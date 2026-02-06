@@ -9,7 +9,7 @@ engine: jupyter
 #| echo: false
 
 from physx.constants import *
-from physx.formatting import fmt
+from physx.formatting import fmt, md_math
 
 # =============================================================================
 # PURPOSE
@@ -23,6 +23,8 @@ from physx.formatting import fmt
 vocab_size_value = 100_000
 embed_dim_value = 10_000
 bytes_per_fp32_value = BYTES_FP32.magnitude
+bytes_per_fp16_value = BYTES_FP16.magnitude
+bytes_per_int32_value = BYTES_INT32.magnitude
 sparsity_pct_value = 1
 n_small_value = 64
 
@@ -34,7 +36,7 @@ dense_bytes_value = total_elements_value * bytes_per_fp32_value
 dense_gb_value = dense_bytes_value / 1e9
 
 nonzeros_value = int(total_elements_value * sparsity_pct_value / 100)
-sparse_bytes_value = nonzeros_value * (4 + 4)
+sparse_bytes_value = nonzeros_value * (bytes_per_fp32_value + bytes_per_int32_value)
 sparse_mb_value = sparse_bytes_value / 1e6
 reduction_factor_value = int(dense_bytes_value / sparse_bytes_value)
 
@@ -60,6 +62,13 @@ total_elements_str = fmt(total_elements_value/1e9, precision=0, commas=False)
 dense_gb_str = fmt(dense_gb_value, precision=0, commas=False)
 nonzeros_str = fmt(nonzeros_value/1e6, precision=0, commas=False)
 sparse_mb_str = fmt(sparse_mb_value, precision=0, commas=False)
+
+bytes_fp16_str = f"{int(bytes_per_fp16_value)}"
+bytes_fp32_str = f"{int(bytes_per_fp32_value)}"
+bytes_int32_str = f"{int(bytes_per_int32_value)}"
+optimizer_overhead_str = "8-12"
+
+gemm_intensity_eq = md_math(rf"\text{{Intensity}} = \frac{{\text{{Ops}}}}{{\text{{Bytes}}}} = \frac{{2n^3}}{{3n^2 \times {bytes_fp16_str}}} = \frac{{n}}{{3}} \text{{ FLOP/byte}}")
 ```
 
 This appendix covers the mathematical and computational machinery that powers neural networks. From the linear algebra at the heart of every layer to the backpropagation algorithm that enables learning, these foundations explain *how* models compute and *why* certain implementation choices affect performance. The concepts here support the deep learning foundations in @sec-deep-learning-systems-foundations, the framework internals in @sec-ai-frameworks, and the training strategies in @sec-ai-training.
@@ -102,9 +111,9 @@ In deep learning, this is our primary tool for measuring **similarity**. In Atte
 
 GEMM is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in **FP16** (2 bytes/element):
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in **FP16** ({python} bytes_fp16_str bytes/element):
 
-$$ \text{Intensity} = \frac{\text{Ops}}{\text{Bytes}} = \frac{2n^3}{3n^2 \times 2} = \frac{n}{3} \text{ FLOP/byte} $$
+{python} gemm_intensity_eq
 
 This explains several important phenomena:
 
@@ -126,8 +135,8 @@ CSR is essential for recommendation systems (sparse embedding tables) and pruned
 
 **Example**: A vocabulary embedding matrix of size `{python} vocab_size_str`×`{python} embed_dim_str` (`{python} total_elements_str` billion parameters).
 
-*   **Dense (FP32)**: `{python} total_elements_str` × 10⁹ × 4 bytes = **`{python} dense_gb_str` GB**.
-*   **Sparse (`{python} sparsity_pct_str`% density)**: Storing only non-zeros requires roughly `{python} nonzeros_str` × 10⁶ × (4 bytes value + 4 bytes index) ≈ **`{python} sparse_mb_str` MB**.
+*   **Dense (FP32)**: `{python} total_elements_str` × 10⁹ × {python} bytes_fp32_str bytes = **`{python} dense_gb_str` GB**.
+*   **Sparse (`{python} sparsity_pct_str`% density)**: Storing only non-zeros requires roughly `{python} nonzeros_str` × 10⁶ × ({python} bytes_fp32_str bytes value + {python} bytes_int32_str bytes index) ≈ **`{python} sparse_mb_str` MB**.
 *   *Result*: A `{python} reduction_factor_str`× reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 ## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
@@ -145,8 +154,8 @@ This table provides a quantitative reference for the most common building blocks
 | **Layer Type**              | **Output Shape**       |               **Parameters ($P$)** |              **FLOPs (per Forward Pass)** |
 |:--------------------------|:---------------------|---------------------------------:|----------------------------------------:|
 | **Linear**                  | $(B, N_{out})$         |      $(N_{in} + 1) \times N_{out}$ | $2 \times B \times N_{in} \times N_{out}$ |
-| **Conv2D**                  | $(B, C_{out}, H', W')$ | $K^2 \times C_{in} \times C_{out}$ |          $2 \times H' \times W' \times P$ |
-| **Attention (Single Head)** | $(B, S, d_{model})$    |             $4 \times d_{model}^2$ |       $4 S^2 d_{model} + 8 S d_{model}^2$ |
+| **Conv2D**                  | $(B, C_{out}, H', W')$ | $K^2 \times C_{in} \times C_{out}$ |          $2 \times B \times H' \times W' \times P$ |
+| **Attention (Single Head)** | $(B, S, d_{model})$    |             $4 \times d_{model}^2$ |       $B \times (4 S^2 d_{model} + 8 S d_{model}^2)$ |
 | **LayerNorm**               | $(B, S, d_{model})$    |               $2 \times d_{model}$ |          $O(B \times S \times d_{model})$ |
 
 : **Deep Learning Tensor Primitives**: Summary of shapes, parameters, and FLOP counts. Note: $B$ is batch size, $S$ is sequence length, $K$ is kernel size. The Attention FLOPs include QKV projections and the $S^2$ attention matrix interactions. The $S^2$ term dominates for long sequences (explaining why LLM inference slows with context length); the $d^2$ term dominates for large hidden dimensions. {#tbl-tensor-op-ref}
@@ -248,8 +257,8 @@ Backpropagation implements the chain rule efficiently through two passes: forwar
   \draw[Edge] (h) -- node[below, Label] {$W_2$} (y);
   \draw[Edge] (y) -- node[below, Label] {Loss} (L);
   \draw[BackEdge] (L) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial y}$} (y);
-  \draw[BackEdge] (y) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_2}$} (h);
-  \draw[BackEdge] (h) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial W_1}$} (x);
+  \draw[BackEdge] (y) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial h}$} (h);
+  \draw[BackEdge] (h) to node[above, Label, text=RedLine] {$\frac{\partial L}{\partial x}$} (x);
 \end{tikzpicture}
 ```
 :::
@@ -274,9 +283,9 @@ $$ M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations} $$
 
 For a standard Adam optimizer in Mixed Precision:
 
-*   **Weights**: 2 bytes (FP16/BF16) or 4 bytes (FP32).
+*   **Weights**: {python} bytes_fp16_str bytes (FP16/BF16) or {python} bytes_fp32_str bytes (FP32).
 *   **Gradients**: Same size as weights.
-*   **Optimizer State**: 8-12 bytes per parameter (Momentum + Variance + FP32 Master Weights).
+*   **Optimizer State**: {python} optimizer_overhead_str bytes per parameter (Momentum + Variance + FP32 Master Weights).
 *   **Activations**: The hidden giant. $O(Batch \times Sequence \times Layers \times Width)$.
 
 **The Activation Explosion**: While weights are fixed ($O(P)$), activations grow linearly with **Batch Size** and **Sequence Length**. For Large Language Models, activations can be 10-50x larger than the weights. This is why techniques like **Gradient Checkpointing** [@chen2016training] (recomputing activations to save memory) and FlashAttention (tiling attention to reduce memory round-trips) are mandatory, not optional.[^fn-grad-checkpoint]

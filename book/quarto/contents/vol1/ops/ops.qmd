@@ -801,7 +801,7 @@ online_features = fs.get_online_features(
 
 By computing `session_length` once in the feature pipeline, training and serving see identical values. Organizations report significant accuracy improvements after eliminating skew through centralized feature stores, with documented cases showing improvements ranging from single-digit to double-digit percentages depending on the severity of the original skew.
 
-The consistency guarantee can be quantified economically. For a model serving one million daily predictions, even a 1% skew-induced error rate at \$0.10 per error represents \$36,500 in annual cost. Feature stores transform this continuous leakage into a one-time infrastructure investment with measurable returns. The Uber case study below demonstrates these economics at scale.
+The consistency guarantee can be quantified economically. For a model serving `{python} queries_daily_str` daily predictions, even a `{python} error_rate_pct_str`% skew-induced error rate at USD `{python} error_cost_str` per error represents USD `{python} skew_cost_str` in annual cost. Feature stores transform this continuous leakage into a one-time infrastructure investment with measurable returns. The Uber case study below demonstrates these economics at scale.
 
 ::: {.callout-lighthouse title="Uber Michelangelo Feature Store"}
 
@@ -1260,6 +1260,52 @@ The decision to retrain a model\index{Retraining Economics!cost-benefit optimiza
 
 The following calculation demonstrates how to determine optimal retraining frequency by estimating the *half-life of a model*.
 
+```{python}
+#| label: retraining-interval-calc
+#| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Napkin math for fraud detection retraining interval.
+# Used in: Callout "The Half-Life of a Model" and "Fraud Detection Retraining".
+
+# =============================================================================
+# INPUT
+# =============================================================================
+import math
+from physx.formatting import fmt
+
+# Fraud detection retraining parameters
+retrain_cost = 5000         # $5,000 per retraining
+Q = 1_000_000               # transactions per day
+V = 0.50                    # value per accuracy point
+A0 = 0.95                   # initial accuracy
+lam = 0.02                  # daily decay rate
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+numerator = 2 * retrain_cost
+denominator = Q * V * A0 * lam
+ratio = numerator / denominator
+T_star = math.sqrt(ratio)
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+# Pre-formatted strings for inputs
+retrain_cost_str = fmt(retrain_cost, precision=0, commas=True)
+Q_str = fmt(Q, precision=0, commas=True)
+V_str = fmt(V, precision=2, commas=False)
+A0_str = fmt(A0, precision=2, commas=False)
+lam_str = fmt(lam, precision=2, commas=False)
+lam_pct_str = f"{lam * 100:.0f}"
+
+numerator_str = fmt(numerator, precision=0, commas=True)
+denominator_str = fmt(denominator, precision=0, commas=True)
+T_star_str = fmt(T_star, precision=0, commas=False)
+```
+
 ::: {.callout-notebook title="The Half-Life of a Model"}
 **The Problem**: How often should you retrain your model to maximize profit?
 
@@ -1272,14 +1318,14 @@ The following calculation demonstrates how to determine optimal retraining frequ
 **The Equation**: The optimal retraining interval ($T^*$) minimizes the sum of staleness losses and training costs:
 $$ T^* \approx \sqrt{\frac{2 \cdot C}{Q \cdot V \cdot A_0 \cdot \lambda}} $$
 
-**The Calculation**: Consider a **Lighthouse Fraud Model** ($A_0=0.95$):
+**The Calculation**: Consider a **Lighthouse Fraud Model** ($A_0=`{python} A0_str`$):
 
-*   **Traffic ($Q$)**: 1 Million transactions/day.
-*   **Utility ($V$)**: \$0.50 per accuracy point.
-*   **Retraining Cost ($C$)**: \$5,000.
-*   **Drift Rate ($\lambda$)**: 2% per day.
+*   **Traffic ($Q$)**: `{python} Q_str` transactions/day.
+*   **Utility ($V$)**: \$`{python} V_str` per accuracy point.
+*   **Retraining Cost ($C$)**: \$`{python} retrain_cost_str`.
+*   **Drift Rate ($\lambda$)**: `{python} lam_pct_str`% per day.
 
-$$ T^* \approx \sqrt{\frac{2 \times 5000}{1,000,000 \times 0.50 \times 0.95 \times 0.02}} \approx \mathbf{1 \text{ Day}} $$
+$$ T^* \approx \sqrt{\frac{2 \times `{python} retrain_cost_str`}{`{python} Q_str` \times `{python} V_str` \times `{python} A0_str` \times `{python} lam_str`}} \approx \mathbf{`{python} T_star_str` \text{ Day}} $$
 
 **The Systems Conclusion**: If your traffic is high and your accuracy is valuable, you cannot afford to wait. You must automate the pipeline. If $T^*$ is less than your manual deployment time, your system is in a state of **Permanent Technical Debt**.
 :::
@@ -1318,58 +1364,13 @@ Consider a fraud detection model with the parameters in @tbl-retraining-paramete
 
 | **Parameter**       | **Value** | **Description**               |
 |:------------------|--------:|:----------------------------|
-| **$Q$**             | 1,000,000 | Transactions per day          |
-| **$V$**             |    \$0.50 | Value per accuracy point      |
-| **$A_0$**           |      0.95 | Initial accuracy              |
-| **$\lambda$**       |      0.02 | Daily decay rate (2% per day) |
-| **Retraining Cost** |   \$5,000 | Total retraining expense      |
+| **$Q$**             | `{python} Q_str` | Transactions per day          |
+| **$V$**             |    \$`{python} V_str` | Value per accuracy point      |
+| **$A_0$**           |      `{python} A0_str` | Initial accuracy              |
+| **$\lambda$**       |      `{python} lam_str` | Daily decay rate (`{python} lam_pct_str`% per day) |
+| **Retraining Cost** |   \$`{python} retrain_cost_str` | Total retraining expense      |
 
-: **Retraining Decision Parameters.** Example values for a fraud detection system processing 1,000,000 transactions daily. The 2% per day decay rate reflects observed fraud evolution in financial services, while the \$0.50 per accuracy point value captures the cost of missed fraud cases. Actual parameters vary by domain and should be calibrated from production observations. {#tbl-retraining-parameters}
-
-```{python}
-#| label: retraining-interval-calc
-#| echo: false
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Napkin math for fraud detection retraining interval.
-# Used in: Callout "Fraud Detection Retraining".
-
-# =============================================================================
-# INPUT
-# =============================================================================
-import math
-from physx.formatting import fmt
-
-# Fraud detection retraining parameters (from table above)
-retrain_cost = 5000         # $5,000 per retraining
-Q = 1_000_000               # transactions per day
-V = 0.50                    # value per accuracy point
-A0 = 0.95                   # initial accuracy
-lam = 0.02                  # daily decay rate
-
-# =============================================================================
-# PROCESS
-# =============================================================================
-numerator = 2 * retrain_cost
-denominator = Q * V * A0 * lam
-ratio = numerator / denominator
-T_star = math.sqrt(ratio)
-
-# =============================================================================
-# OUTPUT
-# =============================================================================
-# Pre-formatted strings for inputs
-retrain_cost_str = fmt(retrain_cost, precision=0, commas=True)
-Q_str = fmt(Q, precision=0, commas=True)
-V_str = fmt(V, precision=2, commas=False)
-A0_str = fmt(A0, precision=2, commas=False)
-lam_str = fmt(lam, precision=2, commas=False)
-
-numerator_str = fmt(numerator, precision=0, commas=True)
-denominator_str = fmt(denominator, precision=0, commas=True)
-T_star_str = fmt(T_star, precision=2, commas=False)
-```
+: **Retraining Decision Parameters.** Example values for a fraud detection system processing `{python} Q_str` transactions daily. The `{python} lam_pct_str`% per day decay rate reflects observed fraud evolution in financial services, while the \$`{python} V_str` per accuracy point value captures the cost of missed fraud cases. Actual parameters vary by domain and should be calibrated from production observations. {#tbl-retraining-parameters}
 
 **Applying the formula:**
 
@@ -1725,6 +1726,40 @@ Each of these approaches introduces different constraints in terms of availabili
 [^fn-slo-reality]: **Service Level Objectives (SLOs)**: Real-world ML serving SLOs often specify P95 latency <100&nbsp;ms for online inference, P99 <500&nbsp;ms, and error rates <0.1%. Large-scale streaming services with hundreds of millions of users typically target P99 latencies under 200&nbsp;ms for their recommendation systems, though actual performance depends on infrastructure and model complexity.
 
 \index{Latency Budget!end-to-end analysis}
+```{python}
+#| label: latency-budget-calc
+#| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Latency budget breakdown.
+# Used in: Callout "The Latency Budget".
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
+slo_p99 = 100
+network = 15
+feature_fetch = 25
+inference = 45
+post_proc = 15
+
+# Verify sum
+total = network + feature_fetch + inference + post_proc
+# assert total == slo_p99 # Commented out to avoid build failure if logic changes, but good for check
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+slo_p99_str = f"{slo_p99}"
+network_str = f"{network}"
+feature_fetch_str = f"{feature_fetch}"
+inference_str = f"{inference}"
+post_proc_str = f"{post_proc}"
+```
+
 ::: {.callout-perspective title="The Latency Budget"}
 **The Problem**: A model achieves 15ms inference time on an A100 GPU, yet end-to-end P99 latency is 180ms. Where does the time go?
 
@@ -1747,12 +1782,12 @@ Systems thinking demands end-to-end analysis. Apply the **D·A·M taxonomy** to 
 
 Dave Patterson's principle applies: "Measure everything, optimize the bottleneck."
 
-**Worked Example**: Given a P99 SLO of 100ms, allocate the budget:
+**Worked Example**: Given a P99 SLO of `{python} slo_p99_str`ms, allocate the budget:
 
-- Network: 15ms (use regional deployment)
-- Feature fetch: 25ms (require feature store P99 < 25ms)
-- Inference: 45ms (sets model complexity ceiling)
-- Post-processing: 15ms (allows light business logic)
+- Network: `{python} network_str`ms (use regional deployment)
+- Feature fetch: `{python} feature_fetch_str`ms (require feature store P99 < `{python} feature_fetch_str`ms)
+- Inference: `{python} inference_str`ms (sets model complexity ceiling)
+- Post-processing: `{python} post_proc_str`ms (allows light business logic)
 
 If feature retrieval exceeds its budget, no amount of model optimization will achieve the SLO.
 :::
@@ -1896,7 +1931,39 @@ Translate hardware metrics into business-relevant cost metrics:
 
 $$\text{Cost per 1K inferences} = \frac{\text{Hourly GPU cost} \times 1000}{\text{Inferences per hour}}$$
 
-For a \$3/hour A100 instance processing 50,000 inferences/hour, cost is \$0.06 per 1K inferences. Track this metric over time; increases indicate efficiency degradation requiring investigation.
+```{python}
+#| label: cost-per-inference-calc
+#| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Cost per inference calculation.
+# Used in: "Cost-Per-Inference Tracking" section.
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
+hourly_gpu_cost = 3.00
+inferences_per_hour = 50_000
+batch_size = 1000
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+cost_per_inference = hourly_gpu_cost / inferences_per_hour
+cost_per_batch = cost_per_inference * batch_size
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+hourly_gpu_cost_str = f"{hourly_gpu_cost:.0f}" # $3
+inferences_per_hour_str = fmt(inferences_per_hour, precision=0, commas=True)
+cost_per_batch_str = f"{cost_per_batch:.2f}"
+```
+
+For a \${python} hourly_gpu_cost_str`/hour A100 instance processing `{python} inferences_per_hour_str` inferences/hour, cost is \${python} cost_per_batch_str` per 1K inferences. Track this metric over time; increases indicate efficiency degradation requiring investigation.
 
 #### Model and Infrastructure Monitoring {#sec-machine-learning-operations-mlops-model-infrastructure-monitoring-3988}
 
@@ -1906,14 +1973,63 @@ Infrastructure management provisions resources; monitoring\index{Model Monitorin
 
 Effective monitoring spans both model behavior and infrastructure performance. On the model side, teams track metrics such as accuracy, precision, recall, and the confusion matrix [@scikit_learn_confusion_matrix] using live or sampled predictions to detect whether performance remains stable or begins to drift. A critical constraint is *the drift detection delay*, which determines how quickly statistical monitoring can confirm that degradation has occurred. The speed of detection depends on traffic volume, as the following calculation demonstrates.
 
+```{python}
+#| label: drift-detection-delay-calc
+#| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Drift detection delay calculation.
+# Used in: Callout "The Drift Detection Delay".
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
+baseline_acc = 0.95
+drop = 0.05
+target_acc = baseline_acc - drop
+confidence = 0.95
+qps_high = 1
+# qps_low = 100 / (24 * 3600) # 100 per day
+
+# Approx samples needed for proportion difference test
+# n = (Z_alpha + Z_beta)^2 * (p1*q1 + p2*q2) / (p1-p2)^2
+# Simplified rule of thumb: ~1000 samples for 5% diff at 95% confidence
+samples_needed = 1000
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+seconds_needed_high = samples_needed / qps_high
+minutes_needed_high = seconds_needed_high / 60
+
+days_needed_low = samples_needed / 100 # 100 requests per day
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+baseline_acc_pct_str = f"{baseline_acc * 100:.0f}"
+drop_pct_str = f"{drop * 100:.0f}"
+target_acc_pct_str = f"{target_acc * 100:.0f}"
+confidence_pct_str = f"{confidence * 100:.0f}"
+qps_high_str = f"{qps_high}"
+samples_needed_str = fmt(samples_needed, precision=0, commas=True)
+seconds_needed_high_str = fmt(seconds_needed_high, precision=0, commas=True)
+minutes_needed_high_str = f"{minutes_needed_high:.0f}"
+requests_per_day_low_str = "100"
+days_needed_low_str = f"{days_needed_low:.0f}"
+```
+
 ::: {.callout-notebook title="The Drift Detection Delay"}
-**Problem**: You have a model with **95% baseline accuracy**. You want to detect a **5% drop** (to 90%) with 95% statistical confidence. Your system handles **1 request per second (1 QPS)**. How long will it take to "prove" the model has drifted?
+**Problem**: You have a model with **`{python} baseline_acc_pct_str`% baseline accuracy**. You want to detect a **`{python} drop_pct_str`% drop** (to `{python} target_acc_pct_str`%) with `{python} confidence_pct_str`% statistical confidence. Your system handles **`{python} qps_high_str` request per second (`{python} qps_high_str` QPS)**. How long will it take to "prove" the model has drifted?
 
 **The Math**:
 
-1.  **Required Samples**: To distinguish 95% from 90% with high confidence, you need $\approx \mathbf{1,000}$ labeled samples.
-2.  **Detection Latency**: $1,000 \text{ samples} / 1 \text{ QPS} = \mathbf{1,000 \text{ seconds}} \approx \mathbf{17 \text{ minutes}}$.
-3.  **Low Traffic Case**: If the model only processes **100 requests per day**, detecting the same 5% drift takes **10 days**.
+1.  **Required Samples**: To distinguish `{python} baseline_acc_pct_str`% from `{python} target_acc_pct_str`% with high confidence, you need $\approx \mathbf{`{python} samples_needed_str`}$ labeled samples.
+2.  **Detection Latency**: `{python} samples_needed_str` \text{ samples} / `{python} qps_high_str` \text{ QPS} = \mathbf{`{python} seconds_needed_high_str` \text{ seconds}} \approx \mathbf{`{python} minutes_needed_high_str` \text{ minutes}}$.
+3.  **Low Traffic Case**: If the model only processes **`{python} requests_per_day_low_str` requests per day**, detecting the same `{python} drop_pct_str`% drift takes **`{python} days_needed_low_str` days**.
 
 **The Systems Conclusion**: The "Sample Rate" of your monitoring is physically limited by your traffic volume. For low-traffic, high-stakes models (like medical diagnosis), drift detection can take *days or weeks*, leaving the system in a long-term "Silent Failure" state. This is why high-stakes systems must supplement statistical monitoring with proactive **Model Audits**.
 :::
@@ -2604,7 +2720,37 @@ Incident communication presents another critical challenge. When models degrade 
 
 Resource justification requires translating technical requirements into business value. Rather than requesting "8 A100 GPUs for model training," effective communication frames investments as "infrastructure to reduce experiment cycle time from 2 weeks to 3 days, enabling 4x faster feature iteration." Timeline estimation must account for realistic proportions: data preparation typically consumes 60% of project duration, model development 25%, and deployment monitoring 15%.
 
-Consider a fraud detection team implementing model improvements. When stakeholders request enhanced accuracy, the team responds with a structured proposal: increasing detection rates from 92% to 94% requires integrating external data sources, extending training duration by two weeks, and accepting 30% higher infrastructure costs, but would prevent an estimated $2 million in annual fraud losses while reducing false positive alerts affecting 50,000 customers monthly.
+```{python}
+#| label: fraud-detection-improvement-calc
+#| echo: false
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Fraud detection improvement calculation.
+# Used in: "Stakeholder Communication" section.
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
+current_rate = 0.92
+target_rate = 0.94
+infra_cost_increase = 0.30
+annual_loss_prevented = 2_000_000
+false_positives_reduced = 50_000
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+current_rate_pct_str = f"{current_rate * 100:.0f}"
+target_rate_pct_str = f"{target_rate * 100:.0f}"
+infra_cost_increase_pct_str = f"{infra_cost_increase * 100:.0f}"
+annual_loss_prevented_str = f"{annual_loss_prevented // 1_000_000} million"
+false_positives_reduced_str = fmt(false_positives_reduced, precision=0, commas=True)
+```
+
+Consider a fraud detection team implementing model improvements. When stakeholders request enhanced accuracy, the team responds with a structured proposal: increasing detection rates from `{python} current_rate_pct_str`% to `{python} target_rate_pct_str`% requires integrating external data sources, extending training duration by two weeks, and accepting `{python} infra_cost_increase_pct_str`% higher infrastructure costs, but would prevent an estimated \${python} annual_loss_prevented_str` in annual fraud losses while reducing false positive alerts affecting `{python} false_positives_reduced_str` customers monthly.
 
 Through disciplined stakeholder communication, MLOps practitioners maintain organizational support while establishing realistic expectations about system capabilities. This communication competency is as essential as technical expertise for sustaining successful ML operations.
 

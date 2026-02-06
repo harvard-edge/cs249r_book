@@ -4,6 +4,53 @@ concepts: conclusion_concepts.yml
 glossary: conclusion_glossary.json
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import sys
+import os
+sys.path.append(os.path.abspath("../../../physx"))
+from constants import (
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, BYTES_FP16,
+    ureg, Q_
+)
+from formatting import md_frac, md_sci, md_math, md
+
+# Llama-2-70B
+llama_params = 70e9
+llama_dvol = llama_params * BYTES_FP16
+llama_compute_per_token = 2 * llama_params
+
+# H100 Specs
+h100_bw = H100_MEM_BW
+h100_peak = H100_FLOPS_FP16_TENSOR
+
+# Calculations
+t_mem = (llama_dvol / h100_bw).to('ms')
+t_comp = (llama_compute_per_token / h100_peak).to('ms')
+ratio = t_mem / t_comp
+
+# Formatting for text
+llama_params_str = "70B"
+llama_dvol_gb_str = f"{llama_dvol.to('GB').magnitude:.0f}"
+llama_compute_gflops_str = f"{llama_compute_per_token / 1e9:.0f}"
+
+h100_bw_tb_str = f"{h100_bw.to('TB/s').magnitude:.2f}"
+h100_peak_tflops_str = f"{h100_peak.to('TFLOPs/s').magnitude:.0f}"
+
+t_mem_ms_str = f"{t_mem.magnitude:.1f}"
+t_comp_ms_str = f"{t_comp.magnitude:.2f}"
+ratio_str = f"{ratio.magnitude:.0f}"
+
+# Math strings
+# Note: 3.35 TB/s is 3350 GB/s.
+h100_bw_gb_val = h100_bw.to('GB/s').magnitude
+t_mem_eq = md_math(f"T_{{mem}} = \\frac{{{llama_dvol_gb_str} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_str} \\text{{ ms}}")
+
+h100_peak_tflops_val = h100_peak.to('TFLOPs/s').magnitude
+t_comp_eq = md_math(f"T_{{comp}} = \\frac{{{llama_compute_gflops_str} \\times 10^9}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}}}} = {t_comp_ms_str} \\text{{ ms}}")
+```
+
 # Conclusion {#sec-conclusion}
 
 ::: {layout-narrow}
@@ -115,7 +162,7 @@ Throughout this book, each Part introduced quantitative principles that govern M
 | 8     | Amdahl's Law                | III: Optimize  | $\text{Speedup} = \frac{1}{(1-p) + \frac{p}{s}}$                             | The serial fraction caps all parallelism gains                                 |
 | 9     | Verification Gap            | IV: Deploy     | $P(f(X) \approx Y) > 1 - \epsilon$                                           | ML testing is statistical; you bound error, not prove correctness              |
 | 10    | Statistical Drift Invariant | IV: Deploy     | $\text{Acc}(t) \approx \text{Acc}_0 - \lambda \cdot D(P_t \Vert P_0)$        | Models decay without code changes; the world drifts away from training data    |
-| 11    | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Acc} \geq \mathbb{E}[\lvert f_{serve}(x) - f_{train}(x)\rvert]$ | Even subtle preprocessing differences silently degrade accuracy                |
+| 11    | Training-Serving Skew Law   | IV: Deploy     | $\Delta\text{Acc} \approx \mathbb{E}[\lvert f_{serve}(x) - f_{train}(x)\rvert]$ | Even subtle preprocessing differences silently degrade accuracy                |
 | 12    | Latency Budget Invariant    | IV: Deploy     | P99 is the hard constraint; throughput is optimized within it                | Throughput is optimized within the latency envelope, never at its expense      |
 
 : **The Twelve Quantitative Invariants of ML Systems Engineering.** Each invariant was introduced in the Part where its governing constraint first becomes visible. Together, they form the complete analytical framework for reasoning about ML system design, optimization, and deployment. The meta-principle that unifies them all is the Conservation of Complexity: you cannot destroy complexity, only move it between Data, Algorithm, and Machine. {#tbl-twelve-principles}
@@ -189,22 +236,22 @@ To see this cycle of mutual constraint in action, trace the flow in @fig-invaria
 As the figure illustrates, this is not a linear progression but a cycle: operational realities feed back into foundational decisions, requiring new data and triggering fresh passes through the entire stack. Notice how the Deploy-to-Foundations arrow carries Invariants 9-12, the deployment invariants that detect drift, skew, and verification failures. These are the signals that force the system to evolve, closing the loop and beginning a new iteration.
 
 ::: {.callout-perspective title="The Cost of a Token"}
-We can apply the **Iron Law** (Invariant 3) and **Arithmetic Intensity** (Invariant 6) to a real-world problem: serving one token from a 70B parameter model (like Llama-2-70B) on an NVIDIA H100.
+We can apply the **Iron Law** (Invariant 3) and **Arithmetic Intensity** (Invariant 6) to a real-world problem: serving one token from a `{python} llama_params_str` parameter model (like Llama-2-70B) on an NVIDIA H100.
 
 **The Physics:**
 
-- **Model Size ($D_{vol}$):** 70B params $\times$ 2 bytes (FP16) = 140 GB.
-- **Compute ($O$):** $\approx 2 \times P$ per token = 140 GFLOPs.
-- **Hardware:** H100 ($BW = 3.35$ TB/s, $R_{peak} \approx 1000$ TFLOPs FP16).
+- **Model Size ($D_{vol}$):** `{python} llama_params_str` params $\times$ 2 bytes (FP16) = `{python} llama_dvol_gb_str` GB.
+- **Compute ($O$):** $\approx 2 \times P$ per token = `{python} llama_compute_gflops_str` GFLOPs.
+- **Hardware:** H100 ($BW = `{python} h100_bw_tb_str`$ TB/s, $R_{peak} \approx `{python} h100_peak_tflops_str`$ TFLOPs FP16).
 
 **The Calculation:**
 
-- **Time to Move Data:** $T_{mem} = \frac{140 \text{ GB}}{3,350 \text{ GB/s}} \approx 41.8 \text{ ms}$.
-- **Time to Compute:** $T_{comp} = \frac{140 \times 10^9}{1,000 \times 10^{12}} = 0.14 \text{ ms}$.
+- **Time to Move Data:** `{python} t_mem_eq`
+- **Time to Compute:** `{python} t_comp_eq`
 
 **The Conclusion:**
 
-$T_{mem}$ is $300\times$ larger than $T_{comp}$. The system is heavily **Memory Bound** (**Arithmetic Intensity** $\approx 1$). To honor the **Silicon Contract**, we must either increase **Arithmetic Intensity** (via batching users to reuse $D_{vol}$) or reduce Data Volume (via quantization to INT4). A systems engineer who optimizes compute kernels ($T_{comp}$) without addressing memory ($T_{mem}$) wastes 100% of their effort.
+$T_{mem}$ is `{python} ratio_str`$\times$ larger than $T_{comp}$. The system is heavily **Memory Bound** (**Arithmetic Intensity** $\approx 1$). To honor the **Silicon Contract**, we must either increase **Arithmetic Intensity** (via batching users to reuse $D_{vol}$) or reduce Data Volume (via quantization to INT4). A systems engineer who optimizes compute kernels ($T_{comp}$) without addressing memory ($T_{mem}$) wastes 100% of their effort.
 :::
 
 The twelve invariants provide a theoretical foundation, but their value emerges through application. The following sections demonstrate how these principles guide decisions across different AI domains.

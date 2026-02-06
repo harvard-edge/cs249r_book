@@ -2101,18 +2101,6 @@ Knowledge distillation transfers capabilities between architectures by training 
 
 Rather than eliminating parameters through pruning or transferring knowledge through distillation, structured approximation methods decompose large weight matrices and tensors into lower-dimensional components. These techniques exploit the mathematical structure of neural network parameters, leveraging the observation that high-dimensional representations often admit compact, low-rank approximations. The following subsections examine low-rank factorization and tensor decomposition as complementary strategies for achieving this compression.
 
-#### Low-Rank Factorization {#sec-model-compression-lowrank-factorization-2ef5}
-
-Low-Rank Matrix Factorization (LRMF)\index{Low-Rank Factorization!definition}\index{Model Compression!low-rank factorization} approximates weight matrices with lower-rank representations. Given a matrix $A \in \mathbb{R}^{m \times n}$, LRMF finds matrices $U \in \mathbb{R}^{m \times k}$ and $V \in \mathbb{R}^{k \times n}$ such that:
-$$
-A \approx UV
-$$
-where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD)\index{Singular Value Decomposition (SVD)}[^fn-svd], retaining only the top $k$ singular values.
-
-[^fn-svd]: **Singular Value Decomposition (SVD)**: Factorizes matrix $A = U \Sigma V^T$ where singular values in $\Sigma$ indicate importance. Truncating to top-k values minimizes Frobenius norm error (Eckart-Young theorem). For a 4096×4096 weight matrix, rank-128 SVD reduces storage from 64MB to 4MB while preserving 95% of spectral energy. GPU implementations achieve O(mn min(m,n)) complexity.
-
-This factorization reveals a fundamental *bandwidth-compute trade-off* that recurs throughout systems design.
-
 ```{python}
 #| label: lowrank-bandwidth-calc
 #| echo: false
@@ -2151,6 +2139,18 @@ data_reduction_str = fmt(data_reduction_value, precision=0, commas=False)
 mat_dim_str = fmt(mat_dim_value, precision=0, commas=False)
 rank_k_str = fmt(rank_k_value, precision=0, commas=False)
 ```
+
+#### Low-Rank Factorization {#sec-model-compression-lowrank-factorization-2ef5}
+
+Low-Rank Matrix Factorization (LRMF)\index{Low-Rank Factorization!definition}\index{Model Compression!low-rank factorization} approximates weight matrices with lower-rank representations. Given a matrix $A \in \mathbb{R}^{m \times n}$, LRMF finds matrices $U \in \mathbb{R}^{m \times k}$ and $V \in \mathbb{R}^{k \times n}$ such that:
+$$
+A \approx UV
+$$
+where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD)\index{Singular Value Decomposition (SVD)}[^fn-svd], retaining only the top $k$ singular values.
+
+[^fn-svd]: **Singular Value Decomposition (SVD)**: Factorizes matrix $A = U \Sigma V^T$ where singular values in $\Sigma$ indicate importance. Truncating to top-k values minimizes Frobenius norm error (Eckart-Young theorem). For a `{python} mat_dim_str`×`{python} mat_dim_str` weight matrix, rank-`{python} rank_k_str` SVD reduces storage from `{python} full_mb_str`MB to `{python} factored_mb_str`MB while preserving 95% of spectral energy. GPU implementations achieve O(mn min(m,n)) complexity.
+
+This factorization reveals a fundamental *bandwidth-compute trade-off* that recurs throughout systems design.
 
 ::: {.callout-notebook title="The Bandwidth-Compute Trade-off"}
 **Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a `{python} mat_dim_str` × `{python} mat_dim_str` matrix requires `{python} full_mb_str` MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
@@ -3105,7 +3105,7 @@ node [midway,above=5mm] {\textbf{16 bits}};
 ```
 :::
 
-INT8\index{INT8!efficiency gains}\index{Quantization!INT8 (8-bit integer)} precision offers more aggressive efficiency improvements for inference workloads. Many quantized models use INT8 for inference, reducing storage by $4\times$ while accelerating computation by 4–8$\times$ on optimized hardware. INT8 is widely used in mobile and embedded AI, where energy constraints are significant. As the quantization savings calculation demonstrated earlier, this $4\times$ reduction in model size enables a 7 billion parameter model to fit on a single consumer GPU rather than requiring data center hardware.
+INT8\index{INT8!efficiency gains}\index{Quantization!INT8 (8-bit integer)} precision offers more aggressive efficiency improvements for inference workloads. Many quantized models use INT8 for inference, reducing storage by $4\times$ while accelerating computation by 4–8$\times$ on optimized hardware. INT8 is widely used in mobile and embedded AI, where energy constraints are significant. As the quantization savings calculation demonstrated earlier, this $4\times$ reduction in model size enables a `{python} llm_params_b_str` billion parameter model to fit on a single consumer GPU rather than requiring data center hardware.
 
 Binary and ternary networks\index{Quantization!binary networks}\index{Quantization!ternary networks} represent the extreme end of quantization, where weights and activations are constrained to 1-bit (binary) or 2-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used. Our *keyword spotting* lighthouse lives precisely in this regime, necessitating strategies for *keyword spotting and extreme compression*.
 
@@ -4311,6 +4311,85 @@ Feature reuse, activation checkpointing, and parameter reduction form key compon
 
 Beyond reducing what data must be stored, substantial efficiency gains emerge from optimizing how operations access memory. The next technique addresses this by combining multiple operations to reduce memory traffic.
 
+```{python}
+#| label: fusion-calc
+#| echo: false
+from physx.formatting import fmt
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate fusion benefits for Conv-BN-ReLU, GEMM, and Memory Bandwidth
+# Used in: Operator Fusion section
+
+# =============================================================================
+# INPUT
+# =============================================================================
+# Conv-BN-ReLU
+conv_channels_value = 256
+conv_spatial_value = 28
+bytes_per_element_value = 4
+
+# GEMM
+gemm_hidden_value = 768
+gemm_seq_value = 512
+
+# Memory Bandwidth Analysis (ResNet-50 layer)
+feat_map_mb_value = 0.784
+weights_mb_value = 2.4
+bn_params_mb_value = 0.002
+
+# Kernel Launch
+kernels_unfused_value = 159
+kernels_fused_value = 53
+latency_per_kernel_us_value = 10
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+# Conv-BN-ReLU intermediate
+conv_bn_relu_intermediate_bytes = 2 * conv_channels_value * conv_spatial_value * conv_spatial_value * bytes_per_element_value
+conv_bn_relu_intermediate_mb_value = conv_bn_relu_intermediate_bytes / (1024**2)
+
+# GEMM intermediate
+gemm_intermediate_bytes = gemm_hidden_value * gemm_seq_value * bytes_per_element_value
+gemm_intermediate_mb_value = gemm_intermediate_bytes / (1024**2)
+
+# Bandwidth Analysis
+unfused_conv_mb_value = feat_map_mb_value * 2 + weights_mb_value
+unfused_bn_mb_value = feat_map_mb_value * 2 + bn_params_mb_value
+unfused_relu_mb_value = feat_map_mb_value * 2
+total_unfused_mb_value = unfused_conv_mb_value + unfused_bn_mb_value + unfused_relu_mb_value
+
+total_fused_mb_value = feat_map_mb_value * 2 + weights_mb_value
+bandwidth_reduction_pct_value = (1 - total_fused_mb_value / total_unfused_mb_value) * 100
+
+# Kernel Launch
+saved_latency_us_value = (kernels_unfused_value - kernels_fused_value) * latency_per_kernel_us_value
+saved_latency_ms_value = saved_latency_us_value / 1000
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+conv_bn_relu_intermediate_mb_str = fmt(conv_bn_relu_intermediate_mb_value, precision=1, commas=False)
+gemm_intermediate_mb_str = fmt(gemm_intermediate_mb_value, precision=1, commas=False)
+
+feat_map_kb_str = fmt(feat_map_mb_value * 1024, precision=0, commas=False)
+weights_mb_str = fmt(weights_mb_value, precision=1, commas=False)
+bn_params_kb_str = fmt(bn_params_mb_value * 1024, precision=0, commas=False)
+
+unfused_conv_mb_str = fmt(unfused_conv_mb_value, precision=1, commas=False)
+unfused_bn_mb_str = fmt(unfused_bn_mb_value, precision=1, commas=False)
+unfused_relu_mb_str = fmt(unfused_relu_mb_value, precision=1, commas=False)
+total_unfused_mb_str = fmt(total_unfused_mb_value, precision=1, commas=False)
+total_fused_mb_str = fmt(total_fused_mb_value, precision=1, commas=False)
+bandwidth_reduction_pct_str = fmt(bandwidth_reduction_pct_value, precision=0, commas=False)
+
+kernels_unfused_str = fmt(kernels_unfused_value, precision=0, commas=False)
+kernels_fused_str = fmt(kernels_fused_value, precision=0, commas=False)
+saved_latency_ms_str = fmt(saved_latency_ms_value, precision=0, commas=False)
+```
+
 #### Operator Fusion {#sec-model-compression-operator-fusion-c1b4}
 
 Operator fusion\index{Operator Fusion!definition}\index{Architectural Efficiency!operator fusion} combines multiple computational operations into single fused kernels, reducing intermediate memory traffic and kernel launch overhead. To understand why this matters, consider a typical neural network layer: convolution followed by batch normalization followed by ReLU. Without fusion, each operation writes its output to GPU global memory, then the next operation reads that output back. This results in three memory round-trips for what could be computed entirely in fast on-chip registers. This graph-level optimization technique addresses a fundamental inefficiency in deep learning execution: sequential operations that write intermediate results to memory only to immediately read them back for the next operation. By fusing operations, inference engines eliminate these redundant memory transactions, improving both throughput and latency on memory-bound workloads.
@@ -4388,7 +4467,7 @@ transfer_reduction_value = unfused_transfers_value / fused_transfers_value
 transfer_reduction_str = fmt(transfer_reduction_value, precision=0, commas=False)
 ```
 
-The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} transfer_reduction_str`× reduction). For a ResNet-50 layer with 256 channels and spatial size $28 \times 28$, this eliminates $2 \times 256 \times 28 \times 28 \times 4 \text{ bytes} = 1.5\text{ MB}$ of intermediate memory traffic per layer.
+The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} transfer_reduction_str`× reduction). For a ResNet-50 layer with 256 channels and spatial size $28 \times 28$, this eliminates $2 \times 256 \times 28 \times 28 \times 4 \text{ bytes} \approx \text{`{python} conv_bn_relu_intermediate_mb_str` MB}$ of intermediate memory traffic per layer.
 
 **Element-wise Operation Fusion**\index{Operator Fusion!element-wise}: Element-wise operations (addition, multiplication, activation functions) have extremely low arithmetic intensity, making them severely memory-bound. @lst-elementwise-fusion demonstrates how combining these operations reduces memory traffic:
 
@@ -4453,7 +4532,7 @@ output = gelu(matmul(input, weight) + bias)
 ```
 :::
 
-This fusion is particularly effective because matrix multiplication is compute-bound (high arithmetic intensity), while bias addition and activation are memory-bound (low arithmetic intensity). Fusing them allows the GPU to perform element-wise operations in registers immediately after computing each output element, before writing to memory. For BERT-Base with hidden size 768, this eliminates $768 \times 512 \times 4 \text{ bytes} = 1.5\text{ MB}$ of intermediate activation memory per linear layer.
+This fusion is particularly effective because matrix multiplication is compute-bound (high arithmetic intensity), while bias addition and activation are memory-bound (low arithmetic intensity). Fusing them allows the GPU to perform element-wise operations in registers immediately after computing each output element, before writing to memory. For BERT-Base with hidden size 768, this eliminates $768 \times 512 \times 4 \text{ bytes} = \text{`{python} gemm_intermediate_mb_str` MB}$ of intermediate activation memory per linear layer.
 
 **Attention Pattern Fusion**\index{Operator Fusion!attention (FlashAttention)}: Transformer attention mechanisms involve multiple operations that benefit from fusion. @lst-attention-fusion compares unfused attention with FlashAttention's tile-based approach:
 
@@ -4475,20 +4554,20 @@ This fusion pattern[^fn-flashattention-compression] achieves 2-4× speedup on lo
 
 [^fn-flashattention-compression]: FlashAttention\index{FlashAttention} (introduced in @sec-dnn-architectures) demonstrates fusion's power for memory-bound attention: tiling to SRAM yields 2–4× speedup and enables 64K context windows by reducing memory traffic from O(n^2) to O(n). This exemplifies how operator fusion can transform memory-bound bottlenecks into compute-bound operations.
 
-Memory bandwidth analysis quantifies fusion benefits. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (784 KB):
+Memory bandwidth analysis quantifies fusion benefits. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (`{python} feat_map_kb_str` KB):
 
 **Unfused execution**:
 
-- Conv reads input (784 KB) + weights (2.4 MB), writes output (784 KB) = 4.0 MB
-- BN reads input (784 KB) + params (2 KB), writes output (784 KB) = 1.6 MB
-- ReLU reads input (784 KB), writes output (784 KB) = 1.6 MB
-- **Total memory traffic: 7.2 MB**
+- Conv reads input (`{python} feat_map_kb_str` KB) + weights (`{python} weights_mb_str` MB), writes output (`{python} feat_map_kb_str` KB) = `{python} unfused_conv_mb_str` MB
+- BN reads input (`{python} feat_map_kb_str` KB) + params (`{python} bn_params_kb_str` KB), writes output (`{python} feat_map_kb_str` KB) = `{python} unfused_bn_mb_str` MB
+- ReLU reads input (`{python} feat_map_kb_str` KB), writes output (`{python} feat_map_kb_str` KB) = `{python} unfused_relu_mb_str` MB
+- **Total memory traffic: `{python} total_unfused_mb_str` MB**
 
 **Fused execution**:
 
-- Conv-BN-ReLU reads input (784 KB) + weights (2.4 MB), writes output (784 KB) = 3.9 MB
-- **Total memory traffic: 3.9 MB**
-- **Bandwidth reduction: 46%**
+- Conv-BN-ReLU reads input (`{python} feat_map_kb_str` KB) + weights (`{python} weights_mb_str` MB), writes output (`{python} feat_map_kb_str` KB) = `{python} total_fused_mb_str` MB
+- **Total memory traffic: `{python} total_fused_mb_str` MB**
+- **Bandwidth reduction: `{python} bandwidth_reduction_pct_str`%**
 
 On a V100 GPU with `{python} v100_bw_gbs_str` GB/s HBM bandwidth and `{python} v100_tflops_fp32_str` TFLOPS FP32 compute, the unfused sequence takes approximately 8 microseconds (memory-bound), while the fused version takes 4.3 microseconds (1.86× speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
 
@@ -4528,7 +4607,7 @@ Fusion effectiveness varies by workload characteristics. Memory-bound operations
 - **GEMM-based operations**: 1.2-1.5× speedup (compute-bound, fusion reduces memory-bound tail)
 - **Attention mechanisms**: 2-4× speedup on long sequences (quadratic memory scaling)
 
-Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs approximately 5-10 microseconds of latency. For a ResNet-50 with 53 convolutional layers, unfused execution launches 159 kernels (Conv + BN + ReLU), while fused execution launches 53 kernels, saving approximately 1 millisecond from launch overhead alone.
+Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs approximately 5-10 microseconds of latency. For a ResNet-50 with 53 convolutional layers, unfused execution launches `{python} kernels_unfused_str` kernels (Conv + BN + ReLU), while fused execution launches `{python} kernels_fused_str` kernels, saving approximately `{python} saved_latency_ms_str` millisecond from launch overhead alone.
 
 Hardware considerations affect fusion strategies. GPUs with large register files and shared memory benefit most from fusion, as intermediate results remain on-chip. TPUs with software-managed memory hierarchies perform fusion at the compiler level. Edge accelerators with limited memory make fusion critical for fitting models within constrained memory budgets.
 

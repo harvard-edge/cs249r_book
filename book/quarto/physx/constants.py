@@ -15,6 +15,7 @@ watt = ureg.watt
 meter = ureg.meter
 hour = ureg.hour
 day = ureg.day
+count = ureg.count
 
 # Register data-scale aliases so .to(TB), .to(GB/second), etc. work
 ureg.define('KB = 1e3 * byte')
@@ -31,6 +32,7 @@ PB = ureg.PB
 
 # Common precision sizes
 BYTES_FP32 = 4 * byte
+BYTES_INT32 = 4 * byte
 BYTES_FP16 = 2 * byte
 BYTES_INT8 = 1 * byte
 BYTES_INT4 = 0.5 * byte
@@ -100,8 +102,8 @@ A100_TDP = 400 * watt                     # SXM variant
 # NVIDIA H100 (Hopper, 2022) — Source: NVIDIA H100 Data Sheet
 H100_FLOPS_FP16_TENSOR = 989 * TFLOPs / second
 H100_FLOPS_FP8_TENSOR = 1979 * TFLOPs / second
-H100_FLOPS_TF32 = 756 * TFLOPs / second
-H100_FLOPS_INT8 = 3958 * TFLOPs / second  # INT8 Tensor Core (Sparse). Dense is 1979.
+H100_FLOPS_TF32 = 494 * TFLOPs / second
+H100_FLOPS_INT8 = 1979 * TFLOPs / second  # Dense. Sparse is 3958.
 H100_MEM_BW = 3.35 * TB / second          # HBM3
 H100_MEM_CAPACITY = 80 * GiB
 H100_TDP = 700 * watt                     # SXM variant
@@ -144,6 +146,12 @@ LATENCY_NVME_SSD = 100000 * NS
 # Mobile NPU
 MOBILE_NPU_TOPS_INT8 = 35 * TFLOPs / second
 MOBILE_NPU_MEM_BW = 100 * GB / second
+
+# --- Datasets ---
+IMAGENET_IMAGES = 1_281_167 * count
+CIFAR10_IMAGES = 50_000 * count
+CIFAR10_TEST_IMAGES = 10_000 * count
+
 
 # --- Network & Interconnect ---
 ureg.define('Gbps = 1e9 * bit / second')
@@ -194,6 +202,25 @@ USD = ureg.dollar
 CLOUD_EGRESS_PER_GB = 0.09 * USD / GB  # AWS data transfer out (2024 baseline)
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
 
+# Storage Pricing (2024 baseline)
+STORAGE_COST_S3_STD = 23 * USD / TB / ureg.month
+STORAGE_COST_GLACIER = 1 * USD / TB / ureg.month
+STORAGE_COST_NVME_LOW = 100 * USD / TB / ureg.month
+STORAGE_COST_NVME_HIGH = 300 * USD / TB / ureg.month
+RETRIEVAL_COST_GLACIER = 0.02 * USD / GB
+
+# Labeling Pricing (2024 estimates)
+LABELING_COST_CROWD_LOW = 0.01 * USD
+LABELING_COST_CROWD_HIGH = 0.05 * USD
+LABELING_COST_EXPERT_LOW = 0.50 * USD
+LABELING_COST_EXPERT_HIGH = 2.00 * USD
+LABELING_COST_BOX_LOW = 0.05 * USD
+LABELING_COST_BOX_HIGH = 0.20 * USD
+LABELING_COST_SEG_LOW = 5 * USD
+LABELING_COST_SEG_HIGH = 50 * USD
+LABELING_COST_MEDICAL_LOW = 50 * USD
+LABELING_COST_MEDICAL_HIGH = 200 * USD
+
 # GPU pricing (scenario baselines)
 CLOUD_GPU_TRAINING_PER_HOUR = 4.0 * USD / hour
 CLOUD_GPU_INFERENCE_PER_HOUR = 2.5 * USD / hour
@@ -233,6 +260,7 @@ GPT2_HIDDEN_DIM = 1600
 # GPT-3 (175B)
 GPT3_PARAMS = 175e9 * param
 GPT3_TRAINING_OPS = 3.14e23 * flop
+GPT3_TRAINING_TOKENS = 300e9 * count
 GPT3_TRAINING_DAYS_REF = 25 # Days on 1024 A100s
 
 # GPT-4 (Reference)
@@ -241,6 +269,7 @@ GPT4_TRAINING_GPU_DAYS = 2.5e6 # A100 days
 # BERT-Base
 BERT_BASE_PARAMS = 110e6 * param
 BERT_BASE_FLOPs = 22e9 * flop              # Per inference (seq_len=512)
+BERT_LARGE_PARAMS = 340e6 * param
 
 # AlexNet (Reference)
 ALEXNET_PARAMS = 60e6 * param
@@ -281,6 +310,9 @@ RESNET50_FLOPs = 4.1e9 * flop
 MOBILENETV2_PARAMS = 3.5e6 * param
 MOBILENETV2_FLOPs = 0.3e9 * flop
 
+# MobileNetV1
+MOBILENET_V1_PARAMS = 4.2e6 * param
+
 # KWS DS-CNN (Keyword Spotting Depthwise Separable CNN)
 KWS_DSCNN_PARAMS = 200e3 * param
 KWS_DSCNN_FLOPs = 20e6 * flop
@@ -291,7 +323,7 @@ DLRM_EMBEDDING_DIM = 128
 DLRM_MODEL_SIZE_FP32 = 100 * GB  # Approximate total model size
 
 # YOLOv8-nano
-YOLOV8_NANO_FLOPs = 3.2e9 * flop
+YOLOV8_NANO_FLOPs = 8.7e9 * flop  # 640x640
 
 # --- Storage (I/O Bandwidth) ---
 NVME_SEQUENTIAL_BW = 3.5 * GB / second    # NVMe SSD sequential read
@@ -300,3 +332,33 @@ SYSTEM_MEMORY_BW = 50 * GB / second        # DDR4/DDR5 typical
 # --- Case Studies ---
 WAYMO_DATA_PER_HOUR_LOW = 1 * TB / hour
 WAYMO_DATA_PER_HOUR_HIGH = 19 * TB / hour
+
+# --- Anomaly Detection Case Study ---
+ANOMALY_MODEL_PARAMS = 270e3 * param
+ANOMALY_MODEL_LATENCY = 10.4 * ureg.ms
+ANOMALY_MODEL_AUC = 0.86
+ANOMALY_MODEL_ENERGY = 516 * ureg.microjoule
+
+# --- Additional Constants for ML Systems Chapter ---
+BATTERY_CAPACITY_MAH = 3000 * ureg.milliampere_hour
+BATTERY_VOLTAGE_V = 3.7 * ureg.volt
+BATTERY_ENERGY_J = (BATTERY_CAPACITY_MAH * BATTERY_VOLTAGE_V).to(joule)
+
+# TinyML Hardware (ESP32-CAM)
+ESP32_RAM = 520 * KiB
+ESP32_FLASH = 4 * MB
+ESP32_POWER_MIN = 0.05 * watt
+ESP32_POWER_MAX = 0.25 * watt
+ESP32_PRICE = 10 * USD
+
+# Edge Hardware (NVIDIA DGX/Workstation)
+DGX_RAM = 128 * GB
+DGX_STORAGE = 4 * TB
+DGX_POWER = 200 * watt
+DGX_PRICE_MIN = 3000 * USD
+DGX_PRICE_MAX = 5000 * USD
+
+# Cloud Hardware (TPU Pod)
+TPU_POD_CHIPS = 4096
+TPU_POD_MEM = 131 * TB
+TPU_POD_POWER = 3 * ureg.megawatt

@@ -49,11 +49,25 @@ Trace the trend line in @fig-running-out-of-human-data: foundation models are co
 
 @tbl-scaling-asymmetry quantifies the growth rates underlying @fig-running-out-of-human-data: compute budgets grow approximately 10$\times$ every three years, while high-quality text grows roughly 2$\times$ every five years. The gap between what compute can process and what quality data exists is widening, necessitating the **Continuous Training** loops of **MLOps** (@sec-machine-learning-operations-mlops) to maintain relevance and making intelligent data selection increasingly critical.
 
+```{python}
+#| label: scaling-asymmetry-calc
+#| echo: false
+from physx.formatting import fmt
+
+# Growth rates
+gpu_growth_str = "10\\times"
+gpu_period_str = "3 years"
+web_data_growth_str = "2\\times"
+web_data_period_str = "5 years"
+label_data_growth_str = "1.5\\times"
+label_data_period_str = "5 years"
+```
+
 | **Resource**            | **Growth Rate** | **Implication**                                       |
 |:----------------------|--------------:|:----------------------------------------------------|
-| **GPU Compute**         |  ~10× / 3 years | Hardware vendors deliver reliable exponential gains   |
-| **Training Data (Web)** |   ~2× / 5 years | High-quality web text is finite; much already scraped |
-| **Labeled Data**        | ~1.5× / 5 years | Human annotation throughput is fundamentally bounded  |
+| **GPU Compute**         |  ~`{python} gpu_growth_str` / `{python} gpu_period_str` | Hardware vendors deliver reliable exponential gains   |
+| **Training Data (Web)** |   ~`{python} web_data_growth_str` / `{python} web_data_period_str` | High-quality web text is finite; much already scraped |
+| **Labeled Data**        | ~`{python} label_data_growth_str` / `{python} label_data_period_str` | Human annotation throughput is fundamentally bounded  |
 | **Synthetic Data**      |       Unbounded | Bounded by generator quality (risk of model collapse) |
 
 : **Scaling Asymmetry in ML Resources.** Compute grows exponentially while high-quality data grows linearly or sub-linearly, creating an increasing compute-to-data imbalance that makes data selection essential. {#tbl-scaling-asymmetry .striped .hover}
@@ -97,9 +111,28 @@ A perfectly efficient dataset would contain only samples that contribute unique 
 
 To make this concrete, consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures), a 70B parameter language model:
 
-- **Compute available**: 10,000 H100 GPUs for 3 months represents tens of millions of dollars in compute budget, capable of processing over 10 trillion tokens
-- **High-quality data available**: ~5 trillion tokens of deduplicated, filtered web text
-- **The gap**: 3× more compute than data can utilize
+```{python}
+#| label: gpt-llama-calc
+#| echo: false
+from physx.formatting import fmt
+
+llama_params_value = 70e9
+h100_count_value = 10000
+training_months_value = 3
+tokens_capacity_value = 10e12
+tokens_available_value = 5e12
+compute_gap_value = tokens_capacity_value / tokens_available_value
+
+llama_params_str = fmt(llama_params_value, precision=0, unit="B")
+h100_count_str = fmt(h100_count_value, precision=0, commas=True)
+tokens_capacity_str = fmt(tokens_capacity_value, precision=0, unit="T")
+tokens_available_str = fmt(tokens_available_value, precision=0, unit="T")
+compute_gap_str = fmt(compute_gap_value, precision=0)
+```
+
+- **Compute available**: `{python} h100_count_str` H100 GPUs for `{python} training_months_value` months represents tens of millions of dollars in compute budget, capable of processing over `{python} tokens_capacity_str` tokens
+- **High-quality data available**: ~`{python} tokens_available_str` tokens of deduplicated, filtered web text
+- **The gap**: `{python} compute_gap_str`× more compute than data can utilize
 
 The team faces a choice:
 
@@ -276,7 +309,7 @@ To make the Information-Compute Ratio concrete, consider how coreset selection i
 #| label: data-selection-setup
 #| echo: false
 
-from physx.constants import RESNET50_FLOPs, GFLOPs
+from physx.constants import RESNET50_FLOPs, GFLOPs, IMAGENET_IMAGES
 from physx.formatting import fmt
 
 # =============================================================================
@@ -288,7 +321,7 @@ from physx.formatting import fmt
 # =============================================================================
 # INPUT
 # =============================================================================
-imagenet_size_value = 1.28e6
+imagenet_size_value = IMAGENET_IMAGES.magnitude
 acc_gain_random_value = 5.0
 acc_gain_coreset_value = 4.5
 coreset_fraction_value = 0.5
@@ -306,6 +339,7 @@ coreset_size_value = int(imagenet_size_value * coreset_fraction_value)
 coreset_flops_value = coreset_size_value * resnet50_fwdbwd_gflops_value * 1e9
 icr_coreset_value = acc_gain_coreset_value / coreset_flops_value
 icr_ratio_value = icr_coreset_value / icr_random_value
+acc_diff_value = acc_gain_random_value - acc_gain_coreset_value
 
 # =============================================================================
 # OUTPUT
@@ -314,10 +348,15 @@ resnet50_fwd_gflops_str = fmt(RESNET50_FLOPs.to(GFLOPs), precision=1)
 resnet50_fwdbwd_gflops_str = fmt((RESNET50_FLOPs * 2).to(GFLOPs), precision=1)
 full_epoch_flops_str = f"{full_epoch_flops_value:.2e}"
 icr_random_str = f"{icr_random_value:.1e}"
+imagenet_size_str = fmt(imagenet_size_value / 1e6, precision=2, unit="M")
 coreset_size_str = f"{coreset_size_value / 1000:.0f}K"
 coreset_flops_str = f"{coreset_flops_value:.1e}"
 icr_coreset_str = f"{icr_coreset_value:.1e}"
 icr_ratio_str = fmt(icr_ratio_value, precision=1, commas=False)
+acc_gain_random_str = fmt(acc_gain_random_value, precision=1, commas=False)
+acc_gain_coreset_str = fmt(acc_gain_coreset_value, precision=1, commas=False)
+acc_diff_str = fmt(acc_diff_value, precision=1, commas=False)
+coreset_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False)
 ```
 
 ::: {.callout-example title="Computing ICR: Coresets"}
@@ -325,26 +364,26 @@ icr_ratio_str = fmt(icr_ratio_value, precision=1, commas=False)
 
 **Setup**:
 
-- Dataset: ImageNet (1.28M images)
+- Dataset: ImageNet (`{python} imagenet_size_str` images)
 - Model: ResNet-50 Lighthouse (~`{python} resnet50_fwd_gflops_str` GFLOPs per forward pass, ~`{python} resnet50_fwdbwd_gflops_str` GFLOPs forward + backward)
-- One epoch: 1.28M × `{python} resnet50_fwdbwd_gflops_str` GFLOPs = **`{python} full_epoch_flops_str` FLOPs**
-- Accuracy improvement per epoch (early training): ~5% points
+- One epoch: `{python} imagenet_size_str` × `{python} resnet50_fwdbwd_gflops_str` GFLOPs = **`{python} full_epoch_flops_str` FLOPs**
+- Accuracy improvement per epoch (early training): ~`{python} acc_gain_random_str`% points
 
 **Random Selection (baseline)**:
 
-- Process all 1.28M samples uniformly
-- Accuracy gain: 5.0 percentage points
-- ICR_random = 5.0 / (`{python} full_epoch_flops_str`) = **`{python} icr_random_str` per FLOP**
+- Process all `{python} imagenet_size_str` samples uniformly
+- Accuracy gain: `{python} acc_gain_random_str` percentage points
+- ICR_random = `{python} acc_gain_random_str` / (`{python} full_epoch_flops_str`) = **`{python} icr_random_str` per FLOP**
 
-**EL2N Coreset (50% of data)**:
+**EL2N Coreset (`{python} coreset_pct_str`% of data)**:
 
-- Process 640K high-uncertainty samples selected by EL2N scoring
+- Process `{python} coreset_size_str` high-uncertainty samples selected by EL2N scoring
 - Coreset focuses on decision boundary samples
-- Accuracy gain: 4.5 percentage points (90% of full data performance)
-- Compute: 640K × `{python} resnet50_fwdbwd_gflops_str` GFLOPs = **`{python} coreset_flops_str` FLOPs**
-- ICR_coreset = 4.5 / (`{python} coreset_flops_str`) = **`{python} icr_coreset_str` per FLOP**
+- Accuracy gain: `{python} acc_gain_coreset_str` percentage points (90% of full data performance)
+- Compute: `{python} coreset_size_str` × `{python} resnet50_fwdbwd_gflops_str` GFLOPs = **`{python} coreset_flops_str` FLOPs**
+- ICR_coreset = `{python} acc_gain_coreset_str` / (`{python} coreset_flops_str`) = **`{python} icr_coreset_str` per FLOP**
 
-**Result**: The coreset achieves **`{python} icr_ratio_str`× higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The 0.5 percentage point accuracy difference is often acceptable given the 50% compute savings.
+**Result**: The coreset achieves **`{python} icr_ratio_str`× higher ICR**, nearly twice the learning per FLOP, by eliminating low-information "easy" samples that contribute little to the decision boundary. The `{python} acc_diff_str` percentage point accuracy difference is often acceptable given the `{python} coreset_pct_str`% compute savings.
 :::
 
 The remainder of this chapter explores each stage of the three-stage optimization pipeline introduced above—static pruning, dynamic selection, and synthetic generation—in depth. We begin with static pruning, the techniques that can reduce a dataset by 30 to 50 percent before training even begins.
@@ -372,19 +411,36 @@ Why does this heterogeneity exist? The answer lies in how neural networks learn 
 1.  **Clean Data**: Convergence rate is typically $O(1/N)$. To halve the error, you need **2x** data.
 2.  **Noisy Data**: Convergence rate drops to $O(1/\sqrt{N})$. To halve the error, you need **4x** data.
 
+```{python}
+#| label: data-quality-multiplier-calc
+#| echo: false
+from physx.formatting import fmt
+
+epsilon_value = 0.01
+n_clean_value = 100
+n_noisy_value = 10000
+ratio_value = n_noisy_value / n_clean_value
+
+epsilon_str = fmt(epsilon_value, precision=2, commas=False)
+epsilon_pct_str = fmt(epsilon_value * 100, precision=0, commas=False)
+n_clean_str = fmt(n_clean_value, precision=0, commas=False)
+n_noisy_str = fmt(n_noisy_value, precision=0, commas=True)
+ratio_str = fmt(ratio_value, precision=0, commas=False)
+```
+
 **The Multiplier**:
 To reach a target error $\epsilon$:
 
 *   $N_{clean} \propto 1/\epsilon$
 *   $N_{noisy} \propto 1/\epsilon^2$
 
-**Example**: For target error $\epsilon = 0.01$ (1%):
+**Example**: For target error $\epsilon = `{python} epsilon_str`$ (`{python} epsilon_pct_str`%):
 
-*   $N_{clean} \approx 100$
-*   $N_{noisy} \approx 10,000$
-*   **Ratio**: $100\times$ more data required if noisy.
+*   $N_{clean} \approx `{python} n_clean_str`$
+*   $N_{noisy} \approx `{python} n_noisy_str`$
+*   **Ratio**: `{python} ratio_str`$\times$ more data required if noisy.
 
-**The Systems Conclusion**: Cleaning your data (removing label noise) is a **100x compute accelerator**.
+**The Systems Conclusion**: Cleaning your data (removing label noise) is a **`{python} ratio_str`x compute accelerator**.
 :::
 
 The practical question then becomes: *how* do we identify which samples to keep?
@@ -503,16 +559,32 @@ These gradient-based approaches generally outperform geometry-based methods in s
 
 Given these trade-offs, most practitioners find that EL2N with a small proxy model offers the best balance of selection quality and computational cost. The approach is straightforward: train a lightweight model (for example, ResNet-18 instead of ResNet-50) for 5 to 10 epochs, compute EL2N scores for all samples, then select the highest-scoring subset. The proxy does not need to be accurate; it only needs to identify which samples are hard. This upfront investment in proxy training typically yields substantial returns when the coreset reduces subsequent training by 50% or more. The following example illustrates this workflow in a concrete scenario.
 
+```{python}
+#| label: coreset-practice-calc
+#| echo: false
+from physx.formatting import fmt
+
+n_train_images_value = 1_000_000
+coreset_fraction_value = 0.1
+n_coreset_value = int(n_train_images_value * coreset_fraction_value)
+n_epochs_proxy_value = 5
+
+n_train_images_str = fmt(n_train_images_value / 1e6, precision=0, unit=" million")
+coreset_fraction_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False)
+n_coreset_str = fmt(n_coreset_value, precision=0, commas=True)
+n_epochs_proxy_str = fmt(n_epochs_proxy_value, precision=0, commas=False)
+```
+
 ::: {.callout-example title="Coreset Selection in Practice"}
-**Scenario**: You have 1 million training images and want to reduce to 100,000 (10%) for faster experimentation.
+**Scenario**: You have `{python} n_train_images_str` training images and want to reduce to `{python} n_coreset_str` (`{python} coreset_fraction_pct_str`%) for faster experimentation.
 
 **Naive Approach**: Random sampling loses rare classes and edge cases.
 
 **Coreset Approach**:
 
-1. Train a small proxy model for 5 epochs
+1. Train a small proxy model for `{python} n_epochs_proxy_str` epochs
 2. Compute EL2N scores for all samples
-3. Select the 100,000 samples with highest uncertainty
+3. Select the `{python} n_coreset_str` samples with highest uncertainty
 4. Train your full model on this coreset
 
 **Result**: The coreset often achieves **higher accuracy** than random sampling because it focuses on the decision boundary rather than redundant "easy" examples.
@@ -627,12 +699,39 @@ From a systems perspective, curriculum learning improves convergence by reducing
 
 @tbl-curriculum-benchmarks summarizes measured speedups from curriculum learning across standard benchmarks:
 
+```{python}
+#| label: curriculum-benchmarks-calc
+#| echo: false
+from physx.formatting import fmt
+
+cifar10_baseline_epochs = 150
+cifar10_curriculum_epochs = 115
+cifar10_speedup_pct = (cifar10_baseline_epochs - cifar10_curriculum_epochs) / cifar10_baseline_epochs * 100
+
+cifar100_baseline_epochs = 220
+cifar100_curriculum_epochs = 180
+cifar100_speedup_pct = (cifar100_baseline_epochs - cifar100_curriculum_epochs) / cifar100_baseline_epochs * 100
+
+imagenet_baseline_epochs = 90
+imagenet_curriculum_epochs = 80
+imagenet_speedup_pct = (imagenet_baseline_epochs - imagenet_curriculum_epochs) / imagenet_baseline_epochs * 100
+
+mentornet_baseline_epochs = 90
+mentornet_curriculum_epochs = 70
+mentornet_speedup_pct = (mentornet_baseline_epochs - mentornet_curriculum_epochs) / mentornet_baseline_epochs * 100
+
+cifar10_speedup_str = fmt(cifar10_speedup_pct, precision=0, commas=False)
+cifar100_speedup_str = fmt(cifar100_speedup_pct, precision=0, commas=False)
+imagenet_speedup_str = fmt(imagenet_speedup_pct, precision=0, commas=False)
+mentornet_speedup_str = fmt(mentornet_speedup_pct, precision=0, commas=False)
+```
+
 | **Dataset**   | **Model** | **Pacing Strategy** | **Epochs to Target Acc.** |    **Speedup** |
 |:------------|--------:|:------------------|------------------------:|-------------:|
-| **CIFAR-10**  | ResNet-18 | Linear warmup       |      115 vs. 150 baseline | **23%** faster |
-| **CIFAR-100** | ResNet-32 | Self-paced          |      180 vs. 220 baseline | **18%** faster |
-| **ImageNet**  | ResNet-50 | Loss-based          |        80 vs. 90 baseline | **11%** faster |
-| **ImageNet**  | ResNet-50 | MentorNet (noisy)   |        70 vs. 90 baseline | **22%** faster |
+| **CIFAR-10**  | ResNet-18 | Linear warmup       |      `{python} cifar10_curriculum_epochs` vs. `{python} cifar10_baseline_epochs` baseline | **`{python} cifar10_speedup_str`%** faster |
+| **CIFAR-100** | ResNet-32 | Self-paced          |      `{python} cifar100_curriculum_epochs` vs. `{python} cifar100_baseline_epochs` baseline | **`{python} cifar100_speedup_str`%** faster |
+| **ImageNet**  | ResNet-50 | Loss-based          |        `{python} imagenet_curriculum_epochs` vs. `{python} imagenet_baseline_epochs` baseline | **`{python} imagenet_speedup_str`%** faster |
+| **ImageNet**  | ResNet-50 | MentorNet (noisy)   |        `{python} mentornet_curriculum_epochs` vs. `{python} mentornet_baseline_epochs` baseline | **`{python} mentornet_speedup_str`%** faster |
 
 : **Curriculum Learning Convergence Speedups.** Target accuracy is 95% of final baseline performance. Gains are larger on redundant datasets (CIFAR-10) and noisy datasets (MentorNet removes approximately 40% noise). ImageNet shows smaller gains because the dataset is less redundant. {#tbl-curriculum-benchmarks .striped .hover}
 
@@ -679,22 +778,57 @@ Active learning is particularly valuable in domains where labeling requires expe
 The economic implications are substantial. In production settings, labeling costs often dwarf compute costs because a specialist's time is far more expensive than GPU hours. These query strategies drive each iteration of the active learning loop in @fig-active-learning-loop, and the *active learning ROI* can exceed 10$\times$, as the following example demonstrates.
 
 ::: {.callout-notebook title="The Active Learning ROI"}
-**Problem**: You are building a medical diagnostic AI. You have a pool of **1 Million unlabeled scans**. A specialist doctor charges **$5.00** to label one scan. You have a budget of **$500,000** and a deadline of **1 month**.
+```{python}
+#| label: active-learning-roi-calc
+#| echo: false
+from physx.formatting import fmt
+
+n_unlabeled_value = 1_000_000
+cost_per_label_value = 5.00
+budget_value = 500_000
+deadline_months_value = 1
+
+cost_all_value = n_unlabeled_value * cost_per_label_value
+n_random_value = int(budget_value / cost_per_label_value)
+n_random_pct_value = n_random_value / n_unlabeled_value * 100
+
+n_active_value = 50_000
+cost_active_value = n_active_value * cost_per_label_value
+cost_active_pct_value = (budget_value - cost_active_value) / budget_value * 100
+speedup_value = n_unlabeled_value / n_active_value
+
+cost_saving_value = cost_all_value - cost_active_value
+
+n_unlabeled_str = fmt(n_unlabeled_value / 1e6, precision=0, unit=" Million")
+cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)
+budget_str = fmt(budget_value, precision=0, commas=True)
+cost_all_str = fmt(cost_all_value, precision=0, commas=True)
+n_random_str = fmt(n_random_value, precision=0, commas=True)
+n_random_pct_str = fmt(n_random_pct_value, precision=0, commas=False)
+
+n_active_str = fmt(n_active_value, precision=0, commas=True)
+cost_active_str = fmt(cost_active_value, precision=0, commas=True)
+cost_active_pct_str = fmt(cost_active_pct_value, precision=0, commas=False)
+speedup_str = fmt(speedup_value, precision=0, commas=False)
+cost_saving_str = fmt(cost_saving_value / 1e6, precision=2, unit=" Million")
+```
+
+**Problem**: You are building a medical diagnostic AI. You have a pool of **`{python} n_unlabeled_str` unlabeled scans**. A specialist doctor charges **$`{python} cost_per_label_str`** to label one scan. You have a budget of **$`{python} budget_str`** and a deadline of **`{python} deadline_months_value` month**.
 
 **Scenario A: Naive Labeling**
 
-1.  **Cost**: Labeling all 1M scans would cost **$5,000,000** (10$\times$ over budget).
-2.  **Time**: You can only afford to label 100,000 random scans.
-3.  **Result**: Your model misses rare pathologies because they weren't in the random 10%.
+1.  **Cost**: Labeling all 1M scans would cost **$`{python} cost_all_str`** (10$\times$ over budget).
+2.  **Time**: You can only afford to label `{python} n_random_str` random scans.
+3.  **Result**: Your model misses rare pathologies because they weren't in the random `{python} n_random_pct_str`%.
 
 **Scenario B: Active Learning**
 
-1.  **Strategy**: Use an uncertainty-based selection to pick the **50,000** "hardest" scans for the doctor to label.
-2.  **Cost**: $50,000 \times 5.00 = \mathbf{\$250,000}$. (50% under budget).
-3.  **Training Speed**: With 20$\times$ less data, each training epoch is **20$\times$ faster**.
-4.  **Result**: Empirical studies suggest that these 50k "high-information" samples often achieve higher accuracy than 500k random samples.
+1.  **Strategy**: Use an uncertainty-based selection to pick the **`{python} n_active_str`** "hardest" scans for the doctor to label.
+2.  **Cost**: `{python} n_active_str` $\times$ `{python} cost_per_label_str` = **$`{python} cost_active_str`**. (`{python} cost_active_pct_str`% under budget).
+3.  **Training Speed**: With `{python} speedup_str`$\times$ less data, each training epoch is **`{python} speedup_str`$\times$ faster**.
+4.  **Result**: Empirical studies suggest that these `{python} n_active_str` "high-information" samples often achieve higher accuracy than `{python} n_random_str` random samples.
 
-**The Systems Conclusion**: Data Selection is not just a "data trick"; it is a **20$\times$ compute accelerator** and a **$4.75 Million** cost-saving measure.
+**The Systems Conclusion**: Data Selection is not just a "data trick"; it is a **`{python} speedup_str`$\times$ compute accelerator** and a **$`{python} cost_saving_str`** cost-saving measure.
 :::
 
 Compare the two curves in @fig-active-learning-multiplier: Active Learning shifts the learning curve to the left, achieving target accuracy with far fewer samples than random selection. The curves are illustrative to highlight the qualitative gap.
@@ -754,26 +888,75 @@ Label propagation offers a third paradigm through graph-based reasoning: constru
 
 The systems trade-off in semi-supervised learning is straightforward: it typically achieves the same accuracy as fully supervised training with 5–10$\times$ fewer labels but requires more compute because training processes both labeled and unlabeled samples. Since labeling costs often dominate compute costs in production settings, this trade-off is usually favorable. The results of *FixMatch on CIFAR-10* illustrate this label efficiency concretely.
 
+```{python}
+#| label: fixmatch-calc
+#| echo: false
+from physx.formatting import fmt
+
+cifar10_full_labels = 50000
+cifar10_full_acc = 96.1
+
+cifar10_fixmatch_4k_labels = 4000
+cifar10_fixmatch_4k_acc = 95.7
+cifar10_fixmatch_4k_eff = cifar10_full_labels / cifar10_fixmatch_4k_labels
+
+cifar10_fixmatch_250_labels = 250
+cifar10_fixmatch_250_acc = 94.9
+cifar10_fixmatch_250_eff = cifar10_full_labels / cifar10_fixmatch_250_labels
+
+cifar10_fixmatch_40_labels = 40
+cifar10_fixmatch_40_acc = 88.6
+cifar10_fixmatch_40_eff = cifar10_full_labels / cifar10_fixmatch_40_labels
+
+cost_label = 1
+cost_gpu_hr = 0.50
+
+supervised_labels = 4000
+supervised_label_cost = supervised_labels * cost_label
+supervised_compute_cost = 50
+supervised_total = supervised_label_cost + supervised_compute_cost
+
+fixmatch_labels = 250
+fixmatch_label_cost = fixmatch_labels * cost_label
+fixmatch_compute_cost = 250
+fixmatch_total = fixmatch_label_cost + fixmatch_compute_cost
+
+cost_reduction = supervised_total / fixmatch_total
+acc_loss = cifar10_full_acc - cifar10_fixmatch_250_acc
+
+supervised_label_cost_str = fmt(supervised_label_cost, precision=0, commas=True)
+supervised_total_str = fmt(supervised_total, precision=0, commas=True)
+fixmatch_label_cost_str = fmt(fixmatch_label_cost, precision=0, commas=True)
+fixmatch_total_str = fmt(fixmatch_total, precision=0, commas=True)
+cost_reduction_str = fmt(cost_reduction, precision=0, commas=False)
+acc_loss_str = fmt(acc_loss, precision=1, commas=False)
+
+cifar10_full_labels_str = fmt(cifar10_full_labels, precision=0, commas=True)
+cifar10_fixmatch_4k_labels_str = fmt(cifar10_fixmatch_4k_labels, precision=0, commas=True)
+cifar10_fixmatch_250_labels_str = fmt(cifar10_fixmatch_250_labels, precision=0, commas=True)
+cifar10_fixmatch_40_labels_str = fmt(cifar10_fixmatch_40_labels, precision=0, commas=True)
+```
+
 ::: {.callout-example title="FixMatch on CIFAR-10"}
 **FixMatch** [@sohn2020fixmatch] combines pseudo-labeling with consistency regularization to achieve high label efficiency (@tbl-fixmatch-cifar10).
 
 | **Label Budget**  | **Method**       | **Accuracy** |            **Label Efficiency** |
 |:----------------|:---------------|-----------:|------------------------------:|
-| **50,000 (100%)** | Fully Supervised |        96.1% |                        Baseline |
-| **4,000 (8%)**    | FixMatch         |        95.7% | **12.5$\times$ more efficient** |
-| **250 (0.5%)**    | FixMatch         |        94.9% |  **200$\times$ more efficient** |
-| **40 (0.08%)**    | FixMatch         |        88.6% |     1250$\times$ more efficient |
+| **`{python} cifar10_full_labels_str` (100%)** | Fully Supervised |        `{python} cifar10_full_acc`% |                        Baseline |
+| **`{python} cifar10_fixmatch_4k_labels_str` (8%)**    | FixMatch         |        `{python} cifar10_fixmatch_4k_acc`% | **`{python} cifar10_fixmatch_4k_eff`$\times$ more efficient** |
+| **`{python} cifar10_fixmatch_250_labels_str` (0.5%)**    | FixMatch         |        `{python} cifar10_fixmatch_250_acc`% |  **`{python} cifar10_fixmatch_250_eff`$\times$ more efficient** |
+| **`{python} cifar10_fixmatch_40_labels_str` (0.08%)**    | FixMatch         |        `{python} cifar10_fixmatch_40_acc`% |     `{python} cifar10_fixmatch_40_eff`$\times$ more efficient |
 
-: **FixMatch Label Efficiency on CIFAR-10.** With 250 labels (0.5% of the dataset), FixMatch achieves within 1.2 points of full supervision, demonstrating 200$\times$ label efficiency. {#tbl-fixmatch-cifar10 .striped .hover}
+: **FixMatch Label Efficiency on CIFAR-10.** With `{python} cifar10_fixmatch_250_labels_str` labels (0.5% of the dataset), FixMatch achieves within `{python} acc_loss_str` points of full supervision, demonstrating `{python} cifar10_fixmatch_250_eff`$\times$ label efficiency. {#tbl-fixmatch-cifar10 .striped .hover}
 
-With only 250 labeled samples (25 per class), FixMatch achieves 94.9% accuracy, within 1.2 points of full supervision using 200$\times$ fewer labels. The technique works by generating pseudo-labels on weakly augmented unlabeled images (only when model confidence exceeds 0.95), then training to predict these labels on strongly augmented versions of the same images.
+With only `{python} cifar10_fixmatch_250_labels_str` labeled samples (25 per class), FixMatch achieves `{python} cifar10_fixmatch_250_acc`% accuracy, within `{python} acc_loss_str` points of full supervision using `{python} cifar10_fixmatch_250_eff`$\times$ fewer labels. The technique works by generating pseudo-labels on weakly augmented unlabeled images (only when model confidence exceeds 0.95), then training to predict these labels on strongly augmented versions of the same images.
 
 **The Systems Insight**: Semi-supervised learning trades labeled data for unlabeled data and compute. On CIFAR-10, training FixMatch requires ~5$\times$ more compute than supervised training (processing 50K unlabeled samples per epoch). When labels cost \$1 each and GPU hours cost \$0.50, the math favors semi-supervised:
 
-- Supervised (4000 labels): \$4,000 labeling + \$50 compute = **\$4,050**
-- FixMatch (250 labels): \$250 labeling + \$250 compute = **\$500**
+- Supervised (`{python} cifar10_fixmatch_4k_labels_str` labels): \$`{python} supervised_label_cost_str` labeling + \$`{python} supervised_compute_cost` compute = **\$`{python} supervised_total_str`**
+- FixMatch (`{python} cifar10_fixmatch_250_labels_str` labels): \$`{python} fixmatch_label_cost_str` labeling + \$`{python} fixmatch_compute_cost` compute = **\$`{python} fixmatch_total_str`**
 
-An 8$\times$ cost reduction for <1% accuracy loss.
+An `{python} cost_reduction_str`$\times$ cost reduction for <1% accuracy loss.
 :::
 
 These gains are substantial, but semi-supervised learning is not universally applicable. The technique assumes that unlabeled data comes from the same distribution as labeled data, and it struggles when unlabeled data contains out-of-distribution samples (the model confidently mislabels them), when class imbalance is severe (pseudo-labels amplify majority class bias), or when the labeled set does not cover all classes (preventing label propagation for unseen classes). Always validate on a held-out set with true labels to catch distribution mismatch.
@@ -819,11 +1002,68 @@ Understanding *why* self-supervised learning dominates modern ML practice requir
 
 To illustrate this economic transformation, consider a company building ten specialized classifiers for tasks such as fraud detection, content moderation, and medical diagnosis.
 
-Training each classifier from scratch would require substantial investment in both labeling and compute. With ten tasks each needing 100,000 labels at \$1 per label, the total labeling cost reaches **\$1,000,000**. The compute burden amounts to 10,000 GPU-hours across all tasks, with each requiring its own data collection effort. From start to finish, each task takes 6–12 months to complete.
+```{python}
+#| label: foundation-cost-calc
+#| echo: false
+from physx.formatting import fmt
 
-The fine-tuning approach restructures these costs. Pre-training requires a one-time investment of 10,000 GPU-hours on unlabeled data, but this cost is paid only once. Fine-tuning each task then requires just 1,000 labels (\$10,000 total across all ten tasks) and only 500 GPU-hours of compute. Each task reaches deployment in 1–2 weeks after pre-training completes.
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Compare GPU-hour costs for scratch vs foundation models
+# Used in: Figure "Cost Amortization in Foundation Models"
 
-The return on investment is substantial across every dimension: labeling costs drop by **100$\times$** (from \$1M to \$10K), per-task compute decreases by **10$\times$** when amortized across applications, and time to deployment accelerates by **20–50$\times$** per task.
+# =============================================================================
+# INPUT
+# =============================================================================
+cost_scratch_per_task_value = 1000
+n_tasks_value = 10
+cost_pretrain_value = 10000
+cost_finetune_value = 50
+
+# Labeling costs
+labels_per_task_scratch = 100_000
+cost_per_label = 1
+labels_per_task_finetune = 1_000
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+cost_scratch_total_value = cost_scratch_per_task_value * n_tasks_value
+cost_foundation_total_value = cost_pretrain_value + (cost_finetune_value * n_tasks_value)
+
+label_cost_scratch_total = labels_per_task_scratch * cost_per_label * n_tasks_value
+label_cost_finetune_total = labels_per_task_finetune * cost_per_label * n_tasks_value
+
+label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
+# Marginal cost reduction: 1000 -> 50 = 20x
+marginal_compute_reduction = cost_scratch_per_task_value / cost_finetune_value
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+total_a_hrs_str = f"{cost_scratch_total_value:,}"
+total_b_hrs_str = f"{cost_foundation_total_value:,}"
+
+labels_per_task_scratch_str = fmt(labels_per_task_scratch, precision=0, commas=True)
+label_cost_scratch_total_str = fmt(label_cost_scratch_total, precision=0, unit="M", prefix="$")
+cost_scratch_per_task_str = fmt(cost_scratch_per_task_value, precision=0, commas=True)
+cost_scratch_total_str = fmt(cost_scratch_total_value, precision=0, commas=True)
+
+labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas=True)
+label_cost_finetune_total_str = fmt(label_cost_finetune_total, precision=0, unit="K", prefix="$")
+cost_finetune_value_str = fmt(cost_finetune_value, precision=0, commas=True)
+cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True)
+
+label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=False)
+marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
+```
+
+Training each classifier from scratch would require substantial investment in both labeling and compute. With ten tasks each needing `{python} labels_per_task_scratch_str` labels at \$1 per label, the total labeling cost reaches **`{python} label_cost_scratch_total_str`**. The compute burden amounts to `{python} cost_scratch_total_str` GPU-hours across all tasks, with each requiring its own data collection effort. From start to finish, each task takes 6–12 months to complete.
+
+The fine-tuning approach restructures these costs. Pre-training requires a one-time investment of `{python} cost_pretrain_value_str` GPU-hours on unlabeled data, but this cost is paid only once. Fine-tuning each task then requires just `{python} labels_per_task_finetune_str` labels (`{python} label_cost_finetune_total_str` total across all ten tasks) and only `{python} cost_finetune_value_str` GPU-hours of compute. Each task reaches deployment in 1–2 weeks after pre-training completes.
+
+The return on investment is substantial across every dimension: labeling costs drop by **`{python} label_cost_drop_str`$\times$** (from `{python} label_cost_scratch_total_str` to `{python} label_cost_finetune_total_str`), per-task marginal compute decreases by **`{python} marginal_compute_reduction_str`$\times$**, and time to deployment accelerates by **20–50$\times$** per task.
 
 This explains *why* the fine-tuning paradigm dominates production ML. The pre-training cost is high but amortized across many downstream applications, while fine-tuning cost remains low on a per-task basis.
 
@@ -1343,21 +1583,55 @@ The following analysis formalizes this heuristic, deriving what we call *the sel
 
 ::: {.callout-notebook title="The Selection Inequality"}
 
-**Problem**: You are using active learning to select the best 10% of samples for training. Your selection algorithm requires running the full model on the unlabeled pool. Is this efficient?
+```{python}
+#| label: selection-inequality-math-calc
+#| echo: false
+from physx.formatting import fmt
+
+n_epochs_full = 100
+subset_fraction = 0.1
+n_epochs_subset = n_epochs_full * subset_fraction
+cost_selection_full = 1 # equivalent to 1 epoch
+cost_total_efficient = cost_selection_full + n_epochs_subset
+speedup_efficient = n_epochs_full / cost_total_efficient
+
+cost_selection_iterative = n_epochs_full * 1
+cost_total_iterative = cost_selection_iterative + n_epochs_subset
+
+proxy_factor = 0.1
+cost_selection_proxy = cost_selection_full * proxy_factor
+cost_total_proxy = cost_selection_proxy + n_epochs_subset
+
+n_epochs_full_str = fmt(n_epochs_full, precision=0, commas=False)
+subset_fraction_pct_str = fmt(subset_fraction * 100, precision=0, commas=False)
+cost_selection_full_str = fmt(cost_selection_full, precision=0, commas=False)
+n_epochs_subset_str = fmt(n_epochs_subset, precision=0, commas=False)
+cost_total_efficient_str = fmt(cost_total_efficient, precision=0, commas=False)
+speedup_efficient_str = fmt(speedup_efficient, precision=0, commas=False)
+
+cost_selection_iterative_str = fmt(cost_selection_iterative, precision=0, commas=False)
+cost_total_iterative_str = fmt(cost_total_iterative, precision=0, commas=False)
+
+proxy_factor_inv_str = fmt(1/proxy_factor, precision=0, commas=False)
+cost_selection_proxy_str = fmt(cost_selection_proxy, precision=1, commas=False)
+cost_total_proxy_str = fmt(cost_total_proxy, precision=1, commas=False)
+```
+
+**Problem**: You are using active learning to select the best `{python} subset_fraction_pct_str`% of samples for training. Your selection algorithm requires running the full model on the unlabeled pool. Is this efficient?
 
 **The Math**:
 
-1.  **Full Training**: 100 epochs. Total cost = $100 \times C_{epoch}$.
-2.  **Selection (Full Model)**: Scoring the full dataset is equivalent to **1 epoch** of training. $T_{selection} = 1 \times C_{epoch}$.
-3.  **Subset Training**: 100 epochs on 10% data = $100 \times 0.1 \times C_{epoch} = 10 \times C_{epoch}$.
-4.  **Total Time**: $1 + 10 = \mathbf{11 \times C_{epoch}}$.
-5.  **Speedup**: $100 / 11 \approx \mathbf{9\times}$.
+1.  **Full Training**: `{python} n_epochs_full_str` epochs. Total cost = $`{python} n_epochs_full_str` \times C_{epoch}$.
+2.  **Selection (Full Model)**: Scoring the full dataset is equivalent to **`{python} cost_selection_full_str` epoch** of training. $T_{selection} = `{python} cost_selection_full_str` \times C_{epoch}$.
+3.  **Subset Training**: `{python} n_epochs_full_str` epochs on `{python} subset_fraction_pct_str`% data = $`{python} n_epochs_full_str` \times `{python} subset_fraction` \times C_{epoch} = `{python} n_epochs_subset_str` \times C_{epoch}$.
+4.  **Total Time**: $`{python} cost_selection_full_str` + `{python} n_epochs_subset_str` = \mathbf{`{python} cost_total_efficient_str` \times C_{epoch}}$.
+5.  **Speedup**: $`{python} n_epochs_full_str` / `{python} cost_total_efficient_str` \approx \mathbf{`{python} speedup_efficient_str`\times}$.
 
-**The Trap**: If your selection algorithm is iterative (e.g., repeating selection every epoch), $T_{selection}$ becomes $100 \times 1 = 100 \times C_{epoch}$. Total time = $100 + 10 = 110 \times C_{epoch}$. You are now **slower** than the baseline.
+**The Trap**: If your selection algorithm is iterative (e.g., repeating selection every epoch), $T_{selection}$ becomes $`{python} n_epochs_full_str` \times 1 = `{python} cost_selection_iterative_str` \times C_{epoch}$. Total time = $`{python} cost_selection_iterative_str` + `{python} n_epochs_subset_str` = `{python} cost_total_iterative_str` \times C_{epoch}$. You are now **slower** than the baseline.
 
 **The Failure Condition**: If the cost of selecting data exceeds the cost of training on the discarded data, you have failed. The goal is to spend compute to save *more* compute.
 
-**The Fix**: Use a **Proxy Model** ($10\times$ smaller) for selection. $T_{selection} = 0.1 \times C_{epoch}$. Total time = $0.1 + 10 = 10.1$. You preserve the speedup.
+**The Fix**: Use a **Proxy Model** ($`{python} proxy_factor_inv_str`\times$ smaller) for selection. $T_{selection} = `{python} cost_selection_proxy_str` \times C_{epoch}$. Total time = $`{python} cost_selection_proxy_str` + `{python} n_epochs_subset_str` = `{python} cost_total_proxy_str`$. You preserve the speedup.
 
 :::
 
@@ -1492,6 +1766,8 @@ echo_hrs_value = echo_sec_value / 3600
 # =============================================================================
 # OUTPUT
 # =============================================================================
+pipeline_throughput_str = fmt(pipeline_throughput_value, precision=0, commas=False)
+gpu_throughput_str = fmt(gpu_throughput_value, precision=0, commas=False)
 ratio_str = fmt(ratio_r_value, precision=2, commas=False)
 idle_pct_str = fmt(gpu_idle_pct_value, precision=0, commas=False)
 no_echo_sec_str = fmt(no_echo_sec_value, precision=0, commas=True)
@@ -1499,6 +1775,8 @@ no_echo_hrs_str = fmt(no_echo_hrs_value, precision=0, commas=False)
 gpu_util_str = fmt(gpu_util_no_echo_value, precision=0, commas=False)
 echo_sec_str = fmt(echo_sec_value, precision=0, commas=True)
 echo_hrs_str = fmt(echo_hrs_value, precision=0, commas=False)
+echo_factor_str = fmt(echo_factor_value, precision=0, commas=False)
+effective_throughput_str = fmt(echo_throughput_value, precision=0, commas=False)
 ```
 
 ::: {.callout-example title="Worked Example: Data Echoing ROI"}
@@ -1506,22 +1784,22 @@ echo_hrs_str = fmt(echo_hrs_value, precision=0, commas=False)
 
 **Measurements**:
 
-- Data pipeline throughput: 300 images/second (reading, decoding, augmenting on CPU)
-- GPU training throughput: 800 images/second (forward + backward pass)
-- Ratio $R = T_{\text{pipeline}} / T_{\text{GPU}}$ = (1/300) / (1/800) = 800/300 ≈ `{python} ratio_str` (GPU waiting `{python} idle_pct_str`% of time)
+- Data pipeline throughput: `{python} pipeline_throughput_str` images/second (reading, decoding, augmenting on CPU)
+- GPU training throughput: `{python} gpu_throughput_str` images/second (forward + backward pass)
+- Ratio $R = T_{\text{pipeline}} / T_{\text{GPU}}$ = (1/`{python} pipeline_throughput_str`) / (1/`{python} gpu_throughput_str`) = `{python} gpu_throughput_str`/`{python} pipeline_throughput_str` ≈ `{python} ratio_str` (GPU waiting `{python} idle_pct_str`% of time)
 
 **Without Echoing**:
 
-- Effective throughput: 300 images/second (limited by data pipeline)
-- Training time for 90 epochs: 90 × 1.28M / 300 = **`{python} no_echo_sec_str` seconds (`{python} no_echo_hrs_str` hours)**
+- Effective throughput: `{python} pipeline_throughput_str` images/second (limited by data pipeline)
+- Training time for 90 epochs: 90 × 1.28M / `{python} pipeline_throughput_str` = **`{python} no_echo_sec_str` seconds (`{python} no_echo_hrs_str` hours)**
 - GPU utilization: ~`{python} gpu_util_str`%
 
-**With Echo Factor $e = 2$**:
+**With Echo Factor $e = `{python} echo_factor_str`$**:
 
 - Each batch is processed twice with different augmentations
-- Effective throughput: 600 images/second (still below GPU capacity)
-- Unique images per second: 300 (unchanged)
-- Training time: 90 × 1.28M / 600 = **`{python} echo_sec_str` seconds (`{python} echo_hrs_str` hours)** if echoed data is equally valuable
+- Effective throughput: `{python} effective_throughput_str` images/second (still below GPU capacity)
+- Unique images per second: `{python} pipeline_throughput_str` (unchanged)
+- Training time: 90 × 1.28M / `{python} effective_throughput_str` = **`{python} echo_sec_str` seconds (`{python} echo_hrs_str` hours)** if echoed data is equally valuable
 
 **Echoed data has diminishing returns**: Research shows echoed samples provide approximately 70–90% of the value of fresh samples, depending on augmentation diversity. Empirically, Choi et al. measured a **3.25$\times$ speedup** on ResNet-50 ImageNet training when reading data over a network, with minimal accuracy degradation.
 
@@ -1599,15 +1877,25 @@ c_train_str = f"${c_train_value:,}"
 c_total_str = f"${c_total_value:,.0f}"
 p_data_str = f"{p_data_value:.0f}%"
 p_compute_str = f"{p_compute_value:.0f}%"
+
+n_labels_str = fmt(n_labels_value / 1e6, precision=1, unit="M")
+cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)
+storage_gb = 150
+storage_months = 12
+storage_str = f"{storage_gb} GB × {storage_months} months"
+train_epochs = 100
+train_gpus = 8
+train_hours = 24
+train_desc_str = f"{train_epochs} epochs × {train_gpus} A100s × {train_hours} h"
 ```
 
 ::: {.callout-example title="Cost Breakdown: ImageNet-Scale Training"}
 | **Cost Component**                         | **Calculation**  | **Amount**                                                       |
 |:-----------------------------------------|:---------------|:---------------------------------------------------------------|
-| **Raw data (1.2M images)**                 | Licensed dataset | `{python} c_raw_str`                                             |
-| **Labels (1.2M × USD 0.05)**               | Crowd annotation | `{python} c_label_str`                                           |
-| **Storage (150 GB × 12 months)**           | Cloud storage    | `{python} c_store_str`                                           |
-| **Training (100 epochs × 8 A100s × 24 h)** | GPU compute      | `{python} c_train_str`                                           |
+| **Raw data (`{python} n_labels_str` images)**                 | Licensed dataset | `{python} c_raw_str`                                             |
+| **Labels (`{python} n_labels_str` × USD `{python} cost_per_label_str`)**               | Crowd annotation | `{python} c_label_str`                                           |
+| **Storage (`{python} storage_str`)**           | Cloud storage    | `{python} c_store_str`                                           |
+| **Training (`{python} train_desc_str`)** | GPU compute      | `{python} c_train_str`                                           |
 | **Total**                                  |                  | **`{python} c_total_str`**                                       |
 | **Data vs. Compute ratio**                 |                  | **`{python} p_data_str` data, `{python} p_compute_str` compute** |
 
@@ -1635,25 +1923,61 @@ ROI calculations assume that techniques deliver their promised benefits, but act
 
 **Example: Active Learning Break-Even**
 
-Suppose labeling costs \$10/sample and active learning requires:
+```{python}
+#| label: breakeven-calc
+#| echo: false
+from physx.formatting import fmt
 
-- Initial labeled set: 1,000 samples (\$10,000)
-- Oracle queries per round: 100 samples
-- Inference cost per round: \$50 (scoring unlabeled pool)
-- Target accuracy achievable with 5,000 random samples
+cost_label = 10
+n_initial = 1000
+n_queries_per_round = 100
+cost_inference = 50
+n_random = 5000
+n_active = 2000
+n_rounds = 10
 
-If active learning reaches target accuracy with only 2,000 labeled samples:
+cost_random_total = n_random * cost_label
+cost_active_label = n_active * cost_label
+cost_active_inference = n_rounds * cost_inference
+cost_active_total = cost_active_label + cost_active_inference
+
+roi_pct = (cost_random_total - cost_active_total) / cost_active_total * 100
+
+cost_label_str = fmt(cost_label, precision=0, commas=False)
+n_initial_str = fmt(n_initial, precision=0, commas=True)
+cost_initial_str = fmt(n_initial * cost_label, precision=0, commas=True)
+n_queries_str = fmt(n_queries_per_round, precision=0, commas=False)
+cost_inference_str = fmt(cost_inference, precision=0, commas=False)
+n_random_str = fmt(n_random, precision=0, commas=True)
+n_active_str = fmt(n_active, precision=0, commas=True)
+n_rounds_str = fmt(n_rounds, precision=0, commas=False)
+
+cost_random_total_str = fmt(cost_random_total, precision=0, commas=True)
+cost_active_label_str = fmt(cost_active_label, precision=0, commas=True)
+cost_active_inference_str = fmt(cost_active_inference, precision=0, commas=True)
+cost_active_total_str = fmt(cost_active_total, precision=0, commas=True)
+roi_pct_str = fmt(roi_pct, precision=0, commas=False)
+```
+
+Suppose labeling costs \$`{python} cost_label_str`/sample and active learning requires:
+
+- Initial labeled set: `{python} n_initial_str` samples (\$`{python} cost_initial_str`)
+- Oracle queries per round: `{python} n_queries_str` samples
+- Inference cost per round: \$`{python} cost_inference_str` (scoring unlabeled pool)
+- Target accuracy achievable with `{python} n_random_str` random samples
+
+If active learning reaches target accuracy with only `{python} n_active_str` labeled samples:
 
 $$
-\text{Random labeling cost} = 5000 \times \$10 = \$50,000
+\text{Random labeling cost} = `{python} n_random_str` \times \$`{python} cost_label_str` = \$`{python} cost_random_total_str`
 $$
 
 $$
-\text{Active learning cost} = 2000 \times \$10 + 10 \text{ rounds} \times \$50 = \$20,500
+\text{Active learning cost} = `{python} n_active_str` \times \$`{python} cost_label_str` + `{python} n_rounds_str` \text{ rounds} \times \$`{python} cost_inference_str` = \$`{python} cost_active_total_str`
 $$
 
 $$
-\text{ROI} = \frac{\$50,000 - \$20,500}{\$20,500} \times 100\% = 144\%
+\text{ROI} = \frac{\$ `{python} cost_random_total_str` - \$ `{python} cost_active_total_str`}{\$ `{python} cost_active_total_str`} \times 100\% = `{python} roi_pct_str`\%
 $$
 
 The break-even occurs when the labeling reduction equals the selection overhead. If active learning only reduces labeling by 20%, and selection overhead is high, ROI may be negative.
@@ -1668,18 +1992,41 @@ $$
 
 **Example: Deduplication Infrastructure**
 
+```{python}
+#| label: amortization-calc
+#| echo: false
+from physx.formatting import fmt
+
+cost_build = 50000
+cost_compute_once = 5000
+cost_investment = cost_build + cost_compute_once
+savings_per_run = 10000
+
+runs = [1, 5, 10, 50]
+rois = [(r * savings_per_run - cost_investment) / cost_investment * 100 for r in runs]
+
+cost_build_str = fmt(cost_build, precision=0, commas=True)
+cost_compute_once_str = fmt(cost_compute_once, precision=0, commas=True)
+savings_per_run_str = fmt(savings_per_run, precision=0, commas=True)
+
+roi_1_str = fmt(rois[0], precision=0, commas=False)
+roi_5_str = fmt(rois[1], precision=0, commas=False)
+roi_10_str = fmt(rois[2], precision=0, commas=False)
+roi_50_str = fmt(rois[3], precision=0, commas=False)
+```
+
 | **Component**                             |                    **Cost** |
 |:----------------------------------------|--------------------------:|
-| **Build deduplication pipeline**          | \$50,000 (engineering time) |
-| **Compute MinHash signatures (one-time)** |                     \$5,000 |
-| **Per-run savings (20% less data)**       |                \$10,000/run |
+| **Build deduplication pipeline**          | \$`{python} cost_build_str` (engineering time) |
+| **Compute MinHash signatures (one-time)** |                     \$`{python} cost_compute_once_str` |
+| **Per-run savings (20% less data)**       |                \$`{python} savings_per_run_str`/run |
 
 | **Number of Runs** |         **Amortized ROI** |
 |:-----------------|------------------------:|
-| 1 run              |           -82% (net loss) |
-| 5 runs             |     -9% (near break-even) |
-| 10 runs            |           +82% (positive) |
-| 50 runs            | +809% (highly profitable) |
+| 1 run              |           `{python} roi_1_str`% (net loss) |
+| 5 runs             |     `{python} roi_5_str`% (near break-even) |
+| 10 runs            |           +`{python} roi_10_str`% (positive) |
+| 50 runs            | +`{python} roi_50_str`% (highly profitable) |
 
 This pattern reveals which circumstances favor infrastructure investment. Data selection investments deliver the highest returns under three conditions: training runs repeat frequently (hyperparameter search, model iterations, or scheduled retraining); datasets are shared across multiple teams or model architectures; and the technique generalizes broadly. Deduplication exemplifies a high-transfer investment because it benefits all models trained on the cleaned dataset. Task-specific coresets, by contrast, may not transfer across architectures, limiting their amortization potential. For one-off training runs, simple techniques like random sampling or basic augmentation often yield better ROI than sophisticated methods requiring substantial infrastructure investment. The following guidelines summarize these considerations.
 

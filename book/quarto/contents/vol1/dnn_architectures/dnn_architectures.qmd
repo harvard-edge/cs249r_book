@@ -103,6 +103,44 @@ a100_8x_mem_value = int(A100_MEM_CAPACITY.to(GiB).magnitude) * 8
 energy_dram_value = ENERGY_DRAM_ACCESS_PJ.magnitude
 
 # =============================================================================
+# EXAMPLES
+# =============================================================================
+
+# MNIST Example
+mnist_dim_value = 784
+mnist_hidden_value = 100
+mnist_mlp_macs_value = mnist_dim_value * mnist_hidden_value
+mnist_neuron_mem_acc_value = mnist_dim_value * 2 # inputs + weights per neuron
+
+# Large MLP Example
+mlp_large_dim_value = 2048
+mlp_large_params_value = mlp_large_dim_value * mlp_large_dim_value
+mlp_large_mem_mb_value = model_memory(mlp_large_params_value * param, BYTES_FP32, MB)
+
+# CNN Parameter Sharing Example (ImageNet)
+img_dim_value = 224
+img_channels_value = 3
+mlp_img_params_value = img_dim_value * img_dim_value * img_channels_value
+cnn_k_value = 3
+cnn_filter_params_value = cnn_k_value * cnn_k_value * img_channels_value
+cnn_param_reduction_value = mlp_img_params_value / cnn_filter_params_value
+
+# RNN Example
+rnn_input_dim_value = 100
+rnn_hidden_dim_value = 128
+rnn_recurrent_macs_value = rnn_hidden_dim_value * rnn_hidden_dim_value
+rnn_input_macs_value = rnn_input_dim_value * rnn_hidden_dim_value
+rnn_macs_step_value = rnn_recurrent_macs_value + rnn_input_macs_value
+
+# Attention Example
+attn_seq_len_value = 512
+attn_head_dim_value = 64
+attn_score_macs_value = attn_seq_len_value * attn_seq_len_value * attn_head_dim_value
+
+# Energy
+energy_mac_pj_value = 4.6
+
+# =============================================================================
 # OUTPUT
 # =============================================================================
 a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)
@@ -140,6 +178,25 @@ dlrm_model_size_gb_str = fmt(dlrm_model_size_gb_value, precision=0, commas=False
 a100_8x_mem_str = f"{a100_8x_mem_value}"
 
 energy_dram_str = fmt(energy_dram_value, precision=0, commas=False)
+
+mnist_mlp_macs_str = fmt(mnist_mlp_macs_value, precision=0, commas=True)
+mnist_neuron_mem_acc_str = fmt(mnist_neuron_mem_acc_value, precision=0, commas=True)
+
+mlp_large_dim_str = f"{mlp_large_dim_value}"
+mlp_large_params_str = fmt(mlp_large_params_value, precision=0, commas=False) # 4 x 10^6
+mlp_large_mem_mb_str = fmt(mlp_large_mem_mb_value, precision=0, commas=False)
+
+mlp_img_params_str = fmt(mlp_img_params_value, precision=0, commas=True)
+cnn_filter_params_str = f"{cnn_filter_params_value}"
+cnn_param_reduction_str = fmt(cnn_param_reduction_value, precision=0, commas=True)
+
+rnn_recurrent_macs_str = fmt(rnn_recurrent_macs_value, precision=0, commas=True)
+rnn_input_macs_str = fmt(rnn_input_macs_value, precision=0, commas=True)
+rnn_macs_step_str = fmt(rnn_macs_step_value, precision=0, commas=True)
+
+attn_score_macs_m_str = fmt(attn_score_macs_value / 1e6, precision=1, commas=False)
+
+energy_mac_pj_str = f"{energy_mac_pj_value}"
 ```
 
 ## Architectural Principles and Engineering Trade-offs {#sec-dnn-architectures-architectural-principles-engineering-tradeoffs-362e}
@@ -652,7 +709,7 @@ def mlp_layer_matrix(X, W, b):
     # b: bias vector (num_outputs)
 
     # Single GEMM call: frameworks dispatch to optimized BLAS/cuBLAS
-    # For MNIST: 784 x 100 = 78,400 MACs per sample
+    # For MNIST: 784 x 100 = `{python} mnist_mlp_macs_str` MACs per sample
     H = activation(matmul(X, W) + b)
     return H
 ```
@@ -690,7 +747,7 @@ This translation from mathematical abstraction to concrete computation exposes h
 
 [^fn-mac]: **Multiply-Accumulate (MAC)**: The atomic operation in neural networks: multiply two values and add to a running sum. Modern accelerators measure performance in MACs per second: datacenter class accelerators can sustain on the order of \(10^{14}\) to \(10^{15}\) MAC/s on dense kernels (e.g., NVIDIA H100 at ~1 PFLOPS), while mobile class chips are often on the order of \(10^{12}\) to \(10^{13}\) MAC/s. At the hardware level, the energy cost of the arithmetic itself is typically in the picojoule range per MAC, while moving data to and from off chip memory can cost orders of magnitude more, which is why data movement is often the dominant systems concern.
 
-In the MNIST example, each output neuron requires 784 multiply-accumulate operations and at least 1,568 memory accesses (784 for inputs, 784 for weights). While actual implementations use optimizations through libraries like BLAS[^fn-dnn-blas] or cuBLAS, these patterns drive key system design decisions. The hardware architectures that accelerate these matrix operations, including GPU tensor cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-ai-acceleration.
+In the MNIST example, each output neuron requires 784 multiply-accumulate operations and at least `{python} mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). While actual implementations use optimizations through libraries like BLAS[^fn-dnn-blas] or cuBLAS, these patterns drive key system design decisions. The hardware architectures that accelerate these matrix operations, including GPU tensor cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-ai-acceleration.
 
 [^fn-dnn-blas]: **Basic Linear Algebra Subprograms (BLAS)**: Developed in the 1970s as a standard for basic vector and matrix operations, BLAS became the foundation for virtually all scientific computing. Modern implementations like Intel MKL and OpenBLAS can achieve 80-95% of theoretical peak performance on well-optimized workloads, making them necessary for neural network efficiency.
 
@@ -701,7 +758,7 @@ In the MNIST example, each output neuron requires 784 multiply-accumulate operat
 Neural network architectures exhibit distinct system-level characteristics across three core dimensions: memory requirements, computation needs, and data movement. Analyzing these dimensions consistently reveals both commonalities and architecture-specific optimizations.
 
 **Memory Requirements.**
-For dense pattern processing, memory usage is dominated by parameter storage. In our MNIST example, connecting a 784-dimensional input to a 100-neuron hidden layer requires a $784 \times 100$ weight matrix (78,400 parameters). While small for MNIST, this $O(M \times N)$ scaling becomes prohibitive for high-dimensional inputs. A typical 2048-unit layer connected to a 2048-unit layer requires $4 \times 10^6$ parameters (16 MB at FP32). Since every weight is used exactly once per input vector, there is no opportunity for weight reuse *within* a single sample processing, making the workload heavily dependent on memory capacity and bandwidth.
+For dense pattern processing, memory usage is dominated by parameter storage. In our MNIST example, connecting a 784-dimensional input to a 100-neuron hidden layer requires a $784 \times 100$ weight matrix (78,400 parameters). While small for MNIST, this $O(M \times N)$ scaling becomes prohibitive for high-dimensional inputs. A typical `{python} mlp_large_dim_str`-unit layer connected to a `{python} mlp_large_dim_str`-unit layer requires `{python} mlp_large_params_str` parameters (`{python} mlp_large_mem_mb_str` MB at FP32). Since every weight is used exactly once per input vector, there is no opportunity for weight reuse *within* a single sample processing, making the workload heavily dependent on memory capacity and bandwidth.
 
 **Computation Needs.**
 The core computation is dense matrix-vector multiplication (GEMV) or matrix-matrix multiplication (GEMM) when batched. For the MNIST layer, each output neuron requires 784 multiply-accumulate (MAC) operations. While regular and parallelizable, the arithmetic intensity (Ops/Byte) is low for small batch sizes. Modern processors optimize this via specialized SIMD (Single Instruction, Multiple Data) units (e.g., AVX-512 on CPUs) or systolic arrays (on TPUs/GPUs) that amortize control overhead over massive blocks of parallel arithmetic.
@@ -961,7 +1018,7 @@ Return to @fig-cnn-spatial-processing and notice how the CNN architecture introd
 
 [^fn-lecun-cnn]: **Yann LeCun and CNNs**: LeCun's 1989 LeNet architecture was inspired by Hubel and Wiesel's discovery of simple and complex cells in cat visual cortex [@hubel1962receptive]. LeNet-5 achieved approximately 0.9% error rate on MNIST in 1998 and was deployed by banks to read millions of checks daily, among the first large-scale commercial applications of neural networks.
 
-[^fn-parameter-sharing]: **Parameter Sharing**\index{CNN!parameter sharing|see{Convolution, parameter sharing}}\index{Convolution!parameter sharing}: CNNs reuse the same filter weights across spatial positions, reducing parameters substantially. A CNN processing $224\times224$ images might use $3\times3$ filters with only 9 parameters per channel, versus an equivalent MLP requiring 50,176 parameters per neuron, a $\sim$5,575$\times$ reduction per neuron enabling practical computer vision.
+[^fn-parameter-sharing]: **Parameter Sharing**\index{CNN!parameter sharing|see{Convolution, parameter sharing}}\index{Convolution!parameter sharing}: CNNs reuse the same filter weights across spatial positions, reducing parameters substantially. A CNN processing $224\times224$ images might use $3\times3$ filters with only 9 parameters per channel, versus an equivalent MLP requiring `{python} mlp_img_params_str` parameters per neuron, a $\sim$`{python} cnn_param_reduction_str`$\times$ reduction per neuron enabling practical computer vision.
 
 [^fn-translation-invariance]: **Translation Invariance**\index{Translation Invariance}\index{CNN!translation invariance|see{Translation Invariance}}: CNNs detect features regardless of spatial position. A cat's ear is recognized whether in the top-left or bottom-right corner. This property emerges from convolution's sliding window design and is important for computer vision, where objects appear at arbitrary locations in images.
 
@@ -1115,7 +1172,7 @@ The feature activation shifts by the same amount as the input, demonstrating equ
 
 :::
 
-Equivariance carries systems implications that extend beyond mathematical elegance. Parameter efficiency is the most immediate benefit: equivariance through parameter sharing produces dramatic reductions in model size. Consider processing a $224 \times 224$ RGB image. An MLP would require each hidden neuron to connect to all $224 \times 224 \times 3 = 150,528$ input pixels. A CNN with a $3 \times 3$ filter needs only $3 \times 3 \times 3 = 27$ parameters per filter, reused across all $224 \times 224$ positions. This represents approximately $5,575\times$ fewer parameters per feature detector, and the memory savings enable larger models and bigger batches on fixed hardware.
+Equivariance carries systems implications that extend beyond mathematical elegance. Parameter efficiency is the most immediate benefit: equivariance through parameter sharing produces dramatic reductions in model size. Consider processing a $224 \times 224$ RGB image. An MLP would require each hidden neuron to connect to all $224 \times 224 \times 3 =$ `{python} mlp_img_params_str` input pixels. A CNN with a $3 \times 3$ filter needs only $3 \times 3 \times 3 =$ `{python} cnn_filter_params_str` parameters per filter, reused across all $224 \times 224$ positions. This represents approximately `{python} cnn_param_reduction_str`$\times$ fewer parameters per feature detector, and the memory savings enable larger models and bigger batches on fixed hardware.
 
 The computational structure created by equivariance proves equally valuable for systems optimization. The sliding window pattern applies the same operation at every spatial position, creating regular computation that hardware can exploit. Input pixels are used by multiple filter positions, enabling im2col optimizations that restructure data for efficient matrix operations. The resulting computation is inherently SIMD-friendly, as modern GPUs can execute identical instructions across spatial positions simultaneously. This structural regularity explains why TPUs and AI accelerators include specialized units for convolution: the operation maps efficiently to silicon precisely because equivariance creates predictable, parallelizable patterns.
 
@@ -1495,7 +1552,7 @@ RNN sequential processing creates computational patterns different from both MLP
 
 @lst-rnn_layer_step demonstrates the operation using high-level matrix operations found in deep learning frameworks. The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_xh` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
 
-::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications (h_prev x W_hh and x_t x W_xh) per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires 16,384 + 12,800 = 29,184 MACs, but sequential dependencies prevent parallelization across time."}
+::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications (h_prev x W_hh and x_t x W_xh) per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} rnn_recurrent_macs_str` + `{python} rnn_input_macs_str` = `{python} rnn_macs_step_str` MACs, but sequential dependencies prevent parallelization across time."}
 ```{.python}
 def rnn_layer_step(x_t, h_prev, W_hh, W_xh, b):
     # x_t: input at time t (batch_size × input_dim)
@@ -1935,7 +1992,7 @@ Unlike the fixed weight matrices found in previous architectures, attention weig
 
 Attention mechanisms create computational patterns that differ significantly from previous architectures. @lst-attention_layer_compute reveals how dynamic connectivity translates into specific computational requirements, exposing the nested loops that implement pairwise attention scoring.
 
-::: {#lst-attention_layer_compute lst-cap="**Attention Computation**: Two implementations showing the same O(N^2 x d) complexity. The matrix form (top) uses optimized GEMM, while the nested loops (bottom) expose the quadratic pairwise comparisons: for sequence length 512 and dimension 64, computing attention scores requires 512 x 512 x 64 = 16.8 million MACs per attention head, plus another 16.8M for value aggregation."}
+::: {#lst-attention_layer_compute lst-cap="**Attention Computation**: Two implementations showing the same O(N^2 x d) complexity. The matrix form (top) uses optimized GEMM, while the nested loops (bottom) expose the quadratic pairwise comparisons: for sequence length 512 and dimension 64, computing attention scores requires 512 x 512 x 64 = `{python} attn_score_macs_m_str` million MACs per attention head, plus another `{python} attn_score_macs_m_str`M for value aggregation."}
 ```{.python}
 def attention_layer_matrix(Q, K, V):
     # Q, K, V: (batch_size × seq_len × d_model)
@@ -2009,7 +2066,8 @@ num_layers_value = 32
 # =============================================================================
 # PROCESS
 # =============================================================================
-elements_value = seq_len_value * seq_len_value
+num_heads_value = 12 # Standard for base models
+elements_value = seq_len_value * seq_len_value * num_heads_value
 single_layer_bytes_value = elements_value * bytes_per_element_value
 single_layer_gb_value = single_layer_bytes_value / 1e9
 total_gb_value = single_layer_gb_value * num_layers_value
@@ -3148,7 +3206,7 @@ Examine @tbl-sys-design-implications to see how architectural primitives drive h
 
 Energy consumption patterns vary dramatically across neural network architectures, with implications for both datacenter deployment and edge computing scenarios. Each architectural pattern exhibits distinct energy characteristics that inform deployment decisions and optimization strategies.
 
-Dense matrix operations in MLPs achieve excellent arithmetic intensity[^fn-arithmetic-intensity] (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately 4.6pJ, while data movement from DRAM costs `{python} energy_dram_str` pJ per 32-bit value [@Horowitz2014]. For typical MLP inference, 70-80% of energy goes to data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
+Dense matrix operations in MLPs achieve excellent arithmetic intensity[^fn-arithmetic-intensity] (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately `{python} energy_mac_pj_str`pJ, while data movement from DRAM costs `{python} energy_dram_str` pJ per 32-bit value [@Horowitz2014]. For typical MLP inference, 70-80% of energy goes to data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
 
 [^fn-arithmetic-intensity]: **Arithmetic Intensity**\index{Arithmetic Intensity!definition}: The ratio of floating-point operations to memory accesses, measured in FLOPS per byte. High arithmetic intensity (>10 FLOPS/byte) enables efficient hardware utilization, while low intensity (<1 FLOPS/byte) makes workloads memory-bound. Attention mechanisms typically have low arithmetic intensity, explaining their energy inefficiency.
 

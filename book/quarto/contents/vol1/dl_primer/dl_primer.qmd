@@ -53,7 +53,13 @@ from physx.formulas import model_memory
 # INPUT
 # =============================================================================
 # Compute MNIST params from the canonical architecture (784→128→64→10)
-mnist_arch_value = [(784, 128), (128, 64), (64, 10)]
+mnist_l1_dim = 784
+mnist_l2_dim = 128
+mnist_l3_dim = 64
+mnist_l4_dim = 10
+mnist_arch_str = f"{mnist_l1_dim}→{mnist_l2_dim}→{mnist_l3_dim}→{mnist_l4_dim}"
+
+mnist_arch_value = [(mnist_l1_dim, mnist_l2_dim), (mnist_l2_dim, mnist_l3_dim), (mnist_l3_dim, mnist_l4_dim)]
 mnist_params_value = sum(i * o + o for i, o in mnist_arch_value)  # weights + biases
 mnist_px_w_value = MNIST_IMAGE_WIDTH
 mnist_px_h_value = MNIST_IMAGE_HEIGHT
@@ -106,6 +112,65 @@ gpt2_mem_str = fmt(gpt2_mem_gb_value, precision=0, commas=False)
 mem_jump_str = fmt(mem_jump_value, precision=0, commas=True)
 
 mnist_input_str = f"{mnist_input_neurons_value}"
+
+# =============================================================================
+# ADDITIONAL EXAMPLES
+# =============================================================================
+
+# MNIST 100-neuron hidden layer example
+mnist_hidden_100_dim = 100
+mnist_100_params_value = mnist_l1_dim * mnist_hidden_100
+mnist_100_params_str = f"{mnist_100_params_value:,}"
+
+# Computational Scale Footnote
+# Large: 784 -> 1000 -> 1000 -> 10
+mnist_large_l1 = 1000
+mnist_large_l2 = 1000
+mnist_large_arch = [(mnist_l1_dim, mnist_large_l1), (mnist_large_l1, mnist_large_l2), (mnist_large_l2, mnist_l4_dim)]
+mnist_large_params = sum(i * o + o for i, o in mnist_large_arch)
+mnist_large_mem_mb = model_memory(mnist_large_params, BYTES_FP32, MB)
+mnist_large_params_m_str = f"{mnist_large_params/1e6:.1f}"
+mnist_large_mem_mb_str = f"{mnist_large_mem_mb:.0f}"
+
+# Small: 784 -> 100 -> 100 -> 10
+mnist_small_l1 = 100
+mnist_small_l2 = 100
+mnist_small_arch = [(mnist_l1_dim, mnist_small_l1), (mnist_small_l1, mnist_small_l2), (mnist_small_l2, mnist_l4_dim)]
+mnist_small_params = sum(i * o + o for i, o in mnist_small_arch)
+mnist_small_mem_kb = model_memory(mnist_small_params, BYTES_FP32, KiB)
+mnist_small_params_k_str = f"{mnist_small_params/1000:.0f}"
+mnist_small_mem_kb_str = f"{mnist_small_mem_kb:.0f}"
+
+# ImageNet / CNN Example
+imagenet_dim = 224
+cnn_filters = 64
+cnn_kernel = 3
+cnn_params_1ch = cnn_kernel**2 * 1 * cnn_filters
+cnn_activations = imagenet_dim**2 * cnn_filters
+cnn_activations_m_str = f"{cnn_activations/1e6:.1f}"
+
+# LLM Serving Example
+llm_70b_params = 70e9
+llm_70b_mem_gb = (llm_70b_params * 2) / 1e9
+llm_70b_mem_gb_str = f"{llm_70b_mem_gb:.0f}"
+
+# Embedding Table Example
+embed_users = 1e9
+embed_dim = 128
+embed_users_b_str = f"{embed_users/1e9:.0f}"
+embed_dim_str = f"{embed_dim}"
+
+# USPS / LeNet
+lenet_1_params = 10000 # Approx
+lenet_1_params_str = f"{lenet_1_params:,}"
+lenet_1_mem_kb = model_memory(lenet_1_params, BYTES_FP32, KiB)
+lenet_1_mem_kb_str = f"{lenet_1_mem_kb:.0f}"
+
+# GPT-4
+gpt4_params_t_value = 1.8
+gpt4_params_t_str = f"{gpt4_params_t_value}"
+
+
 ```
 
 ## The Physics of Neural Computation {#sec-deep-learning-systems-foundations-deep-learning-systems-engineering-foundation-597f}
@@ -575,8 +640,8 @@ While the preceding sections established the technical foundations of deep learn
 | 1998     | LeNet-5    |                         60K ±1K |    $10^{14}$ ±1 OoM | SGI Origin 2000 (200 MHz) | 2-3 days       | 0.95% (MNIST)    |
 | 2012     | AlexNet    |                            ~60M |  $5 \times 10^{17}$ |           2× GTX 580 GPUs | 5-6 days       | 15.3% (ImageNet) |
 | 2015     | ResNet-152 |                            ~60M |  $10^{19}$ ±0.5 OoM |         8× Tesla K80 GPUs | ~3 weeks       | 3.6% (ImageNet)  |
-| 2020     | GPT-3      |                    175B (exact) |  $3 \times 10^{23}$ |            ~10K V100 GPUs | weeks          | N/A (language)   |
-| 2023     | GPT-4      | ~1.8T (MoE, est.[^fn-gpt4-est]) | $10^{24}$–$10^{25}$ |       10-25K A100s (est.) | months         | N/A (language)   |
+| 2020     | GPT-3      |                    {python} gpt3_params_b_str B (exact) |  $3 \times 10^{23}$ |            ~10K V100 GPUs | weeks          | N/A (language)   |
+| 2023     | GPT-4      | ~{python} gpt4_params_t_str T (MoE, est.[^fn-gpt4-est]) | $10^{24}$–$10^{25}$ |       10-25K A100s (est.) | months         | N/A (language)   |
 
 : **Historical Performance**: Four decades of neural network evolution showing the co-scaling of model parameters, training compute, and hardware infrastructure. Training FLOPs increased by approximately $10^{13}$× from LeNet-1 to GPT-4, while parameters grew by $10^{8}$×. **Uncertainty notes**: Earlier systems (LeNet, AlexNet) have well-documented specifications; recent closed models (GPT-4) have only external estimates. "OoM" = order of magnitude uncertainty. {#tbl-historical-performance}
 
@@ -815,7 +880,7 @@ To ground these concepts in a concrete example, we use handwritten digit recogni
 
 **Why This Example**: MNIST is small enough to understand completely (784 inputs, ~100K parameters for a simple network) yet large enough to be realistic. The task is intuitive: everyone understands what "recognize a handwritten 7" means, making it ideal for learning neural network principles that scale to much larger problems.
 
-**Network Architecture Preview**: A typical MNIST classifier might use: 784 input neurons (one per pixel) → 128 hidden neurons → 64 hidden neurons → 10 output neurons (one per digit class). As we develop concepts, we will reference this specific architecture.
+**Network Architecture Preview**: A typical MNIST classifier might use: `{python} mnist_l1_dim` input neurons (one per pixel) → `{python} mnist_l2_dim` hidden neurons → `{python} mnist_l3_dim` hidden neurons → `{python} mnist_l4_dim` output neurons (one per digit class). As we develop concepts, we will reference this specific architecture.
 
 :::
 
@@ -1260,7 +1325,7 @@ The learnable parameters[^fn-parameter-etymology] of neural networks, weights an
 Weights\index{Weights!matrix organization}\index{Weight Matrix!layer connections} determine how strongly inputs influence neuron outputs. In larger networks, these organize into matrices for efficient computation across layers. In a layer with $n$ input features and $m$ neurons, the weights form a matrix $\mathbf{W} \in \mathbb{R}^{n \times m}$, where each column represents the weights for a single neuron. This organization allows the network to process multiple inputs simultaneously, an essential feature for handling real-world data efficiently.
 
 Recall that for a single neuron, we computed $z = \sum_{i=1}^n (x_i \cdot w_{ij}) + b$. When we have a layer of $m$ neurons, we could compute each neuron's output separately, but matrix operations provide a much more efficient approach. Rather than computing each neuron individually, matrix multiplication enables us to compute all $m$ outputs simultaneously:
-$$ \mathbf{z} = \mathbf{x}^T\mathbf{W} + \mathbf{b} $$
+$$ \mathbf{z} = \mathbf{x}\mathbf{W} + \mathbf{b} $$
 
 This matrix organization is more than just mathematical convenience; it reflects how modern neural networks are implemented for efficiency. Each weight $w_{ij}$ represents the strength of the connection between input feature $i$ and neuron $j$ in the layer.
 
@@ -1359,7 +1424,7 @@ To make this concrete, examine @fig-connections, which lays out a small three-la
 Each neuron in a layer also has an associated bias term\index{Bias!activation threshold}\index{Bias Terms|see{Bias}}. While weights determine the relative importance of inputs, biases allow neurons to shift their activation functions. This shifting is important for learning, as it gives the network flexibility to fit more complex patterns.
 
 For a layer with $m$ neurons, the bias terms form a vector $\mathbf{b} \in \mathbb{R}^m$. When we compute the layer's output, this bias vector is added to the weighted sum of inputs:
-$$ \mathbf{z} = \mathbf{x}^T\mathbf{W} + \mathbf{b} $$
+$$ \mathbf{z} = \mathbf{x}\mathbf{W} + \mathbf{b} $$
 
 The bias terms[^fn-bias-terms] effectively allow each neuron to have a different "threshold" for activation, making the network more expressive.
 
@@ -1388,14 +1453,14 @@ Before proceeding to network topology and training, verify your understanding of
 - [ ] **Activation Functions**: Can you explain why ReLU is computationally efficient compared to sigmoid, and why nonlinearity is essential?
 - [ ] **Layer Organization**: Can you describe the three types of layers (input, hidden, output) and how they transform data sequentially?
 - [ ] **Weight Matrices**: Do you understand how a weight matrix $\mathbf{W}^{(l)} \in \mathbb{R}^{n \times m}$ connects a layer of $n$ neurons to a layer of $m$ neurons?
-- [ ] **Parameter Count**: Given a network architecture (e.g., 784→128→64→10), can you calculate the total number of parameters (weights + biases)?
+- [ ] **Parameter Count**: Given a network architecture (e.g., `{python} mnist_arch_str`), can you calculate the total number of parameters (weights + biases)?
 
 **Systems Implications:**
 
 - [ ] Can you explain why neural network computation is memory-bandwidth-limited rather than compute-limited?
 - [ ] Do you understand why each architectural choice (layer width, depth, connectivity) directly affects memory and computational requirements?
 
-**Self-Test Example**: For a digit recognition network with layers 784→128→64→10, calculate: (1) parameters in each weight matrix, (2) total parameter count, (3) activations stored during inference for a single image.
+**Self-Test Example**: For a digit recognition network with layers `{python} mnist_arch_str`, calculate: (1) parameters in each weight matrix, (2) total parameter count, (3) activations stored during inference for a single image.
 
 *If any of these feel unclear, review the earlier sections on Neural Network Fundamentals, Neurons and Activations, or Weights and Biases before continuing. The upcoming sections on training and optimization build directly on these foundations.*
 
@@ -1423,7 +1488,7 @@ This simple network demonstrates how hidden layers enable learning non-linear pa
 
 The XOR example established the fundamental three-layer architecture, but real-world networks require systematic consideration of design constraints and computational scale[^fn-computational-scale]. Recognizing handwritten digits using the MNIST\index{MNIST Dataset!digit recognition}\index{Dataset!MNIST benchmark} [@lecun1998gradient][^fn-mnist-dataset] dataset illustrates how problem structure determines network dimensions while hidden layer configuration remains an important design decision.
 
-[^fn-computational-scale]: **Computational Scale Considerations**: Network size decisions involve balancing accuracy against computational costs. A 784→1000→1000→10 MNIST network has ~1.8M parameters requiring ~7 MB memory, while a 784→100→100→10 network needs only ~90K parameters and ~350 KB memory. The larger network might achieve 99.5% vs 98.5% accuracy, but requires 20$\times$ more memory and computation—often an unacceptable trade-off for mobile deployment where every megabyte and millisecond matters.
+[^fn-computational-scale]: **Computational Scale Considerations**: Network size decisions involve balancing accuracy against computational costs. A 784→{python} mnist_large_l1 →{python} mnist_large_l2 →10 MNIST network has ~{python} mnist_large_params_m_str M parameters requiring ~{python} mnist_large_mem_mb_str MB memory, while a 784→{python} mnist_small_l1 →{python} mnist_small_l2 →10 network needs only ~{python} mnist_small_params_k_str K parameters and ~{python} mnist_small_mem_kb_str KB memory. The larger network might achieve 99.5% vs 98.5% accuracy, but requires 20$\times$ more memory and computation—often an unacceptable trade-off for mobile deployment where every megabyte and millisecond matters.
 
 [^fn-mnist-dataset]: **MNIST Dataset**: Created by Yann LeCun and colleagues in 1998, MNIST (Modified National Institute of Standards and Technology) contains 70,000 images of handwritten digits—60,000 for training and 10,000 for testing. Each image is 28×28 pixels in grayscale, totaling 784 features per digit. MNIST became the "hello world" of computer vision, with error rates dropping from 12% with traditional methods in 1998 to 0.23% with modern deep learning. Despite being "solved," MNIST remains invaluable for teaching because it is large enough to be realistic yet small enough to train quickly on any computer.
 
@@ -1787,11 +1852,11 @@ inf_madd_total_str = f"{inf_madd_total_value:,}"
 
 The arrangement of parameters\index{Model Size!parameter count}\index{Memory Footprint!computational requirements} (weights and biases) in a neural network determines both its learning capacity and computational requirements. While topology defines the network's structure, the initialization and organization of parameters play an important role in learning and performance.
 
-Parameter count grows with network width and depth. For our MNIST example, consider a network with a 784-dimensional input layer, hidden layers of 128 and 64 neurons, and a 10-neuron output layer (784→128→64→10). The first layer requires `{python} w1_str` weights and `{python} b1_str` biases, the second layer `{python} w2_str` weights and `{python} b2_str` biases, and the output layer `{python} w3_str` weights and `{python} b3_str` biases, totaling `{python} total_params_str` parameters. Each must be stored in memory and updated during learning.
+Parameter count grows with network width and depth. For our MNIST example, consider a network with a `{python} mnist_l1_dim`-dimensional input layer, hidden layers of `{python} mnist_l2_dim` and `{python} mnist_l3_dim` neurons, and a `{python} mnist_l4_dim`-neuron output layer (`{python} mnist_arch_str`). The first layer requires `{python} w1_str` weights and `{python} b1_str` biases, the second layer `{python} w2_str` weights and `{python} b2_str` biases, and the output layer `{python} w3_str` weights and `{python} b3_str` biases, totaling `{python} total_params_str` parameters. Each must be stored in memory and updated during learning.
 
 ::: {.callout-example title="Memory: Training vs. Inference"}
 
-**Problem**: Calculate the memory footprint for our MNIST network (784→128→64→10) during training with batch size 32, using 32-bit (4-byte) floating-point precision. Compare to inference requirements.
+**Problem**: Calculate the memory footprint for our MNIST network (`{python} mnist_arch_str`) during training with batch size 32, using 32-bit (4-byte) floating-point precision. Compare to inference requirements.
 
 **Solution**:
 
@@ -2201,7 +2266,7 @@ This composition reveals that forward propagation is fundamentally a chain of ma
 
 Modern AI accelerators (GPUs) have massive compute arrays but limited memory bandwidth. They only achieve peak performance on **High Intensity** operations like Matrix Multiplication where data is reused many times. This is why "fully connected" and "convolutional" layers are preferred over complex, custom element-wise logic.
 
-**The GEMM Engine**: The mathematical expression $\mathbf{x}^T\mathbf{W}$ is implemented in hardware as a **General Matrix Multiply (GEMM)**\index{GEMM!hardware kernel}\index{Matrix Multiplication!GEMM optimization} kernel—the most optimized routine in all of computing, accounting for over 90% of the floating-point operations in most neural networks. To achieve peak performance, engineers use techniques like **blocking** and **tiling** to ensure data fits perfectly into L1/L2 caches and remains there as long as possible (data reuse). This hardware-software co-design—designing model architectures to use large, dense matrix multiplications that specialized accelerators like Tensor Cores can execute at exaflop scale—is what makes modern deep learning physically possible. For a detailed treatment of GEMM arithmetic intensity, sparse matrix formats, and the computational complexity of common layer types, see @sec-algorithm-foundations.
+**The GEMM Engine**: The mathematical expression $\mathbf{x}\mathbf{W}$ is implemented in hardware as a **General Matrix Multiply (GEMM)**\index{GEMM!hardware kernel}\index{Matrix Multiplication!GEMM optimization} kernel—the most optimized routine in all of computing, accounting for over 90% of the floating-point operations in most neural networks. To achieve peak performance, engineers use techniques like **blocking** and **tiling** to ensure data fits perfectly into L1/L2 caches and remains there as long as possible (data reuse). This hardware-software co-design—designing model architectures to use large, dense matrix multiplications that specialized accelerators like Tensor Cores can execute at exaflop scale—is what makes modern deep learning physically possible. For a detailed treatment of GEMM arithmetic intensity, sparse matrix formats, and the computational complexity of common layer types, see @sec-algorithm-foundations.
 :::
 
 While this nested expression captures the complete process, we typically compute it step by step:
@@ -3036,7 +3101,7 @@ Before examining how these concepts integrate in a real-world deployment, verify
 - [ ] Can you trace a single input (e.g., MNIST digit image) through the complete system: raw input → preprocessing → forward propagation through layers → output probabilities → post-processing → final prediction?
 - [ ] Do you understand the distinction between what happens once (loading trained weights) versus per-input (forward propagation)?
 
-**Self-Test**: For an MNIST digit classifier (784→128→64→10) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} training_ratio_str`× more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and post-processing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
+**Self-Test**: For an MNIST digit classifier ({python} mnist_arch_str) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} training_ratio_str`× more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and post-processing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
 
 *The following case study demonstrates how these concepts integrate in a production system deployed at massive scale. Pay attention to how architectural choices, training strategies, and deployment constraints combine to create a working ML system.*
 
@@ -3122,7 +3187,7 @@ The process begins when an envelope reaches the imaging station. High-speed came
 
 Once captured, the raw images are far from ready for neural network processing. Pre-processing\index{Preprocessing!image normalization}\index{Preprocessing!digit segmentation} transforms these camera images into a standardized format. The system must locate the ZIP code region, segment individual digits, and normalize each digit image. This stage employs traditional computer vision techniques: image thresholding adapts to envelope background color, connected component analysis identifies individual digits, and size normalization produces standard $28\times 28$ pixel images. Speed remains critical; these operations must complete within milliseconds to maintain throughput.
 
-The neural network then processes each normalized digit image. The original 1989 system used an early LeNet variant [@lecun1989backpropagation] with approximately 10,000 parameters—remarkably compact compared to our running example's `{python} mnist_params_k_str`K. The network processes each digit through multiple layers, ultimately producing ten output values representing digit probabilities. This inference process, while computationally intensive by 1990s standards, benefits from the optimization principles we discussed in the previous section.
+The neural network then processes each normalized digit image. The original 1989 system used an early LeNet variant [@lecun1989backpropagation] with approximately {python} lenet_1_params_str parameters—remarkably compact compared to our running example's `{python} mnist_params_k_str`K. The network processes each digit through multiple layers, ultimately producing ten output values representing digit probabilities. This inference process, while computationally intensive by 1990s standards, benefits from the optimization principles we discussed in the previous section.
 
 Post-processing\index{Postprocessing!confidence thresholds}\index{Confidence Threshold!decision making} converts these neural network outputs into sorting decisions. The system applies confidence thresholds to each digit prediction. A complete ZIP code requires high confidence in all five digits; a single uncertain digit flags the entire piece for human review. When confidence meets thresholds, the system transmits sorting instructions to mechanical systems that physically direct the mail to its appropriate bin.
 
@@ -3175,7 +3240,7 @@ The same neural network computation that required industrial-scale infrastructur
 | **Inference latency** |                 ~100 ms/digit |          ~0.1 ms/digit |          1,000× |
 | **Power consumption** |                      50-100 W |                    5 W |          10-20× |
 | **Training time**     |                        3 days |            ~30 seconds |          8,640× |
-| **Model storage**     |                        ~40 KB |     ~40 KB (unchanged) | 1× (same model) |
+| **Model storage**     |                        ~{python} lenet_1_mem_kb_str KB |     ~{python} lenet_1_mem_kb_str KB (unchanged) | 1× (same model) |
 | **Energy/inference**  |                         ~10 J |                ~0.5 mJ |         20,000× |
 | **\$/inference**      |                      ~\$0.001 |            ~\$0.000001 |          1,000× |
 

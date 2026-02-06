@@ -788,7 +788,11 @@ The compilation overhead in these examples (approximately 100ms to compile the f
 # =============================================================================
 # INPUT
 # =============================================================================
-kernel_launch_us_value = 15  # Python dispatch + kernel launch per op
+python_dispatch_us = 10
+kernel_launch_us = 5
+memory_access_us = 1
+kernel_launch_us_value = python_dispatch_us + kernel_launch_us  # Python dispatch + kernel launch per op
+
 eager_n_ops_value = 2  # Eager mode: 2 kernel launches (Add + ReLU)
 compiled_n_ops_value = 1  # Compiled mode: 1 fused kernel launch
 eager_mem_factor_value = 4  # 4N bytes (2 reads + 2 writes)
@@ -809,6 +813,9 @@ bw_efficiency_value = eager_mem_factor_value // compiled_mem_factor_value
 # =============================================================================
 # OUTPUT
 # =============================================================================
+python_dispatch_us_str = f"{python_dispatch_us}"
+kernel_launch_only_us_str = f"{kernel_launch_us}"
+memory_access_us_str = f"{memory_access_us}"
 kernel_launch_us_str = f"{kernel_launch_us_value}"
 eager_overhead_str = f"{eager_overhead_us_value}"
 compiled_overhead_str = f"{compiled_overhead_us_value}"
@@ -822,9 +829,9 @@ The **Latency Term** ($\text{Latency}_{\text{fixed}}$) in the Iron Law is domina
 
 **The Constants of Latency:**
 
-*   **Python Dispatch:** ~10 $\mu$s per operation.
-*   **Kernel Launch:** ~5 $\mu$s per operation.
-*   **Memory Access (VRAM):** ~1 $\mu$s.
+*   **Python Dispatch:** ~`{python} python_dispatch_us_str` $\mu$s per operation.
+*   **Kernel Launch:** ~`{python} kernel_launch_only_us_str` $\mu$s per operation.
+*   **Memory Access (VRAM):** ~`{python} memory_access_us_str` $\mu$s.
 
 **Scenario 1: Eager Mode (The "Tiny Op" Trap)**
 Consider a simple activation block: `y = relu(x + bias)`.
@@ -1250,18 +1257,18 @@ This cumulative latency creates what is effectively *a dispatch tax* on executio
 
 **Scenario 1: Small MLP (Overhead Bound)**
 
-*   **Compute**: 6 small matrix/element-wise operations.
-*   **Hardware Time**: T_hw ≈ 2.6 μs (mostly memory latency).
-*   **Software Overhead**: T_sw ≈ 6 ops × 5 μs/op = `{python} dispatch_sw_time_str` μs.
-*   **Ratio**: `{python} dispatch_sw_time_str` / 2.6 ≈ **`{python} dispatch_ratio_small_str`**.
+*   **Compute**: `{python} dispatch_n_ops_value` small matrix/element-wise operations.
+*   **Hardware Time**: T_hw ≈ `{python} dispatch_hw_time_us_value` μs (mostly memory latency).
+*   **Software Overhead**: T_sw ≈ `{python} dispatch_n_ops_value` ops × `{python} dispatch_us_per_op_value` μs/op = `{python} dispatch_sw_time_str` μs.
+*   **Ratio**: `{python} dispatch_sw_time_str` / `{python} dispatch_hw_time_us_value` ≈ **`{python} dispatch_ratio_small_str`**.
 *   **Conclusion**: You spend `{python} dispatch_overhead_pct_str`% of time waiting for Python. Compilation yields **`{python} dispatch_compilation_speedup_str` x speedup**.
 
 **Scenario 2: GPT-3 Layer (Compute Bound)**
 
 *   **Compute**: Huge matrix multiplications.
-*   **Hardware Time**: T_hw ≈ 100 ms = 100,000 μs.
-*   **Software Overhead**: $T_{sw} \approx 50 \mu s$.
-*   **Ratio**: 50 / 100,000 ≈ **`{python} dispatch_ratio_large_str`**.
+*   **Hardware Time**: T_hw ≈ 100 ms = `{python} gpt3_hw_time_us_value` μs.
+*   **Software Overhead**: $T_{sw} \approx {python} gpt3_sw_time_us_value \mu s$.
+*   **Ratio**: `{python} gpt3_sw_time_us_value` / `{python} gpt3_hw_time_us_value` ≈ **`{python} dispatch_ratio_large_str`**.
 *   **Conclusion**: Python overhead is negligible. Compilation helps only via kernel fusion (memory bandwidth), not dispatch elimination.
 :::
 
@@ -1998,20 +2005,76 @@ Every computation in a neural network operates on tensors.[^fn-tensor] Training 
 
 But how much memory does this single abstraction actually consume? The answer is far more than the model weights alone suggest. This hidden overhead catches many practitioners off guard: they estimate memory from parameter count alone, allocate accordingly, and encounter out-of-memory errors that seem inexplicable. The following notebook quantifies what we call the *administrative tax*—the shadow tensors for gradients, optimizer momentum, and stored activations that accompany every weight tensor.
 
+
+```{python}
+#| label: admin-tax-calc
+#| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate memory breakdown for "Administrative Tax" callout
+# Used in: Callout "The Administrative Tax"
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.constants import *
+from physx.formatting import fmt
+
+# Scenario: 1B parameter model (FP16 weights)
+admin_params_count = 1e9
+admin_batch_size = 32
+admin_layers = 100
+admin_width = 1024
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+# Weights: 1B * 2 bytes (FP16) = 2 GB
+admin_weights_gb_value = (admin_params_count * BYTES_FP16).to(GB).magnitude
+# Gradients: Same as weights (FP16)
+admin_grads_gb_value = admin_weights_gb_value
+# Optimizer (Adam): 2 states * 4 bytes (FP32) = 8 bytes/param = 4x weights(FP16)
+# Wait, text says 8 GB. 1B * 8 bytes = 8 GB. Correct.
+admin_opt_gb_value = (admin_params_count * BYTES_ADAM_STATE).to(GB).magnitude
+
+# Activations: Batch * Layers * Width^2 * 2 bytes
+# 32 * 100 * 1024^2 * 2 = 6,710,886,400 bytes = 6.71 GB
+admin_act_bytes = admin_batch_size * admin_layers * (admin_width ** 2) * BYTES_FP16
+admin_act_gb_value = admin_act_bytes.to(GB).magnitude
+
+admin_total_gb_value = admin_weights_gb_value + admin_grads_gb_value + admin_opt_gb_value + admin_act_gb_value
+admin_tax_gb_value = admin_total_gb_value - admin_weights_gb_value
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+admin_weights_gb_str = fmt(admin_weights_gb_value, precision=0, commas=False)
+admin_grads_gb_str = fmt(admin_grads_gb_value, precision=0, commas=False)
+admin_opt_gb_str = fmt(admin_opt_gb_value, precision=0, commas=False)
+admin_act_gb_str = fmt(admin_act_gb_value, precision=1, commas=False)
+admin_total_gb_str = fmt(admin_total_gb_value, precision=0, commas=False)
+admin_tax_gb_str = fmt(admin_tax_gb_value, precision=0, commas=False)
+admin_batch_str = fmt(admin_batch_size, precision=0, commas=False)
+admin_layers_str = fmt(admin_layers, precision=0, commas=False)
+admin_width_str = fmt(admin_width, precision=0, commas=False)
+```
+
 ::: {.callout-notebook title="The Administrative Tax"}
 **Problem**: Why does your GPU utilization drop when training small models?
 
 **The Math (The Hidden Tax)**:
 
-1.  **Model Weights**: 2 GB.
-2.  **Gradients**: 2 GB (same size as weights).
-3.  **Optimizer States (Adam)**: 8 GB ($2 \times \text{weights}$ for momentum and velocity in FP32).
-4.  **Activations**: For a batch size of 32 and a 100-layer network, you must store every intermediate layer output for the backward pass.
+1.  **Model Weights**: `{python} admin_weights_gb_str` GB.
+2.  **Gradients**: `{python} admin_grads_gb_str` GB (same size as weights).
+3.  **Optimizer States (Adam)**: `{python} admin_opt_gb_str` GB ($2 \times \text{weights}$ for momentum and velocity in FP32).
+4.  **Activations**: For a batch size of `{python} admin_batch_str` and a `{python} admin_layers_str`-layer network, you must store every intermediate layer output for the backward pass.
 
     $$ \text{Activations} \approx \text{Batch} \times \text{Layers} \times \text{Width}^{2} \times 2 \text{ bytes} $$
-    For a 1024-width model: $32 \times 100 \times 1024^{2} \times 2 \approx \mathbf{6.7 \text{ GB}}$. (Each layer's activation is a `Width × Width` matrix per sample—appropriate for transformer-style models where intermediate projections scale with hidden dimension squared.)
+    For a `{python} admin_width_str`-width model: ${python} admin_batch_str \times {python} admin_layers_str \times {python} admin_width_str^{2} \times 2 \approx \mathbf{{python} admin_act_gb_str \text{ GB}}$. (Each layer's activation is a `Width × Width` matrix per sample—appropriate for transformer-style models where intermediate projections scale with hidden dimension squared.)
 
-**The Systems Conclusion**: Your 2 GB model has an **"Administrative Tax"** of ~19 GB (2 GB gradients + 8 GB optimizer + 6.7 GB activations) before you even process the first batch. During training, **Data Movement** includes saving and retrieving these activations, which is why training is often 3–4× slower than pure inference.
+**The Systems Conclusion**: Your `{python} admin_weights_gb_str` GB model has an **"Administrative Tax"** of ~`{python} admin_tax_gb_str` GB (`{python} admin_grads_gb_str` GB gradients + `{python} admin_opt_gb_str` GB optimizer + `{python} admin_act_gb_str` GB activations) before you even process the first batch. During training, **Data Movement** includes saving and retrieving these activations, which is why training is often 3–4× slower than pure inference.
 :::
 
 **Tensor Structure and Dimensions.**\index{Tensor!rank hierarchy}\index{Broadcasting!shape compatibility} A tensor generalizes scalars, vectors, and matrices to arbitrary dimensions. The hierarchy is straightforward: a scalar is a rank-0 tensor (single value), a vector is rank-1 (sequence of values), and a matrix is rank-2 (rows and columns). Higher ranks extend this pattern through nesting, so a rank-3 tensor is a stack of matrices—compare all four ranks side by side in @fig-tensor-data-structure-a to see how each level adds a new axis of organization.
@@ -3442,7 +3505,7 @@ optimizer.step()
 
 1. **Python Dispatch**\index{Python Dispatch!overhead} (~1μs): Python interpreter calls `torch.matmul`, which routes through PyTorch's dispatcher to select the CUDA backend.
 
-2. **Kernel Selection**\index{cuBLAS!kernel selection} (~0.5μs): cuBLAS selects an optimized GEMM kernel based on matrix dimensions (32×784 × 784×256). For these dimensions, it might choose a tiled algorithm optimized for L2 cache.
+2. **Kernel Selection**\index{cuBLAS!kernel selection} (~0.5μs): cuBLAS selects an optimized GEMM kernel based on matrix dimensions (`{python} train_batch`×`{python} train_input` × `{python} train_input`×`{python} train_hidden`). For these dimensions, it might choose a tiled algorithm optimized for L2 cache.
 
 3. **Kernel Launch** (~5μs): The selected kernel is queued to the GPU's command buffer. The CPU continues immediately (asynchronous execution).
 
@@ -3473,13 +3536,82 @@ The bias addition and ReLU follow similar patterns, each adding a node to the au
 
 **Phase 3: Memory Traffic Analysis (The Physics at Work).** Applying the Dispatch Overhead Equation (@eq-dispatch-overhead) to this step:
 
+```{python}
+#| label: training-step-calc
+#| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate FLOPs and memory traffic for training step anatomy
+# Used in: "Training Step Anatomy" section
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
+train_batch = 32
+train_input = 784
+train_hidden = 256
+train_output = 10
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+# MatMul 1: [32, 784] @ [784, 256] -> [32, 256]
+# FLOPs = 2 * M * N * K
+train_mm1_flops = 2 * train_batch * train_input * train_hidden
+train_mm1_mem_bytes = (train_batch * train_input + train_input * train_hidden + train_batch * train_hidden) * 4 # FP32
+
+# ReLU: [32, 256]
+train_relu_flops = train_batch * train_hidden
+train_relu_mem_bytes = (train_batch * train_hidden) * 2 * 4 # Read + Write
+
+# MatMul 2: [32, 256] @ [256, 10] -> [32, 10]
+train_mm2_flops = 2 * train_batch * train_hidden * train_output
+train_mm2_mem_bytes = (train_batch * train_hidden + train_hidden * train_output + train_batch * train_output) * 4
+
+# Cross Entropy: [32, 10]
+train_ce_flops = train_batch * train_output * 3 # Approx (exp + sum + div)
+train_ce_mem_bytes = (train_batch * train_output) * 2 * 4
+
+# Backward: 2x Forward FLOPs
+train_bwd_flops = 2 * (train_mm1_flops + train_relu_flops + train_mm2_flops + train_ce_flops)
+# Backward memory: Read activations, weights, grads. Approx 2x forward traffic?
+# Text uses ~3.2 MB for backward memory.
+train_bwd_mem_str = "~3.2 MB"
+train_bwd_ai_str = "~8.0"
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+train_mm1_flops_str = fmt(train_mm1_flops / 1e6, precision=1, commas=False) + "M"
+train_mm1_mem_str = fmt(train_mm1_mem_bytes / 1e6, precision=1, commas=False) + " MB"
+train_mm1_ai_str = fmt(train_mm1_flops / train_mm1_mem_bytes, precision=1, commas=False)
+
+train_relu_flops_str = fmt(train_relu_flops / 1e3, precision=0, commas=False) + "K"
+train_relu_mem_str = fmt(train_relu_mem_bytes / 1e3, precision=0, commas=False) + " KB"
+train_relu_ai_str = fmt(train_relu_flops / train_relu_mem_bytes, precision=3, commas=False)
+
+train_mm2_flops_str = fmt(train_mm2_flops / 1e3, precision=0, commas=False) + "K"
+train_mm2_mem_str = fmt(train_mm2_mem_bytes / 1e3, precision=0, commas=False) + " KB"
+train_mm2_ai_str = fmt(train_mm2_flops / train_mm2_mem_bytes, precision=1, commas=False)
+
+train_ce_flops_str = fmt(train_ce_flops / 1e3, precision=0, commas=False) + "K"
+train_ce_mem_str = fmt(train_ce_mem_bytes / 1e3, precision=0, commas=False) + " KB"
+train_ce_ai_str = fmt(train_ce_flops / train_ce_mem_bytes, precision=1, commas=False)
+
+train_bwd_flops_str = fmt(train_bwd_flops / 1e6, precision=0, commas=False) + "M"
+```
+
 | **Component**             |            **FLOPs** | **Memory Traffic** | **Arithmetic Intensity** |
 |:------------------------|-------------------:|-----------------:|-----------------------:|
-| **MatMul (x @ W1)**       | 2×32×784×256 = 12.8M |            ~1.6 MB |                      8.0 |
-| **ReLU**                  |          32×256 = 8K |              64 KB |                    0.125 |
-| **MatMul (h @ W2)**       |   2×32×256×10 = 164K |             ~40 KB |                      4.1 |
-| **Cross-entropy**         |                 ~10K |              ~1 KB |                     10.0 |
-| **Backward (2× forward)** |                 ~26M |            ~3.2 MB |                     ~8.0 |
+| **MatMul (x @ W1)**       | 2×32×784×256 = `{python} train_mm1_flops_str` |            `{python} train_mm1_mem_str` |                     `{python} train_mm1_ai_str` |
+| **ReLU**                  |          32×256 = `{python} train_relu_flops_str` |              `{python} train_relu_mem_str` |                    `{python} train_relu_ai_str` |
+| **MatMul (h @ W2)**       |   2×32×256×10 = `{python} train_mm2_flops_str` |             `{python} train_mm2_mem_str` |                      `{python} train_mm2_ai_str` |
+| **Cross-entropy**         |                 ~`{python} train_ce_flops_str` |              `{python} train_ce_mem_str` |                     `{python} train_ce_ai_str` |
+| **Backward (2× forward)** |                 ~`{python} train_bwd_flops_str` |            `{python} train_bwd_mem_str` |                     `{python} train_bwd_ai_str` |
 
 ```{python}
 #| label: mnist-training-step-calc

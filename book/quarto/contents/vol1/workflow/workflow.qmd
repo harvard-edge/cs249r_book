@@ -6,6 +6,49 @@ crossrefs: workflow_xrefs.json
 engine: jupyter
 ---
 
+```{python}
+#| echo: false
+#| output: false
+import pint
+from physx.constants import (
+    MOBILENETV2_PARAMS, MOBILENETV2_FLOPs,
+    STORAGE_COST_S3_STD, STORAGE_COST_NVME_LOW,
+    GB, MB, USD, ureg, byte
+)
+from physx.formatting import fmt
+from IPython.display import Markdown
+
+# MobileNetV2 Specs
+# Assuming FP32 (4 bytes per param) for the size estimate in the text
+mobilenet_size_mb = (MOBILENETV2_PARAMS * 4 * byte).to(MB).magnitude
+mobilenet_flops_m = MOBILENETV2_FLOPs.magnitude / 1e6
+
+mobilenet_size_str = f"{mobilenet_size_mb:.0f}"
+mobilenet_flops_str = f"{mobilenet_flops_m:.0f}"
+
+# Storage Costs
+cost_nvme_gb_mo = STORAGE_COST_NVME_LOW.to(USD / GB / ureg.month).magnitude
+cost_s3_gb_mo = STORAGE_COST_S3_STD.to(USD / GB / ureg.month).magnitude
+
+cost_nvme_str = f"{cost_nvme_gb_mo:.2f}"
+cost_s3_str = f"{cost_s3_gb_mo:.3f}"
+
+# Constraint Propagation
+stage_deployment = 5
+stage_definition = 1
+cost_factor = 2**(stage_deployment - stage_definition)
+cost_factor_str = f"{cost_factor}"
+constraint_math = Markdown(f"$2^{{{stage_deployment - stage_definition}}} = {cost_factor}\\times$")
+
+# Monitoring Thresholds
+sens_target = 90
+spec_target = 80
+sens_alert = 88
+spec_alert = 78
+latency_p95_target = 50
+latency_alert = 100
+```
+
 # ML Workflow {#sec-ai-development-workflow}
 
 ::: {layout-narrow}
@@ -420,7 +463,7 @@ Begin with @fig-lifecycle-overview, which distills these concepts into six core 
 
 :::
 
-To make these stages concrete, consider *how* they apply to MobileNetV2 (@sec-dnn-architectures), one of our Lighthouse Models targeting mobile deployment. A DR screening model optimized for rural clinic deployment would face similar constraints: limited device memory, strict power budgets, and the need for real-time inference without reliable connectivity. The Lighthouse Models illustrate these distinct workload pressures that any real system encounters as it moves from training to deployment. For MobileNetV2 specifically, Problem Definition establishes the constraint: <14 MB model size, <300 MFLOPs, real-time inference on mobile GPUs. Data Collection must account for on-device preprocessing limitations. Model Development uses depthwise separable convolutions[^fn-depthwise-sep] specifically designed to meet the FLOP budget. Evaluation validates not just accuracy but latency on target devices. Deployment targets mobile NPUs with quantization. Monitoring tracks performance across diverse device populations. Each stage's decisions propagate through subsequent stages, and the workflow framework makes these dependencies explicit.
+To make these stages concrete, consider *how* they apply to MobileNetV2 (@sec-dnn-architectures), one of our Lighthouse Models targeting mobile deployment. A DR screening model optimized for rural clinic deployment would face similar constraints: limited device memory, strict power budgets, and the need for real-time inference without reliable connectivity. The Lighthouse Models illustrate these distinct workload pressures that any real system encounters as it moves from training to deployment. For MobileNetV2 specifically, Problem Definition establishes the constraint: <{python} mobilenet_size_str` MB model size, <{python} mobilenet_flops_str` MFLOPs, real-time inference on mobile GPUs. Data Collection must account for on-device preprocessing limitations. Model Development uses depthwise separable convolutions[^fn-depthwise-sep] specifically designed to meet the FLOP budget. Evaluation validates not just accuracy but latency on target devices. Deployment targets mobile NPUs with quantization. Monitoring tracks performance across diverse device populations. Each stage's decisions propagate through subsequent stages, and the workflow framework makes these dependencies explicit.
 
 [^fn-depthwise-sep]: **Depthwise Separable Convolutions**: A technique that factorizes a standard convolution into two simpler operations: one that filters spatial information independently per channel (*depthwise* convolution) and one that combines channels (*pointwise* convolution). This factorization reduces computation by roughly an order of magnitude compared to standard convolutions, making it essential for mobile and edge deployment. @sec-dnn-architectures covers these architectural techniques in depth.
 
@@ -503,13 +546,13 @@ This specification reveals why ML projects experience the iteration cycles diagr
 
 **Audit Result**: Stage transition **blocked**. Two contract violations detected.
 
-**Cost Analysis**: Proceeding without deployment paradigm selection risks discovering at stage 5 (Deployment) that the target is Edge deployment with <100ms latency and <500MB memory. By the Constraint Propagation Principle, this would cost $2^{5-1} = 16×$ the effort of resolving it now at stage 1.
+**Cost Analysis**: Proceeding without deployment paradigm selection risks discovering at stage 5 (Deployment) that the target is Edge deployment with <100ms latency and <500MB memory. By the Constraint Propagation Principle, this would cost `{python} constraint_math` the effort of resolving it now at stage 1.
 
 **Resolution**: Return to Problem Definition. Establish deployment target (e.g., "Edge deployment on NVIDIA Jetson with <50ms inference latency and <200MB model size"). This constraint will shape Data Collection (preprocessing must be device-compatible), Model Development (architecture must fit memory budget), and Evaluation (must include device-specific performance testing).
 
 **Time saved**: 2-4 iteration cycles avoided, approximately 8-16 weeks of rework prevented.
 
-**The same pattern applies to MobileNetV2**: If Problem Definition specifies "mobile deployment" but omits "<14 MB model size, <300 MFLOPs, real-time on mobile GPU," the team might develop a 200 MB ResNet-50 variant that achieves state-of-the-art accuracy, only to discover at Deployment that it violates every mobile constraint.
+**The same pattern applies to MobileNetV2**: If Problem Definition specifies "mobile deployment" but omits "<{python} mobilenet_size_str` MB model size, <{python} mobilenet_flops_str` MFLOPs, real-time on mobile GPU," the team might develop a 200 MB ResNet-50 variant that achieves state-of-the-art accuracy, only to discover at Deployment that it violates every mobile constraint.
 
 :::
 
@@ -665,7 +708,7 @@ Understanding how data characteristics and deployment constraints drive architec
 
 Different data access patterns demand different storage solutions. Teams typically implement **tiered storage architectures**[^fn-tiered-storage]:
 
-[^fn-tiered-storage]: **Tiered Storage**: A storage architecture that places data on different storage media based on access frequency and performance requirements. The cost-performance gap between storage tiers is substantial: high-performance NVMe SSDs deliver 500,000+ IOPS (cloud block storage like AWS EBS gp2 costs approximately $0.10/GB/month), while object storage like S3 costs approximately $0.023/GB/month but with 100-200ms latency. For ML workloads, the hot tier feeds training loops requiring sustained sequential reads at 1-10 GB/s, while cold archival storage holds audit trails and historical datasets accessed only during investigations or regulatory reviews.
+[^fn-tiered-storage]: **Tiered Storage**: A storage architecture that places data on different storage media based on access frequency and performance requirements. The cost-performance gap between storage tiers is substantial: high-performance NVMe SSDs deliver 500,000+ IOPS (cloud block storage like AWS EBS gp2 costs approximately ${python} cost_nvme_str`/GB/month), while object storage like S3 costs approximately ${python} cost_s3_str`/GB/month but with 100-200ms latency. For ML workloads, the hot tier feeds training loops requiring sustained sequential reads at 1-10 GB/s, while cold archival storage holds audit trails and historical datasets accessed only during investigations or regulatory reviews.
 
 - **Hot Storage**: High-throughput NVMe SSDs for data currently used in training loops.
 - **Warm Storage**: S3-compatible object storage for recent datasets and active validation sets.
@@ -1110,9 +1153,9 @@ These requirements influence system design significantly. The critical nature of
 
 A production DR system tracks several categories of metrics across a hierarchy designed to catch problems at different timescales:
 
-- **Model performance metrics** (requiring ground truth, available with delay): sensitivity (target >90%, alert if 7-day rolling average drops below 88%), specificity (target >80%, alert if drops below 78%), and subgroup performance (alert if any demographic drops >5% below baseline).
+- **Model performance metrics** (requiring ground truth, available with delay): sensitivity (target >{python} sens_target`%, alert if 7-day rolling average drops below {python} sens_alert`%), specificity (target >{python} spec_target`%, alert if drops below {python} spec_alert`%), and subgroup performance (alert if any demographic drops >5% below baseline).
 - **Proxy metrics** (available immediately, without ground truth): prediction confidence distribution (alert if mean confidence drops >10%), referral rate (alert if rate changes >15% from baseline), and image quality rejection rate (alert if >20% of images fail quality checks).
-- **Operational metrics**: inference latency (P95 <50ms, alert if >100ms), throughput (alert if queue depth >50 images), and error rate (alert if >0.1% of requests fail).
+- **Operational metrics**: inference latency (P95 <{python} latency_p95_target`ms, alert if >{python} latency_alert`ms), throughput (alert if queue depth >50 images), and error rate (alert if >0.1% of requests fail).
 - **Data drift detection**: Population Stability Index (PSI >0.2 indicates significant drift) and feature distribution changes (Kolmogorov-Smirnov test, alert if p<0.01).
 
 The hierarchy matters: operational metrics catch immediate problems, proxy metrics catch model issues within hours, and performance metrics catch accuracy degradation within weeks.
@@ -1215,7 +1258,7 @@ Teams assume cutting validation time ships faster. In production, the multi-stag
 
 ##### Pitfall: *Deferring deployment paradigm selection until after model development.* {.unnumbered}
 
-Teams assume they can "figure out deployment later" and focus first on model accuracy. In production, deployment paradigm (Cloud, Edge, Mobile, TinyML) is not a late-stage detail; it is a fundamental constraint shaping every preceding stage (@tbl-stage-interface). A team that develops a 2 GB ensemble model discovers their target is TinyML with 256 KB memory. The resulting cascade requires revisiting Data Collection, Model Development, and Evaluation. By the Constraint Propagation Principle, a stage-5 discovery costs $2^{5-1} = 16×$ the effort of incorporating the constraint at stage 1. Teams that defer paradigm selection report 2-4 additional iteration cycles and 3-6 month delays. The paradigm is not where you deploy; it is what you can build.
+Teams assume they can "figure out deployment later" and focus first on model accuracy. In production, deployment paradigm (Cloud, Edge, Mobile, TinyML) is not a late-stage detail; it is a fundamental constraint shaping every preceding stage (@tbl-stage-interface). A team that develops a 2 GB ensemble model discovers their target is TinyML with 256 KB memory. The resulting cascade requires revisiting Data Collection, Model Development, and Evaluation. By the Constraint Propagation Principle, a stage-5 discovery costs `{python} constraint_math` the effort of incorporating the constraint at stage 1. Teams that defer paradigm selection report 2-4 additional iteration cycles and 3-6 month delays. The paradigm is not where you deploy; it is what you can build.
 
 ## Summary {#sec-ai-development-workflow-summary-fb13}
 
@@ -1229,7 +1272,7 @@ Three quantitative insights from this chapter should guide your engineering deci
 
 2. **4-8 iteration cycles**: The number of complete cycles production-ready ML systems typically require. Of these iterations, 60% are driven by data quality issues, 25% by architecture choices, and 15% by infrastructure problems. Investment in data engineering yields the highest returns.
 
-3. **$2^{N-1}$ cost escalation**: The Constraint Propagation Principle: a constraint discovered at stage $N$ costs roughly $2^{N-1}$ times more to fix than if caught at stage 1. A deployment paradigm mismatch discovered at stage 5 triggers a 16× cost multiplier. Early validation pays exponential dividends.
+3. **$2^{N-1}$ cost escalation**: The Constraint Propagation Principle: a constraint discovered at stage $N$ costs roughly $2^{N-1}$ times more to fix than if caught at stage 1. A deployment paradigm mismatch discovered at stage 5 triggers a `{python} cost_factor_str`× cost multiplier. Early validation pays exponential dividends.
 
 ::: {.callout-takeaways title="Key Takeaways"}
 

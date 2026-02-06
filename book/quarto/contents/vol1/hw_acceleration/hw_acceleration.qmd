@@ -1596,6 +1596,7 @@ While tensor cores package matrix operations into structured computational units
 #| label: systolic-energy-calc
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import ENERGY_DRAM_ACCESS_PJ, SYSTOLIC_ARRAY_DIM
 # =============================================================================
 # PURPOSE
 # =============================================================================
@@ -1605,10 +1606,10 @@ from physx.formatting import fmt
 # =============================================================================
 # INPUT
 # =============================================================================
-dram_access_pj_value = 640  # pJ per DRAM access
+dram_access_pj_value = ENERGY_DRAM_ACCESS_PJ.magnitude  # pJ per DRAM access
 vector_accesses_value = 4   # 3 loads + 1 write
 systolic_size_value = SYSTOLIC_ARRAY_DIM
-compute_energy_pj_value = 1 # pJ per MAC operation
+compute_energy_pj_value = 1 # pJ per MAC operation (approximate for INT8/FP16 mix)
 
 # =============================================================================
 # PROCESS
@@ -1630,9 +1631,9 @@ dram_access_str = fmt(dram_access_pj_value, precision=0, commas=False)
 systolic_size_str = fmt(systolic_size_value, precision=0, commas=False)
 vector_accesses_str = fmt(vector_accesses_value, precision=0, commas=False)
 compute_energy_str = fmt(compute_energy_pj_value, precision=0, commas=False)
-vector_energy_str = f"{vector_energy_pj_value:,}"
+vector_energy_str = f"{vector_energy_pj_value:,.0f}"
 systolic_access_str = fmt(systolic_accesses_per_op_value, precision=3, commas=False)
-systolic_energy_str = fmt(systolic_energy_pj_value, precision=0, commas=False)
+systolic_energy_str = fmt(systolic_energy_pj_value, precision=1, commas=False)
 energy_ratio_str = fmt(energy_ratio_value, precision=0, commas=False)
 ```
 
@@ -1803,6 +1804,7 @@ The underlying principle remains consistent: data flows systematically through p
 #| label: systolic-array-calc
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import ENERGY_DRAM_PJ_PER_BYTE, ENERGY_FLOP_FP16_PJ, A100_FLOPS_FP16_TENSOR, TFLOPs, second, SYSTOLIC_ARRAY_DIM, BYTES_FP16, LATENCY_HBM3, LATENCY_L2_CACHE, LATENCY_L1_REGISTER
 # =============================================================================
 # PURPOSE
 # =============================================================================
@@ -1812,7 +1814,7 @@ from physx.formatting import fmt
 # =============================================================================
 # INPUT
 # =============================================================================
-systolic_dim_value = 128
+systolic_dim_value = SYSTOLIC_ARRAY_DIM
 
 # =============================================================================
 # PROCESS
@@ -1827,9 +1829,30 @@ systolic_ops_str = f"{systolic_ops_value:,}"
 
 # Tensor life: KWS audio
 kws_samples_value = 16_000
-kws_bytes_fp16_value = 2
+kws_bytes_fp16_value = BYTES_FP16.magnitude
 kws_tensor_kb_value = kws_samples_value * kws_bytes_fp16_value / 1024
-kws_tensor_str = fmt(kws_tensor_kb_value, precision=0, commas=False)
+kws_tensor_str = fmt(kws_tensor_kb_value, precision=1, commas=False)
+kws_samples_str = fmt(kws_samples_value, precision=0, commas=True)
+kws_bytes_str = fmt(kws_bytes_fp16_value, precision=0, commas=False)
+
+# Energy constants
+dram_energy_pj_bit_value = ENERGY_DRAM_PJ_PER_BYTE.magnitude / 8
+dram_energy_pj_bit_str = fmt(dram_energy_pj_bit_value, precision=0, commas=False)
+
+# Latencies
+latency_hbm_str = fmt(LATENCY_HBM3.magnitude, precision=0, commas=False)
+latency_l2_str = fmt(LATENCY_L2_CACHE.magnitude, precision=0, commas=False)
+latency_l1_str = fmt(LATENCY_L1_REGISTER.magnitude, precision=0, commas=False)
+
+# Throughput
+a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
+
+# Register energy (approximate, derived from 0.1 pJ/bit reference or constant)
+reg_energy_pj_bit_str = "0.1" # Keeping this as reference value if not in constants, or use ENERGY_REG_PJ if applicable per access.
+# ENERGY_REG_PJ is 0.01 pJ per access (register file). 
+# If we want pJ/bit, 0.01 pJ / 32 bits is tiny. 
+# The text says "~0.1 pJ/bit". Let's stick to the variable for DRAM first.
+
 ```
 
 A `{python} systolic_dim_str`×`{python} systolic_dim_str` systolic array capable of `{python} systolic_ops_str` operations per cycle requires continuous data feed to maintain utilization. Each cycle demands fresh input activations and weight parameters that must traverse from off-chip memory through on-chip buffers to the array edges. The TPU's 1,200 GB/s on-chip bandwidth enables high utilization, but even this substantial bandwidth becomes limiting when processing large transformer models where memory requirements exceed on-chip capacity.
@@ -2140,22 +2163,22 @@ To make these energy costs concrete, we can trace a single tensor through every 
 Recall the 1-second audio clip from @sec-ml-system-architecture. Here is its physical path through the hardware during inference:
 
 1.  **DRAM (HBM)**: The tensor starts here.
-    *   **Size**: 16,000 samples × 2 bytes (FP16) = **`{python} kws_tensor_str` KB**.
-    *   **Latency**: Fetching this from off-chip memory takes **~100 ns** (plus queuing delay).
-    *   **Energy**: Cost is **~200 pJ/bit**. High cost.
+    *   **Size**: `{python} kws_samples_str` samples × `{python} kws_bytes_str` bytes (FP16) = **`{python} kws_tensor_str` KB**.
+    *   **Latency**: Fetching this from off-chip memory takes **~`{python} latency_hbm_str` ns** (plus queuing delay).
+    *   **Energy**: Cost is **~`{python} dram_energy_pj_bit_str` pJ/bit**. High cost.
 
 2.  **L2 Cache**: The GPU's DMA engine pulls it here.
-    *   **Latency**: ~20 ns.
+    *   **Latency**: ~`{python} latency_l2_str` ns.
     *   **Access**: Shared across multiple Streaming Multiprocessors (SMs).
 
 3.  **L1 Cache / Shared Memory**: A specific SM claims a tile of the audio.
-    *   **Latency**: ~1-2 ns.
+    *   **Latency**: ~`{python} latency_l1_str` ns.
     *   **Locality**: Critical step. If the data leaves this level, we pay the "HBM Tax" again.
 
 4.  **Registers**: The Tensor Core operates here.
     *   **Latency**: ~0 ns (single cycle).
     *   **Throughput**: `{python} a100_tflops_fp16` TFLOPS.
-    *   **Energy**: Cost is **~0.1 pJ/bit**.
+    *   **Energy**: Cost is **~`{python} reg_energy_pj_bit_str` pJ/bit**.
 
 **The Systems Insight**: The "Speed of Light" limit means we cannot compute faster than we can move data from Step 1 to Step 4. The **Roofline** is determined by the bandwidth of the Step 1 $\rightarrow$ Step 2 link.
 :::
@@ -3426,17 +3449,18 @@ Building on software optimization techniques from @sec-model-compression and mem
 #| label: memory-footprint-calc
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import BYTES_FP32
 
 # Intermediate tensor storage analysis
 tensor_dim = 1024
-bytes_fp32 = 4
+bytes_fp32 = BYTES_FP32.magnitude
 tensor_mb = tensor_dim * tensor_dim * bytes_fp32 / 1e6
 n_intermediates = 4  # X, X', X'', Y
 total_mb = n_intermediates * tensor_mb
 footprint_ratio = n_intermediates
 
-tensor_mb_str = fmt(tensor_mb, precision=0, commas=False)
-total_mb_str = fmt(total_mb, precision=0, commas=False)
+tensor_mb_str = fmt(tensor_mb, precision=1, commas=False)
+total_mb_str = fmt(total_mb, precision=1, commas=False)
 footprint_ratio_str = fmt(footprint_ratio, precision=0, commas=False)
 ```
 

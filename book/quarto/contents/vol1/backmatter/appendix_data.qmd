@@ -8,6 +8,9 @@ engine: jupyter
 #| label: appendix-data-setup
 #| echo: false
 
+from physx.constants import TB, PB, Gbps
+from physx.formatting import fmt
+
 # =============================================================================
 # PURPOSE
 # =============================================================================
@@ -17,12 +20,32 @@ engine: jupyter
 # =============================================================================
 # INPUT
 # =============================================================================
-tb_value = 1e12  # bytes
-pb_value = 1e15  # bytes
+tb_value = TB.magnitude  # bytes
+pb_value = PB.magnitude  # bytes
 
 bw_1g_value = 1e9      # 1 Gbps
 bw_10g_value = 10e9    # 10 Gbps
 bw_100g_value = 100e9  # 100 Gbps
+
+# Serialization Constants
+csv_speed_mb = 100
+parquet_speed_mb = 1000
+csv_cycles = 100
+parquet_cycles = 10
+proto_speed_mb = 300
+proto_cycles = 200
+
+# Algebra of Data Constants
+row_size_kb = 1
+int_size_bytes = 4
+waste_pct = (1 - (int_size_bytes / (row_size_kb * 1024))) * 100
+join_table_tb = 1
+join_network_tb = 2 * join_table_tb
+
+# Long Tail Constants
+n_users = 1_000_000
+p99_ratio = 0.01
+n_unhappy = n_users * p99_ratio
 
 # =============================================================================
 # PROCESS
@@ -51,8 +74,8 @@ t_100tb_1g_value = transfer_time(100 * tb_value, bw_1g_value)
 t_100tb_10g_value = transfer_time(100 * tb_value, bw_10g_value)
 t_100tb_100g_value = transfer_time(100 * tb_value, bw_100g_value)
 t_1pb_1g_value = transfer_time(pb_value, bw_1g_value)
-t_1pb_10g_value = transfer_time(pb_value, bw_10g_value)
 t_1pb_100g_value = transfer_time(pb_value, bw_100g_value)
+t_1pb_10g_value = transfer_time(pb_value, bw_10g_value)
 
 # =============================================================================
 # OUTPUT
@@ -66,6 +89,24 @@ t_100tb_100g = format_time(t_100tb_100g_value)
 t_1pb_1g = format_time(t_1pb_1g_value)
 t_1pb_10g = format_time(t_1pb_10g_value)
 t_1pb_100g = format_time(t_1pb_100g_value)
+
+# Formatted strings for text
+csv_speed_str = f"~{csv_speed_mb}"
+parquet_speed_str = f"> {parquet_speed_mb:,}"
+csv_cycles_str = f"~{csv_cycles}"
+parquet_cycles_str = f"~{parquet_cycles}"
+proto_speed_str = f"~{proto_speed_mb}"
+proto_cycles_str = f"~{proto_cycles}"
+
+waste_pct_str = f"{waste_pct:.1f}"
+join_table_tb_str = f"{join_table_tb}"
+join_network_tb_str = f"~{join_network_tb}"
+
+n_users_str = "1M"
+n_unhappy_str = f"{n_unhappy:,.0f}"
+
+psi_threshold = 0.2
+logit_val = 100
 ```
 
 This appendix covers the principles of data engineering and statistical monitoring that keep ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering-ml and the operational monitoring in @sec-machine-learning-operations-mlops.
@@ -96,9 +137,9 @@ Even after data arrives at the machine, we face one final hurdle: **The Serializ
 
 | **Format**          | **Decoding Speed (MB/s)** | **CPU Cycles per Byte** | **Suitability**         |
 |:------------------|------------------------:|----------------------:|:----------------------|
-| **CSV / JSON**      |            ~50 - 100 MB/s |            ~1000 cycles | Debugging only          |
-| **Protobuf**        |                 ~300 MB/s |             ~200 cycles | RPC / Messages          |
-| **Parquet / Arrow** |        **$>$ 1,000 MB/s** |          **~10 cycles** | **High-Scale Training** |
+| **CSV / JSON**      |            `{python} csv_speed_str` MB/s |            `{python} csv_cycles_str` cycles | Debugging only          |
+| **Protobuf**        |                 `{python} proto_speed_str` MB/s |             `{python} proto_cycles_str` cycles | RPC / Messages          |
+| **Parquet / Arrow** |        **`{python} parquet_speed_str` MB/s** |          **`{python} parquet_cycles_str` cycles** | **High-Scale Training** |
 
 : **Serialization Overhead.** Zero-copy formats like Arrow are 10-100x faster than row-based text formats because they align directly with internal memory structures. {#tbl-serialization-cost}
 
@@ -163,11 +204,11 @@ Feature engineering is built on three SQL primitives. Understanding their comput
     *   *Cost*: Cheap ($O(\log N)$) if indexed; expensive ($O(N)$) if full scan.
 
 2.  **Projection ($\pi$)**: Selecting columns (e.g., `SELECT age`).
-    *   *Cost*: **Free** in columnar formats (only read relevant blocks). In row formats, you must read the entire 1KB row just to extract the 4-byte integer, wasting 99% of I/O bandwidth.
+    *   *Cost*: **Free** in columnar formats (only read relevant blocks). In row formats, you must read the entire `{python} row_size_kb` KB row just to extract the `{python} int_size_bytes`-byte integer, wasting `{python} waste_pct_str`% of I/O bandwidth.
 
 3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
-        *   *Cost*: Massive network traffic. Joining two 1 TB tables requires moving ~2 TB over the network.
+        *   *Cost*: Massive network traffic. Joining two `{python} join_table_tb_str` TB tables requires moving `{python} join_network_tb_str` TB over the network.
     *   **Broadcast Join**: One small table is sent to all workers.
         *   *Cost*: Minimal network, but the small table *must* fit in RAM.
 
@@ -181,13 +222,13 @@ Your monitoring dashboard says average latency is fine, but users are complainin
 
 ### Distributions and the Long Tail {#sec-system-foundations-distributions-long-tail-37cc}
 
-In systems, the **mean** is often misleading. Latency distributions are almost always **long-tailed** (log-normal or power law). A "P99" (99th percentile) latency of 500ms means 1% of your users experience extreme slowness, which at scale (1M users) is 10,000 unhappy people.
+In systems, the **mean** is often misleading. Latency distributions are almost always **long-tailed** (log-normal or power law). A "P99" (99th percentile) latency of 500ms means 1% of your users experience extreme slowness, which at scale (`{python} n_users_str` users) is `{python} n_unhappy_str` unhappy people.
 
 ::: {.callout-notebook title="The Median Experience"}
 ```{python}
 #| label: tail-latency-probability
 #| echo: false
-from physx.formatting import fmt
+from physx.formatting import fmt, md_math
 
 # =============================================================================
 # PURPOSE
@@ -212,10 +253,11 @@ p_slow_value = 1 - p_all_fast_value
 # =============================================================================
 p_all_fast_str = fmt(p_all_fast_value, precision=3, commas=False)
 p_slow_pct_str = fmt(p_slow_value * 100, precision=1, commas=False)
+p_slow_eq = md_math(f"P(\\text{{Slow}}) = 1 - ({p_fast_value})^{{{n_requests_value}}} \\approx 1 - {p_all_fast_value:.3f} = {p_slow_pct_str}\\%")
 ```
 
 If a user session involves $N=100$ requests (common for a web page load or chat session), the probability of experiencing *at least one* P99 latency spike is:
-$$ P(\text{Slow}) = 1 - (0.99)^{100} \approx 1 - 0.366 = 63.4\% $$
+`{python} p_slow_eq`
 
 Computed: P(Slow) = `{python} p_slow_pct_str`%.
 For a heavy user ($N$ is large), the "tail" latency becomes their *median* experience. This is why Google and Amazon optimize for P99.9 or P99.99.
@@ -230,7 +272,7 @@ How do we know if serving data ($Q$) has drifted from training data ($P$)? We me
 **KL Divergence** measures how much information is lost if we approximate $P$ with $Q$ [@kullback1951information]:
 $$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
 
-**Population Stability Index (PSI)** is a symmetric, industry-standard metric derived from KL divergence. A PSI $>$ 0.2 typically triggers an alert for retraining.
+**Population Stability Index (PSI)** is a symmetric, industry-standard metric derived from KL divergence. A PSI $>$ `{python} psi_threshold` typically triggers an alert for retraining.
 
 ### Information Theory for Systems {#sec-system-foundations-information-theory-a8f2}
 
@@ -245,7 +287,7 @@ In the "Information Roofline" model (@sec-appendix-dam), we treat data quality a
 Neural networks output **logits** (unnormalized scores), not probabilities. We convert them using Softmax:
 $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
-**The Problem**: If $z_i$ is large (e.g., 100), $e^{100}$ overflows floating-point range.
+**The Problem**: If $z_i$ is large (e.g., `{python} logit_val`), $e^{{python} logit_val}$ overflows floating-point range.
 **The Solution**: We compute in **log-space**. The "Log-Sum-Exp" trick allows us to compute $\log(\sum e^{z_j})$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp]
 
 [^fn-logsumexp]: **Log-Sum-Exp**: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log(\sum e^{x_i}) = a + \log(\sum e^{x_i - a})$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
