@@ -19,11 +19,9 @@ _DALL·E 3 Prompt: A rectangular illustration divided into two halves on a clean
 
 ## Purpose {.unnumbered}
 
-_Why can't you debug a neural network by reading the code?_
+_Why does understanding a neural network's math matter more than reading its code?_
 
-As we saw in the historical arc of @sec-introduction-historical-evolution-ai-paradigms-3be8, the field converged on Deep Learning not by accident, but because it solved the scalability problems that stalled previous approaches. Now we open the black box to see the math behind that convergence.
-
-Data flows through pipelines; predictions emerge from models. The transformation between input and output is not magic but mathematics—operations that **ML Frameworks** (@sec-ai-frameworks) must translate into efficient kernels—and when that mathematics fails, inspecting the code reveals nothing. *The bug is not in the logic but in the math itself.* A misconfigured learning rate causes gradients to explode. An activation function saturates, silently blocking learning in deep layers. A model that fits in memory during development exhausts accelerator memory in production because training states consume gigabytes that inference ignores. The code simply says "multiply these matrices"; understanding *why* that multiplication fails requires seeing the math not as abstract theory, but as the rigorous specification of what your hardware must actually do. Engineers who cannot read that specification cannot predict memory consumption, diagnose optimization failures, or reason about *why* one architecture trains while another diverges.
+Neural networks reduce to a small set of mathematical operations. Matrix multiplications dominate compute. Activation functions introduce nonlinearity. Gradient computations enable learning. These operations *are* the workload that every layer of the system stack must execute, and each carries concrete physical consequences: a matrix multiplication's dimensions determine whether a layer is compute-bound or memory-bound; an activation function's complexity determines whether it can be fused with adjacent kernels; the number of parameters determines whether a model fits in accelerator memory at all. When something goes wrong, inspecting the code reveals nothing—it simply says "multiply these matrices"—because *the bug is not in the logic but in the math itself*: a misconfigured learning rate that causes gradients to explode, an activation that saturates and silently blocks learning, a memory footprint that fits during development but exhausts the accelerator in production. Understanding these operations not as abstract theory but as the physical specification of what your hardware must do is what separates modeling from engineering.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -53,7 +51,9 @@ from physx.formatting import fmt, sci
 # =============================================================================
 # INPUT
 # =============================================================================
-mnist_params_value = 100_000
+# Compute MNIST params from the canonical architecture (784→128→64→10)
+mnist_arch_value = [(784, 128), (128, 64), (64, 10)]
+mnist_params_value = sum(i * o + o for i, o in mnist_arch_value)  # weights + biases
 mnist_px_w_value = MNIST_IMAGE_WIDTH
 mnist_px_h_value = MNIST_IMAGE_HEIGHT
 
@@ -98,6 +98,8 @@ gpt2_params_b_str = fmt(gpt2_params_b_value, precision=1, commas=False)
 gpt2_params_count_str = fmt(gpt2_params_count_value, precision=0, commas=True)
 resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)
 
+mnist_params_k_str = fmt(mnist_params_value / 1000, precision=0, commas=False)
+mnist_params_count_str = f"{mnist_params_value:,}"
 mnist_mem_str = fmt(mnist_mem_kb_value, precision=0, commas=False)
 gpt2_mem_str = fmt(gpt2_mem_gb_value, precision=0, commas=False)
 mem_jump_str = fmt(mem_jump_value, precision=0, commas=True)
@@ -299,9 +301,9 @@ The system discovers patterns from examples through this automated process. When
 
 This gradual layering of patterns reveals *why* neural network *depth* matters. Each layer learns increasingly abstract features: edges, then shapes, then objects, then concepts. Deeper networks can express exponentially more functions with only polynomially more parameters. This advantage stems from the compositionality principle: complex real-world patterns often have hierarchical structure where high-level concepts decompose into simpler parts. Consider recognizing a cat: you do not compare the entire image to a template. Instead, you identify eyes, ears, and whiskers (parts), which are composed of curves and edges (primitives), which are detected from pixel gradients (raw features). When the network's layered architecture matches this natural hierarchy, learning becomes far more efficient than attempting to map raw inputs directly to outputs.
 
-This architecture creates a scalability advantage\index{Scalability!deep learning}: unlike traditional approaches where performance plateaus, deep learning models continue improving with additional data (recognizing more variations) and computation (discovering subtler patterns). This scalability drove dramatic performance gains. In the ImageNet competition, traditional methods achieved approximately 25.8% top-5 error in 2011. AlexNet reduced this to 15.3% in 2012. By 2015, ResNet achieved 3.57% top-5 error, surpassing estimated human performance of approximately 5.1%[^fn-imagenet-progress].
+This architecture creates a scalability advantage\index{Scalability!deep learning}: unlike traditional approaches where performance plateaus, deep learning models continue improving with additional data (recognizing more variations) and computation (discovering subtler patterns). This scalability drove dramatic performance gains. In the ImageNet competition, traditional methods achieved approximately 25.8% top-5 error in 2011. AlexNet reduced this to 15.3% in 2012. By 2015, ResNet achieved 3.6% top-5 error, surpassing estimated human performance of approximately 5.1%[^fn-imagenet-progress].
 
-Trace the curve in @fig-double-descent to see this scaling behavior unfold across three distinct regimes: the *Classical Regime* where traditional statistical intuitions hold, the *Interpolation Threshold* where the model perfectly fits training data, and the *Modern Regime* where massive overparameterization paradoxically improves generalization. The axes are normalized to emphasize shape rather than a specific dataset.
+@fig-double-descent previews this scaling behavior through three distinct regimes. The underlying mechanisms (training error, overfitting, gradient-based learning) are developed in subsequent sections; here we establish the shape of the phenomenon. The *Classical Regime* is where traditional statistical intuitions hold, the *Interpolation Threshold* is where the model perfectly fits training data, and the *Modern Regime* is where massive overparameterization paradoxically improves generalization. The axes are normalized to emphasize shape rather than a specific dataset.
 
 ```{python}
 #| label: fig-double-descent
@@ -493,7 +495,7 @@ The processing pipeline operates as follows:
 
 4. **Nonlinear Activation**\index{Activation Function!nonlinear transformation}: The aggregated signal passes through an activation function $\sigma(z)$. This nonlinearity is critical: it allows the network to model complex, non-linear relationships and acts as a threshold, determining whether the neuron "fires" a signal to the next layer.
 
-From a systems engineering perspective, this translation reveals *why* neural networks have such demanding computational requirements. Each "simple" neuron requires $N$ multiply-accumulate (MAC)\index{MAC Operations!neuron computation}\index{Multiply-Accumulate|see{MAC Operations}} operations and $N+1$ memory accesses. When replicated millions of times across a network, these primitives create the massive arithmetic and bandwidth demands that define modern AI infrastructure.
+From a systems engineering perspective, this translation reveals *why* neural networks have such demanding computational requirements. Each "simple" neuron requires $N$ multiply-accumulate (MAC)\index{MAC Operations!neuron computation}\index{Multiply-Accumulate|see{MAC Operations}} operations and $2N+2$ memory accesses (loading $N$ inputs and $N$ weights, plus the bias and output). When replicated millions of times across a network, these primitives create the massive arithmetic and bandwidth demands that define modern AI infrastructure.
 
 **Artificial Neural Network Design Principles.**
 The transition from individual neurons to integrated systems requires navigating the fundamental trade-off\index{Neural Network!capacity vs. cost trade-off} between representational capacity and computational cost. While silicon transistors operate at gigahertz frequencies, millions of times faster than biological chemical signaling, the sheer volume of operations in deep networks creates unique bottlenecks.
@@ -573,9 +575,11 @@ While the preceding sections established the technical foundations of deep learn
 | 2012     | AlexNet    |              ~60M |  $5 \times 10^{17}$ |           2× GTX 580 GPUs | 5-6 days       | 15.3% (ImageNet) |
 | 2015     | ResNet-152 |              ~60M |  $10^{19}$ ±0.5 OoM |         8× Tesla K80 GPUs | ~3 weeks       | 3.6% (ImageNet)  |
 | 2020     | GPT-3      |      175B (exact) |  $3 \times 10^{23}$ |            ~10K V100 GPUs | weeks          | N/A (language)   |
-| 2023     | GPT-4      | ~1.8T (MoE, est.) | $10^{24}$–$10^{25}$ |       10-25K A100s (est.) | months         | N/A (language)   |
+| 2023     | GPT-4      | ~1.8T (MoE, est.[^fn-gpt4-est]) | $10^{24}$–$10^{25}$ |       10-25K A100s (est.) | months         | N/A (language)   |
 
 : **Historical Performance**: Four decades of neural network evolution showing the co-scaling of model parameters, training compute, and hardware infrastructure. Training FLOPs increased by approximately $10^{13}$× from LeNet-1 to GPT-4, while parameters grew by $10^{8}$×. **Uncertainty notes**: Earlier systems (LeNet, AlexNet) have well-documented specifications; recent closed models (GPT-4) have only external estimates. "OoM" = order of magnitude uncertainty. {#tbl-historical-performance}
+
+[^fn-gpt4-est]: **GPT-4 Architecture**: OpenAI has not officially confirmed GPT-4's architecture or parameter count. The ~1.8T MoE estimate is based on public reporting and analysis; treat these values as approximate. All other entries in this table reflect published specifications.
 
 Beyond raw compute, this exponential growth has profound environmental implications. Consider the energy costs behind these scaling trends, which reveal what we call *the carbon footprint of AI evolution*.
 
@@ -687,7 +691,7 @@ To understand why architectures like CNNs (high reuse) are more efficient than M
 *Source: Mark Horowitz, "Computing's Energy Problem" (ISSCC 2014).*
 
 **The Engineering Implication:**
-Fetching a weight from DRAM costs **173 times more energy** than multiplying it.
+Fetching a weight from DRAM costs **`{python} pe_dram_vs_mul_str` times more energy** than multiplying it.
 
 *   **Inefficient:** Read weight → Multiply → Write. Cost ≈ `{python} pe_inefficient_str` pJ.
 *   **Efficient:** Read weight → Multiply `{python} pe_reuse_str` times (Reuse) → Write. Cost per op drops dramatically.
@@ -778,7 +782,7 @@ Each layer builds on the previous, exponentially expanding representational capa
 
 ::: {.callout-perspective title="The Depth vs. Width Tradeoff"}
 
-The theoretical power of depth comes from the **exponential advantage**: a network with $L$ layers can represent functions that require exponentially more ($2^L$) neurons in a single-layer network. This follows from the fact that each layer doubles the complexity of decision boundaries it can express.
+The theoretical power of depth comes from the **exponential advantage**: for certain function classes, a network with $L$ layers can represent functions that would require exponentially more neurons in a single-layer network [@telgarsky2016benefits]. Composing nonlinear layers enables exponentially more complex decision boundaries with only linearly more parameters.
 
 However, depth introduces engineering challenges. Each additional layer:
 
@@ -786,7 +790,7 @@ However, depth introduces engineering challenges. Each additional layer:
 - Increases gradient path length, risking vanishing/exploding gradients
 - Requires storing intermediate activations for backpropagation
 
-Modern architectures balance depth (representational power) against width (parallelism). A network with 10 layers of 100 neurons has the same 1,000 neurons per input as one with 2 layers of 500 neurons, but very different computational characteristics. The deeper network can represent more complex functions; the wider network can compute all neurons in a layer simultaneously.
+Modern architectures balance depth (representational power) against width (parallelism). A network with 10 layers of 100 neurons has the same 1,000 total hidden neurons as one with 2 layers of 500 neurons, but very different computational characteristics. The deeper network can represent more complex functions; the wider network can compute all neurons in a layer simultaneously.
 
 :::
 
@@ -891,9 +895,9 @@ $$ z = \sum (x_i \cdot w_{ij}) + b $$
 
 This mathematical formulation directly drives the hardware requirements we discussed earlier. The summation requires accumulator units, the multiplications demand high-throughput arithmetic units, and the memory accesses necessitate high-bandwidth memory systems. Understanding this connection between mathematical operations and hardware requirements is essential for designing efficient ML systems.
 
-Activation functions are critical nonlinear transformations that enable neural networks to learn complex patterns by converting linear weighted sums into nonlinear outputs. Without activation functions, multiple linear layers would collapse into a single linear transformation, severely limiting the network's expressive power. Four commonly used activation functions each exhibit distinct mathematical characteristics that shape their effectiveness in different contexts (@fig-activation-functions).
+Activation functions are critical nonlinear transformations that enable neural networks to learn complex patterns by converting linear weighted sums into nonlinear outputs. Without activation functions, multiple linear layers would collapse into a single linear transformation, severely limiting the network's expressive power. Three commonly used element-wise activation functions and one vector-level function (softmax) each exhibit distinct mathematical characteristics that shape their effectiveness in different contexts (@fig-activation-functions).
 
-::: {#fig-activation-functions fig-env="figure" fig-pos="htb" fig-cap="**Common Activation Functions**: Four nonlinear activation functions plotted with their output ranges. Sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, ReLU introduces sparsity by outputting zero for negative inputs, and softmax converts logits into probability distributions." fig-alt="Four plots arranged in 2x2 grid. Top-left: Sigmoid S-curve from 0 to 1. Top-right: Tanh S-curve from -1 to 1. Bottom-left: ReLU showing zero for negative x, linear for positive x. Bottom-right: Softmax showing exponential curve approaching small positive values."}
+::: {#fig-activation-functions fig-env="figure" fig-pos="htb" fig-cap="**Common Activation Functions**: Four nonlinear activation functions plotted with their output ranges. Sigmoid maps inputs to $(0,1)$ with smooth gradients, tanh provides zero-centered outputs in $(-1,1)$, ReLU introduces sparsity by outputting zero for negative inputs, and softmax (bottom-right) shows one component of a 3-element vector, illustrating how a single logit's probability varies as it changes relative to the other elements." fig-alt="Four plots arranged in 2x2 grid. Top-left: Sigmoid S-curve from 0 to 1. Top-right: Tanh S-curve from -1 to 1. Bottom-left: ReLU showing zero for negative x, linear for positive x. Bottom-right: Softmax showing exponential curve approaching small positive values."}
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
 \pgfplotsset{
@@ -1053,7 +1057,7 @@ ReLU is not without drawbacks. The **dying ReLU problem**\index{ReLU!dying ReLU 
 
 ##### Softmax {#sec-deep-learning-systems-foundations-softmax-ebe5}
 
-Unlike the previous activation functions that operate independently on each value, softmax\index{Activation Function!softmax}\index{Softmax!probability distribution}[^fn-softmax-etymology] considers all values simultaneously to produce a probability distribution:
+Unlike the previous activation functions that operate *element-wise* (independently on each value), softmax\index{Activation Function!softmax}\index{Softmax!probability distribution}[^fn-softmax-etymology] is a *vector-level* function: it considers all values simultaneously to produce a probability distribution. This fundamental difference means softmax is used exclusively in output layers for classification, not as a hidden-layer activation:
 
 [^fn-softmax-etymology]: **Softmax**: A "soft" approximation to the "max" function, coined by John Bridle in 1990. While argmax returns a hard one-hot vector (all zeros except one), softmax produces a smooth probability distribution that approaches argmax as values become extreme. The "soft" prefix appears throughout ML: soft attention (vs. hard attention), soft labels (vs. hard labels). The inputs to softmax are called "logits," from "logistic," referring to their role before the logistic-like transformation.
 $$ \text{softmax}(z_i) = \frac{e^{z_i}}{\sum_{j=1}^K e^{z_j}} $$
@@ -1064,10 +1068,10 @@ For a vector of $K$ values (often called logits[^fn-logits-etymology]), softmax 
 
 Softmax is almost exclusively used in the output layer for multi-class classification problems. By converting arbitrary real-valued logits into probabilities, softmax enables the network to express confidence across multiple classes. The class with the highest probability becomes the predicted class. The exponential function ensures that larger logits receive disproportionately higher probabilities, creating clear distinctions between classes when the network is confident.
 
-The mathematical relationship between input logits and output probabilities is differentiable, allowing gradients to flow back through softmax during training. When combined with cross-entropy loss (discussed in @sec-ai-training), softmax produces particularly clean gradient expressions that guide learning effectively. Beyond their mathematical properties, the choice of *activation functions* has direct consequences for *hardware* efficiency.
+The mathematical relationship between input logits and output probabilities is differentiable, allowing gradients to flow back through softmax during training. When combined with cross-entropy loss (discussed in @sec-deep-learning-systems-foundations-loss-functions), softmax produces particularly clean gradient expressions that guide learning effectively. Beyond their mathematical properties, the choice of *activation functions* has direct consequences for *hardware* efficiency.
 
 ::: {.callout-perspective title="Activation Functions and Hardware"}
-**Why ReLU Dominates in Practice**: Beyond its mathematical benefits like avoiding vanishing gradients, ReLU's hardware efficiency explains its widespread adoption. Computing $\max(0,x)$ requires a single comparison operation, while sigmoid and tanh require computing exponentials—operations that are orders of magnitude more expensive in both time and energy. This computational simplicity means ReLU can be executed faster on any processor and consumes significantly less power, a critical consideration for battery-powered devices. The computational and hardware implications of activation functions, including performance benchmarks and implementation strategies for modern accelerators, are explored in @sec-ai-training.
+**Why ReLU Dominates in Practice**: Beyond its mathematical benefits like avoiding vanishing gradients, ReLU's hardware efficiency explains its widespread adoption. Computing $\max(0,x)$ requires a single comparison operation, while sigmoid and tanh require computing exponentials—operations that are orders of magnitude more expensive in both time and energy. This computational simplicity means ReLU can be executed faster on any processor and consumes significantly less power, a critical consideration for battery-powered devices. The computational and hardware implications of activation functions, including performance benchmarks and implementation strategies for modern accelerators, are explored in @sec-ai-acceleration.
 :::
 
 These nonlinear transformations convert the linear input sum into a non-linear output, giving us the complete perceptron computation:
@@ -1308,17 +1312,17 @@ To make this concrete, examine @fig-connections, which lays out a small three-la
 \draw[arrowR](0H3)--node[annot,pos=0.12]{0.11}(H3);
 \draw[arrowR](0H3)--node[annot,pos=0.5]{ihWeight\textsubscript{23} = 0.12}(H4);
 %
-\draw[arrowB](H1)--node[annot]{hoWeight\textsubscript{00} = 017} (3H1);
-\draw[arrowB](H1)--node[annot,pos=0.12]{018} (3H2);
+\draw[arrowB](H1)--node[annot]{hoWeight\textsubscript{00} = 0.17} (3H1);
+\draw[arrowB](H1)--node[annot,pos=0.12]{0.18} (3H2);
 %
-\draw[arrowB](H2)--node[annot,pos=0.12]{019} (3H1);
-\draw[arrowB](H2)--node[annot,pos=0.12]{020} (3H2);
+\draw[arrowB](H2)--node[annot,pos=0.12]{0.19} (3H1);
+\draw[arrowB](H2)--node[annot,pos=0.12]{0.20} (3H2);
 %
-\draw[arrowB](H3)--node[annot,pos=0.12]{021} (3H1);
-\draw[arrowB](H3)--node[annot,pos=0.12]{022} (3H2);
+\draw[arrowB](H3)--node[annot,pos=0.12]{0.21} (3H1);
+\draw[arrowB](H3)--node[annot,pos=0.12]{0.22} (3H2);
 %
-\draw[arrowB](H4)--node[annot,pos=0.12]{023} (3H1);
-\draw[arrowB](H4)--node[annot,pos=0.5]{hoWeight\textsubscript{31} = 024} (3H2);
+\draw[arrowB](H4)--node[annot,pos=0.12]{0.23} (3H1);
+\draw[arrowB](H4)--node[annot,pos=0.5]{hoWeight\textsubscript{31} = 0.24} (3H2);
 %%
 \draw[arrowC](H1.150)--++(160:0.35)
    node[left,inner sep=1pt,text=black,
@@ -1370,8 +1374,8 @@ The organization of weights and biases across a neural network follows a systema
 * Activation functions $f^{(l)}$ for each layer $l$
 
 This gives us the complete layer computation:
-$$ \mathbf{h}^{(l)} = f^{(l)}(\mathbf{z}^{(l)}) = f^{(l)}(\mathbf{h}^{(l-1)T}\mathbf{W}^{(l)} + \mathbf{b}^{(l)}) $$
-Where $\mathbf{h}^{(l)}$ represents the layer's output after applying the activation function. With this equation in place, we have covered all the *neural network architecture fundamentals* needed to proceed.
+$$ \mathbf{a}^{(l)} = f^{(l)}(\mathbf{z}^{(l)}) = f^{(l)}(\mathbf{a}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)}) $$
+Where $\mathbf{a}^{(l)}$ (written as $\mathbf{A}^{(l)}$ for batches) represents the layer's activation output. We adopt the row-vector convention throughout: each sample is a row, and the weight matrix $\mathbf{W}^{(l)} \in \mathbb{R}^{n_{l-1} \times n_l}$ maps from the previous layer's width to the current layer's width. With this equation in place, we have covered all the *neural network architecture fundamentals* needed to proceed.
 
 ::: {.callout-checkpoint title="Neural Network Architecture Fundamentals" collapse="false"}
 
@@ -1934,10 +1938,10 @@ The memory requirements above seem modest for our small MNIST classifier. But wh
 ::: {.callout-notebook title="The Memory Explosion"}
 How does the scale of our Lighthouse Models affect the **Data ($D_{vol}$)** term of the Iron Law? Compare our MNIST classifier to **GPT-2**.
 
--   **MNIST Archetype**: 100,000 parameters × 4 bytes (FP32) ≈ **`{python} mnist_mem_str` KB**. This entire model fits inside the L2 cache of a modern processor.
+-   **MNIST Archetype**: `{python} mnist_params_count_str` parameters × 4 bytes (FP32) ≈ **`{python} mnist_mem_str` KB**. This entire model fits inside the L2 cache of a modern processor.
 -   **GPT-2 Archetype**: `{python} gpt2_params_count_str` parameters × 4 bytes (FP32) ≈ **`{python} gpt2_mem_str` GB**. This requires dedicated GPU VRAM and high-speed memory bandwidth.
 
-**The Systems Conclusion**: Moving from 100K to `{python} gpt2_params_b_str` B parameters is a **`{python} mem_jump_str`× jump**. It is not just "more parameters"; it is a phase change in engineering. MNIST is a logic problem; GPT-2 is a **Data Movement** problem.
+**The Systems Conclusion**: Moving from ~`{python} mnist_params_k_str`K to `{python} gpt2_params_b_str` B parameters is a **`{python} mem_jump_str`× jump**. It is not just "more parameters"; it is a phase change in engineering. MNIST is a logic problem; GPT-2 is a **Data Movement** problem.
 :::
 
 The memory calculations above are precise but slow. Experienced engineers develop shortcuts for quick feasibility assessments.
@@ -2159,11 +2163,11 @@ Each forward pass through our MNIST network (784-128-64-10) requires substantial
 The forward computation through a neural network proceeds systematically, with each layer transforming its inputs into increasingly abstract representations. In our MNIST network, this transformation process occurs in distinct stages.
 
 At each layer, the computation involves two key steps: a linear transformation\index{Linear Transformation!layer computation} of inputs followed by a nonlinear activation. The linear transformation applies the same weighted sum operation we saw earlier, but now using notation that tracks which layer we are in:
-$$ \mathbf{Z}^{(l)} = \mathbf{W}^{(l)}\mathbf{A}^{(l-1)} + \mathbf{b}^{(l)} $$
+$$ \mathbf{Z}^{(l)} = \mathbf{A}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)} $$
 
-Here, $\mathbf{W}^{(l)}$ represents the weight matrix for layer $l$, $\mathbf{A}^{(l-1)}$ contains the activations from the previous layer (the outputs after applying activation functions), and $\mathbf{b}^{(l)}$ is the bias vector. The superscript $(l)$ keeps track of which layer each parameter belongs to.
+Here, $\mathbf{A}^{(l-1)}$ contains the activations from the previous layer (the outputs after applying activation functions), $\mathbf{W}^{(l)} \in \mathbb{R}^{n_{l-1} \times n_l}$ is the weight matrix for layer $l$, and $\mathbf{b}^{(l)}$ is the bias vector (broadcast across the batch). The superscript $(l)$ keeps track of which layer each parameter belongs to. This row-vector convention matches the single-sample equation from earlier: each row of $\mathbf{A}$ is one sample, and right-multiplying by $\mathbf{W}$ transforms it to the next layer's width.
 
-Following this linear transformation, each layer applies a nonlinear activation function $f$:
+Following this linear transformation, each layer applies a nonlinear activation function $f$ (we now write $f$ or $f^{(l)}$ for a generic activation function at layer $l$; earlier, $\sigma$ referred specifically to the sigmoid function):
 $$ \mathbf{A}^{(l)} = f(\mathbf{Z}^{(l)}) $$
 
 This process repeats at each layer, creating a chain of transformations:
@@ -2177,7 +2181,7 @@ In our MNIST example, the pixel values first undergo a transformation by the fir
 The complete forward propagation process can be expressed as a composition of functions\index{Matrix Multiplication!forward propagation}\index{Forward Propagation!matrix operations}, each representing a layer's transformation. Formalizing this mathematically builds on the MNIST example.
 
 For a network with $L$ layers, we can express the full forward computation as:
-$$ \mathbf{A}^{(L)} = f^{(L)}\Big(\mathbf{W}^{(L)}f^{(L-1)}\Big(\mathbf{W}^{(L-1)}\cdots\big(f^{(1)}(\mathbf{W}^{(1)}\mathbf{X} + \mathbf{b}^{(1)})\big)\cdots + \mathbf{b}^{(L-1)}\Big) + \mathbf{b}^{(L)}\Big) $$
+$$ \mathbf{A}^{(L)} = f^{(L)}\!\Big(\cdots f^{(2)}\!\Big(f^{(1)}(\mathbf{X}\mathbf{W}^{(1)} + \mathbf{b}^{(1)})\mathbf{W}^{(2)} + \mathbf{b}^{(2)}\Big)\cdots \mathbf{W}^{(L)} + \mathbf{b}^{(L)}\Big) $$
 
 This composition reveals that forward propagation is fundamentally a chain of matrix multiplications interleaved with nonlinear activations. Understanding *why* matrix multiplication dominates AI computation requires examining the arithmetic intensity of each operation.
 
@@ -2197,23 +2201,23 @@ Modern AI accelerators (GPUs) have massive compute arrays but limited memory ban
 While this nested expression captures the complete process, we typically compute it step by step:
 
 1. First layer:
-$$ \mathbf{Z}^{(1)} = \mathbf{W}^{(1)}\mathbf{X} + \mathbf{b}^{(1)} $$
+$$ \mathbf{Z}^{(1)} = \mathbf{X}\mathbf{W}^{(1)} + \mathbf{b}^{(1)} $$
 $$ \mathbf{A}^{(1)} = f^{(1)}(\mathbf{Z}^{(1)}) $$
 
 2. Hidden layers $(l = 2,\ldots, L-1)$:
-$$ \mathbf{Z}^{(l)} = \mathbf{W}^{(l)}\mathbf{A}^{(l-1)} + \mathbf{b}^{(l)} $$
+$$ \mathbf{Z}^{(l)} = \mathbf{A}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)} $$
 $$ \mathbf{A}^{(l)} = f^{(l)}(\mathbf{Z}^{(l)}) $$
 
 3. Output layer:
-$$ \mathbf{Z}^{(L)} = \mathbf{W}^{(L)}\mathbf{A}^{(L-1)} + \mathbf{b}^{(L)} $$
+$$ \mathbf{Z}^{(L)} = \mathbf{A}^{(L-1)}\mathbf{W}^{(L)} + \mathbf{b}^{(L)} $$
 $$ \mathbf{A}^{(L)} = f^{(L)}(\mathbf{Z}^{(L)}) $$
 
 In our MNIST example, if we have a batch of $B$ images, the dimensions of these operations are:
 
 * Input $\mathbf{X}$: $B \times 784$
-* First layer weights $\mathbf{W}^{(1)}$: $n_1\times 784$
-* Hidden layer weights $\mathbf{W}^{(l)}$: $n_l\times n_{l-1}$
-* Output layer weights $\mathbf{W}^{(L)}$: $10 \times n_{L-1}$
+* First layer weights $\mathbf{W}^{(1)}$: $784 \times n_1$
+* Hidden layer weights $\mathbf{W}^{(l)}$: $n_{l-1}\times n_l$
+* Output layer weights $\mathbf{W}^{(L)}$: $n_{L-1} \times 10$
 
 #### Step-by-Step Computation Sequence {#sec-deep-learning-systems-foundations-stepbystep-computation-sequence-2973}
 
@@ -2473,7 +2477,7 @@ The "Credit Assignment Problem" asks: which weight caused this error?
 
 **Training vs. Inference**
 
-- [ ] **Computational Cost**: Why is training (O(3N) ops) roughly 3x more expensive than inference (O(N) ops)? (Forward + Backward + Update).
+- [ ] **Computational Cost**: If the forward pass requires $N$ operations, why does training require roughly $3N$ total operations ($N$ forward + $\sim 2N$ backward + weight update)?
 :::
 
 To build intuition, consider the credit assignment problem through a factory assembly line analogy. A car factory passes vehicles through four stations: frame installation (A), engine mounting (B), wheel attachment (C), and final assembly (D). When inspectors find a defective car, they must determine which station caused the problem.
@@ -2526,13 +2530,13 @@ Computing gradients involves calculating several partial derivatives\index{Parti
 At each layer $l$, we compute three main gradient components. Each serves a distinct purpose in the learning process.
 
 Weight gradients\index{Gradient!weight gradients} measure how changing each weight affects the final loss. These gradients tell us precisely how to adjust the connection strengths between neurons to reduce prediction errors:
-$$ \frac{\partial L}{\partial \mathbf{W}^{(l)}} = \frac{\partial L}{\partial \mathbf{Z}^{(l)}} {\mathbf{A}^{(l-1)}}^T $$
+$$ \frac{\partial L}{\partial \mathbf{W}^{(l)}} = {\mathbf{A}^{(l-1)}}^T \frac{\partial L}{\partial \mathbf{Z}^{(l)}} $$
 
 Bias gradients\index{Gradient!bias gradients} measure how changing each bias term affects the loss. Since biases shift the activation threshold of neurons, these gradients indicate whether neurons should become more or less easily activated:
 $$ \frac{\partial L}{\partial \mathbf{b}^{(l)}} = \frac{\partial L}{\partial \mathbf{Z}^{(l)}} $$
 
 Input gradients propagate the error signal backward to the previous layer. Rather than directly updating parameters, these gradients serve as the "adjustment signals" that allow earlier layers to learn from the final prediction error:
-$$ \frac{\partial L}{\partial \mathbf{A}^{(l-1)}} = {\mathbf{W}^{(l)}}^T \frac{\partial L}{\partial \mathbf{Z}^{(l)}} $$
+$$ \frac{\partial L}{\partial \mathbf{A}^{(l-1)}} = \frac{\partial L}{\partial \mathbf{Z}^{(l)}} {\mathbf{W}^{(l)}}^T $$
 
 In our MNIST example, consider the final layer where the network outputs digit probabilities. If the network predicted $[0.1, 0.2, 0.5,\ldots, 0.05]$ for an image of "7", the gradient computation would:
 
@@ -2553,14 +2557,14 @@ This automation transforms gradient computation from a manual, error-prone proce
 
 The practical implementation of backward propagation requires careful consideration of computational resources and memory management. These implementation details significantly impact training efficiency and scalability.
 
-Memory requirements during backward propagation stem from two main sources. First, we need to store the intermediate activations from the forward pass, as these are required for computing gradients. For our MNIST network with a batch size of 32, each layer's activations must be maintained:
+Memory requirements during backward propagation stem from two main sources. First, we need to store the intermediate activations from the forward pass, as these are required for computing gradients. To illustrate how these requirements grow with model size, consider a larger variant of our MNIST network (784→512→256→10) with a batch size of 32. Each layer's activations must be maintained:
 
 * Input layer: 32×784 values (~`{python} bp_input_kb_str` KB using 32-bit numbers)
 * Hidden layer 1: 32×512 values (~`{python} bp_h1_kb_str` KB)
 * Hidden layer 2: 32×256 values (~`{python} bp_h2_kb_str` KB)
 * Output layer: 32×10 values (~`{python} bp_out_kb_str` KB)
 
-Second, we must store gradients for each parameter during backward propagation. For our example network with approximately 500,000 parameters, this requires several megabytes of memory for gradients. Advanced optimizers like Adam\index{Adam Optimizer!momentum and velocity}\index{Optimizer!Adam}[^fn-adam-optimizer] require additional memory to store momentum terms, roughly doubling the gradient storage requirements.
+Second, we must store gradients for each parameter during backward propagation. For this larger network with approximately 535,000 parameters, this requires several megabytes of memory for gradients. Advanced optimizers like Adam\index{Adam Optimizer!momentum and velocity}\index{Optimizer!Adam}[^fn-adam-optimizer] require additional memory to store momentum terms, roughly doubling the gradient storage requirements.
 
 [^fn-adam-optimizer]: **Adam Optimizer**: An acronym for "Adaptive Moment Estimation," introduced by Kingma and Ba [@kingma2014adam]. The name reflects how Adam adapts learning rates using running averages (moments) of gradients. "Moment" comes from statistics, where the first moment is the mean and second moment relates to variance. Adam combines AdaGrad's adaptive rates with RMSprop's exponential averaging. It requires 2x memory (storing momentum and velocity per parameter) but became the default optimizer due to its robustness across diverse problems with minimal tuning.
 
@@ -2680,7 +2684,7 @@ You have now covered the complete training cycle, the mathematical machinery tha
 
 **Forward Propagation:**
 
-- [ ] Can you trace data flow through a network, computing activations layer-by-layer using $\mathbf{Z}^{(l)} = \mathbf{W}^{(l)}\mathbf{A}^{(l-1)} + \mathbf{b}^{(l)}$ and $\mathbf{A}^{(l)} = f(\mathbf{Z}^{(l)})$?
+- [ ] Can you trace data flow through a network, computing activations layer-by-layer using $\mathbf{Z}^{(l)} = \mathbf{A}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)}$ and $\mathbf{A}^{(l)} = f(\mathbf{Z}^{(l)})$?
 - [ ] Do you understand why we must store intermediate activations during forward propagation?
 
 **Loss Functions:**
@@ -3026,7 +3030,7 @@ Before examining how these concepts integrate in a real-world deployment, verify
 - [ ] Can you trace a single input (e.g., MNIST digit image) through the complete system: raw input → preprocessing → forward propagation through layers → output probabilities → post-processing → final prediction?
 - [ ] Do you understand the distinction between what happens once (loading trained weights) versus per-input (forward propagation)?
 
-**Self-Test**: For an MNIST digit classifier (784→128→64→10) deployed in production: (1) Explain why training this model requires ~12GB GPU memory while inference needs only ~400MB. (2) Trace a single digit image from camera capture through preprocessing, inference, and post-processing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
+**Self-Test**: For an MNIST digit classifier (784→128→64→10) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} training_ratio_str`× more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and post-processing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
 
 *The following case study demonstrates how these concepts integrate in a production system deployed at massive scale. Pay attention to how architectural choices, training strategies, and deployment constraints combine to create a working ML system.*
 

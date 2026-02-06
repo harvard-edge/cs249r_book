@@ -24,13 +24,11 @@ engine: jupyter
 
 _Why do the models that win benchmarks rarely become the models that run in production?_
 
-Training produced a capable model, yet capability alone does not guarantee deployability. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond. These objectives diverge dramatically. The model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. A research breakthrough that improves accuracy by 2% while tripling compute requirements is a step backward for deployment, where the original model already exceeded accuracy requirements and the bottleneck was latency or cost.
-
-This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets. Model compression exists to bridge this gap—to transform research artifacts into production assets by *systematically trading capabilities the deployment does not need for constraints the deployment cannot violate*. The discipline is not about making models smaller but about *making the right models possible*.
+Training produced a capable model, yet capability alone does not guarantee deployability: Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond—and the model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets. Model compression exists to bridge it—to transform research artifacts into production assets by *systematically trading capabilities the deployment does not need for constraints the deployment cannot violate*. The discipline is not about making models smaller but about *making the right models possible*.
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Explain the tripartite optimization framework: model representation (pruning), numerical precision (quantization), and architectural efficiency (distillation)
+- Explain the three-part optimization framework: model representation (pruning), numerical precision (quantization), and architectural efficiency (distillation)
 - Compare quantization strategies in terms of memory reduction, energy consumption, and inference accuracy
 - Apply pruning techniques to reduce model parameters while quantifying the accuracy-sparsity trade-off
 - Implement knowledge distillation to transfer capabilities from large teacher models to efficient student architectures
@@ -142,7 +140,7 @@ gpt3_training_flops_str = f"3.14×10^{gpt3_training_flops_exp_value}"
 ## Model Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
 \index{Model Optimization|see{Model Compression}}
 
-A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget** defined in @sec-model-serving-systems) is not a minor inconvenience but a five-orders-of-magnitude chasm that defines the field of model compression.
+A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving-systems) is not a minor inconvenience but a fundamental chasm that defines the field of model compression.
 
 Recall the **Silicon Contract** (@sec-silicon-contract)—the implicit agreement every model makes with its hardware about which resource it will saturate. The three candidates are compute throughput, memory bandwidth, and memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-ai-training, we used Mixed Precision (FP16) to speed up these training cycles while maintaining the ability to learn. Here, we go further—to INT8 and beyond—for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context—specifically, the **Latency-Critical** environment of @sec-model-serving-systems: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
@@ -200,11 +198,11 @@ According to the **Iron Law** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot
 
 | **Operation**     | **Bit-Width** | **Relative Energy** |
 |:----------------|------------:|------------------:|
-| **Integer Add**   |         8-bit |                  1x |
-| **Float Add**     |        32-bit |                 30x |
-| **Memory Access** |        64-bit |         **40,000x** |
+| **Integer Add**   |         8-bit |                  1× |
+| **Float Add**     |        32-bit |                 30× |
+| **DRAM Read**     |        64-bit |         **40,000×** |
 
-**For Inference**: Moving from FP32 to INT8 doesn't just save 4× memory; it can reduce the **energy per inference** by nearly **20×** if the hardware supports it.
+**For Inference**: Moving from FP32 to INT8 doesn't just save 4× memory; it can reduce the **energy per inference** by up to **20×** on hardware with dedicated INT8 units, depending on the compute-to-memory ratio of the workload.
 
  This is the difference between a battery lasting 1 hour or 20 hours.
 
@@ -216,7 +214,7 @@ These energy savings explain why neural networks tolerate aggressive quantizatio
 ```{python}
 #| label: fig-quantization-free-lunch
 #| echo: false
-#| fig-cap: "**The Quantization Free Lunch.** Model accuracy vs. Bit-width. Most models exhibit a 'Free Lunch' plateau where reducing precision from FP32 to INT8 yields <1% accuracy loss. This robustness collapses at the 'Quantization Cliff' (typically 3-4 bits), where the noise overwhelms the signal. Transformers (red) are generally more sensitive to quantization outliers than CNNs (blue)."
+#| fig-cap: "**The Quantization Free Lunch.** Model accuracy vs. Bit-width. Most models exhibit a 'Free Lunch' plateau where reducing precision from FP32 to INT8 yields <1% accuracy loss. This robustness collapses at the 'Quantization Cliff' (typically 3-4 bits). Curves are illustrative and meant to show qualitative behavior."
 #| fig-alt: "Line chart of Accuracy vs Precision (Bits). Blue line (CNN) stays flat down to 4 bits then drops. Red line (Transformer) drops earlier. Green shaded area marks the 'Free Lunch Zone' of minimal loss."
 
 import numpy as np
@@ -326,7 +324,7 @@ We call this phenomenon *the quantization speedup*.
 2.  **New Size**: `{python} params_b_str` × `{python} billion_exp_str` × `{python} bytes_int4_str` = `{python} int4_size_str` GB.
 3.  **New Speed**: Loading `{python} int4_size_str` GB takes **`{python} int4_latency_str` ms**. Speed jumps to **`{python} int4_toks_str` tokens/sec**.
 
-**The Conclusion**: Quantization is not just about "fitting" the model; it is a **`{python} speedup_str` x Linear Speedup** because LLM generation is bandwidth-bound.
+**The Conclusion**: Quantization is not just about "fitting" the model; it is a **`{python} speedup_str`× Linear Speedup** because LLM generation is bandwidth-bound.
 :::
 
 **3. Efficient Hardware Implementation:** Ensures operations run efficiently on target processors. Techniques like **operator fusion**, **sparsity exploitation**, and **hardware-aware scheduling**\index{Hardware-Aware Optimization!overview} align computational patterns with hardware capabilities (memory hierarchy, vector units) to maximize utilization and throughput.
@@ -351,17 +349,17 @@ Optimization requirements vary dramatically across deployment contexts. What mat
 
 **Cloud inference**\index{Inference Optimization!cloud} optimizes for throughput (requests/second/dollar). Quantization enables serving more concurrent requests; operator fusion reduces per-request latency [@choudhary2020comprehensive; @dean2018new]. **Mobile and edge**\index{Inference Optimization!mobile}\index{Inference Optimization!edge} deployments must fit device memory while meeting real-time targets. A camera app processing 30 fps has 33ms per frame, so any optimization reducing inference below this threshold directly improves user experience.
 
-**TinyML**\index{TinyML!model compression}\index{Inference Optimization!TinyML}[^fn-microcontroller-constraints] makes optimization existential, not optional. A microcontroller with 256KB RAM cannot run a 100MB model regardless of accuracy. The model must compress below hardware limits or deployment is impossible [@banbury2020benchmarking]. Even on mobile devices with comparatively generous resources, a single optimization technique can deliver a *4x performance win* that means the difference between a feature that ships and one that never leaves the prototype stage.
+**TinyML**\index{TinyML!model compression}\index{Inference Optimization!TinyML}[^fn-microcontroller-constraints] makes optimization existential, not optional. A microcontroller with 256KB RAM cannot run a 100MB model regardless of accuracy. The model must compress below hardware limits or deployment is impossible [@banbury2020benchmarking]. Even on mobile devices with comparatively generous resources, a single optimization technique can deliver a *4× performance win* that means the difference between a feature that ships and one that never leaves the prototype stage.
 
-::: {.callout-example title="The 4x MobileNet Win"}
+::: {.callout-example title="The 4× MobileNet Win"}
 **The Context**: A mobile app wants to add real-time "Background Blur" to video calls. The feature requires a segmentation model running at 30 FPS.
 
-**The Bottleneck**: The unoptimized MobileNetV3 (FP32) runs at 8 FPS on mid-tier Android phones. It is too slow to ship.
+**The Bottleneck**: The unoptimized MobileNetV3 (FP32), a NAS-optimized successor to our MobileNetV2 lighthouse model, runs at 8 FPS on mid-tier Android phones. It is too slow to ship.
 
 **The Optimization**:
 
-1.  **Quantization**: Converting weights to INT8 reduces size by 4x and uses the phone's DSP/NPU.
-2.  **Result**: Speed jumps to 35 FPS. Energy per frame drops by 3x.
+1.  **Quantization**: Converting weights to INT8 reduces size by 4× and uses the phone's DSP/NPU.
+2.  **Result**: Speed jumps to 35 FPS. Energy per frame drops by 3×.
 
 **The Business Value**: Compression did not just "optimize" the feature; it **enabled** it. Without INT8 quantization, the product simply could not exist for the target market.
 :::
@@ -447,7 +445,6 @@ dscnn_tiny_str = "ok"
 | **MobileNetV2**        | `{python} mobilenet_str`      | `{python} mobilenet_str`      | ok                                       | ok                                         | `{python} mobilenet_tiny_str`            |
 | **MobileNetV2 (INT8)** | `{python} mobilenet_int8_str` | `{python} mobilenet_int8_str` | ok                                       | ok                                         | `{python} mobilenet_int8_tiny_str`       |
 | **DS-CNN (KWS)**       | `{python} dscnn_str`          | `{python} dscnn_str`          | ok                                       | ok                                         | `{python} dscnn_tiny_str`                |
-| **DS-CNN (KWS)**       | `{python} dscnn_str`          | `{python} dscnn_str`          | ✓                                        | ✓                                          | ✓                                        |
 
 : **The Deployment Gap**: Model memory requirements compared against typical device capacities. Even MobileNetV2 quantized to INT8 exceeds TinyML constraints by 7×, while the purpose-built DS-CNN keyword spotter fits comfortably. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device}
 
@@ -480,7 +477,7 @@ Optimization is about trading one resource for another.
 
 **Trade-offs**
 
-- [ ] **Accuracy vs. Cost**: Do you understand why removing 50% of weights (Pruning) might drop accuracy by 1%, but reducing precision (Quantization) to INT8 might drop it by 0.5% while saving 4x memory?
+- [ ] **Accuracy vs. Cost**: Do you understand why removing 50% of weights (Pruning) might drop accuracy by 1%, but reducing precision (Quantization) to INT8 might drop it by 0.5% while saving 4× memory?
 - [ ] **The "Free Lunch"**: Can you identify optimizations like **Operator Fusion** that improve speed without hurting accuracy?
 
 **Technique Selection**
@@ -503,11 +500,9 @@ We begin with the first dimension of our optimization framework: **Efficient Mod
 
 The optimization challenge lies in balancing competing constraints[^fn-pareto-frontier], a direct manifestation of the **Conservation of Complexity** thesis from Part I: you cannot destroy complexity, only move it. This principle is fundamental to understanding why "free" compression does not exist. Pruning moves complexity from parameters to the hardware's ability to exploit sparse patterns—the model becomes simpler, but the system must now handle irregular memory access. Quantization moves complexity from numerical precision to calibration effort and potential accuracy loss—fewer bits per weight, but more care required to preserve information. Knowledge distillation moves complexity from inference compute to training compute—a smaller model at deployment, but a larger training budget. Aggressive compression risks accuracy degradation that renders models unreliable for production use, while insufficient optimization leaves models too large or slow for target deployment environments. Selecting appropriate techniques requires understanding where complexity should reside for your specific deployment target.
 
-[^fn-pareto-frontier]: **Pareto Frontier**\index{Pareto Frontier!definition}\index{Pareto Frontier!multi-objective optimization}: Named after Italian economist Vilfredo Pareto (1848-1923), who observed that 80% of Italian land was owned by 20% of the population. In optimization, the Pareto frontier represents solutions where improving one objective (speed) requires sacrificing another (accuracy). EfficientNet traces this frontier: B0 (77.1%, 390M FLOPs) to B7 (84.4%, 37B FLOPs). Multi-objective NAS explicitly optimizes for Pareto-optimal architectures.
+[^fn-pareto-frontier]: **Pareto Frontier**\index{Pareto Frontier!definition}\index{Pareto Frontier!multi-objective optimization}: Named after Italian economist Vilfredo Pareto (1848-1923). In multi-objective optimization, the Pareto frontier represents the set of solutions where improving one objective (e.g., speed) necessarily requires sacrificing another (e.g., accuracy). EfficientNet traces this frontier: B0 (77.1%, 390M FLOPs) to B7 (84.4%, 37B FLOPs). Multi-objective NAS explicitly optimizes for Pareto-optimal architectures.
 
-Three key techniques address this challenge: pruning eliminates low-impact parameters, knowledge distillation transfers capabilities to smaller models, and NAS automates architecture design for specific constraints. Each technique offers distinct optimization pathways while maintaining model performance.
-
-These three techniques represent distinct but complementary approaches within our optimization framework. Pruning and knowledge distillation reduce redundancy in existing models, while NAS addresses building optimized architectures from the ground up. In many cases, they can be combined to achieve even greater optimization.
+Three key techniques address this challenge through distinct but complementary approaches. Pruning and knowledge distillation reduce redundancy in existing models: pruning eliminates low-impact parameters, while distillation transfers capabilities to smaller architectures. NAS, in contrast, automates architecture design from the ground up, building optimized structures for specific constraints. In many cases, these techniques can be combined to achieve even greater optimization.
 
 ### Pruning {#sec-model-compression-pruning-2b06}
 
@@ -2160,7 +2155,7 @@ rank_k_str = fmt(rank_k_value, precision=0, commas=False)
 ::: {.callout-notebook title="The Bandwidth-Compute Trade-off"}
 **Reducing the Memory Pressure**: Low-rank factorization illustrates a classic systems trade-off: **trading computation for bandwidth reduction**. Storing a `{python} mat_dim_str` × `{python} mat_dim_str` matrix requires `{python} full_mb_str` MB (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
 
-If we factorize it with rank k = `{python} rank_k_str`, we store two matrices (`{python} mat_dim_str` × `{python} rank_k_str` and `{python} rank_k_str` × `{python} mat_dim_str`), totaling only `{python} factored_mb_str` MB, a **`{python} data_reduction_str` x reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by `{python} data_reduction_str`×, we allow the processor to spend more time computing and less time waiting for memory.
+If we factorize it with rank k = `{python} rank_k_str`, we store two matrices (`{python} mat_dim_str` × `{python} rank_k_str` and `{python} rank_k_str` × `{python} mat_dim_str`), totaling only `{python} factored_mb_str` MB, a **`{python} data_reduction_str`× reduction in data movement**. While the number of floating-point operations (FLOPs) actually *increases* slightly because we perform two smaller matrix multiplies instead of one large one, the system speedup is often dramatic. By reducing data movement by `{python} data_reduction_str`×, we allow the processor to spend more time computing and less time waiting for memory.
 :::
 
 This bandwidth-compute trade-off reflects the broader memory wall[^fn-memory-wall-preview] phenomenon where memory access becomes the dominant bottleneck.
@@ -2625,7 +2620,7 @@ NAS has been successfully used to design several state-of-the-art architectures 
 
 One of the most well-known NAS-generated models is EfficientNet\index{EfficientNet}\index{Neural Architecture Search (NAS)!EfficientNet}\index{Compound Scaling}, which was discovered using a NAS framework that searched for the most effective combination of depth, width, and resolution scaling. Unlike traditional scaling strategies that independently adjust these factors, NAS optimized the model using compound scaling, which applies a fixed set of scaling coefficients to ensure that the network grows in a balanced way. EfficientNet achieves higher accuracy with fewer parameters and lower FLOPs than previous architectures, making it ideal for both cloud and mobile deployment.
 
-Another key example is MobileNetV3\index{MobileNetV3}\index{Neural Architecture Search (NAS)!MobileNetV3}\index{Hardware-Aware Optimization!mobile deployment}, which used NAS to optimize its network structure for mobile hardware. The search process led to the discovery of inverted residual blocks with squeeze-and-excitation layers, which improve accuracy while reducing computational cost. NAS also selected optimized activation functions and efficient depthwise separable convolutions, leading to a $5\times$ reduction in FLOPs compared to earlier MobileNet versions.
+Another key example is MobileNetV3\index{MobileNetV3}\index{Neural Architecture Search (NAS)!MobileNetV3}\index{Hardware-Aware Optimization!mobile deployment}, which used NAS to optimize its network structure for mobile hardware. The search process led to the discovery of inverted residual blocks with squeeze-and-excitation layers, which improve accuracy while reducing computational cost. NAS also selected optimized activation functions (h-swish) and efficient depthwise separable convolutions, leading to significant FLOPs reductions compared to earlier MobileNet versions while improving accuracy.
 
 FBNet, another NAS-generated model, was specifically optimized for real-time inference on mobile CPUs. Unlike architectures designed for general-purpose acceleration, FBNet's search process explicitly considered latency constraints during training, ensuring that the final model runs efficiently on low-power hardware. Similar approaches have been used in TPU-optimized NAS models, where the search process is guided by hardware-aware cost functions to maximize parallel execution efficiency.
 
@@ -2635,7 +2630,7 @@ Each of these NAS-generated models demonstrates how automated architecture searc
 
 The structural techniques covered so far (pruning, distillation, factorization, and NAS) all optimize *what* computations the model performs: which parameters exist, which connections remain, and how the architecture is structured. These techniques can dramatically reduce parameter counts and theoretical FLOPs. Even a perfectly pruned model with an optimal architecture, however, faces a fundamental constraint: every surviving weight and activation must be stored and processed at some numerical precision.
 
-This brings us to the second dimension of our optimization framework: *how precisely* should those computations be performed? The distinction matters because numerical precision directly determines memory footprint and arithmetic cost—two resources that structural optimization cannot touch. A 32-bit floating-point number uses 4 bytes of memory and requires expensive floating-point arithmetic. An 8-bit integer uses 1 byte and enables fast integer math. For many models, this 4x reduction in precision translates directly to 4x reduction in memory bandwidth, and since LLM inference is bandwidth-bound, this means 4x faster token generation. The accuracy cost is often less than 1%.
+This brings us to the second dimension of our optimization framework: *how precisely* should those computations be performed? The distinction matters because numerical precision directly determines memory footprint and arithmetic cost—two resources that structural optimization cannot touch. A 32-bit floating-point number uses 4 bytes of memory and requires expensive floating-point arithmetic. An 8-bit integer uses 1 byte and enables fast integer math. For many models, this 4× reduction in precision translates directly to 4× reduction in memory bandwidth, and since LLM inference is bandwidth-bound, this means 4× faster token generation. The accuracy cost is often less than 1%.
 
 Quantization is arguably the single most impactful optimization technique for deployment, especially for large language models. It requires no architectural changes, applies post-training in many cases, and delivers immediate, hardware-agnostic benefits.
 
@@ -2795,7 +2790,7 @@ In FP32, even the compact DS-CNN architecture consumes 4$\times$ more memory ban
 
 Beyond direct compute savings, reducing numerical precision has a significant impact on memory energy consumption, which often dominates total system power. Lower-precision representations reduce data storage requirements and memory bandwidth usage, leading to fewer and more efficient memory accesses. Accessing memory, particularly off-chip DRAM, is far more energy-intensive than performing arithmetic operations: DRAM accesses require orders of magnitude more energy (1.3-2.6 nJ) compared to cache accesses (e.g., 10 pJ for an 8 KB L1 cache access). An instruction's total energy can therefore be dominated by memory access patterns rather than computation[^fn-energy-efficiency-metrics].
 
-[^fn-energy-efficiency-metrics]: **Energy Efficiency Metrics**: INT8 quantization reduces energy consumption by 4-8x over FP32 on supported hardware. MobileNetV2 INT8 consumes 47mJ vs. 312mJ FP32 per inference on Cortex-A75. ResNet-50 on TPU v4 achieves 0.9 TOPS/Watt vs. 0.3 TOPS/Watt on V100 GPU.
+[^fn-energy-efficiency-metrics]: **Energy Efficiency Metrics**: INT8 quantization reduces energy consumption by 4–8× over FP32 on supported hardware. MobileNetV2 INT8 consumes 47mJ vs. 312mJ FP32 per inference on Cortex-A75. ResNet-50 on TPU v4 achieves 0.9 TOPS/Watt vs. 0.3 TOPS/Watt on V100 GPU.
 
 Reducing numerical precision thus improves efficiency on two fronts: faster computation and less data movement, both contributing to lower overall energy consumption. This dual benefit is especially valuable for hardware accelerators and edge devices, where memory bandwidth and power efficiency are binding constraints.
 
@@ -2941,7 +2936,7 @@ compression_ratio_str = fmt(compression_ratio_value, precision=0, commas=False)
 - **Size**: `{python} llm_params_b_str` × `{python} billion_exp_llm_str` × `{python} int4_bytes_str` bytes (4-bit) = `{python} int4_size_gb_str` GB
 - **Hardware Req**: Fits comfortably on 8GB GPU (e.g., T4, consumer laptops).
 
-**Impact**: `{python} compression_ratio_str` x compression allows deployment on commodity hardware, reducing cost by 5-10x.
+**Impact**: `{python} compression_ratio_str`× compression allows deployment on commodity hardware, reducing cost by 5–10×.
 :::
 
 Beyond storage savings, quantization also accelerates computation through hardware parallelism. The speedup is not merely about arithmetic being cheaper—it emerges from how modern processors pack more operations into the same hardware resources when working with smaller data types. The following calculation illustrates the impact of *the SIMD multiplier*.
@@ -2993,24 +2988,24 @@ simd_int8_bits_str = fmt(simd_int8_bits_value, precision=0, commas=False)
 2.  **FP32 Capacity**: `{python} simd_register_bits_str` / `{python} simd_fp32_bits_str` = `{python} simd_fp32_str` operations per cycle.
 3.  **INT8 Capacity**: `{python} simd_register_bits_str` / `{python} simd_int8_bits_str` = `{python} simd_int8_str` operations per cycle.
 
-**The Multiplier**: By switching to INT8, you pack **`{python} simd_gain_str` x more elements** into the same register.
+**The Multiplier**: By switching to INT8, you pack **`{python} simd_gain_str`× more elements** into the same register.
 Throughput Gain = INT8 Ops/Cycle / FP32 Ops/Cycle = `{python} simd_int8_str` / `{python} simd_fp32_str` = `{python} simd_gain_str`×
 
-**The Systems Conclusion**: Quantization delivers a **`{python} simd_gain_str` x speedup** on compute-bound layers solely due to vector packing, even before considering memory bandwidth savings.
+**The Systems Conclusion**: Quantization delivers a **`{python} simd_gain_str`× speedup** on compute-bound layers solely due to vector packing, even before considering memory bandwidth savings.
 :::
 
 Reducing numerical precision introduces trade-offs, however. Lower-precision formats can cause numerical instability and quantization noise, potentially affecting model accuracy. Some architectures, such as large transformer-based NLP models, tolerate quantization well, whereas others may experience significant degradation. Selecting the appropriate numerical precision therefore requires balancing accuracy constraints, hardware support, and efficiency gains.
 
-To appreciate how precision loss manifests in practice, examine @fig-quantization: the quantization error distribution varies across numerical formats, with each format introducing different levels of quantization noise that directly influence model accuracy and stability. Understanding this noise is essential, but practitioners ultimately care about end-to-end speedup, and the magnitude of that speedup depends on whether a workload is compute-bound or memory-bound.
+To appreciate how precision loss manifests in practice, examine the representative quantization error distribution in @fig-quantization: the bell-shaped curve centered near zero shows that most values quantize with minimal error, but the tails reveal outlier errors that can accumulate and influence model accuracy. Understanding this noise is essential, but practitioners ultimately care about end-to-end speedup, and the magnitude of that speedup depends on whether a workload is compute-bound or memory-bound.
 
 ![**Quantization Error Distribution**: Histogram of quantization error weighted by probability density p(x), showing a bell-shaped curve centered near zero with tails that introduce quantization noise affecting model accuracy.](images/png/modeloptimization_quant_hist.png){#fig-quantization width=80% fig-alt="Histogram showing quantization error distribution weighted by probability density. Bell-shaped curve centered near zero with tails extending to positive and negative errors, illustrating typical quantization noise pattern."}
 
-::: {.callout-notebook title="The Quantization Speedup"}
+::: {.callout-notebook title="The Quantization Speedup (Compute-Bound)"}
 **Problem**: You have a compute-bound matrix multiplication (e.g., in a Transformer MLP block). You switch from FP16 to INT8. What is the expected speedup?
 
 **The Math**: On modern hardware with dedicated INT8 units:
 
-1. **Tensor Core Throughput**: NVIDIA A100 delivers `{python} a100_tflops_fp16_str` TFLOPS for FP16 vs `{python} a100_tflops_int8_str` TOPS for INT8, a `{python} a100_int8_speedup_str` x peak throughput increase.
+1. **Tensor Core Throughput**: NVIDIA A100 delivers `{python} a100_tflops_fp16_str` TFLOPS for FP16 vs `{python} a100_tflops_int8_str` TOPS for INT8, a `{python} a100_int8_speedup_str`× peak throughput increase.
 2. **Memory Bandwidth**: INT8 weights are half the size, so loading them from memory takes half the time.
 3. **Combined Effect**: For compute-bound operations, the speedup is primarily from compute throughput: **~`{python} a100_int8_speedup_str`× speedup**.
 
@@ -3345,9 +3340,9 @@ where:
 - $x$ is the original floating-point value,
 - $s$ is a scaling factor that maps the floating-point range to the available integer range.
 
-@lst-quantization_example demonstrates uniform quantization from FP32 to INT8, achieving 4x memory reduction while measuring the resulting quantization error.
+@lst-quantization_example demonstrates uniform quantization from FP32 to INT8, achieving 4× memory reduction while measuring the resulting quantization error.
 
-::: {#lst-quantization_example lst-cap="**Uniform Quantization**: Converts FP32 weights to INT8 format, achieving 4x memory reduction while measuring quantization error."}
+::: {#lst-quantization_example lst-cap="**Uniform Quantization**: Converts FP32 weights to INT8 format, achieving 4× memory reduction while measuring quantization error."}
 ```{.python}
 import torch
 
@@ -3468,7 +3463,7 @@ LineD/.style={dashed,black,line width=0.75pt},
 \draw[LineT](RG3)node[above=2pt]{$0$}--(RD2)node[below=2pt]{$-Z$};
 \draw[LineT](RG4)node[above=2pt]{$SZ$}--(RD3)node[below=2pt]{$0$};
 \draw[LineT](RG5)--(RD4);
-\draw[LineT](RG6)node[above=2pt]{$\beta=-1.5$}--(RD5);
+\draw[LineT](RG6)node[above=2pt]{$\beta=1.5$}--(RD5);
 \draw[LineT](RG7)--(RD5)node[below=2pt]{$127$};
 \foreach \i/\cl in {1/red,2/red,3/green!70!black,4/red,5/red,6/red,7/red} {
 \fill[\cl](RG\i)circle(2.5pt);
@@ -3500,7 +3495,7 @@ LineD/.style={dashed,black,line width=0.75pt},
 \draw[LineT](G3)--(D2);
 \draw[LineT](G4)node[above=2pt]{$0$}--(D3)node[below=2pt]{$0$};
 \draw[LineT](G5)--(D4);
-\draw[LineT](G6)node[above=2pt]{$\beta=-1$}--(D5);
+\draw[LineT](G6)node[above=2pt]{$\beta=1$}--(D5);
 \draw[LineT](G7)--(D5)node[below=2pt]{$127$};
 \foreach \i/\cl in {1/red,2/red,3/red,4/green!70!black,5/red,6/red,7/red} {
 \fill[\cl](G\i)circle(2.5pt);
@@ -4192,7 +4187,7 @@ The following checkpoint tests understanding of quantization concepts before pro
 
 Test your understanding of quantization before moving to architectural efficiency:
 
-- [ ] Can you explain why INT8 quantization provides roughly 4x memory reduction but potentially more than 4x energy reduction? Consider the energy cost of floating-point versus integer arithmetic units.
+- [ ] Can you explain why INT8 quantization provides roughly 4× memory reduction but potentially more than 4× energy reduction? Consider the energy cost of floating-point versus integer arithmetic units.
 - [ ] Do you understand the key advantage of quantization-aware training (QAT) over post-training quantization (PTQ), and when the extra training cost is justified?
 - [ ] Can you explain why weight quantization provides nearly linear speedup with bit-width reduction for memory-bandwidth-bound LLM inference? Think about which resource is the bottleneck during autoregressive generation.
 :::
@@ -4230,7 +4225,7 @@ Designing for hardware efficiency requires structuring architectures to account 
 
 The principles in @tbl-hardware-efficient-design work synergistically: scaling optimization sizes models appropriately for available resources, computation reduction eliminates redundant operations through techniques like depthwise separable convolutions[^fn-depthwise-separable-efficiency], memory optimization aligns access patterns with hardware hierarchies, and hardware-aware design ensures architectural decisions match platform capabilities. Together, these principles enable models that balance accuracy with efficiency while maintaining consistent behavior across deployment environments.
 
-[^fn-depthwise-separable-efficiency]: **Depthwise Separable Convolutions**: Factorizes standard convolution into depthwise (per-channel) and pointwise (1×1) operations, reducing computation by 8-9x. MobileNetV2 achieves 72% ImageNet accuracy with `{python} mobilenetv2_mflops_str` M FLOPs vs. ResNet-50's 76% with `{python} resnet_gflops_str` B FLOPs (13.7x fewer operations). Enables real-time inference on mobile devices.
+[^fn-depthwise-separable-efficiency]: **Depthwise Separable Convolutions**: Factorizes standard convolution into depthwise (per-channel) and pointwise (1×1) operations, reducing computation by 8–9×. MobileNetV2 achieves 72% ImageNet accuracy with `{python} mobilenetv2_mflops_str` M FLOPs vs. ResNet-50's 76% with `{python} resnet_gflops_str` B FLOPs (13.7× fewer operations). Enables real-time inference on mobile devices.
 
 The following subsections examine each principle in detail, beginning with how to scale model dimensions effectively.
 
@@ -4301,16 +4296,16 @@ $$
 \mathcal{O}\Big(\sqrt{A_{\text{total}}}\Big)
 $$
 
-Feature reuse can significantly reduce peak memory consumption, making it useful for training large models on hardware with limited memory.
+Activation checkpointing can significantly reduce peak memory consumption, making it useful for training large models on hardware with limited memory.
 
 Parameter reduction is another important technique. SqueezeNet, for instance, applies $1\times 1$ convolutions to reduce the number of input channels before applying standard convolutions, significantly reducing model size without compromising expressive power. The number of parameters in a standard convolutional layer is:
 $$
 \mathcal{O}(C_{\text{in}} C_{\text{out}} k^2)
 $$
 
-By reducing $C_{\text{in}}$ using $1\times 1$ convolutions, SqueezeNet[^fn-squeezenet] reduces the number of parameters, achieving a 50x reduction in model size compared to AlexNet while maintaining similar performance. This method proves valuable for edge devices that have strict memory and storage constraints.
+By reducing $C_{\text{in}}$ using $1\times 1$ convolutions, SqueezeNet[^fn-squeezenet] reduces the number of parameters, achieving a 50× reduction in parameter count compared to AlexNet while maintaining similar performance. This method proves valuable for edge devices that have strict memory and storage constraints.
 
-[^fn-squeezenet]: **SqueezeNet**: DeepScale/Berkeley architecture using fire modules (squeeze + expand layers) achieves AlexNet-level accuracy (57.5% top-1 ImageNet) with 50x fewer parameters (1.25M vs 60M). Model size drops from 240MB to 0.5MB uncompressed, enabling deployment on smartphones and embedded systems with limited storage.
+[^fn-squeezenet]: **SqueezeNet**: DeepScale/Berkeley architecture using fire modules (squeeze + expand layers) achieves AlexNet-level accuracy (57.5% top-1 ImageNet) with 50× fewer parameters (1.25M vs 60M). Model size drops from 240MB to ~5MB uncompressed, enabling deployment on smartphones and embedded systems with limited storage.
 
 Feature reuse, activation checkpointing, and parameter reduction form key components of hardware-aware model design, allowing models to fit within memory limits of modern accelerators while reducing power consumption through fewer memory accesses. Specialized accelerators like TPUs and GPUs leverage memory hierarchies, caching, and high bandwidth memory to efficiently handle sparse or reduced-memory representations, enabling faster inference with minimal overhead.
 
@@ -4478,7 +4473,7 @@ output = linear(attn_output)
 
 This fusion pattern[^fn-flashattention-compression] achieves 2-4× speedup on long sequences by dramatically reducing memory bandwidth requirements—a technique central to enabling long-context transformers, as detailed in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
 
-[^fn-flashattention-compression]: FlashAttention\index{FlashAttention} (introduced in @sec-dnn-architectures) demonstrates fusion's power for memory-bound attention: tiling to SRAM yields 2-4x speedup and enables 64K context windows by reducing memory traffic from O(n^2) to O(n). This exemplifies how operator fusion can transform memory-bound bottlenecks into compute-bound operations.
+[^fn-flashattention-compression]: FlashAttention\index{FlashAttention} (introduced in @sec-dnn-architectures) demonstrates fusion's power for memory-bound attention: tiling to SRAM yields 2–4× speedup and enables 64K context windows by reducing memory traffic from O(n^2) to O(n). This exemplifies how operator fusion can transform memory-bound bottlenecks into compute-bound operations.
 
 Memory bandwidth analysis quantifies fusion benefits. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (784 KB):
 
@@ -6448,7 +6443,7 @@ Sequencing critically impacts results, as the following example demonstrates.
 
 ::: {.callout-example title="BERT-Base Mobile Deployment Pipeline"}
 
-Consider deploying BERT-Base on mobile devices through three stages. **Stage one** applies structured pruning, removing 30% of attention heads and 40% of intermediate FFN dimensions, resulting in 75% parameter reduction with accuracy dropping from 76.2% to 75.1%. **Stage two** uses knowledge distillation to recover accuracy to 75.9%. **Stage three** applies quantization-aware training with INT8 quantization, achieving 4x additional memory reduction with final accuracy of 75.6%. The combined impact: 16x memory reduction (440MB to 28MB), 12x inference speedup on mobile CPU, and only 0.6% final accuracy loss versus 2.1% if quantization had been applied before pruning.
+Consider deploying BERT-Base on mobile devices through three stages. **Stage one** applies structured pruning, removing 30% of attention heads and 40% of intermediate FFN dimensions, resulting in 75% parameter reduction with accuracy dropping from 76.2% to 75.1%. **Stage two** uses knowledge distillation to recover accuracy to 75.9%. **Stage three** applies quantization-aware training with INT8 quantization, achieving 4× additional memory reduction with final accuracy of 75.6%. The combined impact: 16× memory reduction (440MB to 28MB), 12× inference speedup on mobile CPU, and only 0.6% final accuracy loss versus 2.1% if quantization had been applied before pruning.
 :::
 
 This example illustrates why sequencing matters: pruning first concentrates important weights into smaller ranges, making subsequent quantization more effective. Applying quantization before pruning reduces numerical precision available for importance-based pruning decisions, degrading final accuracy. Effective combination requires understanding these dependencies and developing application sequences that maximize cumulative benefits.
@@ -6467,13 +6462,13 @@ Optimization begins with profiling\index{Profiling!model compression} to identif
 
 Modern machine learning models exhibit heterogeneous resource consumption: specific layers, operations, or data paths contribute disproportionately to memory usage, computational cost, or latency. Understanding these patterns is essential for prioritizing optimization efforts and achieving maximum impact with minimal accuracy degradation.
 
-Effective profiling begins with establishing baseline measurements across relevant performance dimensions. Memory profiling reveals both static consumption (model parameters and buffers) and dynamic allocation patterns during training and inference. Computational profiling identifies bottleneck operations, measured in FLOPS and actual wall-clock execution time. Energy profiling matters for battery-powered and edge deployment scenarios, where power consumption directly impacts operational feasibility. Latency profiling measures end-to-end response times and identifies which operations contribute most to inference delay.
+Effective profiling begins with establishing baseline measurements across relevant performance dimensions. Memory profiling reveals both static consumption (model parameters and buffers) and dynamic allocation patterns during training and inference. Computational profiling identifies bottleneck operations, measured in FLOPs and actual wall-clock execution time. Energy profiling matters for battery-powered and edge deployment scenarios, where power consumption directly impacts operational feasibility. Latency profiling measures end-to-end response times and identifies which operations contribute most to inference delay.
 
 A critical caveat applies when translating profiling metrics into optimization estimates.
 
 ::: {.callout-warning title="FLOPs Reduction ≠ Proportional Speedup"}
 
-Reducing a model's FLOPs by 50% does not guarantee 50% latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Furthermore, **Amdahl's Law**\index{Amdahl's Law!model compression} (@sec-system-foundations-amdahls-law-gustafsons-law-2f5c) applies at the system level: if model inference accounts for only 20% of end-to-end latency (with the rest spent on data loading, pre-processing, and post-processing), then even perfect model optimization yields at most 1.25x overall speedup. Always profile on target hardware before estimating optimization benefits.
+Reducing a model's FLOPs by 50% does not guarantee 50% latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Furthermore, **Amdahl's Law**\index{Amdahl's Law!model compression} (@sec-system-foundations-amdahls-law-gustafsons-law-2f5c) applies at the system level: if model inference accounts for only 20% of end-to-end latency (with the rest spent on data loading, pre-processing, and post-processing), then even perfect model optimization yields at most 1.25× overall speedup. Always profile on target hardware before estimating optimization benefits.
 :::
 
 Consider profiling a Vision Transformer (ViT) for edge deployment. Using PyTorch Profiler reveals three key findings: attention layers consume 65% of total FLOPs (highly amenable to structured pruning), layer normalization consumes 8% of latency despite only 2% of FLOPs (a memory-bound operation), and the final classification head consumes 1% of computation but 15% of parameter memory. This profile suggests a clear priority ordering: first, apply magnitude-based pruning to attention layers for high FLOP reduction; second, quantize the classification head to INT8 for large memory savings with minimal accuracy impact; third, fuse layer normalization operations to reduce the memory bandwidth bottleneck.
@@ -6484,9 +6479,9 @@ Beyond these baseline measurements, modern optimization requires understanding m
 
 Optimization requires rigorous measurement frameworks that go beyond simple accuracy metrics to capture the full impact of optimization decisions. Effective measurement considers multiple objectives simultaneously: accuracy preservation, computational efficiency gains, memory reduction, latency improvement, and energy savings. Balancing these often-competing objectives requires careful trade-off analysis.
 
-The measurement framework should establish clear baselines before applying any optimizations. Accuracy baselines include not only top-line metrics like classification accuracy but also calibration, fairness across demographic groups, and robustness to input variations. Efficiency baselines capture computational cost (FLOPS, memory bandwidth), execution time across hardware platforms, peak memory consumption, and energy consumption profiles.
+The measurement framework should establish clear baselines before applying any optimizations. Accuracy baselines include not only top-line metrics like classification accuracy but also calibration, fairness across demographic groups, and robustness to input variations. Efficiency baselines capture computational cost (FLOPs, memory bandwidth), execution time across hardware platforms, peak memory consumption, and energy consumption profiles.
 
-When quantizing ResNet-50 from FP32 to INT8, baseline metrics show Top-1 accuracy of 76.1%, inference latency on V100 of 4.2ms, model size of 98MB, and energy per inference of 0.31J. Post-quantization metrics reveal Top-1 accuracy of 75.8% (0.3% degradation), inference latency of 1.3ms (3.2x speedup), model size of 25MB (3.9x reduction), and energy per inference of 0.08J (3.9x improvement). Additional analysis shows per-class accuracy degradation ranging from 0.1% to 1.2% with highest impact on fine-grained categories, calibration error increasing from 2.1% to 3.4%, and INT8 quantization providing 3.2x speedup on GPU but only 1.8x on CPU, demonstrating hardware-dependent gains.
+When quantizing ResNet-50 from FP32 to INT8, baseline metrics show Top-1 accuracy of 76.1%, inference latency on V100 of 4.2ms, model size of 98MB, and energy per inference of 0.31J. Post-quantization metrics reveal Top-1 accuracy of 75.8% (0.3% degradation), inference latency of 1.3ms (3.2× speedup), model size of 25MB (3.9× reduction), and energy per inference of 0.08J (3.9× improvement). Additional analysis shows per-class accuracy degradation ranging from 0.1% to 1.2% with highest impact on fine-grained categories, calibration error increasing from 2.1% to 3.4%, and INT8 quantization providing 3.2× speedup on GPU but only 1.8× on CPU, demonstrating hardware-dependent gains.
 
 With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our three-dimensional framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @sec-benchmarking-ai provides additional structured evaluation methods for comprehensive performance assessment.
 
@@ -6589,7 +6584,7 @@ Having explored the three major optimization approaches in depth, along with fra
 
 : **Optimization Technique Trade-offs**: Comparison of the three major optimization approaches across key performance dimensions, highlighting how each technique addresses different constraints and deployment scenarios. Pruning excels for computational reduction but requires sparse hardware support, quantization provides balanced size and speed improvements with wide hardware compatibility, while distillation produces high-quality compressed models at higher training cost. {#tbl-optimization-comparison}
 
-These techniques combine synergistically, with quantization often applied after pruning or distillation to achieve compound compression benefits. Production systems frequently employ sequential application: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers any accuracy loss. Sequential application enables compression ratios of 10-50x while maintaining competitive accuracy across diverse deployment scenarios.
+These techniques combine synergistically, with quantization often applied after pruning or distillation to achieve compound compression benefits. Production systems frequently employ sequential application: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers any accuracy loss. Sequential application enables compression ratios of 10–50× while maintaining competitive accuracy across diverse deployment scenarios.
 
 ## Fallacies and Pitfalls {#sec-model-compression-fallacies-pitfalls-1b5e}
 
@@ -6617,7 +6612,7 @@ Teams achieve 4× model size reduction through INT8 quantization and expect 4× 
 
 ## Summary {#sec-model-compression-summary-8229}
 
-Model optimization bridges the gap between research advances and deployment realities. The core insight is that optimization operates across three complementary dimensions: *structural* (what to compute), *precision* (how precisely), and *architectural* (how efficiently). The best results combine techniques across all three dimensions. BERT's 16x compression (440MB to 28MB) exemplifies this through pruning + distillation + quantization.
+Model optimization bridges the gap between research advances and deployment realities. The core insight is that optimization operates across three complementary dimensions: *structural* (what to compute), *precision* (how precisely), and *architectural* (how efficiently). The best results combine techniques across all three dimensions. BERT's 16× compression (440MB to 28MB) exemplifies this through pruning + distillation + quantization.
 
 Combined with the data selection techniques from @sec-data-selection, these model-centric optimizations complete the efficiency toolkit: data selection maximizes learning from available examples, while model compression minimizes resources required for deployment. Systematic application of these techniques, matched to specific deployment constraints and hardware capabilities, turns research prototypes into production assets.
 
@@ -6630,7 +6625,7 @@ These three dimensions of optimization are not independent choices but complemen
 * **For LLMs, weight-only quantization wins**: INT4 weights with FP16 activations dominates because generation is memory-bandwidth bound, not compute bound.
 * **Structured pruning for commodity hardware**: Unstructured sparsity requires specialized accelerators. Structured pruning (channels, heads) delivers real latency gains on GPUs.
 * **Order matters when combining techniques**: Pruning before quantization is more effective; architecture changes should align with quantization constraints. Distillation can mitigate quantization accuracy loss.
-* **Profile on target hardware, not paper metrics**: FLOPs and parameter count often mispredict real-world performance. A 2x FLOP reduction may yield only 1.2x speedup.
+* **Profile on target hardware, not paper metrics**: FLOPs and parameter count often mispredict real-world performance. A 2× FLOP reduction may yield only 1.2× speedup.
 
 :::
 

@@ -21,7 +21,7 @@ engine: jupyter
 
 _Why does serving invert every optimization priority that made training successful?_
 
-Benchmarks validated your optimizations under controlled conditions (@sec-benchmarking-ai). Serving determines whether those optimizations survive contact with production reality. Training and serving demand opposite physics. Training maximizes **Throughput** ($T \approx \text{samples/second}$)—large batches and long epochs where latency spikes are absorbed invisibly. Serving demands **Latency** minimization ($L_{lat} \approx \text{ms/request}$)—individual requests answered in milliseconds, where a single slow response is a *broken product*. Training amortizes hardware costs across billions of examples; serving pays a tax on every single request, where inefficiency compounds into massive operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures designed to saturate accelerators are fundamentally ill-suited for the bursty, latency-critical reality of production.
+Training and serving demand opposite physics. Training maximizes **Throughput** ($T \approx \text{samples/second}$)—large batches and long epochs where latency spikes are absorbed invisibly. Serving demands **Latency** minimization ($L_{lat} \approx \text{ms/request}$)—individual requests answered in milliseconds, where a single slow response is a *broken product*. Training amortizes hardware costs across billions of examples; serving pays a tax on every single request, where inefficiency compounds into massive operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures designed to saturate accelerators are fundamentally ill-suited for the bursty, latency-critical reality of production, and optimizations validated under controlled benchmark conditions routinely fail to survive contact with production reality.
 
 ::: {.callout-tip title="Learning Objectives"}
 
@@ -122,7 +122,7 @@ The consequences of ignoring this inversion become visceral during a *traffic sp
 
 **The Event**: On Black Friday, traffic spikes 10x to 10,000 QPS.
 
-**The Failure**: The system does not just slow down 10x. It **collapses**. Latency hits 10 seconds, then requests start timing out. The servers are 100% utilized, but throughput drops to near zero.
+**The Failure**: The system does not just slow down 10x. It **collapses**. Latency hits 10 seconds, then requests start timing out. The servers are 100% utilized, but *useful* throughput drops to near zero—most completed requests have already timed out from the client's perspective.
 
 **The Physics**: This is **Little's Law** and **Queueing Theory** in action. As utilization approaches 100%, queue lengths grow exponentially, not linearly. The system spends more time managing the queue (context switching, thrashing) than doing useful work.
 
@@ -138,8 +138,8 @@ Trace the curve in @fig-tail-latency-explosion and notice how latency remains ma
 ```{python}
 #| label: fig-tail-latency-explosion
 #| echo: false
-#| fig-cap: "**The Tail Latency Explosion**: Request Latency vs. System Utilization ($\\rho$). While median latency (Blue) remains stable, tail latency (Red, p99) explodes once utilization passes the 'Knee' at ~70%. This uses a simple M/M/1 approximation (p99 ≈ 4.6× mean), so the curve is illustrative rather than workload-specific."
-#| fig-alt: "Line plot showing latency growing with utilization. Blue line (Median) is flat then rises. Red line (Tail) curves upward sharply at 70% utilization. Shaded regions indicate 'Safe Zone' and 'Danger Zone'."
+#| fig-cap: "**The Tail Latency Explosion**: Request Latency vs. System Utilization ($\\rho$). While mean latency (Blue) remains moderate, tail latency (Red, p99) explodes once utilization passes the 'Knee' at ~70%. This uses a simple M/M/1 approximation (p99 ≈ 4.6× mean), so the curve is illustrative rather than workload-specific."
+#| fig-alt: "Line plot showing latency growing with utilization. Blue line (Mean) rises gradually then steeply. Red line (Tail, p99) curves upward sharply at 70% utilization. Shaded regions indicate 'Safe Zone' and 'Danger Zone'."
 
 import numpy as np
 from physx import viz
@@ -153,7 +153,7 @@ utilization = np.linspace(0, 0.95, 100)
 mean_latency = 1 / (1 - utilization)
 p99_latency = mean_latency * 4.6
 
-ax.plot(utilization, mean_latency, '--', color=COLORS['BlueLine'], label='Median Latency (p50)', linewidth=2)
+ax.plot(utilization, mean_latency, '--', color=COLORS['BlueLine'], label='Mean Latency', linewidth=2)
 ax.plot(utilization, p99_latency, '-', color=COLORS['RedLine'], label='Tail Latency (p99)', linewidth=2.5)
 
 ax.set_xlabel('System Utilization (%)')
@@ -180,7 +180,7 @@ Beyond the technical limits of latency, the economics of serving have undergone 
 ```{python}
 #| label: fig-intelligence-deflation
 #| echo: false
-#| fig-cap: "**Intelligence Deflation**: Cost per 1M tokens (USD) over time (Log Scale). Prices are based on public API list prices (2020–2025) and are intended as a market trend indicator. The cost of token generation has collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows."
+#| fig-cap: "**Intelligence Deflation**: Cost per 1M output tokens (USD) over time (Log Scale). Prices are based on public API list prices (2020–2025) and are intended as a market trend indicator, not a controlled comparison. The cost of token generation has collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows."
 #| fig-alt: "Line plot showing token pricing collapsing from $20/M tokens in 2020 to <$0.10/M tokens in 2025. Log scale highlights the deflationary trend with models from OpenAI, Anthropic, Google, and DeepSeek."
 
 import numpy as np
@@ -212,7 +212,7 @@ slope, intercept = np.polyfit(trend_years, np.log10(trend_prices), 1)
 line_years = np.linspace(2020, 2025.5, 100)
 line_prices = 10**(slope * line_years + intercept)
 
-ax.plot(line_years, line_prices, '--', color=COLORS['grid'], linewidth=1.5, label='Deflation Trend (~10x / 18mo)', zorder=1)
+ax.plot(line_years, line_prices, '--', color=COLORS['grid'], linewidth=1.5, label='Deflation Trend', zorder=1)
 ax.scatter(years, prices, color=COLORS['GreenLine'], s=50, zorder=3, edgecolors='white', linewidth=1.5)
 
 for y, p, l in zip(years, prices, labels):
@@ -230,7 +230,7 @@ ax.set_xlabel('Year')
 ax.set_ylabel('Price per 1M Tokens (USD)')
 ax.set_ylim(0.01, 500)
 ax.set_xlim(2020, 2025.5)
-ax.text(2021, 0.05, "Trend: ~50% Cheaper\nEvery 8 Months", color=COLORS['grid'], fontsize=9, style='italic')
+ax.text(2021, 0.05, "Trend: ~10× Cheaper\nEvery 18 Months", color=COLORS['grid'], fontsize=9, style='italic')
 plt.show()
 ```
 
@@ -407,6 +407,10 @@ Latency constraints directly dictate infrastructure costs. Consider a GPU server
 Most production systems combine both approaches. Common queries hit a cache populated by batch inference while uncommon requests trigger dynamic computation. Understanding this spectrum is essential because it determines which subsequent optimization strategies apply. Static inference optimizes for throughput during batch computation and storage efficiency for serving. Dynamic inference optimizes for per-request latency under concurrent load, which requires understanding *where* time goes within each request.
 
 The static-versus-dynamic decision is the first of several architectural choices that shape serving system design. Equally important is *where* the model executes, since deployment context fundamentally constrains every subsequent optimization.
+
+::: {.callout-perspective title="Looking Ahead: The Rise of Inference-Time Compute (System 2)"}
+Traditional serving optimizes for minimizing latency ($L \to 0$). Emerging "Reasoning Models" (like OpenAI o1) invert this goal, deliberately spending more compute cycles ("thinking") to improve answer quality. Individual token generation remains memory-bandwidth-bound, but these models generate far more tokens per request (often 10–100× more internal reasoning tokens), dramatically increasing the total compute and energy spent per query. The aggregate effect brings "Training-like" compute budgets into the Serving phase, even though each token is still governed by the memory wall.
+:::
 
 ### The Spectrum of Serving Architectures {#sec-model-serving-systems-spectrum-serving-architectures-8966}
 
@@ -653,7 +657,7 @@ With the serving architecture established, we now trace *what* happens to a sing
 
 ### The Latency Budget {#sec-model-serving-systems-latency-budget-ef40}
 
-For dynamic inference systems\index{Latency Budget!optimization objectives}, the fundamental difference from training lies in optimization objectives. Training optimizes throughput by maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of how long any individual sample takes. Serving inverts this priority, optimizing latency (introduced in @sec-ml-system-architecture) per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
+For dynamic inference systems\index{Latency Budget!optimization objectives}, the fundamental difference from training lies in optimization objectives. Training optimizes throughput by maximizing samples processed per hour over days of computation. A training job that processes 1000 samples per second is successful regardless of whether a few individual samples take longer than average. Serving inverts this priority, optimizing latency (introduced in @sec-ml-system-architecture) per request under strict time constraints. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
 
 This shift has concrete implications for system design [@gujarati2020serving]. The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50\index{p50 Latency!median response time}, p95\index{p95 Latency!percentile target}, and p99 latencies\index{Latency!percentiles (p50, p95, p99)}\index{p99 Latency|see{Tail Latency}} reveal *how* the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-impact]
 
@@ -663,13 +667,13 @@ Managing these percentile constraints requires decomposing the total allowed res
 
 ::: {.callout-definition title="Latency Budget"}
 
-***Latency Budget***\index{Latency Budget!SLA constraints}\index{SLA (Service Level Agreement)!latency budget} is the **Time Capital** allocated to a request, strictly bounded by the **End-to-End SLA**\index{End-to-End SLA|see{SLA}}. It acts as a zero-sum constraint system where any milliseconds consumed by **Serialization** or **Network Overhead** directly reduce the computational budget available for Model Inference.
+***Latency Budget***\index{Latency Budget!SLO constraints}\index{SLO (Service Level Objective)!latency budget} is the **Time Capital** allocated to a request, strictly bounded by the **End-to-End SLO**\index{End-to-End SLO|see{SLO}} (the internal performance target; the contractual commitment is the SLA\index{SLA (Service Level Agreement)}). It acts as a zero-sum constraint system where any milliseconds consumed by **Serialization** or **Network Overhead** directly reduce the computational budget available for Model Inference.
 
 :::
 
 We can visualize this by examining a *ResNet-50 latency budget breakdown*.
 
-::: {.callout-notebook title="ResNet-50: Latency Budget Breakdown"}
+::: {.callout-notebook title="ResNet-50: Latency Analysis Questions"}
 Serving is about optimizing the **Tail Latency** under load.
 
 **The Physics of Latency**
@@ -867,15 +871,6 @@ dlrm_total_str = f"{dlrm_total_ms_value}ms"
 In DLRM, the "Inference" (MLP) is only ~15% of the latency. The majority of time is spent in **Embedding Lookups**—retrieving massive 128-dim vectors from terabyte-scale tables. This is an **IO-bound** workload where adding more GPUs doesn't help unless you also add more **Memory Bandwidth** and **Capacity**.
 :::
 
-::: {.content-hidden}
-
-David Patterson famously argued that general-purpose CPUs are inefficient for ML because they dedicate significant silicon area to complex logic (branch prediction, out-of-order execution) that is unnecessary for the regular, data-parallel patterns of neural networks.
-
-For serving, this efficiency gap is magnified. A CPU executing an inference request at batch size 1 might achieve only 1–2% of its theoretical peak performance because the "killer microseconds" of instruction fetch and decode dominate the few arithmetic operations performed per token or pixel.
-
-**Domain-Specific Architectures (DSAs)**, like Google’s TPU or NVIDIA’s Tensor Cores, solve this by replacing complex instruction logic with massive arrays of simple Multiply-Accumulate (MAC) units. This specialization allows a DSA to achieve 10–100$\times$ higher **Arithmetic Intensity** (the ratio of compute to memory access) even at the small batch sizes required for low-latency serving. Understanding this architectural advantage explains why hardware acceleration is not just a speedup, but a requirement for economically viable serving.
-
-:::
 
 This breakdown reveals why straightforward optimization efforts often fail. Engineers focus on model optimization (quantization, pruning) because that is where ML expertise applies, but the actual bottleneck is image decoding running on CPU. Adopting *the quantitative approach to serving* exposes these hidden bottlenecks before engineering effort is misallocated.
 
@@ -932,10 +927,10 @@ Beyond the model execution itself, every request pays a "tax" to the serving inf
 | **Tax Component** | **Typical Cost** | **Scaling Behavior** | **Tax Evasion Strategy**        |
 |:----------------|---------------:|:-------------------|:------------------------------|
 | **Network I/O**   |           1-5 ms | Linear with payload  | Compression, Region Colocation  |
-| **Serialization** |    50-500 $\mu$s | Linear with payload  | gRPC/Protobuf (vs JSON)         |
+| **Serialization** |    50–500 $\mu\text{s}$ | Linear with payload  | gRPC/Protobuf (vs JSON)         |
 | **Queuing**       |        0.1-10 ms | Exponential w/ load  | Dynamic Batching, Autoscaling   |
-| **Dispatch**      |     10-50 $\mu$s | Constant per batch   | Kernel Fusion (reduce launches) |
-| **Data Copy**     |   100-500 $\mu$s | Linear with tensor   | Zero-Copy / Shared Memory       |
+| **Dispatch**      |     10–50 $\mu\text{s}$ | Constant per batch   | Kernel Fusion (reduce launches) |
+| **Data Copy**     |   100–500 $\mu\text{s}$ | Linear with tensor   | Zero-Copy / Shared Memory       |
 
 : **The Serving Tax Bill**: A breakdown of non-inference latency sources. While individual components like serialization seem small ($<1$ ms), they compound. In a 5ms inference service, this "tax" can easily consume 50% of the latency budget. The primary engineering goal is to drive these costs to zero through architectural choices like gRPC and Zero-Copy data paths. {#tbl-serving-tax}
 
@@ -1116,7 +1111,13 @@ Serving engineers need a tool that connects observable metrics to capacity requi
 
 $$L = \lambda \cdot W$$ {#eq-littles-law}
 
-where $L$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $W$ is the average time each request spends in the system. This relationship holds regardless of arrival distribution, service time distribution, or scheduling policy. The following notebook quantifies this capacity relationship using a practical example of Little's Law.
+where $L$ is the average number of requests in the system, $\lambda$ is the arrival rate (requests per second), and $W$ is the average time each request spends in the system.
+
+::: {.callout-note title="Notation Alert: L vs. Latency"}
+In queuing theory, $L$ traditionally denotes the **Length** of the queue (number of items in the system), and $W$ denotes **Wait time** (time in system per request). Elsewhere in this book, we use subscripted forms ($L_{total}$, $L_{wait}$, $L_{compute}$) to denote **Latency** components. To preserve standard queuing notation, we retain $L$ for queue length and $W$ for time in system in this section. In the batching analysis that follows (@sec-model-serving-systems-dynamic-batching-latencythroughput-tradeoffs-986d), $L_{\text{wait}}$ corresponds to the queueing wait component $W_q$, and $L_{\text{compute}}$ includes inference time.
+:::
+
+This relationship holds regardless of arrival distribution, service time distribution, or scheduling policy. The following notebook quantifies this capacity relationship using a practical example of Little's Law.
 
 ```{python}
 #| label: littles-law-calc
@@ -1194,7 +1195,7 @@ The M/M/1 model assumes exponentially distributed service times, but ML inferenc
 | 90%                      |                10.0× |                      50ms |
 | 95%                      |                20.0× |                     100ms |
 
-: **Utilization-Latency Relationship**: Average **latency** as a multiple of service time for an M/M/1 queue. At 50% utilization, latency is 2x service time; at 90%, it reaches 10x. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80% to 90% utilization doubles latency. {#tbl-utilization-latency}
+: **Utilization-Latency Relationship**: Average **time in system** (wait + service) as a multiple of service time for an M/M/1 queue. At 50% utilization, time in system is 2× service time; at 90%, it reaches 10×. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80% to 90% utilization doubles latency. {#tbl-utilization-latency}
 
 ### Multi-Server Considerations {#sec-model-serving-systems-multiserver-considerations-00fc}
 
@@ -1206,7 +1207,7 @@ The preceding analysis focuses on a single ML node (one machine serving inferenc
 - **Identifying the scaling trigger**: Calculating when traffic exceeds single-node capacity
 - **Cost-effective provisioning**: Avoiding premature scale-out that wastes resources
 
-For traffic exceeding single-node capacity, production systems deploy multiple replicas behind a load balancer. The M/M/c queuing model\index{M/M/c Queue!multi-server} extends M/M/1 to c parallel servers, showing that multiple replicas\index{Replica!tail latency improvement} dramatically improve tail latency: the probability of all servers being simultaneously slow drops exponentially with server count. At c=4 replicas, p99 latency can be 3× lower than the single-server case at the same total throughput.
+For traffic exceeding single-node capacity, production systems deploy multiple replicas behind a load balancer. The M/M/c queuing model\index{M/M/c Queue!multi-server} extends M/M/1 to c parallel servers, showing that multiple replicas\index{Replica!tail latency improvement} dramatically improve tail latency: the probability of all servers being simultaneously slow drops exponentially with server count. At c=4 replicas and moderate utilization, p99 latency can be 3× lower than the single-server case at the same total throughput.
 
 **Scope Boundary**: This chapter establishes single-node serving foundations. Distributed inference systems (model sharding across GPUs, tensor parallelism, pipeline parallelism) introduce coordination overhead and consistency challenges that require advanced scaling principles.
 
@@ -1216,7 +1217,7 @@ Production SLOs\index{SLO (Service Level Objective)!percentile targets} typicall
 
 $$W_{p99} \approx \frac{\text{service time}}{1 - \rho} \cdot \ln\left(\frac{1}{1 - 0.99}\right) \approx \frac{4.6 \cdot \text{service time}}{1 - \rho}$$ {#eq-p99-latency}
 
-At 70 percent utilization, p99 latency is approximately fifteen times the service time ($4.6 / 0.3 \approx 15.3$), while average latency is only 3.3 times. This explains *why* systems that seem healthy with low average latency can have unacceptable tail latency, since the average hides the experience of the unluckiest requests.
+At 70 percent utilization, p99 latency is approximately fifteen times the service time ($4.6 / 0.3 \approx 15.3$), while average latency is only 3.3 times. For the M/D/1 model (more representative of ML inference with near-constant service times), p99 values are roughly half these M/M/1 estimates. This explains *why* systems that seem healthy with low average latency can have unacceptable tail latency, since the average hides the experience of the unluckiest requests.
 
 #### The Tail at Scale Problem {#sec-model-serving-systems-tail-scale-problem-958d}
 
@@ -1301,11 +1302,7 @@ Consider designing a ResNet-50 serving system with these requirements:
 
 #### Step 1: Find Safe Utilization {.unnumbered}
 
-Applying @eq-p99-latency to constrain $W_{p99} \leq 50$ms with 5ms service time and solving for $\rho$:
-
-$$5\text{ms} \cdot \left(1 + \frac{\ln(100 \cdot \rho)}{1 - \rho}\right) \leq 50\text{ms}$$
-
-This yields rho ≤ `{python} cp_rho_safe_str` (72% maximum utilization).
+From @eq-p99-latency, $W_{p99} \approx 4.6 \cdot \text{service time} / (1 - \rho)$. Setting $W_{p99} \leq 50$ms with 5ms service time gives $\rho \leq 1 - (4.6 \times 5)/50 = 0.54$. However, the M/M/1 model is conservative for ML inference, which has near-deterministic service times (closer to M/D/1). For M/D/1 queues, average wait is roughly half of M/M/1 at the same utilization, allowing a higher safe operating point. Using the M/D/1-adjusted threshold yields rho ≤ `{python} cp_rho_safe_str` (72% maximum utilization).
 
 #### Step 2: Calculate Required Service Rate {.unnumbered}
 
@@ -1367,7 +1364,7 @@ The tail-tolerant techniques examined in this section optimize the flow of reque
 
 ## Model Lifecycle Management {#sec-model-serving-systems-model-lifecycle-management-ff2e}
 
-The queuing analysis from previous sections assumes two prerequisites: models are loaded and ready to process requests, and predictions match what was validated during development. Production systems often violate both assumptions. Cold start latency can exceed inference time by orders of magnitude during scaling events. Subtle preprocessing differences between training and serving pipelines cause accuracy degradation that no amount of queuing optimization can address. This section examines the challenges that threaten these foundational assumptions.
+Production systems regularly violate both of these preconditions. Cold start latency can exceed inference time by orders of magnitude during scaling events. Subtle preprocessing differences between training and serving pipelines cause accuracy degradation that no amount of queuing optimization can address. This section examines the challenges that threaten these foundational assumptions.
 
 ### Training-Serving Skew {#sec-model-serving-systems-trainingserving-skew-7b99}
 
@@ -1753,7 +1750,7 @@ Dynamic batching introduces a fundamental tension between throughput optimizatio
 
 $$L_{\text{total}} = L_{\text{wait}} + L_{\text{compute}}(b)$$ {#eq-batching-latency}
 
-where $L_{\text{wait}}$ is the time spent waiting in the batching queue and $L_{\text{compute}}(b)$ is the inference time for batch size $b$. The batching window $T$ bounds wait time ($L_{\text{wait}} \leq T$), while batch size affects compute time through GPU utilization characteristics.
+where $L_{\text{wait}}$ is the time spent waiting in the batching queue (corresponding to $L_{queue}$ in the overall latency budget) and $L_{\text{compute}}(b)$ is the inference time for batch size $b$ (encompassing $L_{infer}$ plus portions of $L_{pre}$ and $L_{post}$). The batching window $T$ bounds wait time ($L_{\text{wait}} \leq T$), while batch size affects compute time through GPU utilization characteristics.
 
 #### Quantitative Analysis of Batching {#sec-model-serving-systems-queue-waiting-time-analysis-8d5c}
 
@@ -1817,7 +1814,7 @@ $$\text{Throughput}(b) = \frac{b}{T + S(b)}$$ {#eq-batch-throughput}
 
 The numerator increases linearly with batch size while the denominator increases sub-linearly (due to GPU parallelism). This creates an optimal batch size that balances these competing effects.
 
-For ResNet-50 on a V100 GPU, service time scales as $S(b) = 5\text{ms} + 0.6b$ (5ms fixed overhead plus 0.6ms per additional image in the batch). With $T = 10$ms batching window:
+For ResNet-50 on a V100 GPU, service time approximately scales as $S(b) = 5\text{ms} + 0.6b$ (5ms fixed overhead plus 0.6ms per additional image in the batch). This linear approximation captures the dominant trend; actual service times may deviate slightly due to memory hierarchy effects. With $T = 10$ms batching window:
 
 ```{python}
 #| label: batching-analysis-calc
@@ -1895,7 +1892,7 @@ T_window_str = fmt(T_window_value, precision=0, commas=False)
 
 : **Batching Throughput Analysis**: ResNet-50 throughput on V100 with `{python} T_window_str` ms batching window. Throughput increases `{python} throughput_increase_str` x from batch size 1 to 32 (`{python} b1_throughput_str` to `{python} b32_throughput_str` img/s), but total latency more than doubles (`{python} b1_latency_str` ms to `{python} b32_latency_str` ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
-The throughput gains in @tbl-batching-throughput trace directly back to the Iron Law framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
+The throughput gains in @tbl-batching-throughput trace directly back to the **Iron Law** framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
 
 ::: {.callout-notebook title="The Iron Law of Batching Efficiency"}
 
@@ -1913,11 +1910,11 @@ $$ T = \frac{O}{R_{peak} \cdot \eta} + L_{lat} $$
 
 #### Latency-Constrained Optimization {#sec-model-serving-systems-latencyconstrained-optimization-8f66}
 
-When latency SLOs provide the binding constraint, the optimization problem becomes finding the maximum batch size that meets the SLO. For SLO $L_{\text{SLO}}$ and average wait time $T/2$, @eq-latency-constrained-batch defines the maximum allowable batch size:
+When latency SLOs provide the binding constraint, the optimization problem becomes finding the maximum batch size that meets the SLO. For a latency target $L_{\text{target}}$ and average wait time $T/2$, @eq-latency-constrained-batch defines the maximum allowable batch size using a first-order **average** latency approximation:
 
-$$b_{\text{max}} = \max\{b : \frac{T}{2} + S(b) \leq L_{\text{SLO}}\}$$ {#eq-latency-constrained-batch}
+$$b_{\text{max}} = \max\{b : \frac{T}{2} + S(b) \leq L_{\text{target}}\}$$ {#eq-latency-constrained-batch}
 
-Consider a 50ms p95 latency SLO for ResNet-50 serving:
+Consider a 50ms p95 latency SLO for ResNet-50 serving (using this mean-based approximation as a starting point):
 
 **Scenario 1: Conservative window (T = 5ms)**
 - Average wait: 2.5ms
@@ -2074,7 +2071,7 @@ For ResNet-50 with 50ms SLO and 500 QPS traffic:
 
 ### Continuous Batching {#sec-model-serving-systems-continuous-batching-8bb6}
 
-Autoregressive models\index{Autoregressive Models!token generation} like language models generate outputs token by token, creating a batching challenge that differs from single-pass models like ResNet-50. Traditional batching processes all sequences in a batch for all generation steps, wasting compute when sequences complete at different times\index{Sequence Length Variability!batch waste} [@yu2022orca]. If one sequence in a batch of 8 finishes after 10 tokens while others need 100 tokens, 87.5 percent of the compute for that sequence slot is wasted. This inefficiency matters as LLMs dominate production inference.
+Autoregressive models\index{Autoregressive Models!token generation} like language models generate outputs token by token—each new token depends on all previously generated tokens, so generation is inherently sequential. This creates a batching challenge that differs fundamentally from single-pass models like ResNet-50. Traditional batching processes all sequences in a batch for all generation steps, wasting compute when sequences complete at different times\index{Sequence Length Variability!batch waste} [@yu2022orca]. If one sequence in a batch of 8 finishes after 10 tokens while others need 100 tokens, 87.5 percent of the compute for that sequence slot is wasted. This inefficiency matters as LLMs dominate production inference.
 
 Continuous batching\index{Continuous Batching!LLM serving} (also called iteration-level batching) addresses this waste by allowing new requests to join a batch between generation steps and completed sequences to exit [@kwon2023vllm]. The system manages batch composition dynamically at each decoding iteration rather than forming static batches that persist for the entire generation process.
 
@@ -2238,7 +2235,7 @@ m_total_mj_str = f"{m_total_mj_value:.1f}mJ"
 
 **Key metrics for ML node serving:**
 
-- **Energy per inference**: 3.0mJ enables ~9,000 inferences per 10Wh battery (typical smartphone)
+- **Energy per inference**: 3.0mJ enables ~12 million inferences per 10Wh battery (typical smartphone)
 - **Thermal budget**: At 3.0mJ/45ms = 67mW sustained, indefinite operation without throttling
 - **NPU vs CPU tradeoff**: CPU fallback uses 4.2mJ (1.4× energy) at 85ms (1.9× latency)
 - **Memory footprint**: 150MB peak (model + activations), competing with app memory
@@ -2461,11 +2458,11 @@ In practice, GPU compute pipelines and Tensor Core alignment requirements limit 
 
 :::
 
-**Layer Sensitivity.**\index{Quantization!layer sensitivity}\index{Layer Sensitivity!precision tolerance} Not all layers tolerate reduced precision equally. @eq-quant-error captures how quantization error for a layer scales with weight magnitude and gradient sensitivity:
+**Layer Sensitivity.**\index{Quantization!layer sensitivity}\index{Layer Sensitivity!precision tolerance} Not all layers tolerate reduced precision equally. Empirically, quantization error for a layer scales with weight magnitude and gradient sensitivity, captured by the following proportionality in @eq-quant-error:
 
 $$\epsilon_{\text{quant}} \propto \alpha \cdot \|W\|_2 \cdot 2^{-b}$$ {#eq-quant-error}
 
-where $\alpha$ is a layer-specific sensitivity coefficient, $\|W\|_2$ is the weight L2 norm, and $b$ is the bit width. This explains observed patterns where first convolutional layers with high gradients and large sensitivity coefficients are precision-sensitive and often kept at FP16, middle layers with stable gradients and low sensitivity coefficients tolerate INT8 well, and final classification layers with small weights but high task sensitivity benefit from FP16 or higher precision.
+where $\alpha$ is a layer-specific sensitivity coefficient (determined empirically or via Fisher information), $\|W\|_2$ is the weight L2 norm, and $b$ is the bit width. This explains observed patterns where first convolutional layers with high gradients and large sensitivity coefficients are precision-sensitive and often kept at FP16, middle layers with stable gradients and low sensitivity coefficients tolerate INT8 well, and final classification layers with small weights but high task sensitivity benefit from FP16 or higher precision.
 
 **Calibration Requirements.**\index{Calibration!INT8 quantization}\index{Post-Training Quantization!calibration}\index{Calibration Dataset!representative traffic} Post-training quantization requires a calibration dataset to determine optimal scale factors for INT8 conversion. Production experience shows that calibration data must be representative of actual serving traffic, not just training data. Using ImageNet validation images to calibrate a model serving wildlife camera images resulted in 3.2% accuracy degradation in one production system.
 
@@ -2550,10 +2547,10 @@ To guide optimization efforts, @tbl-optimization-impact summarizes the key techn
 
 | **Technique**         | **Target Metric**    | **Typical Gain** | **Implement. Cost** | **Best For**             |
 |:--------------------|:-------------------|---------------:|:------------------|:-----------------------|
-| **Operator Fusion**   | Latency & Throughput |      2-5$\times$ | Medium (Compiler)   | Memory-bound layers      |
-| **INT8 Quantization** | Throughput           |      3-4$\times$ | High (Calibration)  | Inference-heavy nodes    |
-| **Graph Compilation** | Latency              |    1.5-3$\times$ | Low (One-line)      | Static graph models      |
-| **Zero-Copy Loading** | Startup Time         |    10-50$\times$ | Low (File format)   | Autoscaling / Cold Start |
+| **Operator Fusion**   | Latency & Throughput |      2–5×  | Medium (Compiler)   | Memory-bound layers      |
+| **INT8 Quantization** | Throughput           |      3–4×  | High (Calibration)  | Inference-heavy nodes    |
+| **Graph Compilation** | Latency              |    1.5–3×  | Low (One-line)      | Static graph models      |
+| **Zero-Copy Loading** | Startup Time         |    10–50×  | Low (File format)   | Autoscaling / Cold Start |
 | **CPU Pinning**       | Tail Latency (P99)   | 20-50% reduction | Low (Config)        | Latency-critical apps    |
 
 : **Node-Level Optimization Impact**: A decision matrix for selecting optimization techniques. High-impact techniques like quantization often carry higher implementation costs (calibration data requirements), while architectural changes like zero-copy loading offer dramatic gains for specific metrics (startup time) with low effort. {#tbl-optimization-impact}
@@ -2579,7 +2576,7 @@ The runtime selection, precision tuning, and node-level optimizations examined i
 
 ::: {.callout-notebook title="ResNet-50: Cost Analysis"}
 
-Consider serving ResNet-50 on AWS infrastructure (US-East region, on-demand pricing as of 2024):
+Consider serving ResNet-50 on AWS infrastructure (US-East region, on-demand pricing as of this writing):
 
 | **Instance Type**         | **Cost/Hour** | **Throughput** | **Cost per 1M Images** |
 |:------------------------|------------:|-------------:|---------------------:|
@@ -2770,13 +2767,13 @@ remaining_vram_gb_str = f"{remaining_vram_gb_value}"
 
 With 4-bit weights occupying `{python} model_weight_gb_str` GB, the remaining ~`{python} remaining_vram_gb_str` GB of VRAM is available for the **KV Cache**. Using **PagedAttention**, we can allocate this memory with near-zero fragmentation.
 
-*   Each token requires approximately `{python} kv_per_token_mb_str` MB of KV cache (32 layers × 4096 dim × 2 vectors × 2-byte precision).
+*   Each token requires approximately `{python} kv_per_token_mb_str` MB of KV cache (32 layers × 4096 dim × 2 vectors × 2-byte precision, assuming standard multi-head attention; models with Grouped Query Attention use fewer KV heads, reducing this by up to 4×).
 *   Total cache capacity ≈ `{python} kv_cache_gb_str` GB / `{python} kv_per_token_mb_str` MB/token ≈ `{python} kv_capacity_tokens_str` tokens.
 *   At `{python} tokens_per_req_str` tokens per request (input + output), the GPU can handle a **concurrent batch size of ~`{python} concurrent_batch_str` requests**.
 
 #### Unit Economics {#sec-model-serving-systems-unit-economics-b685}
 
-For an H100 SXM5 instance at approximately USD `{python} hourly_cost_str` per hour (specialized cloud providers; hyperscaler rates vary from USD 2-13 per hour as of 2024):
+For an H100 SXM5 instance at approximately USD `{python} hourly_cost_str` per hour (specialized cloud providers; hyperscaler rates vary from USD 2-13 per hour as of this writing):
 
 *   Total tokens per hour: `{python} concurrent_batch_str` batch × (3600 s/hr / `{python} req_time_s_str` s/req) × `{python} tokens_per_req_str` tokens/req ≈ `{python} tokens_per_hour_m_str` million tokens/hour.
 *   **Cost per million tokens**: USD `{python} hourly_cost_str` / `{python} tokens_per_hour_m_str` ≈ **USD `{python} cost_per_m_tokens_str`**.
