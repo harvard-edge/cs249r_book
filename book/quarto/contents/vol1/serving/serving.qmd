@@ -108,7 +108,7 @@ Serving\index{Serving!production deployment}\index{Model Serving!paradigm shift}
 This inversion (from throughput to *latency*, from controlled conditions to *unpredictable traffic*, from offline to *real time*) defines the serving challenge. Prior chapters established techniques that must now be revalidated: @sec-benchmarking-ai measured performance under controlled conditions, but serving faces traffic patterns that no benchmark could anticipate; @sec-model-compression provided quantization methods that reduced model size, but serving must confirm those optimizations preserve accuracy under real traffic distributions. This fundamental shift in constraints creates what we call the *serving inversion*\index{Serving Inversion!throughput to latency}.
 
 ::: {.callout-perspective title="The Serving Inversion"}
-Applying the **DAM Taxonomy** reveals how deployment fundamentally flips your engineering priorities:
+Applying the **D·A·M taxonomy** reveals how deployment fundamentally flips your engineering priorities:
 
 *   **Data (Information)**: In training, you maximize **Volume** (shuffling billions of samples). In serving, you maximize **Freshness** (processing one request *right now*).
 *   **Algorithm (Logic)**: In training, the math is **Mutable** (updating weights via backprop). In serving, the math is **Frozen** (fixed weights, forward pass only).
@@ -133,7 +133,7 @@ The consequences of ignoring this inversion become visceral during a *traffic sp
 3.  **Degradation**: Serve cached/dumber recommendations to reduce compute cost per query.
 :::
 
-As shown in @fig-tail-latency-explosion, this physics dictates *why* production systems must run at relatively low utilization (40-60%) to guarantee stable tail latency\index{Tail Latency!utilization threshold} (p99). The curve is a simple queueing approximation intended for intuition rather than a specific workload.
+Trace the curve in @fig-tail-latency-explosion and notice how latency remains manageable until utilization crosses roughly 70%, then explodes—this is *why* production systems must run at relatively low utilization (40-60%) to guarantee stable tail latency\index{Tail Latency!utilization threshold} (p99). For a mathematical treatment of long-tailed distributions and why P99 latency becomes the *median* user experience at scale, see @sec-system-foundations-distributions-long-tail-37cc. The curve is a simple queueing approximation intended for intuition rather than a specific workload.
 
 ```{python}
 #| label: fig-tail-latency-explosion
@@ -175,7 +175,7 @@ ax.legend(loc='upper left', fontsize=8)
 plt.show()
 ```
 
-Beyond the technical limits of latency, the economics of serving have undergone a radical transformation. As models become more efficient and hardware becomes more specialized, the cost of "intelligence" is collapsing. This trend is visualized in @fig-intelligence-deflation, which tracks public API list prices as a market proxy.
+Beyond the technical limits of latency, the economics of serving have undergone a radical transformation. As models become more efficient and hardware becomes more specialized, the cost of "intelligence" is collapsing. To grasp the speed of this collapse, examine the log-scale price trajectory in @fig-intelligence-deflation, which tracks public API list prices as a market proxy.
 
 ```{python}
 #| label: fig-intelligence-deflation
@@ -242,7 +242,7 @@ These priorities motivate a precise definition of the discipline this chapter ad
 
 :::
 
-Serving systems must execute a complete inference pipeline under latency constraints, not just the neural network computation. A common misconception is that "inference time" equals "serving time"—in reality, the neural network is just one stage in a longer pipeline. @fig-serving-inference-pipeline illustrates this pipeline: raw inputs flow through preprocessing (traditional computing), neural network inference (deep learning), and postprocessing (traditional computing) before producing final outputs. Each stage contributes to total latency, and bottlenecks can occur anywhere in the pipeline. As we will see in @sec-model-serving-systems-latency-budget-ef40, preprocessing often dominates total latency when inference runs on optimized hardware.
+Serving systems must execute a complete inference pipeline under latency constraints, not just the neural network computation. A common misconception is that "inference time" equals "serving time"—in reality, the neural network is just one stage in a longer pipeline. Follow the stages in @fig-serving-inference-pipeline from left to right: raw inputs pass through preprocessing (traditional computing), neural network inference (deep learning), and postprocessing (traditional computing) before producing final outputs. Notice that any of these stages—not just the neural network—can become the latency bottleneck. As we will see in @sec-model-serving-systems-latency-budget-ef40, preprocessing often dominates total latency when inference runs on optimized hardware.
 
 ::: {#fig-serving-inference-pipeline fig-env="figure" fig-pos="htb" fig-cap="**The Inference Pipeline**: ML serving systems transform raw inputs into final outputs through sequential stages: preprocessing, neural network computation, and postprocessing. The neural network represents just one component; preprocessing and postprocessing rely on traditional computing and often dominate total latency in optimized systems." fig-alt="Flow diagram showing six connected boxes: Raw Input, Preprocessing, Neural Network, Raw Output, Postprocessing, Final Output. Preprocessing and postprocessing are labeled Traditional Computing; neural network is labeled Deep Learning."}
 ```{.tikz}
@@ -504,7 +504,7 @@ While load balancers distribute requests across replicas, achieving predictable 
 
 ### Deterministic Latency and Resource Isolation {#sec-model-serving-systems-deterministic-latency-resource-isolation-4d1c}
 
-An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes (logging agents, monitoring tools, and system interrupts) that can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is under-utilized. This is the same tail latency explosion shown in @fig-tail-latency-explosion, but triggered by resource contention rather than queuing.
+An inference server does not operate in isolation. On a single machine, the operating system manages multiple competing processes (logging agents, monitoring tools, and system interrupts) that can intermittently steal CPU cycles from the inference pipeline. These "noisy neighbors" are a primary source of **latency jitter**, where the time required to process identical requests varies significantly, causing the 99th percentile (P99) latency to spike even when the hardware is under-utilized. Recall the tail latency explosion from @fig-tail-latency-explosion—the same spike occurs here, but the trigger is resource contention rather than queuing.
 
 To achieve deterministic performance\index{Latency!deterministic}\index{Resource Isolation!serving} on a single node, systems engineers employ three primary isolation techniques:
 
@@ -526,7 +526,7 @@ Model optimization focuses on the mathematical artifact, while model serving req
 
 The internal anatomy of these servers reveals *how* they bridge the gap between irregular user traffic and the highly regular, batch-oriented requirements of accelerators. The core challenge is that user requests arrive unpredictably (one millisecond apart, then five seconds of silence), while GPUs perform best with steady streams of uniformly-sized batches.
 
-**The Request Pipeline.** Every request traverses a multi-stage pipeline designed to maximize hardware throughput while minimizing latency overhead, as @fig-server-anatomy illustrates.
+**The Request Pipeline.** Every request traverses a multi-stage pipeline designed to maximize hardware throughput while minimizing latency overhead. Walk through the six stages in @fig-server-anatomy to see how each component absorbs a different source of complexity.
 
 ::: {#fig-server-anatomy fig-env="figure" fig-pos="htb" fig-cap="**Inference Server Anatomy**: A modern inference server decouples network handling from accelerator execution through a staged pipeline. Each stage isolates a concern, from absorbing bursty traffic to forming efficient batches, so the hardware accelerator stays highly utilized despite irregular arrival patterns." fig-alt="Flowchart showing 6-stage inference server pipeline: Client to Network Ingress to Request Queue (cylinder) to Dynamic Batcher, then down to Inference Runner to Accelerator. Arrows connect stages sequentially."}
 ```{.tikz}
@@ -916,7 +916,7 @@ optimized_total_str = fmt(optimized_total_ms_value, precision=1, commas=False)
 amdahl_speedup_str = fmt(amdahl_speedup_value, precision=1, commas=False)
 ```
 
-**Amdahl's Law at Work**: Preprocessing (`{python} preprocess_ms_str` ms) and data transfer (`{python} cpu_gpu_ms_str` ms) consume `{python} non_model_pct_str`% of total latency. Optimizing the model 10× faster (`{python} resnet_inference_ms_str` ms → `{python} model_10x_ms_str` ms) yields only `{python} amdahl_speedup_str`× end-to-end speedup (from `{python} total_latency_str` ms to `{python} optimized_total_str` ms). This is why focusing exclusively on model optimization (quantization, pruning) often disappoints: the bottleneck is elsewhere.
+**Amdahl's Law at Work** (see @sec-system-foundations-amdahls-law-gustafsons-law-2f5c for the formal derivation): Preprocessing (`{python} preprocess_ms_str` ms) and data transfer (`{python} cpu_gpu_ms_str` ms) consume `{python} non_model_pct_str`% of total latency. Optimizing the model 10× faster (`{python} resnet_inference_ms_str` ms → `{python} model_10x_ms_str` ms) yields only `{python} amdahl_speedup_str`× end-to-end speedup (from `{python} total_latency_str` ms to `{python} optimized_total_str` ms). This is why focusing exclusively on model optimization (quantization, pruning) often disappoints: the bottleneck is elsewhere.
 
 **DSA Efficiency**: General-purpose CPUs achieve only 1-2% of peak performance at batch-1 because instruction overhead dominates. DSAs like TPUs and Tensor Cores replace complex logic with dense MAC arrays, achieving 10-100× higher arithmetic intensity. This makes hardware acceleration a requirement for economically viable serving.
 
@@ -1008,7 +1008,7 @@ The preceding analysis examined where time goes within individual pipeline stage
 
 In a serialized serving system, the hardware sits idle during network I/O and CPU-based preprocessing. High-performance serving systems use **Request Pipelining**\index{Request Pipelining!GPU utilization} to overlap these stages, ensuring the GPU is fed a continuous stream of tensors.
 
-**Overlapping I/O and Compute.**\index{I/O Overlap!compute pipelining} @fig-serving-pipeline-timing contrasts serial execution with pipelined execution. In the serial case (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins. Even with a fast GPU, the system throughput is limited by the slowest stage, and the GPU remains idle for more than 50% of the time.
+**Overlapping I/O and Compute.**\index{I/O Overlap!compute pipelining} Compare the two timing diagrams in @fig-serving-pipeline-timing. In the serial case (A), each request must complete its entire lifecycle (Network $\rightarrow$ CPU Preprocessing $\rightarrow$ GPU Inference $\rightarrow$ Postprocessing) before the next request begins—notice the grey idle gaps that leave the GPU unused for more than 50% of the time. Now look at the pipelined case (B), where those gaps disappear.
 
 ::: {#fig-serving-pipeline-timing fig-env="figure" fig-pos="htb" fig-cap="**Request Pipelining**: Pipelining hides latency by overlapping independent operations across different hardware resources. In pipelined execution (B), the CPU processes the next request's data while the GPU executes the current request's inference. This increases the GPU duty cycle toward 100%, effectively doubling or tripling throughput on the same hardware without changing the model." fig-alt="Two timing diagrams. A (Serial): alternating CPU preprocessing, GPU inference, and idle blocks in sequence. B (Pipelined): two parallel rows where CPU preprocessing overlaps with GPU inference, eliminating idle time."}
 ```{.tikz}
@@ -1677,7 +1677,7 @@ latency_increase_str = fmt(latency_increase_value, precision=0, commas=False)
 **The Systems Conclusion**: By accepting a **`{python} latency_increase_str`× increase in latency** (`{python} batch1_ms_str` ms → `{python} batch8_user_latency_str` ms), you have achieved nearly **`{python} latency_increase_str`× higher throughput** on the same hardware. As long as `{python} batch8_user_latency_str` ms is under your 20ms budget, this is "free" capacity. This trade-off is the fundamental lever of serving economics.
 :::
 
-@fig-throughput-latency-knee visualizes this trade-off, showing the **"Knee"** of the curve. This is the optimal operating point where throughput is maximized before latency spikes due to queuing; the numbers are representative rather than tied to a single benchmark.
+Look for the **"Knee"** in @fig-throughput-latency-knee—the point where the blue throughput curve begins to plateau just as the orange latency curve starts its sharp upward spike. This is the optimal operating point: push batch size beyond the knee and queuing delays dominate; stay below it and you leave hardware capacity on the table. The numbers are representative rather than tied to a single benchmark.
 
 ```{python}
 #| label: fig-throughput-latency-knee
@@ -2434,7 +2434,7 @@ The optimization-compatibility tradeoff is inherent. More aggressive optimizatio
 
 ### Precision Selection for Serving {#sec-model-serving-systems-precision-selection-serving-55ba}
 
-Numerical precision directly trades accuracy for throughput, connecting to the quantization techniques covered in @sec-model-compression. While @sec-model-compression focuses on training-time quantization, serving introduces additional considerations including calibration requirements, layer sensitivity, and dynamic precision selection.
+Numerical precision directly trades accuracy for throughput, connecting to the quantization techniques covered in @sec-model-compression. For the foundational comparison of numerical formats (FP32, FP16, BF16, FP8, INT8) and their precision-range trade-offs, see @sec-system-foundations-numerical-representations-7b2f; for the mechanics of symmetric and asymmetric integer quantization, see @sec-system-foundations-integer-quantization-9d02. While @sec-model-compression focuses on training-time quantization, serving introduces additional considerations including calibration requirements, layer sensitivity, and dynamic precision selection.
 
 **Precision-Throughput Relationship.**\index{Precision!throughput tradeoff}\index{Quantization!serving precision} For memory-bandwidth-bound operations\index{Memory-Bandwidth Bound!precision impact}, reducing precision proportionally increases throughput by reducing data movement. @eq-precision-throughput quantifies the theoretical maximum speedup from precision reduction:
 
@@ -2613,7 +2613,7 @@ The worked example in @sec-model-serving-systems-queuing-theory-tail-latency-29a
 
 To synthesize the principles of latency budgeting, memory management, and hardware efficiency, we analyze a complete production profile for a modern Large Language Model (LLM) serving workload\index{Llama-3!serving case study}\index{LLM Serving!production case study}. This case study demonstrates how physical constraints—memory bandwidth and capacity—translate directly into service-level metrics and unit economics.
 
-We begin with the bottleneck that dominates LLM serving costs: KV cache memory. @fig-kv-cache-growth visualizes the memory pressure that explains *why* long-context serving is memory-bound even on H100s, using typical 70B-class assumptions.
+We begin with the bottleneck that dominates LLM serving costs: KV cache memory. Watch how steeply the memory curves climb in @fig-kv-cache-growth—especially for larger batch sizes—to see *why* long-context serving is memory-bound even on H100s, using typical 70B-class assumptions.
 
 ```{python}
 #| label: fig-kv-cache-growth
