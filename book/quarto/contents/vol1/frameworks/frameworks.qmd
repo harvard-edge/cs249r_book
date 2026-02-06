@@ -65,7 +65,7 @@ a100_tflops_sparse_value = a100_tflops_fp16_value * 2
 # Extract ResNet-50 parameters
 resnet_params_m_value = RESNET50_PARAMS.to(Mparam).magnitude
 # Extract GPT-3 parameters (convert to billions)
-gpt3_params_b_value = GPT3_PARAMS.to(Mparam).magnitude / 1000
+gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude
 # Extract ResNet-50 FLOPs (in GFLOPs)
 resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
 
@@ -73,6 +73,11 @@ resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
 gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)
 resnet_fp32_mb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, MB)
 resnet_adam_mb_value = model_memory(RESNET50_PARAMS, BYTES_ADAM_STATE, MB)
+resnet_training_min_gb_value = 10
+resnet_training_max_gb_value = 15
+resnet_training_ratio_min_value = (
+    resnet_training_min_gb_value * 1024 / resnet_fp32_mb_value
+)
 # Derived: 7B model reference (used repeatedly for examples)
 model_7b_params = 7e9
 model_7b_fp16_gb_value = model_memory(model_7b_params, BYTES_FP16, GB)
@@ -94,11 +99,11 @@ pcie4_1gb_equiv_ops_value = (pcie4_1gb_ms_value / 1e3) * A100_FLOPS_FP16_TENSOR.
 img_per_sec = 1000
 img_res = 224
 img_channels = 3
-dataloader_mbs_value = img_per_sec * img_res * img_res * img_channels / 1e6
+dataloader_mbs_value = (img_per_sec * img_res * img_res * img_channels * byte).to(MB).magnitude
 # Batch of 64 images at 224x224x3 in FP32
 batch_size = 64
 batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32.magnitude
-batch_mb_value = batch_bytes / 1e6
+batch_mb_value = (batch_bytes * byte).to(MB).magnitude
 batch_transfer_ms_value = batch_bytes / (PCIE_GEN4_BW.to(byte/second).magnitude) * 1e3
 
 # Training step anatomy example dimensions (used in prose before detailed calc cell)
@@ -118,6 +123,9 @@ a100_tflops_sparse_str = fmt(a100_tflops_sparse_value, precision=0, commas=False
 resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)
 resnet_fp32_mb_str = fmt(resnet_fp32_mb_value, precision=0, commas=False)
 resnet_adam_mb_str = fmt(resnet_adam_mb_value, precision=0, commas=False)
+resnet_training_min_gb_str = fmt(resnet_training_min_gb_value, precision=0, commas=False)
+resnet_training_max_gb_str = fmt(resnet_training_max_gb_value, precision=0, commas=False)
+resnet_training_ratio_str = fmt(resnet_training_ratio_min_value, precision=0, commas=False)
 resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)
 gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)
 gpt3_fp16_gb_str = fmt(gpt3_fp16_gb_value, precision=0, commas=False)
@@ -132,7 +140,7 @@ pcie4_4mb_ms_str = fmt(pcie4_4mb_ms_value, precision=3, commas=False)
 nvlink_4mb_ms_str = fmt(nvlink_4mb_ms_value, precision=3, commas=False)
 hbm_4mb_ms_str = fmt(hbm_4mb_ms_value, precision=3, commas=False)
 pcie4_1gb_ms_str = fmt(pcie4_1gb_ms_value, precision=0, commas=False)
-pcie4_1gb_equiv_ops_str = fmt(pcie4_1gb_equiv_ops_value / 1e12, precision=1, commas=False)
+pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops_value * flop).to(TFLOPs).magnitude, precision=1, commas=False)
 dataloader_mbs_str = fmt(dataloader_mbs_value, precision=0, commas=False)
 batch_mb_str = fmt(batch_mb_value, precision=0, commas=False)
 batch_transfer_ms_str = fmt(batch_transfer_ms_value, precision=1, commas=False)
@@ -252,7 +260,7 @@ The execution problem asks a seemingly simple question: should operations execut
 ### Why Execution Strategy Matters: The Memory Wall {#sec-ai-frameworks-execution-strategy-matters-memory-wall-1ce8}
 
 \index{Memory Wall!execution strategy impact}
-To understand why execution strategy matters so much, consider the **Memory Wall**\index{Memory Wall!definition}, the growing gap between processor computational speed and memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} a100_tflops_fp16_str` TFLOPS of compute and `{python} a100_bw_tbs_str` TB/s of memory bandwidth, element-wise operations like ReLU achieve less than 1% of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. The Roofline Model (@sec-system-foundations-roofline-model-5f7c) formalizes this trade-off, showing exactly when operations are memory-bound versus compute-bound.
+To understand why execution strategy matters so much, consider the **Memory Wall**\index{Memory Wall!definition} (first introduced in @sec-deep-learning-systems-foundations), the growing gap between processor computational speed and memory bandwidth. Modern GPUs can perform arithmetic far faster than they can fetch data. On an A100 GPU with `{python} a100_tflops_fp16_str` TFLOPS of compute and `{python} a100_bw_tbs_str` TB/s of memory bandwidth, element-wise operations like ReLU achieve less than 1% of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. The Roofline Model (@sec-system-foundations-roofline-model-5f7c) formalizes this trade-off, showing exactly when operations are memory-bound versus compute-bound.
 
 This creates a fundamental classification: operations are either **compute-bound**\index{Compute-bound operations} (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound**\index{Memory-bound operations} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory-bound, though the large matrix multiplications that dominate total compute time can be compute-bound.
 
@@ -1203,7 +1211,7 @@ From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step
 ```{python}
 #| label: dispatch-tax-calc
 #| echo: false
-from physx.formatting import fmt
+from physx.formatting import fmt, md_math
 
 # =============================================================================
 # PURPOSE
@@ -1242,6 +1250,7 @@ dispatch_sw_time_str = fmt(dispatch_sw_time_value, precision=0, commas=False)
 dispatch_ratio_large_str = fmt(dispatch_ratio_large_value, precision=4, commas=False)
 dispatch_overhead_pct_str = fmt(dispatch_overhead_pct_value, precision=0, commas=False)
 dispatch_compilation_speedup_str = fmt(dispatch_compilation_speedup_value, precision=0, commas=False)
+t_sw_md = md_math(f"T_{{sw}} \\approx {gpt3_sw_time_us_value} \\, \\mu s")
 ```
 
 This cumulative latency creates what is effectively *a dispatch tax* on execution.
@@ -1261,7 +1270,7 @@ This cumulative latency creates what is effectively *a dispatch tax* on executio
 
 *   **Compute**: Huge matrix multiplications.
 *   **Hardware Time**: T_hw ≈ 100 ms = `{python} gpt3_hw_time_us_value` μs.
-*   **Software Overhead**: $T_{sw} \approx {python} gpt3_sw_time_us_value \mu s$.
+*   **Software Overhead**: `{python} t_sw_md`.
 *   **Ratio**: `{python} gpt3_sw_time_us_value` / `{python} gpt3_hw_time_us_value` ≈ **`{python} dispatch_ratio_large_str`**.
 *   **Conclusion**: Python overhead is negligible. Compilation helps only via kernel fusion (memory bandwidth), not dispatch elimination.
 :::
@@ -1494,7 +1503,7 @@ def deep_network(x, w1, w2, w3):
 ```
 :::
 
-Frameworks attack this memory wall with two primary strategies. The first is *activation checkpointing*\index{Gradient Checkpointing!memory-compute trade-off}\index{Activation Checkpointing|see{Gradient Checkpointing}} (also called gradient checkpointing): rather than storing every activation, the framework stores only selected checkpoints and recomputes the intermediate activations during the backward pass. @sec-ai-training examines checkpointing strategies in detail, including optimal checkpoint placement algorithms. @lst-checkpoint_scheme shows the pattern: save activations at checkpoint boundaries, recompute everything between them. The quantitative trade-offs of this approach are examined in @sec-frameworks-autograd-principle-memory.
+Frameworks attack this memory wall with two primary strategies. The first is *activation checkpointing*\index{Gradient Checkpointing!memory-compute trade-off}\index{Activation Checkpointing|see{Gradient Checkpointing}} (also called gradient checkpointing): rather than storing every activation, the framework stores only selected checkpoints and recomputes the intermediate activations during the backward pass. @sec-ai-training examines checkpointing strategies in detail, including optimal checkpoint placement algorithms. @lst-checkpoint_scheme shows the pattern: save activations at checkpoint boundaries, recompute everything between them.
 
 ::: {#lst-checkpoint_scheme lst-cap="**Checkpointing**: Reduces memory usage by selectively storing intermediate activations during forward passes. Frameworks balance storage needs with computational efficiency to optimize model training."}
 ```{.python}
@@ -1607,9 +1616,9 @@ For a network with $L$ layers, the system must save approximately $L$ activation
 - **Forward activations**: ~8-12 GB (varies by implementation and checkpointing)
 - **Parameter gradients**: ~`{python} resnet_fp32_mb_str` MB (same size as parameters)
 - **Optimizer state (Adam)**: ~`{python} resnet_adam_mb_str` MB (two momentum buffers per parameter)
-- **Total training footprint**: ~10–15 GB versus ~`{python} resnet_fp32_mb_str` MB for inference
+- **Total training footprint**: ~`{python} resnet_training_min_gb_str`–`{python} resnet_training_max_gb_str` GB versus ~`{python} resnet_fp32_mb_str` MB for inference
 
-This 100x ratio between training and inference memory quantifies why the Data Movement ($D_{vol}$) term dominates training latency in the **Iron Law**. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone.
+This `{python} resnet_training_ratio_str`x ratio between training and inference memory quantifies why the Data Movement ($D_{vol}$) term dominates training latency in the **Iron Law**. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone.
 
 Frameworks provide two primary mechanisms to manage this trade-off. **Gradient checkpointing**\index{Gradient Checkpointing!recomputation strategy} [@chen2016training] trades recomputation for memory: instead of saving all activations, the framework saves only a subset and recomputes the rest during the backward pass. This typically reduces activation memory by 50–90% at the cost of 20–33% additional compute (with optimal $\sqrt{n}$ checkpoint placement). In Iron Law terms, checkpointing increases the $O$ term (recomputation) to reduce the $D_{vol}$ term (memory traffic). **Tensor detachment** provides a complementary mechanism: calling `.detach()` on a tensor removes it from the computation graph entirely, preventing the framework from saving activations through that path. This is essential for transfer learning, where pretrained layers should not accumulate gradients, and reduces the $D_{vol}$ term by eliminating unnecessary activation storage.
 
@@ -2052,6 +2061,8 @@ admin_tax_gb_str = fmt(admin_tax_gb_value, precision=0, commas=False)
 admin_batch_str = fmt(admin_batch_size, precision=0, commas=False)
 admin_layers_str = fmt(admin_layers, precision=0, commas=False)
 admin_width_str = fmt(admin_width, precision=0, commas=False)
+from physx.formatting import md_math
+admin_act_calc_md = md_math(f"{admin_batch_str} \\times {admin_layers_str} \\times {admin_width_str}^{{2}} \\times 2 \\approx \\mathbf{{{admin_act_gb_str} \\text{{ GB}}}}")
 ```
 
 ::: {.callout-notebook title="The Administrative Tax"}
@@ -2065,7 +2076,7 @@ admin_width_str = fmt(admin_width, precision=0, commas=False)
 4.  **Activations**: For a batch size of `{python} admin_batch_str` and a `{python} admin_layers_str`-layer network, you must store every intermediate layer output for the backward pass.
 
     $$ \text{Activations} \approx \text{Batch} \times \text{Layers} \times \text{Width}^{2} \times 2 \text{ bytes} $$
-    For a `{python} admin_width_str`-width model: ${python} admin_batch_str \times {python} admin_layers_str \times {python} admin_width_str^{2} \times 2 \approx \mathbf{{python} admin_act_gb_str \text{ GB}}$. (Each layer's activation is a `Width × Width` matrix per sample—appropriate for transformer-style models where intermediate projections scale with hidden dimension squared.)
+    For a `{python} admin_width_str`-width model: `{python} admin_act_calc_md`. (Each layer's activation is a `Width × Width` matrix per sample—appropriate for transformer-style models where intermediate projections scale with hidden dimension squared.)
 
 **The Systems Conclusion**: Your `{python} admin_weights_gb_str` GB model has an **"Administrative Tax"** of ~`{python} admin_tax_gb_str` GB (`{python} admin_grads_gb_str` GB gradients + `{python} admin_opt_gb_str` GB optimizer + `{python} admin_act_gb_str` GB activations) before you even process the first batch. During training, **Data Movement** includes saving and retrieving these activations, which is why training is often 3–4× slower than pure inference.
 :::
@@ -3317,17 +3328,17 @@ These three implementations solve the same mathematical problem but reveal funda
 
 **TensorFlow/Keras** inverts this priority through the `Sequential` API, which declares structure without executing it, solving the Abstraction Problem first: the same declaration compiles to server GPUs, mobile NPUs, or browser WebGL backends. Eager mode (default in TensorFlow 2.x) recovers some of PyTorch's debugging flexibility, but production deployment still relies on graph capture for optimization.
 
-**JAX** makes the most radical trade-off by treating the model as a pure function[^pure-function] with immutable data[^immutable-data] and no internal state[^stateless-function]. This functional purity solves the Differentiation Problem most elegantly: `grad`, `vmap` (automatic vectorization[^vectorization]), and `jit` (just-in-time compilation[^jit-compilation]) are composable transformations on stateless functions, not infrastructure bolted onto an object system. The cost is explicit parameter management and a programming model unfamiliar to most engineers.
+**JAX** makes the most radical trade-off by treating the model as a pure function[^fn-pure-function] with immutable data[^fn-immutable-data] and no internal state[^fn-stateless-function]. This functional purity solves the Differentiation Problem most elegantly: `grad`, `vmap` (automatic vectorization[^fn-vectorization]), and `jit` (just-in-time compilation[^fn-jit-compilation]) are composable transformations on stateless functions, not infrastructure bolted onto an object system. The cost is explicit parameter management and a programming model unfamiliar to most engineers.
 
-[^immutable-data]: **Immutable Data Structures**: Cannot be modified after creation. Any operation that appears to change the data actually creates a new copy, ensuring that the original data remains unchanged. This prevents accidental modifications and enables safe parallel processing.
+[^fn-immutable-data]: **Immutable Data Structures**: Cannot be modified after creation. Any operation that appears to change the data actually creates a new copy, ensuring that the original data remains unchanged. This prevents accidental modifications and enables safe parallel processing.
 
-[^stateless-function]: **Stateless Function**: Produces the same output for the same inputs every time, without relying on or modifying any external state. This predictability enables mathematical optimization and parallel execution.
+[^fn-stateless-function]: **Stateless Function**: Produces the same output for the same inputs every time, without relying on or modifying any external state. This predictability enables mathematical optimization and parallel execution.
 
-[^vectorization]: **Automatic Vectorization**: Transforms operations on single data points into operations on entire arrays or batches, improving computational efficiency by using SIMD (Single Instruction, Multiple Data) processor capabilities.
+[^fn-vectorization]: **Automatic Vectorization**: Transforms operations on single data points into operations on entire arrays or batches, improving computational efficiency by using SIMD (Single Instruction, Multiple Data) processor capabilities.
 
-[^jit-compilation]: **Just-in-Time (JIT) Compilation**: Translates high-level code into optimized machine code at runtime, enabling performance optimizations based on actual data shapes and hardware characteristics.
+[^fn-jit-compilation]: **Just-in-Time (JIT) Compilation**: Translates high-level code into optimized machine code at runtime, enabling performance optimizations based on actual data shapes and hardware characteristics.
 
-[^pure-function]: **Pure Function**: Has no side effects and always returns the same output for the same inputs. Pure functions enable mathematical reasoning about code behavior and safe program transformations.
+[^fn-pure-function]: **Pure Function**: Has no side effects and always returns the same output for the same inputs. Pure functions enable mathematical reasoning about code behavior and safe program transformations.
 
 [^fn-xla]: **XLA (Accelerated Linear Algebra)**: Google's domain-specific compiler released in March 2017, optimizing tensor operations across CPUs, GPUs, and TPUs. The name emphasizes that linear algebra operations (matrix multiplies, convolutions) dominate ML computation. Achieves 3-10x speedups through operation fusion and hardware-specific codegen. Now part of OpenXLA (2022), a cross-industry effort including Google, Meta, NVIDIA, and Apple.
 
@@ -3543,6 +3554,7 @@ The bias addition and ReLU follow similar patterns, each adding a node to the au
 # INPUT
 # =============================================================================
 from physx.formatting import fmt
+from physx.constants import byte, KB, MB, flop, KFLOPs, MFLOPs
 
 train_batch = 32
 train_input = 784
@@ -3579,23 +3591,23 @@ train_bwd_ai_str = "~8.0"
 # =============================================================================
 # OUTPUT
 # =============================================================================
-train_mm1_flops_str = fmt(train_mm1_flops / 1e6, precision=1, commas=False) + "M"
-train_mm1_mem_str = fmt(train_mm1_mem_bytes / 1e6, precision=1, commas=False) + " MB"
+train_mm1_flops_str = fmt((train_mm1_flops * flop).to(MFLOPs).magnitude, precision=1, commas=False) + "M"
+train_mm1_mem_str = fmt((train_mm1_mem_bytes * byte).to(MB).magnitude, precision=1, commas=False) + " MB"
 train_mm1_ai_str = fmt(train_mm1_flops / train_mm1_mem_bytes, precision=1, commas=False)
 
-train_relu_flops_str = fmt(train_relu_flops / 1e3, precision=0, commas=False) + "K"
-train_relu_mem_str = fmt(train_relu_mem_bytes / 1e3, precision=0, commas=False) + " KB"
+train_relu_flops_str = fmt((train_relu_flops * flop).to(KFLOPs).magnitude, precision=0, commas=False) + "K"
+train_relu_mem_str = fmt((train_relu_mem_bytes * byte).to(KB).magnitude, precision=0, commas=False) + " KB"
 train_relu_ai_str = fmt(train_relu_flops / train_relu_mem_bytes, precision=3, commas=False)
 
-train_mm2_flops_str = fmt(train_mm2_flops / 1e3, precision=0, commas=False) + "K"
-train_mm2_mem_str = fmt(train_mm2_mem_bytes / 1e3, precision=0, commas=False) + " KB"
+train_mm2_flops_str = fmt((train_mm2_flops * flop).to(KFLOPs).magnitude, precision=0, commas=False) + "K"
+train_mm2_mem_str = fmt((train_mm2_mem_bytes * byte).to(KB).magnitude, precision=0, commas=False) + " KB"
 train_mm2_ai_str = fmt(train_mm2_flops / train_mm2_mem_bytes, precision=1, commas=False)
 
-train_ce_flops_str = fmt(train_ce_flops / 1e3, precision=0, commas=False) + "K"
-train_ce_mem_str = fmt(train_ce_mem_bytes / 1e3, precision=0, commas=False) + " KB"
+train_ce_flops_str = fmt((train_ce_flops * flop).to(KFLOPs).magnitude, precision=0, commas=False) + "K"
+train_ce_mem_str = fmt((train_ce_mem_bytes * byte).to(KB).magnitude, precision=0, commas=False) + " KB"
 train_ce_ai_str = fmt(train_ce_flops / train_ce_mem_bytes, precision=1, commas=False)
 
-train_bwd_flops_str = fmt(train_bwd_flops / 1e6, precision=0, commas=False) + "M"
+train_bwd_flops_str = fmt((train_bwd_flops * flop).to(MFLOPs).magnitude, precision=0, commas=False) + "M"
 ```
 
 | **Component**             |                                     **FLOPs** |            **Memory Traffic** |     **Arithmetic Intensity** |
@@ -3742,7 +3754,7 @@ This approach ignores deployment constraints. @tbl-framework-efficiency-matrix s
 
 ##### Fallacy: *"Framework abstractions eliminate the need for systems knowledge."* {.unnumbered}
 
-This belief ignores the physics of computation. The **Roofline Model** (@sec-system-foundations-roofline-model-5f7c) disproves the fallacy: element-wise operations like ReLU achieve arithmetic intensity of 0.125 FLOPS/byte, utilizing **under 0.1%** of an A100's peak compute regardless of framework. Understanding when operations are memory-bound vs. compute-bound and which sequences can be fused separates efficient implementations from those leaving 80-90% of hardware capacity unused. No framework can optimize away fundamental physics.
+This belief ignores the physics of computation. The **Roofline Model** (@sec-system-foundations-roofline-model-5f7c) disproves the fallacy: element-wise operations like ReLU achieve arithmetic intensity of 0.125 FLOPs/byte, utilizing **under 0.1%** of an A100's peak compute regardless of framework. Understanding when operations are memory-bound vs. compute-bound and which sequences can be fused separates efficient implementations from those leaving 80-90% of hardware capacity unused. No framework can optimize away fundamental physics.
 
 ##### Pitfall: *Ignoring vendor lock-in from framework-specific formats.* {.unnumbered}
 

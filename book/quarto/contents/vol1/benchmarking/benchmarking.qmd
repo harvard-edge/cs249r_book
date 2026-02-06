@@ -58,10 +58,13 @@ h100_tflops_fp16_value = H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 h100_tflops_fp8_value = H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude
 h100_bw_tbs_value = H100_MEM_BW.to(TB/second).magnitude
 
-gpt3_params_b_value = GPT3_PARAMS.to(Mparam).magnitude / 1000
+gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude
 h100_tdp_value = H100_TDP.to(watt).magnitude
 
 energy_fp32_value = ENERGY_FLOP_FP32_PJ.magnitude
+
+edgetpu_latency_ms_value = 2
+cpu_latency_ms_value = 15
 energy_fp16_value = ENERGY_FLOP_FP16_PJ.magnitude
 energy_int8_value = ENERGY_FLOP_INT8_PJ.magnitude
 energy_dram_value = ENERGY_DRAM_ACCESS_PJ.magnitude
@@ -78,7 +81,7 @@ energy_reg_value = ENERGY_REG_PJ.magnitude
 energy_l1_value = ENERGY_SRAM_L1_PJ.magnitude
 energy_l2_value = ENERGY_SRAM_L2_PJ.magnitude
 
-anomaly_params_k_value = ANOMALY_MODEL_PARAMS.to(param).magnitude / 1000
+anomaly_params_k_value = ANOMALY_MODEL_PARAMS.to(Kparam).magnitude
 anomaly_latency_ms_value = ANOMALY_MODEL_LATENCY.to(ureg.ms).magnitude
 anomaly_auc_value = ANOMALY_MODEL_AUC
 anomaly_energy_uj_value = ANOMALY_MODEL_ENERGY.to(ureg.microjoule).magnitude
@@ -89,6 +92,12 @@ anomaly_energy_uj_value = ANOMALY_MODEL_ENERGY.to(ureg.microjoule).magnitude
 a100_ridge_value = (A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude
 mobilenet_v1_size_mb_value = mobilenet_v1_params_m_value * 4
 mobilenet_v1_int8_size_mb_value = mobilenet_v1_params_m_value * 1
+mobilenet_v1_compression_ratio_value = (
+    mobilenet_v1_size_mb_value / mobilenet_v1_int8_size_mb_value
+)
+mobilenet_flops_ratio_value = (
+    RESNET50_FLOPs.to(GFLOPs).magnitude / MOBILENETV2_FLOPs.to(GFLOPs).magnitude
+)
 
 # =============================================================================
 # OUTPUT
@@ -123,6 +132,12 @@ bert_large_params_m_str = fmt(bert_large_params_m_value, precision=0, commas=Fal
 mobilenet_params_m_str = fmt(mobilenet_params_m_value, precision=1, commas=False)
 mobilenet_v1_size_mb_str = fmt(mobilenet_v1_size_mb_value, precision=0, commas=False)
 mobilenet_v1_int8_size_mb_str = fmt(mobilenet_v1_int8_size_mb_value, precision=1, commas=False)
+mobilenet_v1_compression_ratio_str = fmt(
+    mobilenet_v1_compression_ratio_value, precision=0, commas=False
+)
+mobilenet_flops_ratio_str = fmt(mobilenet_flops_ratio_value, precision=1, commas=False)
+edgetpu_latency_ms_str = fmt(edgetpu_latency_ms_value, precision=1, commas=False)
+cpu_latency_ms_str = fmt(cpu_latency_ms_value, precision=0, commas=False)
 resnet50_params_m_str = fmt(resnet50_params_m_value, precision=1, commas=False)
 v100_tflops_fp32_str = fmt(v100_tflops_fp32_value, precision=1, commas=False)
 
@@ -181,17 +196,17 @@ In H&P architecture, you design for the benchmark because the benchmark represen
 To make this three-dimensional framework concrete, we ground it in a running example that threads through the entire chapter, returning to it repeatedly as we develop each dimension. MobileNet (the **Edge Lighthouse** from @sec-dnn-architectures) deployment validation spans all three evaluation dimensions, illustrating *how* each reveals problems the others cannot.
 
 ::: {.callout-lighthouse title="MobileNet Deployment Validation"}
-Throughout this chapter, we validate the complete optimization pipeline using **MobileNet** (introduced in @sec-dnn-architectures-lighthouse-roster-model-biographies-a763) as our lighthouse example. MobileNet exemplifies the deployment challenges where benchmarking determines success or failure. The validation questions below preview the three dimensions we develop throughout this chapter. Each section makes these questions concrete with specific metrics and methodologies.
+Throughout this chapter, we validate the complete optimization pipeline using **MobileNet** (introduced in @sec-dnn-architectures-lighthouse-roster-model-biographies-a763) as our lighthouse example. The initial compression figures below use MobileNet v1 parameters; later sections reference MobileNetV2, which refines v1's depthwise separable design with inverted residuals and linear bottlenecks while maintaining a similar parameter scale. MobileNet exemplifies the deployment challenges where benchmarking determines success or failure. The validation questions below preview the three dimensions we develop throughout this chapter. Each section makes these questions concrete with specific metrics and methodologies.
 
 **The Optimization Pipeline**:
 
-1. **Model Compression** (@sec-model-compression): INT8 quantization reduces MobileNet from `{python} mobilenet_v1_size_mb_str` MB to `{python} mobilenet_v1_int8_size_mb_str` MB (4x compression)
-2. **Hardware Acceleration** (@sec-ai-acceleration): EdgeTPU deployment achieves 2.1ms inference versus 15ms on CPU
+1. **Model Compression** (@sec-model-compression): INT8 quantization reduces MobileNet from `{python} mobilenet_v1_size_mb_str` MB to `{python} mobilenet_v1_int8_size_mb_str` MB (`{python} mobilenet_v1_compression_ratio_str`x compression)
+2. **Hardware Acceleration** (@sec-ai-acceleration): EdgeTPU deployment achieves `{python} edgetpu_latency_ms_str` ms inference versus `{python} cpu_latency_ms_str` ms on CPU
 3. **Benchmarking Validation** (this chapter): Verify the pipeline delivers in practice
 
 **Three-Dimensional Validation Questions**:
 
-- **System**: Does EdgeTPU actually achieve 2.1ms, or do preprocessing and data transfer add 10ms of overhead?
+- **System**: Does EdgeTPU actually achieve `{python} edgetpu_latency_ms_str` ms, or do preprocessing and data transfer add 10ms of overhead?
 - **Model Quality**: Did INT8 quantization preserve accuracy? What about edge cases with unusual lighting?
 - **Data**: Does performance hold on real-world smartphone images, not just ImageNet test images?
 
@@ -244,7 +259,7 @@ The multi-objective evaluation paradigm naturally extended to energy efficiency 
 
 Power benchmarking faces ongoing challenges in accounting for diverse workload patterns and system configurations across computing environments. The MLPerf Power [@mlperf_power_website] benchmark introduced specialized methodologies for measuring the energy impact of machine learning workloads, reflecting the central role energy efficiency now plays in AI system design.
 
-Energy benchmarking extends beyond hardware power measurement to include algorithmic efficiency. Model compression techniques (pruning, quantization, knowledge distillation) often achieve greater energy savings than hardware improvements alone: INT8 quantization typically provides 4x inference speedup with commensurate energy reduction [@jacob2018quantization], while pruning can deliver estimated 8-12x energy reduction through reduced operation counts, though measured savings depend on hardware support for sparse computation [@han2016deep]. MobileNet architectures achieve approximately 10x fewer FLOPs versus ResNet, translating to significant energy reduction on hardware that efficiently exploits the smaller model [@howard2017mobilenets]. These techniques, detailed in @sec-model-compression, establish that energy-aware benchmarking must evaluate algorithmic efficiency alongside hardware power consumption. As AI systems scale, this lesson becomes increasingly critical for sustainable computing practices.
+Energy benchmarking extends beyond hardware power measurement to include algorithmic efficiency. Model compression techniques (pruning, quantization, knowledge distillation) often achieve greater energy savings than hardware improvements alone: INT8 quantization typically provides 4x inference speedup with commensurate energy reduction [@jacob2018quantization], while pruning can deliver estimated 8-12x energy reduction through reduced operation counts, though measured savings depend on hardware support for sparse computation [@han2016deep]. MobileNet architectures achieve approximately `{python} mobilenet_flops_ratio_str`x fewer FLOPs versus ResNet, translating to significant energy reduction on hardware that efficiently exploits the smaller model [@howard2017mobilenets]. These techniques, detailed in @sec-model-compression, establish that energy-aware benchmarking must evaluate algorithmic efficiency alongside hardware power consumption. As AI systems scale, this lesson becomes increasingly critical for sustainable computing practices.
 
 ### Domain-Specific Benchmarks {#sec-benchmarking-ai-domainspecific-benchmarks-b15f}
 
@@ -405,11 +420,39 @@ These system benchmarks perform two critical functions in the AI ecosystem. Firs
 
 Effective benchmark interpretation requires understanding the performance characteristics of target hardware. Understanding whether specific AI workloads are compute-bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOPs[^fn-flops-throughput] per byte of data movement, determines performance limits. Consider an NVIDIA A100 GPU with `{python} a100_tflops_fp16_str` TFLOPS of FP16 Tensor Core performance (FP32 is `{python} a100_tflops_fp32_str` TFLOPS) and `{python} a100_bw_tbs_str` TB/s memory bandwidth (SXM variant). Dividing peak compute by peak bandwidth yields an arithmetic intensity threshold of `{python} a100_ridge_str` FLOPs/byte. Workloads below this threshold are bottlenecked by memory bandwidth, while those above are bottlenecked by compute capacity. The architectural foundations for understanding these hardware characteristics, including the **roofline model** for analyzing compute-bound versus memory-bound workloads, are established in @sec-ai-acceleration, which provides context for interpreting system benchmark results.
 
-[^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second, a measure of computational performance indicating how many floating-point calculations a processor can execute in one second. Modern AI accelerators achieve high FLOPS ratings: NVIDIA A100 delivers `{python} a100_tflops_fp16_str` TFLOPS (trillion FLOPS) for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1-10 TFLOPS. FLOPS measurements help compare hardware capabilities and determine computational bottlenecks in ML workloads.
+```{python}
+#| label: roofline-example-calc
+#| echo: false
+from physx.formatting import fmt
 
-High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOPs/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~300 FLOPs/byte, enabling 85-90% of peak tensor performance (approximately 280 TFLOPS achieved vs `{python} a100_tflops_fp16_str` TFLOPS theoretical) [@nvidia2020a100]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOPs/byte) become memory bandwidth limited, utilizing only a fraction of the GPU's computational capacity. When all data movement is considered (weights, KV cache, and activations), a BERT inference with batch size 1 achieves only ~8 FLOPs/byte arithmetic intensity, limiting performance to ~16 TFLOPS (2.0 TB/s × 8 FLOPs/byte), representing roughly 5% of peak computational capability. A simplified analysis considering only weight loading yields a higher estimate (~50 FLOPs/byte, as shown in the worked example below), illustrating how data movement assumptions significantly affect roofline predictions.
+resnet_ai_value = 300
+resnet_util_min_value = 85
+resnet_util_max_value = 90
+resnet_perf_tflops_value = 280
 
-This quantitative analysis, formalized in roofline models[^fn-roofline-model], provides a systematic framework that guides both algorithm design and hardware selection by clearly identifying the dominant performance constraints for specific workloads. Understanding these quantitative relationships allows engineers to predict performance bottlenecks accurately and optimize both model architectures and deployment strategies accordingly. For instance, increasing batch size from 1 to 32 for transformer inference can shift operations from memory-bound to compute-bound, improving GPU utilization from single-digit percentages to 60-85% [@pope2023efficiently].
+resnet_ai_str = fmt(resnet_ai_value, precision=0, commas=False)
+resnet_util_min_str = fmt(resnet_util_min_value, precision=0, commas=False)
+resnet_util_max_str = fmt(resnet_util_max_value, precision=0, commas=False)
+resnet_perf_tflops_str = fmt(resnet_perf_tflops_value, precision=0, commas=False)
+
+# BERT roofline preview (used in narrative before the full worked example)
+_bert_flops_b = 22  # billion FLOPs per inference
+_bert_weight_mb = 440  # MB (110M params × 4 bytes)
+_utilization_peak = 0.85
+bert_ai_b1_value = _bert_flops_b * 1e9 / (_bert_weight_mb * 1e6)
+bert_perf_b1_tflops_value = bert_ai_b1_value * a100_bw_tbs_value
+bert_util_b1_value = bert_perf_b1_tflops_value / a100_tflops_fp16_value * 100
+bert_ai_b1_str = fmt(bert_ai_b1_value, precision=0, commas=False)
+bert_perf_b1_str = fmt(bert_perf_b1_tflops_value, precision=0, commas=False)
+bert_util_b1_str = fmt(bert_util_b1_value, precision=0, commas=False)
+utilization_peak_pct_str = fmt(_utilization_peak * 100, precision=0, commas=False)
+```
+
+[^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second (see @sec-ai-acceleration for hardware details). The A100 delivers `{python} a100_tflops_fp16_str` TFLOPS for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1--10 TFLOPS. FLOPS measurements help compare hardware and identify computational bottlenecks.
+
+High-intensity operations like dense matrix multiplication in certain AI model operations (typically >150 FLOPs/byte) achieve near-peak computational throughput on the A100. For example, a ResNet-50 forward pass on large batch sizes (256+) achieves arithmetic intensity of ~`{python} resnet_ai_str` FLOPs/byte, enabling `{python} resnet_util_min_str`–`{python} resnet_util_max_str`% of peak tensor performance (approximately `{python} resnet_perf_tflops_str` TFLOPS achieved vs `{python} a100_tflops_fp16_str` TFLOPS theoretical) [@nvidia2020a100]. Conversely, low-intensity operations like activation functions and certain lightweight operations (<10 FLOPs/byte) become memory bandwidth limited, utilizing only a fraction of the GPU's computational capacity. When all data movement is considered (weights, KV cache, and activations), a BERT inference with batch size 1 achieves only ~`{python} bert_ai_b1_str` FLOPs/byte arithmetic intensity, limiting performance to ~`{python} bert_perf_b1_str` TFLOPS (`{python} a100_bw_tbs_str` TB/s × `{python} bert_ai_b1_str` FLOPs/byte), representing roughly `{python} bert_util_b1_str`% of peak computational capability. A simplified analysis considering only weight loading yields a higher estimate (~50 FLOPs/byte, as shown in the worked example below), illustrating how data movement assumptions significantly affect roofline predictions.
+
+This quantitative analysis, formalized in roofline models[^fn-roofline-model], provides a systematic framework that guides both algorithm design and hardware selection by clearly identifying the dominant performance constraints for specific workloads. Understanding these quantitative relationships allows engineers to predict performance bottlenecks accurately and optimize both model architectures and deployment strategies accordingly. For instance, increasing batch size from 1 to 32 for transformer inference can shift operations from memory-bound to compute-bound, improving GPU utilization from `{python} bert_util_b1_str`% to `{python} utilization_peak_pct_str`% [@pope2023efficiently].
 
 [^fn-roofline-model]: **Roofline Model**: Named for its visual appearance resembling a house roofline, this performance model was developed by Samuel Williams at UC Berkeley in 2009. The plot reveals whether workloads are compute-bound (sloped region, limited by peak FLOPS) or memory-bound (flat region, limited by bandwidth). The "ridge point" where the slope meets the flat line marks the critical arithmetic intensity threshold. The architectural metaphor is apt: performance cannot exceed the roofline, just as you cannot build above a roof.
 
@@ -748,7 +791,7 @@ Consider debugging a slow inference pipeline: macro benchmarks might show unacce
 
 A key area of micro-benchmarking focuses on tensor operations[^fn-tensor-ops], which are the computational core of deep learning. Libraries like cuDNN [@chetlur2014cudnn][^fn-cudnn] by NVIDIA provide benchmarks for measuring fundamental computations such as convolutions and matrix multiplications across different hardware configurations. These measurements help developers understand how their hardware handles the core mathematical operations that dominate ML workloads.
 
-[^fn-tensor-ops]: **Tensor Operations**: From Latin "tendere" (to stretch), tensors were introduced by mathematicians Ricci-Curbastro and Levi-Civita in 1900 to describe quantities that transform predictably under coordinate changes. In ML, "tensor" refers to multi-dimensional arrays: vectors (1D), matrices (2D), and higher-order tensors. Operations like GEMM and convolution form the computational backbone of neural networks, with modern accelerators achieving order-of-magnitude gains for optimized tensor primitives.
+[^fn-tensor-ops]: **Tensor Operations**: Operations on multi-dimensional arrays (tensors)---see @sec-deep-learning-systems-foundations and @sec-ai-acceleration. GEMM and convolution form the computational backbone of neural networks, with modern accelerators achieving order-of-magnitude gains for optimized tensor primitives.
 
 [^fn-cudnn]: **cuDNN**: CUDA Deep Neural Network library, NVIDIA's GPU-accelerated library of primitives for deep neural networks. Released in 2014, cuDNN provides highly optimized implementations for convolutions, pooling, normalization, and activation layers, often yielding multi-fold speedups over naive implementations and becoming a widely used standard for GPU-accelerated deep learning.
 
@@ -811,11 +854,11 @@ These tools capture the "physical" execution on the hardware. They answer:
 
 Micro-benchmarks also examine activation functions and neural network layers in isolation. This includes measuring the performance of various activation functions like ReLU, Sigmoid[^fn-sigmoid], and Tanh[^fn-tanh] under controlled conditions, and evaluating the computational efficiency of distinct neural network components such as LSTM[^fn-lstm] cells or Transformer blocks when processing standardized inputs. These granular measurements enable precise optimization, but they cannot reveal how components interact when assembled into complete models. Macro-benchmarks address this gap.
 
-[^fn-sigmoid]: **Sigmoid**: From Greek "sigma" (the S-shaped letter σ), this activation function S(x) = 1/(1+e^(-x)) maps real numbers to (0,1), producing the characteristic S-curve that gave it its name. Introduced to neural networks in the 1980s, sigmoid dominated early deep learning but fell from favor due to vanishing gradients and expensive exponential operations. It persists in output layers for binary classification and as gates in LSTM cells.
+[^fn-sigmoid]: **Sigmoid**: The S-shaped activation function $S(x) = 1/(1+e^{-x})$ mapping real numbers to $(0,1)$. Introduced in @sec-deep-learning-systems-foundations, sigmoid persists in output layers for binary classification and as gates in LSTM cells, though its expensive exponential operations make it a useful benchmarking target.
 
-[^fn-tanh]: **Tanh**: Hyperbolic tangent, borrowing the "tangent" concept from trigonometry but applied to hyperbolas rather than circles. The function tanh(x) = (e^x - e^(-x))/(e^x + e^(-x)) maps inputs to (-1, 1), providing zero-centered outputs that often yield stronger gradients than sigmoid in hidden layers. "Hyperbolic" functions were introduced by Vincenzo Riccati in the 1760s.
+[^fn-tanh]: **Tanh**: Hyperbolic tangent activation mapping inputs to $(-1, 1)$, providing zero-centered outputs. As discussed in @sec-deep-learning-systems-foundations, tanh often yields stronger gradients than sigmoid in hidden layers but shares the same expensive transcendental computation.
 
-[^fn-lstm]: **LSTM (Long Short-Term Memory)**: A type of recurrent neural network architecture introduced by Hochreiter and Schmidhuber in 1997, designed to solve the vanishing gradient problem in traditional RNNs. LSTMs use gates (forget, input, output) to control information flow, enabling them to learn dependencies over hundreds of time steps. This capability made LSTMs essential for sequence modeling before the Transformer era.
+[^fn-lstm]: **LSTM (Long Short-Term Memory)**: A recurrent architecture using gates (forget, input, output) to control information flow, as introduced in @sec-dnn-architectures. LSTMs remain a common benchmarking target due to their mixed compute profile of element-wise operations and matrix multiplications.
 
 DeepBench [@deepbench_github], developed by Baidu, was one of the first to demonstrate the value of comprehensive micro-benchmarking. It evaluates these fundamental operations across different hardware platforms, providing detailed performance data that helps developers optimize their deep learning implementations. By isolating and measuring individual operations, DeepBench enables precise comparison of hardware platforms and identification of potential performance bottlenecks.
 
@@ -1040,10 +1083,12 @@ fit=(GRAPH2)(DIAGRAM1),yshift=0mm](BB2){};
   {
 \textbf{Problem}&\textbf{AD}\\
 |[fill=col3]| Model &|[fill=col3]| FC-AE\\
-|[fill=col2]| Size&|[fill=col2]| {python} anomaly_params_k_str Kpar\\
-|[fill=col3]| Latency &|[fill=col3]| {python} anomaly_latency_ms_str ms/inf.\\
-|[fill=col2]| Accuracy &|[fill=col2]| {python} anomaly_auc_str AUC\\
-|[fill=col3]| Energy &|[fill=col3]|{python} anomaly_energy_uj_str $\mu$J/inf.\\
+% NOTE: Values hardcoded because inline {python} doesn't work inside .tikz blocks.
+% Source: ANOMALY_MODEL_* constants in physx/constants.py
+|[fill=col2]| Size&|[fill=col2]| 270 Kpar\\
+|[fill=col3]| Latency &|[fill=col3]| 10.4 ms/inf.\\
+|[fill=col2]| Accuracy &|[fill=col2]| 0.86 AUC\\
+|[fill=col3]| Energy &|[fill=col3]| 516 $\mu$J/inf.\\
   };
 \end{scope}
 %
@@ -1744,7 +1789,7 @@ Training large-scale machine learning models requires substantial computational 
 
 ::: {.callout-notebook title="Why INT8 Saves Energy"}
 
-Understanding WHY quantization reduces energy consumption\index{INT8 Savings!compute vs. memory energy} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
+Recall from @sec-ai-acceleration and @sec-model-compression that moving data costs far more energy than computing on it. Understanding WHY quantization reduces energy consumption\index{INT8 Savings!compute vs. memory energy} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
 
 **Compute Energy (per multiply-accumulate operation)**:
 
@@ -2206,7 +2251,7 @@ Benchmarking inference systems often involves balancing competing metrics. For e
 
 Numerical precision optimization exemplifies this challenge particularly well. Individual accelerator benchmarks show INT8 operations achieving 4x higher TOPS[^fn-tops] (Tera Operations Per Second) compared to FP32, creating compelling performance narratives.
 
-[^fn-tops]: **TOPS (Tera Operations Per Second)**: A measure of computational throughput indicating trillions of operations per second, commonly used for AI accelerator performance. Modern AI chips achieve 100-1000 TOPS for INT8 operations: NVIDIA H100 delivers `{python} h100_tflops_int8_str` TOPS INT8, Apple M2 Neural Engine provides 15.8 TOPS, while edge devices like Google Edge TPU achieve 4 TOPS. Higher TOPS enable faster AI inference and training. However, when these accelerators deploy in complete training systems, the chip-level advantage often disappears due to increased convergence time, precision conversion overhead, and mixed-precision coordination complexity. The "4x faster" micro-benchmark translates into slower end-to-end training, demonstrating why isolated hardware metrics cannot substitute for holistic system evaluation. Balanced approaches like FP16 mixed-precision often provide superior system-level performance despite lower peak TOPS measurements. Comprehensive benchmarks must account for these cross-metric interactions and system-level complexities.
+[^fn-tops]: **TOPS (Tera Operations Per Second)**: A measure of computational throughput indicating trillions of operations per second, commonly used for AI accelerator performance. Modern AI chips achieve 100--1000 TOPS for INT8 operations: NVIDIA H100 delivers `{python} h100_tflops_int8_str` TOPS INT8, Apple M2 Neural Engine provides 15.8 TOPS, while edge devices like Google Edge TPU achieve 4 TOPS. However, chip-level TOPS advantages often diminish at the system level due to convergence time, precision conversion overhead, and mixed-precision coordination, underscoring why isolated hardware metrics cannot substitute for holistic system evaluation.
 
 **Linear Scaling Assumption.**
 The linear scaling pitfall discussed for training benchmarks applies equally to inference, though the bottlenecks differ. Where training scaling is limited primarily by gradient synchronization overhead, inference scaling encounters bottlenecks from memory bandwidth saturation, thermal throttling under sustained load, and request routing overhead in distributed serving. As discussed in @sec-ai-acceleration, these limitations arise from fundamental hardware constraints and interconnect architectures. Benchmarks that assume linear scaling behavior may overestimate system performance, particularly in distributed deployments.
@@ -3324,7 +3369,7 @@ Model benchmarks validate whether compression techniques from @sec-model-compres
 
 @fig-imagenet-challenge traces the dramatic reduction in error rates on the ImageNet Large Scale Visual Recognition Challenge (ILSVRC) [@russakovsky2015imagenet] classification task, from 28.2% in 2010 to 3.57% by 2015. Starting from the baseline models in 2010 and 2011, the introduction of AlexNet[^fn-bench-alexnet] in 2012 marked an improvement, reducing the error rate from 25.8% to 16.4%. Subsequent models like ZFNet, VGGNet, GoogleNet, and ResNet[^fn-bench-resnet] continued this trend, with ResNet achieving an error rate of 3.57% by 2015 [@russakovsky2015imagenet]. This progression established the baselines against which model compression techniques are evaluated—a pruned ResNet must demonstrate how much accuracy it sacrifices for a given efficiency gain.
 
-[^fn-bench-alexnet]: **AlexNet**: Developed by Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton at the University of Toronto, this 8-layer neural network revolutionized computer vision in 2012. With 60 million parameters trained on two GTX 580 GPUs, AlexNet introduced key innovations in neural network design that became standard techniques in modern AI.
+[^fn-bench-alexnet]: **AlexNet**: The 8-layer CNN that revolutionized computer vision in 2012 (see @sec-ai-acceleration). With 60 million parameters trained on two GTX 580 GPUs, AlexNet demonstrated that GPU-accelerated deep learning could surpass traditional approaches.
 
 [^fn-bench-resnet]: **ResNet**: Microsoft's Residual Networks, introduced in 2015 by Kaiming He and colleagues, solved the vanishing gradient problem with skip connections, enabling networks with 152+ layers. ResNet-50 became the de facto standard for transfer learning, while an ensemble of ResNet models achieved 3.57% top-5 error on ImageNet (single-model ResNet-152 achieved 4.49%), exceeding the estimated 5.1% human error rate from Andrej Karpathy's analysis.
 
@@ -3382,7 +3427,7 @@ Model compression (@sec-model-compression) trades model capacity for efficiency.
 
 **Pareto frontier[^fn-pareto] evaluation** determines whether a compressed model represents a good trade-off. Plot accuracy against your efficiency metric (latency, model size, energy). Models on the Pareto frontier cannot improve one metric without degrading the other; models below the frontier are dominated by better alternatives.
 
-[^fn-pareto]: **Pareto Frontier**: Named after Italian economist Vilfredo Pareto (1848-1923), who observed that 80% of Italy's land was owned by 20% of the population. In optimization, a Pareto frontier contains all solutions where improving one objective requires degrading another. For model compression, this frontier reveals the fundamental accuracy-efficiency trade-off: any point on the frontier represents a valid design choice, while points below the frontier are strictly dominated by better alternatives. A compressed model achieving 92% accuracy at 10ms latency is valuable if no alternative achieves higher accuracy at equal-or-lower latency. It's wasteful if an alternative achieves 94% at 8ms.
+[^fn-pareto]: **Pareto Frontier**: As introduced in @sec-model-compression, a Pareto frontier contains all solutions where improving one objective requires degrading another. For benchmarking, this frontier reveals fundamental accuracy-efficiency trade-offs: any point on the frontier is a valid design choice, while points below it are strictly dominated by better alternatives.
 
 **Different compression techniques fail differently.** Quantization (reducing numerical precision) typically preserves average-case performance while degrading on inputs near decision boundaries—exactly the edge cases that often matter most. Pruning (removing weights or structures) loses capacity for rare features—potentially fine for common cases but catastrophic for tail scenarios. Distillation (training smaller models to mimic larger ones) can lose calibration even when matching accuracy. Validation must probe these specific failure modes, not just measure aggregate accuracy.
 

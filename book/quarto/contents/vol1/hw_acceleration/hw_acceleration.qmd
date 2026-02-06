@@ -55,6 +55,13 @@ a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
 a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
 a100_tdp = f"{A100_TDP.to(watt).magnitude:.0f}"
 
+cpu_utilization_min_value = 5
+cpu_utilization_max_value = 10
+cpu_gflops_value = 100
+cpu_utilization_min_str = fmt(cpu_utilization_min_value, precision=0, commas=False)
+cpu_utilization_max_str = fmt(cpu_utilization_max_value, precision=0, commas=False)
+cpu_gflops_str = fmt(cpu_gflops_value, precision=0, commas=False)
+
 h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
 h100_tflops_fp8 = f"{H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
 h100_tflops_tf32 = f"{H100_FLOPS_TF32.to(TFLOPs/second).magnitude:.0f}"
@@ -112,9 +119,9 @@ Hardware alone, however, cannot achieve these gains. The algorithms must be desi
 
 Co-design explains *why* the compression techniques introduced in @sec-model-compression deliver real speedups. Quantization from FP32 to INT8 (as described in @sec-model-compression) yields 2-4x acceleration not because of fewer bits in the abstract, but because accelerators pack 4x more INT8 operations into the same silicon area. Structured pruning improves performance while unstructured pruning often does not, because structured patterns preserve the regular memory access patterns that hardware can optimize. Throughout this chapter, the physical constraints of silicon will reveal *why* some theoretically promising algorithmic optimizations succeed in practice and others fail.
 
-Hardware acceleration targets specific terms in the **Iron Law of ML Systems** (@sec-silicon-contract), which decomposes end-to-end time into data volume ($D_{vol}/BW$), computation ($O / R_{peak} \cdot \eta$), and fixed latency ($L_{lat}$). While data selection reduced the total data and model compression reduced the ops per sample, hardware acceleration increases the rate at which those ops execute by maximizing the Throughput and Bandwidth denominators. Yet acceleration has a hard ceiling, established by *the iron law of acceleration*.
+Hardware acceleration targets specific terms in the **Iron Law of ML Systems** (@sec-silicon-contract), which decomposes end-to-end time into data volume ($D_{vol}/BW$), computation ($O / R_{peak} \cdot \eta$), and fixed latency ($L_{lat}$). While data selection reduced the total data and model compression reduced the ops per sample, hardware acceleration increases the rate at which those ops execute by maximizing the Throughput and Bandwidth denominators. Yet acceleration has a hard ceiling, established by *Amdahl's Law*.
 
-::: {.callout-notebook title="The Iron Law of Acceleration"}
+::: {.callout-notebook title="The Fundamental Limit of Acceleration (Amdahl's Law)"}
 
 Hardware acceleration does not speed up the entire system; it *only speeds up the parallelizable fraction ($p$)*. This is governed by **Amdahl's Law for AI**\index{Amdahl's Law!parallel fraction}\index{Parallel Computing!Amdahl's Law} [@amdahl1967validity]:
 
@@ -429,7 +436,7 @@ plt.show()
 
 [^fn-dennard-scaling]: **Dennard Scaling**: Robert Dennard's 1974 principle that as transistors shrink, their power density remains constant, allowing higher frequencies without increased power consumption. This enabled CPUs to reach 3+ GHz by 2005. However, quantum effects and leakage current ended Dennard scaling around 2005, forcing architects to prioritize efficiency over raw speed and leading to the multi-core revolution.
 
-[^fn-hennessy-patterson]: **Hennessy & Patterson**: John Hennessy (former President of Stanford) and David Patterson (UC Berkeley Professor) are the "godfathers" of modern computer architecture. They pioneered Reduced Instruction Set Computing (RISC), transforming processor design from an art into a quantitative science. Their textbook *Computer Architecture: A Quantitative Approach* is the definitive reference in the field. They received the 2017 ACM A.M. Turing Award for these contributions. Patterson later joined Google Brain to help design the TPU, directly applying their principles to AI acceleration.
+[^fn-hennessy-patterson]: **Hennessy & Patterson**: John Hennessy and David Patterson pioneered Reduced Instruction Set Computing (RISC), transforming processor design into a quantitative science. Their textbook *Computer Architecture: A Quantitative Approach* is the definitive reference in the field, and they received the 2017 ACM A.M. Turing Award for these contributions.
 
 ### The Technology S-Curve: Why We Must Shift {#sec-ai-acceleration-technology-s-curve}
 
@@ -484,7 +491,7 @@ Machine learning constitutes a computational domain with unique characteristics 
 
 :::
 
-Machine learning computational requirements reveal limitations in traditional processors. CPUs achieve only 5-10% utilization on neural network workloads, delivering approximately 100 GFLOPS (billions of floating-point operations per second)[^fn-gflops] while consuming hundreds of watts. This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth[^fn-memory-bandwidth-accelerators] constraint — the data transfer rate between memory and processors — becomes particularly severe: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies[^fn-cache-hierarchy] designed for kilobyte-scale working sets.
+Machine learning computational requirements reveal limitations in traditional processors. CPUs achieve only `{python} cpu_utilization_min_str`–`{python} cpu_utilization_max_str`% utilization on neural network workloads, delivering approximately `{python} cpu_gflops_str` GFLOPS (billions of floating-point operations per second)[^fn-gflops] while consuming hundreds of watts. This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth[^fn-memory-bandwidth-accelerators] constraint — the data transfer rate between memory and processors — becomes particularly severe: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies[^fn-cache-hierarchy] designed for kilobyte-scale working sets.
 
 [^fn-gflops]: **GFLOPS/TOPS Performance Metrics**: GFLOPS (10⁹ floating-point ops/second) measures floating-point throughput; TOPS (10¹² ops/second) typically measures INT8 operations in AI accelerators. The A100 delivers `{python} a100_tflops_fp16` TFLOPS for FP16/BF16 dense Tensor Core operations (`{python} a100_tflops_tf32` TFLOPS for TF32), with approximately 2$\times$ higher throughput when structured sparsity is enabled; Apple A17 NPU achieves `{python} mobile_tops` INT8 TOPS. Real workload performance depends on memory bandwidth, achieving 10-30% of peak on typical ML models.
 
@@ -2284,7 +2291,7 @@ Different neural network layers interact with memory in distinct ways beyond bat
 
 Another significant factor contributing to irregular memory access is sparsity[^fn-sparsity] in neural networks. Many modern ML models employ techniques such as weight pruning, activation sparsity, and structured sparsity to reduce computational overhead. However, these optimizations often lead to non-uniform memory access, as sparse representations necessitate fetching scattered elements rather than sequential blocks, making hardware caching less effective. Models that incorporate dynamic computation paths, such as Mixture of Experts and Adaptive Computation Time, introduce highly non-deterministic memory access patterns, where the active neurons or model components can vary with each inference step. This variability challenges efficient prefetching and caching strategies.
 
-[^fn-sparsity]: **Sparsity in Neural Networks**: The property that most weights or activations in a neural network are zero or near-zero, enabling computational and memory optimizations. Natural sparsity occurs when ReLU activations zero out 50-90% of values, while artificial sparsity results from pruning techniques that remove 90-99% of weights with minimal accuracy loss. Sparse networks can be 10-100$\times$ smaller and faster, but require specialized hardware support (like NVIDIA's 2:4 sparsity in A100) or software optimization to realize benefits, as standard dense hardware performs zero multiplications inefficiently.
+[^fn-sparsity]: **Sparsity in Neural Networks**: As introduced in @sec-ai-acceleration-nm-sparsity, sparsity refers to zeros distributed throughout a network's weights or activations. Natural sparsity arises from ReLU activations (50--90% zeros), while artificial sparsity results from pruning (90--99% of weights removed). Realizing speedups requires hardware support such as NVIDIA's 2:4 structured sparsity or software-level sparse format optimizations.
 
 These irregularities have significant consequences. ML workloads often experience reduced cache efficiency, as activations and weights may not be accessed in predictable sequences. This leads to increased reliance on off-chip memory traffic, which slows down execution and consumes more energy. Irregular access patterns contribute to memory fragmentation, where the way data is allocated and retrieved results in inefficient utilization of available memory resources. The combined effect is that ML accelerators frequently encounter memory bottlenecks that limit their ability to fully utilize available compute power.
 
@@ -2598,6 +2605,26 @@ The roofline visualization shows performance (TFLOPS) on the vertical axis and a
 
 These ridge point values reveal a surprising trend: as hardware has become more powerful, keeping it fully utilized has become harder. The following analysis illustrates this utilization gap.
 
+```{python}
+#| label: roofline-utilization-gap-calc
+#| echo: false
+from physx.constants import A100_MEM_BW, H100_MEM_BW, A100_FLOPS_FP16_TENSOR, H100_FLOPS_FP16_TENSOR
+from physx.formatting import fmt
+from physx.constants import flop, byte
+
+legacy_ai_value = 200
+relu_ai_value = 1 / 8
+bandwidth_ratio_value = (H100_MEM_BW / A100_MEM_BW).magnitude
+flops_ratio_value = (H100_FLOPS_FP16_TENSOR / A100_FLOPS_FP16_TENSOR).magnitude
+h100_ridge_value = (H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop / byte).magnitude
+relu_below_roofline_value = h100_ridge_value / relu_ai_value
+
+legacy_ai_str = fmt(legacy_ai_value, precision=0, commas=False)
+bandwidth_ratio_str = fmt(bandwidth_ratio_value, precision=1, commas=False)
+flops_ratio_str = fmt(flops_ratio_value, precision=1, commas=False)
+relu_below_roofline_str = fmt(relu_below_roofline_value, precision=0, commas=True)
+```
+
 ::: {.callout-notebook title="The Utilization Gap"}
 
 **The Utilization Physics**: Why is it harder to get 100% utilization on an H100 than a V100?
@@ -2610,9 +2637,9 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 *   **A100 (2020)**: `{python} a100_tflops_fp16` TF / `{python} a100_bw_tbs` TB/s ≈ **`{python} a100_ridge` FLOP/byte**.
 *   **H100 (2023)**: `{python} h100_tflops_fp16` TF / `{python} h100_bw_tbs` TB/s ≈ **`{python} h100_ridge` FLOP/byte**.
 
-**The Systems Conclusion**: The "bar" for compute intensity has doubled. An algorithm with AI = 200 FLOP/byte was **compute-bound** (good) on A100 but is **bandwidth-bound** (bad) on H100. This explains why "legacy" code often sees only 2-3x speedup on H100 (bandwidth ratio) instead of the advertised 6-9x (FLOPs ratio).
+**The Systems Conclusion**: The "bar" for compute intensity has doubled. An algorithm with AI = `{python} legacy_ai_str` FLOP/byte was **compute-bound** (good) on A100 but is **bandwidth-bound** (bad) on H100. This explains why "legacy" code often sees only `{python} bandwidth_ratio_str`x speedup on H100 (bandwidth ratio) instead of the advertised `{python} flops_ratio_str`x (FLOPs ratio).
 
-**Practical Examples**: A standard **ReLU** performs 1 operation for every 8 bytes (0.125 FLOP/byte), placing it 2,300x below the H100 roofline. A large **Dense MatMul** (batch=128) might reach 300 FLOP/byte, making it compute-bound. Most operations fall short of the ridge point, which is why **Kernel Fusion** is the most important optimization, as explored in @sec-ai-acceleration-kernel-fusion-7faf.
+**Practical Examples**: A standard **ReLU** performs 1 operation for every 8 bytes (0.125 FLOP/byte), placing it `{python} relu_below_roofline_str`x below the H100 roofline. A large **Dense MatMul** (batch=128) might reach 300 FLOP/byte, making it compute-bound. Most operations fall short of the ridge point, which is why **Kernel Fusion** is the most important optimization, as explored in @sec-ai-acceleration-kernel-fusion-7faf.
 :::
 
 @tbl-roofline-operations maps common neural network operations to the Roofline model:
@@ -2634,6 +2661,7 @@ To see how these intensity values translate into real performance predictions, w
 #| label: transformer-layer-calc
 #| echo: false
 from physx.formatting import fmt
+from physx.constants import byte, MB, flop, GFLOPs, MFLOPs
 # =============================================================================
 # PURPOSE
 # =============================================================================
@@ -2657,14 +2685,14 @@ t_fp_bytes_value = BYTES_FP16.to(byte).magnitude
 # The "× 2" for multiply-add is often folded into "FLOPs" convention;
 # here the text uses: 3 × batch × seq × hidden × hidden
 qkv_flops_value = 3 * t_batch_value * t_seq_value * t_hidden_value * t_hidden_value
-qkv_flops_b_value = qkv_flops_value / 1e9
+qkv_flops_b_value = (qkv_flops_value * flop).to(GFLOPs).magnitude
 
 # Bytes: (input + weights + output) × 2 bytes
 qkv_input_value = t_batch_value * t_seq_value * t_hidden_value
 qkv_weights_value = 3 * t_hidden_value * t_hidden_value
 qkv_output_value = t_batch_value * t_seq_value * t_hidden_value * 3
 qkv_bytes_value = (qkv_input_value + qkv_weights_value + qkv_output_value) * t_fp_bytes_value
-qkv_mb_value = qkv_bytes_value / 1e6
+qkv_mb_value = (qkv_bytes_value * byte).to(MB).magnitude
 
 # Arithmetic intensity
 qkv_ai_value = qkv_flops_value / qkv_bytes_value
@@ -2672,11 +2700,11 @@ qkv_ai_value = qkv_flops_value / qkv_bytes_value
 # === Softmax ===
 # FLOPs: batch × heads × seq × seq × 3 (exp, sum, div)
 softmax_flops_value = t_batch_value * t_heads_value * t_seq_value * t_seq_value * 3
-softmax_flops_m_value = softmax_flops_value / 1e6
+softmax_flops_m_value = (softmax_flops_value * flop).to(MFLOPs).magnitude
 
 # Bytes: batch × heads × seq × seq × 2 (read + write) × 2 bytes
 softmax_bytes_value = t_batch_value * t_heads_value * t_seq_value * t_seq_value * 2 * t_fp_bytes_value
-softmax_mb_value = softmax_bytes_value / 1e6
+softmax_mb_value = (softmax_bytes_value * byte).to(MB).magnitude
 
 # Arithmetic intensity
 softmax_ai_value = softmax_flops_value / softmax_bytes_value
@@ -2733,7 +2761,7 @@ A *convolutional layer analysis* demonstrates how these formulas apply in practi
 #| label: roofline-examples-calc
 #| echo: false
 from physx.formatting import fmt
-from physx.constants import BYTES_FP16
+from physx.constants import BYTES_FP16, byte, MB, KiB, flop, GFLOPs, MFLOPs, TFLOPs
 
 # === Conv2D Layer Analysis ===
 # Input: (batch=32, C_in=128, H=56, W=56), C_out=256, kernel=3x3, FP16
@@ -2746,12 +2774,12 @@ conv_out_m = conv_out_elements / 1e6  # 25.7M
 
 # FLOPs per output element (multiply-add = 2 ops)
 conv_flops_per_out = conv_cin * conv_k * conv_k * 2  # 2,304
-conv_total_gflops = conv_out_m * conv_flops_per_out / 1e3  # 59.2 GFLOPs
+conv_total_gflops = (conv_out_elements * conv_flops_per_out * flop).to(GFLOPs).magnitude  # 59.2 GFLOPs
 
 # Memory traffic (FP16)
-conv_input_mb = conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes / 1e6  # 25.7
-conv_weights_mb = conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes / 1e6  # 0.6
-conv_output_mb = conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes / 1e6  # 51.4
+conv_input_mb = (conv_batch * conv_cin * conv_h * conv_w * conv_fp_bytes * byte).to(MB).magnitude  # 25.7
+conv_weights_mb = (conv_cout * conv_cin * conv_k * conv_k * conv_fp_bytes * byte).to(MB).magnitude  # 0.6
+conv_output_mb = (conv_batch * conv_cout * conv_h * conv_w * conv_fp_bytes * byte).to(MB).magnitude  # 51.4
 conv_total_mb = conv_input_mb + conv_weights_mb + conv_output_mb  # 77.7
 
 # Arithmetic intensity
@@ -2771,13 +2799,13 @@ conv_ai_str = fmt(conv_ai, precision=0, commas=False)
 dense_batch = 32; dense_in = 2048; dense_out = 2048
 
 # FLOPs: 2 × batch × in × out
-dense_total_mflops = 2 * dense_batch * dense_in * dense_out / 1e6  # 274 MFLOPs
+dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).to(MFLOPs).magnitude  # 274 MFLOPs
 
 # Memory traffic (FP16)
 dense_input_kb = dense_batch * dense_in * 2 / 1024  # 128 KB
-dense_weights_mb = dense_in * dense_out * 2 / 1e6  # 8.4 MB
+dense_weights_mb = (dense_in * dense_out * 2 * byte).to(MB).magnitude  # 8.4 MB
 dense_output_kb = dense_batch * dense_out * 2 / 1024  # 128 KB
-dense_total_mb = (dense_input_kb * 1024 + dense_weights_mb * 1e6 + dense_output_kb * 1024) / 1e6  # 8.7 MB
+dense_total_mb = (dense_input_kb * KiB + dense_weights_mb * MB + dense_output_kb * KiB).to(MB).magnitude  # 8.7 MB
 
 # Arithmetic intensity
 dense_ai = dense_total_mflops / dense_total_mb  # FLOP/byte
@@ -2786,7 +2814,7 @@ dense_ai = dense_total_mflops / dense_total_mb  # FLOP/byte
 a100_bw = A100_MEM_BW.to(GB/second).magnitude
 a100_peak = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 
-dense_attainable_tflops = a100_bw * dense_ai / 1e3  # ~63 TFLOPS
+dense_attainable_tflops = (a100_bw * dense_ai * GFLOPs).to(TFLOPs).magnitude  # ~63 TFLOPS
 dense_util_pct = dense_attainable_tflops / a100_peak * 100  # % of peak FP16
 
 dense_total_mflops_str = fmt(dense_total_mflops, precision=0, commas=False)
@@ -2811,16 +2839,16 @@ ln_flops_per = 6
 ln_total_mflops = ln_elements_m * ln_flops_per  # 75.5M
 
 # Memory traffic
-ln_input_mb = ln_elements * 2 / 1e6  # 25.2 MB
+ln_input_mb = (ln_elements * 2 * byte).to(MB).magnitude  # 25.2 MB
 ln_params_kb = ln_hidden * 2 * 2 / 1024  # 3 KB (scale + bias)
-ln_output_mb = ln_elements * 2 / 1e6  # 25.2 MB
+ln_output_mb = (ln_elements * 2 * byte).to(MB).magnitude  # 25.2 MB
 ln_total_mb = ln_input_mb + ln_output_mb + ln_params_kb / 1024  # 50.4 MB
 
 # Arithmetic intensity
 ln_ai = ln_total_mflops / ln_total_mb  # FLOP/byte
 
 # Attainable performance
-ln_attainable_tflops = a100_bw * ln_ai / 1e3  # 3 TFLOPS (using 2039 GB/s)
+ln_attainable_tflops = (a100_bw * ln_ai * GFLOPs).to(TFLOPs).magnitude  # 3 TFLOPS (using 2039 GB/s)
 
 ln_elements_m_str = fmt(ln_elements_m, precision=1, commas=False)
 ln_total_mflops_str = fmt(ln_total_mflops, precision=1, commas=False)
@@ -2965,7 +2993,7 @@ For workloads where batching is impractical, such as interactive LLM generation 
 #| echo: false
 from physx.formatting import fmt
 from physx.formulas import model_memory
-from physx.constants import GB, GPT2_PARAMS, BYTES_FP16
+from physx.constants import GB, GPT2_PARAMS, BYTES_FP16, flop, GFLOPs
 
 # GPT-2 XL decode analysis (batch size 1)
 # Data movement: load all weights per token
@@ -2974,7 +3002,7 @@ gpt2_weight_gb_str = fmt(gpt2_weight_gb, precision=1, commas=False)
 
 # Compute: 2 FLOPs per parameter (vector-matrix multiply)
 gpt2_decode_flops = 2 * GPT2_PARAMS.magnitude
-gpt2_decode_gflops = gpt2_decode_flops / 1e9
+gpt2_decode_gflops = (gpt2_decode_flops * flop).to(GFLOPs).magnitude
 gpt2_decode_gflops_str = fmt(gpt2_decode_gflops, precision=1, commas=False)
 
 # Arithmetic intensity
@@ -3428,12 +3456,12 @@ Building on software optimization techniques from @sec-model-compression and mem
 #| label: memory-footprint-calc
 #| echo: false
 from physx.formatting import fmt
-from physx.constants import BYTES_FP32
+from physx.constants import BYTES_FP32, byte, MB
 
 # Intermediate tensor storage analysis
 tensor_dim = 1024
 bytes_fp32 = BYTES_FP32.magnitude
-tensor_mb = tensor_dim * tensor_dim * bytes_fp32 / 1e6
+tensor_mb = (tensor_dim * tensor_dim * bytes_fp32 * byte).to(MB).magnitude
 n_intermediates = 4  # X, X', X'', Y
 total_mb = n_intermediates * tensor_mb
 footprint_ratio = n_intermediates

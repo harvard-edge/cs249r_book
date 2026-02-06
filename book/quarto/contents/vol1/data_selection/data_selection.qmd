@@ -107,7 +107,7 @@ where Data Cost encompasses:
 A perfectly efficient dataset would contain only samples that contribute unique information to the model's decision boundary: no redundancy, no noise, no "easy" examples already mastered.
 :::
 
-To make this concrete, consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures), a 70B parameter language model:
+To make this concrete, consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures)---this lighthouse spans the autoregressive LLM family, from GPT-2's 1.5B parameters to Llama's 7B--70B range---here using a 70B parameter language model:
 
 ```{python}
 #| label: gpt-llama-calc
@@ -159,16 +159,6 @@ In this textbook, we adopt a **systems framing**: *how do I reduce the total cos
 
 The systems framing reveals optimization opportunities invisible to the ML framing. To see *why*, consider *how* data selection interacts with the **Iron Law** introduced in @sec-ml-system-architecture.
 
-::: {.callout-perspective title="Data Selection and the Iron Law"}
-In the **Iron Law of ML Systems** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), data selection is the only technique that reduces the *Total Operations* term at its source. Model compression reduces operations per sample; hardware acceleration increases throughput per operation. Data selection, by contrast, reduces the number of samples processed entirely.
-
-- **Model compression**: Reduces $O$ per forward/backward pass
-- **Hardware acceleration**: Increases $R_{peak}$ (peak throughput) and $\eta$ (utilization)
-- **Data selection**: Reduces the number of passes through the entire equation
-
-This makes data selection multiplicatively valuable: when all three optimizations act on the same bottleneck, a 2× reduction in dataset size with 2× model compression and 2× hardware acceleration yields 8× total cost reduction, not 6×.
-:::
-
 ```{python}
 #| label: data-selection-savings-calc
 #| echo: false
@@ -185,11 +175,19 @@ from physx.formatting import fmt
 # =============================================================================
 training_cost_m_value = 100  # $M
 dataset_reduction_pct_value = 50  # percent
+data_selection_factor_value = 2
+model_compression_factor_value = 2
+hardware_accel_factor_value = 2
 
 # =============================================================================
 # PROCESS
 # =============================================================================
 compute_savings_m_value = training_cost_m_value * dataset_reduction_pct_value / 100
+combined_factor_value = (
+    data_selection_factor_value
+    * model_compression_factor_value
+    * hardware_accel_factor_value
+)
 
 # =============================================================================
 # OUTPUT
@@ -197,7 +195,18 @@ compute_savings_m_value = training_cost_m_value * dataset_reduction_pct_value / 
 training_cost_m_str = fmt(training_cost_m_value, precision=0, commas=False)
 dataset_reduction_pct_str = fmt(dataset_reduction_pct_value, precision=0, commas=False)
 compute_savings_m_str = fmt(compute_savings_m_value, precision=0, commas=False)
+combined_factor_str = fmt(combined_factor_value, precision=0, commas=False)
 ```
+
+::: {.callout-perspective title="Data Selection and the Iron Law"}
+In the **Iron Law of ML Systems** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), data selection is the only technique that reduces the *Total Operations* term at its source. Model compression reduces operations per sample; hardware acceleration increases throughput per operation. Data selection, by contrast, reduces the number of samples processed entirely.
+
+- **Model compression**: Reduces $O$ per forward/backward pass
+- **Hardware acceleration**: Increases $R_{peak}$ (peak throughput) and $\eta$ (utilization)
+- **Data selection**: Reduces the number of passes through the entire equation
+
+This makes data selection multiplicatively valuable: when all three optimizations act on the same bottleneck, a 2× reduction in dataset size with 2× model compression and 2× hardware acceleration yields `{python} combined_factor_str`× total cost reduction, not 6×.
+:::
 
 Consider training cost reduction: a `{python} dataset_reduction_pct_str`% reduction in dataset size does not merely improve sample efficiency; it directly halves the number of forward passes, backward passes, and gradient updates. For a USD `{python} training_cost_m_str` M training run, this translates to USD `{python} compute_savings_m_str` M in compute savings. The relationship is linear and immediate.
 
@@ -733,7 +742,7 @@ mentornet_speedup_str = fmt(mentornet_speedup_pct, precision=0, commas=False)
 
 : **Curriculum Learning Convergence Speedups.** Target accuracy is 95% of final baseline performance. Gains are larger on redundant datasets (CIFAR-10) and noisy datasets (MentorNet removes approximately 40% noise). ImageNet shows smaller gains because the dataset is less redundant. {#tbl-curriculum-benchmarks .striped .hover}
 
-The table reveals an important pattern: curriculum learning gains are **inversely proportional to dataset quality**. On highly curated datasets like ImageNet, the 11% speedup is modest. On noisy or redundant data, gains can exceed 20%. The optimal ordering is also task-dependent: **anti-curriculum** (hard examples first) can work when the decision boundary is complex and easy examples contribute little to defining it, while **self-paced learning** lets the model dynamically adjust difficulty based on its current loss, eliminating the need to pre-define a curriculum. Empirically, self-paced methods often match or exceed hand-designed curricula.
+The table reveals an important pattern: curriculum learning gains are **inversely proportional to dataset quality**. On highly curated datasets like ImageNet, the `{python} imagenet_speedup_str`% speedup is modest. On noisy or redundant data, gains can exceed 20%. The optimal ordering is also task-dependent: **anti-curriculum** (hard examples first) can work when the decision boundary is complex and easy examples contribute little to defining it, while **self-paced learning** lets the model dynamically adjust difficulty based on its current loss, eliminating the need to pre-define a curriculum. Empirically, self-paced methods often match or exceed hand-designed curricula.
 
 ### Active Learning: Human-in-the-Loop {#sec-data-selection-active-learning-humanintheloop-a9fa}
 
@@ -919,6 +928,8 @@ fixmatch_label_cost = fixmatch_labels * cost_label
 fixmatch_compute_cost = 250
 fixmatch_total = fixmatch_label_cost + fixmatch_compute_cost
 
+fixmatch_compute_multiplier_value = fixmatch_compute_cost / supervised_compute_cost
+
 cost_reduction = supervised_total / fixmatch_total
 acc_loss = cifar10_full_acc - cifar10_fixmatch_250_acc
 
@@ -928,6 +939,9 @@ fixmatch_label_cost_str = fmt(fixmatch_label_cost, precision=0, commas=True)
 fixmatch_total_str = fmt(fixmatch_total, precision=0, commas=True)
 cost_reduction_str = fmt(cost_reduction, precision=0, commas=False)
 acc_loss_str = fmt(acc_loss, precision=1, commas=False)
+fixmatch_compute_multiplier_str = fmt(
+    fixmatch_compute_multiplier_value, precision=0, commas=False
+)
 
 cifar10_full_labels_str = fmt(cifar10_full_labels, precision=0, commas=True)
 cifar10_fixmatch_4k_labels_str = fmt(cifar10_fixmatch_4k_labels, precision=0, commas=True)
@@ -949,12 +963,12 @@ cifar10_fixmatch_40_labels_str = fmt(cifar10_fixmatch_40_labels, precision=0, co
 
 With only `{python} cifar10_fixmatch_250_labels_str` labeled samples (25 per class), FixMatch achieves `{python} cifar10_fixmatch_250_acc`% accuracy, within `{python} acc_loss_str` points of full supervision using `{python} cifar10_fixmatch_250_eff`× fewer labels. The technique works by generating pseudo-labels on weakly augmented unlabeled images (only when model confidence exceeds 0.95), then training to predict these labels on strongly augmented versions of the same images.
 
-**The Systems Insight**: Semi-supervised learning trades labeled data for unlabeled data and compute. On CIFAR-10, training FixMatch requires ~5× more compute than supervised training (processing 50K unlabeled samples per epoch). When labels cost \$1 each and GPU hours cost \$0.50, the math favors semi-supervised:
+**The Systems Insight**: Semi-supervised learning trades labeled data for unlabeled data and compute. On CIFAR-10, training FixMatch requires ~`{python} fixmatch_compute_multiplier_str`× more compute than supervised training (processing 50K unlabeled samples per epoch). When labels cost \$1 each and GPU hours cost \$0.50, the math favors semi-supervised:
 
 - Supervised (`{python} cifar10_fixmatch_4k_labels_str` labels): \$`{python} supervised_label_cost_str` labeling + \$`{python} supervised_compute_cost` compute = **\$`{python} supervised_total_str`**
 - FixMatch (`{python} cifar10_fixmatch_250_labels_str` labels): \$`{python} fixmatch_label_cost_str` labeling + \$`{python} fixmatch_compute_cost` compute = **\$`{python} fixmatch_total_str`**
 
-An `{python} cost_reduction_str`× cost reduction for <1% accuracy loss.
+An `{python} cost_reduction_str`× cost reduction for ~`{python} acc_loss_str` points of accuracy loss.
 :::
 
 These gains are substantial, but semi-supervised learning is not universally applicable. The technique assumes that unlabeled data comes from the same distribution as labeled data, and it struggles when unlabeled data contains out-of-distribution samples (the model confidently mislabels them), when class imbalance is severe (pseudo-labels amplify majority class bias), or when the labeled set does not cover all classes (preventing label propagation for unseen classes). Always validate on a held-out set with true labels to catch distribution mismatch.
@@ -1036,6 +1050,9 @@ label_cost_finetune_total = labels_per_task_finetune * cost_per_label * n_tasks_
 label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
 # Marginal cost reduction: 1000 -> 50 = 20x
 marginal_compute_reduction = cost_scratch_per_task_value / cost_finetune_value
+crossover_tasks_value = cost_pretrain_value / (
+    cost_scratch_per_task_value - cost_finetune_value
+)
 
 # =============================================================================
 # OUTPUT
@@ -1052,6 +1069,8 @@ labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas
 label_cost_finetune_total_str = f"${label_cost_finetune_total / 1_000:.0f}K"  # e.g., "$10K"
 cost_finetune_value_str = fmt(cost_finetune_value, precision=0, commas=True)
 cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True)
+marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
+crossover_tasks_str = fmt(crossover_tasks_value, precision=0, commas=False)
 
 label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=False)
 marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
@@ -1066,7 +1085,7 @@ The return on investment is substantial across every dimension: labeling costs d
 This explains *why* the fine-tuning paradigm dominates production ML. The pre-training cost is high but amortized across many downstream applications, while fine-tuning cost remains low on a per-task basis.
 
 ```{python}
-#| label: foundation-cost-calc
+#| label: fig-foundation-cost-data
 #| echo: false
 
 # =============================================================================
@@ -1627,7 +1646,7 @@ cost_total_proxy_str = fmt(cost_total_proxy, precision=1, commas=False)
 
 :::
 
-Look at the stacked bars in @fig-selection-inequality to see this trade-off in action: efficient selection (center) saves 55% of total compute, while expensive selection (right) consumes all the savings in overhead.
+Look at the stacked bars in @fig-selection-inequality to see this trade-off in action: efficient selection (center) saves `{python} savings_b_pct_str`% of total compute, while expensive selection (right) consumes all the savings in overhead.
 
 ::: {#fig-selection-inequality fig-cap="**The Selection Inequality**\index{Data Selection Systems!selection inequality}: Data selection only improves end-to-end efficiency if the overhead of selection plus training on the subset is less than training on the full dataset. A lightweight selection function (proxy model, cached embeddings) keeps selection overhead low; an expensive selection function (full model forward pass) can negate the savings." fig-alt="Stacked bar chart comparing three approaches: Baseline shows a single tall bar (100) for full training; Efficient Selection shows two short stacked bars (5 selection overhead plus 40 subset training) totaling 45 with a 55 percent savings annotation; Expensive Selection shows two stacked bars (60 selection overhead plus 40 subset training) totaling 100 with a No savings annotation."}
 ```{python}

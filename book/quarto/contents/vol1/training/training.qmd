@@ -114,7 +114,7 @@ gelu_approx_cost_factor_value = 1.5
 gelu_overhead_pct_min_value = 5
 gelu_overhead_pct_max_value = 8
 adam_7b_params_value = 7
-adam_7b_state_gb_value = 84
+adam_7b_state_gb_value = 56
 adam_7b_compression_value = 2
 sgd_iterations_min_value = 10000
 sgd_iterations_max_value = 100000
@@ -164,8 +164,8 @@ h100_mem_value = h100_mem_capacity_value
 h100_tflops_fp16_value = h100_flops_fp16_tensor_value
 h100_tflops_tf32_value = h100_flops_tf32_value
 h100_tflops_fp8_value = h100_flops_fp8_tensor_value
-h100_pflops_fp8_value = h100_flops_fp8_tensor_value / 1000
-h100_pflops_fp16_value = h100_flops_fp16_tensor_value / 1000
+h100_pflops_fp8_value = H100_FLOPS_FP8_TENSOR.to(PFLOPs/second).magnitude
+h100_pflops_fp16_value = H100_FLOPS_FP16_TENSOR.to(PFLOPs/second).magnitude
 h100_bw_tbs_value = h100_mem_bw_value
 
 # Ridge points
@@ -184,11 +184,11 @@ system_mem_bw_value = system_memory_bw_value
 a100_tdp_value = a100_tdp_value
 
 # Model calculations
-gpt2_params_b_value = gpt2_params_value / 1000
+gpt2_params_b_value = GPT2_PARAMS.to(Bparam).magnitude
 gpt2_layers_value = gpt2_layers_value
 gpt2_params_gb_fp32_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 gpt2_adam_gb_value = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
-gpt3_params_b_value = gpt3_params_value / 1000
+gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude
 resnet50_params_m_value = resnet50_params_value
 resnet50_params_gb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, GB)
 
@@ -368,6 +368,15 @@ total_preprocess_ms_str = "30"
 buffer_batch_size_str = "256"
 buffer_image_res_str = "1024"
 buffer_mem_gb_str = "2"
+from physx.formatting import md_math
+buffer_dims_md = md_math(f"{buffer_image_res_str}\\times {buffer_image_res_str}")
+layer_dims_md = md_math(f"{layer_dim_h_str} \\times {layer_dim_w_str}")
+conv_input_dims_md = md_math(f"{conv_batch_str} \\times {conv_h_str} \\times {conv_w_str} \\times {conv_c_str}")
+conv_kernel_dims_md = md_math(f"{conv_k_str} \\times {conv_k_str}")
+conv_spatial_dims_md = md_math(f"{conv_spatial_str} \\times {conv_spatial_str}")
+bwd_input_bytes_md = md_math(f"{bwd_input_dims_str} \\times 4")
+bwd_grad_bytes_md = md_math(f"{bwd_grad_dims_str} \\times 4")
+bwd_kernel_dims_md = md_math(bwd_kernel_dims_str)
 bytes_fp16_str = "2"
 model_1b_fp32_gb_str = "4"
 model_1b_fp16_gb_str = "2"
@@ -380,9 +389,9 @@ small_lr_str = "2.5e-4"
 
 ## Training Systems Fundamentals {#sec-ai-training-training-systems-fundamentals-05d2}
 
-\index{Training!cost asymmetry}\index{Training!inference vs training}Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately ${python} gpt2_training_cost_2019_str` in 2019. Running GPT-4 once costs a few cents (an inference cost detailed in @sec-model-serving-systems). Training GPT-4 cost an estimated ${python} gpt4_training_cost_est_str` million. This million-to-one cost asymmetry, introduced in the Purpose section, reflects the sheer volume of computation required: tens of billions of forward passes, each followed by a backward pass, repeated across datasets measured in terabytes.
+\index{Training!cost asymmetry}\index{Training!inference vs training}Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately $`{python} gpt2_training_cost_2019_str` in 2019. Running GPT-4 once costs a few cents (an inference cost detailed in @sec-model-serving-systems). Training GPT-4 cost an estimated $`{python} gpt4_training_cost_est_str` million. This million-to-one cost asymmetry, introduced in the Purpose section, reflects the sheer volume of computation required: tens of billions of forward passes, each followed by a backward pass, repeated across datasets measured in terabytes.
 
-A single forward pass through GPT-2 requires roughly ${python} gpt2_fwd_flops_str` floating-point operations. Training requires tens of billions of such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a total computational budget on the order of ${python} gpt2_total_flops_str` operations [@brown2020language]. This asymmetry makes training systems engineering a distinct discipline, and it explains why access to training infrastructure increasingly determines who can participate in AI development at all.
+A single forward pass through GPT-2 requires roughly `{python} gpt2_fwd_flops_str` floating-point operations. Training requires tens of billions of such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a total computational budget on the order of `{python} gpt2_total_flops_str` operations [@brown2020language]. This asymmetry makes training systems engineering a distinct discipline, and it explains why access to training infrastructure increasingly determines who can participate in AI development at all.
 
 ::: {.callout-definition title="Training Systems"}
 
@@ -397,9 +406,9 @@ Each of these challenges opens a corresponding optimization pathway. Computation
 ::: {.callout-example title="The 3AM Gradient Explosion"}
 **The Scenario**: You are training a 7B parameter LLM. The loss curve has been decreasing smoothly for 4 days. You go to sleep.
 
-**The Failure**: At 3:00 AM, the training loss suddenly spikes from {python} loss_spike_val_str` to NaN (Not a Number). The training crashes. You have lost {python} lost_days_str` days of compute ($\approx \${python} lost_cost_str``).
+**The Failure**: At 3:00 AM, the training loss suddenly spikes from `{python} loss_spike_val_str` to NaN (Not a Number). The training crashes. You have lost `{python} lost_days_str` days of compute ($\approx$ \$`{python} lost_cost_str`).
 
-**The Physics**\index{Gradient Explosion!physics of}: A single batch contained an outlier with extremely high activation values. In **Mixed Precision (FP16)**, these values exceeded the dynamic range ($> {python} fp16_max_val_str``), causing an overflow to Infinity. The gradients became Infinite, updating all weights to NaN.
+**The Physics**\index{Gradient Explosion!physics of}: A single batch contained an outlier with extremely high activation values. In **Mixed Precision (FP16)**, these values exceeded the dynamic range ($>$ `{python} fp16_max_val_str`), causing an overflow to Infinity. The gradients became Infinite, updating all weights to NaN.
 
 **The Systems Fix**:
 
@@ -511,7 +520,7 @@ The **Iron Law** framework shows *how* training systems co-evolved with hardware
 - **1986**: Backpropagation algorithm formalized [@rumelhart1986learning] (see @sec-system-foundations-backpropagation-algorithm-3175 for the derivation). Training a 3-layer network on toy datasets required days on CPU workstations. The bottleneck was raw compute throughput (Peak Throughput in Iron Law terms).
 - **2012**: AlexNet demonstrated GPU training [@alexnet2012]. Two GTX 580 GPUs reduced ImageNet training from weeks to days, a 10× improvement that launched the deep learning era. GPUs increased Peak Throughput dramatically.
 - **2017**: Transformers introduced attention mechanisms [@vaswani2017attention]. NVIDIA Volta GPUs with Tensor Cores enabled mixed-precision training, delivering 5× speedup over previous generation. Tensor Cores further increased Peak Throughput for specific operations.
-- **2020**: GPT-3 training used over {python} gpt3_gpu_count_str` V100 GPUs on Microsoft's Azure V100-based supercomputer, consuming an estimated ${python} gpt3_compute_cost_str`M in compute [@brown2020language]. At this scale, Utilization became critical because idle GPUs wasted thousands of dollars per hour.
+- **2020**: GPT-3 training used over `{python} gpt3_gpu_count_str` V100 GPUs on Microsoft's Azure V100-based supercomputer, consuming an estimated $`{python} gpt3_compute_cost_str`M in compute [@brown2020language]. At this scale, Utilization became critical because idle GPUs wasted thousands of dollars per hour.
 - **2023**: Training efficiency improved 10× through the techniques examined in this chapter. FlashAttention reduces Total Operations while improving Utilization; gradient checkpointing trades Operations for memory capacity; ZeRO optimization maximizes Utilization across distributed systems.
 
 Memory limits motivated gradient checkpointing; bandwidth limits motivated FlashAttention; cost limits motivated mixed precision. The **Iron Law** explains *why* each technique matters: they each pull different levers in the fundamental performance equation.
@@ -528,10 +537,10 @@ GPT-2 (1.5B) serves as our primary case study for **large-scale training** becau
 
 | **Property**     |                                  **Specification** | **Systems Implication**                                                                                                    |
 |:---------------|-------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------|
-| **Parameters**   |           {python} gpt2_params_b_str` Billion (XL) | Requires ~{python} gpt2_weights_fp16_gb_str` GB (FP16) or ~{python} gpt2_weights_fp32_gb_str` GB (FP32) for weights alone. |
+| **Parameters**   |           `{python} gpt2_params_b_str` Billion (XL) | Requires ~`{python} gpt2_weights_fp16_gb_str` GB (FP16) or ~`{python} gpt2_weights_fp32_gb_str` GB (FP32) for weights alone. |
 | **Architecture** |                                48 Layers, 1600 Dim | Deep pipeline creates heavy activation memory pressure.                                                                    |
-| **Dataset**      | OpenWebText ({python} gpt2_dataset_size_gb_str`GB) | I/O throughput must match high-speed accelerator compute.                                                                  |
-| **Compute**      |       ~ {python} gpt2_total_flops_str` FLOPs total | Training takes days/weeks; demands parallelization.                                                                        |
+| **Dataset**      | OpenWebText (`{python} gpt2_dataset_size_gb_str`GB) | I/O throughput must match high-speed accelerator compute.                                                                  |
+| **Compute**      |       ~ `{python} gpt2_total_flops_str` FLOPs total | Training takes days/weeks; demands parallelization.                                                                        |
 
 **Key Systems Challenge:**
 Training GPT-2 is primarily **memory-bound** (due to activation storage) and **compute-intensive** (requiring massive matrix multiplications). It forces us to move beyond simple training loops to sophisticated pipelines that manage data movement as carefully as computation.
@@ -548,10 +557,10 @@ DLRM represents the "Sparse" regime of the Iron Law. Unlike GPT-2, which is boun
 
 | **Property**     | **Specification**                                                                                       | **Systems Implication**                                      |
 |:---------------|:------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------|
-| **Parameters**   | {python} dlrm_params_min_b_str` Billion to {python} dlrm_params_max_t_str` Trillion (mostly embeddings) | Embedding tables exceed single-node memory (requires TBs).   |
+| **Parameters**   | `{python} dlrm_params_min_b_str` Billion to `{python} dlrm_params_max_t_str` Trillion (mostly embeddings) | Embedding tables exceed single-node memory (requires TBs).   |
 | **Architecture** | Embedding Tables + MLP                                                                                  | Low arithmetic intensity; highly memory-bandwidth bound.     |
 | **Inputs**       | Sparse Features (IDs)                                                                                   | Random memory access patterns defy caching.                  |
-| **Compute**      | Low FLOPs per byte                                                                                      | GPUs often underutilized; typically trained on CPU clusters. |
+| **Compute**      | Low FLOPs/byte                                                                                      | GPUs often underutilized; typically trained on CPU clusters. |
 
 **Key Systems Challenge:**
 Training DLRM requires **Model Parallelism** not for compute, but for capacity. The embedding tables are sharded across hundreds of devices. The bottleneck becomes the **All-to-All** communication pattern required to gather embeddings for the dense MLP top-stack.
@@ -674,32 +683,32 @@ v100_fp16_tflops_value = V100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude  #
 # =============================================================================
 # QKV projections: 3 × (batch × seq × hidden × hidden)
 qkv_flops_value = 2 * 3 * batch_value * seq_len_value * hidden_value * hidden_value
-qkv_billion_value = qkv_flops_value / 1e9
+qkv_billion_value = (qkv_flops_value * flop).to(GFLOP).magnitude
 
 # Attention scores: batch × heads × seq × seq × head_dim
 attn_flops_value = 2 * batch_value * n_heads_value * seq_len_value * seq_len_value * head_dim_value
-attn_billion_value = attn_flops_value / 1e9
+attn_billion_value = (attn_flops_value * flop).to(GFLOP).magnitude
 
 # FFN: 2 linear layers (hidden -> 4*hidden -> hidden)
 # Layer 1: 2 * batch * seq * hidden * (4*hidden)
 # Layer 2: 2 * batch * seq * (4*hidden) * hidden
 # Total FFN = 16 * batch * seq * hidden^2
 ffn_flops_value = 16 * batch_value * seq_len_value * hidden_value * hidden_value
-ffn_billion_value = ffn_flops_value / 1e9
+ffn_billion_value = (ffn_flops_value * flop).to(GFLOP).magnitude
 
 # Total per layer (QKV + attn scores + attn×V + output projection + FFN)
 # Attention part: QKV (6BLH^2) + Output (2BLH^2) + Scores (2BL^2H) + Values (2BL^2H)
 # FFN part: 16BLH^2
 total_per_layer_value = qkv_flops_value + attn_flops_value + attn_flops_value + (2 * batch_value * seq_len_value * hidden_value * hidden_value) + ffn_flops_value
-total_per_layer_b_value = total_per_layer_value / 1e9
+total_per_layer_b_value = (total_per_layer_value * flop).to(GFLOP).magnitude
 
 # Per step (all layers)
 per_step_flops_value = total_per_layer_value * n_layers_gpt2_value
-per_step_trillion_value = per_step_flops_value / 1e12
+per_step_trillion_value = (per_step_flops_value * flop).to(TFLOP).magnitude
 
 # Total training
 total_training_flops_value = per_step_flops_value * training_steps_value
-total_training_peta_value = total_training_flops_value / 1e15
+total_training_peta_value = (total_training_flops_value * flop).to(PFLOPs).magnitude
 
 # V100 time per step
 v100_time_per_step_s_value = per_step_trillion_value / v100_fp16_tflops_value
@@ -785,9 +794,9 @@ The critical question for ML systems engineers is not *what* these functions do 
 
 ##### Benchmarking Activation Functions {#sec-ai-training-benchmarking-activation-functions-75c1}
 
-Because activation functions execute millions of times per training step, even small per-operation differences compound into significant training time impact. The selection of an activation function directly influences training throughput and hardware efficiency. @fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in {python} tanh_exec_time_str` seconds compared to Sigmoid's {python} sigmoid_exec_time_str` seconds, a {python} tanh_speedup_str`$\times$ speedup.
+Because activation functions execute millions of times per training step, even small per-operation differences compound into significant training time impact. The selection of an activation function directly influences training throughput and hardware efficiency. @fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in `{python} tanh_exec_time_str` seconds compared to Sigmoid's `{python} sigmoid_exec_time_str` seconds, a `{python} tanh_speedup_str`$\times$ speedup.
 
-::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Execution Time**: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in {python} tanh_exec_time_str` seconds, ReLU in {python} relu_exec_time_str` seconds, Softmax in {python} softmax_exec_time_str` seconds, and Sigmoid in {python} sigmoid_exec_time_str` seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision." fig-alt="Bar chart comparing CPU execution times: Sigmoid at {python} sigmoid_exec_time_str` seconds, Tanh at {python} tanh_exec_time_str` seconds, ReLU at {python} relu_exec_time_str` seconds, and Softmax at {python} softmax_exec_time_str` seconds."}
+::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Execution Time**: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in `{python} tanh_exec_time_str` seconds, ReLU in `{python} relu_exec_time_str` seconds, Softmax in `{python} softmax_exec_time_str` seconds, and Sigmoid in `{python} sigmoid_exec_time_str` seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision." fig-alt="Bar chart comparing CPU execution times: Sigmoid at `{python} sigmoid_exec_time_str` seconds, Tanh at `{python} tanh_exec_time_str` seconds, ReLU at `{python} relu_exec_time_str` seconds, and Softmax at `{python} softmax_exec_time_str` seconds."}
 ```{.tikz}
 \scalebox{0.8}{%
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -832,19 +841,19 @@ Because activation functions execute millions of times per training step, even s
 In production environments, modern hardware accelerators like GPUs alter these relative performance characteristics through specialized hardware units. System architects must consider three primary implementation factors:
 
 **Computational Complexity (Arithmetic Intensity).**
-Functions requiring transcendental operations (exponential, logarithmic) are significantly more expensive than simple thresholding. In software, `exp()` takes {python} exp_cycles_min_str`--{python} exp_cycles_max_str` clock cycles compared to {python} arith_cycles_str` cycle for basic arithmetic[^fn-sigmoid-cost]. Modern GPUs and TPUs mitigate this through lookup tables (LUTs) or piece-wise linear approximations, but even optimized hardware-based sigmoid/tanh remains {python} sigmoid_slower_factor_min_str`--{python} sigmoid_slower_factor_max_str`$\times$ slower than ReLU.
+Functions requiring transcendental operations (exponential, logarithmic) are significantly more expensive than simple thresholding. In software, `exp()` takes `{python} exp_cycles_min_str`--`{python} exp_cycles_max_str` clock cycles compared to `{python} arith_cycles_str` cycle for basic arithmetic[^fn-sigmoid-cost]. Modern GPUs and TPUs mitigate this through lookup tables (LUTs) or piece-wise linear approximations, but even optimized hardware-based sigmoid/tanh remains `{python} sigmoid_slower_factor_min_str`--`{python} sigmoid_slower_factor_max_str`$\times$ slower than ReLU.
 
-[^fn-sigmoid-cost]: **Sigmoid Computational Cost**: Computing sigmoid requires expensive exponential operations. On CPU, `exp()` takes {python} exp_cycles_min_str`--{python} exp_cycles_max_str` clock cycles vs. {python} arith_cycles_str` cycle for basic arithmetic. GPU implementations use 32-entry lookup tables with linear interpolation, reducing cost to 3--4 cycles but still 3$\times$ slower than ReLU. This overhead compounds in deep networks with millions of activations per forward pass.
+[^fn-sigmoid-cost]: **Sigmoid Computational Cost**: Computing sigmoid requires expensive exponential operations. On CPU, `exp()` takes `{python} exp_cycles_min_str`--`{python} exp_cycles_max_str` clock cycles vs. `{python} arith_cycles_str` cycle for basic arithmetic. GPU implementations use 32-entry lookup tables with linear interpolation, reducing cost to 3--4 cycles but still 3$\times$ slower than ReLU. This overhead compounds in deep networks with millions of activations per forward pass.
 
 **Hardware Implementation and Branching.**
-ReLU represents a shift toward hardware-optimized design. Its $\max(0,x)$ operation requires only a single comparison and conditional set, which translates to minimal circuit complexity[^fn-relu-hardware]. GPUs can implement ReLU using a simple multiplexer that checks the sign bit of the input. This simplicity enables extremely high parallel throughput, allowing ReLU to operate at near-peak FLOPs while complex functions achieve only {python} sigmoid_peak_flops_pct_min_str`--{python} sigmoid_peak_flops_pct_max_str`% hardware utilization.
+ReLU represents a shift toward hardware-optimized design. Its $\max(0,x)$ operation requires only a single comparison and conditional set, which translates to minimal circuit complexity[^fn-relu-hardware]. GPUs can implement ReLU using a simple multiplexer that checks the sign bit of the input. This simplicity enables extremely high parallel throughput, allowing ReLU to operate at near-peak FLOPs while complex functions achieve only `{python} sigmoid_peak_flops_pct_min_str`--`{python} sigmoid_peak_flops_pct_max_str`% hardware utilization.
 
-[^fn-relu-hardware]: **ReLU Hardware Efficiency**: ReLU requires just 1 instruction (`max(0,x)`) vs. sigmoid's 10+ operations including exponentials. On NVIDIA GPUs, ReLU runs at {python} relu_peak_flops_pct_str`% of peak FLOP/s while sigmoid achieves only {python} sigmoid_peak_flops_pct_min_str`--{python} sigmoid_peak_flops_pct_max_str`%. ReLU's sparsity (typically 50% zeros) enables additional optimizations: sparse matrix operations, reduced memory bandwidth, and compressed gradients during backpropagation.
+[^fn-relu-hardware]: **ReLU Hardware Efficiency**: ReLU requires just 1 instruction (`max(0,x)`) vs. sigmoid's 10+ operations including exponentials. On NVIDIA GPUs, ReLU runs at `{python} relu_peak_flops_pct_str`% of peak FLOP/s while sigmoid achieves only `{python} sigmoid_peak_flops_pct_min_str`--`{python} sigmoid_peak_flops_pct_max_str`%. ReLU's sparsity (typically 50% zeros) enables additional optimizations: sparse matrix operations, reduced memory bandwidth, and compressed gradients during backpropagation.
 
 **Memory Access and Sparsity.**
 The memory footprint of activations is proportional to the batch size and network depth. ReLU's characteristic of producing many zeros (typically 50% sparsity) enables system-level optimizations that other functions cannot exploit. Sparse matrix operations and gradient compression techniques can reduce memory bandwidth requirements, which is the primary bottleneck in large-scale training. In contrast, global normalization functions like Softmax[^fn-softmax-etymology-training] create unique challenges; they require access to the entire input vector simultaneously to compute the denominator, preventing the independent element-wise parallelization possible with Sigmoid or ReLU.
 
-[^fn-softmax-etymology-training]: **Softmax**: A "soft" (differentiable) approximation to the argmax function. While argmax returns a hard one-hot vector (1 for the maximum, 0 elsewhere), softmax returns a probability distribution that smoothly approximates this behavior. The name, coined by John Bridle in 1990, reflects this relationship: as temperature approaches zero, softmax converges to argmax. This differentiability enables gradient-based learning for classification tasks.
+[^fn-softmax-etymology-training]: **Softmax**: A "soft" (differentiable) approximation to the argmax function, returning a probability distribution rather than a hard one-hot vector. As introduced in @sec-deep-learning-systems-foundations, its differentiability enables gradient-based learning for classification tasks. Its global normalization requirement creates unique memory access challenges for training systems.
 
 @tbl-compare-activations synthesizes these system-level trade-offs, showing *how* mathematical behavior translates into operational constraints.
 
@@ -863,7 +872,7 @@ Our GPT-2 Lighthouse Model makes a specific *activation function* choice that il
 
 ::: {.callout-notebook title="GPT-2 GELU Activation Function"}
 
-While @tbl-compare-activations covers classical activation functions, GPT-2 uses the Gaussian Error Linear Unit (GELU) [@hendrycks2016gaussian], defined as:
+Beyond the foundational activation functions covered in @sec-deep-learning-systems-foundations (Sigmoid, Tanh, ReLU), modern architectures increasingly adopt smoother alternatives. GPT-2 uses the Gaussian Error Linear Unit (GELU) [@hendrycks2016gaussian], defined as:
 $$
 \text{GELU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2}\left[1 + \text{erf}\left(\frac{x}{\sqrt{2}}\right)\right]
 $$
@@ -878,12 +887,12 @@ where $\Phi(x)$ is the cumulative distribution function of the standard normal d
 
 **System Performance Tradeoff**
 
-- Computational cost: ~{python} gelu_cost_factor_min_str` to {python} gelu_cost_factor_max_str`$\times$ more expensive than ReLU (requires erf function evaluation)
+- Computational cost: ~`{python} gelu_cost_factor_min_str` to `{python} gelu_cost_factor_max_str`$\times$ more expensive than ReLU (requires erf function evaluation)
 - Memory: Same as ReLU (element-wise operation)
-- Training time impact: For GPT-2's `{python} gpt2_layers_str` layers, GELU adds ~{python} gelu_overhead_pct_min_str` to {python} gelu_overhead_pct_max_str`% to total forward pass time
+- Training time impact: For GPT-2's `{python} gpt2_layers_str` layers, GELU adds ~`{python} gelu_overhead_pct_min_str` to `{python} gelu_overhead_pct_max_str`% to total forward pass time
 - Worth it: The improved model quality (lower perplexity) offsets the computational overhead
 
-Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately {python} gelu_approx_cost_factor_str`$\times$ ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
+Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately `{python} gelu_approx_cost_factor_str`$\times$ ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
 
 :::
 
@@ -941,7 +950,7 @@ This memory breakdown is formalized in the **Algorithm Foundations** appendix, w
 
 \index{SGD|see{Stochastic Gradient Descent}}\index{Stochastic Gradient Descent!gradient estimation}These system constraints led to the development of variants that better align with hardware capabilities. The key insight was that exact gradient computation, while mathematically appealing, is not necessary for effective learning. SGD[^fn-sgd-history] represents a fundamental shift in optimization strategy, estimating gradients using individual training examples rather than the entire dataset. This approach drastically reduces memory requirements since only one example's activations and gradients need storage at any time.
 
-[^fn-sgd-history]: **Stochastic Gradient Descent**: "Stochastic" derives from Greek "stochastikos" meaning "able to guess" or "aim at a target," from "stochos" (target). The term captures the essence: rather than computing exact gradients over all data, we guess the gradient from random samples. Developed by Robbins and Monro in 1951 for statistical optimization, SGD was first applied to neural networks by Rosenblatt for the perceptron in 1958. Today's "mini-batch SGD" (processing 32-512 examples) balances the original single-example approach with full-batch methods. The stochastic noise in updates often helps escape local minima.
+[^fn-sgd-history]: **Stochastic Gradient Descent**: "Stochastic" derives from Greek "stochastikos" meaning "able to guess," from "stochos" (target)---rather than computing exact gradients over all data, we estimate the gradient from random samples. Developed by Robbins and Monro in 1951, SGD was first applied to neural networks by Rosenblatt in 1958. Today's mini-batch SGD (processing 32--512 examples) balances the single-example approach with full-batch methods.
 
 However, processing single examples creates new system challenges. Modern accelerators achieve peak performance through parallel computation, processing multiple data elements simultaneously. Single-example updates leave most computing resources idle, resulting in poor hardware utilization. The frequent parameter updates also increase memory bandwidth requirements, as weights must be read and written for each example rather than amortizing these operations across multiple examples.
 
@@ -964,7 +973,25 @@ $$
 \end{aligned}
 $$
 
-For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately 8 GB of activation memory, 4 GB for gradients, and 200 MB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to 16 GB activations and 8 GB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GB of HBM.
+```{python}
+#| label: resnet50-batch-memory-calc
+#| echo: false
+from physx.formatting import fmt
+
+resnet50_act_mem_b32_gb_value = 8
+resnet50_grad_mem_b32_gb_value = 4
+resnet50_param_mem_b32_mb_value = 200
+resnet50_act_mem_b64_gb_value = 16
+resnet50_grad_mem_b64_gb_value = 8
+
+resnet50_act_mem_b32_gb_str = fmt(resnet50_act_mem_b32_gb_value, precision=0, commas=False)
+resnet50_grad_mem_b32_gb_str = fmt(resnet50_grad_mem_b32_gb_value, precision=0, commas=False)
+resnet50_param_mem_b32_mb_str = fmt(resnet50_param_mem_b32_mb_value, precision=0, commas=False)
+resnet50_act_mem_b64_gb_str = fmt(resnet50_act_mem_b64_gb_value, precision=0, commas=False)
+resnet50_grad_mem_b64_gb_str = fmt(resnet50_grad_mem_b64_gb_value, precision=0, commas=False)
+```
+
+For concrete understanding, consider ResNet-50 training with different batch sizes. At batch size 32, the model requires approximately `{python} resnet50_act_mem_b32_gb_str` GB of activation memory, `{python} resnet50_grad_mem_b32_gb_str` GB for gradients, and `{python} resnet50_param_mem_b32_mb_str` MB for parameters per GPU. Doubling to batch size 64 doubles these memory requirements to `{python} resnet50_act_mem_b64_gb_str` GB activations and `{python} resnet50_grad_mem_b64_gb_str` GB gradients. This linear scaling quickly exhausts GPU memory, with high-end training GPUs typically providing 40--80 GB of HBM.
 
 Larger batches enable more efficient computation through improved parallelism and better memory access patterns. GPU utilization efficiency demonstrates this trade-off: batch sizes of 256 or higher typically achieve over 90% hardware utilization on modern training accelerators, while smaller batches of 16--32 may only achieve 60--70% utilization due to insufficient parallelism to saturate the hardware. Linear scaling rules for large-batch training (scale learning rate proportionally to batch size increase) help maintain convergence speed [@goyal2017accurate].
 
@@ -1022,14 +1049,14 @@ adam_overhead_str = f"{adam_overhead_mb_value}"
 
 The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors (m_t and v_t) for each parameter, tripling the memory required for optimization state.
 
-[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a {python} adam_7b_params_str`B model in FP32, this means {python} adam_7b_state_gb_str` GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam ({python} adam_7b_compression_str`x compression) and GaLoRE (gradient low-rank projection).
+[^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a `{python} adam_7b_params_str`B model in FP32, this means `{python} adam_7b_state_gb_str` GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam (`{python} adam_7b_compression_str`x compression) and GaLoRE (gradient low-rank projection).
 
 #### Optimization Algorithm System Implications {#sec-ai-training-optimization-algorithm-system-implications-f9f2}
 
 []{#sec-ai-training-optimization-tradeoffs-77c5}
 The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Memory requirements increase progressively from SGD ($1\times$ model size) through Momentum ($2\times$) to Adam ($3\times$), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-etymology] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. The concrete scale of these *GPT-2 optimizer memory requirements* illustrates just how significant this overhead becomes for large models.
 
-[^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring {python} sgd_iterations_min_str`-{python} sgd_iterations_max_str` iterations for large models.
+[^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring `{python} sgd_iterations_min_str`-`{python} sgd_iterations_max_str` iterations for large models.
 
 | **Property**             | **SGD**    | **Momentum**   | **RMSprop**       | **Adam**                            |
 |:-----------------------|:---------|:-------------|:----------------|:----------------------------------|
@@ -1069,10 +1096,7 @@ GPT-2 training uses the Adam optimizer with these hyperparameters:
 # =============================================================================
 from physx.constants import GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB
 from physx.formatting import fmt
-
-gpt2_b_value = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5 B
-bytes_fp32_value = BYTES_FP32.to(byte).magnitude
-bytes_fp16_value = BYTES_FP16.to(byte).magnitude
+from physx.formulas import model_memory
 
 v100_mem_gib_value = V100_MEM_CAPACITY.to(GiB).magnitude  # 32 GiB
 
@@ -1080,16 +1104,16 @@ v100_mem_gib_value = V100_MEM_CAPACITY.to(GiB).magnitude  # 32 GiB
 # PROCESS
 # =============================================================================
 # FP32 Baseline
-param_fp32_gb_value = gpt2_b_value * bytes_fp32_value
-grad_fp32_gb_value = gpt2_b_value * bytes_fp32_value
-adam_m_fp32_gb_value = gpt2_b_value * bytes_fp32_value
-adam_v_fp32_gb_value = gpt2_b_value * bytes_fp32_value
+param_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+grad_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+adam_m_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+adam_v_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 total_static_fp32_value = param_fp32_gb_value + grad_fp32_gb_value + adam_m_fp32_gb_value + adam_v_fp32_gb_value
 
 # AMP (FP16)
-param_fp16_gb_value = gpt2_b_value * bytes_fp16_value
-grad_fp16_gb_value = gpt2_b_value * bytes_fp16_value
-master_fp32_gb_value = gpt2_b_value * bytes_fp32_value  # AMP overhead
+param_fp16_gb_value = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
+grad_fp16_gb_value = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
+master_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)  # AMP overhead
 # Optimizer remains FP32 for stability
 total_static_amp_value = param_fp16_gb_value + grad_fp16_gb_value + master_fp32_gb_value + adam_m_fp32_gb_value + adam_v_fp32_gb_value
 
@@ -1295,31 +1319,9 @@ The optimization algorithms above specify how to update parameters given gradien
 
 The backpropagation algorithm[^fn-backpropagation] computes gradients by systematically moving backward through a neural network's computational graph. In @sec-deep-learning-systems-foundations-gradient-computation-backpropagation-dacf, we established the mathematical foundation: the chain rule breaks gradient computation into layer-by-layer operations, with each layer receiving adjustment signals proportional to its contribution to the final error. If terms like "computational graph" or "gradient flow" feel unfamiliar, the factory assembly line analogy in that section is worth revisiting.
 
-[^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes {python} resnet50_act_mem_gb_str` GB per image.
+[^fn-backpropagation]: **Backpropagation Algorithm**: As introduced in @sec-deep-learning-systems-foundations, backpropagation computes gradients in $O(n)$ time by applying the chain rule layer-by-layer. The key systems cost: storing all activations for the backward pass---a ResNet-50 consumes `{python} resnet50_act_mem_gb_str` GB per image, motivating techniques like activation checkpointing.
 
 Here, we shift focus from *what* backpropagation computes to *what it costs* to compute it at scale. The layer computations from @sec-ai-training-mathematical-operations-neural-networks-ddac produce activations that must be retained for the backward pass. Computing $\frac{\partial L}{\partial \mathbf{W}^{(l)}}$ requires access to these stored activations, creating memory requirements that scale with network depth and batch size.
-
-A simple three-layer network processing MNIST requires kilobytes of activation storage. GPT-2 processing a single batch requires over {python} total_act_str` gigabytes, more than most GPUs can hold. That gap defines the engineering challenge this chapter addresses. For the mathematical foundations of how backpropagation drives these memory costs—including the full training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$)—see @sec-algorithm-foundations. Modern training systems use autodifferentiation[^fn-autodiff] to handle gradient computations automatically, but the underlying memory and computation patterns remain the systems engineer's responsibility to manage.
-
-[^fn-autodiff]: **Automatic Differentiation**: Not to be confused with symbolic or numerical differentiation, autodiff constructs a computational graph at runtime and applies the chain rule systematically. PyTorch uses "define-by-run" (dynamic graphs built during forward pass) while TensorFlow v1 used static graphs. This enables complex architectures like RNNs and transformers where graph structure changes dynamically, but requires careful memory management since the entire forward computation graph must be preserved for the backward pass.
-
-#### Activation Memory Requirements {#sec-ai-training-activation-memory-requirements-f44c}
-
-\index{Activation Memory!forward pass storage}\index{Memory!activation storage requirements}Training systems must maintain intermediate values (activations) from the forward pass to compute gradients during the backward pass. This requirement compounds the memory demands of optimization algorithms. For each layer l, the system must store:
-
-* Input activations from the forward pass
-* Output activations after applying layer operations
-* Layer parameters being optimized
-* Computed gradients for parameter updates
-
-Consider a batch of training examples passing through a network. The forward pass computes and stores:
-\begin{gather*}
-\mathbf{z}^{(l)} = \mathbf{a}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)}
-\\
-\mathbf{a}^{(l)} = f(\mathbf{z}^{(l)})
-\end{gather*}
-
-Both $\mathbf{z}^{(l)}$ and $\mathbf{a}^{(l)}$ must be cached for the backward pass. This creates a multiplicative effect on memory usage: each layer's memory requirement is multiplied by the batch size, and the optimizer's memory overhead (discussed in the previous section) applies to each parameter. Quantifying these costs for our GPT-2 Lighthouse Model reveals the scale of the *activation memory* challenge.
 
 ```{python}
 #| label: gpt2-activation-memory-calc
@@ -1329,21 +1331,20 @@ Both $\mathbf{z}^{(l)}$ and $\mathbf{a}^{(l)}$ must be cached for the backward p
 # PURPOSE
 # =============================================================================
 # Purpose: Calculate GPT-2 activation memory requirements and checkpointing trade-offs
-# Used in: Activation Memory Requirements section (GPT-2 memory breakdown)
+# Used in: Backpropagation Mechanics intro and Activation Memory Requirements callout
 
 # =============================================================================
 # INPUT
 # =============================================================================
 from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB
 from physx.formatting import fmt
+from physx.formulas import model_memory
 
 batch_size_value = 32
 seq_len_value = 1024
 hidden_dim_value = GPT2_HIDDEN_DIM  # 1600 for GPT-2 XL (1.5B)
 n_layers_value = GPT2_LAYERS  # 48
 ffn_expansion_value = 4
-bytes_fp16_value = BYTES_FP16.to(byte).magnitude
-bytes_fp32_value = BYTES_FP32.to(byte).magnitude
 
 v100_mem_gb_value = V100_MEM_CAPACITY.to(GiB).magnitude
 
@@ -1356,16 +1357,16 @@ recompute_overhead_pct_value = 33  # Additional compute from recomputation
 ffn_dim_value = hidden_dim_value * ffn_expansion_value
 
 # Per-layer activation memory
-attn_act_mb_value = batch_size_value * seq_len_value * hidden_dim_value * 4 * bytes_fp16_value / 1e6
-ffn_act_mb_value = batch_size_value * seq_len_value * ffn_dim_value * bytes_fp16_value / 1e6
+attn_act_mb_value = (batch_size_value * seq_len_value * hidden_dim_value * 4 * BYTES_FP16).to(MB).magnitude
+ffn_act_mb_value = (batch_size_value * seq_len_value * ffn_dim_value * BYTES_FP16).to(MB).magnitude
 layernorm_mb_value = 10  # approximate
 per_layer_mb_value = attn_act_mb_value + ffn_act_mb_value + layernorm_mb_value
 
 # Full model memory
-total_act_gb_value = n_layers_value * per_layer_mb_value / 1000
-params_gb_value = GPT2_PARAMS.magnitude * bytes_fp16_value / 1e9
+total_act_gb_value = (n_layers_value * per_layer_mb_value * MB).to(GB).magnitude
+params_gb_value = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
 grad_gb_value = params_gb_value
-optimizer_gb_value = GPT2_PARAMS.magnitude * bytes_fp32_value * 2 / 1e9  # Adam: 2 states in FP32
+optimizer_gb_value = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
 peak_gb_value = total_act_gb_value + params_gb_value + grad_gb_value + optimizer_gb_value
 
 # Gradient checkpointing estimates
@@ -1397,6 +1398,28 @@ ckpt_act_gb_str = fmt(ckpt_act_gb_value, precision=0, commas=False)
 recompute_str = f"{recompute_overhead_pct_value}"
 act_fp32_gb_str = fmt(act_fp32_gb_value, precision=0, commas=False)
 ```
+
+A simple three-layer network processing MNIST requires kilobytes of activation storage. GPT-2 processing a single batch requires over `{python} total_act_str` gigabytes, more than most GPUs can hold. That gap defines the engineering challenge this chapter addresses. For the mathematical foundations of how backpropagation drives these memory costs—including the full training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$)—see @sec-algorithm-foundations. Modern training systems use autodifferentiation[^fn-autodiff] to handle gradient computations automatically, but the underlying memory and computation patterns remain the systems engineer's responsibility to manage.
+
+[^fn-autodiff]: **Automatic Differentiation**: Not to be confused with symbolic or numerical differentiation, autodiff constructs a computational graph at runtime and applies the chain rule systematically. PyTorch uses "define-by-run" (dynamic graphs built during forward pass) while TensorFlow v1 used static graphs. This enables complex architectures like RNNs and transformers where graph structure changes dynamically, but requires careful memory management since the entire forward computation graph must be preserved for the backward pass.
+
+#### Activation Memory Requirements {#sec-ai-training-activation-memory-requirements-f44c}
+
+\index{Activation Memory!forward pass storage}\index{Memory!activation storage requirements}Training systems must maintain intermediate values (activations) from the forward pass to compute gradients during the backward pass. This requirement compounds the memory demands of optimization algorithms. For each layer l, the system must store:
+
+* Input activations from the forward pass
+* Output activations after applying layer operations
+* Layer parameters being optimized
+* Computed gradients for parameter updates
+
+Consider a batch of training examples passing through a network. The forward pass computes and stores:
+\begin{gather*}
+\mathbf{z}^{(l)} = \mathbf{a}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)}
+\\
+\mathbf{a}^{(l)} = f(\mathbf{z}^{(l)})
+\end{gather*}
+
+Both $\mathbf{z}^{(l)}$ and $\mathbf{a}^{(l)}$ must be cached for the backward pass. This creates a multiplicative effect on memory usage: each layer's memory requirement is multiplied by the batch size, and the optimizer's memory overhead (discussed in the previous section) applies to each parameter. Quantifying these costs for our GPT-2 Lighthouse Model reveals the scale of the *activation memory* challenge.
 
 We can see this in detail by examining the *GPT-2 activation memory breakdown*.
 
@@ -1435,7 +1458,7 @@ Most GPT-2 implementations use a training configuration of gradient checkpointin
 This breakdown illustrates the practical engineering decisions required when GPU memory falls short. Before examining the mathematical details of memory-computation trade-offs, check your understanding of these core concepts.
 
 ::: {.callout-checkpoint title="The Memory-Compute Tradeoff" collapse="false"}
-Training large models requires managing the memory wall.
+Training large models requires managing the memory wall (the bandwidth bottleneck introduced in @sec-deep-learning-systems-foundations and revisited in @sec-ai-frameworks-execution-strategy-matters-memory-wall-1ce8).
 
 **The Bottleneck**
 
@@ -1483,9 +1506,9 @@ Consider @tbl-training-arithmetic-intensity: dense matrix multiplication achieve
 | **Operation**            |                   **Arithmetic Intensity** | **Classification** |
 |:-----------------------|-----------------------------------------:|:-----------------|
 | **Dense MatMul (large)** |                             O(n) FLOP/byte | Compute-bound      |
-| **Activation functions** | {python} ai_act_fp16_str` FLOP/byte (FP16) | Memory-bound       |
-| **LayerNorm/BatchNorm**  |           ~{python} ai_norm_str` FLOP/byte | Memory-bound       |
-| **Attention softmax**    |        ~{python} ai_softmax_str` FLOP/byte | Memory-bound       |
+| **Activation functions** | `{python} ai_act_fp16_str` FLOP/byte (FP16) | Memory-bound       |
+| **LayerNorm/BatchNorm**  |           ~`{python} ai_norm_str` FLOP/byte | Memory-bound       |
+| **Attention softmax**    |        ~`{python} ai_softmax_str` FLOP/byte | Memory-bound       |
 
 : **Training Operation Classifications.** Different operations in the training pipeline have vastly different arithmetic intensities, determining whether they are limited by compute throughput or memory bandwidth. {#tbl-training-arithmetic-intensity}
 
@@ -2090,9 +2113,9 @@ This inequality determines system efficiency. When preprocessing time exceeds GP
 
 #### Compute Operations {#sec-ai-training-compute-operations-83ee}
 
-The forward pass orchestrates the computational patterns introduced in @sec-ai-training-matrix-operations-1f21, optimizing them for specific neural network operations. Building on the matrix multiplication foundations, the system must efficiently execute the $N \times M \times B$ floating-point operations required for each layer, where typical layers with dimensions of ${python} layer_dim_h_str`\times{python} layer_dim_w_str`$ processing batches of {python} layer_batch_str` samples execute over {python} layer_ops_m_str` million operations.
+The forward pass orchestrates the computational patterns introduced in @sec-ai-training-matrix-operations-1f21, optimizing them for specific neural network operations. Building on the matrix multiplication foundations, the system must efficiently execute the $N \times M \times B$ floating-point operations required for each layer, where typical layers with dimensions of `{python} layer_dims_md` processing batches of `{python} layer_batch_str` samples execute over `{python} layer_ops_m_str` million operations.
 
-Modern neural architectures extend beyond these basic matrix operations to include specialized computational patterns. Convolutional networks[^fn-convolution], for instance, perform systematic kernel operations across input tensors. Consider a typical input tensor of dimensions ${python} conv_batch_str` \times {python} conv_h_str` \times {python} conv_w_str` \times {python} conv_c_str`$ (batch size $\times$ height $\times$ width $\times$ channels) processed by ${python} conv_k_str` \times {python} conv_k_str`$ kernels. Each position requires {python} conv_ops_per_pos_str` multiply-accumulate operations, and with {python} conv_filters_str` filters operating across ${python} conv_spatial_str` \times {python} conv_spatial_str`$ spatial dimensions, the computational demands become substantial.
+Modern neural architectures extend beyond these basic matrix operations to include specialized computational patterns. Convolutional networks[^fn-convolution], for instance, perform systematic kernel operations across input tensors. Consider a typical input tensor of dimensions `{python} conv_input_dims_md` (batch size $\times$ height $\times$ width $\times$ channels) processed by `{python} conv_kernel_dims_md` kernels. Each position requires `{python} conv_ops_per_pos_str` multiply-accumulate operations, and with `{python} conv_filters_str` filters operating across `{python} conv_spatial_dims_md` spatial dimensions, the computational demands become substantial.
 
 Transformer architectures introduce attention mechanisms[^fn-attention-mechanisms], which compute similarity scores between sequences. These operations combine matrix multiplications with softmax normalization, requiring efficient broadcasting and reduction operations across varying sequence lengths. The computational pattern here differs significantly from convolutions, demanding flexible execution strategies from hardware accelerators.
 
@@ -2114,10 +2137,10 @@ A common mistake in ML systems is treating batch size as a continuous variable. 
 
 | **Batch Size**              | **Warps Needed** |             **Utilization** |            **Relative Time** |
 |:--------------------------|---------------:|--------------------------:|---------------------------:|
-| {python} wave_batch_32_str` |                1 |                        100% |                         1.0× |
-| {python} wave_batch_33_str` |                2 | {python} wave_util_33_str`% | ~{python} wave_time_33_str`× |
-| {python} wave_batch_64_str` |                2 |                        100% |                         1.0× |
-| {python} wave_batch_65_str` |                3 | {python} wave_util_65_str`% | ~{python} wave_time_65_str`× |
+| `{python} wave_batch_32_str` |                1 |                        100% |                         1.0× |
+| `{python} wave_batch_33_str` |                2 | `{python} wave_util_33_str`% | ~`{python} wave_time_33_str`× |
+| `{python} wave_batch_64_str` |                2 |                        100% |                         1.0× |
+| `{python} wave_batch_65_str` |                3 | `{python} wave_util_65_str`% | ~`{python} wave_time_65_str`× |
 
 **Engineering Rule**: Always choose batch sizes and hidden dimensions that are **powers of 2** or multiples of 8/32/64 to avoid this "quantization tax." A batch of 32 is often faster than 33, and a batch of 64 is often just as fast as 33.
 
@@ -2135,27 +2158,42 @@ These hardware utilization patterns reinforce the efficiency principles establis
 ```{python}
 #| label: vram-requirements-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Estimate VRAM requirements for LLM training
+# Used in: Estimating VRAM Requirements callout
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# VRAM requirements estimation for LLM training
 vram_params_b = 7           # billion parameters
 vram_gpu_capacity_gb = 24   # GPU memory
 vram_fp16_bytes = BYTES_FP16.to(byte).magnitude
 vram_fp32_bytes = BYTES_FP32.to(byte).magnitude
 vram_adam_bytes = BYTES_ADAM_STATE.to(byte).magnitude
 
-vram_weights_gb = vram_params_b * vram_fp16_bytes
-vram_gradients_gb = vram_params_b * vram_fp16_bytes
-vram_optimizer_gb = vram_params_b * vram_adam_bytes
-vram_subtotal_gb = vram_weights_gb + vram_gradients_gb + vram_optimizer_gb
-
-# Activation example
+# Activation example configuration
 vram_batch = 1
 vram_seq = 2048
 vram_hidden = 4096
 vram_layers = 32
 vram_activations_gb = 2  # approximate
 
+# =============================================================================
+# PROCESS
+# =============================================================================
+vram_weights_gb = vram_params_b * vram_fp16_bytes
+vram_gradients_gb = vram_params_b * vram_fp16_bytes
+vram_optimizer_gb = vram_params_b * vram_adam_bytes
+vram_subtotal_gb = vram_weights_gb + vram_gradients_gb + vram_optimizer_gb
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
 vram_params_b_str = fmt(vram_params_b, precision=0, commas=False)
 vram_gpu_capacity_str = fmt(vram_gpu_capacity_gb, precision=0, commas=False)
 vram_fp16_bytes_str = fmt(vram_fp16_bytes, precision=0, commas=False)
@@ -2197,27 +2235,40 @@ where $B$ represents the batch size, $L$ is the number of layers, and $A_l$ repr
 #| label: resnet-memory-scaling-calc
 #| echo: false
 
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate ResNet-50 memory scaling across batch sizes and GPT-3 parameter memory
+# Used in: Memory scaling discussion (batch size trade-offs, activation checkpointing)
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.constants import RESNET50_PARAMS, Mparam, BYTES_FP32, byte, GB, MiB
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
-# ResNet-50 activation memory scaling (batch=32)
-# Conv1 output: 112x112x64 (after stride-2 conv + pooling from 224x224 input)
+# ResNet-50 Conv1 output: 112x112x64 (after stride-2 conv + pooling from 224x224 input)
 first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
-bytes_fp32 = BYTES_FP32.to(byte).magnitude
-first_conv_mb = first_conv_h * first_conv_w * first_conv_c * bytes_fp32 / (1024**2)
 
-# ResNet-50 parameters: ~25.6M params × 4 bytes ≈ 100MB
+# Empirical values for ResNet-50 training memory footprint
+act_gb_b32 = 8    # Activation memory for batch=32
+grad_gb_b32 = 4   # Gradient memory for batch=32
+param_gb = (200 * MB).to(GB).magnitude  # With batch buffers, ~200MB effective
+a100_40_gb = 40   # A100 40GB variant
+
+# GPT-3 configuration
+gpt3_params = 175e9 * param
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+first_conv_mb = (first_conv_h * first_conv_w * first_conv_c * BYTES_FP32).to(MB).magnitude
+
 resnet_params_m = RESNET50_PARAMS.to(Mparam).magnitude  # 25.6M
 resnet_param_gb = model_memory(RESNET50_PARAMS, BYTES_FP32, GB)  # ~0.1 GB
 
-# Approximate totals for batch=32 (activations dominate)
-# These are empirical values for ResNet-50 training memory footprint
-act_gb_b32 = 8    # Activation memory for batch=32
-grad_gb_b32 = 4   # Gradient memory for batch=32
-param_gb = 200 / 1000  # With batch buffers, ~200MB effective
 total_gb_b32 = act_gb_b32 + grad_gb_b32 + param_gb
-a100_40_gb = 40   # A100 40GB variant
 pct_of_a100 = total_gb_b32 / a100_40_gb * 100
 
 # Batch=64 scaling
@@ -2226,27 +2277,29 @@ grad_gb_b64 = grad_gb_b32 * 2
 total_gb_b64 = act_gb_b64 + grad_gb_b64 + param_gb
 
 # GPT-3 parameter memory
-gpt3_params_count = 175  # billion
-gpt3_fp32_gb = gpt3_params_count * bytes_fp32
-gpt3_fp16_gb = gpt3_params_count * 2
+gpt3_fp32_gb = model_memory(gpt3_params, BYTES_FP32, GB)
+gpt3_fp16_gb = model_memory(gpt3_params, BYTES_FP16, GB)
 
-first_conv_mb_str = f"{first_conv_mb:.0f}"  # ~98 MB (note: 32 batches not included here, just one activation map)
+# =============================================================================
+# OUTPUT
+# =============================================================================
+first_conv_mb_str = fmt(first_conv_mb, precision=0, commas=False)
 total_gb_b32_str = fmt(total_gb_b32, precision=1, commas=False)
 pct_a100_str = fmt(pct_of_a100, precision=0, commas=False)
-act_gb_b64_str = f"{act_gb_b64}"
-grad_gb_b64_str = f"{grad_gb_b64}"
+act_gb_b64_str = fmt(act_gb_b64, precision=0, commas=False)
+grad_gb_b64_str = fmt(grad_gb_b64, precision=0, commas=False)
 total_gb_b64_str = fmt(total_gb_b64, precision=1, commas=False)
-gpt3_fp32_str = f"{gpt3_fp32_gb}"
-gpt3_fp16_str = f"{gpt3_fp16_gb}"
+gpt3_fp32_str = fmt(gpt3_fp32_gb, precision=0, commas=False)
+gpt3_fp16_str = fmt(gpt3_fp16_gb, precision=0, commas=False)
 ```
 
-Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at {python} resnet_input_dim_str`x{python} resnet_input_dim_str` resolution with a batch size of {python} resnet_batch_32_str`. The initial convolutional layer produces activation maps of dimension {python} resnet_conv1_h_str`x{python} resnet_conv1_w_str`x{python} resnet_conv1_c_str`; for a batch of {python} resnet_batch_32_str` at single-precision ({python} bytes_fp32_str` bytes), this requires approximately {python} resnet_conv1_mb_str` MB. As the network progresses through its {python} resnet_layers_str` layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately {python} act_gb_b32_str` GB, gradients require an additional {python} grad_gb_b32_str` GB, and model parameters consume {python} param_mb_str` MB. This `{python} total_gb_b32_str` GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's {python} a100_mem_gb_str` GB memory capacity for a single batch.
+Consider a representative large model like ResNet-50 (a widely-used image classification architecture) processing images at `{python} resnet_input_dim_str`x`{python} resnet_input_dim_str` resolution with a batch size of `{python} resnet_batch_32_str`. The initial convolutional layer produces activation maps of dimension `{python} resnet_conv1_h_str`x`{python} resnet_conv1_w_str`x`{python} resnet_conv1_c_str`; for a batch of `{python} resnet_batch_32_str` at single-precision (`{python} bytes_fp32_str` bytes), this requires approximately `{python} resnet_conv1_mb_str` MB. As the network progresses through its `{python} resnet_layers_str` layers, the cumulative memory demands grow substantially: the complete forward pass activations total approximately `{python} act_gb_b32_str` GB, gradients require an additional `{python} grad_gb_b32_str` GB, and model parameters consume `{python} param_mb_str` MB. This `{python} total_gb_b32_str` GB total represents over `{python} pct_a100_str`% of a high-end A100 GPU's `{python} a100_mem_gb_str` GB memory capacity for a single batch.
 
-The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to {python} resnet_batch_64_str` increases activation memory to `{python} act_gb_b64_str` GB and gradient memory to `{python} grad_gb_b64_str` GB, totaling `{python} total_gb_b64_str` GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} gpt3_params_b_str` B parameters, representing current large language models) requires approximately `{python} gpt3_fp32_str` GB just for parameters in FP32 (`{python} gpt3_fp16_str` GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
+The memory scaling patterns reveal critical hardware utilization trade-offs. Doubling the batch size to `{python} resnet_batch_64_str` increases activation memory to `{python} act_gb_b64_str` GB and gradient memory to `{python} grad_gb_b64_str` GB, totaling `{python} total_gb_b64_str` GB and approaching memory limits. Training larger models at the scale of GPT-3 (`{python} gpt3_params_b_str` B parameters, representing current large language models) requires approximately `{python} gpt3_fp32_str` GB just for parameters in FP32 (`{python} gpt3_fp16_str` GB in FP16), necessitating distributed memory strategies across multiple high-memory nodes.
 
-GPUs typically provide {python} gpu_mem_range_min_str`--{python} gpu_mem_range_max_str` GB of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. This constraint has motivated several memory management strategies:
+GPUs typically provide `{python} gpu_mem_range_min_str`--`{python} gpu_mem_range_max_str` GB of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. This constraint has motivated several memory management strategies:
 
-Activation checkpointing\index{Activation Checkpointing!recomputation trade-off} trades computational cost for memory efficiency by strategically discarding and recomputing activations during the backward pass. Rather than storing all intermediate values, the system maintains checkpoints at selected layers. During backpropagation, it regenerates necessary activations from these checkpoints. While this approach can reduce memory usage by {python} ckpt_mem_saving_pct_str`% or more, it typically increases computation time by {python} ckpt_compute_cost_pct_min_str`--{python} ckpt_compute_cost_pct_max_str`%.
+Activation checkpointing\index{Activation Checkpointing!recomputation trade-off} trades computational cost for memory efficiency by strategically discarding and recomputing activations during the backward pass. Rather than storing all intermediate values, the system maintains checkpoints at selected layers. During backpropagation, it regenerates necessary activations from these checkpoints. While this approach can reduce memory usage by `{python} ckpt_mem_saving_pct_str`% or more, it typically increases computation time by `{python} ckpt_compute_cost_pct_min_str`--`{python} ckpt_compute_cost_pct_max_str`%.
 
 Mixed precision training offers another approach to memory efficiency. By storing activations in half-precision (FP16) format instead of single-precision (FP32), memory requirements are immediately halved. Modern hardware architectures provide specialized support for these reduced-precision operations, often maintaining computational throughput while saving memory.
 
@@ -2266,18 +2319,18 @@ The gradient computation $\frac{\partial L}{\partial \mathbf{W}^{(l)}} = \left(\
 
 #### Memory Operations {#sec-ai-training-memory-operations-0ac1}
 
-The backward pass moves large amounts of data between memory and compute units. Consider ResNet-50's first convolutional layer processing a batch of {python} bwd_batch_str` images: the stored input activations (${python} bwd_input_dims_str` \times 4$ bytes) occupy approximately {python} bwd_input_gb_str` GB, while the output activation gradients (${python} bwd_grad_dims_str` \times 4$ bytes) require approximately {python} bwd_grad_gb_str` GB. Weight gradients for the ${python} bwd_kernel_dims_str`$ kernel are comparatively small ($\approx$ {python} bwd_kernel_mb_str` MB). While these per-layer costs appear modest, they accumulate across all {python} resnet_layers_str` layers and must reside in memory simultaneously during the backward pass.
+The backward pass moves large amounts of data between memory and compute units. Consider ResNet-50's first convolutional layer processing a batch of `{python} bwd_batch_str` images: the stored input activations (`{python} bwd_input_bytes_md` bytes) occupy approximately `{python} bwd_input_gb_str` GB, while the output activation gradients (`{python} bwd_grad_bytes_md` bytes) require approximately `{python} bwd_grad_gb_str` GB. Weight gradients for the `{python} bwd_kernel_dims_md` kernel are comparatively small ($\approx$ `{python} bwd_kernel_mb_str` MB). While these per-layer costs appear modest, they accumulate across all `{python} resnet_layers_str` layers and must reside in memory simultaneously during the backward pass.
 
 #### Production Considerations {#sec-ai-training-production-considerations-4c12}
 
-Consider training a ResNet-50 model on the ImageNet dataset with a batch of {python} bwd_batch_str` images. The first convolutional layer applies {python} bwd_filters_str` filters of size ${python} bwd_kernel_size_str` \times {python} bwd_kernel_size_str`$ to RGB images sized ${python} bwd_image_size_str`\times {python} bwd_image_size_str`$. During the backward pass, this single layer's computation requires:
+Consider training a ResNet-50 model on the ImageNet dataset with a batch of `{python} bwd_batch_str` images. The first convolutional layer applies `{python} bwd_filters_str` filters of size $`{python} bwd_kernel_size_str` \times `{python} bwd_kernel_size_str`$ to RGB images sized $`{python} bwd_image_size_str`\times `{python} bwd_image_size_str`$. During the backward pass, this single layer's computation requires:
 $$
-\text{Memory per image} = {python} bwd_mem_per_image_dims_str` \times 4 \text{ bytes}
+\text{Memory per image} = `{python} bwd_mem_per_image_dims_str` \times 4 \text{ bytes}
 $$
 
-The total memory requirement multiplies by the batch size of {python} bwd_batch_str`, reaching approximately {python} bwd_total_grad_gb_str` GB just for storing gradients. When we add memory for activations, weight updates, and intermediate computations, a single layer approaches the memory limits of many GPUs.
+The total memory requirement multiplies by the batch size of `{python} bwd_batch_str`, reaching approximately `{python} bwd_total_grad_gb_str` GB just for storing gradients. When we add memory for activations, weight updates, and intermediate computations, a single layer approaches the memory limits of many GPUs.
 
-Deeper in the network, layers with more filters demand even greater resources. A mid-network convolutional layer might use {python} mid_layer_filters_str` filters, quadrupling the memory and computation requirements. The backward pass must manage these resources while maintaining efficient computation. Each layer's computation can only begin after receiving gradient signals from the subsequent layer, creating a strict sequential dependency in memory usage and computation patterns.
+Deeper in the network, layers with more filters demand even greater resources. A mid-network convolutional layer might use `{python} mid_layer_filters_str` filters, quadrupling the memory and computation requirements. The backward pass must manage these resources while maintaining efficient computation. Each layer's computation can only begin after receiving gradient signals from the subsequent layer, creating a strict sequential dependency in memory usage and computation patterns.
 
 This dependency means the GPU must maintain a large working set of memory throughout the backward pass. As gradients flow backward through the network, each layer temporarily requires peak memory usage during its computation phase. The system cannot release this memory until the layer completes its gradient calculations and passes the results to the previous layer.
 
@@ -2300,7 +2353,7 @@ These operations initiate a sequence of memory accesses and computations. The sy
 
 The memory scaling analysis from @sec-ai-training-optimization-algorithm-system-implications-f9f2—where SGD requires $1\times$, momentum requires $2\times$, and Adam requires $3\times$ the parameter memory—manifests concretely during each training iteration. Each parameter update involves reading current values, accessing gradients, computing the update rule, and writing modified parameters back to memory. For Adam, this includes updating and accessing the momentum and variance buffers, creating substantial memory traffic for large models.
 
-At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-ai-training-optimization-algorithm-system-implications-f9f2), a {python} gpt2_params_b_str`B parameter model requires {python} adam_state_gb_str` GB for optimizer state alone in FP32—before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
+At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-ai-training-optimization-algorithm-system-implications-f9f2), a `{python} gpt2_params_b_str`B parameter model requires `{python} adam_state_gb_str` GB for optimizer state alone in FP32—before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
 ::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget." fig-alt="Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 24 GB."}
 ```{.tikz}
@@ -2552,7 +2605,7 @@ In practice, profiling reveals characteristic signatures for each bottleneck typ
 
 ## Pipeline Optimizations {#sec-ai-training-pipeline-optimizations-cd9d}
 
-\index{Training Optimization!systematic framework}\index{Training Optimization!technique selection}Once bottlenecks are identified, targeted optimizations can address them. Even well-designed pipeline architectures rarely achieve optimal performance without such optimization. The gap between theoretical hardware capability and realized training throughput often reaches {python} util_gap_min_str`--{python} util_gap_max_str`%: GPUs advertised at {python} gpu_advertised_tflops_str` TFLOPS may deliver only {python} gpu_real_tflops_min_str`--{python} gpu_real_tflops_max_str` TFLOPS for training workloads, and distributed systems with aggregate {python} cluster_agg_tflops_str` TFLOPS capacity frequently achieve under {python} cluster_real_tflops_str` TFLOPS effective throughput [@wang2019superneurons]. This efficiency gap stems from systematic bottlenecks that optimization techniques can address.
+\index{Training Optimization!systematic framework}\index{Training Optimization!technique selection}Once bottlenecks are identified, targeted optimizations can address them. Even well-designed pipeline architectures rarely achieve optimal performance without such optimization. The gap between theoretical hardware capability and realized training throughput often reaches `{python} util_gap_min_str`--`{python} util_gap_max_str`%: GPUs advertised at `{python} gpu_advertised_tflops_str` TFLOPS may deliver only `{python} gpu_real_tflops_min_str`--`{python} gpu_real_tflops_max_str` TFLOPS for training workloads, and distributed systems with aggregate `{python} cluster_agg_tflops_str` TFLOPS capacity frequently achieve under `{python} cluster_real_tflops_str` TFLOPS effective throughput [@wang2019superneurons]. This efficiency gap stems from systematic bottlenecks that optimization techniques can address.
 
 @tbl-optimization-roadmap extends the D·A·M-based bottleneck classification from @tbl-dam-training-bottlenecks by mapping each bottleneck to the specific optimization technique that addresses it:
 
@@ -2566,13 +2619,13 @@ In practice, profiling reveals characteristic signatures for each bottleneck typ
 
 Training pipeline performance is constrained by three primary bottlenecks that determine overall system efficiency. @tbl-optimization-roadmap maps each bottleneck category to its targeted solution: data movement latency responds to prefetching and pipeline overlapping, compute throughput improves through mixed-precision training, and memory capacity constraints yield to gradient accumulation and activation checkpointing. Data movement latency emerges when training batches cannot flow from storage through preprocessing to compute units fast enough to keep accelerators utilized. Computational throughput limitations occur when mathematical operations execute below hardware peak performance due to suboptimal parallelization, precision choices, or kernel inefficiencies. Memory capacity constraints restrict both the model sizes we can train and the batch sizes we can process, directly limiting both model complexity and training efficiency. These bottlenecks manifest differently across system scales—a 100 GB model faces different constraints than a 1 GB model—but their systematic identification and mitigation follows consistent principles.
 
-These bottlenecks interact in complex ways, illustrating the **Conservation of Complexity** thesis from Part I: you cannot eliminate a bottleneck without shifting load elsewhere. When data loading becomes a bottleneck, GPUs sit idle waiting for batches. When computation is suboptimal, memory bandwidth goes underutilized. When memory is constrained, we resort to smaller batches that reduce GPU efficiency. Consider GPT-2: profiling reveals memory-bound attention operations ({python} gpt2_attn_time_pct_str`% of time), data loading overhead ({python} gpt2_data_time_pct_str`%), and compute-bound matrix multiplications ({python} gpt2_compute_time_pct_str`%)—requiring a composition of mixed precision, prefetching, and gradient checkpointing to address all three constraints. The optimization challenge involves identifying which bottleneck currently limits performance, then selecting techniques that address that specific constraint without introducing new bottlenecks elsewhere.
+These bottlenecks interact in complex ways, illustrating the **Conservation of Complexity** thesis from Part I: you cannot eliminate a bottleneck without shifting load elsewhere. When data loading becomes a bottleneck, GPUs sit idle waiting for batches. When computation is suboptimal, memory bandwidth goes underutilized. When memory is constrained, we resort to smaller batches that reduce GPU efficiency. Consider GPT-2: profiling reveals memory-bound attention operations (`{python} gpt2_attn_time_pct_str`% of time), data loading overhead (`{python} gpt2_data_time_pct_str`%), and compute-bound matrix multiplications (`{python} gpt2_compute_time_pct_str`%)—requiring a composition of mixed precision, prefetching, and gradient checkpointing to address all three constraints. The optimization challenge involves identifying which bottleneck currently limits performance, then selecting techniques that address that specific constraint without introducing new bottlenecks elsewhere.
 
 ### Systematic Optimization Framework {#sec-ai-training-systematic-optimization-framework-83b0}
 
 The pipeline architecture established above creates opportunities for targeted optimizations. Effective optimization follows a systematic methodology that applies regardless of system scale or model architecture. This three-phase framework provides the foundation for all optimization work: profile to identify bottlenecks, select appropriate techniques for the identified constraints, and compose solutions that address multiple bottlenecks simultaneously without creating conflicts.
 
-The profiling phase employs tools like PyTorch Profiler, TensorFlow Profiler, or NVIDIA Nsight Systems to reveal where time is spent during training iterations. These are the same profiling approaches introduced in the overview, now applied systematically to quantify which bottleneck dominates. A profile might show {python} profile_data_pct_str`% of time in data loading, {python} profile_compute_pct_str`% in computation, and {python} profile_mem_pct_str`% in memory operations, clearly indicating data loading as the primary target for optimization.
+The profiling phase employs tools like PyTorch Profiler, TensorFlow Profiler, or NVIDIA Nsight Systems to reveal where time is spent during training iterations. These are the same profiling approaches introduced in the overview, now applied systematically to quantify which bottleneck dominates. A profile might show `{python} profile_data_pct_str`% of time in data loading, `{python} profile_compute_pct_str`% in computation, and `{python} profile_mem_pct_str`% in memory operations, clearly indicating data loading as the primary target for optimization.
 
 The selection phase matches optimization techniques to identified bottlenecks. Each technique we examine targets specific constraints: prefetching addresses data movement latency, mixed-precision training tackles both computational throughput and memory constraints, and gradient accumulation manages memory limitations. Selection requires understanding not just which bottleneck exists, but the characteristics of the hardware, model architecture, and training configuration that influence technique effectiveness.
 
@@ -2672,7 +2725,7 @@ The flowchart embodies a critical insight: optimization is iterative. After appl
 
 Training machine learning models involves significant data movement between storage, memory, and computational units. The data pipeline consists of sequential transfers: from disk storage to CPU memory, CPU memory to GPU memory, and through the GPU processing units. @fig-fetching-naive exposes the inefficiency of sequential data transfer: the GPU remains idle during file operations (Open 1, Open 2), and training steps cannot begin until read operations complete, leaving expensive compute resources underutilized for significant portions of each epoch.
 
-::: {#fig-fetching-naive fig-env="figure" fig-pos="htb" fig-cap="**Sequential Data Fetching**: File open, read, and train operations execute serially across two epochs, with the GPU remaining idle during all file operations. The full sequential pipeline spans approximately {python} seq_pipeline_time_str` seconds, establishing the baseline that overlapped prefetching improves upon." fig-alt="Gantt chart showing sequential data pipeline over two epochs. Four rows: Open, Read, Train, and Epoch. Operations execute serially with gaps between phases, spanning from 00:00 to 01:30."}
+::: {#fig-fetching-naive fig-env="figure" fig-pos="htb" fig-cap="**Sequential Data Fetching**: File open, read, and train operations execute serially across two epochs, with the GPU remaining idle during all file operations. The full sequential pipeline spans approximately `{python} seq_pipeline_time_str` seconds, establishing the baseline that overlapped prefetching improves upon." fig-alt="Gantt chart showing sequential data pipeline over two epochs. Four rows: Open, Read, Train, and Epoch. Operations execute serially with gaps between phases, spanning from 00:00 to 01:30."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt]
 % Standard color definitions
@@ -2734,9 +2787,9 @@ Training machine learning models involves significant data movement between stor
 
 Prefetching addresses these inefficiencies by loading data into memory before its scheduled computation time. During the processing of the current batch, the system loads and prepares subsequent batches, maintaining a consistent supply of ready data [@tensorflow_data_2015].
 
-Overlapping builds upon prefetching by coordinating multiple pipeline stages to execute concurrently. The system processes the current batch while simultaneously preparing future batches through data loading and preprocessing operations. Compare @fig-fetching-naive with @fig-fetching-optimized: the optimized pipeline completes two epochs in approximately {python} opt_pipeline_time_str` seconds compared to {python} seq_pipeline_time_str` seconds with sequential fetching, a {python} pipeline_speedup_pct_str`% speedup achieved by overlapping read and train operations within each time slice.
+Overlapping builds upon prefetching by coordinating multiple pipeline stages to execute concurrently. The system processes the current batch while simultaneously preparing future batches through data loading and preprocessing operations. Compare @fig-fetching-naive with @fig-fetching-optimized: the optimized pipeline completes two epochs in approximately `{python} opt_pipeline_time_str` seconds compared to `{python} seq_pipeline_time_str` seconds with sequential fetching, a `{python} pipeline_speedup_pct_str`% speedup achieved by overlapping read and train operations within each time slice.
 
-::: {#fig-fetching-optimized fig-env="figure" fig-pos="htb" fig-cap="**Overlapped Data Prefetching**: Read and train operations execute concurrently, with each time slice overlapping data loading for the next batch with computation on the current batch. Two epochs complete in approximately {python} opt_pipeline_time_str` seconds compared to {python} seq_pipeline_time_str` seconds with sequential fetching, a {python} pipeline_speedup_pct_str`% speedup." fig-alt="Gantt chart showing optimized pipeline with overlapping operations. Read and Train execute in parallel across time slices. Two epochs complete in approximately 55 seconds total."}
+::: {#fig-fetching-optimized fig-env="figure" fig-pos="htb" fig-cap="**Overlapped Data Prefetching**: Read and train operations execute concurrently, with each time slice overlapping data loading for the next batch with computation on the current batch. Two epochs complete in approximately `{python} opt_pipeline_time_str` seconds compared to `{python} seq_pipeline_time_str` seconds with sequential fetching, a `{python} pipeline_speedup_pct_str`% speedup." fig-alt="Gantt chart showing optimized pipeline with overlapping operations. Read and Train execute in parallel across time slices. Two epochs complete in approximately 55 seconds total."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt]
 % Standard color definitions
@@ -2807,12 +2860,12 @@ Training data undergoes three main stages: retrieval from storage, transformatio
 
 Overlapping extends this efficiency by coordinating all three pipeline stages simultaneously. As the GPU processes one batch, preprocessing begins on the next batch, while data fetching starts for the subsequent batch. This coordination maintains constant activity across all pipeline stages.
 
-Machine learning frameworks (introduced in @sec-ai-frameworks) implement these techniques through built-in utilities. @lst-dataloader_usage demonstrates PyTorch's DataLoader configuration, where `num_workers={python} num_workers_str`` enables four parallel preprocessing threads and `prefetch_factor={python} prefetch_factor_str`` maintains a buffer of {python} prefetch_buffer_batches_str` batches ready for GPU consumption.
+Machine learning frameworks (introduced in @sec-ai-frameworks) implement these techniques through built-in utilities. @lst-dataloader_usage demonstrates PyTorch's DataLoader configuration, where `num_workers=``{python} num_workers_str` enables four parallel preprocessing threads and `prefetch_factor=``{python} prefetch_factor_str` maintains a buffer of `{python} prefetch_buffer_batches_str` batches ready for GPU consumption.
 
 ::: {#lst-dataloader_usage lst-cap="**Pipeline Optimization**: Machine learning workflows benefit from efficient data handling through batching and prefetching to maintain constant GPU utilization."}
 ```{.python}
 loader = DataLoader(
-    dataset, batch_size=32, num_workers={python} num_workers_str`, prefetch_factor={python} prefetch_factor_str`
+    dataset, batch_size=32, num_workers=`{python} num_workers_str`, prefetch_factor=`{python} prefetch_factor_str`
 )
 ```
 :::
@@ -2844,9 +2897,9 @@ These techniques are also highly scalable and adaptable to various hardware conf
 
 #### Practical Considerations {#sec-ai-training-pipeline-practical-considerations-4ba0}
 
-Prefetching and overlapping deliver the greatest gains when preprocessing is computationally expensive relative to model computation. A typical image classification pipeline involving random cropping ({python} crop_time_ms_str` ms), color jittering ({python} jitter_time_ms_str` ms), and normalization ({python} norm_time_ms_str` ms) adds {python} total_preprocess_ms_str` ms of delay per batch without prefetching; overlapping these operations with the previous batch's GPU computation eliminates this stall entirely. NLP workloads similarly benefit when tokenization and subword processing would otherwise block the training loop.
+Prefetching and overlapping deliver the greatest gains when preprocessing is computationally expensive relative to model computation. A typical image classification pipeline involving random cropping (`{python} crop_time_ms_str` ms), color jittering (`{python} jitter_time_ms_str` ms), and normalization (`{python} norm_time_ms_str` ms) adds `{python} total_preprocess_ms_str` ms of delay per batch without prefetching; overlapping these operations with the previous batch's GPU computation eliminates this stall entirely. NLP workloads similarly benefit when tokenization and subword processing would otherwise block the training loop.
 
-The primary trade-off is memory: prefetch buffers consume GPU or host memory proportional to the buffer depth and batch size. With a prefetch factor of {python} prefetch_factor_str` and batch size of {python} buffer_batch_size_str` high-resolution images (${python} buffer_image_res_str`\times{python} buffer_image_res_str`$ pixels), the buffer alone requires approximately {python} buffer_mem_gb_str` GB. Tuning `num_workers` and `prefetch_factor` requires empirical testing, as excessive worker threads contend for CPU resources while insufficient buffering reintroduces data stalls. A practical starting point is setting `num_workers` equal to the number of available CPU cores, then profiling to verify that data loading no longer appears as idle GPU time. When storage bandwidth already exceeds compute demand, prefetching adds complexity without measurable throughput improvement.
+The primary trade-off is memory: prefetch buffers consume GPU or host memory proportional to the buffer depth and batch size. With a prefetch factor of `{python} prefetch_factor_str` and batch size of `{python} buffer_batch_size_str` high-resolution images (`{python} buffer_dims_md` pixels), the buffer alone requires approximately `{python} buffer_mem_gb_str` GB. Tuning `num_workers` and `prefetch_factor` requires empirical testing, as excessive worker threads contend for CPU resources while insufficient buffering reintroduces data stalls. A practical starting point is setting `num_workers` equal to the number of available CPU cores, then profiling to verify that data loading no longer appears as idle GPU time. When storage bandwidth already exceeds compute demand, prefetching adds complexity without measurable throughput improvement.
 
 ### Mixed-Precision Training {#sec-ai-training-mixedprecision-training-9218}
 
@@ -2854,7 +2907,7 @@ The primary trade-off is memory: prefetch buffers consume GPU or host memory pro
 
 Mixed-precision training combines FP32, 16-bit floating-point (FP16), and brain floating-point (bfloat16) formats to reduce memory usage and speed up computation while preserving model accuracy [@micikevicius2017mixed; @google_bfloat16].
 
-A neural network trained in FP32 requires {python} bytes_fp32_str` bytes per parameter, while both FP16 and bfloat16 use {python} bytes_fp16_str` bytes. For a model with $10^9$ parameters, this reduction cuts memory usage from {python} model_1b_fp32_gb_str` GB to {python} model_1b_fp16_gb_str` GB. This memory reduction enables larger batch sizes and deeper architectures on the same hardware.
+A neural network trained in FP32 requires `{python} bytes_fp32_str` bytes per parameter, while both FP16 and bfloat16 use `{python} bytes_fp16_str` bytes. For a model with $10^9$ parameters, this reduction cuts memory usage from `{python} model_1b_fp32_gb_str` GB to `{python} model_1b_fp16_gb_str` GB. This memory reduction enables larger batch sizes and deeper architectures on the same hardware.
 
 The numerical precision differences between these formats shape their use cases. @tbl-precision-comparison reveals that BF16's 8-bit exponent matches FP32's dynamic range ($10^{-45}$ minimum representable), while FP16's 5-bit exponent limits its range to $6 \times 10^{-8}$, explaining why gradients below this threshold underflow to zero without loss scaling. FP32 represents numbers from approximately $\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$ with 7 decimal digits of precision. FP16 ranges from $\pm6.10 \times 10^{-5}$ to $\pm65,504$ with 3-4 decimal digits of precision. Bfloat16, developed by Google Brain, maintains the same dynamic range as FP32 ($\pm1.18 \times 10^{-38}$ to $\pm3.4 \times 10^{38}$) but with reduced precision (3-4 decimal digits). This range preservation makes bfloat16 particularly suited for deep learning training, as it handles large and small gradients more effectively than FP16.
 
@@ -2947,7 +3000,7 @@ Machine learning frameworks provide built-in support for mixed-precision trainin
 
 #### Mixed-Precision Benefits {#sec-ai-training-mixedprecision-benefits-d57b}
 
-Mixed-precision benefits manifest across three dimensions that compound in practice. First, memory consumption decreases by approximately {python} mp_mem_savings_pct_str`%: a 1 billion parameter transformer requires {python} model_1b_fp32_gb_str` GB in FP32 but only {python} model_1b_fp16_gb_str` GB in FP16 for weights alone, enabling larger batch sizes or deeper architectures. Second, computational throughput increases dramatically as Tensor Cores achieve 2-3$\times$ speedup for matrix multiplications, as detailed in @sec-ai-training-mixedprecision-hardware-support-d7c1. Third, halving tensor sizes proportionally reduces inter-device communication bandwidth requirements in distributed training.
+Mixed-precision benefits manifest across three dimensions that compound in practice. First, memory consumption decreases by approximately `{python} mp_mem_savings_pct_str`%: a 1 billion parameter transformer requires `{python} model_1b_fp32_gb_str` GB in FP32 but only `{python} model_1b_fp16_gb_str` GB in FP16 for weights alone, enabling larger batch sizes or deeper architectures. Second, computational throughput increases dramatically as Tensor Cores achieve 2-3$\times$ speedup for matrix multiplications, as detailed in @sec-ai-training-mixedprecision-hardware-support-d7c1. Third, halving tensor sizes proportionally reduces inter-device communication bandwidth requirements in distributed training.
 
 These benefits compound: a practitioner might simultaneously double batch size (memory savings), accelerate each iteration (Tensor Core throughput), and reduce gradient synchronization time (smaller tensors). Quantifying the *GPT-2 mixed precision training impact* makes these compounding gains concrete.
 
@@ -2961,32 +3014,48 @@ GPT-2 training heavily relies on mixed-precision (FP16) to fit within GPU memory
 #| label: gpt2-mixed-precision-calc
 #| echo: false
 
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate GPT-2 memory footprint under FP32, FP16, and checkpointing
+# Used in: Mixed Precision Training callout (FP32 vs FP16 memory comparison)
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.constants import GPT2_PARAMS, Mparam
 from physx.formatting import fmt
+from physx.formulas import model_memory
 
-gpt2_b_mp = GPT2_PARAMS.to(Mparam).magnitude / 1000  # 1.5
+mp_batch_size = 32
+fp32_act_gb = 65    # approximate activations for batch=32
+fp16_act_gb = 32.6  # approximate, half of FP32
+ckpt_act_gb = 8     # with gradient checkpointing
 
+# =============================================================================
+# PROCESS
+# =============================================================================
 # FP32 baseline
-fp32_param_gb = gpt2_b_mp * 4
-fp32_act_gb = 65  # approximate, batch=32
+fp32_param_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 fp32_grad_gb = fp32_param_gb
 fp32_total_gb = fp32_param_gb + fp32_act_gb + fp32_grad_gb
 
 # FP16 mixed precision
-fp16_param_gb = gpt2_b_mp * 2
-fp16_act_gb = 32.6  # approximate, half of FP32
+fp16_param_gb = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
 fp16_grad_gb = fp16_param_gb
-# Adam m, v in FP32: 2 states × 1.5B × 4 bytes
-optimizer_fp32_gb = gpt2_b_mp * 4 * 2
+optimizer_fp32_gb = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
 fp16_total_gb = fp16_param_gb + fp16_act_gb + fp16_grad_gb + optimizer_fp32_gb
 
-# Pre-formatted strings
-gpt2_b_str = fmt(gpt2_b_mp, precision=1, commas=False)
-mp_batch_size = 32
+# Gradient checkpointing
+ckpt_total_gb = fp16_param_gb + ckpt_act_gb + fp16_grad_gb + optimizer_fp32_gb
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+gpt2_b_str = fmt(GPT2_PARAMS.to(Bparam).magnitude, precision=1, commas=False)
 mp_batch_size_str = fmt(mp_batch_size, precision=0, commas=False)
 fp32_act_str = fmt(fp32_act_gb, precision=0, commas=False)
 fp16_act_str = fmt(fp16_act_gb, precision=1, commas=False)
-
 fp32_p_str = fmt(fp32_param_gb, precision=1, commas=False)
 fp32_g_str = fmt(fp32_grad_gb, precision=1, commas=False)
 fp32_t_str = fmt(fp32_total_gb, precision=0, commas=False)
@@ -2994,10 +3063,6 @@ fp16_p_str = fmt(fp16_param_gb, precision=1, commas=False)
 fp16_g_str = fmt(fp16_grad_gb, precision=1, commas=False)
 opt_str = fmt(optimizer_fp32_gb, precision=1, commas=False)
 fp16_t_str = fmt(fp16_total_gb, precision=0, commas=False)
-
-# Gradient checkpointing estimates
-ckpt_act_gb = 8
-ckpt_total_gb = fp16_param_gb + ckpt_act_gb + fp16_grad_gb + optimizer_fp32_gb
 ckpt_act_str = fmt(ckpt_act_gb, precision=0, commas=False)
 ckpt_total_str = fmt(ckpt_total_gb, precision=0, commas=False)
 v100_capacity_str = "32"
@@ -3028,13 +3093,29 @@ With Mixed Precision + Gradient Checkpointing:
 ```{python}
 #| label: mixed-precision-speedup-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate mixed-precision speedup on V100
+# Used in: Mixed Precision Training callout (computational speedup section)
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# Mixed precision speedup on V100
-v100_fp32_samples = 90
-v100_fp16_samples = 220
+v100_fp32_samples = 90   # samples/sec
+v100_fp16_samples = 220  # samples/sec
+
+# =============================================================================
+# PROCESS
+# =============================================================================
 v100_mp_speedup = v100_fp16_samples / v100_fp32_samples
 
+# =============================================================================
+# OUTPUT
+# =============================================================================
 v100_mp_speedup_str = fmt(v100_mp_speedup, precision=1, commas=False)
 ```
 
@@ -3046,8 +3127,8 @@ On NVIDIA V100 (Tensor Cores enabled):
 
 **Critical Implementation Details**
 
-1. Loss Scaling: Start with scale=2^{python} loss_scale_exp_str`, dynamically reduce if overflow detected. Gradients in attention layers can range from 10^{python} grad_range_min_exp_str` to 10^{python} grad_range_max_exp_str`, so loss scaling prevents underflow.
-2. FP32 Master Weights: Optimizer updates in FP32 prevent weight stagnation. Small learning rate ({python} small_lr_str`) × FP16 gradient might round to zero; FP32 accumulation preserves these tiny updates.
+1. Loss Scaling: Start with scale=2^`{python} loss_scale_exp_str`, dynamically reduce if overflow detected. Gradients in attention layers can range from 10^`{python} grad_range_min_exp_str` to 10^`{python} grad_range_max_exp_str`, so loss scaling prevents underflow.
+2. FP32 Master Weights: Optimizer updates in FP32 prevent weight stagnation. Small learning rate (`{python} small_lr_str`) × FP16 gradient might round to zero; FP32 accumulation preserves these tiny updates.
 3. Selective FP32 Operations:
    - LayerNorm: Computed in FP32 (requires high precision for variance calculation)
    - Softmax: Computed in FP32 (exponentials need full range)
@@ -3071,7 +3152,7 @@ Despite the benefits demonstrated above, mixed-precision training introduces num
 
 Understanding how modern hardware implements reduced-precision arithmetic reveals why mixed-precision achieves substantial speedups beyond mere memory savings. The performance gains from FP16 and BF16 computation stem from specialized hardware units designed explicitly for low-precision tensor operations[^fn-tensor-etymology], with architectural decisions that trade numerical range or precision for dramatic increases in computational throughput.
 
-[^fn-tensor-etymology]: **Tensor**: From Latin "tensus" (stretched), past participle of "tendere" (to stretch). Originally used in physics for stress/strain relationships in materials, the term was adopted by mathematicians for multi-dimensional arrays that transform in specific ways under coordinate changes. In ML, "tensor" simply means a multi-dimensional array: scalars (0D), vectors (1D), matrices (2D), and higher-dimensional arrays (3D+). NVIDIA's "Tensor Cores" perform fused multiply-accumulate on small matrix tiles, optimized for the tensor operations that dominate neural network computation.
+[^fn-tensor-etymology]: **Tensor**: From Latin "tensus" (stretched). In ML, a tensor is a multi-dimensional array: scalars (0D), vectors (1D), matrices (2D), and higher-dimensional arrays (3D+). NVIDIA's Tensor Cores perform fused multiply-accumulate on small matrix tiles, optimized for these operations. See @sec-deep-learning-systems-foundations for the full etymology.
 
 #### Tensor Core Architecture {.unnumbered}
 
@@ -3087,10 +3168,10 @@ where $A$ and $B$ are $4 \times 4$ FP16 matrices, $C$ is an FP32 accumulator, an
 
 The computational advantage of Tensor Cores becomes apparent when comparing theoretical peak performance across precisions. An NVIDIA A100 GPU specifications:
 
-- **FP32 throughput**: `{python} a100_tflops_fp32_str` TFLOPs (standard CUDA cores)
-- **FP16 Tensor Core throughput**: `{python} a100_tflops_fp16_str` TFLOPs (16× speedup)
-- **BF16 Tensor Core throughput**: `{python} a100_tflops_fp16_str` TFLOPs (same as FP16)
-- **FP8 Tensor Core throughput** (H100 SXM): `{python} h100_tflops_fp8_str` TFLOPs without sparsity (approximately 100× speedup over FP32)
+- **FP32 throughput**: `{python} a100_tflops_fp32_str` TFLOPS (standard CUDA cores)
+- **FP16 Tensor Core throughput**: `{python} a100_tflops_fp16_str` TFLOPS (16× speedup)
+- **BF16 Tensor Core throughput**: `{python} a100_tflops_fp16_str` TFLOPS (same as FP16)
+- **FP8 Tensor Core throughput** (H100 SXM): `{python} h100_tflops_fp8_str` TFLOPS without sparsity (approximately 100× speedup over FP32)
 
 This 16× theoretical speedup for FP16 materializes in practice because matrix multiplications, the dominant operation in neural network training, map naturally to Tensor Core operations. A transformer's attention mechanism computing $QK^T$ for a $(B, H, N, D)$ tensor requires $2 \times B \times H \times N^2 \times D$ FLOPs. On Tensor Cores, this executes 16× faster than on CUDA cores, directly translating to wall-clock speedups.
 
@@ -3108,7 +3189,7 @@ For transformer training where attention gradients vary from $10^{-10}$ to $10^3
 
 \index{FP8!Hopper architecture}\index{FP8!E4M3 and E5M2 formats}NVIDIA's Hopper architecture (H100) introduces FP8 support with two formats. E4M3 uses 4 exponent bits and 3 mantissa bits (prioritizing precision for forward pass weights and activations), while E5M2 uses 5 exponent bits and 2 mantissa bits (prioritizing dynamic range for backward pass gradients).
 
-FP8 training doubles Tensor Core throughput again (`{python} h100_pflops_fp8_str` PFLOPs on H100 dense versus `{python} h100_pflops_fp16_str` PFLOPs for FP16 dense, without sparsity). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. The decision tree becomes:
+FP8 training doubles Tensor Core throughput again (`{python} h100_pflops_fp8_str` PFLOPS on H100 dense versus `{python} h100_pflops_fp16_str` PFLOPS for FP16 dense, without sparsity). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. The decision tree becomes:
 
 | **Precision** | **When to Use**                                  | **Hardware Requirement** |
 |:------------|:-----------------------------------------------|-----------------------:|
@@ -3122,7 +3203,7 @@ FP8 training doubles Tensor Core throughput again (`{python} h100_pflops_fp8_str
 Reduced precision not only accelerates computation but also alleviates memory bandwidth bottlenecks. Modern GPUs are increasingly compute-bound rather than bandwidth-bound for large matrix operations, but data movement still limits performance for smaller operations. A100's specifications illustrate this:
 
 - HBM2e bandwidth: `{python} a100_bw_gbs_str` GB/s
-- FP32 throughput: `{python} a100_tflops_fp32_str` TFLOPs → requires `{python} a100_tflops_fp32_str` × 10¹² × 4 bytes = 78 TB/s if every FLOP needs new data
+- FP32 throughput: `{python} a100_tflops_fp32_str` TFLOPS → requires `{python} a100_tflops_fp32_str` × 10¹² × 4 bytes = 78 TB/s if every FLOP needs new data
 - Actual requirement (with data reuse): Much lower, but bandwidth-limited for operations with low arithmetic intensity
 
 FP16 halves memory traffic for the same computation, effectively doubling available bandwidth. For operations like layer normalization (arithmetic intensity approximately 1 FLOP/byte), this bandwidth doubling directly translates to speedups even without Tensor Core involvement.
@@ -3172,25 +3253,40 @@ Optimal mixed-precision training requires matching the precision format to hardw
 |:----------------|-----------------------------------:|-----------------------------------------------------------------------------------------:|
 | **V100 (Volta)**  |               FP16 with loss scaling |                                               No BF16 support; gradient clipping essential |
 | **A100 (Ampere)** | BF16 for transformers; FP16 for CNNs |                             TF32 mode provides automatic 2-3× speedup for legacy FP32 code |
-| **H100 (Hopper)** |            FP8 via TransformerEngine | Requires FP8-aware training recipes; `{python} h100_tflops_fp8_str` TFLOPs peak throughput |
+| **H100 (Hopper)** |            FP8 via TransformerEngine | Requires FP8-aware training recipes; `{python} h100_tflops_fp8_str` TFLOPS peak throughput |
 
 : **Precision Strategy by GPU Architecture.** Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy}
 
 ```{python}
 #| label: cross-gen-precision-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Compare cross-generation GPU throughput for GPT-2 training
+# Used in: Mixed-Precision Hardware Support section (cross-generation comparison)
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# Cross-generation performance comparison (GPT-2 1.5B, single GPU)
-v100_fp32_sps = 18
-v100_fp16_sps = 45
-a100_bf16_sps = 165
-h100_fp8_sps = 380
+v100_fp32_sps = 18    # samples/sec
+v100_fp16_sps = 45    # samples/sec
+a100_bf16_sps = 165   # samples/sec
+h100_fp8_sps = 380    # samples/sec
 
+# =============================================================================
+# PROCESS
+# =============================================================================
 v100_fp16_speedup = v100_fp16_sps / v100_fp32_sps
 a100_over_v100 = a100_bf16_sps / v100_fp32_sps
 h100_over_v100 = h100_fp8_sps / v100_fp32_sps
 
+# =============================================================================
+# OUTPUT
+# =============================================================================
 v100_fp16_speedup_str = fmt(v100_fp16_speedup, precision=1, commas=False)
 a100_over_v100_str = fmt(a100_over_v100, precision=1, commas=False)
 h100_over_v100_str = fmt(h100_over_v100, precision=0, commas=False)
@@ -3213,27 +3309,38 @@ $$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right
 ```{python}
 #| label: attention-memory-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate attention matrix memory requirements
+# Used in: Standard Attention Memory Bottleneck section
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# Attention matrix memory calculation
 seq_len = 4096
-embed_dim = 64  # per head
+embed_dim = 64   # per head
 n_heads = 16
-bytes_fp32 = BYTES_FP32.to(byte).magnitude
 
-attn_matrix_bytes = seq_len ** 2 * bytes_fp32
-attn_matrix_mb = attn_matrix_bytes / (1024 ** 2)
+# =============================================================================
+# PROCESS
+# =============================================================================
+attn_matrix_mb = (seq_len ** 2 * BYTES_FP32).to(MB).magnitude
 total_attn_mb = attn_matrix_mb * n_heads
-total_attn_gb = total_attn_mb / 1024
+total_attn_gb = (total_attn_mb * MB).to(GB).magnitude
 
-attn_matrix_mb_str = fmt(attn_matrix_mb, precision=0, commas=False)
-total_attn_gb_str = fmt(total_attn_gb, precision=0, commas=False)
-
-# Pre-formatted strings for inline use
+# =============================================================================
+# OUTPUT
+# =============================================================================
 seq_len_str = f"{seq_len:,}"
 embed_dim_str = f"{embed_dim}"
 n_heads_str = f"{n_heads}"
-bytes_fp32_str = f"{bytes_fp32}"
+bytes_fp32_str = f"{BYTES_FP32.to(byte).magnitude:.0f}"
+attn_matrix_mb_str = fmt(attn_matrix_mb, precision=0, commas=False)
+total_attn_gb_str = fmt(total_attn_gb, precision=0, commas=False)
 ```
 
 The memory bottleneck emerges from materializing the n × n intermediate matrices for scores and probabilities. For a sequence length of `{python} seq_len_str` tokens with embedding dimension `{python} embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} seq_len_str`^2 × `{python} bytes_fp32_str` bytes = `{python} attn_matrix_mb_str` MB in FP32. With `{python} n_heads_str` attention heads, this grows to `{python} total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
@@ -3285,25 +3392,36 @@ Flash Attention achieves asymptotic improvements in both memory footprint and me
 ```{python}
 #| label: flash-attention-calc
 #| echo: false
-from physx.formatting import fmt
-from physx.constants import BYTES_FP32
 
-# Flash Attention memory comparison
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Compare standard vs Flash Attention memory per head
+# Used in: Memory and IO Complexity Analysis section
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
 fa_n = 4096          # sequence length
 fa_d = 64            # head dimension
-fa_bytes_per_elem = BYTES_FP32.magnitude
 
+# =============================================================================
+# PROCESS
+# =============================================================================
 # Standard attention: n^2 attention matrix
-fa_standard_bytes = fa_n**2 * fa_bytes_per_elem
-fa_standard_mb = fa_standard_bytes / 1e6
+fa_standard_mb = (fa_n**2 * BYTES_FP32).to(MB).magnitude
 
 # Flash Attention: 3 input tensors (Q, K, V) each n x d
-fa_flash_bytes = (3 * fa_n * fa_d) * fa_bytes_per_elem
-fa_flash_mb = fa_flash_bytes / 1e6
+fa_flash_mb = (3 * fa_n * fa_d * BYTES_FP32).to(MB).magnitude
 
 # Reduction factor
 fa_reduction = fa_standard_mb / fa_flash_mb
 
+# =============================================================================
+# OUTPUT
+# =============================================================================
 fa_standard_mb_str = fmt(fa_standard_mb, precision=0, commas=False)
 fa_flash_mb_str = fmt(fa_flash_mb, precision=0, commas=False)
 fa_reduction_str = fmt(fa_reduction, precision=0, commas=False)
@@ -3379,24 +3497,39 @@ Training a GPT-2 Small-scale transformer on NVIDIA A100 GPU (12 layers, 768 hidd
 ```{python}
 #| label: flash-attention-speedup-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate Flash Attention forward/backward speedups at 2048 tokens
+# Used in: Benchmark Results section (speedup summary after table)
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# Flash Attention speedups at 2048 tokens (from table above)
-std_fwd_2048 = 45   # ms
+std_fwd_2048 = 45    # ms (from benchmark table)
 flash_fwd_2048 = 15  # ms
 std_bwd_2048 = 120   # ms
 flash_bwd_2048 = 35  # ms
 
+# =============================================================================
+# PROCESS
+# =============================================================================
 flash_fwd_speedup = std_fwd_2048 / flash_fwd_2048
 flash_bwd_speedup = std_bwd_2048 / flash_bwd_2048
 
+# =============================================================================
+# OUTPUT
+# =============================================================================
 flash_fwd_speedup_str = fmt(flash_fwd_speedup, precision=0, commas=False)
 flash_bwd_speedup_str = fmt(flash_bwd_speedup, precision=1, commas=False)
 ```
 
 Standard attention runs out of memory beyond 2048 tokens on a 40 GB A100, while Flash Attention trains sequences up to 8192 tokens. Even at 2048 tokens where both fit, Flash Attention achieves `{python} flash_fwd_speedup_str`× forward pass speedup and `{python} flash_bwd_speedup_str`× backward pass speedup.
 
-Subsequent versions have continued improving performance: Flash Attention 2 (2023) achieved 1.5-2× additional speedup through better parallelism and register allocation, while Flash Attention 3 (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPs on H100 (75% of theoretical peak).
+Subsequent versions have continued improving performance: Flash Attention 2 (2023) achieved 1.5-2× additional speedup through better parallelism and register allocation, while Flash Attention 3 (2024) exploits FP8 tensor cores and asynchronous memory operations on Hopper GPUs to reach 740 TFLOPS on H100 (75% of theoretical peak).
 
 #### When to Use Flash Attention {#sec-ai-training-use-flash-attention-375d}
 
@@ -3676,30 +3809,48 @@ GPT-2's training configuration demonstrates the essential role of gradient accum
 ```{python}
 #| label: grad-accum-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Compare gradient accumulation vs naive multi-GPU cost and configuration
+# Used in: Gradient Accumulation callout (memory constraints, cost comparison)
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
 micro_batch = 16
 effective_batch = 512
-gpus_naive = effective_batch // micro_batch
-
-# Gradient accumulation scenario
 gpus_accum = 8
 accum_steps = 4
+gpu_hourly_rate = 16  # $/hour per GPU
+training_hours = 14 * 24  # 2 weeks
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+gpus_naive = effective_batch // micro_batch
 batch_per_gpu = micro_batch * accum_steps
 global_batch_accum = gpus_accum * batch_per_gpu
 
 # Cost comparison
-gpu_hourly_rate = 16  # $/hour per GPU
 naive_hourly = gpu_hourly_rate * gpus_naive
 accum_hourly = gpu_hourly_rate * gpus_accum
 savings_hourly = naive_hourly - accum_hourly
 savings_pct = savings_hourly / naive_hourly * 100
 
 # 2-week training cost
-training_hours = 14 * 24  # 2 weeks
 accum_2wk = gpus_accum * gpu_hourly_rate * training_hours / 1000  # $K
 naive_2wk = gpus_naive * gpu_hourly_rate * training_hours / 1000  # $K
 
+# Communication reduction
+comm_reduction_pct = (1 - 1 / accum_steps) * 100
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
 gpus_naive_str = f"{gpus_naive}"
 batch_per_gpu_str = f"{batch_per_gpu}"
 naive_hourly_str = f"{naive_hourly}"
@@ -3708,12 +3859,7 @@ savings_hourly_str = f"{savings_hourly}"
 savings_pct_str = fmt(savings_pct, precision=0, commas=False)
 accum_2wk_str = fmt(accum_2wk, precision=1, commas=False)
 naive_2wk_str = fmt(naive_2wk, precision=1, commas=False)
-
-# Communication reduction from gradient accumulation
-comm_reduction_pct = (1 - 1 / accum_steps) * 100
 comm_reduction_pct_str = fmt(comm_reduction_pct, precision=0, commas=False)
-
-# Pre-formatted string for inline use
 accum_steps_str = f"{accum_steps}"
 ```
 
@@ -3823,39 +3969,45 @@ To demonstrate how these techniques compose in practice, let us walk through opt
 #| label: gpt2-walkthrough-calc
 #| echo: false
 
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Walk through GPT-2 optimization steps (FP32 → AMP → checkpointing)
+# Used in: GPT-2 Optimization on V100 callout
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB
 from physx.formatting import fmt
+from physx.formulas import model_memory
 
-# Configuration
 batch_size = 32
 seq_len = 1024
-bytes_fp32 = BYTES_FP32.to(byte).magnitude
-bytes_fp16 = BYTES_FP16.to(byte).magnitude
+act_fp32_gb = 65.0  # empirical activations for GPT-2 XL, batch=32, seq=1024
+checkpoint_factor = 4  # checkpoint every 4 layers → 4× reduction
+recompute_overhead_pct = 33  # empirical: ~33% more compute
 
-# Derive memory from model parameters
-params_b = GPT2_PARAMS.magnitude  # 1.5e9
-
+# =============================================================================
+# PROCESS
+# =============================================================================
 # Step 1: FP32 Baseline
-params_fp32_gb = params_b * bytes_fp32 / 1e9  # 6.0 GB
-grads_fp32_gb = params_fp32_gb                 # Same as params
-adam_fp32_gb = 2 * params_fp32_gb              # m and v states
-# Activation memory (empirical for GPT-2 XL with batch=32, seq=1024)
-# Includes attention scores, intermediate projections, residuals
-act_fp32_gb = 65.0
+params_fp32_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+grads_fp32_gb = params_fp32_gb
+adam_fp32_gb = 2 * params_fp32_gb  # m and v states
 total_fp32_gb = params_fp32_gb + grads_fp32_gb + adam_fp32_gb + act_fp32_gb
 
 # Step 2: Mixed Precision (AMP)
-params_fp16_gb = params_b * bytes_fp16 / 1e9   # 3.0 GB
-grads_fp16_gb = params_fp16_gb                  # Same as params
-master_weights_gb = params_fp32_gb              # FP32 copy for optimizer
-adam_amp_gb = adam_fp32_gb                      # Adam states stay FP32
-act_fp16_gb = act_fp32_gb * (bytes_fp16 / bytes_fp32)  # 32.5 GB
+params_fp16_gb = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
+grads_fp16_gb = params_fp16_gb
+master_weights_gb = params_fp32_gb  # FP32 copy for optimizer
+adam_amp_gb = adam_fp32_gb          # Adam states stay FP32
+act_fp16_gb = act_fp32_gb * (BYTES_FP16.magnitude / BYTES_FP32.magnitude)
 total_amp_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb + act_fp16_gb
 
 # Step 3: Gradient Checkpointing
-static_mem_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb  # 24.0 GB
-checkpoint_factor = 4  # Checkpoint every 4 layers → 4× reduction
-act_ckpt_gb = act_fp16_gb / checkpoint_factor  # 8.0 GB (approximate)
+static_mem_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb
+act_ckpt_gb = act_fp16_gb / checkpoint_factor
 total_ckpt_gb = static_mem_gb + act_ckpt_gb
 
 # V100 capacity
@@ -3863,9 +4015,10 @@ v100_mem_gb = V100_MEM_CAPACITY.to('GB').magnitude
 
 # Improvement calculations
 amp_reduction_pct = (1 - total_amp_gb / total_fp32_gb) * 100
-recompute_overhead_pct = 33  # Empirical: ~33% more compute
 
-# Format strings for inline references
+# =============================================================================
+# OUTPUT
+# =============================================================================
 params_fp32_str = fmt(params_fp32_gb, precision=1, commas=False)
 grads_fp32_str = fmt(grads_fp32_gb, precision=1, commas=False)
 adam_fp32_str = fmt(adam_fp32_gb, precision=1, commas=False)
@@ -3994,53 +4147,71 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 #| label: gpt2-summary-calc
 #| echo: false
 
-# GPT-2 Training Optimization Summary
-# Baseline
-b_param = 6.0
-b_grad = 6.0
-b_master = 0.0
-b_opt = 12.0
-b_act = 65.0
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Summarize GPT-2 training baseline vs optimized metrics
+# Used in: GPT-2 Training Optimization Summary table (@tbl-gpt2-summary)
+
+# =============================================================================
+# INPUT
+# =============================================================================
+from physx.formatting import fmt
+
+# Baseline (FP32)
+b_param = 6.0       # GB
+b_grad = 6.0        # GB
+b_master = 0.0      # GB
+b_opt = 12.0        # GB
+b_act = 65.0        # GB
+b_time = 14.0       # days
+b_energy = 275000   # kWh
+b_carbon = 125.0    # tons CO₂
+
+# Optimized (AMP + checkpointing)
+o_param = 3.0       # GB
+o_grad = 3.0        # GB
+o_master = 6.0      # GB
+o_opt = 12.0        # GB
+o_act = 8.0         # GB
+o_time = 8.4        # days
+o_energy = 115000   # kWh
+o_carbon = 52.0     # tons CO₂
+
+# =============================================================================
+# PROCESS
+# =============================================================================
 b_total_mem = b_param + b_grad + b_master + b_opt + b_act
-b_time = 14.0
-b_energy = 275000
 b_cost = b_energy * 0.10
-b_carbon = 125.0
 
-# Optimized
-o_param = 3.0
-o_grad = 3.0
-o_master = 6.0
-o_opt = 12.0
-o_act = 8.0
 o_total_mem = o_param + o_grad + o_master + o_opt + o_act
-o_time = 8.4
-o_energy = 115000
 o_cost = o_energy * 0.10
-o_carbon = 52.0
 
-# Strings
-b_param_str = f"{b_param:.1f} GB"
-b_grad_str = f"{b_grad:.1f} GB"
-b_master_str = f"{b_master:.1f} GB"
-b_opt_str = f"{b_opt:.1f} GB"
-b_act_str = f"{b_act:.1f} GB"
-b_total_mem_str = f"{b_total_mem:.1f} GB"
-b_time_str = f"{b_time:.0f} days"
-b_energy_str = f"{b_energy:,.0f} kWh"
-b_cost_str = f"${b_cost:,.0f}"
-b_carbon_str = f"~{b_carbon:.0f} tons CO₂"
+# =============================================================================
+# OUTPUT
+# =============================================================================
+# Note: Units embedded in _str vars because these populate a summary table
+b_param_str = f"{fmt(b_param, precision=1, commas=False)} GB"
+b_grad_str = f"{fmt(b_grad, precision=1, commas=False)} GB"
+b_master_str = f"{fmt(b_master, precision=1, commas=False)} GB"
+b_opt_str = f"{fmt(b_opt, precision=1, commas=False)} GB"
+b_act_str = f"{fmt(b_act, precision=1, commas=False)} GB"
+b_total_mem_str = f"{fmt(b_total_mem, precision=1, commas=False)} GB"
+b_time_str = f"{fmt(b_time, precision=0, commas=False)} days"
+b_energy_str = f"{fmt(b_energy, precision=0, commas=True)} kWh"
+b_cost_str = f"${fmt(b_cost, precision=0, commas=True)}"
+b_carbon_str = f"~{fmt(b_carbon, precision=0, commas=False)} tons CO₂"
 
-o_param_str = f"{o_param:.1f} GB"
-o_grad_str = f"{o_grad:.1f} GB"
-o_master_str = f"{o_master:.1f} GB"
-o_opt_str = f"{o_opt:.1f} GB"
-o_act_str = f"{o_act:.1f} GB"
-o_total_mem_str = f"{o_total_mem:.1f} GB"
-o_time_str = f"{o_time:.1f} days"
-o_energy_str = f"{o_energy:,.0f} kWh"
-o_cost_str = f"${o_cost:,.0f}"
-o_carbon_str = f"~{o_carbon:.0f} tons CO₂"
+o_param_str = f"{fmt(o_param, precision=1, commas=False)} GB"
+o_grad_str = f"{fmt(o_grad, precision=1, commas=False)} GB"
+o_master_str = f"{fmt(o_master, precision=1, commas=False)} GB"
+o_opt_str = f"{fmt(o_opt, precision=1, commas=False)} GB"
+o_act_str = f"{fmt(o_act, precision=1, commas=False)} GB"
+o_total_mem_str = f"{fmt(o_total_mem, precision=1, commas=False)} GB"
+o_time_str = f"{fmt(o_time, precision=1, commas=False)} days"
+o_energy_str = f"{fmt(o_energy, precision=0, commas=True)} kWh"
+o_cost_str = f"${fmt(o_cost, precision=0, commas=True)}"
+o_carbon_str = f"~{fmt(o_carbon, precision=0, commas=False)} tons CO₂"
 ```
 
 | **Metric**                          | **FP32 Baseline**              | **Optimized**                  | **Technique Applied**               |
@@ -4061,21 +4232,35 @@ o_carbon_str = f"~{o_carbon:.0f} tons CO₂"
 ```{python}
 #| label: optimization-summary-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate overall optimization improvement ratios
+# Used in: Summary paragraph after GPT-2 optimization table
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# GPT-2 optimization summary ratios
 naive_mem_gb = 89.0
 optimized_mem_gb = 32.0
-mem_reduction = naive_mem_gb / optimized_mem_gb
-
 naive_energy_kwh = 275_000
 optimized_energy_kwh = 115_000
-energy_reduction_pct = (1 - optimized_energy_kwh / naive_energy_kwh) * 100
-
 naive_days = 14
 optimized_days = 8.4
+
+# =============================================================================
+# PROCESS
+# =============================================================================
+mem_reduction = naive_mem_gb / optimized_mem_gb
+energy_reduction_pct = (1 - optimized_energy_kwh / naive_energy_kwh) * 100
 time_speedup = naive_days / optimized_days
 
+# =============================================================================
+# OUTPUT
+# =============================================================================
 mem_reduction_str = fmt(mem_reduction, precision=1, commas=False)
 energy_reduction_pct_str = fmt(energy_reduction_pct, precision=0, commas=False)
 time_speedup_str = fmt(time_speedup, precision=1, commas=False)
@@ -4096,21 +4281,32 @@ Scaling to multiple devices also amplifies the energy consumption and environmen
 ```{python}
 #| label: carbon-footprint-calc
 #| echo: false
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Calculate carbon footprint and energy cost of training a 7B model
+# Used in: The Carbon Footprint of Training callout
+
+# =============================================================================
+# INPUT
+# =============================================================================
 from physx.formatting import fmt
 
-# Carbon Footprint of Training: 7B model on A100 cluster
-# Scenario: smaller training run representative of fine-tuning or
-# partial pre-training on a mid-size cluster
 cf_params = 7e9              # 7B parameters
 cf_tokens = 1e12             # 1T tokens
 cf_scaling_factor = 6        # Chinchilla scaling constant
 cf_sustained_tflops = 150    # sustained TFLOPS on A100
 cf_num_gpus = 1024           # realistic cluster for 1T-token run
 cf_gpu_tdp_w = A100_TDP.to(watt).magnitude  # 400W from constants
-cf_hosts = cf_num_gpus // 8  # 8 GPUs per host
 cf_cpu_tdp_per_host_w = 200  # CPU power per host
 
-# Compute
+# =============================================================================
+# PROCESS
+# =============================================================================
+cf_hosts = cf_num_gpus // 8  # 8 GPUs per host
+
+# Compute time
 cf_total_flops = cf_scaling_factor * cf_params * cf_tokens
 cf_time_seconds = cf_total_flops / (cf_sustained_tflops * 1e12 * cf_num_gpus)
 cf_time_hours = cf_time_seconds / 3600
@@ -4124,27 +4320,28 @@ cf_energy_kwh = cf_total_power_w * cf_time_hours / 1000
 
 # Optimization dividend: halving time saves half the energy
 cf_energy_saved_kwh = cf_energy_kwh / 2
-# CO2: US grid average ~0.4 kg CO2/kWh
-cf_co2_tons = cf_energy_saved_kwh * 0.4 / 1000
+cf_co2_tons = cf_energy_saved_kwh * 0.4 / 1000  # US grid average ~0.4 kg CO2/kWh
 
 # US household average ~900 kWh/month
 cf_household_months = cf_energy_kwh / 900
 
-# Format for inline references
+# Scientific notation decomposition for total FLOPs
 cf_flops_mantissa = f"{cf_total_flops:.1e}".split("e+")[0]
 cf_flops_exp = int(f"{cf_total_flops:.1e}".split("e+")[1])
+
+# =============================================================================
+# OUTPUT
+# =============================================================================
+cf_num_gpus_str = f"{cf_num_gpus}"
+cf_hosts_str = f"{cf_hosts}"
+cf_cpu_tdp_per_host_w_str = f"{cf_cpu_tdp_per_host_w}"
+cf_gpu_tdp_str = fmt(cf_gpu_tdp_w, precision=0, commas=False)
 cf_time_days_str = fmt(cf_time_days, precision=1, commas=False)
 cf_time_hours_str = fmt(cf_time_hours, precision=0, commas=False)
 cf_energy_kwh_str = fmt(cf_energy_kwh, precision=0, commas=True)
 cf_energy_saved_str = fmt(cf_energy_saved_kwh, precision=0, commas=True)
 cf_co2_str = fmt(cf_co2_tons, precision=1, commas=False)
-cf_gpu_tdp_str = fmt(cf_gpu_tdp_w, precision=0, commas=False)
 cf_household_months_str = fmt(cf_household_months, precision=0, commas=False)
-
-# Pre-formatted strings for inline use
-cf_num_gpus_str = f"{cf_num_gpus}"
-cf_hosts_str = f"{cf_hosts}"
-cf_cpu_tdp_per_host_w_str = f"{cf_cpu_tdp_per_host_w}"
 ```
 
 This scaling leads to a massive *carbon footprint of training*.
@@ -4396,7 +4593,7 @@ Model parallelism's challenge is *idle time*. While Device 1 computes layers 1--
 *   Use **Model Parallel** when the model is too big to fit in a single GPU's memory.
 :::
 
-[^fn-nvlink-training]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, introduced in 2016 with Pascal architecture. NVLink provides 50-`{python} nvlink_h100_str` GB/s bidirectional bandwidth (depending on generation), compared to 16-64 GB/s for PCIe. For training, this 10-50x bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. A DGX H100 system uses NVLink to achieve `{python} nvlink_h100_str` GB/s between any pair of 8 GPUs, making intra-node communication nearly as fast as local memory access.
+[^fn-nvlink-training]: **NVLink**: NVIDIA's high-bandwidth GPU interconnect, providing 50--`{python} nvlink_h100_str` GB/s bidirectional bandwidth (depending on generation) compared to 16--64 GB/s for PCIe. For training, this 10--50$\times$ bandwidth advantage enables efficient gradient synchronization and model parallelism within a node. See @sec-ai-frameworks for additional details.
 
 ### Scaling Beyond a Single Node {#sec-ai-training-scaling-beyond-single-node-a671}
 

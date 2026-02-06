@@ -12,6 +12,7 @@ byte = ureg.byte
 second = ureg.second
 joule = ureg.joule
 watt = ureg.watt
+milliwatt = ureg.milliwatt
 meter = ureg.meter
 hour = ureg.hour
 day = ureg.day
@@ -55,6 +56,7 @@ ureg.define('US = 1e-6 * second')
 ureg.define('NS = 1e-9 * second')
 
 MS = ureg.MS
+ms = ureg.ms          # pint built-in millisecond (alias for convenience)
 US = ureg.US
 NS = ureg.NS
 
@@ -70,17 +72,23 @@ HOURS_PER_YEAR = 8760
 
 # FLOPs are dimensionless "operations"
 ureg.define('flop = 1 * count')
+ureg.define('KFLOPs = 1e3 * flop')
+ureg.define('MFLOPs = 1e6 * flop')
 ureg.define('GFLOP = 1e9 * flop')
 ureg.define('GFLOPs = 1e9 * flop')
 ureg.define('TFLOP = 1e12 * flop')
 ureg.define('TFLOPs = 1e12 * flop')
+ureg.define('PFLOPs = 1e15 * flop')
 ureg.define('ZFLOPs = 1e21 * flop')
 
 flop = ureg.flop
+KFLOPs = ureg.KFLOPs
+MFLOPs = ureg.MFLOPs
 GFLOP = ureg.GFLOP
 GFLOPs = ureg.GFLOPs
 TFLOP = ureg.TFLOP
 TFLOPs = ureg.TFLOPs
+PFLOPs = ureg.PFLOPs
 ZFLOPs = ureg.ZFLOPs
 
 # NVIDIA V100 (Volta, 2017) — Source: NVIDIA V100 Data Sheet
@@ -247,10 +255,14 @@ VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 
 # --- Models & Workloads ---
 ureg.define('param = 1 * count')
+ureg.define('Kparam = 1e3 * param')
 ureg.define('Mparam = 1e6 * param')
+ureg.define('Bparam = 1e9 * param')
 
 param = ureg.param
+Kparam = ureg.Kparam
 Mparam = ureg.Mparam
+Bparam = ureg.Bparam
 
 # GPT-2 (1.5B) — used in training chapter worked examples
 GPT2_PARAMS = 1.5e9 * param

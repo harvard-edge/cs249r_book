@@ -3,11 +3,14 @@ r"""
 Check for problematic rendering patterns in QMD files.
 
 Detects patterns known to cause PDF/LaTeX rendering issues:
-1. Inline Python inside LaTeX math: $...`{python}`...$
-2. LaTeX symbols adjacent to inline Python: `{python}` $\times$
-3. Quad asterisks (malformed bold): ****text**
-4. Footnotes in table cells: | text[^fn-xxx] |
-5. Grid tables (should be pipe tables for inline Python)
+1. Missing opening backtick: {python} var` (renders raw {python} text)
+2. Dollar sign instead of backtick: ${python} var` (same rendering failure)
+3. Inline Python inside $...$ math blocks (LaTeX escaping breaks output)
+4. Non-standard arithmetic intensity units (should be FLOPs/byte)
+5. LaTeX symbols adjacent to inline Python: `{python}` $\times$
+6. Quad asterisks (malformed bold): ****text**
+7. Footnotes in table cells: | text[^fn-xxx] |
+8. Grid tables (should be pipe tables for inline Python)
 
 Usage:
   python check_render_patterns.py --check book/quarto/contents/
@@ -33,23 +36,51 @@ class Issue:
 
 # Pattern definitions
 PATTERNS = {
-    'latex_inline_python': {
-        # Match $ followed by {python} then $, but not when $ is escaped (\$)
-        'regex': re.compile(r'(?<!\\)\$\s*`\{python\}[^`]+`|`\{python\}[^`]+`\s*(?<!\\)\$'),
+    'missing_opening_backtick': {
+        # {python} followed by a closing backtick, but NOT preceded by an opening backtick
+        # Matches: {python} var_str`  or  ${python} var_str`  or  >{python} var_str`
+        # Skips lines inside ```python code blocks (handled by in_code_block logic)
+        'regex': re.compile(r'(?<!`)(\{python\}\s+\w+`)'),
         'severity': 'error',
-        'message': 'Inline Python inside LaTeX math - will not render correctly',
-        'fix_hint': 'Move Python outside $ delimiters: `{python} var` instead of $`{python} var`$'
+        'message': 'Missing opening backtick on inline Python - will render raw {python} text',
+        'fix_hint': 'Add opening backtick: `{python} var_name` (backtick before {python})'
     },
+    'dollar_before_python': {
+        # $ immediately before {python} (currency dollar used instead of backtick)
+        'regex': re.compile(r'\$\{python\}\s+\w+`'),
+        'severity': 'error',
+        'message': 'Dollar sign instead of backtick before {python} - will render raw text',
+        'fix_hint': 'Replace $ with backtick: $`{python} var_name` (add backtick between $ and {python})'
+    },
+    'python_in_dollar_math': {
+        # {python} inside $...$ math (not escaped \$)
+        # Excludes $` pattern (currency dollar + backtick, e.g., $`{python} cost`)
+        'regex': re.compile(r'(?<!\\)\$(?!`)[^$]*\{python\}[^$]*(?<!\\)\$'),
+        'severity': 'error',
+        'message': 'Inline Python inside $...$ math block - will not render correctly',
+        'fix_hint': 'Use md_math() from physx.formatting to create a Markdown() object'
+    },
+    'inconsistent_arith_units': {
+        # Catch non-standard arithmetic intensity units (should be FLOPs/byte)
+        # Excludes the correct form "FLOPs/byte" and "FLOP/byte"
+        'regex': re.compile(r'(?:Ops/Byte|Ops/byte|ops/byte|FLOPS/byte|FLOPS per byte|FLOPs per byte)'),
+        'severity': 'warning',
+        'message': 'Non-standard arithmetic intensity unit - should be "FLOPs/byte"',
+        'fix_hint': 'Standardize to "FLOPs/byte" (capital F, capital L, lowercase s)'
+    },
+    # NOTE: The original 'latex_inline_python' check was removed because it
+    # produced false positives on currency patterns like $`{python} cost_str`.
+    # The 'python_in_dollar_math' check above handles real $...{python}...$ cases.
     'latex_adjacent_python_after': {
         'regex': re.compile(r'`\{python\}[^`]+`\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)'),
-        'severity': 'error', 
-        'message': 'LaTeX symbol after inline Python - will not render correctly',
+        'severity': 'warning', 
+        'message': 'LaTeX symbol after inline Python - may not render correctly in PDF',
         'fix_hint': 'Use Unicode: × instead of $\\times$, ≈ instead of $\\approx$'
     },
     'latex_adjacent_python_before': {
         'regex': re.compile(r'\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)\$\s*`\{python\}'),
-        'severity': 'error',
-        'message': 'LaTeX symbol before inline Python - will not render correctly',
+        'severity': 'warning',
+        'message': 'LaTeX symbol before inline Python - may not render correctly in PDF',
         'fix_hint': 'Use Unicode: × instead of $\\times$, ≈ instead of $\\approx$'
     },
     'quad_asterisks': {

@@ -112,7 +112,7 @@ Applying the **D·A·M taxonomy** reveals how deployment fundamentally flips you
 
 *   **Data (Information)**: In training, you maximize **Volume** (shuffling billions of samples). In serving, you maximize **Freshness** (processing one request *right now*).
 *   **Algorithm (Logic)**: In training, the math is **Mutable** (updating weights via backprop). In serving, the math is **Frozen** (fixed weights, forward pass only).
-*   **Machine (Physics)**: In training, you maximize **Utilization** (keeping GPUs at 100% to saturate throughput). In serving, you maximize **Headroom** (keeping GPUs at 50-70% to survive traffic spikes).
+*   **Machine (Physics)**: In training, you maximize **Utilization** (keeping GPUs at 100% to saturate throughput). In serving, you maximize **Headroom** (keeping GPUs at 40-60% to absorb traffic spikes before tail latency explodes; see @fig-tail-latency-explosion).
 :::
 
 The consequences of ignoring this inversion become visceral during a *traffic spike* that pushes the system beyond what it was designed to handle.
@@ -757,7 +757,18 @@ With the serving architecture established, we now trace *what* happens to a sing
 
 For dynamic inference systems\index{Latency Budget!optimization objectives}, the serving inversion established in @sec-model-serving-systems-serving-paradigm-9634 has concrete implications for system design [@gujarati2020serving]. A serving system with 1000ms per-request latency has failed, even if it achieves excellent throughput.
 
-The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50\index{p50 Latency!median response time}, p95\index{p95 Latency!percentile target}, and p99 latencies\index{Latency!percentiles (p50, p95, p99)}\index{p99 Latency|see{Tail Latency}} reveal *how* the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits 40 times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-impact]
+```{python}
+#| label: tail-latency-ratio-calc
+#| echo: false
+from physx.formatting import fmt
+
+mean_latency_ms_value = 50
+p99_latency_ms_value = 2000
+tail_ratio_value = p99_latency_ms_value / mean_latency_ms_value
+tail_ratio_str = fmt(tail_ratio_value, precision=0, commas=False)
+```
+
+The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50\index{p50 Latency!median response time}, p95\index{p95 Latency!percentile target}, and p99 latencies\index{Latency!percentiles (p50, p95, p99)}\index{p99 Latency|see{Tail Latency}} reveal *how* the system performs across the full range of requests. If your mean latency is 50ms but p99 is 2 seconds, one in a hundred users waits `{python} tail_ratio_str` times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-impact]
 
 [^fn-tail-latency-impact]: **Tail Latency Impact**: Research at Google and Amazon in the mid-2000s established that users are more sensitive to latency variance than mean latency. Industry experience suggests that latency increases of 100ms can measurably impact user engagement and conversion rates for e-commerce applications, though the magnitude varies by context. This is why service level objectives (SLOs) typically specify percentile targets rather than averages.
 
@@ -1121,18 +1132,34 @@ ridge_point_str = f"{ridge_point_value}"
 
 | **Resolution** |         **Activation Size** |             **Arith. Intensity** | **Bottleneck** |
 |:-------------|--------------------------:|-------------------------------:|:-------------|
-| **224×224**    | `{python} act_224_mb_str`MB | `{python} ai_224_str` FLOPS/byte | Compute        |
-| **384×384**    | `{python} act_384_mb_str`MB | `{python} ai_384_str` FLOPS/byte | Transitional   |
-| **512×512**    | `{python} act_512_mb_str`MB | `{python} ai_512_str` FLOPS/byte | Memory BW      |
-| **640×640**    | `{python} act_640_mb_str`MB | `{python} ai_640_str` FLOPS/byte | Memory BW      |
+| **224×224**    | `{python} act_224_mb_str`MB | `{python} ai_224_str` FLOPs/byte | Compute        |
+| **384×384**    | `{python} act_384_mb_str`MB | `{python} ai_384_str` FLOPs/byte | Transitional   |
+| **512×512**    | `{python} act_512_mb_str`MB | `{python} ai_512_str` FLOPs/byte | Memory BW      |
+| **640×640**    | `{python} act_640_mb_str`MB | `{python} ai_640_str` FLOPs/byte | Memory BW      |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (`{python} v100_tflops_fp32` TFLOPS FP32, `{python} v100_bw` GB/s bandwidth), the ridge point is approximately `{python} ridge_point_str` FLOPS/byte. At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (`{python} v100_tflops_fp32` TFLOPS FP32, `{python} v100_bw` GB/s bandwidth), the ridge point is approximately `{python} ridge_point_str` FLOPs/byte. At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
 
 #### Resolution Strategies in Production {#sec-model-serving-systems-deploymentspecific-resolution-decisions-1d76}
 
 Different deployment contexts have distinct resolution requirements. Mobile applications often accept lower resolution such as 224×224 for object detection in camera viewfinders, where latency and battery life dominate. Medical imaging requires high resolution of 512×512 or higher for diagnostic accuracy, with relaxed latency requirements. Autonomous vehicles use multiple resolutions for different tasks, with low resolution for detection and high resolution crops for recognition. Cloud APIs typically receive resolution set by client upload and must handle a range gracefully. This variability makes cloud APIs ideal candidates for adaptive resolution strategies, where the system selects resolution dynamically based on content characteristics.
 
-**Adaptive Resolution.**\index{Adaptive Resolution!content-based selection} Production systems can select resolution dynamically based on content. One approach runs a lightweight classifier at 128×128 to categorize content type, then selects task-appropriate resolution with documents at 512×512, landscapes at 224×224, and faces at 384×384. This achieves 1.4× throughput improvement with 99.2 percent accuracy retention versus fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
+```{python}
+#| label: adaptive-resolution-calc
+#| echo: false
+from physx.formatting import fmt
+
+adaptive_throughput_improvement_value = 1.4
+adaptive_accuracy_retention_value = 99.2
+
+adaptive_throughput_improvement_str = fmt(
+    adaptive_throughput_improvement_value, precision=1, commas=False
+)
+adaptive_accuracy_retention_str = fmt(
+    adaptive_accuracy_retention_value, precision=1, commas=False
+)
+```
+
+**Adaptive Resolution.**\index{Adaptive Resolution!content-based selection} Production systems can select resolution dynamically based on content. One approach runs a lightweight classifier at 128×128 to categorize content type, then selects task-appropriate resolution with documents at 512×512, landscapes at 224×224, and faces at 384×384. This achieves `{python} adaptive_throughput_improvement_str`× throughput improvement with `{python} adaptive_accuracy_retention_str` percent accuracy retention versus fixed high resolution. This pattern trades preprocessing cost from running the lightweight classifier for inference savings on the main model.
 
 The latency analysis so far has focused on sequential processing: one request completing before the next begins. The preprocessing, inference, and postprocessing stages use different hardware resources. This separation creates an opportunity to process multiple requests simultaneously.
 
@@ -2982,7 +3009,7 @@ We begin with the bottleneck that dominates LLM serving costs: KV cache memory. 
 
 import numpy as np
 from physx import viz
-from physx.constants import BYTES_FP16
+from physx.constants import BYTES_FP16, byte, GB
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
@@ -2994,7 +3021,7 @@ layers, d_model, bytes_per_param = 80, 8192, BYTES_FP16.magnitude  # 70B model p
 
 def get_kv_gb(batch, seq):
     bytes_total = 2 * layers * d_model * seq * batch * bytes_per_param
-    return bytes_total / 1e9
+    return (bytes_total * byte).to(GB).magnitude
 
 batches = [1, 4, 16, 32]
 colors = [COLORS['BlueLine'], COLORS['GreenLine'], COLORS['OrangeLine'], COLORS['VioletLine']]

@@ -41,7 +41,7 @@ In conventional software, programmers write logic that computers execute. In mac
 #| echo: false
 
 from physx.constants import *
-from physx.formatting import fmt, sci
+from physx.formatting import fmt, sci, md_math
 from physx.formulas import model_memory
 
 # =============================================================================
@@ -108,12 +108,25 @@ a100_tflops_fp16_sparse_value = (A100_FLOPS_FP16_TENSOR * 2).to(TFLOPs/second).m
 energy_dram_pj_value = ENERGY_DRAM_ACCESS_PJ.magnitude
 energy_flop_fp32_pj_value = ENERGY_FLOP_FP32_PJ.magnitude
 energy_flop_int8_pj_value = ENERGY_FLOP_INT8_PJ.magnitude
+energy_flop_fp32_pj_per_bit_value = energy_flop_fp32_pj_value / 32
+energy_local_ssd_pj_value = 10_000
+energy_network_pj_value = 50_000
 
 dram_vs_int_value = int(energy_dram_pj_value / energy_add_int32_pj_value)
 network_vs_int_value = int(energy_network_1kb_pj_value / energy_add_int32_pj_value)
 dram_multiplier_str = f"{int(ENERGY_DRAM_ACCESS_PJ.magnitude / ENERGY_FLOP_FP32_PJ.magnitude):,}"
+local_ssd_multiplier_str = fmt(
+    energy_local_ssd_pj_value / energy_flop_fp32_pj_per_bit_value,
+    precision=0,
+    commas=True,
+)
+network_multiplier_str = fmt(
+    energy_network_pj_value / energy_flop_fp32_pj_per_bit_value,
+    precision=0,
+    commas=True,
+)
 
-gpt3_params_b_value = GPT3_PARAMS.magnitude / 1e9  # 175B
+gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude  # 175B
 gpt3_fp32_gb_value = model_memory(GPT3_PARAMS, BYTES_FP32, GB)  # 700 GB
 gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)  # 350 GB
 model_growth_factor_value = int(gpt3_params_b_value * 1e9 / (alexnet_params_m_value * 1e6))
@@ -181,18 +194,28 @@ storage_cost_nvme_high_str = fmt(storage_cost_nvme_high_val, precision=0, commas
 retrieval_cost_glacier_str = fmt(retrieval_cost_glacier_val, precision=2, commas=False)
 
 # KWS Storage Cost Calculation
-kws_storage_s3_cost_value = kws_dataset_size_gb_value / 1000 * storage_cost_s3_val
-kws_storage_nvme_low_cost_value = kws_dataset_size_gb_value / 1000 * storage_cost_nvme_low_val
-kws_storage_nvme_high_cost_value = kws_dataset_size_gb_value / 1000 * storage_cost_nvme_high_val
+kws_dataset_size_tb_value = (kws_dataset_size_gb_value * GB).to(TB).magnitude
+kws_storage_s3_cost_value = kws_dataset_size_tb_value * storage_cost_s3_val
+kws_storage_nvme_low_cost_value = kws_dataset_size_tb_value * storage_cost_nvme_low_val
+kws_storage_nvme_high_cost_value = kws_dataset_size_tb_value * storage_cost_nvme_high_val
 
 kws_storage_s3_cost_str = fmt(kws_storage_s3_cost_value, precision=0, commas=False)
 kws_storage_nvme_low_cost_str = fmt(kws_storage_nvme_low_cost_value, precision=0, commas=False)
 kws_storage_nvme_high_cost_str = fmt(kws_storage_nvme_high_cost_value, precision=0, commas=False)
+
+# Data Gravity preview (used in narrative before the full callout calculation)
+_dataset_pb = 1
+_network_10g_gbs = 10 / 8  # 10 Gbps in GB/s
+_transfer_days_10g = (_dataset_pb * 1_000_000) / _network_10g_gbs / (
+    SECONDS_PER_MINUTE * MINUTES_PER_HOUR * HOURS_PER_DAY
+)
+transfer_days_10g_str = fmt(_transfer_days_10g, precision=0, commas=False)
+transfer_time_10g_md = md_math(f"T = D_{{vol}}/BW \\approx {transfer_days_10g_str} \\text{{ days}}")
 ```
 
 ## Data Engineering as Dataset Compilation {#sec-data-engineering-ml-data-engineering-dataset-compilation-0496}
 
-\index{Data Engineering!dataset compilation}The methodologies examined in @sec-ai-development-workflow establish the *when* and *why* of data preparation, showing that data work consumes `{python} data_prep_effort_low_str` to `{python} data_prep_effort_high_str` percent of ML project effort and represents the foundational "D" in the **AI Triad** (Data, Algorithm, Machine) introduced in @sec-introduction. However, executing those stages at scale requires dedicated infrastructure. If the workflow is the plan, data engineering is the factory floor. This chapter examines the infrastructure, processes, and engineering principles that turn raw observations into training-ready datasets.
+\index{Data Engineering!dataset compilation}The methodologies examined in @sec-ai-development-workflow establish the *when* and *why* of data preparation, showing that data work consumes `{python} data_prep_effort_low_str` to `{python} data_prep_effort_high_str` percent of ML project effort (as @fig-ds-time quantified) and represents the foundational "D" in the **AI Triad** (Data, Algorithm, Machine) introduced in @sec-introduction. However, executing those stages at scale requires dedicated infrastructure. If the workflow is the plan, data engineering is the factory floor. While the previous chapter traced the ML lifecycle through diabetic retinopathy screening, this chapter uses **Keyword Spotting (KWS)** to demonstrate data engineering under extreme resource constraints — where every byte and operation matters. This chapter examines the infrastructure, processes, and engineering principles that turn raw observations into training-ready datasets.
 
 The stakes of this infrastructure are quantifiable. The **Degradation Equation**\index{Degradation Equation!data quality impact} from @sec-introduction-degradation-equation-e87e captures *why* data quality matters so directly to model performance:
 
@@ -264,11 +287,35 @@ plt.show()
 
 The statistical ceiling establishes the theoretical bound on model performance. But how do we quantify the practical returns from investing in data quality? The following analysis demonstrates the compounding economics of one common data quality improvement, a phenomenon we call the *deduplication dividend*.
 
+```{python}
+#| label: deduplication-dividend-calc
+#| echo: false
+from physx.formatting import fmt
+
+dedup_train_weeks_value = 2
+dedup_train_days_value = dedup_train_weeks_value * 7
+dedup_train_cost_value = 5000
+dedup_duplicate_pct_value = 0.30
+dedup_runs_value = 10
+dedup_eng_days_value = 2
+dedup_eng_cost_value = 2000
+
+dedup_new_days_value = dedup_train_days_value * (1 - dedup_duplicate_pct_value)
+dedup_savings_per_run_value = dedup_train_cost_value * dedup_duplicate_pct_value
+dedup_total_savings_value = dedup_savings_per_run_value * dedup_runs_value
+dedup_roi_value = dedup_total_savings_value / dedup_eng_cost_value
+
+dedup_new_days_str = fmt(dedup_new_days_value, precision=0, commas=False)
+dedup_savings_per_run_str = fmt(dedup_savings_per_run_value, precision=0, commas=True)
+dedup_total_savings_str = fmt(dedup_total_savings_value, precision=0, commas=True)
+dedup_roi_str = fmt(dedup_roi_value, precision=1, commas=False)
+```
+
 ::: {.callout-notebook title="The Deduplication Dividend"}
 
 \index{Deduplication!ROI calculation}**Problem**: You have a 10TB dataset of web-scraped images. Training takes 2 weeks on your GPU cluster ($5,000). You suspect 30% of the images are near-duplicates. Is it worth the engineering time to remove them?
 
-**The Math**: If duplicates contribute little training signal, removing 30% reduces training time to approximately 10 days, saving $1,500 per run. Over 10 training iterations (hyperparameter tuning, architecture search), this totals $15,000 saved. If deduplication takes 2 engineer-days ($2,000), the ROI is 7.5×.
+**The Math**: If duplicates contribute little training signal, removing 30% reduces training time to approximately `{python} dedup_new_days_str` days, saving $`{python} dedup_savings_per_run_str` per run. Over 10 training iterations (hyperparameter tuning, architecture search), this totals $`{python} dedup_total_savings_str` saved. If deduplication takes 2 engineer-days ($2,000), the ROI is `{python} dedup_roi_str`×.
 
 **The Systems Lesson**: Data cleaning has compounding returns because cleaned data benefits every downstream experiment. This is *why* production teams prioritize data quality tooling over model complexity.
 :::
@@ -316,7 +363,7 @@ These failure modes require systematic engineering approaches. To understand *wh
 
 \index{Data!physics of}The "data as code" metaphor captures *what* data does (determines system behavior) but not *why* moving it is so expensive. To engineer data systems effectively, we must also treat data as a physical substance with measurable properties. Just as diverse materials have density and viscosity, datasets have **Information Entropy** and **Data Gravity**.
 
-**Data Gravity**\index{Data Gravity!physics of} is the cost of movement. It is a function of volume ($D_{vol}$) and network bandwidth ($BW$). The time to move a petabyte dataset across a 10 Gbps link is fixed by physics ($T = D_{vol}/BW \approx 10 \text{ days}$); the "Physics of Data Gravity" callout below quantifies these transfer times for a 100 Gbps link. This gravity dictates architecture: because moving 1PB to the compute is slow and expensive, we must move the compute to the data. This explains the rise of "Data Lakehouse" architectures\index{Data Lakehouse!architecture} [@armbrust2021lakehouse] where processing engines (Spark, Presto) run directly on storage nodes. In contrast, **Data Mesh**\index{Data Mesh!decentralized ownership} [@dehghani2022data] proposes decentralizing ownership to manage this scale organizationally, treating data as a product owned by domain teams.
+**Data Gravity**\index{Data Gravity!physics of} is the cost of movement. It is a function of volume ($D_{vol}$) and network bandwidth ($BW$). The time to move a petabyte dataset across a 10 Gbps link is fixed by physics (`{python} transfer_time_10g_md`); the "Physics of Data Gravity" callout below quantifies these transfer times for a 100 Gbps link. This gravity dictates architecture: because moving 1PB to the compute is slow and expensive, we must move the compute to the data. This explains the rise of "Data Lakehouse" architectures\index{Data Lakehouse!architecture} [@armbrust2021lakehouse] where processing engines (Spark, Presto) run directly on storage nodes. In contrast, **Data Mesh**\index{Data Mesh!decentralized ownership} [@dehghani2022data] proposes decentralizing ownership to manage this scale organizationally, treating data as a product owned by domain teams.
 
 **Information Entropy**\index{Information Entropy!data density} is the density of signal. A dataset of 1 million identical images has high gravity (TB of storage) but zero entropy (1 image worth of information). A dataset of 10,000 diverse edge-cases has low gravity but high entropy.
 
@@ -331,8 +378,8 @@ A corollary of the **Iron Law** (@sec-silicon-contract) for data engineering is 
 |:---------------------------------|---------------------------------:|----------------------------------:|
 | **32-bit Floating Point Add**      | `{python} energy_flop_fp32_str` pJ |                                  1× |
 | **DRAM Memory Access (32-bit)**    |  **`{python} energy_dram_str` pJ** | **`{python} dram_multiplier_str`×** |
-| **Local SSD Access (per bit)**     |                         ~10,000 pJ |                            100,000× |
-| **Network Transfer (Data Center)** |                         ~50,000 pJ |                            500,000× |
+| **Local SSD Access (per bit)**     |                         ~10,000 pJ |                  `{python} local_ssd_multiplier_str`× |
+| **Network Transfer (Data Center)** |                         ~50,000 pJ |                   `{python} network_multiplier_str`× |
 
 **Systems Implication**: Data has physical mass. If you prune 50% of your training data through deduplication, you are not just saving disk space; you are eliminating the most energy-intensive stages of the training lifecycle. This is *why* **Data Selection** is the highest-leverage tool in the systems engineer's toolkit: it addresses the problem at the most expensive source.
 :::
@@ -345,7 +392,7 @@ Effective data engineering maximizes this ratio. "Data Cleaning"\index{Data Clea
 ```{python}
 #| label: data-gravity-calc
 #| echo: false
-from physx.formatting import fmt
+from physx.formatting import fmt, md_math
 
 # =============================================================================
 # PURPOSE
@@ -366,8 +413,12 @@ tpuv4_cost_per_hour_value = TPU_V4_PER_HOUR.to(USD / hour).magnitude
 # =============================================================================
 dataset_gb_gravity_value = dataset_pb_value * 1_000_000  # 1 PB in GB
 network_gbs_value = NETWORK_100G_BW.to(GB / second).magnitude
+network_10g_gbs_value = 10 / 8
 transfer_seconds_value = dataset_gb_gravity_value / network_gbs_value
 transfer_hours_value = transfer_seconds_value / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR)
+transfer_days_10g_value = dataset_gb_gravity_value / network_10g_gbs_value / (
+    SECONDS_PER_MINUTE * MINUTES_PER_HOUR * HOURS_PER_DAY
+)
 transfer_cost_value = dataset_gb_gravity_value * egress_cost_per_gb_value
 equivalent_tpu_hours_value = transfer_cost_value / tpuv4_cost_per_hour_value
 
@@ -376,6 +427,8 @@ equivalent_tpu_hours_value = transfer_cost_value / tpuv4_cost_per_hour_value
 # =============================================================================
 transfer_seconds_str = fmt(transfer_seconds_value, precision=0, commas=True)
 transfer_hours_str = fmt(transfer_hours_value, precision=0, commas=False)
+transfer_days_10g_str = fmt(transfer_days_10g_value, precision=0, commas=False)
+transfer_time_10g_md = md_math(f"T = D_{{vol}}/BW \\approx {transfer_days_10g_str} \\text{{ days}}")
 transfer_cost_str = fmt(transfer_cost_value, precision=0, commas=True)
 tpu_hours_str = fmt(equivalent_tpu_hours_value, precision=0, commas=True)
 network_gbs_str = fmt(network_gbs_value, precision=1, commas=False)
@@ -832,7 +885,7 @@ When ML systems exhibit failures, @tbl-four-pillars-diagnostic helps teams ident
 
 Having examined how each pillar addresses specific concerns and how they manifest across pipeline stages, we now turn to how they function together as a system. Understanding each pillar individually is necessary but not sufficient; effective data engineering requires recognizing their interconnections. These four pillars are not independent components but interconnected aspects of a unified system where decisions in one area affect all others. Quality improvements must account for scalability constraints, reliability requirements influence governance implementations, and governance policies shape quality metrics. This systems perspective guides our exploration of data engineering, examining how each technical topic supports and balances these principles while managing their tensions.
 
-The practical stakes of this integrated framework are substantial. According to industry surveys, ML practitioners spend an estimated `{python} data_prep_effort_low_str`--`{python} data_prep_effort_high_str`% of their time on data preparation tasks[^fn-data-quality-stats], with data cleaning alone consuming up to `{python} data_cleaning_effort_str`% of that effort (see @fig-ds-time in @sec-ai-development-workflow). This imbalance reflects ad-hoc rather than systematic data engineering practices. Applying the four-pillar framework consistently can reduce data preparation time while producing more reliable and maintainable systems.
+The practical stakes of this integrated framework are substantial. According to industry surveys, ML practitioners spend an estimated `{python} data_prep_effort_low_str`--`{python} data_prep_effort_high_str`% of their time on data preparation tasks[^fn-data-quality-stats], with data cleaning alone consuming up to `{python} data_cleaning_effort_str`% of that effort, as @fig-ds-time quantified. This imbalance reflects ad-hoc rather than systematic data engineering practices. Applying the four-pillar framework consistently can reduce data preparation time while producing more reliable and maintainable systems.
 
 This time allocation motivates knowing the key constants that govern data engineering costs and timelines.
 
@@ -1771,7 +1824,7 @@ Categorical features require different statistical approaches. Instead of compar
 
 Validation at the pipeline level encompasses multiple strategies working together. Schema validation executes synchronously as data enters the pipeline, rejecting malformed records immediately before they can propagate downstream. Modern tools like TensorFlow Data Validation (TFDV)[^fn-tfdv] [@breck2019data] automatically infer schemas from training data, capturing expected data types, value ranges, and presence requirements.
 
-[^fn-tfdv]: **TensorFlow Data Validation (TFDV)**: A production-grade library for analyzing and validating ML data that automatically infers schemas, detects anomalies, and identifies training-serving skew. TFDV computes descriptive statistics, identifies data drift through distribution comparisons, and generates human-readable validation reports, integrating with TFX pipelines for automated data quality monitoring. For a feature vector containing user demographics, the inferred schema might specify that user_age must be a 64-bit integer between 18 and 95 and cannot be null, user_country must be a string from a specific set of country codes, and session_duration must be a floating-point number between 0 and 7200 seconds but is optional. During serving, the validator checks each incoming record against these specifications, rejecting records with null required fields, out-of-range values, or type mismatches before they reach feature computation logic.
+[^fn-tfdv]: **TensorFlow Data Validation (TFDV)**: A production-grade library for analyzing and validating ML data that automatically infers schemas from training data, detects anomalies, and identifies training-serving skew. TFDV computes descriptive statistics, identifies data drift through distribution comparisons, and generates human-readable validation reports, integrating with TFX pipelines for automated data quality monitoring.
 
 This synchronous validation necessarily remains simple and fast, checking properties that can be evaluated on individual records in microseconds. More sophisticated validation that requires comparing serving data against training data distributions or aggregating statistics across many records must run asynchronously to avoid blocking the ingestion pipeline. Statistical validation\index{Statistical Validation!sampling strategies} systems typically sample 1-10% of serving traffic—enough to detect meaningful shifts while avoiding the computational cost of analyzing every record. These samples accumulate in rolling windows, commonly 1 hour, 24 hours, and 7 days, with different windows revealing different patterns. Hourly windows detect sudden shifts like a data source failing over to a backup with different characteristics, while weekly windows reveal gradual drift in user populations or behavior.
 
@@ -2023,11 +2076,11 @@ stream_cost_per_hr_value = 0.05
 # =============================================================================
 # PROCESS
 # =============================================================================
-throughput_gbs_value = events_per_sec_value * event_size_kb_value / 1e6  # GB/s
+throughput_gbs_value = (events_per_sec_value * event_size_kb_value * KB).to(GB).magnitude  # GB/s
 stream_cost_day_value = (
     stream_cores_value * stream_hours_value * stream_cost_per_hr_value
 )
-hourly_data_tb_value = throughput_gbs_value * 3600 / 1000  # TB per hour
+hourly_data_tb_value = (throughput_gbs_value * 3600 * GB).to(TB).magnitude  # TB per hour
 batch_core_hours_value = 200 * (10 / 60) * 24  # 200 cores × 10min/hr × 24 hours
 batch_cost_day_value = batch_core_hours_value * stream_cost_per_hr_value
 cost_ratio_value = stream_cost_day_value / batch_cost_day_value
@@ -3243,8 +3296,8 @@ s3_bw_mbs_value = 100
 # =============================================================================
 max_img_per_sec_value = int(a100_flops_val_value / resnet_flops_per_img_value)
 required_bw_gbs_value = (
-    max_img_per_sec_value * image_size_kb_value * 1e3 / 1e9
-)
+    max_img_per_sec_value * image_size_kb_value * KB
+).to(GB).magnitude
 sata_max_img_sec_value = int(sata_bw_mbs_value * 1e6 / (image_size_kb_value * 1e3))
 sata_utilization_pct_value = int(
     round(sata_max_img_sec_value / max_img_per_sec_value * 100)
@@ -3256,8 +3309,8 @@ s3_workers_value = int(round(required_bw_gbs_value * 1e3 / s3_bw_mbs_value))
 # =============================================================================
 max_img_per_sec_str = f"{max_img_per_sec_value:,}"
 required_bw_gbs_str = fmt(required_bw_gbs_value, precision=1, commas=False)
-a100_flops_t_str = str(int(a100_flops_val_value / 1e12))
-resnet_flops_g_str = str(int(resnet_flops_per_img_value / 1e9))
+a100_flops_t_str = str(int((a100_flops_val_value * flop).to(TFLOPs).magnitude))
+resnet_flops_g_str = str(int((resnet_flops_per_img_value * flop).to(GFLOPs).magnitude))
 image_size_kb_str = fmt(image_size_kb_value, precision=0, commas=False)
 sata_bw_mbs_str = fmt(sata_bw_mbs_value, precision=0, commas=False)
 sata_max_img_sec_str = f"{sata_max_img_sec_value:,}"

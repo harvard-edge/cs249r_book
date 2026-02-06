@@ -41,8 +41,12 @@ from physx.constants import (
     ALEXNET_PARAMS,
     IMAGENET_IMAGES,
     Mparam,
+    Bparam,
     TFLOPs,
+    ZFLOPs,
     second,
+    byte,
+    GB,
 )
 import math
 from physx.formatting import fmt
@@ -57,12 +61,34 @@ imagenet_images_m_value = IMAGENET_IMAGES.magnitude / 1e6
 # Verification Gap
 vg_pixels = 224 * 224 * 3
 vg_digits_value = vg_pixels * math.log10(256)
+imagenet_test_images_value = 50_000
+imagenet_test_images_str = fmt(imagenet_test_images_value, precision=0, commas=True)
 gmail_emails_t_value = GMAIL_EMAILS_PER_DAY * 365 / 1e12
 gpt4_gpu_m_value = GPT4_TRAINING_GPU_DAYS / 1e6
 
-gpt3_params_b_value = GPT3_PARAMS.to(Mparam).magnitude / 1000
-gpt3_training_zflops_value = int(GPT3_TRAINING_OPS.magnitude / 1e21)
+# AlexNet relative improvement
+alexnet_top5_error_value = 15.3
+alexnet_second_place_error_value = 26.4
+alexnet_relative_improvement_value = (
+    (alexnet_second_place_error_value - alexnet_top5_error_value)
+    / alexnet_second_place_error_value
+    * 100
+)
+
+# Data scale conversion (approximate tokens -> GB)
+data_scale_tokens_b_value = 500
+token_bytes_value = 1.4
+data_scale_gb_value = (data_scale_tokens_b_value * 1e9 * token_bytes_value * byte).to(GB).magnitude
+
+# Moore's Law comparison
+moores_doubling_months_value = 24
+ai_compute_doubling_months_value = 3.4
+moores_speedup_value = moores_doubling_months_value / ai_compute_doubling_months_value
+
+gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude
+gpt3_training_zflops_value = int(GPT3_TRAINING_OPS.to(ZFLOPs).magnitude)
 gpt3_gpus_value = 1024
+algo_efficiency_max_value = 44.5
 
 # =============================================================================
 # OUTPUT
@@ -71,12 +97,16 @@ google_search_b_str = fmt(google_search_b_value, precision=1)
 alexnet_params_m_str = fmt(alexnet_params_m_value, precision=0)
 imagenet_images_m_str = fmt(imagenet_images_m_value, precision=1)
 vg_digits_str = fmt(vg_digits_value, precision=0, commas=True)
+alexnet_relative_improvement_str = fmt(alexnet_relative_improvement_value, precision=0)
+data_scale_gb_str = fmt(data_scale_gb_value, precision=0, commas=False)
+moores_speedup_str = fmt(moores_speedup_value, precision=0, commas=False)
 gmail_emails_t_str = fmt(gmail_emails_t_value, precision=0)
 gpt4_gpu_m_str = fmt(gpt4_gpu_m_value, precision=1)
 
 gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)
 gpt3_params_billion_str = f"{gpt3_params_b_str} billion"
 gpt3_training_zflops_str = fmt(gpt3_training_zflops_value, precision=0, commas=False)
+algo_efficiency_max_str = fmt(algo_efficiency_max_value, precision=0, commas=False)
 
 gpt3_gpus_str = fmt(gpt3_gpus_value, precision=0, commas=True)
 
@@ -121,7 +151,7 @@ Artificial intelligence has moved from research laboratories to the fabric of da
 
 This dual mandate is visible in every large-scale AI deployment. ChatGPT coordinates thousands of GPUs[^fn-gpu] across data centers, executing trillions of operations per query while managing memory, network bandwidth, and thermal constraints. Tesla's collision avoidance relies on dozens of neural networks[^fn-neural-network] processing data from cameras, radar, and ultrasonic sensors simultaneously, fusing their outputs into a control decision within milliseconds. Google processes `{python} google_search_b_str` billion searches per day, each one triggering multiple AI systems for ranking, knowledge extraction, and spell-checking, all while meeting strict latency targets on globally distributed infrastructure. These systems do not merely run algorithms. They orchestrate data, computation, and hardware under tight physical constraints to deliver statistically reliable results at scale.
 
-[^fn-gpu]: **GPU (Graphics Processing Unit)**: Originally designed for rendering video game graphics, GPUs excel at performing thousands of simple calculations simultaneously. A modern data center GPU like NVIDIA's H100 can perform approximately `{python} h100_fp16_tflops_str` trillion floating-point operations per second for FP16 Tensor Core operations (or nearly `{python} h100_fp8_tflops_str` TFLOPS for FP8), compared to roughly `{python} cpu_fp32_tflops_str` trillion for a high-end CPU. This massive parallelism aligns naturally with neural network computations, which consist of matrix multiplications across millions of parameters. The GPU's rise as the dominant AI accelerator represents a systems engineering insight: matching algorithm structure to hardware capabilities (see @sec-ai-acceleration).
+[^fn-gpu]: **GPU (Graphics Processing Unit)**: Originally designed for rendering video game graphics, GPUs excel at performing thousands of simple calculations simultaneously. A modern data center GPU like NVIDIA's H100 can perform approximately `{python} h100_fp16_tflops_str` TFLOPS for FP16 operations, compared to roughly `{python} cpu_fp32_tflops_str` TFLOPS for a high-end CPU. This massive parallelism aligns naturally with neural network computations. See @sec-ai-acceleration for details on GPU architecture and AI accelerator design.
 
 [^fn-neural-network]: **Neural Network**: Named for its inspiration from biological neurons, from Greek *neuron* (nerve, sinew). Warren McCulloch and Walter Pitts introduced the computational model in 1943 [@mcculloch1943logical], abstracting the brain's interconnected nerve cells into mathematical functions. The biological metaphor persists in terminology: neurons, synapses (connections), and activation (firing). Despite the name, modern neural networks bear little resemblance to actual brain architecture; they are better understood as differentiable function approximators organized in layers.
 
@@ -161,7 +191,7 @@ Google researchers quantified this paradigm shift in a landmark 2015 paper.
 
 This table reveals the fundamental shift: *Data is Source Code.*\index{Software 2.0!data as source code} In traditional software, a programmer writes explicit logic (`if x > 0 then y`). In machine learning, the programmer writes the *optimization meta-logic* (the training algorithm), but the actual operational logic is "compiled" from the training dataset through stochastic gradient descent[^fn-sgd] and related optimization methods. The dataset serves as source code, the training pipeline as compiler, and the model weights as binary executable.
 
-[^fn-sgd]: **Stochastic Gradient Descent (SGD)**\index{Stochastic Gradient Descent (SGD)|see{Gradient Descent}}: The name reveals the method: "stochastic" derives from Greek *stochastikos* (able to guess or aim at a target), reflecting the algorithm's use of random sampling; "gradient" comes from Latin *gradiens* (stepping), describing the incremental steps down the error surface. Rather than computing gradients over the entire dataset (computationally prohibitive for large datasets), SGD estimates gradients from small random batches, typically 32–256 samples. This stochasticity introduces noise that paradoxically helps optimization avoid poor solutions. Modern variants are discussed in @sec-ai-training.
+[^fn-sgd]: **Stochastic Gradient Descent (SGD)**\index{Stochastic Gradient Descent (SGD)|see{Gradient Descent}}: "Stochastic" derives from Greek *stochastikos* (able to guess); "gradient" from Latin *gradiens* (stepping). Rather than computing gradients over the entire dataset, SGD estimates them from small random batches (typically 32--256 samples). This noise paradoxically helps optimization avoid poor solutions. Modern variants are discussed in @sec-ai-training.
 
 From a systems perspective, this represents a transition from *instruction-centric* to *data-centric* computing\index{Data-Centric Computing!vs. instruction-centric}:
 
@@ -173,7 +203,7 @@ Debugging an ML system therefore means debugging the *data*, not the Python scri
 ::: {.callout-perspective title="The Verification Gap"}
 ***Why* we cannot just 'test' ML systems**\index{Verification Gap!continuous input space}: In Software 1.0, logic is discrete. We can write unit tests that cover edge cases because the input space is often enumerable or partitionable.
 
-In Software 2.0, the input space is **high-dimensional** (e.g., all possible images). Although technically discrete, it is so vast that it is practically unsamplable. Consider an image classifier: a 224×224 RGB image has $256^{150{,}528}$ possible pixel configurations, a number with over `{python} vg_digits_str` digits. ImageNet's entire test set covers only 50,000 of them. No test suite can sample this space meaningfully.
+In Software 2.0, the input space is **high-dimensional** (e.g., all possible images). Although technically discrete, it is so vast that it is practically unsamplable. Consider an image classifier: a 224×224 RGB image has $256^{150{,}528}$ possible pixel configurations, a number with over `{python} vg_digits_str` digits. ImageNet's entire test set covers only `{python} imagenet_test_images_str` of them. No test suite can sample this space meaningfully.
 
 $$ \text{Verification Gap} = \text{Total Input Space} - \text{Test Set Coverage} \approx \text{Total Input Space} $$
 
@@ -385,7 +415,7 @@ in Google's database that mention artificial intelligence};
 
 **Symbolic AI Era: The Logic Bottleneck.**\index{Symbolic AI!logic bottleneck} The first era of AI engineering (1950s–1970s) attempted to reduce intelligence to symbolic manipulation. Researchers at the 1956 Dartmouth Conference [@mccarthy1956dartmouth][^fn-dartmouth-conference] hypothesized that if they could formalize the rules of logic, machines could "think." Daniel Bobrow's *STUDENT* system [@bobrow1964student] (1964) exemplifies this approach.
 
-[^fn-dartmouth-conference]: **Dartmouth Conference (1956)**: The summer workshop where John McCarthy coined "artificial intelligence," deliberately choosing *artificial* (from Latin *artificium*, meaning craft or skill made by art) to distinguish machine cognition from natural intelligence. McCarthy later admitted the term was chosen partly for marketing appeal. Participants severely underestimated the systems challenge, assuming AI could run on 1950s hardware (64 KB memory), focusing on algorithmic logic while ignoring the physical constraints of storage and compute.
+[^fn-dartmouth-conference]: **Dartmouth Conference (1956)**: The summer workshop where John McCarthy coined "artificial intelligence," choosing *artificial* (from Latin *artificium*, craft or skill made by art) to distinguish machine cognition from natural intelligence. Participants severely underestimated the systems challenge, focusing on algorithmic logic while ignoring the physical constraints of storage and compute.
 
 ::: {.callout-example title="STUDENT (1964)"}
 ```{.text}
@@ -460,7 +490,7 @@ This hybrid approach combined human-engineered features with statistical learnin
 
 ### Deep Learning Era: The Infrastructure Bottleneck {#sec-introduction-deep-learning-era-infrastructure-bottleneck-490a}
 
-\index{Deep Learning!infrastructure bottleneck}\index{End-to-End Learning}Deep learning (2012 to present) removed the human feature engineering requirement. Neural networks learn representations directly from raw data (pixels, audio waveforms), enabling "end-to-end" learning. This shift was unlocked not by new algorithms (CNNs existed in the 1980s) but by **Systems Co-design**\index{Systems Co-design!hardware-algorithm alignment}. The 2012 AlexNet breakthrough\index{AlexNet!ImageNet 2012 breakthrough} [@alexnet2012] occurred because algorithmic structure (parallel matrix operations) matched hardware capabilities (GPUs). With 60 million parameters distributed across two GTX 580 GPUs, AlexNet achieved 15.3% top-5 error, a 42% relative improvement over the next-best entry that year, not through algorithmic novelty but through hardware-algorithm alignment. @fig-alexnet makes this co-design visible: the architecture's two parallel processing streams exist not for any algorithmic reason but because a single GTX 580 GPU lacked sufficient memory, making the network's very structure a product of its hardware constraints.
+\index{Deep Learning!infrastructure bottleneck}\index{End-to-End Learning}Deep learning (2012 to present) removed the human feature engineering requirement. Neural networks learn representations directly from raw data (pixels, audio waveforms), enabling "end-to-end" learning. This shift was unlocked not by new algorithms (CNNs existed in the 1980s) but by **Systems Co-design**\index{Systems Co-design!hardware-algorithm alignment}. The 2012 AlexNet breakthrough\index{AlexNet!ImageNet 2012 breakthrough} [@alexnet2012] occurred because algorithmic structure (parallel matrix operations) matched hardware capabilities (GPUs). With 60 million parameters distributed across two GTX 580 GPUs, AlexNet achieved 15.3% top-5 error, a `{python} alexnet_relative_improvement_str`% relative improvement over the next-best entry that year, not through algorithmic novelty but through hardware-algorithm alignment. @fig-alexnet makes this co-design visible: the architecture's two parallel processing streams exist not for any algorithmic reason but because a single GTX 580 GPU lacked sufficient memory, making the network's very structure a product of its hardware constraints.
 
 ::: {#fig-alexnet fig-env="figure" fig-pos="htb" fig-cap="**AlexNet Architecture.** The network that launched the deep learning revolution at ImageNet 2012. Two parallel GPU streams process 224x224 input images through convolutional layers (green blocks) that extract spatial features at decreasing resolutions, converging through three fully connected layers to 1,000 output classes. With `{python} alexnet_params_m_str` million parameters trained across two GTX 580 GPUs, AlexNet achieved 15.3% top-5 error, a 42% relative improvement over the second-place entry." fig-alt="3D diagram of AlexNet with two parallel GPU streams. Green blocks show convolutional layers decreasing from 224x224 input. Red kernels overlay green blocks. Right side shows three dense layers converging to 1000 outputs."}
 ```{.tikz}
@@ -885,7 +915,7 @@ node[below]{dense}(X1-|B1D.north west);
 This shift effectively traded the **Feature Engineering Bottleneck** for a new **Compute Bottleneck**\index{Compute Bottleneck}. Models like GPT-3\index{GPT-3!training scale} [@brown2020language] (`{python} gpt3_params_billion_str` parameters) required:
 
 *   **Compute Scale**: `{python} gpt3_training_zflops_str` zettaFLOPs (where 1 zettaFLOP = $10^{21}$ floating-point operations).
-*   **Data Scale**: Approximately 500 billion tokens (~700GB) from filtered web text, books, and Wikipedia.
+*   **Data Scale**: Approximately 500 billion tokens (~`{python} data_scale_gb_str` GB) from filtered web text, books, and Wikipedia.
 *   **Infrastructure Scale**: `{python} gpt3_gpus_str` GPUs running for weeks.
 
 The primary engineering challenge shifted from "*how* do we describe a cat's ear?" to "*how* do we coordinate `{python} gpt3_gpus_str` GPUs without failure?"
@@ -910,6 +940,10 @@ Richard Sutton's[^fn-sutton] 2019 essay "The Bitter Lesson"\index{Bitter Lesson,
 
 @tbl-ai-evolution-performance provides quantitative validation of this principle. Examine the rightmost column carefully: as computational resources grew from "minimal" to "millions of GPU-days," performance improved from amateur-level to superhuman. The shift from expert systems to statistical learning to deep learning has dramatically improved performance on representative tasks, with each transition enabled by increased computational scale rather than cleverer encoding of human knowledge.
 
+The table reveals two additional insights. Training time initially increased (hours to days) but then decreased (back to hours) as distributed systems enabled parallelization. The most dramatic improvements occurred at paradigm transitions (expert systems to statistical learning, statistical learning to deep learning) when new approaches unlocked the ability to leverage more computation effectively. This pattern validates Sutton's observation: progress comes from finding ways to use more compute, not from encoding more human knowledge.
+
+This principle finds further validation across AI breakthroughs. In chess, IBM's Deep Blue defeated world champion Garry Kasparov in 1997 [@campbell2002deep] not by encoding chess strategies, but through brute-force search evaluating millions of positions per second. In Go, DeepMind's AlphaGo[^fn-alphago] [@silver2016mastering] achieved superhuman performance by learning from self-play rather than studying centuries of human Go wisdom.
+
 | **Era**                          | **Approach**                   | **Representative Task** |     **Performance** | **Computational Resources**                               |
 |:-------------------------------|:-----------------------------|:----------------------|------------------:|:--------------------------------------------------------|
 | **Expert Systems (1980s)**       | Hand-crafted rules             | Chess (Elo rating)      | ~2000 Elo (amateur) | Minimal (rule evaluation)                                 |
@@ -920,11 +954,9 @@ Richard Sutton's[^fn-sutton] 2019 essay "The Bitter Lesson"\index{Bitter Lesson,
 
 : **AI Performance Evolution Across Paradigms**: Each paradigm transition correlates with increased computational scale rather than algorithmic sophistication. Performance improved from amateur-level expert systems (2000 Elo) to superhuman foundation models (86.4% MMLU), while computational requirements grew from single CPUs to `{python} gpt4_gpu_m_str` million A100 GPU-days. Training time initially increased (hours to days) but later decreased as distributed systems enabled parallelization. {#tbl-ai-evolution-performance}
 
-The table reveals two additional insights. Training time initially increased (hours to days) but then decreased (back to hours) as distributed systems enabled parallelization. The most dramatic improvements occurred at paradigm transitions (expert systems to statistical learning, statistical learning to deep learning) when new approaches unlocked the ability to leverage more computation effectively. This pattern validates Sutton's observation: progress comes from finding ways to use more compute, not from encoding more human knowledge.
 
-This principle finds further validation across AI breakthroughs. In chess, IBM's Deep Blue defeated world champion Garry Kasparov in 1997 [@campbell2002deep] not by encoding chess strategies, but through brute-force search evaluating millions of positions per second. In Go, DeepMind's AlphaGo[^fn-alphago] [@silver2016mastering] achieved superhuman performance by learning from self-play rather than studying centuries of human Go wisdom.
 
-[^fn-alphago]: **AlphaGo**: DeepMind's Go-playing system that defeated world champion Lee Sedol in 2016. From a systems perspective, AlphaGo demonstrated the power of combining neural networks with tree search at unprecedented scale: the match version used 1,920 CPUs and 280 GPUs for inference alone. Its successor AlphaGo Zero eliminated human game data entirely, learning solely through self-play using 64 GPU workers and 19 CPU parameter servers for training. The generalized successor AlphaZero extended this approach to chess and shogi using 5,000 TPUs (Tensor Processing Units, Google's custom AI accelerators). This progression from human-data-dependent to fully self-supervised learning, enabled by massive compute infrastructure, exemplifies the Bitter Lesson in practice. In computer vision, convolutional neural networks that learn features directly from data have surpassed decades of hand-crafted feature engineering. In speech recognition, end-to-end deep learning systems have outperformed approaches built on detailed models of human phonetics and linguistics.
+[^fn-alphago]: **AlphaGo**: DeepMind's Go system that defeated Lee Sedol in 2016, combining neural networks with tree search at unprecedented scale (1,920 CPUs and 280 GPUs). AlphaGo Zero later removed all human game data, training purely via self-play. This compute-driven progression exemplifies the Bitter Lesson: scale and learning from data beat hand-crafted expertise.
 
 The "bitter" aspect is that our intuition misleads us\index{Bitter Lesson, The!human intuition vs. scale}. We naturally assume that encoding human expertise should be the path to artificial intelligence. Yet repeatedly, systems that leverage computation to learn from data outperform systems that rely on human knowledge given sufficient scale. This pattern has held across symbolic AI, statistical learning, and deep learning eras.
 
@@ -1352,7 +1384,7 @@ Each archetype manifests different constraints along the D·A·M axes, ensuring 
 
 The D·A·M taxonomy's interdependencies become concrete in breakthrough moments. The 2012 AlexNet victory [@alexnet2012], reducing ImageNet[^fn-imagenet] [@deng2009imagenet] top-5 error from 26.2% to 15.3%, occurred not through algorithmic novelty alone but because convolutional neural networks' parallel matrix operations aligned perfectly with GPU hardware capabilities.
 
-[^fn-imagenet]: **ImageNet**: A dataset of over 14 million labeled images organized into 22,000 categories, created at Stanford and Princeton starting in 2006. The associated ImageNet Large Scale Visual Recognition Challenge (ILSVRC), held from 2010 to 2017, became the definitive benchmark for computer vision systems. ImageNet's scale (`{python} imagenet_images_m_str` million training images across 1,000 categories in the competition subset) demanded systems engineering solutions: distributed data loading, GPU memory optimization, and efficient preprocessing pipelines. The benchmark methodology established here influenced all subsequent ML systems evaluation. As examined in the historical evolution section earlier (@sec-introduction-deep-learning-era-infrastructure-bottleneck-490a), the lesson is immediate: coordinating all three D·A·M axes enables capabilities that any single axis cannot achieve alone.
+[^fn-imagenet]: **ImageNet**: A dataset of over 14 million labeled images across 22,000 categories, created at Stanford and Princeton starting in 2006. The associated ILSVRC challenge (2010--2017) became the definitive benchmark for computer vision. ImageNet's scale (`{python} imagenet_images_m_str` million training images in the competition subset) demanded systems engineering solutions: distributed data loading, GPU memory optimization, and efficient preprocessing pipelines.
 
 This interdependence means that optimizing one component often shifts pressure to another. AlexNet's co-design success came at a cost affordable in 2012 (two consumer GPUs for a week), but modern models demand resources nine orders of magnitude larger. If the **Iron Law** governs *how fast* a system runs, we still need a framework for reasoning about *how efficiently* it uses those resources.
 
@@ -1442,20 +1474,20 @@ text width=85mm](GB8){Data Selection};
 
 ### Quantitative Evidence for Efficiency Gains {#sec-introduction-quantitative-evidence-efficiency-gains-13ae}
 
-The magnitude of efficiency improvements is measurable. Between 2012 and 2019, computational resources needed to train a neural network to achieve AlexNet-level performance on ImageNet classification decreased by approximately $44\times$ [@hernandez2020measuring]. This improvement, which halved every 16 months, outpaced hardware efficiency gains predicted by Moore's Law\index{Moore's Law!comparison to AI scaling}[^fn-moores-law], demonstrating that algorithmic innovation drives efficiency as much as hardware advances.
+The magnitude of efficiency improvements is measurable. Between 2012 and 2019, computational resources needed to train a neural network to achieve AlexNet-level performance on ImageNet classification decreased by approximately `{python} algo_efficiency_max_str`$\times$ [@hernandez2020measuring]. This improvement, which halved every 16 months, outpaced hardware efficiency gains predicted by Moore's Law\index{Moore's Law!comparison to AI scaling}[^fn-moores-law], demonstrating that algorithmic innovation drives efficiency as much as hardware advances.
 
-[^fn-moores-law]: **Moore's Law**: Intel co-founder Gordon Moore's 1965 observation [@moore1965cramming] that transistor density on integrated circuits doubles approximately every two years, historically corresponding to similar improvements in cost-performance ratios. For ML systems, Moore's Law matters because AI compute demand has grown far faster: training compute doubled every 3.4 months from 2012–2019, roughly 6x faster than Moore's Law. This gap explains why specialized AI accelerators (GPUs, TPUs, custom ASICs) became necessary, and why algorithmic efficiency gains are essential to keep AI development economically viable.
+[^fn-moores-law]: **Moore's Law**: Intel co-founder Gordon Moore's 1965 observation [@moore1965cramming] that transistor density doubles approximately every two years. For ML systems, Moore's Law matters because AI compute demand has grown far faster---training compute doubled every 3.4 months from 2012--2019, roughly `{python} moores_speedup_str`$\times$ faster. This gap explains why specialized AI accelerators became necessary (see @sec-ai-acceleration).
 
 Simultaneously, the compute used in AI training increased by roughly five orders of magnitude from 2012 to 2018, doubling approximately every 3.4 months [@amodei2018aicompute]. This exponential growth far exceeds Moore's Law and explains why efficiency optimization is not optional. Without it, only the most resource-rich organizations could participate in AI development.
 
 These measurements emerge from rigorous empirical methodology that tracked training compute across hundreds of published models; @sec-benchmarking-ai develops the measurement frameworks that enable such systematic analysis of ML system performance. Closing the Systems Gap is the primary objective of this textbook, requiring integrated expertise across the software and hardware stack.
 
-To appreciate the magnitude of these gains, consider the trajectory in @fig-algo-efficiency: starting from AlexNet as the baseline, each successive architecture—VGG, ResNet, MobileNet, EfficientNet—achieves comparable accuracy with dramatically fewer computational resources, culminating in a 44× improvement over just eight years.
+To appreciate the magnitude of these gains, consider the trajectory in @fig-algo-efficiency: starting from AlexNet as the baseline, each successive architecture—VGG, ResNet, MobileNet, EfficientNet—achieves comparable accuracy with dramatically fewer computational resources, culminating in a `{python} algo_efficiency_max_str`$\times$ improvement over just eight years.
 
 ```{python}
 #| label: fig-algo-efficiency
 #| echo: false
-#| fig-cap: "**Algorithmic Efficiency Trajectory.** Training efficiency factor relative to AlexNet (2012 baseline) for ImageNet classification. Each point represents a model architecture that achieves comparable accuracy with fewer computational resources. The trajectory from AlexNet (1x) through VGG, ResNet, MobileNet, and ShuffleNet to EfficientNet (44x) demonstrates that algorithmic innovation has delivered a 44-fold reduction in required compute over eight years, independent of hardware improvements."
+#| fig-cap: "**Algorithmic Efficiency Trajectory.** Training efficiency factor relative to AlexNet (2012 baseline) for ImageNet classification. Each point represents a model architecture that achieves comparable accuracy with fewer computational resources. The trajectory from AlexNet (1x) through VGG, ResNet, MobileNet, and ShuffleNet to EfficientNet (`{python} algo_efficiency_max_str`x) demonstrates that algorithmic innovation has delivered a `{python} algo_efficiency_max_str`-fold reduction in required compute over eight years, independent of hardware improvements."
 #| fig-alt: "Scatter plot showing training efficiency factor from 2012 to 2020. Red dots mark models from AlexNet at 1x to EfficientNet at 44x. Dashed trend line curves upward. Labels identify VGG, ResNet, MobileNet, ShuffleNet versions at their positions."
 
 # =============================================================================
@@ -1738,7 +1770,7 @@ At the other end, TinyML systems\index{TinyML!microcontroller constraints}\index
 
 Between these extremes lies a rich variety of ML systems adapted for different contexts. Edge ML systems\index{Edge ML!latency and bandwidth} bring computation closer to data sources, reducing latency[^fn-latency] and bandwidth requirements while managing local computing resources. Mobile ML systems\index{Mobile ML!resource constraints} must balance sophisticated capabilities with severe constraints. Modern smartphones typically have 4–12 GB RAM, ARM processors operating at 1.5–3 GHz, and power budgets of 2–5 W that must be shared across all system functions. For example, running a state-of-the-art image classification model on a smartphone might consume 100–500 mW and complete inference in 10–100 ms, compared to cloud servers that can use 200+ W but deliver results in under 1 ms. Enterprise ML systems often operate within specific business constraints, focusing on particular tasks while integrating with existing infrastructure. Some organizations employ hybrid approaches, distributing ML capabilities across multiple tiers to balance various requirements.
 
-[^fn-latency]: **Latency**: From Latin *latere* (to lie hidden, to lurk), the same root as "latent." The term captures how delay "hides" between request and response. In ML systems, latency is critical: autonomous vehicles need less than 10 ms latency for safety decisions, while voice assistants target less than 100 ms for natural conversation. Sending data to a distant cloud server typically adds 50–100 ms of network latency alone, which is why edge computing became essential for real-time AI applications.
+[^fn-latency]: **Latency**: From Latin *latere* (to lie hidden, to lurk), capturing how delay "hides" between request and response. In ML systems, latency is critical: autonomous vehicles need less than 10 ms for safety decisions, while voice assistants target less than 100 ms. Cloud servers add 50--100 ms of network latency alone, motivating edge computing for real-time AI.
 
 Each position on this deployment spectrum creates distinct bottlenecks that determine which efficiency dimensions matter most, as summarized in @tbl-efficiency-priorities:
 
@@ -1772,7 +1804,7 @@ Evolution and maintenance requirements must be considered from the initial desig
 
 [^fn-ab-testing]: **A/B Testing**: A method of comparing two versions of a system by showing version A to some users and version B to others, then measuring which performs better. In ML systems, this might mean deploying a new model to 5% of users while keeping 95% on the old model, comparing metrics like accuracy or user engagement before fully rolling out the new version. This gradual rollout strategy helps catch problems before they affect all users.
 
-[^fn-ota-updates]: **Over-the-Air (OTA) Updates**: Wireless software updates delivered remotely to devices, like how your smartphone installs new apps without physical connection. For ML systems on embedded devices or vehicles, OTA updates enable deploying improved models to thousands or millions of devices without manual intervention. However, updating a 500MB neural network over cellular networks to a fleet of vehicles requires careful bandwidth management and rollback capabilities if updates fail.
+[^fn-ota-updates]: **Over-the-Air (OTA) Updates**: Wireless software updates delivered remotely to devices. For ML systems on embedded devices or vehicles, OTA enables deploying improved models to millions of devices without manual intervention, though updating large models over cellular networks requires careful bandwidth management and rollback capabilities.
 
 These trade-offs are rarely simple binary choices. Modern ML systems often adopt hybrid approaches, balancing considerations based on specific use cases and constraints. An autonomous vehicle might perform real-time perception and control at the edge for latency reasons. At the same time, the vehicle uploads driving data to the cloud for model improvement and periodically downloads updated models. A voice assistant might run wake-word detection on-device to preserve privacy and reduce latency but send full speech to the cloud for complex natural language processing.
 
@@ -1912,7 +1944,7 @@ With these five engineering disciplines established, we can now see how the rema
 
 : **Book Organization**: The four parts follow a pedagogical progression from context (Foundations) through theory (Build) to practice (Optimize, Deploy). {#tbl-book-structure}
 
-Part I establishes context by surveying the ML systems landscape. @sec-introduction develops the engineering revolution in AI and the frameworks that organize this discipline. @sec-ml-system-architecture examines what distinguishes ML systems from traditional software, introducing unique failure patterns and lifecycle stages. @sec-ai-development-workflow presents the end-to-end process from problem formulation through deployment, providing the conceptual map that guides subsequent learning. @sec-data-engineering-ml addresses data collection, processing, and management, establishing that data infrastructure precedes and enables model development.
+Part I establishes context by surveying the ML systems landscape. @sec-introduction develops the engineering revolution in AI and the frameworks that organize this discipline. @sec-ml-system-architecture explores the deployment spectrum from Cloud to TinyML, examining how physical constraints — power envelopes, memory hierarchies, and latency budgets — govern each tier. @sec-ai-development-workflow presents the end-to-end process from problem formulation through deployment, providing the conceptual map that guides subsequent learning. @sec-data-engineering-ml addresses data collection, processing, and management, establishing that data infrastructure precedes and enables model development.
 
 Part II builds theoretical foundations and practical skills for model development. @sec-deep-learning-systems-foundations provides algorithmic foundations, while @sec-dnn-architectures extends these to specific network designs. Both chapters reference the five **Lighthouse Models** introduced above (ResNet-50, GPT-2/Llama, MobileNet, DLRM, and Keyword Spotting) to anchor abstract concepts in concrete workloads. @sec-ai-frameworks examines the software infrastructure from TensorFlow and PyTorch to specialized tools. @sec-ai-training develops training systems for complex models and large datasets.
 
