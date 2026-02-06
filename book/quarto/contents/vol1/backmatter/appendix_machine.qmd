@@ -1,12 +1,204 @@
 ---
-title: "Machine Foundations"
-id: sec-machine-foundations
 engine: jupyter
 ---
 
 # Machine Foundations {#sec-machine-foundations}
 
 This appendix covers the hardware and physical constraints that govern ML system performance. From performance modeling to memory hierarchies to numerical precision, these are the "speed limits" that every ML engineer must understand. The concepts here underpin the hardware acceleration strategies in @sec-ai-acceleration, the training optimizations in @sec-ai-training, and the serving architectures in @sec-model-serving-systems.
+
+## Numbers Every ML Systems Engineer Should Know {#sec-numbers-to-know}
+
+```{python}
+#| label: numbers-to-know-setup
+#| echo: false
+
+from physx.constants import *
+from physx.formatting import fmt
+
+# =============================================================================
+# PURPOSE
+# =============================================================================
+# Purpose: Compute all values for the "Numbers Every ML Systems Engineer
+#          Should Know" quick reference section. Inspired by Jeff Dean's
+#          famous "Latency Numbers Every Programmer Should Know."
+#
+# Philosophy: RATIOS and RULES are eternal; absolute numbers are snapshots.
+#             We organize this section to emphasize what will still be true
+#             in 10 years, while providing current hardware specs as reference.
+
+# =============================================================================
+# PHYSICS CONSTANTS (Eternal)
+# =============================================================================
+speed_of_light_km_ms = int(SPEED_OF_LIGHT_FIBER_KM_S.to(ureg.kilometer / second).magnitude / 1000)
+
+# =============================================================================
+# ENERGY RATIOS (Stable across process nodes)
+# =============================================================================
+dram_vs_compute = int(ENERGY_DRAM_ACCESS_PJ.magnitude / ENERGY_FLOP_FP16_PJ.magnitude)
+fp32_vs_int8 = int(ENERGY_FLOP_FP32_PJ.magnitude / ENERGY_FLOP_INT8_PJ.magnitude)
+fp32_vs_fp16 = round(ENERGY_FLOP_FP32_PJ.magnitude / ENERGY_FLOP_FP16_PJ.magnitude, 1)
+l1_vs_reg = int(ENERGY_SRAM_L1_PJ.magnitude / ENERGY_REG_PJ.magnitude)
+
+# =============================================================================
+# MEMORY HIERARCHY RATIOS (Stable)
+# =============================================================================
+hbm_vs_l1 = int(LATENCY_HBM3.to(NS).magnitude / LATENCY_L1_REGISTER.to(NS).magnitude)
+ssd_vs_l1 = int(LATENCY_NVME_SSD.to(NS).magnitude / LATENCY_L1_REGISTER.to(NS).magnitude)
+network_vs_local = int(LATENCY_INFINIBAND.to(NS).magnitude / LATENCY_HBM3.to(NS).magnitude)
+
+# GPU bandwidth vs CPU-GPU link (architectural ratio)
+gpu_bw_vs_pcie = int(H100_MEM_BW.to(GB / second).magnitude / PCIE_GEN5_BW.to(GB / second).magnitude)
+
+# =============================================================================
+# CURRENT HARDWARE REFERENCE (circa 2024 — will need updates)
+# =============================================================================
+# Latencies
+lat_l1_ns = int(LATENCY_L1_REGISTER.to(NS).magnitude)
+lat_l2_ns = int(LATENCY_L2_CACHE.to(NS).magnitude)
+lat_hbm_ns = int(LATENCY_HBM3.to(NS).magnitude)
+lat_pcie_ns = int(LATENCY_PCIE_GEN5.to(NS).magnitude)
+lat_ib_ns = int(LATENCY_INFINIBAND.to(NS).magnitude)
+lat_ssd_ns = int(LATENCY_NVME_SSD.to(NS).magnitude)
+
+# Bandwidths
+bw_hbm_h100 = f"{H100_MEM_BW.to(TB / second).magnitude:.1f}"
+bw_pcie5 = int(PCIE_GEN5_BW.to(GB / second).magnitude)
+bw_dram = int(SYSTEM_MEMORY_BW.to(GB / second).magnitude)
+bw_nvme = f"{NVME_SEQUENTIAL_BW.to(GB / second).magnitude:.1f}"
+
+# Compute
+flops_h100_fp16 = int(H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude)
+flops_h100_fp8 = int(H100_FLOPS_FP8_TENSOR.to(TFLOPs / second).magnitude)
+flops_a100_fp16 = int(A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude)
+flops_mobile_int8 = int(MOBILE_NPU_TOPS_INT8.to(TFLOPs / second).magnitude)
+dc_mobile_ratio = int(flops_h100_fp16 / flops_mobile_int8)
+
+# Ridge points
+ridge_a100 = int(A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude / A100_MEM_BW.to(TB / second).magnitude)
+ridge_h100 = int(H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude / H100_MEM_BW.to(TB / second).magnitude)
+```
+
+Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean] shaped a generation of systems engineers, these reference numbers provide the order-of-magnitude intuition essential for ML systems design. While absolute values evolve with hardware generations, the *ratios* between categories remain remarkably stable. **Memorize the relationships; use the specific numbers as sanity checks.**
+
+::: {.callout-note title="Three Numbers That Matter Most"}
+If you memorize nothing else from this section, memorize these:
+
+1. **~600× energy ratio**: DRAM access costs ~`{python} dram_vs_compute`× more energy than an FP16 multiply-add. This is why arithmetic intensity is everything.
+
+2. **16 bytes/parameter for training**: Model weights (2B FP16) + master weights (4B FP32) + optimizer states (8B Adam). A 7B model needs 112 GB just to start training.
+
+3. **~200 km/ms speed of light in fiber**: Cross-country latency is ~40 ms. No optimization can reduce this—it's physics.
+:::
+
+[^fn-jeff-dean]: **Jeff Dean** is a Google Senior Fellow and one of the architects of Google's distributed systems infrastructure, including MapReduce, BigTable, and TensorFlow. His latency numbers, originally presented with Peter Norvig around 2010, became a canonical reference for systems engineers. The numbers have been updated over the years as hardware evolved, but the *hierarchy* of latencies remains remarkably stable. See Colin Scott's interactive visualization at <https://colin-scott.github.io/personal_website/research/interactive_latency.html>.
+
+### The Invariants: Numbers That Won't Change {.unnumbered}
+
+These relationships are governed by physics or arithmetic—they will still be true in 2035.
+
+**The Speed of Light Tax**
+
+| Distance | Round-Trip Latency | Implication |
+|:---------|-------------------:|:------------|
+| Same datacenter | ~1 ms | Distributed training feasible |
+| Cross-country (US) | ~40 ms | Edge needed for <100 ms apps |
+| Cross-Atlantic | ~60 ms | CDN required for global users |
+| Cross-Pacific | ~100 ms | Data locality is critical |
+
+: Light in fiber travels ~`{python} speed_of_light_km_ms` km/ms. These latencies are physics—no optimization can reduce them. {#tbl-speed-of-light-ref}
+
+**The Energy Hierarchy**
+
+| Relationship | Ratio | Why It's Stable |
+|:-------------|------:|:----------------|
+| DRAM access vs. FP16 compute | ~`{python} dram_vs_compute`× | Wire capacitance scales with distance |
+| FP32 vs. INT8 energy | ~`{python} fp32_vs_int8`× | Bit width determines switching energy |
+| FP32 vs. FP16 energy | ~`{python} fp32_vs_fp16`× | Halving bits roughly halves energy |
+| L1 SRAM vs. register | ~`{python} l1_vs_reg`× | Distance to ALU |
+
+: **The Energy Wall.** Moving data costs ~`{python} dram_vs_compute`× more energy than computing on it. This ratio is physics, not engineering.[^fn-horowitz-energy] {#tbl-energy-ratios-ref}
+
+[^fn-horowitz-energy]: Energy numbers from Horowitz's classic "Computing's Energy Problem" (ISSCC 2014, 45nm process). While absolute values scale with process node, the *ratios* between memory access and compute remain remarkably stable because wire capacitance (distance) dominates.
+
+**The Memory Hierarchy**
+
+| Relationship | Ratio | Why It Persists |
+|:-------------|------:|:----------------|
+| GPU memory (HBM) vs. L1 cache | ~`{python} hbm_vs_l1`× slower | On-chip vs. off-chip |
+| SSD vs. L1 cache | ~`{python} ssd_vs_l1`× slower | Electrical vs. mechanical/flash |
+| Network vs. local memory | ~`{python} network_vs_local`× slower | Speed of light + switching |
+| GPU memory BW vs. CPU↔GPU link | ~`{python} gpu_bw_vs_pcie`× faster | Architectural investment priority |
+
+: **The Latency Hierarchy.** Each level costs roughly 10–100× more than the one above it. {#tbl-memory-ratios-ref}
+
+**The Scaling Laws**
+
+| Rule | Formula | Example |
+|:-----|:--------|:--------|
+| Inference memory (FP16) | 2 bytes × parameters | 7B params → 14 GB |
+| Inference memory (INT8) | 1 byte × parameters | 7B params → 7 GB |
+| Training memory (Adam) | 16 bytes × parameters | 7B params → 112 GB |
+| Inference FLOPs (transformer) | ~2 × parameters per token | 7B model → ~14 GFLOPs/token |
+| Training FLOPs | ~6 × parameters × tokens | 7B on 1T tokens → 4×10²² FLOPs |
+| Datacenter vs. edge compute | ~`{python} dc_mobile_ratio`× | Compute per watt × power budget |
+
+: **Scaling Rules.** These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2B), FP32 master weights (4B), and Adam optimizer states (8B for momentum + variance).[^fn-training-memory] {#tbl-scaling-rules-ref}
+
+[^fn-training-memory]: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization (@sec-distributed-training) can reduce this by sharding optimizer states across GPUs, but the total memory across all GPUs remains ~16× parameters.
+
+### Latency Budgets: The Non-Negotiables {#sec-latency-budgets-ref}
+
+These budgets are set by physics (safety) or psychology (human perception)—not by engineering choice. Unlike hardware specs that improve each generation, these are *constraints* your system must meet.
+
+| Application | Budget | Constraint |
+|:------------|-------:|:-----------|
+| Autonomous braking | <10 ms | At 100 km/h, 10 ms = 28 cm of travel |
+| Voice assistant | <100 ms | Human perception of "instant" |
+| Web search | <200 ms | User patience threshold |
+| Video streaming | <1 s | Buffer tolerance |
+| Batch training | hours–days | Throughput dominates latency |
+
+: **Latency Targets.** Miss these and the application fails, regardless of accuracy. {#tbl-latency-targets-ref}
+
+### Current Hardware Reference (c. 2024) {.unnumbered}
+
+These numbers reflect the current generation. Use them for back-of-envelope calculations, but expect them to improve ~2× every 2–3 years.
+
+**Memory Latency & Bandwidth**
+
+| Level | Latency | Bandwidth |
+|:------|--------:|----------:|
+| Register | ~0.3 ns | — |
+| L1 Cache | ~`{python} lat_l1_ns` ns | — |
+| L2 Cache | ~`{python} lat_l2_ns` ns | — |
+| GPU HBM3 | ~`{python} lat_hbm_ns` ns | `{python} bw_hbm_h100` TB/s |
+| PCIe Gen5 (CPU↔GPU) | ~`{python} lat_pcie_ns` ns | `{python} bw_pcie5` GB/s |
+| CPU DRAM | ~100 ns | `{python} bw_dram` GB/s |
+| InfiniBand (network) | ~`{python} lat_ib_ns` ns | 50 GB/s |
+| NVMe SSD | ~`{python} lat_ssd_ns` ns | `{python} bw_nvme` GB/s |
+
+: **Memory Hierarchy (c. 2024).** Specific values for current hardware. {#tbl-memory-current-ref}
+
+**Compute Throughput**
+
+| Platform | FP16/BF16 | INT8 | Power |
+|:---------|----------:|-----:|------:|
+| Datacenter GPU (H100) | `{python} flops_h100_fp16` TFLOPS | `{python} flops_h100_fp8` TOPS | 700W |
+| Datacenter GPU (A100) | `{python} flops_a100_fp16` TFLOPS | 624 TOPS | 400W |
+| Mobile NPU | — | `{python} flops_mobile_int8` TOPS | 3–5W |
+
+: **Compute Reference (c. 2024).** Datacenter is ~`{python} dc_mobile_ratio`× more powerful than mobile—this ratio persists across generations. {#tbl-compute-current-ref}
+
+**Roofline Ridge Points**
+
+| Accelerator | Ridge Point | Implication |
+|:------------|------------:|:------------|
+| A100 (FP16) | `{python} ridge_a100` ops/byte | Below → memory-bound |
+| H100 (FP16) | `{python} ridge_h100` ops/byte | Higher bar for compute-bound |
+
+: **Arithmetic Intensity Thresholds (c. 2024).** Most inference workloads are <10 ops/byte—firmly memory-bound. {#tbl-ridge-current-ref}
+
+---
 
 ::: {.callout-note title="A Note on Terminology: GPUs and Accelerators"}
 Throughout this book, we often use "GPU" when discussing hardware acceleration. However, the principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply equally to **TPUs**, **NPUs**, **custom ASICs**, and other specialized AI accelerators. We use "GPU" as convenient shorthand given its prevalence in the ML ecosystem, but readers should understand these concepts as **accelerator-general** unless we explicitly discuss vendor-specific features (e.g., CUDA, NVLink).
@@ -54,6 +246,15 @@ The **ridge point** determines the hardware's balance. If your workload's intens
 $$ \text{Arithmetic Intensity} = \frac{\text{FLOPs}}{\text{Bytes Accessed}} $$
 
 $$ \text{Ridge Point} = \frac{\text{Peak FLOP/s}}{\text{Memory Bandwidth}} $$
+
+::: {.callout-tip title="Batch Size Controls Arithmetic Intensity"}
+For matrix multiplications, arithmetic intensity scales with the batch dimension. When you compute $Y = XW$ where $X$ is $(B \times D_{in})$ and $W$ is $(D_{in} \times D_{out})$:
+
+- **FLOPs**: $2 \times B \times D_{in} \times D_{out}$ (multiply-adds)
+- **Bytes**: Weights are loaded once: $D_{in} \times D_{out} \times \text{bytes}_{\text{precision}}$
+
+Doubling the batch size $B$ doubles FLOPs while keeping weight loads constant—directly increasing arithmetic intensity. This is why inference serving batches requests: batch size 1 is almost always memory-bound, while batch size 64+ can approach the compute ceiling.
+:::
 
 ```{python}
 #| label: appendix-machine-setup
@@ -345,21 +546,6 @@ n_1000_minus_1_str = str(n_1000_value - 1)
 
 In weak scaling, efficiency remains high because the useful work (training the model) scales up to dwarf the fixed overheads.
 
-::: {.callout-notebook title="The Training Time Equation"}
-
-Just as classical architecture has an "Iron Law" of performance, Large Language Model training has a fundamental governing equation. To estimate training time $T$:
-
-$$ T \approx \frac{6 \cdot P \cdot D}{N \cdot X \cdot U} $$
-
-Where:
-
-*   **$6$**: The factor deriving from the forward pass ($2PD$) and backward pass ($4PD$) FLOPs per token.
-*   **$P$**: Number of model parameters.
-*   **$D$**: Number of training tokens.
-*   **$N$**: Number of accelerators (GPUs).
-*   **$X$**: Peak FLOP/s of one accelerator.
-*   **$U$**: Model FLOPs Utilization (MFU), typically 30%–50%.
-
 ```{python}
 #| label: training-time-example
 #| echo: false
@@ -404,6 +590,21 @@ eq_total_flops = md_math(f"\\text{{Total FLOPs}} = 6 \\times {sci_latex(p_params
 eq_throughput = md_math(f"\\text{{Throughput}} = {int(n_gpus_value)} \\times ({sci_latex(x_flops_value, 0)}) \\times {u_mfu_value:.2f} \\approx {sci_latex(throughput_value, 2)} \\text{{ FLOP/s}}")
 eq_time = md_math(f"T = \\frac{{{sci_latex(total_flops_value, 1)}}}{{{sci_latex(throughput_value, 2)}}} \\approx {fmt(t_seconds_value, precision=0, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=0, commas=True)} \\text{{ minutes}}")
 ```
+
+::: {.callout-notebook title="The Training Time Equation"}
+
+Just as classical architecture has an "Iron Law" of performance, Large Language Model training has a fundamental governing equation. To estimate training time $T$:
+
+$$ T \approx \frac{6 \cdot P \cdot D}{N \cdot X \cdot U} $$
+
+Where:
+
+*   **$6$**: The factor deriving from the forward pass ($2PD$) and backward pass ($4PD$) FLOPs per token.
+*   **$P$**: Number of model parameters.
+*   **$D$**: Number of training tokens.
+*   **$N$**: Number of accelerators (GPUs).
+*   **$X$**: Peak FLOP/s of one accelerator.
+*   **$U$**: Model FLOPs Utilization (MFU), typically 30%–50%.
 
 **Example**: Training a **`{python} p_params_str` parameter** model on **`{python} d_tokens_str` tokens** using **`{python} n_gpus_str` A100** (`{python} a100_fp16` TFLOPS) at **`{python} u_mfu_pct_str`% utilization**.
 `{python} eq_total_flops`
@@ -478,7 +679,8 @@ The first step in systems intuition is understanding the cost of distance. @tbl-
 
 | **Component**            |         **Latency (ns)** | **Cycles (Approx)** | **Relative "Distance"** |
 |:-----------------------|-----------------------:|------------------:|:---------------------:|
-| **L1 Cache / Register**  |     ~`{python} l1_ns` ns |          3-4 cycles |         1 minute        |
+| **Register**             |               ~0.3 ns |            1 cycle |        10 seconds       |
+| **L1 Cache**             |     ~`{python} l1_ns` ns |          3-4 cycles |         1 minute        |
 | **L2 Cache**             |     ~`{python} l2_ns` ns |           12 cycles |        4 minutes        |
 | **HBM3 (GPU Memory)**    |    ~`{python} hbm_ns` ns |        1,000 cycles |         5 hours         |
 | **NVLink (GPU-GPU)**     | ~`{python} nvlink_ns` ns |        1,500 cycles |         8 hours         |

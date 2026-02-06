@@ -423,29 +423,50 @@ Effective benchmark interpretation requires understanding the performance charac
 ```{python}
 #| label: roofline-example-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROOFLINE ANALYSIS EXAMPLES (RESNET-50 AND BERT PREVIEW)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Prose explaining compute-bound vs memory-bound workloads, leading
+# │          into the BERT roofline worked example callout
+# │
+# │ Why: Grounds the roofline model in concrete hardware numbers. ResNet-50 at
+# │      large batch shows compute-bound behavior (~300 FLOPs/byte, 85-90% util).
+# │      BERT batch-1 preview shows memory-bound behavior (~50 FLOPs/byte, low
+# │      util), motivating the detailed worked example that follows.
+# │
+# │ Imports: physx.formatting (fmt); uses a100_bw_tbs_value, a100_tflops_fp16_value
+# │          from earlier cell
+# │ Exports: resnet_ai_str, resnet_util_min_str, resnet_util_max_str,
+# │          resnet_perf_tflops_str, bert_ai_b1_str, bert_perf_b1_str,
+# │          bert_util_b1_str, utilization_peak_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-resnet_ai_value = 300
-resnet_util_min_value = 85
-resnet_util_max_value = 90
-resnet_perf_tflops_value = 280
+# --- Inputs (ResNet-50 roofline characteristics at large batch) ---
+resnet_ai_value = 300                                                          # FLOPs/byte arithmetic intensity
+resnet_util_min_value = 85                                                     # min utilization %
+resnet_util_max_value = 90                                                     # max utilization %
+resnet_perf_tflops_value = 280                                                 # achieved TFLOPS
 
-resnet_ai_str = fmt(resnet_ai_value, precision=0, commas=False)
-resnet_util_min_str = fmt(resnet_util_min_value, precision=0, commas=False)
-resnet_util_max_str = fmt(resnet_util_max_value, precision=0, commas=False)
-resnet_perf_tflops_str = fmt(resnet_perf_tflops_value, precision=0, commas=False)
+# --- Inputs (BERT roofline preview at batch=1) ---
+_bert_flops_b = 22                                                             # billion FLOPs per inference
+_bert_weight_mb = 440                                                          # MB (110M params × 4 bytes)
+_utilization_peak = 0.85                                                       # peak utilization factor
 
-# BERT roofline preview (used in narrative before the full worked example)
-_bert_flops_b = 22  # billion FLOPs per inference
-_bert_weight_mb = 440  # MB (110M params × 4 bytes)
-_utilization_peak = 0.85
+# --- Process (BERT roofline calculation) ---
 bert_ai_b1_value = _bert_flops_b * 1e9 / (_bert_weight_mb * 1e6)
 bert_perf_b1_tflops_value = bert_ai_b1_value * a100_bw_tbs_value
 bert_util_b1_value = bert_perf_b1_tflops_value / a100_tflops_fp16_value * 100
-bert_ai_b1_str = fmt(bert_ai_b1_value, precision=0, commas=False)
-bert_perf_b1_str = fmt(bert_perf_b1_tflops_value, precision=0, commas=False)
-bert_util_b1_str = fmt(bert_util_b1_value, precision=0, commas=False)
-utilization_peak_pct_str = fmt(_utilization_peak * 100, precision=0, commas=False)
+
+# --- Outputs (formatted strings for prose) ---
+resnet_ai_str = fmt(resnet_ai_value, precision=0, commas=False)                # e.g. "300" FLOPs/byte
+resnet_util_min_str = fmt(resnet_util_min_value, precision=0, commas=False)    # e.g. "85" %
+resnet_util_max_str = fmt(resnet_util_max_value, precision=0, commas=False)    # e.g. "90" %
+resnet_perf_tflops_str = fmt(resnet_perf_tflops_value, precision=0, commas=False)  # e.g. "280" TFLOPS
+bert_ai_b1_str = fmt(bert_ai_b1_value, precision=0, commas=False)              # e.g. "50" FLOPs/byte
+bert_perf_b1_str = fmt(bert_perf_b1_tflops_value, precision=0, commas=False)   # e.g. "100" TFLOPS
+bert_util_b1_str = fmt(bert_util_b1_value, precision=0, commas=False)          # e.g. "32" %
+utilization_peak_pct_str = fmt(_utilization_peak * 100, precision=0, commas=False)  # e.g. "85" %
 ```
 
 [^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second (see @sec-ai-acceleration for hardware details). The A100 delivers `{python} a100_tflops_fp16_str` TFLOPS for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1--10 TFLOPS. FLOPS measurements help compare hardware and identify computational bottlenecks.
@@ -1787,33 +1808,6 @@ I/O performance also plays a significant role in training efficiency, particular
 **Energy Efficiency and Cost.**
 Training large-scale machine learning models requires substantial computational resources, leading to significant energy consumption and financial costs. Energy efficiency metrics quantify the power usage of training workloads, helping identify systems that optimize computational efficiency while minimizing energy waste. The increasing focus on sustainability has led to the inclusion of energy-based benchmarks, such as those in MLPerf Training, which measure power consumption per training run. To understand what these energy benchmarks actually measure, we must decompose *why INT8 saves energy* at the hardware level.
 
-::: {.callout-notebook title="Why INT8 Saves Energy"}
-
-Recall from @sec-ai-acceleration and @sec-model-compression that moving data costs far more energy than computing on it. Understanding WHY quantization reduces energy consumption\index{INT8 Savings!compute vs. memory energy} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
-
-**Compute Energy (per multiply-accumulate operation)**:
-
-| **Precision** |          **Multiplier Energy** | **Relative Cost** |
-|:------------|-----------------------------:|----------------:|
-| **FP32**      | ~`{python} energy_fp32_str` pJ |              1.0× |
-| **FP16**      | ~`{python} energy_fp16_str` pJ |              0.3× |
-| **INT8**      | ~`{python} energy_int8_str` pJ |             0.05× |
-
-An 8-bit multiplier uses ~20× less energy than a 32-bit floating-point multiplier because transistor count scales roughly with bit-width squared, and switching energy scales with transistor count.
-
-**Memory Access Energy (per byte)**:
-
-| **Memory Level** |               **Energy per Byte** | **Relative Cost** |
-|:---------------|--------------------------------:|----------------:|
-| **Register**     |     ~`{python} energy_reg_str` pJ |                1× |
-| **L1 Cache**     |      ~`{python} energy_l1_str` pJ |               50× |
-| **L2 Cache**     |      ~`{python} energy_l2_str` pJ |              200× |
-| **DRAM**         | ~`{python} dram_energy_pj_str` pJ |             1000× |
-
-Memory access dominates: reading one byte from DRAM costs 1000× more energy than a register access.
-
-**Combined Effect for MobileNet Inference**:
-
 ```{python}
 #| label: energy-breakdown-calc
 #| echo: false
@@ -1884,6 +1878,33 @@ e_fp32_compute_mj_value = e_fp32_compute_value / 1000
 e_fp32_load_mj_str = fmt(e_fp32_load_mj_value, precision=1, commas=False)
 e_fp32_compute_mj_str = fmt(e_fp32_compute_mj_value, precision=1, commas=False)
 ```
+
+::: {.callout-notebook title="Why INT8 Saves Energy"}
+
+Recall from @sec-ai-acceleration and @sec-model-compression that moving data costs far more energy than computing on it. Understanding WHY quantization reduces energy consumption\index{INT8 Savings!compute vs. memory energy} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
+
+**Compute Energy (per multiply-accumulate operation)**:
+
+| **Precision** |          **Multiplier Energy** | **Relative Cost** |
+|:------------|-----------------------------:|----------------:|
+| **FP32**      | ~`{python} energy_fp32_str` pJ |              1.0× |
+| **FP16**      | ~`{python} energy_fp16_str` pJ |              0.3× |
+| **INT8**      | ~`{python} energy_int8_str` pJ |             0.05× |
+
+An 8-bit multiplier uses ~20× less energy than a 32-bit floating-point multiplier because transistor count scales roughly with bit-width squared, and switching energy scales with transistor count.
+
+**Memory Access Energy (per byte)**:
+
+| **Memory Level** |               **Energy per Byte** | **Relative Cost** |
+|:---------------|--------------------------------:|----------------:|
+| **Register**     |     ~`{python} energy_reg_str` pJ |                1× |
+| **L1 Cache**     |      ~`{python} energy_l1_str` pJ |               50× |
+| **L2 Cache**     |      ~`{python} energy_l2_str` pJ |              200× |
+| **DRAM**         | ~`{python} dram_energy_pj_str` pJ |             1000× |
+
+Memory access dominates: reading one byte from DRAM costs 1000× more energy than a register access.
+
+**Combined Effect for MobileNet Inference**:
 
 | **Component**                              | **FP32 (`{python} m_fp32_mb_str` MB)** | **INT8 (`{python} m_int8_mb_str` MB)** |                 **Savings** |
 |:-----------------------------------------|-------------------------------------:|-------------------------------------:|--------------------------:|
@@ -2083,8 +2104,6 @@ A critical distinction in inference benchmarking is between component latency (t
 
 These component-level contributions explain why optimizing any single stage yields diminishing returns on end-to-end performance, an *optimization ceiling* formalized by **Amdahl's Law**.
 
-::: {.callout-notebook title="Amdahl's Law: Optimization Ceiling"}
-
 ```{python}
 #| label: amdahl-benchmark-calc
 #| echo: false
@@ -2128,6 +2147,8 @@ amdahl_ceiling_str = fmt(amdahl_ceiling_value, precision=1, commas=False)
 preprocess_pct_str = fmt(preprocess_fraction_value*100, precision=0, commas=False)
 preprocess_fraction_str = fmt(preprocess_fraction_value, precision=2, commas=False)
 ```
+
+::: {.callout-notebook title="Amdahl's Law: Optimization Ceiling"}
 
 The latency breakdown reveals why aggressive model optimization often yields disappointing end-to-end results. Consider a vision pipeline where preprocessing (JPEG decode, resize, normalize) consumes `{python} bench_preprocess_ms_str` ms and inference consumes `{python} bench_inference_ms_str` ms. Optimizing inference by `{python} bench_inf_speedup_str` x (from `{python} bench_inference_ms_str` ms to `{python} bench_opt_inf_str` ms) reduces total latency from `{python} bench_total_ms_str` ms to only `{python} bench_opt_total_str` ms, a `{python} bench_e2e_str` x improvement rather than `{python} bench_inf_speedup_str` x.
 
@@ -3396,7 +3417,7 @@ ax.scatter(years, errors, color=COLORS['RedLine'], s=50, zorder=2, edgecolors='w
 offsets = [(5, 8), (5, 8), (5, 8), (5, 8), (-40, 8), (5, -15), (0, 8)]
 for year, model, error, (ox, oy) in zip(years, models, errors, offsets):
     ax.annotate(model, (year, error), textcoords='offset points',
-                xytext=(ox, oy), fontsize=9, ha='left' if ox >= 0 else 'right')
+                xytext=(ox, oy), fontsize=9, ha='left' if ox >= 0 else 'right', bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.5))
 
 ax.set_ylim(0, 30)
 ax.set_xlabel('Year')
@@ -3942,27 +3963,135 @@ These production monitoring challenges—including A/B testing frameworks, canar
 
 ## Fallacies and Pitfalls {#sec-benchmarking-ai-fallacies-pitfalls-9781}
 
-The preceding sections established what benchmarks can tell us, and what they cannot. This final section distills the most common ways that benchmarking goes wrong. Benchmarking creates false confidence through standardized measurement that obscures deployment realities. Teams assume controlled evaluations predict production performance, but real systems face variability, resource constraints, and multi-objective trade-offs that benchmarks cannot capture. These fallacies waste engineering effort and produce systems optimized for evaluation rather than deployment.
+```{python}
+#| label: fallacies-pitfalls-setup
+#| echo: false
+
+# =============================================================================
+# PURPOSE: Quantitative backing for F&P section examples
+# =============================================================================
+
+# Fallacy 1: Benchmark vs. production accuracy gap
+benchmark_accuracy_pct = 92
+production_accuracy_low_pct = 78
+production_accuracy_high_pct = 82
+accuracy_drop_pct = benchmark_accuracy_pct - production_accuracy_high_pct
+
+# Fallacy 1: Latency gap (mean vs. p99)
+benchmark_latency_mean_ms = 15
+production_p99_low_ms = 150
+production_p99_high_ms = 200
+latency_multiplier = production_p99_low_ms / benchmark_latency_mean_ms
+
+# Pitfall 1 (Goodhart): Quantization speedup
+pre_quant_latency_ms = 12
+post_quant_latency_ms = 8
+ranking_improvement = 15
+energy_increase_pct = 40
+ood_degradation_pct = 25
+accuracy_improvement_pct = 2.1
+
+# Fallacy 2: Single-metric trade-offs
+rec_accuracy_pct = 94
+rec_p99_latency_ms = 180
+slo_p99_requirement_ms = 100
+high_throughput_qps = 1200
+low_throughput_qps = 1000
+high_power_w = 420
+low_power_w = 180
+power_ratio = high_power_w / low_power_w
+throughput_loss_pct = round((1 - low_throughput_qps / high_throughput_qps) * 100)
+battery_multiplier = 2.3
+
+# Pitfall 2: Benchmark saturation (ImageNet)
+imagenet_error_2010_pct = 28.2
+imagenet_error_2015_pct = 3.57
+imagenet_competition_end_year = 2017
+imagenet_teams_above_95 = 29
+imagenet_total_teams = 38
+mnist_accuracy_pct = 99.8
+edge_memory_constraint_x = 10
+edge_power_constraint_x = 100
+
+# Pitfall 3: Research vs. production
+isolated_throughput_qps = 800
+production_throughput_low_qps = 400
+production_throughput_high_qps = 500
+production_utilization_pct = 90
+throughput_degradation_pct = round((1 - production_throughput_high_qps / isolated_throughput_qps) * 100)
+model_inference_low_ms = 5
+model_inference_high_ms = 10
+e2e_latency_low_ms = 50
+e2e_latency_high_ms = 100
+availability_nines = 99.9
+downtime_minutes_month = 43
+
+# Pre-format all strings
+benchmark_accuracy_pct_str = f"{benchmark_accuracy_pct}"
+production_accuracy_range_str = f"{production_accuracy_low_pct}-{production_accuracy_high_pct}"
+accuracy_drop_pct_str = f"{accuracy_drop_pct}"
+benchmark_latency_mean_ms_str = f"{benchmark_latency_mean_ms}"
+production_p99_range_str = f"{production_p99_low_ms}-{production_p99_high_ms}"
+latency_multiplier_str = f"{latency_multiplier:.0f}"
+
+pre_quant_latency_ms_str = f"{pre_quant_latency_ms}"
+post_quant_latency_ms_str = f"{post_quant_latency_ms}"
+ranking_improvement_str = f"{ranking_improvement}"
+energy_increase_pct_str = f"{energy_increase_pct}"
+ood_degradation_pct_str = f"{ood_degradation_pct}"
+accuracy_improvement_pct_str = f"{accuracy_improvement_pct}"
+
+rec_accuracy_pct_str = f"{rec_accuracy_pct}"
+rec_p99_latency_ms_str = f"{rec_p99_latency_ms}"
+slo_p99_requirement_ms_str = f"{slo_p99_requirement_ms}"
+high_throughput_qps_str = f"{high_throughput_qps:,}"
+low_throughput_qps_str = f"{low_throughput_qps:,}"
+high_power_w_str = f"{high_power_w}"
+low_power_w_str = f"{low_power_w}"
+power_ratio_str = f"{power_ratio:.1f}"
+throughput_loss_pct_str = f"{throughput_loss_pct}"
+battery_multiplier_str = f"{battery_multiplier}"
+
+imagenet_error_2010_pct_str = f"{imagenet_error_2010_pct}"
+imagenet_error_2015_pct_str = f"{imagenet_error_2015_pct}"
+imagenet_competition_end_year_str = f"{imagenet_competition_end_year}"
+imagenet_teams_above_95_str = f"{imagenet_teams_above_95}"
+imagenet_total_teams_str = f"{imagenet_total_teams}"
+mnist_accuracy_pct_str = f"{mnist_accuracy_pct}"
+edge_memory_constraint_x_str = f"{edge_memory_constraint_x}"
+edge_power_constraint_x_str = f"{edge_power_constraint_x}"
+
+isolated_throughput_qps_str = f"{isolated_throughput_qps}"
+production_throughput_range_str = f"{production_throughput_low_qps}-{production_throughput_high_qps}"
+production_utilization_pct_str = f"{production_utilization_pct}"
+throughput_degradation_pct_str = f"{throughput_degradation_pct}"
+model_inference_range_str = f"{model_inference_low_ms}-{model_inference_high_ms}"
+e2e_latency_range_str = f"{e2e_latency_low_ms}-{e2e_latency_high_ms}"
+availability_nines_str = f"{availability_nines}"
+downtime_minutes_month_str = f"{downtime_minutes_month}"
+```
+
+Benchmarking creates false confidence when standardized measurement obscures deployment realities. Teams assume controlled evaluations predict production performance, but real systems face variability, resource constraints, and multi-objective trade-offs that benchmarks cannot capture. These fallacies waste engineering effort and produce systems optimized for evaluation rather than deployment.
 
 ##### Fallacy: *Benchmark performance directly translates to real-world application performance.* {.unnumbered}
 
-Engineers select systems based on benchmark rankings. In production, performance degrades significantly. As @sec-benchmarking-ai-ml-measurement-challenges-60ea demonstrates, ML systems exhibit inherent variability from data quality issues, distribution shifts, and resource constraints absent in controlled evaluation. A language model achieving 92% benchmark accuracy drops to 78-82% accuracy in production when processing user-generated text with spelling errors, informal language, and domain-specific terminology. An inference system with 15ms mean latency on MLPerf experiences 150-200ms p99 latency in production due to concurrent load, garbage collection pauses, and network variability. Teams relying solely on benchmark rankings systematically underestimate deployment complexity, leading to failed launches and costly re-engineering.
+Engineers select systems based on benchmark rankings. In production, performance degrades significantly. As @sec-benchmarking-ai-ml-measurement-challenges-60ea demonstrates, ML systems exhibit inherent variability from data quality issues, distribution shifts, and resource constraints absent in controlled evaluation. A language model achieving `{python} benchmark_accuracy_pct_str`% benchmark accuracy drops to `{python} production_accuracy_range_str`% accuracy in production when processing user-generated text with spelling errors, informal language, and domain-specific terminology. An inference system with `{python} benchmark_latency_mean_ms_str`ms mean latency on MLPerf experiences `{python} production_p99_range_str`ms p99 latency in production (`{python} latency_multiplier_str`x degradation) due to concurrent load, garbage collection pauses, and network variability. Teams relying solely on benchmark rankings systematically underestimate deployment complexity, leading to failed launches and costly re-engineering.
 
 ##### Pitfall: *Optimizing exclusively for benchmark metrics without considering broader system requirements.* {.unnumbered}
 
-Teams optimize aggressively to improve benchmark rankings. In deployment, benchmark-specific optimizations degrade critical characteristics. A team reduces inference latency from 12ms to 8ms through aggressive quantization, improving MLPerf ranking by 15 positions while degrading calibration such that prediction confidence scores become unreliable for downstream decision-making. Another team achieves 2.1% ImageNet accuracy improvement through extensive hyperparameter tuning but the optimized model consumes 40% more energy and exhibits 25% worse performance on out-of-distribution images from production cameras. This exemplifies Goodhart's Law: when benchmark scores become optimization targets, they cease to be meaningful measures of system quality. Organizations rewarding benchmark rankings over deployment success systematically produce systems that excel in evaluation but fail in production.
+Teams optimize aggressively to improve benchmark rankings. In deployment, benchmark-specific optimizations degrade critical characteristics. As discussed in @sec-benchmarking-ai-organizational-strategic-issues-d25a, this exemplifies Goodhart's Law: when benchmark scores become optimization targets, they cease to be meaningful measures of system quality. A team reduces inference latency from `{python} pre_quant_latency_ms_str`ms to `{python} post_quant_latency_ms_str`ms through aggressive quantization, improving MLPerf ranking by `{python} ranking_improvement_str` positions while degrading calibration such that prediction confidence scores become unreliable for downstream decision-making. Another team achieves `{python} accuracy_improvement_pct_str`% ImageNet accuracy improvement through extensive hyperparameter tuning but the optimized model consumes `{python} energy_increase_pct_str`% more energy and exhibits `{python} ood_degradation_pct_str`% worse performance on out-of-distribution images from production cameras. Organizations rewarding benchmark rankings over deployment success systematically produce systems that excel in evaluation but fail in production.
 
 ##### Fallacy: *Single-metric evaluation provides sufficient insight into system performance.* {.unnumbered}
 
-Engineers evaluate systems using one primary metric. Production requires balancing multiple competing objectives that single metrics obscure. As established in @sec-benchmarking-ai-inference-metrics-78d4, modern inference systems demand evaluation across accuracy, latency, throughput, energy, and robustness dimensions. A recommendation model achieving 94% accuracy with 180ms p99 latency fails service-level objectives requiring p99 < 100ms despite excellent accuracy. Conversely, a system optimized for 1,200 QPS throughput achieves this rate while consuming 420W versus 180W for a slightly slower system at 1,000 QPS. For battery-powered edge devices, the 18% throughput loss enables 2.3x longer operation time. Different stakeholders prioritize different metrics: ML engineers focus on accuracy, infrastructure teams on throughput and cost, product managers on latency percentiles. Single-metric optimization systematically produces systems that excel on one dimension while failing deployment requirements on others.
+Engineers evaluate systems using one primary metric. Production requires balancing multiple competing objectives that single metrics obscure. As established in @sec-benchmarking-ai-inference-metrics-78d4, modern inference systems demand evaluation across accuracy, latency, throughput, energy, and robustness dimensions. A recommendation model achieving `{python} rec_accuracy_pct_str`% accuracy with `{python} rec_p99_latency_ms_str`ms p99 latency fails service-level objectives requiring p99 < `{python} slo_p99_requirement_ms_str`ms despite excellent accuracy. Conversely, a system optimized for `{python} high_throughput_qps_str` QPS throughput achieves this rate while consuming `{python} high_power_w_str`W versus `{python} low_power_w_str`W for a slightly slower system at `{python} low_throughput_qps_str` QPS (`{python} power_ratio_str`x power difference). For battery-powered edge devices, the `{python} throughput_loss_pct_str`% throughput loss enables `{python} battery_multiplier_str`x longer operation time. Different stakeholders prioritize different metrics: ML engineers focus on accuracy, infrastructure teams on throughput and cost, product managers on latency percentiles. Single-metric optimization systematically produces systems that excel on one dimension while failing deployment requirements on others.
 
 ##### Pitfall: *Using outdated benchmarks that no longer reflect current challenges and requirements.* {.unnumbered}
 
-Teams continue using established benchmarks long after they cease to provide meaningful discrimination. Benchmark saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from 28.2% in 2010 to 3.57% by 2015, with the competition ending in 2017 when 29 of 38 teams exceeded 95% accuracy; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST achieves 99.8% accuracy with simple models, yet teams still report improvements at the third decimal place. As discussed in @sec-benchmarking-ai-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with 10x memory constraints and 100x power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching current deployment realities.
+Teams continue using established benchmarks long after they cease to provide meaningful discrimination. Benchmark saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from `{python} imagenet_error_2010_pct_str`% in 2010 to `{python} imagenet_error_2015_pct_str`% by 2015, with the competition ending in `{python} imagenet_competition_end_year_str` when `{python} imagenet_teams_above_95_str` of `{python} imagenet_total_teams_str` teams exceeded 95% accuracy; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST achieves `{python} mnist_accuracy_pct_str`% accuracy with simple models, yet teams still report improvements at the third decimal place. As discussed in @sec-benchmarking-ai-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with `{python} edge_memory_constraint_x_str`x memory constraints and `{python} edge_power_constraint_x_str`x power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching current deployment realities.
 
-##### Pitfall: *Applying research-oriented benchmarks to evaluate production system performance without accounting for operational constraints.* {.unnumbered}
+##### Pitfall: *Applying research-oriented benchmarks to evaluate production system performance.* {.unnumbered}
 
-Teams use academic benchmarks designed for research comparisons to evaluate production systems. Research benchmarks assume unlimited computational resources, optimal data quality, and idealized conditions absent in production. As established in @sec-benchmarking-ai-laboratorytodeployment-performance-gaps-16c8, production systems face concurrent user loads, varying input quality, network latency, and system failures that degrade performance. A system achieving 800 QPS throughput in isolated benchmarks sustains only 400-500 QPS under production load with 90% utilization due to queue contention and garbage collection pauses. Research benchmarks report model inference time (5-10ms) while production end-to-end latency includes preprocessing, queuing, and postprocessing overhead totaling 50-100ms. Production systems require 99.9% availability (43 minutes downtime per month) and graceful degradation under failures, characteristics research benchmarks ignore. Effective production evaluation requires operational metrics: sustained throughput under load, recovery time from failures, and complete latency breakdown from request to response.
+Teams use academic benchmarks designed for research comparisons to evaluate production systems. Research benchmarks assume unlimited computational resources, optimal data quality, and idealized conditions absent in production. As established in @sec-benchmarking-ai-laboratorytodeployment-performance-gaps-16c8, production systems face concurrent user loads, varying input quality, network latency, and system failures that degrade performance. A system achieving `{python} isolated_throughput_qps_str` QPS throughput in isolated benchmarks sustains only `{python} production_throughput_range_str` QPS under production load with `{python} production_utilization_pct_str`% utilization (`{python} throughput_degradation_pct_str`% degradation) due to queue contention and garbage collection pauses. Research benchmarks report model inference time (`{python} model_inference_range_str`ms) while production end-to-end latency includes preprocessing, queuing, and postprocessing overhead totaling `{python} e2e_latency_range_str`ms. Production systems require `{python} availability_nines_str`% availability (`{python} downtime_minutes_month_str` minutes downtime per month) and graceful degradation under failures, characteristics research benchmarks ignore. Effective production evaluation requires operational metrics: sustained throughput under load, recovery time from failures, and complete latency breakdown.
 
 ## Summary {#sec-benchmarking-ai-summary-5b23}
 
