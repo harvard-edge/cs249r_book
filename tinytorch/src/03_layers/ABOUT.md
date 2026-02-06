@@ -331,7 +331,7 @@ By the end, your layers will support parameter management, proper initialization
 
 ```{tip} By completing this module, you will:
 
-- **Implement** Linear layers with Xavier initialization and proper parameter management for gradient-based training
+- **Implement** Linear layers with proper weight initialization and parameter management for gradient-based training
 - **Master** the mathematical operation `y = xW + b` and understand how parameter counts scale with layer dimensions
 - **Understand** memory usage patterns (parameter memory vs activation memory) and computational complexity of matrix operations
 - **Connect** your implementation to production PyTorch patterns, including `nn.Linear`, `nn.Dropout`, and parameter tracking
@@ -366,7 +366,7 @@ flowchart LR
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `Layer` base class with `forward()`, `__call__()`, `parameters()` | Consistent interface for all layers |
-| 2 | `Linear` layer with Xavier initialization | Learned transformation `y = xW + b` |
+| 2 | `Linear` layer with proper initialization | Learned transformation `y = xW + b` |
 | 3 | `Dropout` with training/inference modes | Regularization through random masking |
 | 4 | `Sequential` container for layer composition | Chaining layers together |
 
@@ -498,7 +498,7 @@ The elegance is in the simplicity. Matrix multiplication handles all the feature
 
 How you initialize weights determines whether your network can learn at all. Initialize too small and gradients vanish, making learning impossibly slow. Initialize too large and gradients explode, making training unstable. The sweet spot ensures stable gradient flow through the network.
 
-Xavier (Glorot) initialization solves this by scaling weights based on the number of inputs. For a layer with `in_features` inputs, Xavier uses scale `sqrt(1/in_features)`. This keeps the variance of activations roughly constant as data flows through layers, preventing vanishing or exploding gradients.
+We use LeCun-style initialization, which scales weights by `sqrt(1/in_features)`. This keeps the variance of activations roughly constant as data flows through layers, preventing vanishing or exploding gradients. (True Xavier/Glorot uses `sqrt(2/(fan_in+fan_out))` which also considers output dimensions, but the simpler LeCun formula works well in practice.)
 
 Here's your initialization code:
 
@@ -508,8 +508,8 @@ def __init__(self, in_features, out_features, bias=True):
     self.in_features = in_features
     self.out_features = out_features
 
-    # Xavier/Glorot initialization for stable gradients
-    scale = np.sqrt(XAVIER_SCALE_FACTOR / in_features)
+    # LeCun-style initialization for stable gradients
+    scale = np.sqrt(INIT_SCALE_FACTOR / in_features)
     weight_data = np.random.randn(in_features, out_features) * scale
     self.weight = Tensor(weight_data)
 
@@ -726,10 +726,10 @@ def parameters(self):
 
 **Cause**: Weights initialized too large (exploding gradients) or too small (vanishing gradients).
 
-**Fix**: Use Xavier initialization with proper scale:
+**Fix**: Use proper initialization scaling:
 
 ```python
-scale = np.sqrt(1.0 / in_features)  # Not just random()!
+scale = np.sqrt(1.0 / in_features)  # LeCun-style, not just random()!
 weight_data = np.random.randn(in_features, out_features) * scale
 ```
 
@@ -742,7 +742,7 @@ Your TinyTorch layers and PyTorch's `nn.Linear` and `nn.Dropout` share the same 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
 | **Backend** | NumPy (Python) | C++/CUDA |
-| **Initialization** | Xavier manual | Multiple schemes (`init.xavier_uniform_`) |
+| **Initialization** | LeCun-style manual | Multiple schemes (`init.xavier_uniform_`, `init.kaiming_normal_`) |
 | **Parameter Management** | Manual `parameters()` list | `nn.Module` base class with auto-registration |
 | **Training Mode** | Manual `training` flag | `model.train()` / `model.eval()` state |
 | **Layer Types** | Linear, Dropout | 100+ layer types (Conv, LSTM, Attention, etc.) |
@@ -915,7 +915,7 @@ What happens if you initialize all weights to zero? To the same non-zero value?
 
 **Same non-zero value (e.g., all 1s)**: Same problem - symmetry. All neurons remain identical throughout training. You need randomness to break symmetry.
 
-**Xavier initialization**: Random values scaled by `sqrt(1/in_features)` break symmetry AND maintain stable gradient variance. This is why proper initialization is essential for learning.
+**Proper initialization**: Random values scaled by `sqrt(1/in_features)` break symmetry AND maintain stable gradient variance. This is why proper initialization is essential for learning.
 ```
 
 **Q6: Batch Size vs Throughput**
