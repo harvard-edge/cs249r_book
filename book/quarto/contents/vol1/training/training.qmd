@@ -380,7 +380,7 @@ small_lr_str = "2.5e-4"
 
 ## Training Systems Fundamentals {#sec-ai-training-training-systems-fundamentals-05d2}
 
-\index{Training!cost asymmetry}\index{Training!inference vs training}Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately ${python} gpt2_training_cost_2019_str` in 2019. Running GPT-4 once costs a few cents (an inference cost detailed in @sec-model-serving-systems). Training GPT-4 cost an estimated ${python} gpt4_training_cost_est_str` million. This million-to-one asymmetry between inference (covered in @sec-model-serving-systems) and training is not an engineering failure awaiting a clever solution—it is the *fundamental economics of learning*. Inference executes a fixed function; training discovers what that function should be by iterating through billions of examples, computing gradients for every parameter, and slowly refining weights until statistical patterns crystallize into useful behavior. The cost is not in the computation per se but in the sheer volume of computation required: tens of billions of forward passes, each followed by a backward pass that costs twice as much, repeated across datasets measured in terabytes.
+\index{Training!cost asymmetry}\index{Training!inference vs training}Running GPT-2 once costs a fraction of a cent. Training GPT-2 cost approximately ${python} gpt2_training_cost_2019_str` in 2019. Running GPT-4 once costs a few cents (an inference cost detailed in @sec-model-serving-systems). Training GPT-4 cost an estimated ${python} gpt4_training_cost_est_str` million. This million-to-one cost asymmetry, introduced in the Purpose section, reflects the sheer volume of computation required: tens of billions of forward passes, each followed by a backward pass, repeated across datasets measured in terabytes.
 
 A single forward pass through GPT-2 requires roughly ${python} gpt2_fwd_flops_str` floating-point operations. Training requires tens of billions of such passes, and each backward pass costs approximately twice as much as the forward pass, yielding a total computational budget on the order of ${python} gpt2_total_flops_str` operations [@brown2020language]. This asymmetry makes training systems engineering a distinct discipline, and it explains why access to training infrastructure increasingly determines who can participate in AI development at all.
 
@@ -592,9 +592,7 @@ Third, **infrastructure scale**: coordinating thousands of accelerators introduc
 
 ### System Design Principles {#sec-ai-training-system-design-principles-7058}
 
-These lifecycle dependencies create specific system design requirements. Training is not merely a mathematical optimization problem; it is a system-driven process that requires careful orchestration of computing hardware, memory, and data movement.
-
-Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-deep-learning-systems-foundations. Each stage imposes specific demands on system resources. The data preprocessing stage relies on storage and I/O subsystems to provide computing hardware with continuous input. @sec-data-engineering-ml covers data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies; this chapter examines the efficiency of data movement, transformation throughput, and delivery to computational resources during training.
+These scaling challenges translate into concrete workflow requirements. Training workflows consist of interdependent stages: data preprocessing, forward and backward passes, and parameter updates, extending the basic neural network concepts from @sec-deep-learning-systems-foundations. Each stage imposes specific demands on system resources. The data preprocessing stage relies on storage and I/O subsystems to provide computing hardware with continuous input. @sec-data-engineering-ml covers data validation, corruption detection, feature engineering, schema enforcement, and pipeline reliability strategies; this chapter examines the efficiency of data movement, transformation throughput, and delivery to computational resources during training.
 
 System constraints often dictate the performance limits of training workloads. Modern accelerators are frequently bottlenecked by memory bandwidth, as data movement between memory hierarchies can be slower and more energy-intensive than the computations themselves [@patterson2021hardware]. In distributed setups, synchronization across devices introduces additional latency, with interconnect performance (NVLink, InfiniBand) critically affecting throughput. For example, training large Transformer models[^fn-transformer-training] requires partitioning data and model parameters across multiple devices, introducing synchronization challenges during gradient updates. \index{NCCL!gradient communication}Communication libraries such as NVIDIA's Collective Communications Library (NCCL) [@nvidia_nccl] enable efficient gradient sharing.
 
@@ -608,9 +606,7 @@ Four dimensions structure this analysis of computational cost. First, the FLOP c
 
 The shift in perspective is essential because the same mathematical operations that elegantly describe learning in equations become significant engineering challenges in implementation. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between ReLU and sigmoid determines whether Tensor Cores can accelerate computation. Understanding these system-level implications of familiar mathematics enables practitioners to identify bottlenecks and apply targeted optimizations.
 
-Training systems must execute three categories of operations repeatedly: forward propagation computes predictions through matrix multiplications and activation functions, gradient computation calculates parameter updates using stored activations and the chain rule, and parameter updates apply gradients using optimization algorithms that maintain momentum and adaptive learning rate state. Each category exhibits distinct computational patterns and system requirements.
-
-Matrix multiplications dominate forward and backward passes, accounting for 60--90% of training time [@he2016deep], which explains *why* specialized matrix units (GPU tensor cores, TPU systolic arrays) became central to training hardware. Activation storage for gradient computation creates memory pressure proportional to batch size and network depth, motivating techniques like gradient checkpointing. The iterative dependencies between these operations constrain parallelization strategies for scaling.
+Building on the computational intensity, memory pressure, and data dependencies established in @sec-ai-training-training-systems-fundamentals-05d2, this section quantifies the specific costs of each operation type. Matrix multiplications dominate forward and backward passes, accounting for 60--90% of training time [@he2016deep], which explains *why* specialized matrix units (GPU tensor cores, TPU systolic arrays) became central to training hardware.
 
 ### Neural Network Computation {#sec-ai-training-neural-network-computation-5660}
 
@@ -1024,7 +1020,7 @@ adam_overhead_mb_value = adam_example_params_m_value * adam_vectors_value * adam
 adam_overhead_str = f"{adam_overhead_mb_value}"
 ```
 
-The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors (m_t and v_t) for each parameter, tripling the memory required for optimization state. For a model with 100 million parameters using 32-bit floating-point numbers, the additional memory requirement is approximately `{python} adam_overhead_str` MB.
+The system implications of Adam are more substantial than previous methods. The optimizer must store two additional vectors (m_t and v_t) for each parameter, tripling the memory required for optimization state.
 
 [^fn-adam-optimizer-memory]: **Adam (Adaptive Moment Estimation)**: Introduced by Kingma and Ba in 2015, Adam became the default optimizer for deep learning due to its robust performance across diverse architectures. The algorithm maintains per-parameter learning rates using first and second moment estimates, requiring 3x the memory of SGD (parameters + two state vectors). For a {python} adam_7b_params_str`B model in FP32, this means {python} adam_7b_state_gb_str` GB for optimizer state alone, driving the adoption of memory-efficient variants like 8-bit Adam ({python} adam_7b_compression_str`x compression) and GaLoRE (gradient low-rank projection).
 
@@ -1301,7 +1297,7 @@ The backpropagation algorithm[^fn-backpropagation] computes gradients by systema
 
 [^fn-backpropagation]: **Backpropagation Algorithm**: Independently rediscovered multiple times, backpropagation was popularized by Rumelhart, Hinton, and Williams in 1986 (though similar ideas appeared in Werbos 1974). This breakthrough enabled training of deep networks by efficiently computing gradients in O(n) time vs. naive O(n²) approaches. Modern implementations require careful memory management since storing all activations for a ResNet-50 consumes {python} resnet50_act_mem_gb_str` GB per image.
 
-Here, we shift focus from *what* backpropagation computes to *what it costs* to compute it at scale. The familiar equations from @sec-deep-learning-systems-foundations reappear because understanding their structure reveals exactly *what* must be stored and *when*. During the forward pass, each layer computes activations $\mathbf{a}^{(l)} = f(\mathbf{a}^{(l-1)}\mathbf{W}^{(l)} + \mathbf{b}^{(l)})$ that must be retained for the backward pass. Computing $\frac{\partial L}{\partial \mathbf{W}^{(l)}}$ requires access to these stored activations, creating memory requirements that scale with network depth and batch size.
+Here, we shift focus from *what* backpropagation computes to *what it costs* to compute it at scale. The layer computations from @sec-ai-training-mathematical-operations-neural-networks-ddac produce activations that must be retained for the backward pass. Computing $\frac{\partial L}{\partial \mathbf{W}^{(l)}}$ requires access to these stored activations, creating memory requirements that scale with network depth and batch size.
 
 A simple three-layer network processing MNIST requires kilobytes of activation storage. GPT-2 processing a single batch requires over {python} total_act_str` gigabytes, more than most GPUs can hold. That gap defines the engineering challenge this chapter addresses. For the mathematical foundations of how backpropagation drives these memory costs—including the full training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$)—see @sec-algorithm-foundations. Modern training systems use autodifferentiation[^fn-autodiff] to handle gradient computations automatically, but the underlying memory and computation patterns remain the systems engineer's responsibility to manage.
 
@@ -1323,18 +1319,7 @@ Consider a batch of training examples passing through a network. The forward pas
 \mathbf{a}^{(l)} = f(\mathbf{z}^{(l)})
 \end{gather*}
 
-Both $\mathbf{z}^{(l)}$ and $\mathbf{a}^{(l)}$ must be cached for the backward pass. This creates a multiplicative effect on memory usage: each layer's memory requirement is multiplied by the batch size, and the optimizer's memory overhead (discussed in the previous section) applies to each parameter.
-
-The total memory needed scales with:
-
-* Network depth (number of layers)
-* Layer widths (number of parameters per layer)
-* Batch size (number of examples processed together)
-* Optimizer state (additional memory for algorithms like Adam)
-
-This creates a complex set of trade-offs. Larger batch sizes enable more efficient computation and better gradient estimates for optimization, but require proportionally more memory for storing activations. More sophisticated optimizers like Adam can achieve faster convergence but require additional memory per parameter.
-
-Quantifying these trade-offs for our GPT-2 Lighthouse Model reveals the scale of the *activation memory* challenge.
+Both $\mathbf{z}^{(l)}$ and $\mathbf{a}^{(l)}$ must be cached for the backward pass. This creates a multiplicative effect on memory usage: each layer's memory requirement is multiplied by the batch size, and the optimizer's memory overhead (discussed in the previous section) applies to each parameter. Quantifying these costs for our GPT-2 Lighthouse Model reveals the scale of the *activation memory* challenge.
 
 ```{python}
 #| label: gpt2-activation-memory-calc
@@ -2217,20 +2202,22 @@ from physx.formatting import fmt
 from physx.formulas import model_memory
 
 # ResNet-50 activation memory scaling (batch=32)
-first_conv_h, first_conv_w, first_conv_c = {python} resnet_conv1_h_str`, {python} resnet_conv1_w_str`, {python} resnet_conv1_c_str`
+# Conv1 output: 112x112x64 (after stride-2 conv + pooling from 224x224 input)
+first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
 bytes_fp32 = BYTES_FP32.to(byte).magnitude
 first_conv_mb = first_conv_h * first_conv_w * first_conv_c * bytes_fp32 / (1024**2)
 
-# ResNet-50 parameters: {python} resnet50_params_m_str`M params × {python} bytes_fp32_str` bytes ≈ {python} resnet_param_mb_str`MB
+# ResNet-50 parameters: ~25.6M params × 4 bytes ≈ 100MB
 resnet_params_m = RESNET50_PARAMS.to(Mparam).magnitude  # 25.6M
 resnet_param_gb = model_memory(RESNET50_PARAMS, BYTES_FP32, GB)  # ~0.1 GB
 
 # Approximate totals for batch=32 (activations dominate)
-act_gb_b32 = {python} act_gb_b32_str`
-grad_gb_b32 = {python} grad_gb_b32_str`
-param_gb = {python} param_mb_str` / 1000  # With batch buffers, ~200MB effective
+# These are empirical values for ResNet-50 training memory footprint
+act_gb_b32 = 8    # Activation memory for batch=32
+grad_gb_b32 = 4   # Gradient memory for batch=32
+param_gb = 200 / 1000  # With batch buffers, ~200MB effective
 total_gb_b32 = act_gb_b32 + grad_gb_b32 + param_gb
-a100_40_gb = {python} a100_mem_gb_str`
+a100_40_gb = 40   # A100 40GB variant
 pct_of_a100 = total_gb_b32 / a100_40_gb * 100
 
 # Batch=64 scaling
@@ -2279,9 +2266,7 @@ The gradient computation $\frac{\partial L}{\partial \mathbf{W}^{(l)}} = \left(\
 
 #### Memory Operations {#sec-ai-training-memory-operations-0ac1}
 
-The backward pass moves large amounts of data between memory and compute units. Each time a layer computes gradients, the GPU loads stored activations from memory, reads incoming gradient signals, and writes the computed gradients back. Consider ResNet-50's first convolutional layer processing a batch of {python} bwd_batch_str` images: the stored input activations (${python} bwd_input_dims_str` \times 4$ bytes) occupy approximately {python} bwd_input_gb_str` GB, while the output activation gradients (${python} bwd_grad_dims_str` \times 4$ bytes) require approximately {python} bwd_grad_gb_str` GB. Weight gradients for the ${python} bwd_kernel_dims_str`$ kernel are comparatively small ($\approx$ {python} bwd_kernel_mb_str` MB). While these per-layer costs appear modest, they accumulate across all {python} resnet_layers_str` layers and must reside in memory simultaneously during the backward pass.
-
-These computations operate across a memory hierarchy where the processor must retrieve activation values stored in HBM, transfer them to fast SRAM for computation, and write results back. Each gradient calculation triggers this sequence of memory transfers, making memory access patterns a key factor in backward pass performance.
+The backward pass moves large amounts of data between memory and compute units. Consider ResNet-50's first convolutional layer processing a batch of {python} bwd_batch_str` images: the stored input activations (${python} bwd_input_dims_str` \times 4$ bytes) occupy approximately {python} bwd_input_gb_str` GB, while the output activation gradients (${python} bwd_grad_dims_str` \times 4$ bytes) require approximately {python} bwd_grad_gb_str` GB. Weight gradients for the ${python} bwd_kernel_dims_str`$ kernel are comparatively small ($\approx$ {python} bwd_kernel_mb_str` MB). While these per-layer costs appear modest, they accumulate across all {python} resnet_layers_str` layers and must reside in memory simultaneously during the backward pass.
 
 #### Production Considerations {#sec-ai-training-production-considerations-4c12}
 
@@ -3080,9 +3065,7 @@ On NVIDIA V100 (Tensor Cores enabled):
 
 #### Practical Considerations {#sec-ai-training-mixedprecision-practical-considerations-a644}
 
-Mixed-precision training has become the default for large-scale workloads across NLP [@devlin2019bert; @brown2020language], computer vision [@he2016deep], and reinforcement learning. The benefits compound: halving tensor sizes from FP32 to FP16 simultaneously reduces memory consumption, accelerates Tensor Core computation, and cuts inter-device communication bandwidth in distributed settings.
-
-The primary limitation is FP16's restricted dynamic range of $\pm65{,}504$. Gradient values below $6 \times 10^{-5}$ underflow to zero. Loss scaling factors, typically $2^{8}$ to $2^{14}$, keep gradients within the representable range. Recurrent architectures with long sequences are particularly susceptible to accumulated numerical errors. NaN values in gradients or activations, the telltale sign of precision failures, appear more frequently in FP16 workflows and may manifest differently than in FP32, complicating debugging. BF16 eliminates many of these issues by preserving FP32's dynamic range, though at the cost of reduced mantissa precision. For models under 10M parameters, the overhead of configuring mixed precision may exceed the performance benefit.
+Despite the benefits demonstrated above, mixed-precision training introduces numerical challenges. The primary limitation is FP16's restricted dynamic range of $\pm65{,}504$. Gradient values below $6 \times 10^{-5}$ underflow to zero. Loss scaling factors, typically $2^{8}$ to $2^{14}$, keep gradients within the representable range. Recurrent architectures with long sequences are particularly susceptible to accumulated numerical errors. NaN values in gradients or activations, the telltale sign of precision failures, appear more frequently in FP16 workflows and may manifest differently than in FP32, complicating debugging. BF16 eliminates many of these issues by preserving FP32's dynamic range, though at the cost of reduced mantissa precision. For models under 10M parameters, the overhead of configuring mixed precision may exceed the performance benefit.
 
 #### Mixed-Precision Hardware Support {#sec-ai-training-mixedprecision-hardware-support-d7c1}
 
@@ -3551,9 +3534,7 @@ fit=(Z)](BB3){};
 ```
 :::
 
-This process allows models to achieve the benefits of training with larger batch sizes, such as improved gradient estimates and convergence stability, without requiring the memory to store an entire batch at once. For instance, in PyTorch, this can be implemented by adjusting the learning rate proportionally to the number of accumulated micro-batches and calling `optimizer.step()` only after processing the entire effective batch.
-
-The key steps in gradient accumulation are:
+In PyTorch, this is implemented by adjusting the learning rate proportionally to the number of accumulated micro-batches and calling `optimizer.step()` only after processing the entire effective batch. The key steps in gradient accumulation are:
 
 1. Perform the forward pass for a micro-batch.
 2. Compute the gradients during the backward pass.
@@ -4187,13 +4168,9 @@ Training large models is not just a compute challenge; it's a massive energy sin
 
 ### The Evolution of Training Infrastructure {#sec-ai-training-evolution-training-infrastructure-f3a6}
 
-\index{Training!infrastructure evolution}\index{Computing Eras!mainframe to AI}Why do modern training systems look the way they do—with specialized GPUs, high-bandwidth interconnects, and software stacks optimized for gradient-based learning? The answer lies in how computing infrastructure evolved. Each generation of systems was shaped by its dominant workloads, and AI training represents a uniquely demanding combination of requirements that prior architectures only partially addressed. Trace this evolution through @fig-evolution-systems to spot the recurring pattern: new application demands expose architectural limitations, triggering innovations that eventually become standardized infrastructure.
+\index{Training!infrastructure evolution}\index{Computing Eras!mainframe to AI}Why do modern training systems look the way they do? The answer lies in how computing infrastructure evolved through four distinct eras, each shaped by dominant workloads. Trace this evolution through @fig-evolution-systems and @tbl-computing-eras: new application demands expose architectural limitations, triggering innovations that eventually become standardized infrastructure.
 
-The **mainframe era** (1950s--1970s) optimized for sequential batch processing---payroll, accounting, and scientific calculations that could be scheduled overnight. Memory hierarchies were simple because programs accessed data predictably. The **HPC era** (1970s--2000s) emerged when weather simulation, nuclear modeling, and fluid dynamics required computing power beyond any single processor. These workloads featured regular array access patterns amenable to vectorization, leading to architectures like the Cray-1 that pioneered parallel floating-point computation.
-
-The **warehouse-scale computing era** (2000s--2010s) arose from internet services that demanded different trade-offs entirely. Google's search index, Facebook's social graph, and Amazon's recommendation systems processed billions of independent requests with irregular, sparse data access. These systems prioritized fault tolerance and horizontal scaling over raw floating-point throughput. Thousands of commodity servers replaced a few expensive supercomputers.
-
-Neural network training combines requirements from both predecessors while adding unique demands. Like HPC, training requires massive floating-point throughput for matrix operations. Like warehouse-scale computing, training at scale requires fault tolerance across many machines. Unlike either, training involves iterative parameter updates with complex synchronization requirements---every GPU must agree on gradient values before proceeding. This hybrid requirement set drove the emergence of **AI hypercomputing**, characterized by specialized accelerators (GPUs, TPUs), high-bandwidth interconnects (NVLink, InfiniBand), and software stacks optimized for gradient-based learning.
+Neural network training combines requirements from multiple predecessors while adding unique demands. Like HPC, training requires massive floating-point throughput for matrix operations. Like warehouse-scale computing, training at scale requires fault tolerance across many machines. Unlike either, training involves iterative parameter updates with complex synchronization requirements. This hybrid requirement set drove the emergence of **AI hypercomputing**, characterized by specialized accelerators (GPUs, TPUs), high-bandwidth interconnects (NVLink, InfiniBand), and software stacks optimized for gradient-based learning.
 
 ::: {#fig-evolution-systems fig-env="figure" fig-pos="htb" fig-cap="**Computing System Evolution**: Hardware advancements continuously adapted to the increasing demands of machine learning workloads, transitioning from centralized mainframes to specialized architectures optimized for parallel processing and massive datasets." fig-alt="Timeline spanning 1950s to 2020s showing evolution from mainframes through HPC and warehouse-scale computing to AI hypercomputing with GPUs and TPUs."}
 ```{.tikz}

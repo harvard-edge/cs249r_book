@@ -101,6 +101,12 @@ batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32.magnitu
 batch_mb_value = batch_bytes / 1e6
 batch_transfer_ms_value = batch_bytes / (PCIE_GEN4_BW.to(byte/second).magnitude) * 1e3
 
+# Training step anatomy example dimensions (used in prose before detailed calc cell)
+train_batch = 32
+train_input = 784
+train_hidden = 256
+train_output = 10
+
 # =============================================================================
 # OUTPUT
 # =============================================================================
@@ -254,7 +260,7 @@ The key optimization for memory-bound operations is **kernel fusion**\index{Kern
 
 [^fn-kernel]: **Kernel**: From German "Kern" (core/nucleus), borrowed from operating systems where it denotes the core program with full hardware access. In GPU programming, a kernel is the function that executes in parallel across thousands of threads. The metaphor extends: just as an OS kernel mediates between software and hardware, a GPU kernel is the fundamental unit where algorithms meet silicon.
 
-[^fn-flashattention-frameworks]: FlashAttention (introduced in @sec-dnn-architectures) exemplifies kernel fusion taken to its logical extreme. By fusing the entire attention computation into a single kernel that tiles data to fit in SRAM, it reduces HBM traffic by 10–20× and achieves 2–4× wall-clock speedup. This demonstrates that frameworks enabling such fusions can transform memory-bound operations into compute-bound ones.
+[^fn-flashattention-frameworks]: FlashAttention (introduced in @sec-dnn-architectures) exemplifies kernel fusion taken to its logical extreme, fusing the entire attention computation into a single kernel that tiles data to fit in SRAM. This demonstrates that frameworks enabling such fusions can transform memory-bound operations into compute-bound ones.
 
 **The critical constraint**: a framework can only fuse operations it can see together. If operations execute immediately one at a time (eager execution)\index{Eager Execution!optimization limitations}, the framework cannot fuse them. If operations are recorded first into a graph (deferred execution)\index{Graph Execution!optimization advantages}, the framework can analyze and optimize the entire computation. This is why execution strategy matters so much: it determines what optimizations are even possible.
 
@@ -262,7 +268,7 @@ The key optimization for memory-bound operations is **kernel fusion**\index{Kern
 
 The previous section established that kernel fusion is the key optimization for memory-bound operations, but fusion requires seeing multiple operations together. How do frameworks represent computation in a way that makes this visibility possible? The answer is the **computational graph**\index{Computational Graph!definition (DAG)}, a directed acyclic graph (DAG) where nodes represent operations and edges represent data dependencies. This graph is the framework's internal model of your computation. To ground this abstraction, examine @fig-comp-graph: computing $z = x \times y$ maps onto two input nodes ($x$ and $y$), one operation node (multiplication), and one output node ($z$). The execution problem asks: *when* is this graph constructed, and *when* is it executed?
 
-::: {#fig-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Simple Computational Graph.** A directed acyclic graph representing the computation $z = x \\times y$, where nodes define operations and edges specify the flow of data between them." fig-alt="Simple directed graph with nodes x and y flowing into function f(x,y) which outputs z."}
+::: {#fig-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Simple Computational Graph.** The computation $z = x \\times y$ represented as a graph, where nodes define operations and edges specify data flow." fig-alt="Simple directed graph with nodes x and y flowing into function f(x,y) which outputs z."}
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
 %
@@ -292,7 +298,7 @@ The previous section established that kernel fusion is the key optimization for 
 
 Real machine learning models require much more complex graph structures. @fig-mlfm-comp-graph extends this representation to show a neural network computation graph alongside the system components that reason about it. In the left panel, notice how data flows through six operation nodes in a directed acyclic graph—each node's output becomes the next node's input. The right panel reveals what the framework gains by having this graph: it can query the structure to plan memory allocation for each tensor's lifetime, and it can assign operations to devices based on data dependencies rather than execution order. The critical insight is that the graph exists independently of execution, enabling the framework to optimize *before* any arithmetic occurs.
 
-::: {#fig-mlfm-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Computation Graph with System Interactions.** A neural network represented as a directed acyclic graph (left), with system components including memory management and device placement (right) that interact with the graph to optimize resource allocation before execution." fig-alt="Left side shows computational graph with 6 operation nodes connected by data flow edges. Right side shows system components box with Memory Management and Device Placement nodes that interact with the computational graph."}
+::: {#fig-mlfm-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Computation Graph with System Interactions.** A neural network computation graph (left) alongside system components including memory management and device placement (right) that interact with the graph to optimize resource allocation before execution." fig-alt="Left side shows computational graph with 6 operation nodes connected by data flow edges. Right side shows system components box with Memory Management and Device Placement nodes that interact with the computational graph."}
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
 %
@@ -387,9 +393,6 @@ print(f"Intermediate value: {y}")  # Works immediately
 z = y.sum()
 ```
 
-*   **Pros**: Intuitive debugging, dynamic control flow.
-*   **Cons**: No global optimization, Python overhead per op.
-
 **TensorFlow 1.x (Static Graph)**:
 
 ```{.python}
@@ -403,9 +406,6 @@ z = tf.reduce_sum(y)
 with tf.Session() as sess:
     result = sess.run(z, feed_dict={x: [1.0, 2.0]})
 ```
-
-*   **Pros**: Whole-graph optimization (fusion), portability.
-*   **Cons**: "Define-then-run" friction, hard to debug.
 :::
 
 **The Approach**: Execute operations immediately as encountered, building the computation graph dynamically during execution. When you write `y = x * 2`, the multiplication happens instantly and the result is available for immediate use.
@@ -1063,22 +1063,16 @@ Avoid torch.compile for:
 | **Debugging**            | Easy (standard Python)                          | Difficult (symbolic)                  | Moderate (mixed)                        |
 | **Performance**          | Baseline                                        | High (optimized)                      | High (compiled regions)                 |
 
-The trade-offs between static and dynamic graphs extend beyond the dimensions shown above. @tbl-mlfm-graphs provides deeper analysis of how these architectures influence optimization potential, debugging workflows, scalability, and deployment complexity:
+Beyond these core execution trade-offs, @tbl-mlfm-graphs highlights additional systems-level distinctions between static and dynamic approaches:
 
 | **Aspect**                       | **Static Graphs**                                    | **Dynamic Graphs**                              |
 |:-------------------------------|:---------------------------------------------------|:----------------------------------------------|
 | **Memory Management**            | Precise allocation planning, optimized memory usage  | Flexible but potentially less efficient         |
-| **Optimization Potential**       | Comprehensive graph-level optimizations possible     | Limited to local optimizations due to runtime   |
 | **Hardware Utilization**         | Can generate highly optimized hardware-specific code | May sacrifice hardware-specific optimizations   |
-| **Development Experience**       | Requires more upfront planning, harder to debug      | Better debugging, faster iteration cycles       |
-| **Debugging Workflow**           | Framework-specific tools, disconnected stack traces  | Standard Python debugging (pdb, print, inspect) |
-| **Error Reporting**              | Execution-time errors disconnected from definition   | Intuitive stack traces pointing to exact lines  |
 | **Research Velocity**            | Slower iteration due to define-then-run requirement  | Faster prototyping and model experimentation    |
-| **Runtime Flexibility**          | Fixed computation structure                          | Can adapt to runtime conditions                 |
-| **Production Performance**       | Generally better performance at scale                | May have overhead from graph construction       |
 | **Integration with Legacy Code** | More separation between definition and execution     | Natural integration with imperative code        |
 
-: **Graph Computation Modes.** Static graphs define the entire computation upfront for optimization, while dynamic graphs construct the computation on the fly for flexibility with variable-length inputs and control flow. The choice affects both execution efficiency and the ease of model development and debugging. These trade-offs reappear when selecting frameworks in @sec-ai-frameworks-selecting-framework-2949. {#tbl-mlfm-graphs}
+: **Additional Graph Trade-Offs.** Systems-level distinctions between static and dynamic graphs that complement the execution model comparison above. These trade-offs reappear when selecting frameworks in @sec-ai-frameworks-selecting-framework-2949. {#tbl-mlfm-graphs}
 
 These trade-offs are not binary choices. Modern frameworks offer a spectrum of options, which raises the quantitative question: where on this spectrum should your project operate?
 
@@ -1500,7 +1494,7 @@ def deep_network(x, w1, w2, w3):
 ```
 :::
 
-Frameworks attack this memory wall with two primary strategies. The first is *activation checkpointing*\index{Gradient Checkpointing!memory-compute trade-off}\index{Activation Checkpointing|see{Gradient Checkpointing}} (also called gradient checkpointing): rather than storing every activation, the framework stores only selected checkpoints and recomputes the intermediate activations during the backward pass. @sec-ai-training examines checkpointing strategies in detail, including optimal checkpoint placement algorithms. Depending on checkpoint placement, this trades 20–33% additional compute (with optimal $\sqrt{n}$ checkpointing) for a 50 to 90% reduction in activation memory. @lst-checkpoint_scheme shows the pattern: save activations at checkpoint boundaries, recompute everything between them.
+Frameworks attack this memory wall with two primary strategies. The first is *activation checkpointing*\index{Gradient Checkpointing!memory-compute trade-off}\index{Activation Checkpointing|see{Gradient Checkpointing}} (also called gradient checkpointing): rather than storing every activation, the framework stores only selected checkpoints and recomputes the intermediate activations during the backward pass. @sec-ai-training examines checkpointing strategies in detail, including optimal checkpoint placement algorithms. @lst-checkpoint_scheme shows the pattern: save activations at checkpoint boundaries, recompute everything between them. The quantitative trade-offs of this approach are examined in @sec-frameworks-autograd-principle-memory.
 
 ::: {#lst-checkpoint_scheme lst-cap="**Checkpointing**: Reduces memory usage by selectively storing intermediate activations during forward passes. Frameworks balance storage needs with computational efficiency to optimize model training."}
 ```{.python}
@@ -1619,7 +1613,7 @@ This 100x ratio between training and inference memory quantifies why the Data Mo
 
 Frameworks provide two primary mechanisms to manage this trade-off. **Gradient checkpointing**\index{Gradient Checkpointing!recomputation strategy} [@chen2016training] trades recomputation for memory: instead of saving all activations, the framework saves only a subset and recomputes the rest during the backward pass. This typically reduces activation memory by 50–90% at the cost of 20–33% additional compute (with optimal $\sqrt{n}$ checkpoint placement). In Iron Law terms, checkpointing increases the $O$ term (recomputation) to reduce the $D_{vol}$ term (memory traffic). **Tensor detachment** provides a complementary mechanism: calling `.detach()` on a tensor removes it from the computation graph entirely, preventing the framework from saving activations through that path. This is essential for transfer learning, where pretrained layers should not accumulate gradients, and reduces the $D_{vol}$ term by eliminating unnecessary activation storage.
 
-Mixed-precision training offers a third approach: storing activations in FP16 rather than FP32 halves the activation memory while modern Tensor Cores execute FP16 matrix multiplications at 2x the throughput of FP32. The net effect is both reduced $D_{vol}$ (smaller activations) and increased hardware utilization ($\eta$).
+Mixed-precision training offers a third approach, reducing activation memory by storing values in lower precision formats. The detailed trade-offs of mixed precision are examined later in this chapter.
 
 ##### Principle 3: Extensibility and Control {#sec-frameworks-autograd-principle-extensibility .unnumbered}
 

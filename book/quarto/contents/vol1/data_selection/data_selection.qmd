@@ -78,7 +78,7 @@ label_data_period_str = "5 years"
 **The Consequence**: Compute budgets now support training runs that far exceed what available high-quality data can fill. The field has become *compute-rich and data-poor*.
 :::
 
-This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data selection**: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware. In the Iron Law ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta}$), where $T$ is training time, $D_{vol}$ is data volume, $BW$ is memory bandwidth, $O$ is total operations, $R_{peak}$ is peak hardware throughput, and $\eta$ is utilization efficiency, data selection is the only technique that shrinks the *numerator* of the compute term. Companies training frontier models are no longer bottlenecked by GPU access but by the quality and diversity of their training corpora.
+This asymmetry inverts the optimization priority. When data was abundant and compute was scarce, the right strategy was algorithmic efficiency: squeeze more accuracy from limited GPU cycles. Now that compute is abundant and *quality data* is scarce, the winning strategy is **data selection**: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware, directly shrinking the Total Operations ($O$) term in the Iron Law (see the callout "Data Selection and the Iron Law" below for a detailed analysis). Companies training frontier models are no longer bottlenecked by GPU access but by the quality and diversity of their training corpora.
 
 This chapter provides the engineering toolkit for intelligent data selection, organized around Part III's **D·A·M taxonomy**, which establishes a deliberate optimization ordering: Data first, then Algorithm, then Machine. Data selection puts the "highest leverage first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. The chapter follows a three-stage optimization pipeline that structures the practical response to the Data Wall:
 
@@ -89,8 +89,6 @@ This chapter provides the engineering toolkit for intelligent data selection, or
 Each stage increases the *information density* of the data that reaches the model, and together they form a complementary toolkit: pruning reduces *what* you have, selection focuses *how* you use it, and synthesis expands *what* you can access. The next two sections formalize *what* "data selection" means and *why* it is fundamentally a systems problem.
 
 ## Defining Data Selection {#sec-data-selection-defining}
-
-The Data Wall establishes the urgency; a formal framework for measuring data selection establishes the response. What exactly does "efficient" use of data mean?
 
 ::: {.callout-definition title="Data Selection"}
 ***Data Selection***\index{Data Selection!definition} is the process of maximizing the **Information-Compute Ratio**\index{Data Selection!Information-Compute Ratio (ICR)}. It operates upstream of training to identify the **Minimum Viable Subset** of data required to define the decision boundary, reducing the **Total Operations** ($O$) term of the Iron Law by eliminating redundant, noisy, or non-informative samples before they consume GPU cycles.
@@ -256,7 +254,7 @@ $$
 \text{ICR} = \frac{\Delta \text{Model Performance}}{\Delta \text{FLOPs}}
 $$
 
-**The Iron Law Connection**: Focusing on the compute term of the Iron Law ($\frac{O}{R_{peak} \cdot \eta}$), the **Total Operations ($O$)** term is usually treated as a fixed constant determined by model architecture and dataset size. **Data Selection turns $O$ into a variable.** By maximizing ICR, we reduce the total FLOPs required to reach a target performance level, directly shrinking the numerator of the Iron Law equation. In this compute term, a 2x improvement in ICR is mathematically equivalent to a 2x improvement in hardware Peak Throughput ($R_{peak}$), but often much cheaper to achieve. Note that ICR focuses specifically on the compute component of the broader Selection Efficiency metric defined earlier, which also accounts for acquisition, labeling, and storage costs.
+**The Iron Law Connection**: As detailed in the "Data Selection and the Iron Law" callout above, data selection turns the Total Operations ($O$) term from a fixed constant into a variable. By maximizing ICR, we reduce the total FLOPs required to reach a target performance level. A 2x improvement in ICR is mathematically equivalent to a 2x improvement in hardware Peak Throughput ($R_{peak}$), but often much cheaper to achieve. Note that ICR focuses specifically on the compute component of the broader Selection Efficiency metric defined earlier, which also accounts for acquisition, labeling, and storage costs.
 
 A random batch of raw data often has low ICR because it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measuring-data-selection-7957 provides the complete measurement framework for evaluating these efficiency gains, including the Data Roofline model that diagnoses whether a system is data-bound or compute-bound.
 
@@ -295,7 +293,7 @@ The goal of data selection is to maximize the **Information-Compute Ratio (ICR)*
 
 **Metrics**
 
-- [ ] **ICR**: Can you define ICR as $\Delta \text{Performance} / \Delta \text{FLOPs}$?
+- [ ] **ICR Application**: Given two training runs with identical accuracy gains but different compute budgets, can you determine which had higher ICR?
 - [ ] **Data Efficiency**: Do you understand why a 50% smaller dataset with 2x higher ICR yields the same model for half the training cost?
 
 **The Pipeline**
@@ -402,7 +400,7 @@ The most counterintuitive finding in data selection is that training on *less* d
 
 These numbers are benchmark-specific. Gains from pruning depend on the dataset's intrinsic redundancy, the selection algorithm, and the model architecture; always validate on your specific task before deploying aggressive pruning in production. The key insight remains: not all data points provide equal value for training.
 
-Why does this heterogeneity exist? The answer lies in how neural networks learn decision boundaries. Most samples fall far from any class boundary: a picture of a dog in good lighting is obviously a dog. These "easy" examples provide diminishing returns after the first few epochs because the model has already mastered them. The informative samples cluster near boundaries where classes become ambiguous. The following analysis quantifies this effect, revealing what we call *the data quality multiplier*.
+Why does this heterogeneity exist? The answer lies in how neural networks learn decision boundaries. Most samples fall far from any class boundary: a picture of a dog in good lighting is obviously a dog. These "easy" examples provide diminishing returns after the first few epochs because the model has already mastered them. The informative samples cluster near boundaries where classes become ambiguous. Beyond sample redundancy, label quality also dramatically affects data requirements. The following analysis quantifies this effect.
 
 ::: {.callout-notebook title="The Data Quality Multiplier"}
 **The Physics of Noise**: Why is one clean sample worth 100 noisy ones?
@@ -1046,12 +1044,12 @@ total_a_hrs_str = f"{cost_scratch_total_value:,}"
 total_b_hrs_str = f"{cost_foundation_total_value:,}"
 
 labels_per_task_scratch_str = fmt(labels_per_task_scratch, precision=0, commas=True)
-label_cost_scratch_total_str = fmt(label_cost_scratch_total, precision=0, unit="M", prefix="$")
+label_cost_scratch_total_str = f"${label_cost_scratch_total / 1_000_000:.0f}M"  # e.g., "$1M"
 cost_scratch_per_task_str = fmt(cost_scratch_per_task_value, precision=0, commas=True)
 cost_scratch_total_str = fmt(cost_scratch_total_value, precision=0, commas=True)
 
 labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas=True)
-label_cost_finetune_total_str = fmt(label_cost_finetune_total, precision=0, unit="K", prefix="$")
+label_cost_finetune_total_str = f"${label_cost_finetune_total / 1_000:.0f}K"  # e.g., "$10K"
 cost_finetune_value_str = fmt(cost_finetune_value, precision=0, commas=True)
 cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True)
 
@@ -1195,11 +1193,9 @@ Generative pre-training, exemplified by the GPT family of models, scales well wi
 
 These trade-offs converge on a clear conclusion: from a data selection perspective, self-supervised pre-training represents a **1000$\times$ or greater multiplier** on the value of labeled data. Instead of labeling millions of task-specific examples, practitioners fine-tune on hundreds or thousands of labeled samples while inheriting knowledge distilled from billions of unlabeled tokens.
 
-This multiplicative advantage created the *foundation model paradigm*\index{Self-supervised learning!foundation model paradigm}[^fn-foundation-model] [@bommasani2021opportunities] that defines modern ML systems.
+This multiplicative advantage extends the amortization economics examined in the previous section, creating the *foundation model paradigm*\index{Self-supervised learning!foundation model paradigm}[^fn-foundation-model] [@bommasani2021opportunities] that defines modern ML systems.
 
 [^fn-foundation-model]: **Foundation Model**: Term coined by Stanford's Center for Research on Foundation Models in 2021 to describe models like BERT, GPT-3, and DALL-E. The name emphasizes a critical property: these models serve as a "foundation" for many downstream tasks, but this creates dangerous homogenization. Defects in the foundation model propagate to all applications built upon it, making them single points of failure that can "radiate harms" across an ecosystem.
-
-The paradigm follows a three-step pattern. First, pre-train once on massive unlabeled corpora comprising billions of tokens or images. Second, fine-tune many times on small task-specific datasets containing hundreds to thousands of samples. Third, amortize the pre-training cost across all downstream applications. This structure explains *why* organizations invest millions of dollars in pre-training: the investment pays dividends across every subsequent application built on that foundation.
 
 The architectural and training details for these methods appear in @sec-ai-training. From a data selection perspective, self-supervised learning represents the current ceiling of what the field has achieved, transforming data from the primary bottleneck into an abundant resource. At scale, self-supervised pre-training requires distributed infrastructure: gradient accumulation across mini-batches, mixed precision to reduce memory footprint, and pipeline parallelism to split models across devices are essential for pre-training billion-parameter models. The data selection principles discussed here (coreset selection, curriculum learning) apply regardless of scale, but their implementation must account for distributed coordination overhead.
 
@@ -1235,9 +1231,7 @@ Three classes of generative approaches address these needs, each with distinct c
 
 ### Bridging the Domain Gap {#sec-data-selection-bridging-domain-gap-15f5}
 
-Synthetic data's greatest limitation is the **domain gap**: the statistical difference between generated and real-world data. A model trained on perfectly rendered simulation images may fail on blurry, poorly-lit real camera footage. This gap can negate the efficiency gains of synthetic data if not addressed.
-
-Examine the two distributions in @fig-domain-gap to see why. Synthetic data (left) and real data (right) occupy different regions of feature space. A model trained only on synthetic data learns a decision boundary optimized for the wrong distribution: it may perform excellently on held-out synthetic test data while failing catastrophically on real deployment data. The gap between distributions represents wasted training: the model learned features that do not transfer.
+Synthetic data's greatest limitation is the **domain gap**: the statistical difference between generated and real-world data, as illustrated in @fig-domain-gap. A model trained only on synthetic data learns a decision boundary optimized for the wrong distribution, potentially performing well on synthetic test data while failing on real deployment data.
 
 ::: {#fig-domain-gap fig-env="figure" fig-pos="htb" fig-cap="**The Domain Gap Problem**: Synthetic data (blue) and real data (orange) have different distributions. A model trained on synthetic data alone learns a boundary that fails on real data. Domain adaptation techniques aim to align these distributions or learn domain-invariant features." fig-alt="Two overlapping bell curves representing synthetic and real data distributions, with a decision boundary that works for synthetic but misses real data."}
 ```{.tikz}
@@ -1629,9 +1623,7 @@ cost_total_proxy_str = fmt(cost_total_proxy, precision=1, commas=False)
 
 **The Trap**: If your selection algorithm is iterative (e.g., repeating selection every epoch), T_selection becomes `{python} n_epochs_full_str` × 1 = `{python} cost_selection_iterative_str` × C_epoch. Total time = `{python} cost_selection_iterative_str` + `{python} n_epochs_subset_str` = `{python} cost_total_iterative_str` × C_epoch. You are now **slower** than the baseline.
 
-**The Failure Condition**: If the cost of selecting data exceeds the cost of training on the discarded data, you have failed. The goal is to spend compute to save *more* compute.
-
-**The Fix**: Use a **Proxy Model** (`{python} proxy_factor_inv_str`× smaller) for selection. T_selection = `{python} cost_selection_proxy_str` × C_epoch. Total time = `{python} cost_selection_proxy_str` + `{python} n_epochs_subset_str` = `{python} cost_total_proxy_str`. You preserve the speedup.
+**The Failure Condition**: If the cost of selecting data exceeds the cost of training on the discarded data, you have failed. The goal is to spend compute to save *more* compute. As discussed in the coreset selection section, proxy models solve this problem by reducing T_selection by an order of magnitude.
 
 :::
 
@@ -1706,13 +1698,9 @@ The selection inequality addresses compute overhead, but data selection introduc
 
 :::
 
-High-efficiency systems mitigate this penalty through two proxy selection techniques. The first uses small proxy models: a distilled, lightweight model (e.g., a 10M parameter "student") scores the data pool on behalf of a 7B parameter "teacher," reducing selection cost by an order of magnitude while preserving most of the ranking quality. The second leverages embedding indices: by pre-computing embeddings and storing them in a vector search index (e.g., FAISS), selection transforms from a $O(N)$ linear scan into a $O(\log N)$ nearest-neighbor lookup. Both techniques share a common principle: decoupling selection computation from training computation enables independent optimization of each stage.
+High-efficiency systems mitigate this penalty through several techniques. Small proxy models (a 10M parameter "student" scoring on behalf of a 7B "teacher") reduce selection cost by an order of magnitude while preserving ranking quality. Embedding indices (e.g., FAISS) transform selection from $O(N)$ linear scans into $O(\log N)$ lookups. Both approaches share a common principle: decoupling selection from training enables independent optimization.
 
-### Optimizing Data Loaders {#sec-data-selection-optimizing-data-loaders-b6c2}
-
-Data loaders themselves also require architectural adaptation. Data selection strategies often produce non-sequential access patterns. Standard training reads files sequentially, optimizing disk readahead, but strategies like dynamic subset selection require random access to specific high-value samples. Standard filesystems and object stores (S3) suffer significant latency penalties under random access loads, as @tbl-io-performance demonstrates.
-
-To maintain GPU utilization, data loaders must be architected for sharded random access. Modern formats like WebDataset or FFCV group thousands of samples into `tar` or `record` shards, enabling efficient bulk reads even when the target samples are scattered across the logical dataset. Complementing this, shuffle buffers provide a practical approximation to true random access: the loader reads large sequential shards into a memory buffer and samples randomly from within the buffer. This design preserves the sequential I/O throughput that storage hardware delivers best while still achieving the statistical benefits of random sampling that many data selection algorithms require.
+Data loaders also require architectural adaptation. Modern formats like WebDataset or FFCV group thousands of samples into shards, enabling efficient bulk reads even when target samples are scattered. Shuffle buffers provide a practical approximation: the loader reads large sequential shards into memory and samples randomly within the buffer, preserving sequential I/O throughput while achieving the statistical benefits of random sampling.
 
 ### Data Echoing: Amortizing I/O Costs {#sec-data-selection-data-echoing-amortizing-io-costs-24e3}
 

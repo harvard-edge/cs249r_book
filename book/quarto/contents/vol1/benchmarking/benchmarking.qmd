@@ -116,6 +116,7 @@ energy_dram_str = fmt(energy_dram_value, precision=0, commas=False)
 energy_reg_str = fmt(energy_reg_value, precision=2, commas=False)
 energy_l1_str = fmt(energy_l1_value, precision=1, commas=False)
 energy_l2_str = fmt(energy_l2_value, precision=1, commas=False)
+dram_energy_pj_str = fmt(ENERGY_DRAM_PJ_PER_BYTE.magnitude, precision=0, commas=False)
 
 bert_params_m_str = fmt(bert_params_m_value, precision=0, commas=False)
 bert_large_params_m_str = fmt(bert_large_params_m_value, precision=0, commas=False)
@@ -322,7 +323,7 @@ Beyond workload representativeness, the distinction between statistical signific
 **The Moral**: Small benchmarks are the "Laboratory Fallacy." In AI Engineering, your sensors (the test set) must be sized to match the precision of the change you are trying to measure.
 :::
 
-Statistical validity is only part of the story. Even statistically significant improvements can be misleading when they optimize the wrong metric, a phenomenon known as *Goodhart's Law in action*.
+This principle manifests concretely in practice:
 
 ::: {.callout-notebook title="Goodhart's Law in Action"}
 **The Metric Trap**: Optimizing for a single metric often degrades others.
@@ -343,15 +344,7 @@ Statistical validity is only part of the story. Even statistically significant i
 
 Current benchmarking paradigms often fall short by measuring narrow task performance while missing characteristics that determine real-world system effectiveness. Most existing benchmarks evaluate supervised learning performance on static datasets, primarily testing pattern recognition capabilities rather than the adaptability and resilience required for production deployment. This limitation becomes apparent when models achieve excellent benchmark performance yet fail under slightly different conditions or domains. Comprehensive system evaluation must therefore measure learning efficiency, continual learning capability, and out-of-distribution generalization alongside traditional metrics.
 
-These measurement challenges motivate a three-dimensional evaluation framework:
-
-1. **Model benchmarks** validate whether optimization techniques from @sec-model-compression preserved accuracy, calibration, and robustness. A pruned model might maintain top-1 accuracy while losing calibration; a quantized model might preserve average-case performance while degrading on edge cases.
-
-2. **System benchmarks** validate whether the acceleration strategies from @sec-ai-acceleration deliver their promised throughput, latency, and efficiency. Hardware specifications often describe theoretical peaks that real workloads never achieve.
-
-3. **Data benchmarks** validate whether data curation strategies from @sec-data-selection produced training sets that enable robust generalization. A model might achieve excellent accuracy on held-out test data while failing on production inputs with different characteristics.
-
-The bulk of this chapter focuses on **system benchmarking** (training benchmarks, inference benchmarks, and power measurement) because these form the foundation of standardized evaluation through MLPerf. Model and data benchmarking require different methodologies and are treated in detail in @sec-benchmarking-ai-model-data-benchmarking-e0ca after we establish system evaluation foundations.
+The measurement challenges above motivate evaluating each dimension of our three-dimensional framework—system, model, and data—with distinct methodologies. The bulk of this chapter focuses on **system benchmarking** (training benchmarks, inference benchmarks, and power measurement) because these form the foundation of standardized evaluation through MLPerf. Model and data benchmarking require different methodologies and are treated in detail in @sec-benchmarking-ai-model-data-benchmarking-e0ca after we establish system evaluation foundations.
 
 ### System Benchmarks {#sec-benchmarking-ai-system-benchmarks-393c}
 
@@ -1923,8 +1916,6 @@ Where training benchmarks ask "how quickly can we learn?" inference benchmarks a
 
 Inference benchmarks validate whether hardware acceleration and model compression translate to production-ready serving performance. This is where the optimization chapters converge: the accelerated hardware from @sec-ai-acceleration runs compressed models from @sec-model-compression to deliver real-time predictions. Inference benchmarks reveal whether theoretical speedups become actual latency reductions under realistic deployment conditions.
 
-Unlike training benchmarks that tolerate high latency in exchange for throughput, inference benchmarks enforce strict latency constraints that expose system weaknesses: cold-start delays, memory fragmentation, thermal throttling, and the gap between batch-optimized throughput and single-request latency. A system achieving excellent training benchmark scores may fail inference benchmarks if it cannot maintain consistent sub-10ms response times under variable load.
-
 ::: {.callout-definition title="ML Inference Benchmarks"}
 
 ***ML Inference Benchmarks*** quantify the system's ability to meet **Latency Constraints** under load. Unlike training benchmarks which optimize for pure throughput, inference benchmarks measure the **Tail Latency** (p99) and **Jitter** of the serving stack, validating its suitability for interactive applications.
@@ -2044,13 +2035,6 @@ A critical distinction in inference benchmarking is between component latency (t
 | **Response serialization** |          0.1-1 ms | JSON/protobuf              |
 
 : **Inference Latency Breakdown.** Different components contribute to end-to-end latency, with model inference often representing only a fraction of total request time. {#tbl-latency-breakdown}
-
-**Implications for benchmarking:**
-
-1. **Preprocessing dominance**: For vision models, image decoding and resizing can exceed model inference time, especially for high-resolution inputs
-2. **Queue effects**: Under load, queuing delay often dominates, making isolated model benchmarks misleading
-3. **Network realities**: Edge deployment benchmarks should include network latency to cloud fallback scenarios
-4. **First-token vs. total latency**: For LLMs, first-token latency (time to generate the first output token) differs significantly from total generation time
 
 These component-level contributions explain why optimizing any single stage yields diminishing returns on end-to-end performance, an *optimization ceiling* formalized by **Amdahl's Law**.
 
@@ -2207,12 +2191,7 @@ The key insight from @tbl-metric-priorities is that the *same metric* can be pri
 Even with well-defined metrics, benchmarking inference systems can be challenging. Missteps during the evaluation process often lead to misleading conclusions. Students and practitioners should be aware of common pitfalls when analyzing inference performance.
 
 **Overemphasis on Average Latency.**
-
-While average latency provides a baseline measure of response time, it fails to capture how a system performs under peak load. In real-world scenarios, worst-case latency, which is captured through metrics such as p95[^fn-p95] or p99[^fn-p99] tail latency, can significantly impact system reliability. For instance, a conversational AI system may fail to provide timely responses if occasional latency spikes exceed acceptable thresholds.
-
-[^fn-p95]: **P95 Latency**: The 95th percentile latency measurement, meaning 95% of requests complete within this time while 5% take longer. For example, if p95 latency is 100ms, then 19 out of 20 requests finish within 100ms. P95 is widely used in SLA agreements because it captures typical user experience while acknowledging that some requests will naturally take longer due to system variability.
-
-[^fn-p99]: **P99 Latency**: The 99th percentile latency measurement, indicating that 99% of requests complete within this time while only 1% experience longer delays. P99 latency is critical for user-facing applications where even rare slow responses significantly impact user satisfaction. For instance, if a web service handles 1 million requests daily, p99 latency determines the experience for 10,000 users.
+As established above, tail latency (p95, p99) determines production reliability, not averages. Conversational AI systems failing to maintain tail latency targets will exhibit unacceptable response delays regardless of acceptable average performance.
 
 **Ignoring Memory and Energy Constraints.**
 A model with excellent throughput or latency may be unsuitable for mobile or edge deployments if it requires excessive memory or power. For example, an inference system designed for cloud environments might fail to operate efficiently on a battery-powered device. Proper benchmarks must consider memory footprint and energy consumption to ensure practicality across deployment contexts.
