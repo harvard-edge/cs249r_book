@@ -2,51 +2,53 @@
 
 Project-wide conventions for AI assistance.
 
-## QMD Inline Python: Two Approaches
+## QMD Inline Python: The Just-in-Time Pattern
 
-When working with `.qmd` files, there are two approaches for inline Python:
+When working with `.qmd` files, Python compute cells should follow the **just-in-time pattern**: small, focused cells placed immediately before the prose that uses their values.
 
-### Approach 1: Pre-Formatted Strings (Simple Values)
+### Cell Documentation Format
 
-For simple values outside of LaTeX math blocks, use pre-formatted `_str` variables:
-
-```python
-# ✅ GOOD - In Python block, format everything as strings
-cloud_compute_ms_str = f"{cloud_stats['compute_ms']:.3f}"
-ratio_str = f"{ratio:.0f}"
-```
-
-```markdown
-<!-- ✅ GOOD - Reference pre-formatted strings -->
-Compute time: `{python} cloud_compute_ms_str` ms
-```
-
-### Approach 2: Markdown() for LaTeX (Nice Fractions & Math)
-
-For LaTeX math with dynamic values (fractions, scientific notation), use `Markdown()` from IPython:
+Every compute cell should have a documentation header box:
 
 ```python
-from IPython.display import Markdown
-from calc.formulas import md_frac, md_sci, md_math
+```{python}
+#| echo: false
+#| label: descriptive-name
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CELL NAME IN CAPS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Which section/callout/figure uses these values
+# │
+# │ Why: 2-3 sentences explaining the pedagogical purpose of this calculation
+# │
+# │ Imports: physx.constants (LIST_CONSTANTS), physx.formatting (fmt)
+# │ Exports: var1_str, var2_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import CONSTANT1, CONSTANT2
+from physx.formatting import fmt
 
-# Create Markdown objects that preserve LaTeX
-frac_result = md_frac("4.10 × 10⁹", "3.12 × 10¹⁴", "0.013", "ms")
-sci_result = md_sci(RESNET50_FLOPs)
-math_eq = md_math(f"T_{{comp}} = {value}")
+# --- Inputs (description of source) ---
+input_var = 100                          # description
+
+# --- Outputs (formatted strings for prose) ---
+output_value = input_var * 2
+output_str = fmt(output_value, precision=0)  # e.g. "200" units
+` ` `
 ```
+
+### Inline Python with LaTeX Math
+
+When combining Python values with mathematical notation, use **simple mixing**:
 
 ```markdown
-<!-- ✅ GOOD - Markdown() preserves LaTeX -->
-Compute time: `{python} frac_result`
+<!-- ✅ GOOD - Mix inline Python with LaTeX $...$ -->
+`{python} params_b_str` $\times 10^9$ $\times$ `{python} bytes_str` bytes = `{python} result_str` GB
 ```
 
-**Helper functions in `calc/formulas.py`:**
-- `md(latex_str)` - Wrap any LaTeX string
-- `md_frac(num, denom, result, unit)` - Create fraction with optional result
-- `md_sci(val, precision)` - Scientific notation wrapped in Markdown
-- `md_math(expr)` - Wrap math expression in $...$
-- `sci(val)` - Unicode scientific notation for plain text (e.g., "4.10 × 10⁹")
-- `sci_latex(val)` - LaTeX scientific notation for use inside fractions (e.g., "4.10 \\times 10^{9}")
+**Key rules:**
+- Python variables hold simple formatted strings (no LaTeX)
+- LaTeX `$...$` wraps math symbols (`×`, `10^9`, `\times`)
+- Use Unicode `×` in tables (tables don't process LaTeX)
 
 ### What NOT To Do
 
@@ -57,22 +59,24 @@ $T = `{python} value`$ ms  <!-- Decimals get stripped! -->
 <!-- ❌ BAD - Inline f-string formatting -->
 `{python} f"{value:.2f}"`
 
-<!-- ❌ BAD - Function calls inline (except Markdown helpers) -->
+<!-- ❌ BAD - Function calls inline -->
 `{python} fmt(value, "ms", 3)`
+
+<!-- ❌ BAD - Plain text exponents -->
+`{python} value` × 10^9 × 2  <!-- 10^9 won't render as superscript! -->
 ```
 
-### Why This Matters
+### LaTeX Formatting Rules
 
-Quarto automatically escapes inline code output, which breaks:
-1. **LaTeX backslashes**: `\times` → `times`, `\frac` → `frac`
-2. **Decimal points** inside `$...$` math blocks
-3. **Superscripts**: `^{9}` → `{9}`
-
-Using `Markdown()` tells Quarto to render the output as-is, preserving LaTeX.
+| Context | Correct Format | Wrong Format |
+|---------|----------------|--------------|
+| Prose | `$10^{12}$` | `10^12` |
+| Tables | `×` (Unicode) | `\times` or `$\times$` |
+| Python strings | `f"{value}"` | `f"$10^{value}$"` |
 
 ### Validation
 
-Run validation to check for violations:
+Run validation to check all inline references resolve:
 ```bash
-python3 book/quarto/calc/validate_inline_refs.py --check-patterns
+python3 book/quarto/physx/validate_inline_refs.py --verbose
 ```

@@ -54,6 +54,14 @@ INLINE_FSTRING = re.compile(r'`\{python\}\s*f"[^`]+`')
 # Pattern 5: Inline function calls (should be pre-computed as _str)
 INLINE_FUNC_CALL = re.compile(r'`\{python\}\s*\w+\([^`]+\)`')
 
+# Pattern 6: Inline Python in YAML cell options (fig-cap, tbl-cap, etc.)
+# These NEVER render - Quarto passes YAML options as literal strings
+YAML_OPTION_INLINE = re.compile(r'^#\|\s*(fig-cap|tbl-cap|lst-cap|fig-alt):\s*.*`\{python\}')
+
+# Pattern 7: Inline Python in Quarto caption syntax (: Caption {#tbl-...} or {#fig-...})
+# These also NEVER render - the caption line is parsed as metadata
+CAPTION_SYNTAX_INLINE = re.compile(r'^:\s+.*`\{python\}.*\{#(tbl|fig|lst)-')
+
 
 def extract_compute_vars(lines):
     """Extract all variable names assigned in ```{python} compute cells."""
@@ -136,7 +144,21 @@ def check_rendering_patterns(qmd_path, verbose=False):
                 "Inline function call - pre-compute as _str variable in Python block"))
             if verbose:
                 print(f"  ⚠ {qmd_path.name}:{i} — Inline function call")
-    
+
+        # Check for inline Python in YAML cell options (NEVER renders!)
+        if YAML_OPTION_INLINE.search(line):
+            warnings.append((filepath, i, "YAML_OPTION",
+                "Inline Python in YAML option (fig-cap/tbl-cap) - NEVER renders! Use hardcoded value or plt.suptitle()"))
+            if verbose:
+                print(f"  ✗ {qmd_path.name}:{i} — Python in YAML option (will appear literally)")
+
+        # Check for inline Python in Quarto caption syntax (: Caption {#tbl-...})
+        if CAPTION_SYNTAX_INLINE.search(line):
+            warnings.append((filepath, i, "CAPTION_SYNTAX",
+                "Inline Python in caption (: ... {#tbl/fig-}) - NEVER renders! Use hardcoded value."))
+            if verbose:
+                print(f"  ✗ {qmd_path.name}:{i} — Python in caption syntax (will appear literally)")
+
     return warnings
 
 

@@ -26,6 +26,10 @@ _Why do the models that win benchmarks rarely become the models that run in prod
 
 Training produced a capable model, yet capability alone does not guarantee deployability: Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond—and the model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets. Model compression exists to bridge it—to transform research artifacts into production assets by *systematically trading capabilities the deployment does not need for constraints the deployment cannot violate*. The discipline is not about making models smaller but about *making the right models possible*.
 
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
 ::: {.callout-tip title="Learning Objectives"}
 
 - Explain the three-part optimization framework: model representation (pruning), numerical precision (quantization), and architectural efficiency (distillation)
@@ -154,7 +158,7 @@ gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp_value}}}
 ## Model Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
 \index{Model Optimization|see{Model Compression}}
 
-A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving-systems) is not a minor inconvenience but a fundamental chasm that defines the field of model compression.
+This chapter addresses the fundamental gap between training and deployment. A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving-systems) is not a minor inconvenience but a fundamental chasm that defines the field of model compression.
 
 Recall the **Silicon Contract** (@sec-silicon-contract)—the implicit agreement every model makes with its hardware about which resource it will saturate. The three candidates are compute throughput, memory bandwidth, and memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-ai-training, we used Mixed Precision (FP16) to speed up these training cycles while maintaining the ability to learn. Here, we go further—to INT8 and beyond—for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context—specifically, the **Latency-Critical** environment of @sec-model-serving-systems: reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
@@ -485,16 +489,16 @@ Optimization is a search for the **Pareto Frontier**.
 
 @tbl-optimization-tradeoffs summarizes the key optimization techniques, their systems benefits, and their ML costs. These are empirical relationships—actual results depend on model architecture, task, and careful implementation.
 
-| **Technique** | **Systems Gain** | **ML Cost** | **Typical Impact** | **Region** |
-|:--------------|:-----------------|:------------|:-------------------|:----------:|
-| **Operator Fusion** | 10–30% latency reduction | None | No accuracy loss | 1 |
-| **FP32 → BF16** | 2× memory, ~2× throughput | Minimal | <0.1% accuracy drop | 1 |
-| **FP16 → INT8** | 2× memory, 2–4× throughput | Quantization error | 0.5–1% accuracy drop | 2 |
-| **50% Pruning** | ~2× smaller model | Capacity loss | 0.5–1% accuracy drop | 2 |
-| **Knowledge Distillation** | 2–10× smaller student | Capability ceiling | 1–3% accuracy drop | 2 |
-| **4-bit Quantization** | 4× memory reduction | Significant error | 2–5% accuracy drop | 2–3 |
-| **90% Pruning** | ~10× smaller model | Severe capacity loss | 5–15% accuracy drop | 3 |
-| **↑ Batch Size (8×)** | Higher throughput, better GPU util | Generalization gap | Requires LR scaling | — |
+| **Technique**              | **Systems Gain**                   | **ML Cost**          | **Typical Impact**   | **Region** |
+|:-------------------------|:---------------------------------|:-------------------|:-------------------|:--------:|
+| **Operator Fusion**        | 10–30% latency reduction           | None                 | No accuracy loss     |     1      |
+| **FP32 → BF16**            | 2× memory, ~2× throughput          | Minimal              | <0.1% accuracy drop  |     1      |
+| **FP16 → INT8**            | 2× memory, 2–4× throughput         | Quantization error   | 0.5–1% accuracy drop |     2      |
+| **50% Pruning**            | ~2× smaller model                  | Capacity loss        | 0.5–1% accuracy drop |     2      |
+| **Knowledge Distillation** | 2–10× smaller student              | Capability ceiling   | 1–3% accuracy drop   |     2      |
+| **4-bit Quantization**     | 4× memory reduction                | Significant error    | 2–5% accuracy drop   |    2–3     |
+| **90% Pruning**            | ~10× smaller model                 | Severe capacity loss | 5–15% accuracy drop  |     3      |
+| **↑ Batch Size (8×)**      | Higher throughput, better GPU util | Generalization gap   | Requires LR scaling  |     —      |
 
 : **The Optimization Tradeoffs.** Region 1 = Free Lunch, Region 2 = Efficient Trade, Region 3 = Danger Zone. Batch size affects training dynamics rather than model quality directly. These ranges are empirical guidelines from published benchmarks [@jacob2018quantization; @han2015deep; @hinton2015distilling]; actual results vary with architecture, task, and implementation quality. {#tbl-optimization-tradeoffs}
 
@@ -536,7 +540,7 @@ Three key techniques address this challenge through distinct but complementary a
 
 Pruning\index{Pruning!overview}[^fn-pruning-etymology] directly addresses memory efficiency constraints by eliminating redundant parameters. Modern neural networks are heavily overparameterized, often containing far more weights than are strictly necessary to solve a task. This redundancy allows us to remove a significant fraction of weights without substantial performance degradation. As we will explore in @sec-ai-acceleration, specialized hardware can further exploit these sparse structures.
 
-[^fn-pruning-etymology]: **Pruning**: Borrowed from horticulture, where gardeners prune branches to improve plant health and growth. The ML metaphor fits precisely: just as removing unproductive branches redirects resources to productive growth, removing low-magnitude weights redirects computational resources to parameters that matter. The technique dates to optimal brain damage [@lecun1990optimal], which formalized the gardener's intuition with second-derivative analysis.
+[^fn-pruning-etymology]: **Pruning**: Borrowed from horticulture, where gardeners prune branches to improve plant health and growth. The ML metaphor fits precisely: just as removing unproductive branches redirects resources to productive growth, removing low-magnitude weights redirects computational resources to parameters that matter. The technique dates to Yann LeCun's "Optimal Brain Damage" (Bell Labs, 1989) [@lecun1990optimal], which formalized the gardener's intuition with second-derivative analysis. Babak Hassibi and colleagues at Stanford extended this with "Optimal Brain Surgeon" (1993), using full Hessian information for more precise cuts. The field then lay largely dormant for two decades until Song Han (Stanford, later MIT) revived it for deep learning in 2015 [@han2015deep], demonstrating that modern networks could be pruned by 90% without accuracy loss—a finding that launched the modern model compression era.
 
 ::: {.callout-definition title="Pruning"}
 ***Pruning***\index{Pruning!definition} is the sparsification of the **Parameter Space**. It removes weights that contribute minimal information to the **Loss Landscape**, converting dense matrices into sparse structures to reduce **Memory Footprint** and, with specialized hardware, **FLOPs**, at the cost of **Regularity**.
@@ -1911,7 +1915,7 @@ This limitation leads to **knowledge distillation**, a fundamentally different a
 
 **Knowledge distillation**\index{Knowledge Distillation!teacher-student framework}\index{Knowledge Distillation!definition}[^fn-distillation-etymology] trains a smaller **student**\index{Knowledge Distillation!student model} model using guidance from a larger, pre-trained **teacher**\index{Knowledge Distillation!teacher model} model. The core insight is that a well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label\index{Knowledge Distillation!hard labels} is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**\index{Knowledge Distillation!soft labels}, showing that a cat shares more features with a dog than a fox. Notice in @fig-kd-targets how this "dark knowledge" embedded in the teacher's probability distribution reveals inter-class relationships that guide the student to generalize better.
 
-[^fn-distillation-etymology]: **Distillation**: Borrowed from chemistry, where distillation separates mixtures by selective evaporation and condensation, extracting the essence while leaving impurities behind. Hinton et al. [@hinton2015distilling] chose this metaphor deliberately: the teacher's "dark knowledge" about class relationships is the essence being extracted, while the massive parameter count is the impurity left behind. The temperature parameter $T$ in the softmax even mirrors the literal temperature control in chemical distillation.
+[^fn-distillation-etymology]: **Distillation**: Borrowed from chemistry, where distillation separates mixtures by selective evaporation and condensation, extracting the essence while leaving impurities behind. The concept predates its famous 2015 formulation: Rich Caruana and colleagues at Cornell demonstrated in 2006 that ensemble models could be "compressed" into single networks by training on the ensemble's predictions, achieving a model "a thousand times smaller and faster." Geoffrey Hinton, Oriol Vinyals, and Jeff Dean at Google [@hinton2015distilling] transformed this into a practical technique for deep networks by introducing temperature-scaled softmax, which controls how much "dark knowledge" about class relationships the student can absorb. The temperature parameter $T$ even mirrors the literal temperature control in chemical distillation—higher temperatures reveal more of the teacher's uncertainty structure.
 
 ::: {#fig-kd-targets fig-env="figure" fig-pos="htb" fig-cap="**Soft Target Distribution**: The teacher's relative confidence levels indicate which classes are semantically similar (e.g., cat vs. dog), providing a much richer supervision signal than a binary \"correct\" label." fig-alt="Bar chart showing probability distribution across three animal classes: Cat at 85 percent, Dog at 10 percent, Fox at 5 percent. Demonstrates how soft labels capture inter-class similarity."}
 ```{.tikz}
@@ -2687,7 +2691,7 @@ Test your understanding of the structural optimization techniques covered so far
 
 Quantization[^fn-quantization-etymology] affects every neural network weight and activation stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower.
 
-[^fn-quantization-etymology]: **Quantization**: From Latin "quantus" (how much), via quantum physics where it describes discrete energy levels. In signal processing (1940s-1960s), quantization meant mapping continuous values to discrete levels, introducing "quantization error." ML borrowed this term directly: converting FP32 weights to INT8 maps continuous values to 256 discrete levels, trading precision for efficiency. The error analysis parallels signal processing exactly.
+[^fn-quantization-etymology]: **Quantization**: From Latin "quantus" (how much), via quantum physics where it describes discrete energy levels. The technique's theoretical foundations trace to Claude Shannon at Bell Labs, whose 1948 paper "A Mathematical Theory of Communication" established the fundamental limits of representing continuous signals with discrete values. In signal processing (1940s-1960s), quantization meant mapping continuous values to discrete levels, introducing "quantization error"—and Shannon proved exactly how much precision you could sacrifice before information was irretrievably lost. ML borrowed both the term and the mathematics directly: converting FP32 weights to INT8 maps continuous values to 256 discrete levels, trading precision for efficiency. When we analyze quantization error in neural networks, we are applying Shannon's six-decade-old framework to a new domain.
 
 This choice directly impacts three system properties:
 
@@ -3598,16 +3602,16 @@ x_recon_str = fmt(x_recon_value, precision=2, commas=False)   # "0.00"
 **The Affine Quantization Formula**: How do we map a floating-point range $[\alpha, \beta]$ to an integer range $[0, 2^b-1]$ (e.g., UINT8)?
 
 **The Math**:
-We need a linear mapping $x \approx s(x_q - z)$, where $s$ is the **scale** (step size) and $z$ is the **zero-point** (integer value corresponding to real zero).
+We need a linear mapping $x \approx s(x_q - z)$, where $s$ is the **scale** (step size) and $z$ is the **zero-point** (integer value corresponding to real zero). The affine quantization process consists of three steps formalized in @eq-quant-scale, @eq-quant-zero-point, and @eq-quantize.
 
 1.  **Calculate Scale ($s$)**: Divide the real range by the integer range.
-    $$s = \frac{\beta - \alpha}{2^b - 1}$$
+    $$s = \frac{\beta - \alpha}{2^b - 1}$$ {#eq-quant-scale}
 
 2.  **Calculate Zero-Point ($z$)**: Shift the range so that real zero maps to an integer.
-    $$z = \text{round}\left(\frac{-\alpha}{s}\right)$$
+    $$z = \text{round}\left(\frac{-\alpha}{s}\right)$$ {#eq-quant-zero-point}
 
 3.  **Quantize ($x \to x_q$)**:
-    $$x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 2^b - 1\right)$$
+    $$x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 2^b - 1\right)$$ {#eq-quantize}
 
 **Example**:
 Suppose your activations range from $\alpha$ = `{python} alpha_str` to $\beta$ = `{python} beta_str`. You want to quantize to UINT8 ($b=8$).

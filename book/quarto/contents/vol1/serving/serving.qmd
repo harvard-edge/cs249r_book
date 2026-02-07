@@ -23,6 +23,10 @@ _Why does serving invert every optimization priority that made training successf
 
 Training and serving demand opposite physics. Training maximizes **Throughput** ($T \approx \text{samples/second}$)—large batches and long epochs where latency spikes are absorbed invisibly. Serving demands **Latency** minimization ($L_{lat} \approx \text{ms/request}$)—individual requests answered in milliseconds, where a single slow response is a *broken product*. Training amortizes hardware costs across billions of examples; serving pays a tax on every single request, where inefficiency compounds into massive operational debt. This inversion is why models that train beautifully often serve poorly: the batch-heavy architectures designed to saturate accelerators are fundamentally ill-suited for the bursty, latency-critical reality of production, and optimizations validated under controlled benchmark conditions routinely fail to survive contact with production reality.
 
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
 ::: {.callout-tip title="Learning Objectives"}
 
 - Explain the inversion from throughput optimization to latency minimization that distinguishes serving from training
@@ -82,7 +86,7 @@ h100_tdp = f"{h100_tdp_value:.0f}"                                         # e.g
 
 ## The Serving Paradigm {#sec-model-serving-systems-serving-paradigm-9634}
 
-Serving\index{Serving!production deployment}\index{Model Serving!paradigm shift} marks the transition from model development to production deployment, where the **Iron Law of ML Systems** (@sec-silicon-contract) undergoes a fundamental shift. The **Latency term**\index{Latency!serving constraint} ($L_{lat}$), representing the irreducible overhead of request scheduling, network round-trips, and system orchestration, becomes the dominant constraint rather than a rounding error.
+This chapter examines what happens when models meet real users. Serving\index{Serving!production deployment}\index{Model Serving!paradigm shift} marks the transition from model development to production deployment, where the **Iron Law of ML Systems** (@sec-silicon-contract) undergoes a fundamental shift. The **Latency term**\index{Latency!serving constraint} ($L_{lat}$), representing the irreducible overhead of request scheduling, network round-trips, and system orchestration, becomes the dominant constraint rather than a rounding error.
 
 This throughput-to-latency inversion has concrete engineering implications. Prior chapters established techniques that must now be revalidated: @sec-benchmarking-ai measured performance under controlled conditions, but serving faces traffic patterns that no benchmark could anticipate; @sec-model-compression provided quantization methods that reduced model size, but serving must confirm those optimizations preserve accuracy under real traffic distributions. This fundamental shift in constraints creates what we call the *serving inversion*\index{Serving Inversion!throughput to latency}.
 
@@ -1146,7 +1150,7 @@ ridge_point_str = f"{ridge_point_value}"                                     # e
 | **512×512**    | `{python} act_512_mb_str`MB | `{python} ai_512_str` FLOPs/byte | Memory BW      |
 | **640×640**    | `{python} act_640_mb_str`MB | `{python} ai_640_str` FLOPs/byte | Memory BW      |
 
-: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (`{python} v100_tflops_fp32` TFLOPS FP32, `{python} v100_bw` GB/s bandwidth), the ridge point is approximately `{python} ridge_point_str` FLOPs/byte. At 224x224, compute dominates; by 512x512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
+: **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity decreases with resolution as activation sizes grow. For a V100 PCIe (15.7 TFLOPS FP32, 900 GB/s bandwidth), the ridge point is approximately 16 FLOPs/byte. At 224×224, compute dominates; by 512×512, memory bandwidth becomes the limiting factor. {#tbl-resolution-bottleneck}
 
 #### Resolution Strategies in Production {#sec-model-serving-systems-deploymentspecific-resolution-decisions-1d76}
 
@@ -1225,9 +1229,9 @@ In a serialized serving system, the hardware sits idle during network I/O and CP
 
 Pipelining is enabled by **Asynchronous I/O**\index{Asynchronous I/O!pipelining} and **Concurrency Models**\index{Concurrency!serving models}. Instead of waiting for a GPU kernel to finish, the server's CPU thread submits the work to the GPU's command queue and immediately begins preprocessing the next incoming request.
 
-**The Systems Metric: Hardware Duty Cycle.** In the "Quantitative Approach" to ML systems, we define the efficiency of a serving system by its ability to saturate the bottleneck resource. For most ML systems, this is the GPU's compute cores or memory bandwidth.
+**The Systems Metric: Hardware Duty Cycle.** In the "Quantitative Approach" to ML systems, we define the efficiency of a serving system by its ability to saturate the bottleneck resource. For most ML systems, this is the GPU's compute cores or memory bandwidth. We quantify this in @eq-system-efficiency:
 
-$$\text{System Efficiency} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$
+$$\text{System Efficiency} = \frac{\sum T_{\text{compute}}}{\text{Wall Clock Time} \times \text{Resource Count}}$$ {#eq-system-efficiency}
 
 If a ResNet-50 request takes 10ms total (5ms GPU, 5ms CPU), a serial system achieves only 50% efficiency. By pipelining just two requests, efficiency approaches 100% (assuming the CPU can keep up with the GPU). If the CPU is too slow to feed the GPU, the system becomes **CPU-bound**, and further model optimization provides zero throughput gain, a direct application of **Amdahl's Law** (introduced in @sec-ml-system-architecture) to serving: if preprocessing consumes 50% of latency, maximum speedup is 2x regardless of how fast the model runs.
 
@@ -1371,7 +1375,7 @@ This equation reveals why serving systems exhibit nonlinear behavior: small incr
 
 The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1\index{M/D/1 Queue!deterministic service} (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. @tbl-utilization-latency reveals how average **latency** grows rapidly as utilization approaches 100%. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-queuing-models]
 
-[^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning.
+[^fn-queuing-models]: **Kendall Notation**: The M/M/1 notation was introduced by British statistician David Kendall in 1953 and follows the pattern A/S/c (Arrivals/Service/servers). "M" stands for "Markovian" (memoryless, meaning exponential distributions), honoring Russian mathematician Andrey Markov (1856-1922). "D" means deterministic. So M/M/1 describes a single server with exponential arrivals and service times, while M/D/1 has deterministic service. ML inference is closer to M/D/1 since inference time is nearly constant, but M/M/1 yields conservative estimates suitable for capacity planning. The mathematics underlying all queuing models traces to Agner Krarup Erlang, a Danish engineer at the Copenhagen Telephone Company who published the foundational formulas in 1909 to determine how many telephone circuits were needed to handle call traffic—the same capacity planning problem ML engineers face today with inference requests instead of phone calls.
 
 | **Utilization ($\rho$)** | **Latency Multiple** | **Example (5ms service)** |
 |:-----------------------|-------------------:|------------------------:|
@@ -2078,15 +2082,16 @@ T_window_str = fmt(T_window_value, precision=0, commas=False)                   
 | 16             |           14.6ms |            24.6ms |      650 img/s | High           |
 | 32             |           24.2ms |            34.2ms |      935 img/s | Maximum        |
 
-: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with `{python} T_window_str` ms batching window. Throughput increases `{python} throughput_increase_str` x from batch size 1 to 32 (`{python} b1_throughput_str` to `{python} b32_throughput_str` img/s), but total latency more than doubles (`{python} b1_latency_str` ms to `{python} b32_latency_str` ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
+: **Batching Throughput Analysis**: ResNet-50 throughput on V100 with 10 ms batching window. Throughput increases 14.6× from batch size 1 to 32 (64 to 935 img/s), but total latency more than doubles (15.6 ms to 34.2 ms). The optimal configuration depends on whether the latency SLO or throughput target is the binding constraint. {#tbl-batching-throughput}
 
 The throughput gains in @tbl-batching-throughput trace directly back to the **Iron Law** framework established in @sec-ai-training-iron-law-training-performance-a53f, where batching amortizes the fixed overhead term.
 
 ::: {.callout-notebook title="The Iron Law of Batching Efficiency"}
 
 **The Iron Law Connection:**
-In serving, we maximize throughput by amortizing the **Latency Term** ($L_{lat}$).
-$$ T = \frac{O}{R_{peak} \cdot \eta} + L_{lat} $$
+In serving, we maximize throughput by amortizing the **Latency Term** ($L_{lat}$), as shown in @eq-compute-time:
+
+$$ T = \frac{O}{R_{peak} \cdot \eta} + L_{lat} $$ {#eq-compute-time}
 
 **Deriving the Sweet Spot:**
 
@@ -3146,9 +3151,9 @@ The model generates 256 tokens sequentially. This phase is memory-bandwidth boun
 
 Recall the **Energy-Movement Invariant** from @sec-data-engineering-ml: moving a bit is 100–1,000× more expensive than computing on it. In the **Decode Phase**, this law determines the physical "cost per word."
 
-**The Memory Wall for Generative AI**: Because the decode phase has an arithmetic intensity of $\approx 1$ FLOP/byte (we must read every weight just to generate one token), performance is strictly limited by memory bandwidth ($BW$), not compute.
+**The Memory Wall for Generative AI**: Because the decode phase has an arithmetic intensity of $\approx 1$ FLOP/byte (we must read every weight just to generate one token), performance is strictly limited by memory bandwidth ($BW$), not compute. This relationship is captured in @eq-token-generation-time:
 
-$$ T_{\text{token}} \approx \frac{\text{Model Size (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}} $$
+$$ T_{\text{token}} \approx \frac{\text{Model Size (Bytes)}}{\text{Memory Bandwidth (Bytes/s)}} $$ {#eq-token-generation-time}
 
 **The Engineering Implication**:
 Every time you generate a token, you are paying a massive "energy tax" to move the model's logic from HBM into compute registers. For Llama-3-8B (3.5 GB int4), an A100 80GB (`{python} a100_bw_tbs` TB/s HBM2e) generates tokens at $\approx 1.7$ ms/token. Adding more *compute cores* yields **zero** latency improvement; only faster memory (Physics) or smaller models (Algorithm) can speed up generation.
