@@ -192,9 +192,15 @@ TinyTorch is built by a passionate community dedicated to making ML systems educ
   <div class="section-label">Community Staff</div>
 
   <div class="staff-row">
+    <a href="https://github.com/kai4avaya" class="team-staff">
+      <img src="https://avatars.githubusercontent.com/kai4avaya?v=4&s=120" alt="kai" />
+      <div class="name">kai</div>
+      <div class="role">🌐 Web Wizard</div>
+    </a>
+
     <a href="https://github.com/AndreaMattiaGaravagno" class="team-staff">
-      <img src="https://avatars.githubusercontent.com/AndreaMattiaGaravagno?v=4&s=120" alt="Andrea Garavagno" />
-      <div class="name">Andrea Garavagno</div>
+      <img src="https://avatars.githubusercontent.com/u/22458187?v=4" alt="AndreaMattiaGaravagno" />
+      <div class="name">AndreaMattiaGaravagno</div>
       <div class="role">🧭 Tech Lead</div>
     </a>
 
@@ -204,11 +210,6 @@ TinyTorch is built by a passionate community dedicated to making ML systems educ
       <div class="role">👑 Chief of Staff</div>
     </a>
 
-    <a href="https://github.com/kai4avaya" class="team-staff">
-      <img src="https://avatars.githubusercontent.com/kai4avaya?v=4&s=120" alt="Kai Kleinbard" />
-      <div class="name">Kai Kleinbard</div>
-      <div class="role">🌐 Web Wizard</div>
-    </a>
   </div>
 
   <div class="section-label">Contributors</div>
@@ -232,6 +233,11 @@ TinyTorch is built by a passionate community dedicated to making ML systems educ
     <span class="name">Avik De</span>
     <span class="roles">🪲 🧪</span>
   </a>
+  <a href="https://github.com/Takosaga" class="team-member">
+    <img src="https://avatars.githubusercontent.com/Takosaga?v=4&s=160" alt="Takosaga" />
+    <span class="name">Takosaga</span>
+    <span class="roles">🪲 ✍️</span>
+  </a>
   <a href="https://github.com/rnjema" class="team-member">
     <img src="https://avatars.githubusercontent.com/rnjema?v=4&s=160" alt="rnjema" />
     <span class="name">rnjema</span>
@@ -252,35 +258,35 @@ TinyTorch is built by a passionate community dedicated to making ML systems educ
     <span class="name">jettythek</span>
     <span class="roles">🧑‍💻</span>
   </a>
-  <a href="https://github.com/Takosaga" class="team-member">
-    <img src="https://avatars.githubusercontent.com/Takosaga?v=4&s=160" alt="Takosaga" />
-    <span class="name">Takosaga</span>
-    <span class="roles">🪲</span>
-  </a>
   <a href="https://github.com/wz1114841863" class="team-member">
     <img src="https://avatars.githubusercontent.com/wz1114841863?v=4&s=160" alt="wzz" />
     <span class="name">wzz</span>
     <span class="roles">🪲</span>
   </a>
   <a href="https://github.com/ngbolin" class="team-member">
-    <img src="https://avatars.githubusercontent.com/ngbolin?v=4&s=160" alt="Ng Bo Lin" />
+    <img src="https://avatars.githubusercontent.com/u/9389997?v=4" alt="Ng Bo Lin" />
     <span class="name">Ng Bo Lin</span>
     <span class="roles">✍️</span>
   </a>
   <a href="https://github.com/keo-dara" class="team-member">
-    <img src="https://avatars.githubusercontent.com/keo-dara?v=4&s=160" alt="keo-dara" />
+    <img src="https://avatars.githubusercontent.com/u/175544368?v=4" alt="keo-dara" />
     <span class="name">keo-dara</span>
     <span class="roles">🪲</span>
   </a>
   <a href="https://github.com/Kobra299" class="team-member">
-    <img src="https://avatars.githubusercontent.com/Kobra299?v=4&s=160" alt="Wayne Norman" />
+    <img src="https://avatars.githubusercontent.com/u/4283156?v=4" alt="Wayne Norman" />
     <span class="name">Wayne Norman</span>
     <span class="roles">🪲</span>
   </a>
   <a href="https://github.com/lalalostcode" class="team-member">
-    <img src="https://avatars.githubusercontent.com/lalalostcode?v=4&s=160" alt="Ilham Rafiqin" />
+    <img src="https://avatars.githubusercontent.com/u/149884766?v=4" alt="Ilham Rafiqin" />
     <span class="name">Ilham Rafiqin</span>
     <span class="roles">🪲</span>
+  </a>
+  <a href="https://github.com/oscarf189" class="team-member">
+    <img src="https://avatars.githubusercontent.com/u/28113740?v=4" alt="Oscar Flores" />
+    <span class="name">Oscar Flores</span>
+    <span class="roles">✍️</span>
   </a>
 </div>
 ```
