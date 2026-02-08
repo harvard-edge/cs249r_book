@@ -216,7 +216,26 @@ Never skip heading levels:
 - `#####` — Fine-grained topics (use sparingly)
 - `######` — Avoid; restructure instead
 
-### Rule 8: Deciding Header Level for Conversions
+### Rule 8: No Lone Sub-Headers
+
+If a section header has exactly ONE child header at the next level (no siblings), remove the child — it fragments prose without adding navigational value. The content should flow directly under the parent.
+
+```markdown
+<!-- ❌ BAD — lone child header -->
+### The Load Balancer Layer
+#### Impact on Queuing Analysis
+Content here...
+### Next Section
+
+<!-- ✅ GOOD — content flows under parent -->
+### The Load Balancer Layer
+Content about queuing analysis here...
+### Next Section
+```
+
+If the lone child has a `{#sec-...}` cross-reference ID, preserve it as an anchor: `[]{#sec-...}`.
+
+### Rule 9: Deciding Header Level for Conversions
 
 When converting a bold-start paragraph to a header, choose the level that fits the local hierarchy:
 
@@ -245,6 +264,9 @@ Is it one of 3+ parallel items, each 1-2 sentences?
   → NO: Continue...
 
 Does it introduce a topic with its own paragraph(s)?
-  → YES: Convert to header at appropriate level (Rule 1, 8)
+  → YES: Convert to header at appropriate level (Rule 1, 9)
   → NO: Remove bold or rewrite as plain prose (Rule 6)
+
+After converting, check: is the new header a lone child?
+  → YES: Remove it — let content flow under parent (Rule 8)
 ```
