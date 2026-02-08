@@ -34,9 +34,9 @@ Inference computes a single forward pass: data flows through the network, a pred
 ::: {.callout-tip title="Learning Objectives"}
 
 - Explain the Iron Law of Training Performance and identify which term (operations, peak throughput, or utilization) each optimization technique targets
-- Calculate computational requirements (FLOPs) and memory footprints (activation storage, optimizer states) for neural network training
+- Calculate computational requirements (FLOPs), memory footprints (activation storage, optimizer states), and training cost estimates for neural network training
 - Compare optimization algorithms (SGD, Adam, AdamW) based on convergence speed, memory overhead, and computational cost
-- Identify performance bottlenecks in training pipelines by applying the profile-diagnose-fix-reprofile methodology to distinguish compute-bound, memory-bound, and data-bound scenarios
+- Identify performance bottlenecks in training pipelines by applying arithmetic intensity analysis (roofline model) and the profile-diagnose-fix-reprofile methodology to distinguish compute-bound, memory-bound, and data-bound scenarios
 - Apply memory and throughput optimization strategies---including mixed-precision training, activation checkpointing, gradient accumulation, and IO-aware attention (Flash Attention)---to train large models within GPU constraints
 - Construct efficient single-machine training pipelines using data prefetching, pipeline overlapping, and the systematic optimization framework
 - Analyze when single-machine training becomes infeasible due to memory exhaustion, unacceptable training duration, or dataset scale, and evaluate the trade-offs of scaling to multi-GPU configurations
@@ -1917,7 +1917,7 @@ Text tokenization is CPU-bound (unlike image preprocessing which is I/O-bound). 
 
 :::
 
-While data pipeline throughput determines how fast training data reaches the GPU, multi-GPU training introduces a second bottleneck: the network communication required to synchronize gradients across devices. The following exercise quantifies when this communication overhead dominates.
+While data pipeline throughput determines how fast training data reaches the GPU, even single-node multi-GPU configurations (previewed here, detailed in @sec-ai-training-scaling-training-systems-adfd) introduce a second bottleneck: the network communication required to synchronize gradients across devices. The following exercise quantifies when this communication overhead dominates.
 
 ```{python}
 #| label: network-wall-calc
@@ -2074,7 +2074,7 @@ Understanding these tail effects is the difference between a practitioner who tu
 
 Libraries like cuDNN [@chetlur2014cudnn] address these challenges by providing optimized implementations for each operation type. These systems dynamically select algorithms based on input dimensions, hardware capabilities, and memory constraints. The selection process balances computational efficiency with memory usage, often requiring empirical measurement to determine optimal configurations for specific hardware setups.
 
-These hardware utilization patterns reinforce the efficiency principles established earlier. When batch size decreases from 32 to 16, GPU utilization often drops due to incomplete warp occupation. The tension between larger batch sizes (better utilization) and memory constraints (forcing smaller batches) exemplifies how the central hardware-software trade-offs permeate all levels of training system design.
+These hardware utilization patterns reinforce the batch-size--utilization relationship established in @sec-ai-training-minibatch-processing-4eb0: the tension between larger batch sizes (better utilization) and memory constraints (forcing smaller batches) permeates all levels of training system design.
 
 #### Memory Management {#sec-ai-training-memory-management-c1ec}
 
@@ -2239,7 +2239,7 @@ These operations initiate a sequence of memory accesses and computations. The sy
 
 #### Optimizer Memory in the Training Loop {#sec-ai-training-optimizer-memory-training-loop-4383}
 
-The memory scaling analysis from @sec-ai-training-optimization-algorithm-system-implications-f9f2—where SGD requires $1\times$, momentum requires $2\times$, and Adam requires $3\times$ the parameter memory—manifests concretely during each training iteration. Each parameter update involves reading current values, accessing gradients, computing the update rule, and writing modified parameters back to memory. For Adam, this includes updating and accessing the momentum and variance buffers, creating substantial memory traffic for large models.
+The optimizer memory hierarchy established in @tbl-optimizer-properties manifests concretely during each training iteration. Each parameter update involves reading current values, accessing gradients, computing the update rule, and writing modified parameters back to memory. For Adam, this includes updating and accessing the momentum and variance buffers, creating substantial memory traffic for large models.
 
 At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-ai-training-optimization-algorithm-system-implications-f9f2), a `{python} gpt2_params_b_str`B parameter model requires `{python} adam_state_gb_str` GB for optimizer state alone in FP32—before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
@@ -3375,7 +3375,7 @@ def flash_attn_2(q, k, v):
 ```
 :::
 
-#### Benchmark Results {.unnumbered}
+#### Benchmark Results
 
 Training a GPT-2 Small-scale transformer on NVIDIA A100 GPU (12 layers, 768 hidden dim, 12 heads—smaller than our XL lighthouse model to fit benchmarks on a single GPU) with varying sequence lengths:
 
@@ -4121,7 +4121,7 @@ Some models simply cannot fit. Some training runs would take years. When all the
 
 \index{Training!scaling strategies}\index{Scaling!single-device limitations}Multi-device training provides three capabilities unavailable to a single GPU: aggregate memory capacity, aggregate compute throughput, and aggregate storage bandwidth. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary. We introduce the key parallelism strategies and their trade-offs; the implementation details of multi-node distributed training---collective communication primitives, fault tolerance, and elastic scheduling---are beyond our current scope.
 
-Not all workloads benefit equally from adding more GPUs---the relationship between compute intensity and communication overhead determines whether scaling helps or hurts. To see why, examine the scaling curves in @fig-communication-tax: compute-bound workloads like image classification (blue) maintain high efficiency as GPU count grows, balanced workloads like LLM training with high-speed interconnects (green) show moderate degradation, while bandwidth-bound workloads (red) suffer the full "communication tax" as synchronization overhead accumulates with cluster size. The shaded region reveals this tax---the gap between theoretical linear scaling and actual achieved throughput. Here, $r$ denotes the fraction of step time spent on communication and the curves are illustrative.
+Not all workloads benefit equally from adding more GPUs---the relationship between compute intensity and communication overhead determines whether scaling helps or hurts. This is the **Conservation of Complexity** (introduced in @sec-ai-training-pipeline-optimizations-cd9d) at the system level: eliminating single-machine bottlenecks through parallelism introduces new communication bottlenecks across devices. Examine the scaling curves in @fig-communication-tax to see this tradeoff quantified: compute-bound workloads like image classification (blue) maintain high efficiency as GPU count grows, balanced workloads like LLM training with high-speed interconnects (green) show moderate degradation, while bandwidth-bound workloads (red) suffer the full "communication tax" as synchronization overhead accumulates with cluster size. The shaded region reveals this tax---the gap between theoretical linear scaling and actual achieved throughput. Here, $r$ denotes the fraction of step time spent on communication and the curves are illustrative.
 
 ```{python}
 #| label: fig-communication-tax
@@ -4440,7 +4440,7 @@ The practical consequence: when you configure a multi-GPU training job today, yo
 
 : **Computing Era Characteristics.** Each computing era optimized for different workload patterns. AI hypercomputing uniquely combines HPC's parallel numerical computation with warehouse-scale's distributed processing, while adding specialized support for gradient-based optimization central to neural network training. {#tbl-computing-eras}
 
-Scaling to multiple devices also amplifies the energy consumption and environmental impact of training. The *carbon footprint of training* grows proportionally with cluster size, making efficiency optimization not just a performance concern but an environmental one.
+With this historical context in mind, the practical question becomes: *when* should a practitioner accept the complexity of distributed training, and what are its broader costs? Scaling to multiple devices also amplifies the energy consumption and environmental impact of training. The *carbon footprint of training* grows proportionally with cluster size, making efficiency optimization not just a performance concern but an environmental one.
 
 ```{python}
 #| label: carbon-footprint-calc
@@ -4693,11 +4693,14 @@ This co-design principle---where algorithms, software frameworks, and hardware a
 ::: {.callout-takeaways title="Key Takeaways"}
 
 * **The Iron Law governs training**: $T_{train} = \frac{O}{R_{peak} \times \eta}$. Every optimization affects one of these terms. Identifying which term is affected is essential for effective optimization.
+* **Memory is dominated by optimizer state and activations, not weights**: Adam's two state vectors per parameter create a 3× multiplier over model size, and activation memory scales linearly with batch size and depth. Together, these determine whether a model fits on a given GPU---not the parameter count alone.
+* **Optimizer selection is a memory-convergence tradeoff**: Adam converges in roughly one-third the iterations of SGD but requires 3× the memory for per-parameter state, making the choice a binding constraint for large model training. Variants like AdamW and 8-bit Adam shift this tradeoff without eliminating it.
 * **Profiling precedes optimization**: The iterative loop is: profile → identify bottleneck → apply targeted fix → re-profile. Optimization without profiling typically wastes effort on non-bottlenecks.
 * **Mixed precision provides substantial performance gains**: FP16 training with FP32 accumulation delivers approximately 2× throughput and 2× memory reduction with typically <1% accuracy impact on most workloads.
 * **IO-aware algorithm design transforms bottleneck regimes**: Flash Attention's tiling strategy converts attention from memory-bound to compute-bound by never materializing the full $n \times n$ matrix in HBM, achieving 2--4× speedups and enabling 4× longer sequences. The principle extends beyond attention: optimizing data movement often yields larger gains than optimizing computation.
 * **Gradient checkpointing trades compute for memory**: Recomputing activations during the backward pass enables training larger models (e.g., GPT-3 scales from 1.3B to 3.7B parameters on V100s) or achieves 3–4× activation memory reduction. Essential when memory is the binding constraint.
-* **Single-machine optimizations should precede distributed training**: Distributed training adds communication overhead and complexity. A well-optimized single GPU often outperforms a poorly-optimized multi-GPU setup.
+* **Optimizations compose---and must be applied systematically**: No single technique addresses all bottlenecks. The GPT-2 walkthrough demonstrates how mixed precision, gradient checkpointing, and data prefetching must be layered together, guided by iterative profiling, to transform an infeasible 89 GB memory requirement into a practical 32 GB configuration.
+* **Single-machine optimizations should precede distributed training**: Distributed training adds communication overhead and complexity. A well-optimized single GPU often outperforms a poorly-optimized multi-GPU setup; exhaust prefetching, mixed precision, checkpointing, and accumulation before scaling out.
 * **Energy and cost scale linearly with training time**: The same optimizations that accelerate training also reduce carbon emissions and cloud costs. Efficiency improvements directly translate to reduced resource consumption.
 
 :::
