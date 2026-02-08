@@ -168,6 +168,9 @@ class BuildCommand:
         Returns:
             True if build succeeded, False otherwise
         """
+        # Expand patterns like appendix* / re:^appendix_
+        chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names)
+
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type})[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
 
@@ -264,6 +267,9 @@ class BuildCommand:
         Returns:
             True if build succeeded, False otherwise
         """
+        # Expand patterns like appendix* / re:^appendix_ within the requested volume
+        chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names, volume=volume)
+
         volume_name = "Volume I" if volume == "vol1" else "Volume II"
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type}, {volume_name} config)[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")

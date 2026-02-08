@@ -6,6 +6,7 @@ Supports volume-aware discovery for vol1 and vol2.
 """
 
 import re
+import fnmatch
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from rich.console import Console
@@ -349,6 +350,73 @@ class ChapterDiscovery:
             chapter_files.append(chapter_file)
 
         return chapter_files
+
+    def expand_chapter_patterns(
+        self,
+        chapter_specs: List[str],
+        *,
+        volume: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Expand glob/regex chapter patterns into concrete chapter specs.
+
+        Supported pattern forms:
+        - **Glob** (default): `appendix*`, `*principles`, `vol1/appendix_*`
+        - **Regex**: prefix with `re:` (matched with `re.search`), e.g. `re:^appendix_`
+
+        Notes:
+        - If a token has no wildcard/meta and doesn't start with `re:`, it is returned unchanged.
+        - If a pattern matches nothing, it is returned unchanged (so existing fuzzy matching
+          behavior remains available); callers may still fail later during validation.
+        - Order is preserved; duplicates are removed.
+        """
+        # Candidate names come from discovery; includes front/backmatter too (useful for appendix*).
+        all_candidates = [ch["name"] for ch in self.get_all_chapters(volume=volume)]
+
+        expanded: List[str] = []
+        seen = set()
+
+        def _append(spec: str) -> None:
+            if spec not in seen:
+                expanded.append(spec)
+                seen.add(spec)
+
+        for spec in chapter_specs:
+            spec = spec.strip()
+            if not spec:
+                continue
+
+            spec_volume, name_or_pat = self._parse_chapter_spec(spec)
+            local_volume = spec_volume or volume
+
+            candidates = (
+                [ch["name"] for ch in self.get_all_chapters(volume=local_volume)]
+                if local_volume
+                else all_candidates
+            )
+
+            is_regex = name_or_pat.startswith("re:")
+            is_glob = any(ch in name_or_pat for ch in ["*", "?", "["])
+
+            matches: List[str] = []
+            if is_regex:
+                pat = name_or_pat[len("re:") :]
+                try:
+                    rx = re.compile(pat)
+                    matches = [c for c in candidates if rx.search(c)]
+                except re.error:
+                    matches = []
+            elif is_glob:
+                matches = [c for c in candidates if fnmatch.fnmatchcase(c, name_or_pat)]
+
+            if matches:
+                for m in matches:
+                    _append(f"{local_volume}/{m}" if spec_volume else m)
+            else:
+                # Not a pattern, or didn't match: keep original token for existing behavior.
+                _append(spec)
+
+        return expanded
 
     def get_chapter_dependencies(self, chapter_file: Path) -> List[Path]:
         """Get dependencies for a chapter (images, includes, etc.).

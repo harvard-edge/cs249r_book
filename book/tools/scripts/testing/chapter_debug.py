@@ -3,10 +3,10 @@
 Build chapters one-by-one to identify which ones have build errors.
 
 Usage:
-    python debug_chapter_builds.py --vol1          # Test all vol1 chapters
-    python debug_chapter_builds.py --vol2          # Test all vol2 chapters
-    python debug_chapter_builds.py --vol1 --format html  # Test HTML instead of PDF
-    python debug_chapter_builds.py --vol1 -v       # Verbose output + save build artifacts
+    python chapter_debug.py --vol1          # Test all vol1 chapters
+    python chapter_debug.py --vol2          # Test all vol2 chapters
+    python chapter_debug.py --vol1 --format html  # Test HTML instead of PDF
+    python chapter_debug.py --vol1 -v       # Verbose output + save build artifacts
     
 Log files are written to: book/tools/scripts/testing/logs/<volume>/<chapter>/
 Build artifacts (index.tex, index.log) are saved to each chapter's folder.
@@ -18,7 +18,6 @@ import time
 import re
 import shutil
 import signal
-import fnmatch
 from pathlib import Path
 from datetime import datetime
 
@@ -85,58 +84,6 @@ def _uncomment_quarto_toggles(yml_text: str) -> str:
     return "\n".join(out) + ("\n" if yml_text.endswith("\n") else "")
 
 
-def _expand_name_patterns(tokens: list[str], candidates: list[str]) -> list[str]:
-    """
-    Expand simple patterns in tokens against candidates.
-
-    Supported:
-    - Glob patterns (default): `appendix*`, `*principles`, `appendix_??`
-    - Regex patterns via `re:` prefix: `re:^appendix_`
-
-    If a pattern token matches nothing, we keep it as-is (so the script can still
-    attempt to build it and fail loudly later).
-    """
-    out: list[str] = []
-    seen = set()
-
-    def add(x: str) -> None:
-        if x not in seen:
-            out.append(x)
-            seen.add(x)
-
-    for tok in tokens:
-        tok = tok.strip()
-        if not tok:
-            continue
-
-        if tok.startswith("re:"):
-            pat = tok[len("re:") :]
-            try:
-                rx = re.compile(pat)
-                matches = [c for c in candidates if rx.search(c)]
-            except re.error:
-                matches = []
-            if matches:
-                for m in matches:
-                    add(m)
-            else:
-                add(tok)
-            continue
-
-        if any(ch in tok for ch in ["*", "?", "["]):
-            matches = [c for c in candidates if fnmatch.fnmatchcase(c, tok)]
-            if matches:
-                for m in matches:
-                    add(m)
-            else:
-                add(tok)
-            continue
-
-        add(tok)
-
-    return out
-
-
 def get_chapters_from_config(volume: str) -> list[str]:
     """
     Read chapter list from the PDF config file.
@@ -161,9 +108,9 @@ def get_chapters_from_config(volume: str) -> list[str]:
     # Captures the .qmd filename (without extension) as the chapter name
     pattern = rf'#?\s*-\s*contents/{volume}/[^/]+/([^/]+)\.qmd'
     
-    # Exclude structural entries that aren't standalone buildable chapters
-    exclude = {"index", "references", "glossary",
-               "foundations_principles", "build_principles",
+    # Exclude these non-chapter files
+    exclude = {"index", "references", "glossary", "foreword", "about", 
+               "acknowledgements", "foundations_principles", "build_principles",
                "optimize_principles", "deploy_principles"}
     
     chapters = []
@@ -532,19 +479,11 @@ def main():
     
     # Filter chapters if --only specified
     if args.only:
-        if args.only == "__ACTIVE__":
-            chapters = get_active_targets_from_pdf_config(volume)
-            if not chapters:
-                print(f"Error: No active .qmd targets found in _quarto-pdf-{volume}.yml")
-                sys.exit(1)
-        else:
-            tokens = [c.strip() for c in args.only.split(",") if c.strip()]
-            selected = _expand_name_patterns(tokens, candidates=chapters)
-            only_set = set(selected)
-            chapters = [c for c in chapters if c in only_set]
-            if not chapters:
-                print(f"Error: None of the --only patterns matched: {args.only}")
-                sys.exit(1)
+        only_set = {c.strip() for c in args.only.split(",") if c.strip()}
+        chapters = [c for c in chapters if c in only_set]
+        if not chapters:
+            print(f"Error: None of the --only chapters found: {args.only}")
+            sys.exit(1)
     
     # Skip chapters if --start-from specified
     if args.start_from:
