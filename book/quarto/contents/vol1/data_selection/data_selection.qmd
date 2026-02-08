@@ -21,7 +21,7 @@ _DALL·E 3 Prompt: A futuristic digital illustration depicting the concept of da
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlsysstack{0}{0}{0}{70}{0}{20}{0}{80}
+\mlsysstack{0}{0}{25}{50}{0}{0}{0}{90}
 \end{marginfigure}
 
 _Why can a carefully selected 10% of your data match the accuracy of 100%?_
@@ -34,12 +34,13 @@ The most leveraged optimization in machine learning operates upstream, before a 
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Explain data selection as the third pillar of ML optimization alongside algorithms and systems
-- Apply the Information-Compute Ratio (ICR) framework to evaluate dataset value
-- Compare coreset and deduplication techniques for pre-training data reduction
-- Implement the three-stage optimization pipeline: static pruning, dynamic selection, and synthetic generation
-- Design curriculum learning and active learning strategies for training-time optimization
-- Analyze cost-benefit trade-offs and systems engineering challenges in data selection pipelines
+- Explain data selection as a systems optimization that reduces the Total Operations ($O$) term in the Iron Law, following the D·A·M taxonomy
+- Apply the Information-Compute Ratio (ICR) framework to evaluate dataset value and diagnose whether training is data-starved or compute-starved
+- Compare coreset selection, deduplication, and quality pruning techniques for pre-training data reduction
+- Apply the decision framework to determine which combination of static pruning, dynamic selection, and synthetic generation fits a given workload
+- Design curriculum learning and active learning strategies that adapt the training data diet as the model learns
+- Evaluate how self-supervised pre-training and the foundation model paradigm transform data economics through cost amortization
+- Analyze the Selection Inequality, cost-benefit trade-offs, and engineering challenges in production data selection systems
 
 :::
 
@@ -126,7 +127,7 @@ where Data Cost encompasses:
 - **Storage cost**: Bytes required to persist the dataset
 - **Compute cost**: FLOPs to process samples during training
 
-A perfectly efficient dataset would contain only samples that contribute unique information to the model's decision boundary: no redundancy, no noise, no "easy" examples already mastered.
+A perfectly efficient dataset would contain only samples that contribute unique information to the model's decision boundary: no redundancy, no noise, no "easy" examples already mastered. In practice, this chapter operationalizes Selection Efficiency through its compute component, the **Information-Compute Ratio (ICR)**, formalized in @sec-data-selection-informationcompute-ratio-8e9b.
 :::
 
 To make this concrete, consider training a model in the **GPT-2/Llama Lighthouse** family (@sec-dnn-architectures)---this lighthouse spans the autoregressive LLM family, from GPT-2's 1.5B parameters to Llama's 7B--70B range---here using a 70B parameter language model:
@@ -179,7 +180,7 @@ The team faces a choice:
 
 Option 3 is increasingly the dominant approach.
 
-This data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are **memory bandwidth-bound** during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs.
+This data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are **memory bandwidth-bound** during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. This universality---data selection benefits every architecture, regardless of its dominant bottleneck---motivates a broader framing: data selection as a *systems* problem rather than a purely statistical one.
 
 ## Data Selection as a Systems Problem {#sec-data-selection-data-selection-systems-problem-d857}
 
@@ -196,7 +197,7 @@ In this textbook, we adopt a **systems framing**: *how do I reduce the total cos
 
 : **ML vs. Systems Perspectives on Data Selection.** The ML framing optimizes sample complexity; the systems framing optimizes total resource cost across the pipeline. {#tbl-ml-vs-systems-framing .striped .hover}
 
-The systems framing reveals optimization opportunities invisible to the ML framing. To see *why*, consider *how* data selection interacts with the **Iron Law** introduced in @sec-ml-system-architecture.
+The systems framing reveals optimization opportunities invisible to the ML framing. To see *why*, consider *how* data selection interacts with the **Iron Law** introduced in @sec-silicon-contract.
 
 ```{python}
 #| label: data-selection-savings-calc
@@ -259,25 +260,13 @@ The environmental implications are substantial. Training a large language model 
 
 Smaller, curated datasets also enable faster iteration velocity. A team that can iterate in hours rather than days has a compounding advantage in model development.
 
-These cascading benefits illustrate a broader point about how systems engineers think differently about data than ML researchers.
-
-::: {.callout-perspective title="The Systems Engineer's View of Data"}
-**The ML Researcher asks:** "What is the sample complexity of this learning problem?"
-
-**The Systems Engineer asks:** "What is the cost-per-accuracy-point across the entire pipeline, from data acquisition through deployment?"
-
-This chapter equips you with the systems engineer's toolkit: techniques to minimize total cost, metrics to quantify efficiency gains, and architectural patterns to implement data selection at scale.
-:::
+These cascading benefits illustrate a broader point: where the ML researcher asks "what is the sample complexity of this learning problem?", the systems engineer asks "what is the cost-per-accuracy-point across the entire pipeline, from data acquisition through deployment?" This chapter equips you with the systems engineer's toolkit for that question: techniques to minimize total cost, metrics to quantify efficiency gains, and architectural patterns to implement data selection at scale.
 
 ## The Information-Compute Ratio {#sec-data-selection-informationcompute-ratio-8e9b}
 
-The systems framing established above calls for a quantitative metric. The Optimize Principles (Part III) introduced the **Pareto Frontier** as the boundary where improving one metric necessarily degrades another, and identified three pillars of efficiency following the D·A·M taxonomy: Data, Algorithm (model compression, @sec-model-compression), and Machine (hardware acceleration, @sec-ai-acceleration). As the first pillar in the D·A·M ordering, data selection addresses the most fundamental question: can we reduce the work before it begins? We formalize this with a central metric: the Information-Compute Ratio.
+The systems framing established above calls for a quantitative metric. The Optimize Principles (Part III) introduced the **Pareto Frontier** as the boundary where improving one metric necessarily degrades another, and identified three pillars of efficiency following the D·A·M taxonomy: Data, Algorithm (model compression, @sec-model-compression), and Machine (hardware acceleration, @sec-ai-acceleration). As the first pillar in the D·A·M ordering, data selection addresses the most fundamental question: *how much information does each sample contribute to the model's learning per unit of computation?* We formalize this with a central metric: the Information-Compute Ratio.
 
-While model compression and hardware acceleration focus on the *execution* of the math, *Data Selection* reduces the *amount* of math required by optimizing what enters the training pipeline.
-
-Data engineering (@sec-data-engineering-ml) ensures that data is clean, accessible, and correctly formatted. Data selection asks a different question: *how much information does each sample contribute to the model's learning per unit of computation?*
-
-In the optimization triad (@fig-optimization-triad), data selection plays the role of *Input Optimization*, reducing total workload before it enters the model or hardware. While model compression minimizes the math per parameter and hardware acceleration maximizes the math per second, data selection minimizes the total math required to reach convergence. The three edges of the triad capture the dominant bottlenecks: *Compute Bound* describes systems limited by arithmetic throughput, *I/O Bound* describes systems limited by data movement, and *Sample Efficiency* describes systems limited by the information content of training data.
+In the optimization triad (@fig-optimization-triad), data selection plays the role of *Input Optimization*, reducing total workload before it enters the model or hardware. Model compression minimizes the math per parameter; hardware acceleration maximizes the math per second; data selection minimizes the total math required to reach convergence. The three edges of the triad capture the dominant bottlenecks: *Compute Bound* describes systems limited by arithmetic throughput, *I/O Bound* describes systems limited by data movement, and *Sample Efficiency* describes systems limited by the information content of training data.
 
 ::: {#fig-optimization-triad fig-cap="**The Optimization Triad**: Machine learning performance relies on three pillars: Algorithms (models), Systems (hardware/software), and Data Selection. While algorithms and systems have traditionally received the most attention, optimizing data selection (Input Optimization) offers a third, powerful lever for scaling performance." fig-alt="A triangular diagram with three nodes: Algorithms (Model), Systems (Hardware), and Data Selection. Bidirectional arrows connect all three with edge labels: Compute Bound between Algorithms and Systems, I/O Bound between Systems and Data Selection, and Sample Efficiency between Data Selection and Algorithms. Data Selection is highlighted with a bold border. ML Scale appears at the center."}
 ```{.tikz}
@@ -306,7 +295,7 @@ $$
 
 **The Iron Law Connection**: As detailed in the "Data Selection and the Iron Law" callout above, data selection turns the Total Operations ($O$) term from a fixed constant into a variable. By maximizing ICR, we reduce the total FLOPs required to reach a target performance level. A 2x improvement in ICR is mathematically equivalent to a 2x improvement in hardware Peak Throughput ($R_{peak}$), but often much cheaper to achieve. Note that ICR focuses specifically on the compute component of the broader Selection Efficiency metric defined earlier, which also accounts for acquisition, labeling, and storage costs.
 
-A random batch of raw data often has low ICR because it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measuring-data-selection-7957 provides the complete measurement framework for evaluating these efficiency gains, including the Data Roofline model that diagnoses whether a system is data-bound or compute-bound.
+A random batch of raw data often has low ICR because it contains redundant examples, noisy samples, or "easy" examples the model has already mastered. Training on such a batch wastes GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measuring-data-selection-7957 provides the complete measurement framework for evaluating these efficiency gains, including the compute-optimal frontier diagnostic that determines whether training is data-starved or compute-starved.
 
 ::: {#fig-data-selection-pipeline fig-cap="**The Data Selection Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
 ```{.tikz}
@@ -1117,13 +1106,13 @@ An `{python} cost_reduction_str`× cost reduction for ~`{python} acc_loss_str` p
 
 These gains are substantial, but semi-supervised learning is not universally applicable. The technique assumes that unlabeled data comes from the same distribution as labeled data, and it struggles when unlabeled data contains out-of-distribution samples (the model confidently mislabels them), when class imbalance is severe (pseudo-labels amplify majority class bias), or when the labeled set does not cover all classes (preventing label propagation for unseen classes). Always validate on a held-out set with true labels to catch distribution mismatch.
 
-Despite these limitations, semi-supervised learning reduces label requirements by 5–10$\times$ while maintaining accuracy. Notice what we have not yet questioned: the assumption that we need *any* task-specific labels at all. What if the structure of data itself (the fact that cat images resemble other cat images, that coherent sentences follow grammatical patterns) could provide the supervision signal?
-
-We have progressively reduced labeling demands: active learning queries only informative samples, semi-supervised learning exploits unlabeled data to stretch labeled examples further. The logical endpoint of this trajectory is eliminating task-specific labels entirely. Self-supervised learning achieves this by reframing the data selection problem: rather than selecting which examples to label, it defines learning objectives that derive supervision from the data itself. This approach transforms the pipeline's annotation stage from a bottleneck into an opportunity, and represents the most dramatic shift in how we think about data efficiency.
+Despite these limitations, semi-supervised learning reduces label requirements by 5–10$\times$ while maintaining accuracy. We have now progressively reduced labeling demands: active learning queries only informative samples, semi-supervised learning exploits unlabeled data to stretch labeled examples further. But notice what we have not yet questioned: the assumption that we need *any* task-specific labels at all. What if the structure of data itself---the fact that cat images resemble other cat images, that coherent sentences follow grammatical patterns---could provide the supervision signal?
 
 ## Self-Supervised Learning: Eliminating the Label Bottleneck {#sec-data-selection-selfsupervised-learning-eliminating-label-bottleneck-1005}
 
-Active learning reduces labeling cost by 10$\times$. Semi-supervised learning reduces it by another 5–10$\times$. The most dramatic gain, however, comes from **self-supervised learning**[^fn-self-supervised], which removes the human annotation bottleneck entirely by learning from data structure. The key insight is that the structure itself provides supervision: predicting masked words or matching augmented images forces models to learn useful representations without any human labels. Self-supervised learning does not map neatly onto the three-stage pipeline (static pruning, dynamic selection, synthetic generation) introduced earlier. Rather than optimizing which labeled samples to use, SSL eliminates the label bottleneck by redefining what counts as supervision. It is best understood as a paradigm shift that makes the entire pipeline more effective: pre-trained representations improve the quality of coreset selection, active learning, and downstream fine-tuning alike.
+The logical endpoint of reducing labeling demands is eliminating task-specific labels entirely. **Self-supervised learning**[^fn-self-supervised] achieves this by reframing the data selection problem: rather than selecting which examples to label, it defines learning objectives that derive supervision from the data itself. Self-supervised learning represents the field's most powerful response to the **Data Wall** introduced in @sec-data-selection-fundamentals: rather than searching for more high-quality labeled data in a finite pool, SSL redefines what counts as training data by extracting supervision from the structure of unlabeled corpora that exist at web scale.
+
+SSL is best understood as a paradigm shift that makes the entire pipeline more effective: pre-trained representations improve the quality of coreset selection, active learning, and downstream fine-tuning alike. It does not map neatly onto the three-stage pipeline (static pruning, dynamic selection, synthetic generation) introduced earlier---rather than optimizing which labeled samples to use, it eliminates the label bottleneck by redefining what counts as supervision.
 
 [^fn-self-supervised]: **Self-Supervised Learning**: While self-supervision ideas existed earlier, 2018 marked the paradigm's breakthrough year. BERT (Google, October 2018) demonstrated that masked language modeling could produce representations achieving state-of-the-art results on 11 NLP tasks. GPT (OpenAI, June 2018) showed that next-token prediction at scale yielded surprisingly general language understanding. Together, they established pre-training on unlabeled data as the dominant paradigm for NLP, later extended to vision and multimodal domains.
 
@@ -1517,7 +1506,7 @@ Having examined selection techniques across all three pipeline stages, we now co
 
 ### Decision Framework: Choosing the Right Technique {#sec-data-selection-decision-framework-choosing-right-technique-c36a}
 
-With many techniques available, practitioners need a systematic approach to selection. Start at the top of @fig-technique-decision-tree and follow the branches that match your constraints:
+@tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The decision tree below (@fig-technique-decision-tree) structures the selection process hierarchically: start by identifying your *primary* bottleneck, then follow the branches to narrow the field.
 
 ::: {#fig-technique-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Data Selection Technique Selection Tree**: Start at the top by identifying your primary bottleneck, then follow the branches to find the most appropriate technique. Leaf nodes show recommended methods. Multiple paths may apply; combine techniques as needed." fig-alt="A decision tree flowchart with diamond decision nodes and rectangular technique recommendations. Starts with bottleneck identification and branches to specific techniques."}
 ```{.tikz}
@@ -1590,7 +1579,7 @@ With many techniques available, practitioners need a systematic approach to sele
 ```
 :::
 
-The following text-based decision tree elaborates on each path, guiding practitioners from initial bottleneck identification through implementation.
+The following walkthrough elaborates on each path, guiding practitioners from initial bottleneck identification through implementation.
 
 **Step 1: Assess Your Bottleneck.** Identify which resource constraint most severely limits your training pipeline. If labeling cost dominates your budget, consider label efficiency techniques such as Active Learning, Semi-Supervised, or Self-Supervised learning. These methods maximize the value extracted from each human annotation. When compute cost is the primary concern, prioritize dataset reduction through Coreset selection, Deduplication, and Curriculum Learning, all of which reduce the number of training iterations required. If data scarcity is the fundamental problem, pursue data creation through Augmentation, Synthesis, and Distillation to expand your effective training set beyond what raw collection provides.
 
@@ -1739,7 +1728,7 @@ trap_pct_str = fmt(trap_overhead_pct_value, precision=0, commas=False)  # e.g. "
 **Rule of thumb**: Selection time should be <10% of subset training time for good ROI.
 :::
 
-The following analysis formalizes this heuristic, deriving what we call *the selection inequality*.
+The following analysis formalizes the 10% heuristic by normalizing selection cost in epoch-equivalents.
 
 ```{python}
 #| label: selection-inequality-math-calc
@@ -2415,7 +2404,7 @@ t_total_overhead_str = f"{t_total_overhead_value} minutes"      # e.g. "67 minut
 
 This positive ROI can erode quickly when workers must coordinate frequently during training. Distributed data selection always incurs a *coordination tax*: the overhead of maintaining consistent selection across workers. This tax must be smaller than the efficiency gains, or distributed selection yields negative ROI. As a rule of thumb, if selection overhead exceeds 10% of training time, simplify the selection strategy or increase the selection interval.
 
-The preceding sections treated data selection as an isolated optimization: techniques to reduce dataset size, select better samples, or generate synthetic data. Real ML systems, however, combine multiple optimizations simultaneously. How do these optimizations interact?
+So far we have examined data selection techniques one at a time. Real ML systems, however, combine multiple optimizations simultaneously---and these optimizations interact in ways that can amplify or undermine each other.
 
 ## Interactions with Other Optimizations {#sec-data-selection-interactions-optimizations-02bc}
 
@@ -2493,7 +2482,7 @@ The preceding sections examined pairwise interactions, but production systems ap
 ```
 :::
 
-The pipeline in @fig-optimization-stack reveals why data selection occupies a strategic position: it sits at the head of the optimization stack. Reducing the dataset by 50% through intelligent selection doesn't just halve data processing time---it halves the training compute, which in turn produces a model that may require less aggressive compression, which then demands less from hardware acceleration. Each downstream stage inherits the efficiency gains (or quality losses) from upstream decisions.
+The pipeline in @fig-optimization-stack reveals why data selection occupies a strategic position: it sits at the head of the optimization stack, following the **D·A·M taxonomy** introduced in @sec-data-selection-fundamentals---Data first, then Algorithm, then Machine. Reducing the dataset by 50% through intelligent selection doesn't just halve data processing time---it halves the training compute, which in turn produces a model that may require less aggressive compression, which then demands less from hardware acceleration. Each downstream stage inherits the efficiency gains (or quality losses) from upstream decisions.
 
 This **multiplicative effect** means that every FLOP saved in data processing is a FLOP that never needs to be executed, compressed, or accelerated. Conversely, poor data selection that degrades model quality forces downstream stages to compensate---either through longer training, less aggressive compression, or over-provisioned hardware.
 
@@ -2665,7 +2654,7 @@ plt.show()
 
 **The practical question** for practitioners: at what point should you stop collecting data and start curating it? When does adding more samples waste compute rather than improve accuracy? These questions require rigorous metrics: ways to quantify diminishing returns, compare selection strategies, and evaluate the cost-effectiveness of different data sources. Data selection techniques (coreset selection, active learning, deduplication) all make implicit claims about the value of different samples. Validating that a curated dataset actually preserves model quality requires systematic benchmarking: coverage metrics validate that coreset selection preserved representation across classes and demographic groups; distribution alignment metrics (such as KL divergence and PSI; see @sec-system-foundations-measuring-drift-divergence-0525) detect whether the curated training set drifted from the deployment distribution; and label quality metrics (inter-annotator agreement, confident learning) validate that active learning did not introduce systematic labeling errors. A 50% dataset reduction is only valuable if benchmarking confirms the model maintains target accuracy, calibration, and robustness.
 
-For a comprehensive treatment of data selection metrics and benchmarking methodologies, including how initiatives like DataPerf are standardizing evaluation protocols, see @sec-benchmarking-ai. That chapter provides the measurement framework needed to quantify the ROI of the techniques introduced here. Before concluding, let us revisit how data selection applies to our Lighthouse Models.
+For a comprehensive treatment of data selection metrics and benchmarking methodologies, including how initiatives like DataPerf are standardizing evaluation protocols, see @sec-benchmarking-ai.
 
 ::: {.callout-lighthouse title="Lighthouse Data Selection"}
 This chapter has applied data selection principles to all five Lighthouse Models, demonstrating that the techniques are universal but the priorities differ by bottleneck:
@@ -2683,7 +2672,7 @@ The common thread: **data selection is not a single technique but a systems opti
 
 ## Fallacies and Pitfalls {#sec-data-selection-fallacies-pitfalls-6285}
 
-Data selection involves counterintuitive diminishing returns that contradict the "more is better" intuition from traditional machine learning. These fallacies and pitfalls capture errors that waste labeling budgets, create negative-ROI selection pipelines, and produce models that excel on benchmarks while failing on production edge cases.
+Data selection involves counterintuitive diminishing returns that contradict the "more is better" intuition from traditional machine learning. The errors below fall into three groups: *conceptual fallacies* about what data selection can achieve, *implementation pitfalls* that arise when correct strategies meet engineering realities, and *transfer errors* that occur when benchmark results are applied uncritically to new domains.
 
 ```{python}
 #| label: fp-scaling-calc
@@ -2867,7 +2856,7 @@ Aggressive coreset selection removes rare classes entirely because they contribu
 
 **Pitfall:** *Training on deduplicated data while evaluating on duplicated test sets.*
 
-Web-scraped datasets contain `{python} test_contamination_pct_str`% train-test overlap on average. Deduplicating only training data inflates apparent test accuracy to `{python} inflated_acc_str`% when true generalization is `{python} true_acc_str`%, a `{python} inflation_gap_str`-point gap that masks real-world performance. @sec-data-selection-data-deduplication-9035 emphasizes joint deduplication: hash both train and test sets, removing any sample appearing in both. Studies on GPT-3 and LLaMA training show that deduplicated data improves both efficiency and generalization. Teams observing accuracy drops after deduplication are measuring improved generalization, not degradation.
+Web-scraped datasets contain `{python} test_contamination_pct_str`% train-test overlap on average. Deduplicating only training data inflates apparent test accuracy to `{python} inflated_acc_str`% when true generalization is `{python} true_acc_str`%, a `{python} inflation_gap_str`-point gap that masks real-world performance. @sec-data-selection-data-deduplication-9035 emphasizes joint deduplication: hash both train and test sets, removing any sample appearing in both. As noted in that section, GPT-3 and LLaMA training studies confirm that deduplicated data improves both efficiency and generalization. Teams observing accuracy drops after deduplication are measuring improved generalization, not degradation.
 
 **Pitfall:** *Active learning without considering annotation latency.*
 
@@ -2885,22 +2874,25 @@ A team creates a `{python} coreset_size_pct_str`% coreset with excellent PPD and
 
 ## Summary {#sec-data-selection-summary-8b2a}
 
-This chapter opened with a question: why do smaller, curated datasets sometimes outperform massive ones? The answer lies in recognizing data selection as a *systems* problem rather than a purely statistical one. Where traditional machine learning asks "how few samples achieve target accuracy?", the systems perspective asks "how do we minimize total cost across the entire pipeline?"
+This chapter opened with a question: why do smaller, curated datasets sometimes outperform massive ones? The answer lies in recognizing data selection as a *systems* problem rather than a purely statistical one---the "D" pillar of the **D·A·M taxonomy**, addressing the most fundamental question in the optimization ordering: can we reduce the work before it begins? Where traditional machine learning asks "how few samples achieve target accuracy?", the systems perspective asks "how do we minimize total cost across the entire pipeline?"
 
-This reframing transforms how practitioners approach the ML development lifecycle. Rather than treating data as a static input to be collected and labeled, data selection treats it as a dynamic resource to be engineered. The goal is minimizing total cost across compute, storage, labeling, energy, and time, not merely maximizing accuracy.
+This reframing transforms how practitioners approach the ML development lifecycle. The shift introduced in the Purpose section---from accumulating data as a massive liability to curating it as a precise resource---becomes actionable through the ICR metric, the Selection Inequality, and the cost modeling framework. The goal is minimizing total cost across compute, storage, labeling, energy, and time, not merely maximizing accuracy.
 
 We explored the three-stage optimization pipeline: **Static Pruning** removes redundancy before training through coreset selection and deduplication, **Dynamic Selection** prioritizes informative examples during training through curriculum and active learning, and **Synthetic Generation** creates data where none exists through augmentation, simulation, and distillation. Together, these strategies address the "Data Wall," the fundamental asymmetry between exponentially growing compute and slowly growing high-quality data.
 
 The self-supervised learning paradigm represents a ceiling of data selection: by eliminating task-specific labels entirely, foundation models achieve 1,000$\times$ multipliers on downstream tasks through cost amortization. This paradigm shift from "train from scratch" to "pre-train once, fine-tune many" has become the dominant approach in production ML precisely because of its superior data economics.
 
+Translating these techniques into production requires systems engineering: the Selection Inequality ($T_{selection} + T_{train}(subset) < T_{train}(full)$) gates every technique, proxy models and shard-based data loaders reconcile selection algorithms with storage hardware, and data echoing maximizes GPU utilization when pipelines become the bottleneck. The cost modeling framework---total data cost, ROI analysis, and break-even thresholds---provides the quantitative tools to evaluate which techniques merit investment for a given workload, while core metrics (PPD, AULC, DCR) and the compute-optimal frontier diagnostic help practitioners determine whether their training is data-starved or compute-starved.
+
 ::: {.callout-takeaways title="Key Takeaways"}
 
-* **Data selection is a systems problem**: The goal is reduced cost across the entire pipeline (compute, storage, labeling, energy), not just "fewer samples for same accuracy."
-* **Start with deduplication**: Deduplication typically offers the highest return on investment: low cost, immediate gains, and no accuracy penalty. Deduplication should precede sophisticated selection methods.
-* **The Selection Inequality must hold**: $T_{selection} + T_{train}(subset) < T_{train}(full)$. Selection overhead should be kept below 10% of training time using proxy models or cached embeddings.
-* **Amortization determines ROI**: Data selection techniques are most effective when training repeats (hyperparameter search) or datasets are reused across multiple teams. For one-off training, simpler methods often outperform sophisticated approaches.
-* **Fine-tuning typically outperforms training from scratch**: Self-supervised pre-training amortizes cost across applications. Fine-tuning typically requires 100× fewer labels and 10× less per-task compute (when amortized) than from-scratch training.
-* **Avoid exclusive use of synthetic data**: Mixing 50–80% synthetic with 20–50% real data typically yields better results. Domain gap without mitigation can significantly degrade real-world performance.
+* **Data selection is a systems problem, and ICR is its metric**: The goal is reduced total cost across the entire pipeline (compute, storage, labeling, energy), not just "fewer samples for same accuracy." The Information-Compute Ratio quantifies this: learning gained per FLOP spent. Maximizing ICR is mathematically equivalent to improving hardware throughput, but often cheaper to achieve.
+* **Start with deduplication**: It is the only data selection technique with guaranteed zero accuracy penalty and immediate compute savings. Deduplication should precede all other selection methods in any data pipeline.
+* **The Selection Inequality gates every technique**: $T_{selection} + T_{train}(subset) < T_{train}(full)$. Selection overhead should stay below 10% of training time. Proxy models and cached embeddings keep $T_{selection}$ low; expensive selection algorithms can consume all the savings they promise.
+* **Dynamic selection adapts the data diet as the model learns**: Curriculum learning (easy-to-hard ordering) and active learning (uncertainty-guided labeling) exploit the insight that the optimal training distribution changes during training, improving convergence speed and label efficiency respectively.
+* **Self-supervised pre-training delivers a 1000× labeled-data multiplier**: Foundation models amortize expensive pre-training across many downstream tasks, reducing per-task label requirements by 100× and marginal compute by 20×. This cost amortization is strongest when techniques are reused across teams and training runs.
+* **Synthetic data is a supplement, not a replacement**: Mixing 50–80% synthetic with 20–50% real data typically yields the best results. Pure synthetic training risks model collapse and domain gap degradation.
+* **Data selection sits at the head of the D·A·M optimization stack**: Savings from data selection are multiplicative with downstream optimizations (model compression, hardware acceleration). Every FLOP eliminated upstream is a FLOP that never needs to be compressed or accelerated.
 
 :::
 
