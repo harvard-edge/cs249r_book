@@ -97,7 +97,6 @@ h100_tdp_value = H100_TDP.to(watt).magnitude
 h100_tdp = f"{h100_tdp_value:.0f}"                                         # e.g. "700" W
 ```
 
-
 ## Serving Paradigm {#sec-model-serving-systems-serving-paradigm-9634}
 
 Serving\index{Serving!production deployment}\index{Model Serving!paradigm shift} marks the transition from model development to production deployment. The four deployment paradigms introduced in @sec-ml-system-architecture—Cloud, Edge, Mobile, and TinyML—each impose distinct serving challenges, but all share a common inversion: the throughput-to-latency shift introduced in the Purpose. This inversion has concrete engineering implications that ripple through every technique established in prior chapters. The **Iron Law of ML Systems** (@sec-silicon-contract) undergoes a decisive shift: the **Latency term**\index{Latency!serving constraint} ($L_{lat}$), representing the irreducible overhead of request scheduling, network round-trips, and system orchestration, becomes the dominant constraint rather than a rounding error. @sec-benchmarking-ai measured performance under controlled conditions, but serving faces traffic patterns that no benchmark could anticipate; @sec-model-compression provided quantization methods that reduced model size, but serving must confirm those optimizations preserve accuracy under real traffic distributions. These revalidations define the *serving inversion*\index{Serving Inversion!throughput to latency}.
@@ -266,9 +265,11 @@ These priorities motivate a formal definition of model serving.
 
 ::: {.callout-definition title="Model Serving"}
 
-***Model Serving***\index{Model Serving!definition}\index{Inference!production systems|see{Model Serving}} is the operational phase that inverts the **Throughput** priority of training into a **Latency** constraint. It requires a distinct architectural stack designed to minimize the **Tail Latency**\index{Tail Latency!SLO constraint} of individual inferences under stochastic load, bounded by the **Service Level Objective (SLO)**[^fn-slo-sla]\index{SLO (Service Level Objective)!latency targets}\index{Service Level Objective|see{SLO}}.
+***Model Serving***\index{Model Serving!definition}\index{Inference!production systems|see{Model Serving}} is the operational phase that inverts the **Throughput** priority of training into a **Latency** constraint. It requires a distinct architectural stack designed to minimize the **Tail Latency**\index{Tail Latency!SLO constraint} of individual inferences under stochastic load, bounded by the **Service Level Objective (SLO)**\index{SLO (Service Level Objective)!latency targets}\index{Service Level Objective|see{SLO}}.
 
 :::
+
+The SLO[^fn-slo-sla] defines the latency target that shapes every architectural decision in the serving stack.
 
 [^fn-slo-sla]: **Service Level Objective (SLO) vs. Service Level Agreement (SLA)**\index{SLO (Service Level Objective)!vs. SLA}\index{SLA (Service Level Agreement)!vs. SLO}: Formalized in Google's Site Reliability Engineering practice [@beyer2016sre]. An **SLO** is an *internal* target (e.g., "p99 latency under 50 ms"); an **SLA** is an *external* contractual commitment with penalties for violation. SLOs are set tighter than SLAs to provide a safety margin. For ML systems, model accuracy and inference latency both contribute to SLOs, creating multi-dimensional optimization targets that traditional SRE did not face.
 
@@ -320,7 +321,7 @@ Serving systems must execute a complete inference pipeline under latency constra
 ```
 :::
 
-This chapter explains how to build systems that orchestrate this pipeline efficiently. The chapter proceeds in three parts. **Part 1** establishes system fundamentals: serving architectures, server anatomy, and the protocols that connect clients to models. **Part 2** follows the request lifecycle: where latency accumulates across preprocessing, inference, and postprocessing, then how queuing dynamics govern system behavior under load. **Part 3** addresses optimization: model lifecycle management ensures models are ready to serve, batching strategies maximize throughput, LLM-specific techniques handle generative workloads, runtime selection tunes performance, and economics translate these choices into infrastructure decisions.
+This chapter develops the engineering principles needed to orchestrate this pipeline under production constraints. The chapter proceeds in three parts. **Part 1** establishes system fundamentals: serving architectures, server anatomy, and the protocols that connect clients to models. **Part 2** follows the request lifecycle: where latency accumulates across preprocessing, inference, and postprocessing, then how queuing dynamics govern system behavior under load. **Part 3** addresses optimization: model lifecycle management ensures models are ready to serve, batching strategies maximize throughput, LLM-specific techniques handle generative workloads, runtime selection tunes performance, and economics translate these choices into infrastructure decisions.
 
 ### Static vs Dynamic Inference {#sec-model-serving-systems-static-vs-dynamic-inference-e864}
 
@@ -479,15 +480,15 @@ The model\index{Serving!TinyML}\index{TinyML!bare-metal serving} is compiled int
 
 @tbl-serving-spectrum summarizes *how* these deployment contexts shape serving system design:
 
-| **Characteristic**   | **Cloud/Datacenter** | **Mobile/Edge**      | **TinyML**      |
-|:-------------------|:-------------------|:-------------------|:--------------|
-| **Latency Target**   | 10–100 ms            | 20–50 ms             | 1–100 ms        |
-| **Batch Size**       | 1–128 (dynamic)      | 1 (fixed)            | 1 (fixed)       |
-| **Memory**           | 16–80 GB VRAM        | 2–8 GB shared        | 256 KB–2 MB SRAM|
-| **Power**            | 300–700 W            | 1–10 W               | 1–100 mW        |
-| **Update Mechanism** | Container deploy     | App store update     | Firmware OTA    |
-| **Failure Mode**     | Retry/failover       | Graceful degradation | Silent or reset |
-| **Monitoring**       | Full telemetry       | Limited analytics    | Heartbeat only  |
+| **Characteristic**   | **Cloud/Datacenter** | **Mobile/Edge**      | **TinyML**       |
+|:-------------------|:-------------------|:-------------------|:---------------|
+| **Latency Target**   | 10–100 ms            | 20–50 ms             | 1–100 ms         |
+| **Batch Size**       | 1–128 (dynamic)      | 1 (fixed)            | 1 (fixed)        |
+| **Memory**           | 16–80 GB VRAM        | 2–8 GB shared        | 256 KB–2 MB SRAM |
+| **Power**            | 300–700 W            | 1–10 W               | 1–100 mW         |
+| **Update Mechanism** | Container deploy     | App store update     | Firmware OTA     |
+| **Failure Mode**     | Retry/failover       | Graceful degradation | Silent or reset  |
+| **Monitoring**       | Full telemetry       | Limited analytics    | Heartbeat only   |
 
 : **Serving Architecture Spectrum**: The deployment paradigm selected in @sec-ml-system-architecture-comparative-analysis-paradigm-selection-bf66 shapes every aspect of serving system design. Cloud systems optimize for throughput with dynamic batching; mobile systems optimize for energy with fixed batch-1; TinyML systems operate under extreme memory and power constraints with no dynamic allocation. The physical walls (light, power, memory) that created these paradigms now dictate the serving constraints each must satisfy. {#tbl-serving-spectrum}
 
@@ -596,11 +597,7 @@ The same ResNet-50 architecture requires dramatically different serving strategi
 
 The preceding spectrum focused on *how* deployment context shapes serving constraints, from datacenter GPUs to microcontroller SRAM. What happens when traffic exceeds what a single machine can handle? For cloud and datacenter deployments specifically—where multiple replicas serve the same model—an additional infrastructure layer becomes essential: the load balancer. Production serving systems place load balancers\index{Load Balancer!serving infrastructure} between clients and model servers, providing three essential functions for serving infrastructure.
 
-**Request Distribution** routes incoming requests to available model replicas using algorithms like round-robin or least-connections. For latency-sensitive ML serving, algorithms that route away from slow or overloaded replicas improve tail latency.
-
-**Health Monitoring**\index{Health Monitoring!replica readiness} continuously verifies that replicas are ready to serve, routing traffic away from unhealthy instances. For ML systems, health checks must verify not just process liveness but model readiness, confirming that weights are loaded and warmup is complete.
-
-**Deployment Support** enables safe model updates by gradually shifting traffic between versions. @sec-machine-learning-operations-mlops examines deployment strategies including canary testing, blue-green deployments, and shadow mode validation.
+The first function, request distribution, routes incoming requests to available model replicas using algorithms like round-robin or least-connections. For latency-sensitive ML serving, algorithms that route away from slow or overloaded replicas improve tail latency. The second, health monitoring\index{Health Monitoring!replica readiness}, continuously verifies that replicas are ready to serve, routing traffic away from unhealthy instances. For ML systems, health checks must verify not just process liveness but model readiness, confirming that weights are loaded and warmup is complete. The third, deployment support, enables safe model updates by gradually shifting traffic between versions. @sec-machine-learning-operations-mlops examines deployment strategies including canary testing, blue-green deployments, and shadow mode validation.
 
 For single-machine serving with multiple model instances, such as running several ONNX Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes essential when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
 
@@ -619,7 +616,6 @@ To achieve deterministic performance\index{Latency!deterministic}\index{Resource
 3.  **Interrupt Shielding**\index{Interrupt Shielding!latency isolation}: Configuring the system to route network and storage interrupts to CPU cores not used by the inference runner. This ensures that a burst of incoming network traffic does not interrupt the GPU's command stream, protecting the "heartbeat" of the inference execution.
 
 These isolation principles transform a simple "model script" into a **deterministic service**, a transition essential for safety-critical applications like autonomous driving or real-time industrial control. With the deployment spectrum, load balancing, and resource isolation established, we have defined *where* models serve and *what* infrastructure supports them. The next question is *how* the serving software itself is organized: what components comprise an inference server, and how do they coordinate to turn irregular user traffic into efficient hardware utilization?
-
 
 ## Serving System Architecture {#sec-model-serving-systems-serving-system-architecture-4879}
 
@@ -667,7 +663,11 @@ Every request traverses a multi-stage pipeline designed to maximize hardware thr
 ```
 :::
 
-The server architecture serves three critical functions. First, *concurrency management*: servers use asynchronous event loops or thread pools to handle thousands of concurrent client connections without blocking, ensuring that network I/O wait times do not idle the accelerator. Second, *request transformation*\index{Request Transformation!tensor formats}: the server converts network payloads (JSON/Protobuf) into the specific tensor formats required by the optimized model runtime. Image tensors, for example, can be stored as NCHW\index{NCHW!tensor layout} (batch, channels, height, width) or NHWC\index{NHWC!tensor layout} (batch, height, width, channels). PyTorch and TensorRT prefer NCHW because it places channel data contiguously, enabling efficient convolution on GPUs. TensorFlow defaults to NHWC, which is more efficient on CPUs. A format mismatch between client and server silently corrupts inference: the model interprets pixel rows as color channels, producing garbage outputs without raising errors. Third, *model management*: servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and ensuring that warmup inferences are completed before exposing the model to live traffic.
+The server architecture serves three critical functions. First, *concurrency management*: servers use asynchronous event loops or thread pools to handle thousands of concurrent client connections without blocking, ensuring that network I/O wait times do not idle the accelerator. Second, *request transformation*\index{Request Transformation!tensor formats}: the server converts network payloads (JSON/Protobuf) into the specific tensor formats required by the optimized model runtime. Image tensors, for example, can be stored as NCHW[^fn-nchw-nhwc]\index{NCHW!tensor layout} (batch, channels, height, width) or NHWC\index{NHWC!tensor layout} (batch, height, width, channels). PyTorch and TensorRT prefer NCHW because it places channel data contiguously, enabling efficient convolution on GPUs. TensorFlow defaults to NHWC, which is more efficient on CPUs.
+
+[^fn-nchw-nhwc]: **NCHW and NHWC**: These acronyms encode the memory layout order of 4D image tensors: N (batch), C (channels), H (height), W (width). The layout determines which elements are contiguous in memory, with profound performance implications. NCHW places all values for one channel together, enabling vectorized convolution filters to read contiguous memory blocks on GPUs. NHWC interleaves channels at each spatial position, which aligns better with CPU SIMD instructions that process multiple channels simultaneously. The choice dates to framework design decisions: Caffe (2014) established NCHW as the GPU convention; TensorFlow (2015) chose NHWC for CPU compatibility. A format mismatch between client and server silently corrupts inference: the model interprets pixel rows as color channels, producing garbage outputs without raising errors.
+
+Third, *model management*: servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and ensuring that warmup inferences are completed before exposing the model to live traffic.
 
 Of these components, the scheduler deserves special attention because it embodies the core serving tradeoff between throughput and latency.
 
@@ -685,7 +685,11 @@ The mechanism used to transport data between client and server directly affects 
 
 Text-based\index{Serialization!overhead} formats like JSON are ubiquitous but computationally expensive. Parsing a JSON object requires reading every byte, validating syntax, and converting text representations into machine-native types. For high-throughput systems, this consumes CPU cycles that could otherwise be used for request handling or preprocessing.
 
-Binary formats like Protocol Buffers (Protobuf) or FlatBuffers reduce this overhead by designing the wire format to map directly to in-memory data structures. This enables "zero-copy" deserialization in optimal cases, where the network buffer can be used directly without allocating new memory.
+Binary formats like Protocol Buffers[^fn-protobuf] (Protobuf) or FlatBuffers[^fn-flatbuffers] reduce this overhead by designing the wire format to map directly to in-memory data structures. This enables "zero-copy" deserialization in optimal cases, where the network buffer can be used directly without allocating new memory.
+
+[^fn-protobuf]: **Protocol Buffers (Protobuf)**: Google's language-neutral binary serialization format, first developed internally circa 2001 and open-sourced in 2008. "Protocol" refers to the message format specification (the `.proto` schema), while "Buffers" refers to the serialized byte buffers. Protobuf uses a schema-first design: message structures are defined in `.proto` files, then compiled to language-specific code. The binary encoding is 3--10× more compact than JSON and 20--100× faster to parse because the schema eliminates runtime type checking. For ML serving, Protobuf's fixed-size integer encoding and packed repeated fields make tensor serialization efficient, though the format still requires a deserialization step (unlike FlatBuffers).
+
+[^fn-flatbuffers]: **FlatBuffers**: Created by Wouter van Oortmerssen at Google and released in 2014. Originally designed for mobile game development where memory allocation and serialization overhead were unacceptable, FlatBuffers stores data in a format that can be accessed directly without parsing or unpacking. The "flat" in the name refers to the flat binary buffer that serves simultaneously as the serialized and in-memory representation. For ML inference, FlatBuffers enables true zero-copy access to tensor metadata: the serving system can read tensor shapes and data pointers directly from the network buffer without allocating new memory, reducing per-request overhead to near zero. TensorFlow Lite uses FlatBuffers as its model format for exactly this reason.
 
 #### REST vs gRPC {#sec-model-serving-systems-rest-vs-grpc-c7b7}
 
@@ -755,7 +759,6 @@ For a system processing `{python} requests_per_sec_str` requests per second, swi
 The system choice is clear: use REST for public APIs to maximize developer accessibility, and use gRPC for high-performance internal communication to minimize the serialization tax.
 
 The architectural components and protocols examined so far describe *how* serving systems are built. Understanding *why* certain configurations perform better requires analyzing what happens to individual requests as they traverse these components.
-
 
 ## Request Lifecycle {#sec-model-serving-systems-request-lifecycle-d9c6}
 
@@ -1054,7 +1057,11 @@ amdahl_speedup_str = fmt(amdahl_speedup_value, precision=1, commas=False)     # 
 **Engineering Implication**: Profile before optimizing. If preprocessing dominates, GPU-accelerated pipelines (NVIDIA DALI) may outperform model quantization.
 :::
 
-Moving preprocessing to GPU\index{GPU Preprocessing!NVIDIA DALI} can reduce total latency by 6× in some pipelines by eliminating CPU-GPU data transfers between stages [@nvidia_triton]. Effective optimization targets the largest time consumers first.
+Moving preprocessing to GPU[^fn-dali]\index{GPU Preprocessing!NVIDIA DALI} can reduce total latency by 6× in some pipelines by eliminating CPU-GPU data transfers between stages [@nvidia_triton].
+
+[^fn-dali]: **NVIDIA DALI (Data Loading Library)**: Released by NVIDIA in 2018, DALI moves image preprocessing operations (decoding, resizing, color space conversion, normalization) from the CPU to the GPU. The name "DALI" evokes the surrealist painter Salvador Dalí, though NVIDIA uses the acronym for Data Loading Library. The key insight is that CPU-based preprocessing becomes the bottleneck when inference runs on optimized accelerators: a V100 can classify an image in under 1 ms, but CPU-based JPEG decoding and resizing may take 3--5 ms. DALI's GPU-accelerated pipeline processes these operations in parallel with inference, achieving 2--6× end-to-end speedup by eliminating the CPU preprocessing bottleneck identified in Amdahl's Law analysis. For serving, DALI also reduces training-serving skew risk by providing identical preprocessing implementations across both pipelines.
+
+Effective optimization targets the largest time consumers first.
 
 #### The Serving Tax Bill {#sec-model-serving-systems-serving-tax-bill-ef40a}
 
@@ -1315,7 +1322,6 @@ Production systems rarely return raw predictions. Outputs must conform to API co
 
 The latency budget analysis reveals *where* time goes within a single request. Production systems, however, do not process requests in isolation: they must handle hundreds or thousands of concurrent requests competing for finite resources. Understanding this concurrency requires a different analytical framework.
 
-
 ## Queuing Theory {#sec-model-serving-systems-queuing-theory-tail-latency-29a6}
 
 The preceding lifecycle analysis assumed sequential processing. In production, concurrent requests compete for finite resources, and queuing theory\index{Queuing Theory!serving systems} predicts how this competition affects latency. These principles explain the counterintuitive behavior that causes well-provisioned systems to violate latency SLOs when load increases modestly.
@@ -1433,11 +1439,7 @@ M/M/1 analysis remains the foundation for:
 - **Identifying the scaling trigger**: Calculating when traffic exceeds single-node capacity
 - **Cost-effective provisioning**: Avoiding premature scale-out that wastes resources
 
-For traffic exceeding single-node capacity, production systems deploy multiple replicas behind a load balancer. The M/M/c queuing model\index{M/M/c Queue!multi-server} extends M/M/1 to c parallel servers, showing that multiple replicas\index{Replica!tail latency improvement} dramatically improve tail latency: the probability of all servers being simultaneously slow drops exponentially with server count. At c=4 replicas and moderate utilization, p99 latency can be 3× lower than the single-server case at the same total throughput.
-
-#### Scope Boundary {#sec-model-serving-systems-scope-boundary-00fc2}
-
-This chapter establishes single-node serving foundations. Distributed inference systems (model sharding across GPUs, tensor parallelism, pipeline parallelism) introduce coordination overhead and consistency challenges that require advanced scaling principles.
+For traffic exceeding single-node capacity, production systems deploy multiple replicas behind a load balancer. The M/M/c queuing model\index{M/M/c Queue!multi-server} extends M/M/1 to c parallel servers, showing that multiple replicas\index{Replica!tail latency improvement} dramatically improve tail latency: the probability of all servers being simultaneously slow drops exponentially with server count. At c=4 replicas and moderate utilization, p99 latency can be 3× lower than the single-server case at the same total throughput. This chapter establishes single-node serving foundations; distributed inference systems (model sharding across GPUs, tensor parallelism, pipeline parallelism) introduce coordination overhead and consistency challenges that require advanced scaling principles beyond our scope here.
 
 ### Tail Latency {#sec-model-serving-systems-tail-latency-5376}
 
@@ -1616,10 +1618,9 @@ Latency SLOs are not enforced by "fast inference" alone; they are enforced by *h
 - [ ] **Capacity planning**: Can you explain why a throughput number is only "real" if requests still meet the percentile latency SLO under load?
 ::::
 
-
 ## Model Lifecycle Management {#sec-model-serving-systems-model-lifecycle-management-ff2e}
 
-Production systems regularly violate both of these preconditions. Cold start latency can exceed inference time by orders of magnitude during scaling events. Subtle preprocessing differences between training and serving pipelines cause accuracy degradation that no amount of queuing optimization can address. This section examines the challenges that threaten these foundational assumptions.
+The queuing analysis assumes two preconditions: that models are loaded and ready, and that predictions match what was validated during development. Production systems regularly violate both. Cold start latency can exceed inference time by orders of magnitude during scaling events. Subtle preprocessing differences between training and serving pipelines cause accuracy degradation that no amount of queuing optimization can address. This section examines the lifecycle challenges that threaten these foundational assumptions.
 
 ### Training-Serving Skew {#sec-model-serving-systems-trainingserving-skew-7b99}
 
@@ -1715,11 +1716,15 @@ cs_warmup_str = f"{cs_warmup_value}s"                                        # e
 
 **Key insight**: Pre-compiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments.
 
-**CUDA Context**\index{CUDA Context!initialization overhead}: Before any GPU operation, the CUDA runtime must establish a *context*: a data structure that tracks memory allocations, loaded kernels, and device state. Creating a context requires communicating with the GPU driver and allocating GPU memory for internal bookkeeping. This one-time cost (0.3–0.5 s) affects every new process that uses the GPU. CUDA 11+ introduced lazy initialization that defers some setup until first use, reducing apparent startup time but shifting cost to the first inference.
-
-**CUDA MPS (Multi-Process Service)**\index{CUDA MPS!context sharing}: Normally, each process creates its own CUDA context, and the GPU time-slices between contexts. MPS allows multiple processes to share a single context, eliminating redundant initialization and enabling concurrent kernel execution. For serving systems running multiple model replicas, MPS can reduce aggregate cold start time and improve GPU utilization. The trade-off is reduced isolation: a crash in one process can affect others sharing the MPS server.
-
 :::
+
+The CUDA context[^fn-cuda-serving]\index{CUDA Context!initialization overhead} is the first cost in the cold start timeline. Before any GPU operation, the CUDA runtime must establish a *context*: a data structure that tracks memory allocations, loaded kernels, and device state. Creating a context requires communicating with the GPU driver and allocating GPU memory for internal bookkeeping. This one-time cost (0.3–0.5 s) affects every new process that uses the GPU. CUDA 11+ introduced lazy initialization that defers some setup until first use, reducing apparent startup time but shifting cost to the first inference.
+
+CUDA MPS (Multi-Process Service)[^fn-cuda-mps]\index{CUDA MPS!context sharing} addresses the context overhead for multi-model deployments. Normally, each process creates its own CUDA context, and the GPU time-slices between contexts. MPS allows multiple processes to share a single context, eliminating redundant initialization and enabling concurrent kernel execution. For serving systems running multiple model replicas, MPS can reduce aggregate cold start time and improve GPU utilization. The trade-off is reduced isolation: a crash in one process can affect others sharing the MPS server.
+
+[^fn-cuda-serving]: **CUDA (Compute Unified Device Architecture)**: NVIDIA's parallel computing platform, first released in June 2007. The name reflects its original goal: unifying the diverse shader programming models of GPUs into a single general-purpose computing architecture. Before CUDA, GPU programming required disguising computations as graphics operations (rendering triangles to perform matrix math). CUDA exposed the GPU's thousands of cores through a C-like programming model, enabling the direct parallel computation that made deep learning on GPUs practical. The CUDA context—the data structure tracking memory allocations, loaded kernels, and device state—is the runtime's per-process gateway to GPU resources.
+
+[^fn-cuda-mps]: **CUDA MPS (Multi-Process Service)**: Introduced in CUDA 5.0 (2012) and substantially improved in CUDA 11.4 (2021). MPS creates a daemon process that mediates GPU access for multiple client processes through a shared CUDA context, enabling true concurrent kernel execution rather than the time-sliced scheduling that occurs with separate contexts. For serving workloads, MPS enables multiple model replicas to share a GPU efficiently—each replica submits kernels independently, and the GPU schedules them across its streaming multiprocessors. The primary limitation is fault isolation: because all clients share a context, a segfault or illegal memory access in one process can corrupt the GPU state for all others.
 
 Without warmup, the first real request triggers compilation and memory allocation mid-inference, often causing timeout failures. A request that normally takes 5 ms might require 500 ms during cold start, violating SLOs and degrading user experience.
 
@@ -1747,7 +1752,9 @@ Three strategies address multi-model memory management. Time-multiplexing\index{
 
 #### Multi-Stream Execution {#sec-model-serving-systems-multistream-execution-1b1f}
 
-When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU\index{MIG (Multi-Instance GPU)!hardware isolation}\index{Multi-Instance GPU|see{MIG}} technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30 (up to 4 instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
+When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig]\index{MIG (Multi-Instance GPU)!hardware isolation}\index{Multi-Instance GPU|see{MIG}} technology enables hardware-level isolation, dividing an A100 into up to 7 independent GPU instances, each with dedicated memory and compute resources. MIG is available on A100, A30 (up to 4 instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
+
+[^fn-mig]: **MIG (Multi-Instance GPU)**: Introduced with NVIDIA's A100 GPU (Ampere architecture, 2020). MIG partitions a single physical GPU into up to seven independent instances, each with dedicated streaming multiprocessors, memory controllers, and L2 cache. Unlike software-based sharing (MPS or time-slicing), MIG provides hardware-level isolation: a runaway kernel in one partition cannot affect another's performance or memory. The trade-off is granularity—partitions must follow fixed profiles (e.g., 1g.5gb, 2g.10gb, 3g.20gb on A100), so resources cannot be divided arbitrarily. For multi-model serving, MIG enables running different models on the same GPU with guaranteed SLOs per model, eliminating the "noisy neighbor" problem that plagues time-shared GPU access.
 
 The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
 
@@ -1794,7 +1801,6 @@ To mitigate this, systems use **Pinned Memory**\index{Pinned Memory!DMA transfer
 Pinning memory instructs the OS to keep that region permanently in physical RAM. The GPU's DMA engine can then transfer data directly from the pinned region at full PCIe bandwidth without CPU involvement. The trade-off is that pinned memory reduces the RAM available for other processes and cannot be reclaimed under memory pressure. For model serving, the performance gain (2–3× faster transfers) typically justifies pinning model weights and frequently-used input buffers, while leaving less critical memory pageable.
 
 The lifecycle management strategies examined so far ensure models are ready to serve: loaded into memory, warmed up, and producing predictions consistent with training. With these prerequisites satisfied, the queuing dynamics from @sec-model-serving-systems-queuing-theory-tail-latency-29a6 become relevant. The next optimization opportunity lies in how requests are grouped for processing, which directly affects both the throughput and latency terms in our queuing equations.
-
 
 ## Throughput Optimization {#sec-model-serving-systems-throughput-optimization-18d1}
 
@@ -2365,7 +2371,7 @@ This approach reduces average wait time during high traffic while maintaining ba
 
 The interplay between window size and batch limits creates a space of possible configurations, each representing a different balance between throughput and latency.
 
-The batching configuration space forms a Pareto frontier\index{Pareto Frontier!throughput-latency} where improving throughput requires accepting higher latency. @tbl-pareto-batching traces this frontier across five representative configurations:
+The batching configuration space forms a Pareto frontier[^fn-pareto-frontier]\index{Pareto Frontier!throughput-latency} where improving throughput requires accepting higher latency. @tbl-pareto-batching traces this frontier across five representative configurations:
 
 | **Window (ms)** | **Max Batch** | **Avg Latency** | **p99 Latency** | **Throughput** | **Configuration**    |
 |:--------------|------------:|--------------:|--------------:|-------------:|:-------------------|
@@ -2378,6 +2384,8 @@ The batching configuration space forms a Pareto frontier\index{Pareto Frontier!t
 : **Batching Pareto Frontier**: Each configuration represents a different point on the throughput-latency trade-off curve. Moving from 2ms to 50ms windows improves throughput by only 52% while increasing p99 latency by 5.4×. Diminishing returns make aggressive batching costly for latency-sensitive applications. {#tbl-pareto-batching}
 
 #### Practical Configuration Guidelines {#sec-model-serving-systems-practical-configuration-guidelines-9791}
+
+[^fn-pareto-frontier]: **Pareto Frontier**: Named after Italian economist Vilfredo Pareto (1848--1923), who observed in 1896 that 80% of Italy's land was owned by 20% of the population. The "Pareto frontier" (also called "Pareto optimal" or "efficient frontier") describes the set of solutions where no objective can be improved without worsening another. In serving systems, the frontier maps the throughput-latency trade-off: each point represents a configuration where gaining throughput requires sacrificing latency, and vice versa. The concept originated in welfare economics but pervades engineering optimization, from portfolio theory (Markowitz, 1952) to multi-objective neural architecture search.
 
 The Pareto frontier in @tbl-pareto-batching illustrates why these guidelines matter: moving from a 2ms to a 50ms window improves throughput by only 52% while increasing p99 latency by 5.4×. Principled batching configuration avoids this region of diminishing returns. Start with the latency budget by allocating 20 to 30 percent of SLO to batching wait time. Estimate traffic using the p95 arrival rate rather than average to account for traffic spikes. Calculate the maximum window as $T_{\text{max}} = 0.3 \times L_{\text{SLO}}$. Determine the batch size limit from GPU memory and p99 latency constraints. Monitor the actual distribution since batch size variance indicates whether traffic assumptions hold.
 
@@ -2448,11 +2456,19 @@ pc_predicted_throughput_str = f"{pc_predicted_throughput_value:,}"
 
 Autoregressive models\index{Autoregressive Models!token generation} like language models generate outputs token by token—each new token depends on all previously generated tokens, so generation is inherently sequential. The dynamic batching examined in @sec-model-serving-systems-throughput-optimization-18d1 assumes fixed-length outputs. LLMs violate this assumption: if one sequence in a batch of 8 finishes after 10 tokens while others need 100 tokens, 87.5 percent of the compute for that sequence slot is wasted\index{Sequence Length Variability!batch waste} [@yu2022orca].
 
-Continuous batching\index{Continuous Batching!LLM serving} (also called iteration-level batching) addresses this waste by allowing new requests to join a batch between generation steps and completed sequences to exit [@kwon2023vllm]. The system manages batch composition dynamically at each decoding iteration rather than forming static batches that persist for the entire generation process.
+Continuous batching[^fn-continuous-batching]\index{Continuous Batching!LLM serving} (also called iteration-level batching) addresses this waste by allowing new requests to join a batch between generation steps and completed sequences to exit [@kwon2023vllm]. The system manages batch composition dynamically at each decoding iteration rather than forming static batches that persist for the entire generation process.
 
-The mechanism works as follows: when a sequence generates its end-of-sequence token, its slot becomes immediately available. A waiting request can fill that slot for the next iteration rather than waiting for the entire batch to complete. Similarly, the system can add new requests to available slots without interrupting ongoing generation. This dynamic approach maintains high GPU utilization even when sequence lengths vary dramatically.
+The mechanism works as follows: when a sequence generates its end-of-sequence token, its slot becomes immediately available. A waiting request can fill that slot for the next iteration rather than waiting for the entire batch to complete. Similarly, the system can add new requests to available slots without interrupting ongoing generation.
 
-Systems implementing continuous batching, such as vLLM\index{vLLM!continuous batching}\index{vLLM!PagedAttention implementation} and TensorRT-LLM\index{TensorRT-LLM!inference optimization}\index{TensorRT-LLM!LLM serving}, achieve 2–4× higher throughput than traditional static batching [@agrawal2024sarathi]. The improvement comes from two sources: eliminating wasted compute on completed sequences and reducing average wait time for new requests. For production language model serving where response lengths vary from single tokens to thousands, continuous batching has become essential for cost-effective deployment.
+[^fn-continuous-batching]: **Continuous Batching**: Introduced by the Orca system from Yu et al. at OSDI 2022 [@yu2022orca], which coined the term "iteration-level batching" to distinguish it from "request-level batching" (traditional dynamic batching). The key insight is scheduling granularity: traditional batching commits to a fixed batch for an entire generation sequence (potentially hundreds of iterations), while continuous batching makes scheduling decisions at every single token-generation step. NVIDIA adopted the term "in-flight batching" for the same concept in TensorRT-LLM. The technique draws an analogy to CPU process scheduling: just as modern operating systems preemptively schedule processes at each time slice rather than running each to completion, continuous batching reschedules the GPU's "process slots" at each decoding iteration.
+
+This dynamic approach maintains high GPU utilization even when sequence lengths vary dramatically.
+
+Systems implementing continuous batching, such as vLLM[^fn-vllm]\index{vLLM!continuous batching}\index{vLLM!PagedAttention implementation} and TensorRT-LLM[^fn-tensorrt-llm]\index{TensorRT-LLM!inference optimization}\index{TensorRT-LLM!LLM serving}, achieve 2–4× higher throughput than traditional static batching [@agrawal2024sarathi]. The improvement comes from two sources: eliminating wasted compute on completed sequences and reducing average wait time for new requests. For production language model serving where response lengths vary from single tokens to thousands, continuous batching has become essential for cost-effective deployment.
+
+[^fn-vllm]: **vLLM**: Open-sourced by UC Berkeley researchers Woosuk Kwon, Zhuohan Li, and others in June 2023 alongside their SOSP paper introducing PagedAttention. The name stands for "virtual LLM," drawing a deliberate analogy to virtual memory in operating systems: just as virtual memory decouples logical addresses from physical RAM pages, vLLM decouples the logical KV cache from contiguous GPU memory blocks. This OS-inspired design solved the memory fragmentation problem that limited prior LLM serving systems to 50--60% memory utilization, enabling 2--4× higher throughput at the same hardware cost.
+
+[^fn-tensorrt-llm]: **TensorRT-LLM**: NVIDIA's open-source library (released October 2023) that extends TensorRT's inference optimization to large language models. Built on top of TensorRT's graph compilation and kernel fusion capabilities, it adds LLM-specific optimizations: in-flight batching (NVIDIA's term for continuous batching), paged KV cache management, multi-GPU tensor parallelism, and custom attention kernels. The library provides a Python API for defining models that compile to optimized TensorRT engines, bridging the gap between research model code and production-grade serving performance.
 
 Memory management adds complexity to continuous batching. As sequences enter and exit the batch, the key-value cache that stores attention context must be dynamically allocated and freed. Consider what happens when sequences of varying lengths share GPU memory: a 100-token sequence completes and releases its cache, but a new 150-token sequence cannot use that space because it needs a larger contiguous block. Over time, small unusable gaps accumulate between allocated regions, eventually preventing new sequences from starting even when total free memory appears sufficient. This *memory fragmentation*\index{Memory Fragmentation!KV cache} can waste 40 to 50 percent of available memory in naive implementations, severely limiting the concurrent batch size that determines throughput.
 
@@ -2476,7 +2492,7 @@ Continuous batching represents the state of the art for LLM serving, yet not all
 
 #### When Not to Batch {#sec-model-serving-systems-when-not-to-batch-8bb6a}
 
-Some\index{Batching!when to avoid} scenarios require single-request processing. Ultra-low latency requirements\index{Ultra-Low Latency!no batching} where p99 latency must stay under 10 ms make any batching delay unacceptable. Highly variable request sizes where inputs vary dramatically in size cause batching to create padding overhead that wastes compute. Memory constraints where models already consume most GPU memory mean batch activations may cause out-of-memory errors.
+Some\index{Batching!when to avoid} scenarios require single-request processing. Ultra-low latency requirements\index{Ultra-Low Latency!no batching}, where p99 latency must stay under 10 ms, make any batching delay unacceptable. Highly variable request sizes create padding overhead that wastes compute, since the smallest input in a batch must be padded to match the largest. And memory constraints become binding when models already consume most GPU memory, since batch activations scale linearly with batch size and can trigger out-of-memory errors.
 
 ### Session Affinity Constraints {#sec-model-serving-systems-session-affinity-constraints-8b1f}
 
@@ -2667,10 +2683,11 @@ Batching is the primary lever for serving economics, but the optimal strategy de
 
 The batching strategies examined so far share a critical assumption: each request produces a single, fixed-size output---one classification label, one bounding box, one embedding vector. This assumption governs the queuing math, the Pareto frontier analysis, and the traffic-adaptive window tuning. But the fastest-growing category of serving workloads violates this assumption entirely. Large language models generate outputs token by token, with each token depending on every previous one. A single request may produce hundreds or thousands of tokens over seconds of elapsed time, yet must feel responsive from the first token onward. This fundamental shift from fixed-output to variable-length, streaming-output serving demands new metrics, new memory management strategies, and new batching techniques that build on---but substantially extend---the foundations established above.
 
-
 ## LLM Serving {#sec-model-serving-systems-llm-serving-b8bf}
 
-Large language models\index{LLM Serving!token generation} introduce three properties absent from traditional serving: *autoregressive generation* (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, invalidating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure that traditional models never face). Together, these properties create a qualitatively different serving challenge. The p50, p95, and p99 metrics that govern classification serving still matter, but they apply to different *phases* of the request---the initial prompt processing and the subsequent token generation. The foundational principles of queuing theory, batching tradeoffs, and latency budgets apply universally; LLM serving adds domain-specific techniques atop this foundation.
+Large language models\index{LLM Serving!token generation} introduce three properties absent from traditional serving: *autoregressive generation*[^fn-autoregressive] (each token depends on all previous tokens, making output inherently sequential), *variable-length output* (response length is unknown at request time, invalidating fixed-batch assumptions), and *stateful memory* (the key-value cache grows with each generated token, creating dynamic memory pressure that traditional models never face). Together, these properties create a qualitatively different serving challenge. The p50, p95, and p99 metrics that govern classification serving still matter, but they apply to different *phases* of the request---the initial prompt processing and the subsequent token generation. The foundational principles of queuing theory, batching tradeoffs, and latency budgets apply universally; LLM serving adds domain-specific techniques atop this foundation.
+
+[^fn-autoregressive]: **Autoregressive**: From Greek *auto-* (self) and Latin *regressus* (a going back). In statistics, an autoregressive model predicts the next value from its own previous values—the output "regresses" on itself. George Udny Yule introduced autoregressive models in 1927 for analyzing sunspot cycles. In language modeling, the term describes the sequential token generation process where each output token conditions on all previously generated tokens, creating a fundamental serial dependency that prevents the parallelism exploited during training's forward pass. This serial bottleneck explains why LLM serving is memory-bandwidth-bound rather than compute-bound: the model must be read from memory once per token, regardless of available compute capacity.
 
 ### Performance Metrics: TTFT and TPOT {#sec-model-serving-systems-performance-metrics-ttft-tpot-b009}
 
@@ -2682,7 +2699,9 @@ Generative models produce a stream of tokens rather than a single output tensor.
 
 :::
 
-These two metrics capture distinct user experience aspects. A fast TTFT provides immediate responsiveness (the system starts answering quickly), while a fast TPOT provides fluid generation (the answer streams smoothly). Production systems must optimize both, typically with different techniques since they are governed by different hardware constraints. Translating these metrics into concrete *LLM serving latency targets* grounds the discussion in production reality.
+These two metrics[^fn-ttft-tpot] capture distinct user experience aspects.
+
+[^fn-ttft-tpot]: **TTFT and TPOT**: These metrics emerged from the LLM serving community circa 2022--2023, formalized in Pope et al.'s analysis of efficient generative inference [@pope2023efficiently]. TTFT adapts the traditional "time to first byte" (TTFB) metric from web performance—coined in the early 2000s to measure server responsiveness—to token-based generation. TPOT has no direct predecessor; it captures the unique streaming characteristic of autoregressive models, where user-perceived quality depends not on total completion time but on the *rhythm* of token arrival. Together, they replace the single-number latency metric adequate for classification models with a two-dimensional characterization reflecting the prefill/decode phase split inherent to transformer generation. A fast TTFT provides immediate responsiveness (the system starts answering quickly), while a fast TPOT provides fluid generation (the answer streams smoothly). Production systems must optimize both, typically with different techniques since they are governed by different hardware constraints. Translating these metrics into concrete *LLM serving latency targets* grounds the discussion in production reality.
 
 ::: {.callout-lighthouse title="LLM Serving Latency Targets"}
 
@@ -2698,11 +2717,11 @@ A production-grade LLM service typically targets the following SLOs:
 
 Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy dramatically affects both output quality and computational cost.
 
-**Greedy decoding**\index{Greedy Decoding!LLM generation} selects the highest-probability token at each step. Fast but often produces repetitive, low-quality outputs because it cannot recover from early mistakes.
+The simplest approach, greedy decoding\index{Greedy Decoding!LLM generation}, selects the highest-probability token at each step. It is fast but often produces repetitive, low-quality outputs because it cannot recover from early mistakes. Beam search[^fn-beam-search]\index{Beam Search!decoding strategy}\index{Beam Search!candidate sequences} improves quality by maintaining multiple candidate sequences and selecting the highest-scoring complete sequence, though it multiplies computation by the beam width. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-k, and top-p parameters introduces randomness for diversity [@holtzman2020curious]. Temperature scales logits before softmax. Top-k limits sampling to the k highest-probability tokens. Top-p, also called nucleus sampling[^fn-nucleus-sampling]\index{Nucleus Sampling!top-p}, limits sampling to tokens comprising probability mass p.
 
-**Beam search**\index{Beam Search!decoding strategy}\index{Beam Search!candidate sequences} maintains multiple candidate sequences, selecting the highest-scoring complete sequence. Produces higher-quality outputs but multiplies computation by the beam width.
+[^fn-beam-search]: **Beam Search**: A heuristic search algorithm that explores a graph by expanding only the most promising nodes at each level. The "beam" metaphor evokes a flashlight illuminating a narrow band of the search space—wider beams (larger beam widths) explore more possibilities but cost proportionally more compute and memory. Beam search originated in speech recognition in the 1970s (Raj Reddy's group at CMU) and was adopted for neural machine translation by Sutskever et al. (2014). For LLM serving, beam width directly multiplies memory requirements because each beam maintains its own KV cache, making beam width a critical serving cost parameter.
 
-**Sampling**\index{Sampling!temperature, top-k, top-p} with temperature, top-k, and top-p parameters introduces randomness for diversity [@holtzman2020curious]. Temperature scales logits before softmax. Top-k limits sampling to the k highest-probability tokens. Top-p, also called nucleus sampling\index{Nucleus Sampling!top-p}, limits sampling to tokens comprising probability mass p.
+[^fn-nucleus-sampling]: **Nucleus Sampling (Top-p)**: Introduced by Ari Holtzman et al. in "The Curious Case of Neural Text Degeneration" [@holtzman2020curious] (2019). The "nucleus" metaphor comes from the core of the probability distribution: rather than sampling from a fixed number of top tokens (top-k), nucleus sampling dynamically selects the smallest set of tokens whose cumulative probability exceeds a threshold *p* (typically 0.9--0.95). This adapts to the shape of the distribution: when the model is confident, few tokens are sampled; when uncertain, more diversity is allowed. The approach elegantly solves the problem that top-k with fixed *k* is either too restrictive (cutting off valid tokens) or too permissive (including nonsensical ones) depending on context.
 
 The choice presents latency tradeoffs [@meister2020beam]. Beam search with width 5 takes roughly 5× the compute of greedy decoding. Sampling adds minimal overhead but requires careful parameter tuning to balance quality and coherence.
 
@@ -2710,10 +2729,9 @@ Production LLM systems\index{Streaming Responses!LLM serving}\index{Chunked HTTP
 
 ### Memory and KV Cache {#sec-model-serving-systems-memory-kv-cache-d1ea}
 
-Generative inference requires managing the **KV Cache**\index{KV Cache!LLM memory}\index{Key-Value Cache|see{KV Cache}}\index{KV Cache!sequence length scaling}, a stateful memory structure that grows with sequence length. Unlike traditional models where memory usage is constant per batch, LLM memory usage is dynamic:
+Generative inference requires managing the **KV Cache**[^fn-kv-cache]\index{KV Cache!LLM memory}\index{Key-Value Cache|see{KV Cache}}\index{KV Cache!sequence length scaling}, a stateful memory structure that grows with sequence length. Unlike traditional models where memory usage is constant per batch, LLM memory usage is dynamic. Each generated token adds to the context window, consuming additional GPU memory through state accumulation, and variable-length sequences can lead to memory fragmentation if not managed explicitly.
 
-*   **State Accumulation**: Each generated token adds to the context window, consuming additional GPU memory.
-*   **Fragmentation**: Variable-length sequences can lead to memory fragmentation if not managed explicitly.
+[^fn-kv-cache]: **KV Cache (Key-Value Cache)**: In transformer attention (introduced by Vaswani et al. in 2017), each layer computes Key and Value projections from input tokens. During autoregressive generation, previously computed K and V vectors remain valid for all future tokens—only the new token's Q (Query) vector changes. The KV cache stores these precomputed projections to avoid redundant recomputation, trading memory for compute. Without caching, generating the $n$-th token would require reprocessing all $n-1$ previous tokens, making generation cost quadratic in sequence length. With caching, each new token requires only one new K-V pair per layer, reducing cost to linear. The catch: for a 70B model with 80 layers and FP16 precision, the KV cache consumes ~1.3 MB per token per request, meaning a batch of 32 requests at 8,000 tokens each requires ~330 GB of KV cache alone—far exceeding the model weights themselves.
 
 The continuous batching and PagedAttention techniques covered in @sec-model-serving-systems-continuous-batching-8bb6 address these challenges. Advanced techniques including prefix caching and speculative decoding are covered in specialized coverage of large-scale systems.
 
@@ -2805,7 +2823,6 @@ LLM serving introduces constraints absent from traditional model serving.
 - [ ] **PagedAttention**: Can you explain the memory fragmentation problem in KV cache management and how borrowing virtual memory concepts from OS design achieves near-zero waste?
 ::::
 
-
 ## Inference Runtime Selection {#sec-model-serving-systems-inference-runtime-selection-5eef}
 
 The batching strategies and LLM-specific techniques examined in preceding sections determine *how* requests are grouped and processed. These strategies assume an underlying execution engine that actually runs the model computations—an assumption that matters enormously. The token generation time (@eq-token-generation-time) and the latency budgets established earlier are achievable only if the runtime efficiently maps operations to hardware. The inference runtime, the software layer that orchestrates tensor operations and manages hardware resources, can vary by an order of magnitude in performance for identical models. Choosing appropriately requires understanding the tradeoffs between framework-native serving, general-purpose optimization, and specialized inference engines.
@@ -2818,11 +2835,15 @@ TorchScript\index{TorchScript!serving optimization} and TensorFlow SavedModel\in
 
 #### General-Purpose Optimization {#sec-model-serving-systems-general-purpose-optimization-da62a}
 
-ONNX Runtime\index{ONNX Runtime!cross-platform inference} provides a hardware-agnostic optimization layer [@onnxruntime2024]. Models export to ONNX format, then ONNX Runtime applies graph optimizations and selects execution providers for the target hardware. This enables single-format deployment across CPUs, GPUs, and specialized accelerators.
+ONNX Runtime[^fn-onnx-runtime]\index{ONNX Runtime!cross-platform inference} provides a hardware-agnostic optimization layer [@onnxruntime2024]. Models export to ONNX format, then ONNX Runtime applies graph optimizations and selects execution providers for the target hardware. This enables single-format deployment across CPUs, GPUs, and specialized accelerators.
+
+[^fn-onnx-runtime]: **ONNX Runtime**: Microsoft's open-source inference engine, first released in December 2018. Built to execute models in the ONNX (Open Neural Network Exchange) format, it acts as a hardware abstraction layer: the same ONNX model can run on CPUs (via Intel MKL-DNN or ARM optimizations), NVIDIA GPUs (via CUDA or TensorRT), AMD GPUs (via ROCm), or custom accelerators through pluggable "execution providers." ONNX Runtime applies framework-agnostic graph optimizations—constant folding, redundant node elimination, operator fusion—that benefit all hardware targets. This cross-platform capability makes it the most common choice when models must deploy across heterogeneous infrastructure without maintaining separate optimization pipelines per hardware target.
 
 #### Specialized Inference Engines {#sec-model-serving-systems-specialized-inference-engines-da62b}
 
-TensorRT\index{Inference Engine!specialized}\index{TensorRT!GPU optimization}[^fn-tensorrt-serving] (NVIDIA GPUs), OpenVINO\index{OpenVINO!Intel optimization} (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
+TensorRT\index{Inference Engine!specialized}\index{TensorRT!GPU optimization}[^fn-tensorrt-serving] (NVIDIA GPUs), OpenVINO[^fn-openvino]\index{OpenVINO!Intel optimization} (Intel hardware), and similar engines optimize specifically for their target hardware [@nvidia2024tensorrt; @chen2018tvm]. They apply aggressive optimizations that framework-native runtimes cannot safely perform:
+
+[^fn-openvino]: **OpenVINO (Open Visual Inference and Neural network Optimization)**: Intel's open-source toolkit, first released in May 2018. The name emphasizes its original focus on visual inference (computer vision on Intel hardware), though it now supports all neural network types. OpenVINO's core capability is mapping neural network operations onto Intel-specific instruction sets: AVX-512 and AMX (Advanced Matrix Extensions) on Xeon CPUs, integrated GPU execution via oneAPI, and specialized inference on Intel's Movidius VPUs (Vision Processing Units) for edge deployment. For organizations using Intel infrastructure, OpenVINO achieves 2--5× speedup over framework-native CPU inference through hardware-specific kernel implementations and INT8 calibration.
 
 [^fn-tensorrt-serving]: **TensorRT**: NVIDIA's inference optimization SDK that applies layer fusion, kernel auto-tuning, and precision calibration to neural networks. Unlike framework-native runtimes that preserve training-time graph structure, TensorRT rebuilds the computation graph for the specific target GPU during a build phase. This GPU-specific compilation means TensorRT engines are not portable across GPU architectures, requiring separate builds for V100, A100, and H100 deployments. The build phase can take minutes but produces engines that often achieve 2–5× speedup over PyTorch.
 
@@ -3029,7 +3050,6 @@ The precision decision has direct infrastructure consequences: INT8 inference ac
 
 Runtime selection and precision tuning operate at the model level: they determine *what* computation runs and at *what* numerical format. But between the model and the silicon lies another optimization layer—the mechanics of how computation graphs compile to kernels, how bytes move from disk to memory, and how the CPU and GPU coordinate their work. These node-level techniques often yield the final 2–5× that separates a functional prototype from a production-grade serving node.
 
-
 ## Node-Level Optimization {#sec-model-serving-systems-node-level-optimization-profiling}
 
 Runtime selection and precision tuning establish the software foundation for serving. Achieving peak efficiency requires going deeper: understanding *how* the hardware executes each operation and *where* every microsecond goes. This section explores optimizations that occur at the boundaries of software and silicon: compiling the computation graph\index{Graph Compilation!optimization}, exploiting CPU capabilities when GPUs are absent, minimizing the time to get bytes from disk to memory, and visualizing exactly *where* every microsecond goes.
@@ -3057,9 +3077,13 @@ Inference engines like TensorRT were introduced in @sec-model-serving-systems-in
 
 GPUs dominate the narrative, yet CPUs\index{CPU Inference!when to use} remain the workhorse for a vast number of inference workloads, particularly for smaller models, latency-insensitive batch jobs, or cost-constrained environments. Optimizing for the CPU requires a different mindset.
 
-**SIMD and Vectorization**\index{SIMD!CPU vectorization}\index{AVX-512!vector instructions}: Modern CPUs (Intel Xeon, AMD EPYC) pack powerful vector units (AVX-512, AMX). Standard Python loops cannot use these. Specialized runtimes like **OpenVINO** or **Intel Extension for PyTorch (IPEX)** map neural network operators directly to these vector instructions, achieving order-of-magnitude speedups over vanilla implementations.
+**SIMD and Vectorization**[^fn-simd-serving]\index{SIMD!CPU vectorization}\index{AVX-512!vector instructions}: Modern CPUs (Intel Xeon, AMD EPYC) pack powerful vector units (AVX-512, AMX). Standard Python loops cannot use these. Specialized runtimes like **OpenVINO** or **Intel Extension for PyTorch (IPEX)** map neural network operators directly to these vector instructions, achieving order-of-magnitude speedups over vanilla implementations.
 
-**Thread Pinning & NUMA**\index{NUMA!memory locality}\index{Thread Pinning!CPU affinity}: On multi-socket servers, accessing memory attached to a different CPU socket (NUMA) adds significant latency. Inference servers must be "NUMA-aware," pinning threads to specific cores and ensuring that memory allocations remain local to those cores.
+[^fn-simd-serving]: **SIMD (Single Instruction, Multiple Data)**: A parallel computing classification from Michael Flynn's 1966 taxonomy of computer architectures. SIMD enables one instruction to operate on multiple data elements simultaneously—for example, adding eight pairs of floating-point numbers in a single clock cycle. Intel's AVX-512 (Advanced Vector Extensions, 2016) processes 512 bits (16 floats) per instruction; AMX (Advanced Matrix Extensions, 2023) extends this to matrix tile operations. For CPU inference, SIMD exploitation is the primary lever: a naively written matrix multiplication uses scalar operations at ~1% of theoretical peak, while SIMD-optimized kernels approach 80--90% utilization.
+
+**Thread Pinning & NUMA**[^fn-numa-serving]\index{NUMA!memory locality}\index{Thread Pinning!CPU affinity}: On multi-socket servers, accessing memory attached to a different CPU socket (NUMA) adds significant latency. Inference servers must be "NUMA-aware," pinning threads to specific cores and ensuring that memory allocations remain local to those cores.
+
+[^fn-numa-serving]: **NUMA (Non-Uniform Memory Access)**: A memory architecture where access latency depends on the physical proximity of the processor to the memory bank. The term was coined in the 1990s as multi-processor systems grew beyond what a single shared memory bus could serve. In a two-socket server, each CPU has "local" memory (accessed in ~80 ns) and "remote" memory attached to the other socket (accessed in ~130 ns via the interconnect, a 60% penalty). For ML inference, NUMA-unaware memory allocation causes model weights to reside on the "wrong" socket, adding 40--60% latency overhead to every weight access. Linux's `numactl` tool and the `libnuma` library enable NUMA-aware process placement.
 
 **The "Small Batch" Advantage**\index{Small Batch!CPU advantage}: CPUs often outperform GPUs at batch size 1 for small models. The overhead of launching a GPU kernel (~10 $\mu$s) and transferring data (~50 $\mu$s) can exceed the compute time for a tiny dense layer. For models under 50 MB serving single requests, a well-optimized CPU runtime often delivers lower latency than a GPU.
 
@@ -3071,7 +3095,7 @@ In autoscaling systems, the time to spin up a new node is critical. A major comp
 
 **Zero-Copy with `mmap`**\index{mmap!zero-copy loading}: Memory mapping allows the OS to map a file directly into the process's virtual address space. The data is effectively "loaded" only when accessed, and the OS handles the transfer from disk to RAM efficiently.
 
-**Safetensors**\index{Safetensors!zero-copy loading}: A modern format designed specifically for fast loading. It stores tensors as raw bytes with a minimal JSON header. This enables zero-copy\index{Zero-Copy!model loading} loading: the raw bytes on disk are mapped directly into the tensor's memory buffer.
+**Safetensors**[^fn-safetensors]\index{Safetensors!zero-copy loading}: A modern format designed specifically for fast loading. It stores tensors as raw bytes with a minimal JSON header. This enables zero-copy\index{Zero-Copy!model loading} loading: the raw bytes on disk are mapped directly into the tensor's memory buffer.
 
 ::: {.callout-example title="Loading Speed: Safetensors vs. Pickle"}
 Loading a 5GB Stable Diffusion model:
@@ -3081,6 +3105,8 @@ Loading a 5GB Stable Diffusion model:
 
 By using `mmap` and formats like `safetensors`, loading speed becomes limited only by the disk's read speed (e.g., 3GB/s for NVMe), rather than CPU parsing overhead.
 :::
+
+[^fn-safetensors]: **Safetensors**: Created by Hugging Face engineer Nicolas Patry and released in 2022. The name emphasizes safety: unlike Python's pickle format (used by `torch.save`), safetensors cannot execute arbitrary code during deserialization, eliminating a class of security vulnerabilities where malicious model files could compromise a serving system. The format stores tensors as contiguous raw bytes with a small JSON header describing shapes and data types, enabling memory-mapped loading where the OS maps the file directly into the process's address space. This design achieves 30--100× faster loading than pickle because no parsing, object construction, or memory copying occurs.
 
 ### Profiling the Serving Node {#sec-model-serving-systems-profiling-serving-node}
 
@@ -3130,7 +3156,6 @@ Optimizing inference requires a layered approach.
 :::
 
 The optimization techniques examined so far—batching, runtime selection, precision tuning, graph compilation—collectively determine how much useful work a single serving node extracts from its hardware. The natural question that follows is economic: given these per-node capabilities, *how much* infrastructure is required, and *what does it cost*?
-
 
 ## Economics and Planning {#sec-model-serving-systems-economics-capacity-planning-3e7e}
 
@@ -3283,7 +3308,9 @@ The linear growth of the KV cache with sequence length forces a hard trade-off: 
 
 #### Workload Profile {#sec-model-serving-systems-workload-profile-a380}
 
-*   **Model**: Llama-3-8B (quantized to 4-bit AWQ\index{AWQ!4-bit quantization}).
+*   **Model**: Llama-3-8B (quantized to 4-bit AWQ[^fn-awq]\index{AWQ!4-bit quantization}).
+[^fn-awq]: **AWQ (Activation-Aware Weight Quantization)**: Introduced by Ji Lin et al. at MIT in 2023. AWQ observes that not all weights contribute equally to model quality—weights corresponding to channels with large activation magnitudes are disproportionately important. Rather than quantizing all weights identically, AWQ applies per-channel scaling that protects salient weights from quantization error while aggressively compressing less important ones. This activation-aware approach achieves 4-bit quantization with negligible quality loss (typically <0.5% accuracy degradation), enabling models to fit in roughly 4× less GPU memory and achieving proportional memory bandwidth savings during the decode phase. For serving, AWQ's 4-bit compression directly translates to higher concurrent batch sizes and lower cost per token.
+
 *   **Hardware**: 1× NVIDIA H100 SXM5 GPU (`{python} h100_mem` GB HBM3, `{python} h100_bw_tbs` TB/s bandwidth).
 *   **Request Characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
@@ -3292,15 +3319,13 @@ The linear growth of the KV cache with sequence length forces a hard trade-off: 
 
 The end-to-end request latency is governed by the two-phase execution model of autoregressive transformers, applying the TTFT and TPOT metrics defined in @sec-model-serving-systems-performance-metrics-ttft-tpot-b009.
 
-**1. Prefill Phase (Time to First Token)**\index{Prefill Phase!compute-bound}
+##### Prefill Phase (Time to First Token) {.unnumbered}
 
-The model processes the 1,000-token prompt in parallel\index{Prefill Phase!parallel processing}. On an H100, this compute-bound operation achieves approximately 10,000 tokens per second.
-*   $T_{\text{prefill}} = \frac{1000 \text{ tokens}}{10000 \text{ tokens/s}} = 100 \text{ ms}$.
-*   Accounting for 20 ms of system overhead (network ingress, tokenization), the **TTFT is 120 ms**, comfortably within the 200 ms SLO.
+The model processes the 1,000-token prompt in parallel\index{Prefill Phase!compute-bound}\index{Prefill Phase!parallel processing}. On an H100, this compute-bound operation achieves approximately 10,000 tokens per second: $T_{\text{prefill}} = 1000 \text{ tokens} / 10{,}000 \text{ tokens/s} = 100 \text{ ms}$. Accounting for 20 ms of system overhead (network ingress, tokenization), the **TTFT is 120 ms**, comfortably within the 200 ms SLO.
 
-**2. Decode Phase (Time Per Output Token)**\index{Decode Phase!memory-bandwidth bound}
+##### Decode Phase (Time Per Output Token) {.unnumbered}
 
-The model generates 256 tokens sequentially. This phase is memory-bandwidth bound\index{Memory Bandwidth!LLM bottleneck}\index{Decode Phase!sequential generation}—the same IO-bound pattern seen in the DLRM embedding lookups (@sec-model-serving-systems-latency-distribution-analysis-b0f8), but at a larger scale: the system must read the entire 3.5 GB weight tensor from VRAM to generate a single token.
+The model generates 256 tokens sequentially. This phase is memory-bandwidth bound\index{Decode Phase!memory-bandwidth bound}\index{Memory Bandwidth!LLM bottleneck}\index{Decode Phase!sequential generation}—the same IO-bound pattern seen in the DLRM embedding lookups (@sec-model-serving-systems-latency-distribution-analysis-b0f8), but at a larger scale: the system must read the entire 3.5 GB weight tensor from VRAM to generate a single token.
 
 ::: {.callout-perspective title="The Physics of Token Generation"}
 
@@ -3410,7 +3435,6 @@ For an H100 SXM5 instance at approximately USD `{python} hourly_cost_str` per ho
 This analysis highlights that for LLMs, **memory capacity**\index{Memory Capacity!LLM throughput}\index{KV Cache!memory capacity} (the size of the KV cache) is the primary determinant of throughput and cost, while **memory bandwidth**\index{Memory Bandwidth!LLM latency}\index{HBM!memory bandwidth} is the primary determinant of latency.
 
 This case study applies the core principles developed throughout this chapter: latency budgets decompose into prefill and decode phases, queuing theory governs batch sizing and capacity planning, and hardware constraints in the form of memory bandwidth and capacity determine achievable performance and cost. The quantitative framework established here enables principled engineering decisions, but only when applied correctly. Common misconceptions cause even experienced engineers to misapply these principles in practice.
-
 
 ## Fallacies and Pitfalls {#sec-model-serving-systems-fallacies-pitfalls-336b}
 
@@ -3761,7 +3785,6 @@ cs_cold_mult_str = f"{cs_cold_multiplier_value:.0f}"
 ```
 
 Engineers optimize steady-state latency\index{Cold Start!bursty traffic impact} assuming most requests hit warm instances. In production, cold starts compound during the events that matter most: traffic spikes requiring scale-up, deployments rolling out new versions, and recovery from instance failures. @sec-model-serving-systems-model-loading-initialization-cc5a details the anatomy of cold start: TensorRT compilation alone takes `{python} cs_compile_time_str` seconds per instance. During a traffic spike requiring `{python} cs_new_instances_str` new instances, aggregate cold start latency reaches `{python} cs_aggregate_cold_str` seconds of user-facing delay before new capacity becomes useful. Worse, requests hitting cold instances experience `{python} cs_cold_latency_str` ms latency versus `{python} cs_steady_latency_str` ms steady-state, a `{python} cs_cold_mult_str`× degradation that violates SLOs precisely when traffic is highest. Systems ignoring cold start meet SLOs during steady state but fail during scale-up events and deployment windows when reliability matters most.
-
 
 ## Summary {#sec-model-serving-systems-summary-9635}
 
