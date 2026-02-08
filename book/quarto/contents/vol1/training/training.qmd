@@ -47,20 +47,25 @@ Inference computes a single forward pass: data flows through the network, a pred
 #| label: training-setup
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: GPU specifications and model parameters used throughout chapter
-# Used in: Various sections referencing GPU specs and model sizes
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Entire chapter — GPU specs, model parameters, and hardcoded
+# │          display values referenced throughout all sections
+# │
+# │ Why: Centralizes GPU hardware constants, model sizes, and miscellaneous
+# │      display values so that every section can reference them without
+# │      recomputation. Will be split into per-section cells in a future pass.
+# │
+# │ Imports: physx.constants (*), physx.formatting (fmt, sci, md_math),
+# │          physx.formulas (model_memory)
+# │ Exports: ~200 _str variables used across the entire chapter
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.constants import *
 from physx.formatting import fmt, sci
 from physx.formulas import model_memory
 
-# GPU constants from physx.constants
+# --- Inputs (GPU constants from physx.constants) ---
 v100_flops_fp16_tensor_value = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 v100_flops_fp32_value = V100_FLOPS_FP32.to(TFLOPs/second).magnitude
 v100_mem_bw_value = V100_MEM_BW.to(GB/second).magnitude
@@ -151,9 +156,7 @@ wave_util_65_value = 68
 wave_time_33_value = 2.0
 wave_time_65_value = 1.5
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (derived values and unit conversions) ---
 # V100 calculations
 v100_tflops_fp16_value = v100_flops_fp16_tensor_value
 v100_tflops_fp32_value = v100_flops_fp32_value
@@ -200,9 +203,7 @@ gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude
 resnet50_params_m_value = resnet50_params_value
 resnet50_params_gb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, GB)
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 # V100 display strings
 v100_tflops_fp16_str = fmt(v100_tflops_fp16_value, precision=0, commas=False)
 v100_tflops_fp32_str = fmt(v100_tflops_fp32_value, precision=1, commas=False)
@@ -406,13 +407,17 @@ A single forward pass through GPT-2 requires roughly `{python} gpt2_fwd_flops_st
 
 ::: {.callout-definition title="Training Systems"}
 
-***Machine Learning Training Systems***\index{Training System!definition} are distributed engines optimized for *throughput* and *convergence*. They orchestrate the movement of massive datasets through computational graphs to minimize the *time-to-accuracy*, balancing the competing constraints of memory capacity, compute intensity, and network bandwidth.
+***Machine Learning Training Systems***\index{Training System!definition} are compute engines optimized for *throughput* and *convergence*. They orchestrate the movement of massive datasets through computational graphs to minimize the *time-to-accuracy*, balancing the competing constraints of memory capacity, compute intensity, and data movement. At production scale, training systems often span multiple nodes connected by high-bandwidth networks, but the core principles---and the bottlenecks---originate within a single machine.
 
 :::
 
 Three characteristics distinguish training workloads from general-purpose computing. First, *computational intensity*: that `{python} gpt2_total_flops_str` operation budget spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing `{python} gpt2_params_b_str` billion weights requires `{python} gpt2_params_gb_fp32_str` GB in FP32; the Adam optimizer adds two additional state tensors per parameter, consuming another `{python} gpt2_adam_gb_str` GB; and activation storage across `{python} gpt2_layers_str` transformer layers can double or triple this total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
 
-Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration (@sec-ai-acceleration) and precision reduction (using the BF16/FP8 formats discussed in @sec-model-compression). Memory pressure responds to techniques like **gradient checkpointing** (a specific application of *rematerialization*—discarding and recomputing intermediate values to save memory—from @sec-ai-frameworks), which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement, heavily relying on the data loading throughput optimized in @sec-data-engineering-ml, so the GPU never sits idle waiting for the next batch. The current chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges beyond our current scope.
+Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration (@sec-ai-acceleration) and precision reduction (using the BF16/FP8 formats discussed in @sec-model-compression). Memory pressure responds to techniques like **gradient checkpointing**[^fn-activation-checkpointing] (a specific application of *rematerialization*—discarding and recomputing intermediate values to save memory—from @sec-ai-frameworks), which trades recomputation for reduced activation storage, and **mixed-precision training**[^fn-mixed-precision], which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement, heavily relying on the data loading throughput optimized in @sec-data-engineering-ml, so the GPU never sits idle waiting for the next batch. The current chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges beyond our current scope.
+
+[^fn-activation-checkpointing]: **Activation Checkpointing (Gradient Checkpointing)**\index{Activation Checkpointing!etymology}: Introduced by Chen et al. [@chen2016training] in "Training Deep Nets with Sublinear Memory Cost." The term borrows from database systems, where "checkpointing" means saving state at intervals. In training, forward-pass activations must be stored for backpropagation, but deep networks can exhaust GPU memory. Checkpointing saves activations at strategic layer boundaries and recomputes the rest, trading roughly 33% extra compute for up to 10× memory reduction---enabling training of models that would otherwise not fit in memory.
+
+[^fn-mixed-precision]: **Mixed-Precision Training**\index{Mixed-Precision Training!etymology}: Introduced by Micikevicius et al. [@micikevicius2018mixed] in a collaboration between NVIDIA and Baidu Research. Uses half-precision (FP16 or BF16) for computation while maintaining FP32 "master weights" for accumulation, where rounding errors would otherwise compound. A "loss scaling" trick prevents gradient underflow in FP16's limited dynamic range. The result: nearly 2× memory savings and 2--8× throughput gains on tensor cores. BF16 (Brain Floating Point, Google Brain) later simplified the technique by matching FP32's exponent range, eliminating loss scaling in most cases.
 
 The chapter proceeds through five stages. First, we formalize the *Iron Law of Training Performance*, a specialized application of the general Iron Law (@sec-silicon-contract) that decomposes training time into total operations, peak throughput, and utilization—three levers that every optimization technique in this chapter targets. Second, we examine the *mathematical foundations* that underpin training: neural network computation as a systems workload, optimization algorithms that navigate loss landscapes, backpropagation mechanics, and the arithmetic intensity analysis that determines whether training is compute-bound or memory-bound. Third, we dissect the *pipeline architecture* of a training system—data loading, forward pass, backward pass, and parameter updates—as a staged pipeline where each component's throughput constrains the next. Fourth, we develop *pipeline optimizations*—mixed-precision training, FlashAttention, gradient accumulation, and checkpointing—that target specific Iron Law terms to close the gap between theoretical peak and actual training speed. Fifth, we explore how training *scales* beyond a single GPU to multi-GPU and multi-node configurations, where communication overhead introduces new bottlenecks.
 
@@ -551,9 +556,8 @@ Where:
 
 #### Matrix Operations {#sec-ai-training-matrix-operations-1f21}
 
-Computational patterns in neural networks revolve around various types of matrix operations. These operations and their evolution reveal *why* specific system designs and optimizations emerged in machine learning training systems.
+The DL Primer established that forward propagation reduces to chains of matrix multiplications (@sec-deep-learning-systems-foundations-matrix-multiplication-formulation-417c), and the Architectures chapter catalogued the computational primitives---GEMM, convolution, and dynamic attention---that every architecture shares (@sec-dnn-architectures-core-computational-primitives-b853). Training amplifies these patterns: each operation executes not once but billions of times, and each forward pass is paired with a backward pass that roughly doubles the compute. Understanding which matrix operations dominate---and how their shapes change between forward and backward passes---reveals *why* specific system designs and optimizations emerged for training.
 
-[]{#sec-ai-training-dense-matrixmatrix-multiplication-057f}
 \index{Matrix Multiplication!training operations}\index{GEMM|see{Matrix Multiplication}}Matrix multiplication dominance has driven both algorithmic and hardware innovations. Early neural network implementations relied on standard CPU-based linear algebra libraries, but the scale of modern training demanded specialized optimizations. Strassen's algorithm[^fn-strassen-algorithm] reduced the naive $O(n^3)$ complexity to approximately $O(n^{2.81})$ [@strassen1969gauss], and contemporary hardware-accelerated libraries like cuBLAS [@nvidia_cublas] continue pushing computational efficiency limits.
 
 [^fn-strassen-algorithm]: **Strassen's Algorithm**: Developed by Volker Strassen in 1969, this breakthrough reduced matrix multiplication from O(n³) to O(n^2.807) by using clever algebraic tricks with 7 multiplications instead of 8. While theoretically faster, it's only practical for matrices larger than 500×500 due to overhead. Modern implementations in libraries like Intel MKL switch between algorithms based on matrix size, demonstrating how theoretical advances require careful engineering for practical impact.
@@ -566,15 +570,24 @@ To illustrate the scale of these operations concretely, consider the *attention 
 #| label: gpt2-flop-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate GPT-2 attention layer FLOPs and training computation requirements
-# Used in: GPT-2 Attention Layer Computation callout (attention FLOP breakdown)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 FLOP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 Attention Layer Computation callout — FLOP breakdown for
+# │          QKV projections, attention scores, FFN, and total training compute
+# │
+# │ Why: Shows students how to decompose a transformer layer into individual
+# │      matrix operations and derive the total FLOP budget, connecting
+# │      architectural choices (hidden dim, heads) to concrete compute costs.
+# │
+# │ Imports: physx.constants (GPT2_HIDDEN_DIM, GPT2_LAYERS,
+# │          V100_FLOPS_FP16_TENSOR, TFLOPs, second, flop, GFLOP, TFLOP,
+# │          PFLOPs), physx.formatting (fmt)
+# │ Exports: qkv_billion_str, attn_billion_str, total_layer_str,
+# │          per_step_t_str, total_peta_str, v100_time_str, batch_str,
+# │          seq_len_str, hidden_str, n_heads_str, head_dim_str,
+# │          n_layers_gpt2_str, training_steps_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.constants import (
     GPT2_HIDDEN_DIM,
     GPT2_LAYERS,
@@ -598,9 +611,7 @@ training_steps_value = 50_000
 
 v100_fp16_tflops_value = V100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude  # 125
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (FLOP breakdown per layer and total training) ---
 # QKV projections: 3 × (batch × seq × hidden × hidden)
 qkv_flops_value = 2 * 3 * batch_value * seq_len_value * hidden_value * hidden_value
 qkv_billion_value = (qkv_flops_value * flop).to(GFLOP).magnitude
@@ -633,9 +644,7 @@ total_training_peta_value = (total_training_flops_value * flop).to(PFLOPs).magni
 # V100 time per step
 v100_time_per_step_s_value = per_step_trillion_value / v100_fp16_tflops_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 # FLOP calculation display strings
 qkv_billion_str = fmt(qkv_billion_value, precision=0, commas=False)
 attn_billion_str = fmt(attn_billion_value, precision=1, commas=False)
@@ -654,7 +663,7 @@ n_layers_gpt2_str = f"{n_layers_gpt2_value}"
 training_steps_str = f"{training_steps_value:,}"
 ```
 
-The scale of attention computations becomes concrete when we trace through a single layer.
+The scale of these computations becomes concrete in the *GPT-2 attention layer computation* below, which traces through a single layer.
 
 ::: {.callout-notebook title="GPT-2 Attention Layer Computation"}
 
@@ -718,7 +727,6 @@ Matrix multiplications dominate training compute, but neural networks require mo
 
 The critical question for ML systems engineers is not *what* these functions do mathematically, but *how* to implement them efficiently at scale. This section analyzes the computational trade-offs that determine real-world training efficiency.
 
-[]{#sec-ai-training-benchmarking-activation-functions-75c1}
 Because activation functions execute millions of times per training step, even small per-operation differences compound into significant training time impact. The selection of an activation function directly influences training throughput and hardware efficiency. @fig-activation-perf quantifies these performance differences through CPU benchmarks on Apple M2 hardware, revealing that Tanh executes in `{python} tanh_exec_time_str` seconds compared to Sigmoid's `{python} sigmoid_exec_time_str` seconds, a `{python} tanh_speedup_str`$\times$ speedup.
 
 ::: {#fig-activation-perf fig-env="figure" fig-pos="htb" fig-cap="**Activation Function Execution Time**: CPU benchmarks on Apple M2 hardware reveal significant variation: Tanh completes in `{python} tanh_exec_time_str` seconds, ReLU in `{python} relu_exec_time_str` seconds, Softmax in `{python} softmax_exec_time_str` seconds, and Sigmoid in `{python} sigmoid_exec_time_str` seconds. These differences directly affect training throughput and real-time inference latency, making activation function selection a system-level design decision." fig-alt="Bar chart comparing CPU execution times: Sigmoid at `{python} sigmoid_exec_time_str` seconds, Tanh at `{python} tanh_exec_time_str` seconds, ReLU at `{python} relu_exec_time_str` seconds, and Softmax at `{python} softmax_exec_time_str` seconds."}
@@ -780,7 +788,7 @@ In production environments, modern hardware accelerators alter these relative ch
 
 The choice of activation function should balance computational considerations with their mathematical properties. This data underscores the value of evaluating both theoretical and practical performance when designing neural networks. For large-scale networks or real-time applications, ReLU is often the best choice due to its efficiency and scalability. However, for tasks requiring probabilistic outputs, such as classification, softmax remains indispensable despite its computational cost.
 
-Our GPT-2 Lighthouse Model makes a specific activation function choice that illustrates these trade-offs in practice.
+Our GPT-2 Lighthouse Model illustrates these trade-offs through its choice of the *GPT-2 GELU activation function*.
 
 ::: {.callout-notebook title="GPT-2 GELU Activation Function"}
 
@@ -859,7 +867,6 @@ $$ \text{Memory Required} = N \times \text{(Activation Memory + Gradient Memory)
 
 This memory breakdown is formalized in the **Algorithm Foundations** appendix, which derives the full training memory equation including optimizer state overhead. The memory requirements often exceed available hardware resources on modern hardware. A ResNet-50 model processing ImageNet-scale datasets would require hundreds of gigabytes of memory using this approach. Processing the full dataset before each update creates long iteration times, reducing the rate at which the model can learn from the data.
 
-[]{#sec-ai-training-stochastic-gradient-descent-f356}
 \index{SGD|see{Stochastic Gradient Descent}}\index{Stochastic Gradient Descent!gradient estimation}These system constraints led to the development of variants that better align with hardware capabilities. The key insight was that exact gradient computation, while mathematically appealing, is not necessary for effective learning. SGD[^fn-sgd-history] represents a pivotal shift in optimization strategy, estimating gradients using individual training examples rather than the entire dataset. This approach drastically reduces memory requirements since only one example's activations and gradients need storage at any time.
 
 [^fn-sgd-history]: **Stochastic Gradient Descent**: "Stochastic" derives from Greek "stochastikos" meaning "able to guess," from "stochos" (target)---rather than computing exact gradients over all data, we estimate the gradient from random samples. Developed by Robbins and Monro in 1951, SGD was first applied to neural networks by Rosenblatt in 1958. Today's mini-batch SGD (processing 32--512 examples) balances the single-example approach with full-batch methods.
@@ -926,7 +933,9 @@ This establishes a central theme in training systems: the hardware-software trad
 
 #### Adaptive and Momentum-Based Optimizers {#sec-ai-training-adaptive-momentumbased-optimizers-f079}
 
-\index{Optimizer!momentum-based methods}\index{Optimizer!adaptive learning rate}SGD computes correct gradients but struggles with ill-conditioned loss landscapes where some dimensions are steep (requiring small steps) while others are shallow (benefiting from large steps). A single learning rate either oscillates dangerously in steep dimensions or moves glacially in shallow ones. Each subsequent optimizer we examine solves a specific limitation of its predecessors: momentum smooths oscillations by averaging gradient history, RMSprop adapts step sizes per parameter, and Adam combines both strategies. Understanding this progression clarifies why Adam became the default choice for transformer training while revealing the system costs, specifically memory and computation, that each refinement introduces [@kingma2014adam].
+\index{Optimizer!momentum-based methods}\index{Optimizer!adaptive learning rate}SGD computes correct gradients but struggles with ill-conditioned loss landscapes where some dimensions are steep (requiring small steps) while others are shallow (benefiting from large steps). A single learning rate[^fn-learning-rate] either oscillates dangerously in steep dimensions or moves glacially in shallow ones. Each subsequent optimizer we examine solves a specific limitation of its predecessors: momentum smooths oscillations by averaging gradient history, RMSprop adapts step sizes per parameter, and Adam combines both strategies. Understanding this progression clarifies why Adam became the default choice for transformer training while revealing the system costs, specifically memory and computation, that each refinement introduces [@kingma2014adam].
+
+[^fn-learning-rate]: **Learning Rate ($\alpha$)**\index{Learning Rate!etymology}: From Latin *rata* (fixed, settled). The single most consequential hyperparameter: it controls step size along the gradient direction. Too large and the optimizer overshoots; too small and training stalls. Modern practice uses *learning rate schedules* (warmup followed by cosine decay) rather than fixed rates, and the linear scaling rule [@goyal2017accurate] showed that learning rate should scale proportionally with batch size. Learning rate also interacts with numerical precision: FP16 training constrains the range of effective rates due to limited mantissa bits.
 
 ##### Momentum-Based Methods
 
@@ -953,27 +962,29 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla L(\theta_t)\big)^2
 #| label: adam-memory-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate Adam optimizer memory overhead for example model
-# Used in: Adam optimization section (memory overhead discussion)
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ADAM MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Adam optimization section — memory overhead discussion
+# │
+# │ Why: Demonstrates that Adam's two extra state vectors (m_t, v_t) impose a
+# │      concrete memory cost that scales linearly with parameter count,
+# │      motivating memory-efficient optimizer variants.
+# │
+# │ Imports: physx.constants (BYTES_FP32, byte)
+# │ Exports: adam_overhead_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import BYTES_FP32, byte
 
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (example 100M-parameter model) ---
 adam_example_params_m_value = 100  # million
 adam_bytes_value = BYTES_FP32.to(byte).magnitude
 adam_vectors_value = 2  # m_t and v_t
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (total optimizer state overhead) ---
 adam_overhead_mb_value = adam_example_params_m_value * adam_vectors_value * adam_bytes_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 adam_overhead_str = f"{adam_overhead_mb_value}"
 ```
 
@@ -983,7 +994,6 @@ The system implications of Adam are more substantial than previous methods. The 
 
 #### Optimization Algorithm System Implications {#sec-ai-training-optimization-algorithm-system-implications-f9f2}
 
-[]{#sec-ai-training-optimization-tradeoffs-77c5}
 The choice of optimization algorithm creates specific patterns of computation and memory access that influence training efficiency. Memory requirements increase progressively from SGD ($1\times$ model size) through Momentum ($2\times$) to Adam ($3\times$), as quantified in @tbl-optimizer-properties. These memory costs must be balanced against convergence[^fn-convergence-etymology] benefits. While Adam often requires fewer iterations to reach convergence, its per-iteration memory and computation overhead may impact training speed on memory-constrained systems. The concrete scale of these *GPT-2 optimizer memory requirements* illustrates just how significant this overhead becomes for large models.
 
 [^fn-convergence-etymology]: **Convergence**: From Latin "convergere" (to incline together), combining "con-" (together) + "vergere" (to bend, turn). In optimization, convergence describes the process by which iterative algorithms approach a stable solution, where successive updates become smaller until parameters stabilize at a minimum. Training is said to converge when the loss stops decreasing meaningfully, typically requiring `{python} sgd_iterations_min_str`-`{python} sgd_iterations_max_str` iterations for large models.
@@ -1003,24 +1013,30 @@ The choice of optimization algorithm creates specific patterns of computation an
 #| label: gpt2-optimizer-memory-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate GPT-2 optimizer memory requirements for FP32 and FP16 training
-# Used in: GPT-2 Optimizer Memory Requirements callout (memory overhead calculation)
-
-# =============================================================================
-# INPUT
-# =============================================================================
-from physx.constants import GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 OPTIMIZER MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 Optimizer Memory Requirements callout — FP32 vs AMP memory
+# │
+# │ Why: Quantifies the memory overhead of Adam optimizer states for GPT-2,
+# │      showing how AMP (FP16 weights/grads + FP32 master + FP32 optimizer)
+# │      compares to a pure FP32 baseline. Students see that optimizer state
+# │      dominates the memory budget.
+# │
+# │ Imports: physx.constants (GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB,
+# │          BYTES_FP32, BYTES_FP16, GB), physx.formatting (fmt),
+# │          physx.formulas (model_memory)
+# │ Exports: param_fp32_str, grad_fp32_str, adam_state_str,
+# │          total_static_fp32_str, total_static_amp_str, v100_mem_gib_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
+# --- Inputs (V100 memory capacity) ---
 v100_mem_gib_value = V100_MEM_CAPACITY.to(GiB).magnitude  # 32 GiB
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (FP32 baseline vs AMP memory breakdown) ---
 # FP32 Baseline
 param_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 grad_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
@@ -1035,9 +1051,7 @@ master_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)  # AMP overhead
 # Optimizer remains FP32 for stability
 total_static_amp_value = param_fp16_gb_value + grad_fp16_gb_value + master_fp32_gb_value + adam_m_fp32_gb_value + adam_v_fp32_gb_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 param_fp32_str = fmt(param_fp32_gb_value, precision=1, commas=False)
 grad_fp32_str = fmt(grad_fp32_gb_value, precision=1, commas=False)
 adam_state_str = fmt(adam_m_fp32_gb_value + adam_v_fp32_gb_value, precision=1, commas=False)
@@ -1234,16 +1248,26 @@ Here, we shift focus from *what* backpropagation computes to *what it costs* to 
 #| label: gpt2-activation-memory-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate GPT-2 activation memory requirements and checkpointing trade-offs
-# Used in: Backpropagation Mechanics intro and Activation Memory Requirements callout
-
-# =============================================================================
-# INPUT
-# =============================================================================
-from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 ACTIVATION MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Backpropagation Mechanics section and Activation Memory
+# │          Requirements callout — per-layer and total activation memory
+# │
+# │ Why: Breaks down activation memory into attention, FFN, and layernorm
+# │      components per layer, then scales to the full model. Shows students
+# │      that activations dominate peak memory and motivates gradient
+# │      checkpointing as a mitigation strategy.
+# │
+# │ Imports: physx.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
+# │          V100_MEM_CAPACITY, GiB, BYTES_FP16, MB, GB, BYTES_ADAM_STATE),
+# │          physx.formatting (fmt), physx.formulas (model_memory)
+# │ Exports: batch_size_str, seq_len_str, n_layers_str, hidden_dim_str,
+# │          ffn_dim_str, attn_act_str, ffn_act_str, per_layer_str,
+# │          total_act_str, params_gb_str, grad_gb_str, opt_gb_str,
+# │          peak_gb_str, v100_mem_str, ckpt_reduction_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB, BYTES_FP16, MB, GB, BYTES_ADAM_STATE
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
@@ -1258,9 +1282,7 @@ v100_mem_gb_value = V100_MEM_CAPACITY.to(GiB).magnitude
 ckpt_reduction_pct_value = 75  # Typical reduction with checkpointing
 recompute_overhead_pct_value = 33  # Additional compute from recomputation
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (per-layer and total activation memory) ---
 ffn_dim_value = hidden_dim_value * ffn_expansion_value
 
 # Per-layer activation memory
@@ -1280,9 +1302,7 @@ peak_gb_value = total_act_gb_value + params_gb_value + grad_gb_value + optimizer
 ckpt_act_gb_value = total_act_gb_value * (1 - ckpt_reduction_pct_value / 100)  # ~8 GB
 act_fp32_gb_value = total_act_gb_value * 2  # FP32 would be 2× the FP16 size
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 # Configuration display strings
 batch_size_str = fmt(batch_size_value, precision=0, commas=False)
 seq_len_str = fmt(seq_len_value, precision=0, commas=False)
@@ -1429,9 +1449,7 @@ from physx import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
-# =============================================================================
-# PLOT: Training Roofline Model
-# =============================================================================
+# --- Plot: Training Roofline Model ---
 peak_flops, peak_bw = 312, 2.0  # A100 specs
 ridge = peak_flops / peak_bw
 
@@ -1474,29 +1492,34 @@ plt.show()
 ```{python}
 #| label: attn-intensity-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ATTENTION ARITHMETIC INTENSITY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Arithmetic Intensity section — attention layer intensity for
+# │          roofline analysis (GPT-2 Small variant)
+# │
+# │ Why: Derives the H/8 formula for attention arithmetic intensity and shows
+# │      that GPT-2 Small (H=768) falls below the A100 ridge point, making
+# │      standard attention memory-bound. Contrasts with GPT-2 XL (H=1600)
+# │      which exceeds the ridge point.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: attn_intensity_str, H_small_str
+# │
+# │ Note: The prose following this cell references a100_tflops_fp16_str,
+# │       a100_bw_tbs_str, a100_ridge_str, h100_tflops_fp16_str,
+# │       h100_bw_tbs_str, h100_ridge_str — all defined in training-setup.
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate attention layer arithmetic intensity for roofline analysis
-# Used in: Arithmetic Intensity section (attention layer intensity calculation)
-
-# =============================================================================
-# INPUT
-# =============================================================================
-# GPT-2 Small (117M) used here for roofline illustration:
+# --- Inputs (GPT-2 Small hidden dimension for roofline illustration) ---
 # H=768 gives intensity=96 FLOP/byte, below A100 ridge (~153), demonstrating memory-bound behavior
 H_small_value = 768
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (attention intensity = H / 8) ---
 attn_intensity_value = H_small_value / 8
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 attn_intensity_str = fmt(attn_intensity_value, precision=0, commas=False)
 H_small_str = f"{H_small_value}"
 ```
@@ -1514,7 +1537,9 @@ Batch size directly influences arithmetic intensity. With batch=1, many operatio
 
 This analysis guides optimization strategy selection. For memory-bound operations, reducing data movement through operator fusion, reduced precision, or algorithmic improvements like FlashAttention provides the largest gains. For compute-bound operations, increasing throughput through Tensor Cores, parallelism, or quantization matters more. See @sec-ai-acceleration for detailed roofline model analysis and hardware-specific optimization strategies.
 
-Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) versus where FlashAttention lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N \times N$ attention matrix and instead processing in tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2--4× speedups [@dao2022flashattention]. We examine the algorithm, its implementation, and when to use it in detail in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
+Look back at @fig-training-roofline and notice where standard attention sits (memory-bound region) versus where FlashAttention[^fn-flash-attention] lands (compute-bound region)—this shift represents the core insight of IO-aware algorithm design. By never materializing the full $N \times N$ attention matrix and instead processing in tiles that fit in fast SRAM (on-chip static RAM), FlashAttention reduces memory traffic from $O(N^2)$ to $O(N)$, achieving 2--4× speedups [@dao2022flashattention]. We examine the algorithm, its implementation, and when to use it in detail in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
+
+[^fn-flash-attention]: **FlashAttention**\index{FlashAttention!etymology}: Introduced by Tri Dao et al. [@dao2022flashattention] at Stanford (2022). The core innovation is *IO-awareness*: rather than optimizing FLOPs, FlashAttention optimizes *memory accesses* by tiling the computation to fit within GPU SRAM, avoiding materialization of the full $N \times N$ attention matrix in slower HBM. The algorithm performs slightly more FLOPs but dramatically fewer memory accesses, shifting attention from memory-bound to compute-bound. FlashAttention-2 [@dao2023flashattention2] further improved occupancy, achieving up to 72% of theoretical peak throughput.
 
 The arithmetic intensity analysis above reveals which operations constrain training performance and why: matrix multiplications are compute-bound while normalization and activation functions are memory-bound, each requiring different optimization strategies. FlashAttention exemplifies how understanding these bottlenecks enables algorithmic solutions that shift operations from one regime to another.
 
@@ -1529,47 +1554,53 @@ This section examines the *system-level pipeline* that coordinates these stages 
 
 This orchestration is not a single monolithic process but rather three interconnected subsystems, each with distinct responsibilities and resource demands. Trace the flow through @fig-training-pipeline to see how these subsystems connect: the data pipeline handles ingestion and preprocessing, the training loop executes forward passes, backward passes, and parameter updates, and the evaluation pipeline periodically assesses model quality. Pay attention to how data flows between these components—the interconnection points are exactly where bottlenecks emerge.
 
-::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Training System Overview**: Machine learning systems organize training through interconnected data, training, and evaluation pipelines. Data flows sequentially through these components, with evaluation metrics providing feedback to guide iterative model refinement and ensure reproducible results." fig-alt="Block diagram with three connected boxes: Data Pipeline, Training Loop, and Evaluation Pipeline. Arrows show data flow with feedback from evaluation."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1.5cm]
-% Standard color definitions
-\definecolor{BlueLine}{HTML}{006395}
-\definecolor{BlueL}{HTML}{D1E6F3}
-\definecolor{TextColor}{HTML}{F8F9FA}
+```{python}
+#| label: fig-training-pipeline
+#| echo: false
+#| fig-cap: "**Training System Overview**: Machine learning systems organize training through interconnected data, training, and evaluation pipelines. Data flows sequentially through these components, with evaluation metrics providing feedback to guide iterative model refinement and ensure reproducible results."
+#| fig-alt: "Block diagram with three connected boxes: Data Pipeline, Training Loop, and Evaluation Pipeline. Arrows show data flow with feedback from evaluation."
 
-\tikzset{
-  Box/.style={
-    rectangle, draw=BlueLine, fill=BlueL, line width=0.75pt,
-    rounded corners=2pt, text width=32mm, align=center,
-    minimum height=18mm
-  },
-  Line/.style={
-    draw=black!50, line width=1.0pt, -latex
-  },
-  Text/.style={
-    fill=TextColor, inner sep=3pt, font=\footnotesize\usefont{T1}{phv}{m}{n},
-    align=center, minimum width=15mm
-  }
-}
+import matplotlib.patches as mpatches
+from physx import viz
 
-% Nodes
-\node[Box] (data) {\textbf{Data Pipeline}\\ Ingestion, Preprocessing, Batching};
-\node[Box, right=of data] (train) {\textbf{Training Loop}\\ Forward Pass, Loss, Backward Pass};
-\node[Box, right=of train] (eval) {\textbf{Evaluation Pipeline}\\ Validation and Metrics};
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 2.5))
+ax.set_xlim(-1, 13)
+ax.set_ylim(-1.0, 1.5)
+ax.set_aspect('equal')
+ax.axis('off')
+ax.grid(False)
 
-% Connections
-\draw[Line] (data) -- node[Text] {Processed\\ Batches} (train);
+bw, bh = 2.8, 1.0
+arrow_kw = dict(arrowstyle='->', color='#555555', lw=1.5)
 
-\draw[Line] (train.20) -- node[Text] {Evaluation\\ Metrics} (eval.160);
-\draw[Line, latex-] (train.340) -- node[Text] {Feedback} (eval.200);
+# Three boxes
+for x, title, sub in [(0, 'Data Pipeline', 'Ingestion, Preprocessing,\nBatching'),
+                       (4.5, 'Training Loop', 'Forward Pass, Loss,\nBackward Pass'),
+                       (9.5, 'Evaluation Pipeline', 'Validation and Metrics')]:
+    rect = mpatches.FancyBboxPatch((x - bw/2, -bh/2), bw, bh, boxstyle="round,pad=0.08",
+                                    facecolor=COLORS['BlueL'], edgecolor=COLORS['BlueLine'], linewidth=1.2, zorder=2)
+    ax.add_patch(rect)
+    ax.text(x, 0.15, title, ha='center', va='center', fontsize=7.5, fontweight='bold', zorder=3)
+    ax.text(x, -0.2, sub, ha='center', va='center', fontsize=6.5, zorder=3)
 
-\end{tikzpicture}
+# Data -> Training
+ax.annotate('', xy=(3.1, 0.15), xytext=(1.4, 0.15), arrowprops=arrow_kw)
+ax.text(2.25, 0.55, 'Processed\nBatches', ha='center', va='bottom', fontsize=6.5)
+
+# Training -> Evaluation (top arrow)
+ax.annotate('', xy=(8.1, 0.25), xytext=(5.9, 0.25), arrowprops=arrow_kw)
+ax.text(7, 0.6, 'Evaluation\nMetrics', ha='center', va='bottom', fontsize=6.5)
+
+# Evaluation -> Training (bottom arrow, feedback)
+ax.annotate('', xy=(5.9, -0.15), xytext=(8.1, -0.15), arrowprops=arrow_kw)
+ax.text(7, -0.55, 'Feedback', ha='center', va='top', fontsize=6.5)
+
+plt.show()
 ```
-:::
 
 ### Architectural Overview {#sec-ai-training-architectural-overview-5fc6}
 
-The architectural overview in @fig-training-loop details the interactions between these three subsystems at the single-iteration level.
+A single training iteration involves three subsystems executing in sequence: a *data pipeline* that ingests, transforms, and batches raw data; a *training loop* that performs the forward pass, gradient computation, and parameter update; and an *evaluation pipeline* that measures model quality against held-out data. @fig-training-loop details the interactions between these three subsystems at the single-iteration level. Understanding each subsystem's role clarifies where performance bottlenecks arise and where the system-level optimizations discussed later in this chapter have their greatest impact.
 
 #### Data Pipeline
 
@@ -1579,93 +1610,82 @@ The data pipeline manages the ingestion, preprocessing, and batching of data for
 
 \index{Training Loop!forward and backward passes}\index{Training Loop!parameter update cycle}The training loop is the computational core of the pipeline, where the model learns from the prepared data. Follow the data path in @fig-training-loop to see how this process unfolds through three sequential steps on a single GPU: the forward pass generates predictions from input data, gradient computation propagates error signals backward through the network, and parameter updates apply the optimizer to minimize the loss function.
 
-::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**Single-GPU Training Loop**: The three sequential steps of one training iteration: the forward pass generates predictions, gradient computation propagates error signals backward, and the optimizer applies parameter updates. GPUs parallelize the underlying matrix operations, accelerating both the forward and backward passes." fig-alt="Neural network diagram showing data cylinders feeding into a network of connected nodes. A GPU box at bottom processes the forward and backward pass computations."}
+```{python}
+#| label: fig-training-loop
+#| echo: false
+#| fig-cap: "**Single-GPU Training Loop**: The three sequential steps of one training iteration: the forward pass generates predictions, gradient computation propagates error signals backward, and the optimizer applies parameter updates. GPUs parallelize the underlying matrix operations, accelerating both the forward and backward passes."
+#| fig-alt: "Flow diagram showing Training Batch -> Forward Pass -> Predicted Labels -> Loss Function -> Parameter Gradients -> Backward Pass -> Optimizer -> Update Parameters, with a dashed loop back to the start."
 
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1cm]
-% Standard color definitions
-\definecolor{BlueLine}{HTML}{006395}
-\definecolor{BlueL}{HTML}{D1E6F3}
-\definecolor{GreenLine}{HTML}{008F45}
-\definecolor{GreenL}{HTML}{D4EFDF}
-\definecolor{RedLine}{HTML}{CB202D}
-\definecolor{RedL}{HTML}{F5D2D5}
-\definecolor{OrangeLine}{HTML}{CC5500}
-\definecolor{OrangeL}{HTML}{FFE5CC}
-\definecolor{TextColor}{HTML}{F8F9FA}
+import matplotlib.patches as mpatches
+from physx import viz
 
-\tikzset{
-  Block/.style={
-    rectangle, draw=BlueLine, fill=BlueL, line width=0.75pt,
-    rounded corners=2pt, text width=28mm, align=center,
-    minimum height=10mm
-  },
-  DataBlock/.style={
-    rectangle, draw=GreenLine, fill=GreenL, line width=0.75pt,
-    rounded corners=2pt, text width=20mm, align=center,
-    minimum height=8mm
-  },
-  LossBlock/.style={
-    rectangle, draw=RedLine, fill=RedL, line width=0.75pt,
-    rounded corners=2pt, text width=28mm, align=center,
-    minimum height=10mm
-  },
-  OptBlock/.style={
-    rectangle, draw=OrangeLine, fill=OrangeL, line width=0.75pt,
-    rounded corners=2pt, text width=28mm, align=center,
-    minimum height=10mm
-  },
-  Line/.style={
-    draw=black!50, line width=1.0pt, -latex
-  },
-  StepLabel/.style={
-    fill=TextColor, inner sep=2pt, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}
-  },
-  Annotation/.style={
-    font=\footnotesize\itshape\usefont{T1}{phv}{m}{n}, text=black!70
-  }
-}
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 7))
+ax.set_xlim(-2, 12)
+ax.set_ylim(-5.5, 2)
+ax.set_aspect('equal')
+ax.axis('off')
+ax.grid(False)
 
-% Nodes
-\node[DataBlock] (data) {Training\\Batch};
-\node[Block, right=1.5 of data] (forward) {\textbf{Forward Pass}\\ (Model)};
-\node[DataBlock, right=1.2 of forward] (pred) {Predicted\\Labels};
-\node[LossBlock, below=1.2 of pred] (loss) {\textbf{Loss Function}\\ (Error Calculation)};
-\node[DataBlock, left=1.2 of loss] (grad) {Parameter\\Gradients};
-\node[Block, left=1.2 of grad] (backward) {\textbf{Backward Pass}\\ (Chain Rule)};
-\node[OptBlock, below=1.2 of backward] (optimizer) {\textbf{Optimizer}\\ (Adam / SGD)};
-\node[Block, right=1.5 of optimizer] (update) {\textbf{Update}\\ Parameters};
+bw_sm, bh = 1.8, 0.7
+bw_lg = 2.2
+arrow_kw = dict(arrowstyle='->', color='#555555', lw=1.5)
+dash_kw = dict(arrowstyle='->', color='#555555', lw=1.3, linestyle='dashed')
 
-% Feedback to data/start
-\coordinate (loopback) at ($(update.east) + (1.0, 0)$);
+def box(x, y, w, label, fc, ec):
+    rect = mpatches.FancyBboxPatch((x - w/2, y - bh/2), w, bh, boxstyle="round,pad=0.08",
+                                    facecolor=fc, edgecolor=ec, linewidth=1.2, zorder=2)
+    ax.add_patch(rect)
+    ax.text(x, y, label, ha='center', va='center', fontsize=8, fontweight='bold', zorder=3)
 
-% Arrows and Step Labels
-\draw[Line] (data) -- (forward);
-\node[StepLabel, above=0.1 of $(data)!0.5!(forward)$] {Step 1: Predict};
+# Row 1: Forward pass
+box(0, 1, bw_sm, 'Training\nBatch', COLORS['GreenL'], COLORS['GreenLine'])
+box(3.5, 1, bw_lg, 'Forward Pass\n(Model)', COLORS['BlueL'], COLORS['BlueLine'])
+box(7, 1, bw_sm, 'Predicted\nLabels', COLORS['GreenL'], COLORS['GreenLine'])
 
-\draw[Line] (forward) -- (pred);
-\draw[Line] (pred) -- (loss);
+# Row 2: Loss
+box(7, -1, bw_lg, 'Loss Function\n(Error Calculation)', COLORS['RedL'], COLORS['RedLine'])
+box(3.5, -1, bw_sm, 'Parameter\nGradients', COLORS['GreenL'], COLORS['GreenLine'])
+box(0, -1, bw_lg, 'Backward Pass\n(Chain Rule)', COLORS['BlueL'], COLORS['BlueLine'])
 
-% Annotation for loss
-\node[DataBlock, right=0.8 of loss, xshift=0.5cm] (labels) {Ground\\Truth};
-\draw[Line, dashed] (labels) -- (loss);
-\node[Annotation, above=0.1 of labels] {Labels};
+# Ground truth
+box(10, -1, bw_sm, 'Ground\nTruth', COLORS['GreenL'], COLORS['GreenLine'])
 
-\draw[Line] (loss) -- (grad);
-\draw[Line] (grad) -- (backward);
-\node[StepLabel, above=0.1 of $(grad)!0.5!(backward)$] {Step 2: Gradients};
+# Row 3: Optimizer
+box(0, -3.2, bw_lg, 'Optimizer\n(Adam / SGD)', COLORS['OrangeL'], COLORS['OrangeLine'])
+box(3.5, -3.2, bw_lg, 'Update\nParameters', COLORS['BlueL'], COLORS['BlueLine'])
 
-\draw[Line] (backward) |- (optimizer);
-\draw[Line] (optimizer) -- (update);
-\node[StepLabel, above=0.1 of $(optimizer)!0.5!(update)$] {Step 3: Update};
+# Step labels
+ax.text(1.75, 1.65, 'Step 1: Predict', ha='center', va='bottom', fontsize=8, fontweight='bold',
+        bbox=dict(facecolor='#F8F9FA', edgecolor='none', alpha=0.9, pad=2))
+ax.text(1.75, -0.35, 'Step 2: Gradients', ha='center', va='bottom', fontsize=8, fontweight='bold',
+        bbox=dict(facecolor='#F8F9FA', edgecolor='none', alpha=0.9, pad=2))
+ax.text(1.75, -2.55, 'Step 3: Update', ha='center', va='bottom', fontsize=8, fontweight='bold',
+        bbox=dict(facecolor='#F8F9FA', edgecolor='none', alpha=0.9, pad=2))
 
-% Loop connection
-\draw[Line, dashed] (update.east) -- ++(0.5,0) |- ($(data.west) + (-0.5,0)$) -- (data.west);
-\node[Annotation, right=0.1 of update, xshift=0.2cm] {Next Iteration};
+# Arrows
+ax.annotate('', xy=(2.4, 1), xytext=(0.9, 1), arrowprops=arrow_kw)
+ax.annotate('', xy=(6.1, 1), xytext=(4.6, 1), arrowprops=arrow_kw)
+ax.annotate('', xy=(7, 0.3), xytext=(7, 0.65), arrowprops=arrow_kw)  # pred -> loss
+ax.annotate('', xy=(8.1, -1), xytext=(9.1, -1), arrowprops=dict(arrowstyle='->', color='#555555', lw=1.3, linestyle='dashed'))  # labels -> loss
+ax.text(10, -0.2, 'Labels', ha='center', va='bottom', fontsize=7, style='italic', color='gray')
+ax.annotate('', xy=(4.4, -1), xytext=(5.9, -1), arrowprops=arrow_kw)  # loss -> grad
+ax.annotate('', xy=(1.1, -1), xytext=(2.6, -1), arrowprops=arrow_kw)  # grad -> backward
+ax.annotate('', xy=(0, -2.85), xytext=(0, -1.35), arrowprops=arrow_kw)  # backward -> optimizer
+ax.annotate('', xy=(2.4, -3.2), xytext=(1.1, -3.2), arrowprops=arrow_kw)  # optimizer -> update
 
-\end{tikzpicture}
+# Dashed loop back: Update -> right -> down -> left -> up -> Training Batch
+loop_r = 5.2   # right edge
+loop_b = -4.2  # bottom edge
+loop_l = -1.2  # left edge
+ax.plot([4.6, loop_r], [-3.2, -3.2], color='#555555', lw=1.3, linestyle='dashed', zorder=1)  # right from Update
+ax.plot([loop_r, loop_r], [-3.2, loop_b], color='#555555', lw=1.3, linestyle='dashed', zorder=1)  # down
+ax.plot([loop_r, loop_l], [loop_b, loop_b], color='#555555', lw=1.3, linestyle='dashed', zorder=1)  # left
+ax.plot([loop_l, loop_l], [loop_b, 1], color='#555555', lw=1.3, linestyle='dashed', zorder=1)  # up
+ax.annotate('', xy=(-0.9, 1), xytext=(loop_l, 1), arrowprops=dash_kw)  # arrow into Training Batch
+ax.text(loop_r + 0.2, loop_b + 0.15, 'Next Iteration', ha='left', fontsize=7, style='italic', color='gray')
+
+plt.show()
 ```
-:::
 
 Each iteration executes the forward pass, loss computation, backward pass, and parameter update cycle established in @sec-ai-training-mathematical-foundations-d894. The systems question is not *what* these operations compute---we covered that above---but how they interact as a *pipeline*, where the bottleneck in any one stage limits overall throughput.
 
@@ -1687,84 +1707,71 @@ The architectural overview identified the data pipeline as the first component i
 
 The data pipeline running on the CPU bridges raw data storage and GPU computation. @fig-data-pipeline breaks down this architecture into three distinct zones:
 
-::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Three distinct zones compose the data pipeline: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple GPU workers for parallel computation." fig-alt="Block diagram showing data flow through three zones: Storage Zone with raw data, CPU Preprocessing Zone with format, process, and batch stages, and GPU Training Zone with three GPU workers."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=0.8cm]
-% Standard color definitions
-\definecolor{BlueLine}{HTML}{006395}
-\definecolor{BlueL}{HTML}{D1E6F3}
-\definecolor{GreenLine}{HTML}{008F45}
-\definecolor{GreenL}{HTML}{D4EFDF}
-\definecolor{RedLine}{HTML}{CB202D}
-\definecolor{RedL}{HTML}{F5D2D5}
-\definecolor{BackColor}{RGB}{255,255,229}
-\definecolor{BackLine}{RGB}{181,181,72}
-\definecolor{TextColor}{HTML}{F8F9FA}
+```{python}
+#| label: fig-data-pipeline
+#| echo: false
+#| fig-cap: "**CPU-to-GPU Data Flow**: Three distinct zones compose the data pipeline: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple GPU workers for parallel computation."
+#| fig-alt: "Block diagram showing data flow through three zones: Storage Zone with raw data, CPU Preprocessing Zone with format, process, and batch stages, and GPU Training Zone with three GPU workers."
 
-\tikzset{
-  Box/.style={
-    rectangle, draw=BlueLine, fill=BlueL, line width=0.75pt,
-    rounded corners=2pt, text width=22mm, align=center,
-    minimum height=10mm
-  },
-  DataBox/.style={
-    Box, draw=RedLine, fill=RedL
-  },
-  GPUBox/.style={
-    Box, draw=GreenLine, fill=GreenL
-  },
-  ZoneBox/.style={
-    draw=BackLine, fill=BackColor, line width=0.75pt,
-    rounded corners=4pt
-  },
-  Line/.style={
-    draw=black!50, line width=1.0pt, -latex
-  },
-  Text/.style={
-    fill=TextColor, inner sep=2pt, font=\footnotesize\usefont{T1}{phv}{m}{n}
-  },
-  ZoneLabel/.style={
-    font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, anchor=north, yshift=-2pt
-  }
-}
+import matplotlib.patches as mpatches
+from physx import viz
 
-% Nodes
-\node[DataBox] (raw) {Raw Data\\ (Disk/S3)};
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(12, 3.5))
+ax.set_xlim(-1.5, 16)
+ax.set_ylim(-2.5, 2.5)
+ax.set_aspect('equal')
+ax.axis('off')
+ax.grid(False)
 
-\node[Box, right=1.5 of raw] (format) {Format\\ Conversion};
-\node[Box, right=of format] (process) {Preprocessing\\ (Augment)};
-\node[Box, right=of process] (batch) {Batching};
+bw, bh = 1.8, 0.7
+arrow_kw = dict(arrowstyle='->', color='#555555', lw=1.5)
 
-\node[GPUBox, right=2.2 of batch] (gpu2) {GPU 2};
-\node[GPUBox, above=0.5 of gpu2] (gpu1) {GPU 1};
-\node[GPUBox, below=0.5 of gpu2] (gpu3) {GPU 3};
+def box(x, y, label, fc, ec, w=bw):
+    rect = mpatches.FancyBboxPatch((x - w/2, y - bh/2), w, bh, boxstyle="round,pad=0.08",
+                                    facecolor=fc, edgecolor=ec, linewidth=1.2, zorder=3)
+    ax.add_patch(rect)
+    ax.text(x, y, label, ha='center', va='center', fontsize=8, fontweight='bold', zorder=4)
 
-% Zone Backgrounds
-\scoped[on background layer]{
-  \node[ZoneBox, fit=(raw), inner xsep=10pt, inner ysep=20pt] (z1) {};
-  \node[ZoneBox, fit=(format)(process)(batch), inner xsep=10pt, inner ysep=20pt] (z2) {};
-  \node[ZoneBox, fit=(gpu1)(gpu2)(gpu3), inner xsep=10pt, inner ysep=15pt] (z3) {};
-}
+def zone(x1, y1, x2, y2, label):
+    rect = mpatches.FancyBboxPatch((x1, y1), x2 - x1, y2 - y1, boxstyle="round,pad=0.15",
+                                    facecolor='#FFFFF0', edgecolor='#B5B548', linewidth=0.8, zorder=1)
+    ax.add_patch(rect)
+    ax.text((x1 + x2)/2, y2 - 0.1, label, ha='center', va='top', fontsize=8, fontweight='bold', zorder=2)
 
-% Zone Labels
-\node[ZoneLabel] at (z1.north) {Storage Zone};
-\node[ZoneLabel] at (z2.north) {CPU Preprocessing Zone};
-\node[ZoneLabel] at (z3.north) {GPU Training Zone};
+# Zones
+zone(-1.2, -1.0, 1.2, 1.5, 'Storage Zone')
+zone(2.2, -1.0, 10.2, 1.5, 'CPU Preprocessing Zone')
+zone(11.5, -1.8, 14.5, 1.8, 'GPU Training Zone')
 
-% Connections
-\draw[Line] (raw) -- (format);
-\draw[Line] (format) -- (process);
-\draw[Line] (process) -- (batch);
+# Storage zone
+box(0, 0, 'Raw Data\n(Disk/S3)', COLORS['RedL'], COLORS['RedLine'])
 
-\draw[Line] (batch.east) -- ++(0.4,0) |- (gpu1.west);
-\draw[Line] (batch.east) -- (gpu2.west);
-\draw[Line] (batch.east) -- ++(0.4,0) |- (gpu3.west);
+# CPU zone
+box(3.5, 0, 'Format\nConversion', COLORS['BlueL'], COLORS['BlueLine'])
+box(6, 0, 'Preprocessing\n(Augment)', COLORS['BlueL'], COLORS['BlueLine'])
+box(8.8, 0, 'Batching', COLORS['BlueL'], COLORS['BlueLine'])
 
-\node[Text] at ($(batch.east)!0.5!(gpu2.west)$) {Data};
+# GPU zone
+box(13, 1, 'GPU 1', COLORS['GreenL'], COLORS['GreenLine'], w=1.5)
+box(13, 0, 'GPU 2', COLORS['GreenL'], COLORS['GreenLine'], w=1.5)
+box(13, -1, 'GPU 3', COLORS['GreenL'], COLORS['GreenLine'], w=1.5)
 
-\end{tikzpicture}
+# Arrows in CPU zone
+ax.annotate('', xy=(2.6, 0), xytext=(0.9, 0), arrowprops=arrow_kw)
+ax.annotate('', xy=(5.1, 0), xytext=(4.4, 0), arrowprops=arrow_kw)
+ax.annotate('', xy=(7.9, 0), xytext=(6.9, 0), arrowprops=arrow_kw)
+
+# Batching -> GPUs (fan-out)
+jx = 10.0
+ax.plot([9.7, jx], [0, 0], color='#555555', lw=1.5, zorder=2)
+for gy in [1, 0, -1]:
+    ax.plot([jx, jx], [0, gy], color='#555555', lw=1.5, zorder=2)
+    ax.annotate('', xy=(12.25, gy), xytext=(jx, gy), arrowprops=arrow_kw)
+
+ax.text(10.8, 0.35, 'Data', ha='center', va='bottom', fontsize=8)
+
+plt.show()
 ```
-:::
 
 The storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple accelerators for parallel computation.
 
@@ -1812,18 +1819,26 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 #| label: gpt2-data-pipeline-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Analyze GPT-2 data loading pipeline bottlenecks and optimization
-# Used in: GPT-2 Language Model Data Pipeline callout (pipeline stage analysis)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 DATA PIPELINE CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 Language Model Data Pipeline callout — pipeline stage
+# │          analysis for tokenization, transfer, and multi-worker optimization
+# │
+# │ Why: Breaks down the data loading pipeline into measurable stages
+# │      (tokenization, PCIe transfer) so students can identify which stage
+# │      is the bottleneck and quantify the benefit of multi-worker prefetching.
+# │
+# │ Imports: physx.constants (PCIE_GEN3_BW, GB, second),
+# │          physx.formatting (fmt)
+# │ Exports: tokens_per_batch_str, tokenization_ms_str, batch_kb_str,
+# │          pcie_gen3_str, transfer_ms_str, n_cpu_workers_str,
+# │          parallel_tokenization_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.constants import PCIE_GEN3_BW, GB, second
 from physx.formatting import fmt
 
+# --- Inputs (GPT-2 data pipeline parameters) ---
 batch_size_gpt2_value = 32
 seq_len_gpt2_value = 1024
 tokenization_rate_value = 500_000  # tokens/sec per CPU core
@@ -1831,9 +1846,7 @@ n_cpu_workers_value = 8
 
 pcie_gen3_gbps_value = PCIE_GEN3_BW.to(GB / second).magnitude  # 15.75 GB/s
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (pipeline stage timing analysis) ---
 # GPT-2 data loading pipeline analysis
 tokens_per_batch_value = batch_size_gpt2_value * seq_len_gpt2_value  # 32K
 tokenization_ms_value = tokens_per_batch_value / tokenization_rate_value * 1000  # ms
@@ -1848,9 +1861,7 @@ transfer_ms_value = (batch_kb_value / 1024 / 1024) / pcie_gen3_gbps_value * 1000
 # Multi-worker optimization
 parallel_tokenization_ms_value = tokenization_ms_value / n_cpu_workers_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 tokens_per_batch_str = f"{tokens_per_batch_value // 1000}K"
 tokenization_ms_str = fmt(tokenization_ms_value, precision=0, commas=False)
 batch_kb_str = fmt(batch_kb_value, precision=0, commas=False)
@@ -1903,38 +1914,41 @@ Text tokenization is CPU-bound (unlike image preprocessing which is I/O-bound). 
 
 :::
 
-While data pipeline throughput determines how fast training data reaches the GPU, even single-node multi-GPU configurations (previewed here, detailed in @sec-ai-training-scaling-training-systems-adfd) introduce a second bottleneck: the network communication required to synchronize gradients across devices. The following exercise quantifies when this communication overhead dominates.
+While data pipeline throughput determines how fast training data reaches the GPU, even single-node multi-GPU configurations (previewed here, detailed in @sec-ai-training-scaling-training-systems-adfd) introduce a second bottleneck: the network communication required to synchronize gradients across devices. This communication overhead creates *the network wall*, as the following exercise quantifies.
 
 ```{python}
 #| label: network-wall-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NETWORK WALL CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The Network Wall callout — network communication overhead for
+# │          gradient synchronization in distributed training
+# │
+# │ Why: Quantifies the time cost of AllReduce gradient synchronization for a
+# │      7B model over 100 Gbps links, showing students why network bandwidth
+# │      becomes the binding constraint in distributed training.
+# │
+# │ Imports: physx.constants (BYTES_FP16, ALLREDUCE_FACTOR),
+# │          physx.formatting (fmt)
+# │ Exports: model_params_b_str, gradient_size_str, allreduce_str,
+# │          network_time_str, network_bw_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 from physx.constants import BYTES_FP16, ALLREDUCE_FACTOR
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate network communication overhead for distributed training
-# Used in: The Network Wall callout (network bottleneck analysis)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (7B model over 100 Gbps network) ---
 model_params_b_value = 7  # 7B parameters (hypothetical example)
 bytes_per_param_fp16_value = BYTES_FP16.magnitude
 network_bw_gbs_value = 12.5  # 100 Gbps = 12.5 GB/s
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (gradient size and AllReduce communication time) ---
 # Gradient size: params × bytes (1e9 factors cancel out)
 gradient_size_gb_value = model_params_b_value * bytes_per_param_fp16_value
 allreduce_total_gb_value = ALLREDUCE_FACTOR * gradient_size_gb_value  # Ring AllReduce sends ~2× gradients
 network_time_s_value = allreduce_total_gb_value / network_bw_gbs_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 model_params_b_str = fmt(model_params_b_value, precision=0, commas=False)
 gradient_size_str = fmt(gradient_size_gb_value, precision=0, commas=False)
 allreduce_str = fmt(allreduce_total_gb_value, precision=0, commas=False)
@@ -2054,17 +2068,27 @@ These hardware utilization patterns reinforce the batch-size--utilization relati
 #| label: vram-requirements-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Estimate VRAM requirements for LLM training
-# Used in: Estimating VRAM Requirements callout
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ VRAM REQUIREMENTS CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Estimating VRAM Requirements callout — will a 7B model fit on
+# │          a 24 GB GPU for training?
+# │
+# │ Why: Walks students through the standard VRAM estimation formula:
+# │      weights + gradients + optimizer states + activations. The concrete
+# │      7B / 24 GB mismatch motivates multi-GPU and memory optimization.
+# │
+# │ Imports: physx.constants (BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte),
+# │          physx.formatting (fmt)
+# │ Exports: vram_params_b_str, vram_gpu_capacity_str, vram_fp16_bytes_str,
+# │          vram_adam_bytes_str, vram_weights_gb_str, vram_gradients_gb_str,
+# │          vram_optimizer_gb_str, vram_subtotal_gb_str, vram_seq_str,
+# │          vram_hidden_str, vram_layers_str, vram_activations_gb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte
 from physx.formatting import fmt
 
+# --- Inputs (7B model on a 24 GB GPU) ---
 vram_params_b = 7           # billion parameters
 vram_gpu_capacity_gb = 24   # GPU memory
 vram_fp16_bytes = BYTES_FP16.to(byte).magnitude
@@ -2078,17 +2102,13 @@ vram_hidden = 4096
 vram_layers = 32
 vram_activations_gb = 2  # approximate
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (memory breakdown: weights + gradients + optimizer) ---
 vram_weights_gb = vram_params_b * vram_fp16_bytes
 vram_gradients_gb = vram_params_b * vram_fp16_bytes
 vram_optimizer_gb = vram_params_b * vram_adam_bytes
 vram_subtotal_gb = vram_weights_gb + vram_gradients_gb + vram_optimizer_gb
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 vram_params_b_str = fmt(vram_params_b, precision=0, commas=False)
 vram_gpu_capacity_str = fmt(vram_gpu_capacity_gb, precision=0, commas=False)
 vram_fp16_bytes_str = fmt(vram_fp16_bytes, precision=0, commas=False)
@@ -2126,19 +2146,29 @@ The total memory scales linearly with batch size (as established in @eq-activati
 #| label: resnet-memory-scaling-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate ResNet-50 memory scaling across batch sizes and GPT-3 parameter memory
-# Used in: Memory scaling discussion (batch size trade-offs, activation checkpointing)
-
-# =============================================================================
-# INPUT
-# =============================================================================
-from physx.constants import RESNET50_PARAMS, Mparam, BYTES_FP32, byte, GB, MiB
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RESNET-50 MEMORY SCALING CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Memory scaling discussion — batch size trade-offs and GPT-3
+# │          parameter memory, activation checkpointing motivation
+# │
+# │ Why: Shows how memory scales linearly with batch size for ResNet-50,
+# │      demonstrating that doubling batch size from 32→64 approaches A100
+# │      memory limits. Also computes GPT-3 parameter memory to illustrate
+# │      the scale gap between vision and language models.
+# │
+# │ Imports: physx.constants (RESNET50_PARAMS, Mparam, BYTES_FP32, BYTES_FP16,
+# │          byte, GB, MB, MiB, param), physx.formatting (fmt),
+# │          physx.formulas (model_memory)
+# │ Exports: first_conv_mb_str, total_gb_b32_str, pct_a100_str,
+# │          act_gb_b64_str, grad_gb_b64_str, total_gb_b64_str,
+# │          gpt3_fp32_str, gpt3_fp16_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import RESNET50_PARAMS, Mparam, BYTES_FP32, BYTES_FP16, byte, GB, MB, MiB, param
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
+# --- Inputs (ResNet-50 Conv1 output dimensions and empirical memory values) ---
 # ResNet-50 Conv1 output: 112x112x64 (after stride-2 conv + pooling from 224x224 input)
 first_conv_h, first_conv_w, first_conv_c = 112, 112, 64
 
@@ -2151,9 +2181,7 @@ a100_40_gb = 40   # A100 40GB variant
 # GPT-3 configuration
 gpt3_params = 175e9 * param
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (memory scaling across batch sizes + GPT-3 parameter memory) ---
 first_conv_mb = (first_conv_h * first_conv_w * first_conv_c * BYTES_FP32).to(MB).magnitude
 
 resnet_params_m = RESNET50_PARAMS.to(Mparam).magnitude  # 25.6M
@@ -2171,9 +2199,7 @@ total_gb_b64 = act_gb_b64 + grad_gb_b64 + param_gb
 gpt3_fp32_gb = model_memory(gpt3_params, BYTES_FP32, GB)
 gpt3_fp16_gb = model_memory(gpt3_params, BYTES_FP16, GB)
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 first_conv_mb_str = fmt(first_conv_mb, precision=0, commas=False)
 total_gb_b32_str = fmt(total_gb_b32, precision=1, commas=False)
 pct_a100_str = fmt(pct_of_a100, precision=0, commas=False)
@@ -2263,7 +2289,7 @@ At billion-parameter scale, optimizer state dominates the memory budget. As quan
 
 \legend{Others, Weight Gradient, Optimizer State, Activation, Weights}
 \draw[dashed,RedLine,ultra thick] (axis cs:24,-0.5) -- (axis cs:24,3.5)
-node[right=2pt, RedLine, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, pos=0.8] {24 GB Limit (RTX 4090)};
+node[above right=2pt, RedLine, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, fill=white, fill opacity=0.85, text opacity=1, inner sep=2pt, pos=1] {24 GB Limit (RTX 4090)};
 \end{axis}
 \end{tikzpicture}
 ```
@@ -2286,9 +2312,7 @@ from physx import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
-# =============================================================================
-# PLOT: The Linear Scaling Failure
-# =============================================================================
+# --- Plot: The Linear Scaling Failure ---
 steps = np.arange(0, 1000)
 loss_base = 2.0 * np.exp(-0.01 * steps) + 0.2
 loss_large_naive = 2.0 * np.exp(-0.00125 * steps) + 0.2
@@ -2315,17 +2339,24 @@ Beyond batch size tuning, practitioners must also confront the economic reality 
 ```{python}
 #| label: utility-bill-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ UTILITY BILL CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The Utility Bill callout — Llama-2-70B training cost analysis
+# │          with rental vs purchase economics
+# │
+# │ Why: Grounds the abstract FLOP counts in dollar costs. Students compute
+# │      single-GPU years, cluster wall-clock days, and rental vs purchase
+# │      breakeven to understand the economic reality of large-scale training.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: ub_flops_mantissa_str, ub_flops_exp_str, ub_time_s_mantissa_str,
+# │          ub_time_s_exp_str, ub_years_str, ub_cluster_days_str,
+# │          ub_rental_str, ub_purchase_str, ub_breakeven_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate Llama-2-70B training cost and rental vs purchase economics
-# Used in: The Utility Bill callout (training cost analysis)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (Llama-2-70B training configuration and economics) ---
 # Utility Bill: Llama-2-70B training cost analysis
 ub_params_value = 70e9  # 70B parameters
 ub_tokens_value = 2e12  # 2T tokens
@@ -2336,9 +2367,7 @@ ub_num_gpus_value = 1000
 ub_rental_rate_value = 3  # $/hr per GPU
 ub_purchase_price_value = 30_000  # $ per GPU
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (compute time and cost analysis) ---
 ub_effective_tflops_value = ub_peak_tflops_value * ub_utilization_value
 
 # Compute
@@ -2352,9 +2381,7 @@ ub_rental_cost_value = ub_num_gpus_value * 24 * ub_cluster_days_value * ub_renta
 ub_purchase_cost_value = ub_num_gpus_value * ub_purchase_price_value
 ub_breakeven_value = ub_purchase_cost_value / ub_rental_cost_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 # Format for LaTeX inline references - all as _str to avoid nested $...$ issues
 ub_flops_mantissa_str = f"{ub_total_flops_value:.1e}".split("e+")[0]
 ub_flops_exp_str = f"{int(f'{ub_total_flops_value:.1e}'.split('e+')[1])}"
@@ -2430,7 +2457,6 @@ Training bottlenecks fall into three categories, which map directly to the **D·
 
 : **D·A·M Taxonomy Applied to Training Bottlenecks.** Each axis of the D·A·M taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which axis is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks}
 
-[]{#sec-ai-training-profiling-identify-bottlenecks-f306}
 Profiling tools reveal which bottleneck dominates your workload. @fig-tf-bottleneck-trace captures a data-bound pathology through TensorFlow's profiler: the gaps in GPU activity (white regions between compute blocks) reveal that the device frequently waits for input data, with utilization dropping to zero during data loading phases.
 
 ![**Data-Bound Profiler Trace**: TensorFlow profiler output capturing a data loading bottleneck during training. The gaps in GPU activity (white regions between compute blocks) indicate periods where the device idles while waiting for input data, with utilization dropping to zero during data loading phases.](images/png/tf_profiler.png){#fig-tf-bottleneck-trace fig-alt="TensorFlow profiler screenshot showing GPU activity timeline. Colored blocks indicate computation periods with white gaps revealing idle time when GPU waits for data loading to complete."}
@@ -2482,87 +2508,109 @@ This systematic framework—profile, select, compose—applies three core optimi
 
 Use @fig-optimization-flowchart as a decision tree to operationalize this systematic framework. Starting from profiling results, follow the branches through bottleneck identification to technique selection, ensuring optimization effort targets the actual constraint rather than perceived issues.
 
-::: {#fig-optimization-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Training Optimization Decision Flowchart**: Systematic approach to optimization selection based on profiling results. Begin by measuring GPU utilization, then follow the decision path to identify whether the bottleneck is data-bound, memory-bound, or compute-bound. Each path leads to specific techniques that address the identified constraint." fig-alt="Flowchart showing optimization decision tree starting from Profile Training Run, branching based on GPU utilization and memory pressure to different optimization techniques."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, line width=0.75pt, node distance=1.2cm]
-% Standard color definitions
-\definecolor{BlueLine}{HTML}{006395}
-\definecolor{BlueL}{HTML}{D1E6F3}
-\definecolor{GreenLine}{HTML}{008F45}
-\definecolor{GreenL}{HTML}{D4EFDF}
-\definecolor{RedLine}{HTML}{CB202D}
-\definecolor{RedL}{HTML}{F5D2D5}
-\definecolor{TextColor}{HTML}{F8F9FA}
+```{python}
+#| label: fig-optimization-flowchart
+#| echo: false
+#| fig-cap: "**Training Optimization Decision Flowchart**: Systematic approach to optimization selection based on profiling results. Begin by measuring GPU utilization, then follow the decision path to identify whether the bottleneck is data-bound, memory-bound, or compute-bound. Each path leads to specific techniques that address the identified constraint."
+#| fig-alt: "Flowchart showing optimization decision tree starting from Profile Training Run, branching based on GPU utilization and memory pressure to different optimization techniques."
 
-\tikzset{
-  Start/.style={
-    draw=GreenLine, fill=magenta!20, line width=0.75pt,
-    rounded corners=10pt, text width=30mm, align=center,
-    minimum height=9mm
-  },
-  Decision/.style={
-    diamond, aspect=2, draw=BlueLine, fill=BlueL, line width=0.75pt,
-    text width=28mm, align=center, inner sep=0pt
-  },
-  Bottleneck/.style={
-    rectangle, draw=GreenLine, fill=GreenL, line width=0.75pt,
-    rounded corners=2pt, text width=30mm, align=center,
-    minimum height=9mm
-  },
-  Action/.style={
-    rectangle, draw=RedLine, fill=RedL, line width=0.75pt,
-    rounded corners=2pt, text width=35mm, align=center,
-    minimum height=10mm
-  },
-  Line/.style={
-    draw=black!50, line width=1.0pt, -latex
-  },
-  Text/.style={
-    fill=TextColor, inner sep=2pt, font=\footnotesize\usefont{T1}{phv}{m}{n}
-  }
-}
+import matplotlib.patches as mpatches
+import numpy as np
+from physx import viz
 
-% Nodes
-\node[Start] (profile) {Profile Training Run};
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 10))
+ax.set_xlim(-7, 7)
+ax.set_ylim(-11, 1)
+ax.set_aspect('equal')
+ax.axis('off')
+ax.grid(False)
 
-\node[Decision, below=of profile] (gpu) {GPU Util\\ $<$ 70\%?};
+arrow_kw = dict(arrowstyle='->', color='#555555', lw=1.5)
 
-% Data-bound path
-\node[Bottleneck, left=1.5 of gpu, yshift=-1cm] (databound) {\textbf{Data-Bound}};
-\node[Action, below=0.4 of databound] (prefetch) {Apply Prefetching \&\\ Pipeline Overlap};
+def rounded_box(cx, cy, w, h, text, fc, ec, rad="round,pad=0.15"):
+    rect = mpatches.FancyBboxPatch((cx - w/2, cy - h/2), w, h, boxstyle=rad,
+                                    facecolor=fc, edgecolor=ec, linewidth=1.2, zorder=2)
+    ax.add_patch(rect)
+    ax.text(cx, cy, text, ha='center', va='center', fontsize=9, fontweight='bold', zorder=3)
 
-% Memory vs Compute path
-\node[Decision, below=1.5 of gpu] (memory) {OOM Errors or\\ Mem $>$ 90\%?};
+def diamond(cx, cy, w, h, text, fc, ec):
+    verts = [(cx, cy+h/2), (cx+w/2, cy), (cx, cy-h/2), (cx-w/2, cy), (cx, cy+h/2)]
+    d = plt.Polygon(verts, facecolor=fc, edgecolor=ec, linewidth=1.2, zorder=2)
+    ax.add_patch(d)
+    ax.text(cx, cy, text, ha='center', va='center', fontsize=8, fontweight='bold', zorder=3)
 
-\node[Bottleneck, left=1.5 of memory, yshift=-1cm] (membound) {\textbf{Memory-Bound}};
-\node[Action, below=0.8 of membound] (memtech) {Mixed Precision $\rightarrow$\\ Checkpointing $\rightarrow$\\ Accumulation};
+# Start: Profile Training Run
+rounded_box(0, 0, 3.2, 0.8, 'Profile Training Run', '#F0D0F0', COLORS['GreenLine'], "round,pad=0.2")
 
-\node[Bottleneck, right=1.5 of memory, yshift=-1cm] (compbound) {\textbf{Compute-Bound}};
-\node[Action, below=0.8 of compbound] (comptech) {Increase Batch Size,\\ Optimize Kernels};
+# Decision: GPU Util < 70%?
+diamond(0, -2, 3.5, 1.8, 'GPU Util\n< 70%?', COLORS['BlueL'], COLORS['BlueLine'])
 
-\node[Start, below=5.5 of gpu] (recheck) {Re-profile \& Iterate};
+# Data-Bound path (left)
+rounded_box(-4.5, -3.8, 2.5, 0.7, 'Data-Bound', COLORS['GreenL'], COLORS['GreenLine'])
+rounded_box(-4.5, -5.0, 3.0, 0.8, 'Apply Prefetching &\nPipeline Overlap', COLORS['RedL'], COLORS['RedLine'])
 
-% Connections
-\draw[Line] (profile) -- (gpu);
+# Decision: Memory
+diamond(0, -5, 3.5, 1.8, 'OOM Errors or\nMem > 90%?', COLORS['BlueL'], COLORS['BlueLine'])
 
-\draw[Line] (gpu.west) -| node[Text, pos=0.3] {Yes} (databound.north);
-\draw[Line] (gpu.south) -- node[Text, pos=0.5] {No} (memory.north);
+# Memory-Bound path (left)
+rounded_box(-4.5, -7, 2.5, 0.7, 'Memory-Bound', COLORS['GreenL'], COLORS['GreenLine'])
+rounded_box(-4.5, -8.5, 3.0, 1.0, 'Mixed Precision,\nCheckpointing,\nAccumulation', COLORS['RedL'], COLORS['RedLine'])
 
-\draw[Line] (memory.west) -| node[Text, pos=0.3] {Yes} (membound.north);
-\draw[Line] (memory.east) -| node[Text, pos=0.3] {No} (compbound.north);
+# Compute-Bound path (right)
+rounded_box(4.5, -7, 2.5, 0.7, 'Compute-Bound', COLORS['GreenL'], COLORS['GreenLine'])
+rounded_box(4.5, -8.5, 3.0, 0.8, 'Increase Batch Size,\nOptimize Kernels', COLORS['RedL'], COLORS['RedLine'])
 
-\draw[Line] (databound) -- (prefetch);
-\draw[Line] (membound) -- (memtech);
-\draw[Line] (compbound) -- (comptech);
+# Re-profile & Iterate
+rounded_box(0, -10.2, 3.2, 0.8, 'Re-profile & Iterate', '#F0D0F0', COLORS['GreenLine'], "round,pad=0.2")
 
-% Feedback loops
-\draw[Line] (prefetch.west) -- ++(-0.6,0) |- (recheck.west);
-\draw[Line] (memtech.east) -| (recheck.north);
-\draw[Line] (comptech.west) -| (recheck.north);
+# --- Arrows ---
+# Profile -> GPU decision
+ax.annotate('', xy=(0, -1.1), xytext=(0, -0.4), arrowprops=arrow_kw)
 
-\end{tikzpicture}
+# GPU -> Data-Bound (Yes, left)
+ax.annotate('', xy=(-4.5, -3.45), xytext=(-1.75, -2), arrowprops=arrow_kw)
+ax.text(-3.5, -2.5, 'Yes', ha='center', fontsize=8, bbox=dict(facecolor='#F8F9FA', edgecolor='none', pad=2))
+
+# GPU -> Memory decision (No, down)
+ax.annotate('', xy=(0, -4.1), xytext=(0, -2.9), arrowprops=arrow_kw)
+ax.text(0.4, -3.5, 'No', ha='left', fontsize=8, bbox=dict(facecolor='#F8F9FA', edgecolor='none', pad=2))
+
+# Data-Bound -> Prefetch
+ax.annotate('', xy=(-4.5, -4.6), xytext=(-4.5, -4.15), arrowprops=arrow_kw)
+
+# Memory -> Memory-Bound (Yes, left)
+ax.annotate('', xy=(-4.5, -6.65), xytext=(-1.75, -5), arrowprops=arrow_kw)
+ax.text(-3.5, -5.6, 'Yes', ha='center', fontsize=8, bbox=dict(facecolor='#F8F9FA', edgecolor='none', pad=2))
+
+# Memory -> Compute-Bound (No, right)
+ax.annotate('', xy=(4.5, -6.65), xytext=(1.75, -5), arrowprops=arrow_kw)
+ax.text(3.5, -5.6, 'No', ha='center', fontsize=8, bbox=dict(facecolor='#F8F9FA', edgecolor='none', pad=2))
+
+# Bottleneck -> Action
+ax.annotate('', xy=(-4.5, -8.0), xytext=(-4.5, -7.35), arrowprops=arrow_kw)
+ax.annotate('', xy=(4.5, -8.1), xytext=(4.5, -7.35), arrowprops=arrow_kw)
+
+# Feedback loops to Re-profile — single shared bus
+fb_y = -9.8  # shared horizontal routing level
+
+# All three action boxes drop down to fb_y, then a single arrow goes up to Re-profile
+# Prefetch (left path) drops straight down
+ax.plot([-6, -6], [-5.4, fb_y], color='#555555', lw=1.3, zorder=1)
+
+# Memory tech drops down to fb_y
+ax.plot([-4.5, -4.5], [-9.0, fb_y], color='#555555', lw=1.3, zorder=1)
+
+# Compute tech drops down to fb_y
+ax.plot([4.5, 4.5], [-8.9, fb_y], color='#555555', lw=1.3, zorder=1)
+
+# Shared horizontal bus connecting all three drop points
+ax.plot([-6, 4.5], [fb_y, fb_y], color='#555555', lw=1.3, zorder=1)
+
+# Single arrow from bus center up to Re-profile box
+ax.annotate('', xy=(0, -10.6), xytext=(0, fb_y), arrowprops=arrow_kw)
+
+plt.show()
 ```
-:::
 
 The flowchart embodies a critical insight: optimization is iterative. After applying a technique, re-profiling often reveals that a different bottleneck has become dominant. A data-bound system that implements prefetching may become memory-bound, requiring the next technique in the decision tree. This iterative refinement continues until profiling shows balanced resource utilization or acceptable training throughput.
 
@@ -2855,53 +2903,63 @@ These benefits compound: a practitioner might simultaneously double batch size (
 #| label: gpt2-mixed-precision-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate GPT-2 memory footprint under FP32, FP16, and checkpointing
-# Used in: Mixed Precision Training callout (FP32 vs FP16 memory comparison)
-
-# =============================================================================
-# INPUT
-# =============================================================================
-from physx.constants import GPT2_PARAMS, Mparam
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 MIXED PRECISION CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Mixed Precision Training callout — FP32 vs FP16 vs checkpointing
+# │          memory comparison for GPT-2
+# │
+# │ Why: Quantifies the three-step memory reduction pathway (FP32 → FP16 →
+# │      checkpointing) for GPT-2, showing how each technique reduces the
+# │      total memory footprint and whether it fits on a V100 (32 GB).
+# │
+# │ Imports: physx.constants (GPT2_PARAMS, Mparam, Bparam, BYTES_FP32,
+# │          BYTES_FP16, BYTES_ADAM_STATE, GB), physx.formatting (fmt),
+# │          physx.formulas (model_memory)
+# │ Exports: gpt2_b_str, mp_batch_size_str, fp32_act_str, fp16_act_str,
+# │          fp32_p_str, fp32_g_str, fp32_opt_str, fp32_t_str, fp16_p_str,
+# │          fp16_g_str, master_str, opt_str, fp16_t_str, ckpt_act_str,
+# │          ckpt_total_str, v100_capacity_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import GPT2_PARAMS, Mparam, Bparam, BYTES_FP32, BYTES_FP16, BYTES_ADAM_STATE, GB
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
+# --- Inputs (GPT-2 activation estimates at batch=32) ---
 mp_batch_size = 32
 fp32_act_gb = 65    # approximate activations for batch=32
 fp16_act_gb = 32.6  # approximate, half of FP32
 ckpt_act_gb = 8     # with gradient checkpointing
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-# FP32 baseline
+# --- Process (FP32 baseline, FP16 mixed precision, gradient checkpointing) ---
+# FP32 baseline (includes Adam optimizer states: m and v, each FP32)
 fp32_param_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 fp32_grad_gb = fp32_param_gb
-fp32_total_gb = fp32_param_gb + fp32_act_gb + fp32_grad_gb
+fp32_optimizer_gb = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
+fp32_total_gb = fp32_param_gb + fp32_act_gb + fp32_grad_gb + fp32_optimizer_gb
 
-# FP16 mixed precision
+# FP16 mixed precision (requires FP32 master weights + FP32 optimizer states)
 fp16_param_gb = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
 fp16_grad_gb = fp16_param_gb
+master_fp32_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 optimizer_fp32_gb = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
-fp16_total_gb = fp16_param_gb + fp16_act_gb + fp16_grad_gb + optimizer_fp32_gb
+fp16_total_gb = fp16_param_gb + fp16_act_gb + fp16_grad_gb + master_fp32_gb + optimizer_fp32_gb
 
 # Gradient checkpointing
-ckpt_total_gb = fp16_param_gb + ckpt_act_gb + fp16_grad_gb + optimizer_fp32_gb
+ckpt_total_gb = fp16_param_gb + ckpt_act_gb + fp16_grad_gb + master_fp32_gb + optimizer_fp32_gb
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 gpt2_b_str = fmt(GPT2_PARAMS.to(Bparam).magnitude, precision=1, commas=False)
 mp_batch_size_str = fmt(mp_batch_size, precision=0, commas=False)
 fp32_act_str = fmt(fp32_act_gb, precision=0, commas=False)
 fp16_act_str = fmt(fp16_act_gb, precision=1, commas=False)
 fp32_p_str = fmt(fp32_param_gb, precision=1, commas=False)
 fp32_g_str = fmt(fp32_grad_gb, precision=1, commas=False)
+fp32_opt_str = fmt(fp32_optimizer_gb, precision=1, commas=False)
 fp32_t_str = fmt(fp32_total_gb, precision=0, commas=False)
 fp16_p_str = fmt(fp16_param_gb, precision=1, commas=False)
 fp16_g_str = fmt(fp16_grad_gb, precision=1, commas=False)
+master_str = fmt(master_fp32_gb, precision=1, commas=False)
 opt_str = fmt(optimizer_fp32_gb, precision=1, commas=False)
 fp16_t_str = fmt(fp16_total_gb, precision=0, commas=False)
 ckpt_act_str = fmt(ckpt_act_gb, precision=0, commas=False)
@@ -2913,28 +2971,28 @@ v100_capacity_str = "32"
 #| label: mixed-precision-speedup-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate mixed-precision speedup on V100
-# Used in: Mixed Precision Training callout (computational speedup section)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MIXED PRECISION SPEEDUP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Mixed Precision Training callout — computational speedup section
+# │
+# │ Why: Provides a concrete throughput comparison (samples/sec) between FP32
+# │      and FP16 on V100, giving students an empirical speedup number to
+# │      complement the theoretical memory analysis.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: v100_mp_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
+# --- Inputs (empirical V100 throughput) ---
 v100_fp32_samples = 90   # samples/sec
 v100_fp16_samples = 220  # samples/sec
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (speedup ratio) ---
 v100_mp_speedup = v100_fp16_samples / v100_fp32_samples
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 v100_mp_speedup_str = fmt(v100_mp_speedup, precision=1, commas=False)
 ```
 
@@ -2949,6 +3007,7 @@ FP32 Baseline:
 - Parameters: `{python} gpt2_b_str` B × 4 bytes = `{python} fp32_p_str` GB
 - Activations (batch=`{python} mp_batch_size_str`): ~`{python} fp32_act_str` GB
 - Gradients: `{python} fp32_g_str` GB
+- Optimizer states (Adam m, v in FP32): `{python} fp32_opt_str` GB
 - Total: ~`{python} fp32_t_str` GB (exceeds any single GPU)
 
 FP16 Mixed Precision:
@@ -2956,13 +3015,14 @@ FP16 Mixed Precision:
 - Parameters (FP16): `{python} gpt2_b_str` B × 2 bytes = `{python} fp16_p_str` GB
 - Activations (FP16): ~`{python} fp16_act_str` GB
 - Gradients (FP16): `{python} fp16_g_str` GB
-- Optimizer state (FP32 master weights): `{python} opt_str` GB (Adam m, v)
+- FP32 master weights: `{python} master_str` GB (for precise optimizer updates)
+- Optimizer states (Adam m, v in FP32): `{python} opt_str` GB
 - Total: ~`{python} fp16_t_str` GB (still tight, but manageable with optimizations)
 
 With Mixed Precision + Gradient Checkpointing:
 
 - Activations reduced to ~`{python} ckpt_act_str` GB (recompute during backward)
-- Total: ~`{python} ckpt_total_str` GB → fits comfortably in `{python} v100_capacity_str` GB V100
+- Total: ~`{python} ckpt_total_str` GB → fits in `{python} v100_capacity_str` GB V100
 
 **Computational Speedup**
 
@@ -3108,32 +3168,33 @@ Optimal mixed-precision training requires matching the precision format to hardw
 #| label: cross-gen-precision-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compare cross-generation GPU throughput for GPT-2 training
-# Used in: Mixed-Precision Hardware Support section (cross-generation comparison)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CROSS-GENERATION PRECISION CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Mixed-Precision Hardware Support section — cross-generation GPU
+# │          throughput comparison for GPT-2 training
+# │
+# │ Why: Shows how hardware evolution (V100 → A100 → H100) compounds with
+# │      precision evolution (FP32 → FP16 → BF16 → FP8) to deliver 20×+
+# │      speedups, illustrating hardware-software co-design.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: v100_fp16_speedup_str, a100_over_v100_str, h100_over_v100_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
+# --- Inputs (empirical samples/sec across GPU generations) ---
 v100_fp32_sps = 18    # samples/sec
 v100_fp16_sps = 45    # samples/sec
 a100_bf16_sps = 165   # samples/sec
 h100_fp8_sps = 380    # samples/sec
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (speedup ratios relative to V100 FP32 baseline) ---
 v100_fp16_speedup = v100_fp16_sps / v100_fp32_sps
 a100_over_v100 = a100_bf16_sps / v100_fp32_sps
 h100_over_v100 = h100_fp8_sps / v100_fp32_sps
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 v100_fp16_speedup_str = fmt(v100_fp16_speedup, precision=1, commas=False)
 a100_over_v100_str = fmt(a100_over_v100, precision=1, commas=False)
 h100_over_v100_str = fmt(h100_over_v100, precision=0, commas=False)
@@ -3157,31 +3218,35 @@ $$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right
 #| label: attention-memory-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate attention matrix memory requirements
-# Used in: Standard Attention Memory Bottleneck section
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ATTENTION MEMORY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Standard Attention Memory Bottleneck section — memory cost of
+# │          materializing the n×n attention matrix
+# │
+# │ Why: Quantifies the quadratic memory cost of standard attention (n²×4
+# │      bytes per head) at a realistic sequence length, showing that multi-
+# │      head attention consumes GBs of HBM just for intermediate matrices.
+# │
+# │ Imports: physx.constants (BYTES_FP32, MB, GB, byte),
+# │          physx.formatting (fmt)
+# │ Exports: seq_len_str, embed_dim_str, n_heads_str, bytes_fp32_str,
+# │          attn_matrix_mb_str, total_attn_gb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import BYTES_FP32, MB, GB, byte
 from physx.formatting import fmt
 
+# --- Inputs (attention configuration) ---
 seq_len = 4096
 embed_dim = 64   # per head
 n_heads = 16
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (per-head and total attention matrix memory) ---
 attn_matrix_mb = (seq_len ** 2 * BYTES_FP32).to(MB).magnitude
 total_attn_mb = attn_matrix_mb * n_heads
 total_attn_gb = (total_attn_mb * MB).to(GB).magnitude
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 seq_len_str = f"{seq_len:,}"
 embed_dim_str = f"{embed_dim}"
 n_heads_str = f"{n_heads}"
@@ -3240,23 +3305,27 @@ Flash Attention achieves asymptotic improvements in both memory footprint and me
 #| label: flash-attention-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compare standard vs Flash Attention memory per head
-# Used in: Memory and IO Complexity Analysis section
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLASH ATTENTION CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Memory and IO Complexity Analysis section — standard vs Flash
+# │          Attention memory per head
+# │
+# │ Why: Compares per-head memory of standard attention (n² matrix) vs Flash
+# │      Attention (3×n×d input tensors), giving students a concrete reduction
+# │      factor that motivates the tiling approach.
+# │
+# │ Imports: physx.constants (BYTES_FP32, MB), physx.formatting (fmt)
+# │ Exports: fa_standard_mb_str, fa_flash_mb_str, fa_reduction_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import BYTES_FP32, MB
 from physx.formatting import fmt
 
+# --- Inputs (sequence length and head dimension) ---
 fa_n = 4096          # sequence length
 fa_d = 64            # head dimension
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (standard vs Flash Attention memory comparison) ---
 # Standard attention: n^2 attention matrix
 fa_standard_mb = (fa_n**2 * BYTES_FP32).to(MB).magnitude
 
@@ -3266,9 +3335,7 @@ fa_flash_mb = (3 * fa_n * fa_d * BYTES_FP32).to(MB).magnitude
 # Reduction factor
 fa_reduction = fa_standard_mb / fa_flash_mb
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 fa_standard_mb_str = fmt(fa_standard_mb, precision=0, commas=False)
 fa_flash_mb_str = fmt(fa_flash_mb, precision=0, commas=False)
 fa_reduction_str = fmt(fa_reduction, precision=0, commas=False)
@@ -3347,31 +3414,33 @@ Training a GPT-2 Small-scale transformer on NVIDIA A100 GPU (12 layers, 768 hidd
 #| label: flash-attention-speedup-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate Flash Attention forward/backward speedups at 2048 tokens
-# Used in: Benchmark Results section (speedup summary after table)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLASH ATTENTION SPEEDUP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Benchmark Results section — Flash Attention forward/backward
+# │          speedups at 2048-token sequence length
+# │
+# │ Why: Converts raw benchmark timings into speedup ratios so students can
+# │      see the practical wall-clock improvement from Flash Attention,
+# │      especially the larger backward-pass speedup (where memory traffic
+# │      is heaviest).
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: flash_fwd_speedup_str, flash_bwd_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
+# --- Inputs (empirical benchmark timings in ms) ---
 std_fwd_2048 = 45    # ms (from benchmark table)
 flash_fwd_2048 = 15  # ms
 std_bwd_2048 = 120   # ms
 flash_bwd_2048 = 35  # ms
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (speedup ratios) ---
 flash_fwd_speedup = std_fwd_2048 / flash_fwd_2048
 flash_bwd_speedup = std_bwd_2048 / flash_bwd_2048
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 flash_fwd_speedup_str = fmt(flash_fwd_speedup, precision=0, commas=False)
 flash_bwd_speedup_str = fmt(flash_bwd_speedup, precision=1, commas=False)
 ```
@@ -3637,17 +3706,25 @@ Returning to our GPT-2 Lighthouse Model, *gradient accumulation* is essential fo
 #| label: grad-accum-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compare gradient accumulation vs naive multi-GPU cost and configuration
-# Used in: Gradient Accumulation callout (memory constraints, cost comparison)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRADIENT ACCUMULATION CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Gradient Accumulation callout — memory constraints and cost
+# │          comparison (accumulation vs naive multi-GPU)
+# │
+# │ Why: Shows how gradient accumulation achieves a large effective batch size
+# │      (512) with fewer GPUs (8 vs 32) by accumulating over micro-batches,
+# │      then quantifies the dollar savings over a 2-week training run.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: gpus_naive_str, batch_per_gpu_str, naive_hourly_str,
+# │          accum_hourly_str, savings_hourly_str, savings_pct_str,
+# │          accum_2wk_str, naive_2wk_str, comm_reduction_pct_str,
+# │          accum_steps_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
+# --- Inputs (batch configuration and GPU economics) ---
 micro_batch = 16
 effective_batch = 512
 gpus_accum = 8
@@ -3655,9 +3732,7 @@ accum_steps = 4
 gpu_hourly_rate = 16  # $/hour per GPU
 training_hours = 14 * 24  # 2 weeks
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (GPU count, batch math, and cost comparison) ---
 gpus_naive = effective_batch // micro_batch
 batch_per_gpu = micro_batch * accum_steps
 global_batch_accum = gpus_accum * batch_per_gpu
@@ -3675,9 +3750,7 @@ naive_2wk = gpus_naive * gpu_hourly_rate * training_hours / 1000  # $K
 # Communication reduction
 comm_reduction_pct = (1 - 1 / accum_steps) * 100
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 gpus_naive_str = f"{gpus_naive}"
 batch_per_gpu_str = f"{batch_per_gpu}"
 naive_hourly_str = f"{naive_hourly}"
@@ -3800,28 +3873,37 @@ To answer that question, let us walk through optimizing GPT-2 (1.5B parameters) 
 #| label: gpt2-walkthrough-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Walk through GPT-2 optimization steps (FP32 → AMP → checkpointing)
-# Used in: GPT-2 Optimization on V100 callout
-
-# =============================================================================
-# INPUT
-# =============================================================================
-from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 WALKTHROUGH CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 Optimization on V100 callout — three-step memory reduction
+# │          walkthrough (FP32 → AMP → gradient checkpointing)
+# │
+# │ Why: Ties together all the optimization techniques from the chapter into
+# │      a single worked example. Students see each technique's incremental
+# │      effect on total memory and whether the model fits on a V100 (32 GB).
+# │
+# │ Imports: physx.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
+# │          V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB),
+# │          physx.formatting (fmt), physx.formulas (model_memory)
+# │ Exports: params_fp32_str, grads_fp32_str, adam_fp32_str, act_fp32_str,
+# │          total_fp32_str, params_fp16_str, grads_fp16_str,
+# │          master_weights_str, adam_amp_str, act_fp16_str, total_amp_str,
+# │          static_mem_str, act_ckpt_str, total_ckpt_str, v100_mem_str,
+# │          amp_reduction_str, recompute_overhead_str, checkpoint_factor_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
+# --- Inputs (GPT-2 XL on V100 configuration) ---
 batch_size = 32
 seq_len = 1024
 act_fp32_gb = 65.0  # empirical activations for GPT-2 XL, batch=32, seq=1024
 checkpoint_factor = 4  # checkpoint every 4 layers → 4× reduction
 recompute_overhead_pct = 33  # empirical: ~33% more compute
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (three-step memory reduction) ---
 # Step 1: FP32 Baseline
 params_fp32_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 grads_fp32_gb = params_fp32_gb
@@ -3847,9 +3929,7 @@ v100_mem_gb = V100_MEM_CAPACITY.to('GB').magnitude
 # Improvement calculations
 amp_reduction_pct = (1 - total_amp_gb / total_fp32_gb) * 100
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 params_fp32_str = fmt(params_fp32_gb, precision=1, commas=False)
 grads_fp32_str = fmt(grads_fp32_gb, precision=1, commas=False)
 adam_fp32_str = fmt(adam_fp32_gb, precision=1, commas=False)
@@ -3941,17 +4021,22 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 #| label: gpt2-summary-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Summarize GPT-2 training baseline vs optimized metrics
-# Used in: GPT-2 Training Optimization Summary table (@tbl-gpt2-summary)
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 SUMMARY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GPT-2 Training Optimization Summary table (@tbl-gpt2-summary) —
+# │          baseline vs optimized metrics across memory, time, energy, cost
+# │
+# │ Why: Compiles the cumulative impact of all optimization techniques into
+# │      a single comparison table, showing students the end-to-end effect of
+# │      mixed precision + checkpointing on a real model.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: b_param_str..b_carbon_str, o_param_str..o_carbon_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
+# --- Inputs (baseline FP32 vs optimized AMP + checkpointing) ---
 # Baseline (FP32)
 b_param = 6.0       # GB
 b_grad = 6.0        # GB
@@ -3972,18 +4057,14 @@ o_time = 8.4        # days
 o_energy = 115000   # kWh
 o_carbon = 52.0     # tons CO₂
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (total memory and cost) ---
 b_total_mem = b_param + b_grad + b_master + b_opt + b_act
 b_cost = b_energy * 0.10
 
 o_total_mem = o_param + o_grad + o_master + o_opt + o_act
 o_cost = o_energy * 0.10
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings with units for table cells) ---
 # Note: Units embedded in _str vars because these populate a summary table
 b_param_str = f"{fmt(b_param, precision=1, commas=False)} GB"
 b_grad_str = f"{fmt(b_grad, precision=1, commas=False)} GB"
@@ -4029,17 +4110,21 @@ o_carbon_str = f"~{fmt(o_carbon, precision=0, commas=False)} tons CO₂"
 #| label: optimization-summary-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate overall optimization improvement ratios
-# Used in: Summary paragraph after GPT-2 optimization table
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OPTIMIZATION SUMMARY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Summary paragraph after GPT-2 optimization table — overall
+# │          improvement ratios
+# │
+# │ Why: Distills the optimization table into three headline numbers (memory
+# │      reduction, time speedup, energy savings) for the summary prose.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: mem_reduction_str, energy_reduction_pct_str, time_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
+# --- Inputs (baseline vs optimized totals from summary table) ---
 naive_mem_gb = 89.0
 optimized_mem_gb = 32.0
 naive_energy_kwh = 275_000
@@ -4047,16 +4132,12 @@ optimized_energy_kwh = 115_000
 naive_days = 14
 optimized_days = 8.4
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (improvement ratios) ---
 mem_reduction = naive_mem_gb / optimized_mem_gb
 energy_reduction_pct = (1 - optimized_energy_kwh / naive_energy_kwh) * 100
 time_speedup = naive_days / optimized_days
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 mem_reduction_str = fmt(mem_reduction, precision=1, commas=False)
 energy_reduction_pct_str = fmt(energy_reduction_pct, precision=0, commas=False)
 time_speedup_str = fmt(time_speedup, precision=1, commas=False)
@@ -4088,9 +4169,7 @@ from physx import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
-# =============================================================================
-# PLOT: The Communication Tax
-# =============================================================================
+# --- Plot: The Communication Tax ---
 N = np.array([1, 2, 4, 8, 16, 32, 64, 128, 256])
 
 scenarios = [
@@ -4400,17 +4479,27 @@ With this historical context in mind, the practical question becomes: *when* sho
 #| label: carbon-footprint-calc
 #| echo: false
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate carbon footprint and energy cost of training a 7B model
-# Used in: The Carbon Footprint of Training callout
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CARBON FOOTPRINT CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: The Carbon Footprint of Training callout — energy and CO₂
+# │          analysis for training a 7B model on 1024 A100s
+# │
+# │ Why: Connects optimization techniques to environmental impact. Students
+# │      compute energy consumption, household-equivalent usage, and CO₂
+# │      emissions to understand that efficiency improvements are also
+# │      sustainability improvements.
+# │
+# │ Imports: physx.constants (A100_TDP, watt), physx.formatting (fmt)
+# │ Exports: cf_num_gpus_str, cf_hosts_str, cf_cpu_tdp_per_host_w_str,
+# │          cf_gpu_tdp_str, cf_time_days_str, cf_time_hours_str,
+# │          cf_energy_kwh_str, cf_energy_saved_str, cf_co2_str,
+# │          cf_household_months_str, cf_flops_mantissa_str, cf_flops_exp_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import A100_TDP, watt
 from physx.formatting import fmt
 
+# --- Inputs (7B model training configuration) ---
 cf_params = 7e9              # 7B parameters
 cf_tokens = 1e12             # 1T tokens
 cf_scaling_factor = 6        # Chinchilla scaling constant
@@ -4419,9 +4508,7 @@ cf_num_gpus = 1024           # realistic cluster for 1T-token run
 cf_gpu_tdp_w = A100_TDP.to(watt).magnitude  # 400W from constants
 cf_cpu_tdp_per_host_w = 200  # CPU power per host
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (compute time, energy, and carbon footprint) ---
 cf_hosts = cf_num_gpus // 8  # 8 GPUs per host
 
 # Compute time
@@ -4447,9 +4534,7 @@ cf_household_months = cf_energy_kwh / 900
 cf_flops_mantissa_str = f"{cf_total_flops:.1e}".split("e+")[0]
 cf_flops_exp_str = f"{int(f'{cf_total_flops:.1e}'.split('e+')[1])}"
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 cf_num_gpus_str = f"{cf_num_gpus}"
 cf_hosts_str = f"{cf_hosts}"
 cf_cpu_tdp_per_host_w_str = f"{cf_cpu_tdp_per_host_w}"
@@ -4525,9 +4610,20 @@ Scaling trades compute bottlenecks for communication bottlenecks.
 #| label: fallacies-pitfalls-setup
 #| echo: false
 
-# =============================================================================
-# PURPOSE: Quantitative values for Fallacies and Pitfalls section
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FALLACIES AND PITFALLS SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Fallacies and Pitfalls section — quantitative values for all
+# │          fallacy/pitfall examples (model scaling, distributed training,
+# │          hyperparameters, mixed precision, memory-compute trade-offs,
+# │          data pipeline)
+# │
+# │ Why: Provides concrete numbers for each fallacy/pitfall so the discussion
+# │      is grounded in realistic scenarios rather than hand-waving.
+# │
+# │ Imports: physx.constants (*), physx.formatting (fmt)
+# │ Exports: fp_model_20b_params_str..fp_prefetch_reduction_str (~30 vars)
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.constants import *
 from physx.formatting import fmt
 

@@ -22,10 +22,22 @@ COLORS = {
 }
 
 def set_book_style():
-    """Applies the global matplotlib style configuration."""
+    """Applies the global matplotlib style configuration.
+    
+    Font priority mirrors TikZ's \\usefont{T1}{phv}{m}{n} (Helvetica).
+    The fallback chain covers macOS (Helvetica), Linux TeX installs
+    (Nimbus Sans L, TeX Gyre Heros), and generic Linux (DejaVu Sans).
+    """
     plt.rcParams.update({
         'font.family': 'sans-serif',
-        'font.sans-serif': ['Helvetica', 'Arial', 'Inter', 'DejaVu Sans'],
+        'font.sans-serif': [
+            'Helvetica',         # macOS native
+            'Helvetica Neue',    # macOS modern variant
+            'Nimbus Sans L',     # Free Helvetica clone (TeX/Linux)
+            'TeX Gyre Heros',    # Free Helvetica clone (TeX)
+            'Arial',             # Windows fallback
+            'DejaVu Sans',       # Universal last resort
+        ],
         'font.size': 10,
         'text.color': COLORS['primary'],
         'axes.labelsize': 11,
@@ -56,6 +68,15 @@ def set_book_style():
         'figure.figsize': (8, 5),
         'figure.autolayout': True
     })
+
+# --- Font Size Convention for Diagram Figures ---
+# All diagram figures (flowcharts, pipelines, etc.) should use:
+#   - Node/box labels:     fontsize=9, fontweight='bold'
+#   - Edge/arrow labels:   fontsize=8
+#   - Step/annotation:     fontsize=8
+#   - Supplementary text:  fontsize=7 (italic gray for minor labels)
+#   - In-plot headings:    fontsize=10-12, fontweight='bold'
+# Data plot text inherits from rcParams (axes: 11, ticks: 9, legend: 9).
 
 # --- Lightweight helpers ---
 

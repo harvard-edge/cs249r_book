@@ -336,8 +336,12 @@ function RawBlock(el)
       -- 1. BOOK DIVISIONS: Major book structure sections
       if part_type == "division" then
         part_cmd = "\\division{" .. formatted_title .. "}"
-        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
-        local line_cmd = "\\addtocontents{toc}{\\par\\noindent\\hfil{\\color{crimson}\\rule{0.6\\textwidth}{0.5pt}}\\hfil\\par\\addvspace{6pt}}"
+        -- Use \protect so \tocdivisionentry survives into the .toc file.
+        -- At read time, \tocdivisionentry checks \ifminitoc to render in
+        -- the global TOC but hide in chapter mini-TOCs (same pattern as
+        -- \tocpartentry for numbered parts).
+        local toc_cmd = "\\addtocontents{toc}{\\protect\\tocdivisionentry{" .. formatted_title .. "}}"
+        local line_cmd = "\\addtocontents{toc}{\\protect\\tocdivisionline}"
         local float_flush = "\\FloatBarrier\\clearpage"  -- Aggressively flush all floats before division break
         log_info("🔄 Replacing key '" .. key .. "' with division: '" .. formatted_title .. "' (with TOC entry + crimson line)")
         return {
@@ -350,7 +354,7 @@ function RawBlock(el)
       -- 2. LAB PLATFORMS: Circuit-style neural network design
       elseif part_type == "lab" then
         part_cmd = "\\labdivision{" .. formatted_title .. "}"
-        local toc_cmd = "\\addtocontents{toc}{\\par\\addvspace{12pt}\\noindent\\hfil\\bfseries\\color{crimson}" .. formatted_title .. "\\color{black}\\hfil\\par\\addvspace{6pt}}"
+        local toc_cmd = "\\addtocontents{toc}{\\protect\\tocdivisionentry{" .. formatted_title .. "}}"
         local float_flush = "\\FloatBarrier\\clearpage"  -- Aggressively flush all floats before lab division break
         log_info("🔄 Replacing key '" .. key .. "' with lab division: '" .. formatted_title .. "' (circuit style, clean TOC entry)")
         return {

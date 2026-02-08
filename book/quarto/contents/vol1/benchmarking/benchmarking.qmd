@@ -22,9 +22,9 @@ engine: jupyter
 \mlsysstack{65}{10}{25}{25}{35}{45}{10}{25}
 \end{marginfigure}
 
-_Why do benchmark results so often fail to predict production performance?_
+_How do you systematically compare ML systems when hardware, models, data, and deployment conditions all interact?_
 
-Every optimization—compression, acceleration, data selection—promises improvement, but benchmarks routinely fail to predict whether that improvement survives contact with production. A model benchmarked under ideal batch sizes fails during traffic spikes. A vendor reports latency figures that exclude preprocessing and queuing overhead. An edge device advertises peak throughput that thermal throttling halves under sustained workloads. A vision model scores impressively on standard datasets but drops dramatically on images with different lighting, resolution, or demographic characteristics. These are not measurement errors but symptoms of a fundamental mismatch between controlled conditions and operational reality. The underlying principle is straightforward: *a benchmark is only as valid as the degree to which its conditions match the deployment environment*. Laboratory conditions—fixed batch sizes, curated inputs, thermal steady-state, isolated processes—measure a system that will never exist in production, and organizations that cannot distinguish between the two make deployment decisions based on numbers that describe hardware they will never actually run. Rigorous benchmarking requires making the measurement conditions explicit, varying them systematically across the ranges the production environment will impose, and reporting not single numbers but distributions that capture the variability real workloads exhibit. The previous chapters optimized the model, selected the data, and matched the hardware; benchmarking is where those optimizations are *validated*—where claims meet evidence, and where the gap between what was promised and what will be delivered is either quantified honestly or discovered painfully in production.
+Every preceding chapter introduced decisions with measurable consequences: which hardware to target, how to compress a model, what data to select, how to serve predictions. Each decision improved one dimension—latency, accuracy, throughput, energy—but an ML system is the product of all these dimensions simultaneously. A pruned model runs faster on one accelerator but slower on another. A larger batch size improves GPU utilization but violates a latency SLA. An edge device advertises peak throughput that thermal throttling halves under sustained workloads. The challenge is not whether individual optimizations work in isolation—they do—but how to *measure their combined effect* under conditions that actually matter. Benchmarking is the discipline of making such comparisons systematic rather than anecdotal. It requires defining *what* to measure (accuracy, latency, throughput, energy), *at what granularity* (a single kernel, a full model, an end-to-end pipeline), and *under which conditions* (batch size, input distribution, thermal state, concurrent load). Without this structure, teams compare numbers that were never measured on the same terms, and decisions that looked sound in a spreadsheet collapse under production workloads. The previous chapters optimized the model, selected the data, and matched the hardware; benchmarking is where those optimizations are *validated*—where claims meet evidence, and where the gap between what was promised and what will be delivered is either quantified honestly or discovered painfully in production.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -47,19 +47,40 @@ Every optimization—compression, acceleration, data selection—promises improv
 ```{python}
 #| label: benchmarking-setup
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BENCHMARKING SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter-wide constants used across all benchmarking sections,
+# │          callouts, and worked examples
+# │
+# │ Why: Centralizes hardware specs, model parameters, and energy constants so
+# │      that every downstream cell and inline reference draws from a single
+# │      source of truth. Values are derived from physx.constants wherever
+# │      possible, with a few illustrative numbers hardcoded for pedagogical
+# │      examples (e.g., EdgeTPU latency, GPT-3 training energy).
+# │
+# │ Imports: physx.constants (*), physx.formatting (fmt, sci)
+# │ Exports: a100_tflops_fp16_str, a100_tflops_fp32_str, a100_bw_gbs_str,
+# │          a100_bw_tbs_str, h100_tflops_fp16_str, h100_tflops_fp8_str,
+# │          h100_tflops_int8_str, h100_bw_tbs_str, a100_ridge_str,
+# │          gpt3_params_b_str, gpt3_params_billion_str, gpt3_tokens_b_str,
+# │          h100_tdp_str, energy_fp32_str, energy_fp16_str, energy_int8_str,
+# │          energy_dram_str, energy_reg_str, energy_l1_str, energy_l2_str,
+# │          dram_energy_pj_str, bert_params_m_str, bert_large_params_m_str,
+# │          mobilenet_params_m_str, mobilenet_v1_size_mb_str,
+# │          mobilenet_v1_int8_size_mb_str, mobilenet_v1_compression_ratio_str,
+# │          mobilenet_flops_ratio_str, edgetpu_latency_ms_str,
+# │          cpu_latency_ms_str, resnet50_params_m_str, v100_tflops_fp32_str,
+# │          anomaly_params_k_str, anomaly_latency_ms_str, anomaly_auc_str,
+# │          anomaly_energy_uj_str, gpt3_energy_mwh_str, accel_power_w_str,
+# │          latency_fast_ms_str, latency_slow_ms_str, energy_fast_j_str,
+# │          energy_fast_wh_str, energy_slow_wh_str
+# └─────────────────────────────────────────────────────────────────────────────
 
 from physx.constants import *
 from physx.formatting import fmt, sci
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Chapter-wide constants for benchmarking examples
-# Used in: Multiple benchmarking calculations and callouts
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (hardware specs from physx.constants) ---
 a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 a100_tflops_fp32_value = A100_FLOPS_FP32.to(TFLOPs/second).magnitude
 a100_bw_gbs_value = A100_MEM_BW.to(GB/second).magnitude
@@ -96,9 +117,7 @@ anomaly_latency_ms_value = ANOMALY_MODEL_LATENCY.to(ureg.ms).magnitude
 anomaly_auc_value = ANOMALY_MODEL_AUC
 anomaly_energy_uj_value = ANOMALY_MODEL_ENERGY.to(ureg.microjoule).magnitude
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (derived values) ---
 a100_ridge_value = (A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude
 mobilenet_v1_size_mb_value = mobilenet_v1_params_m_value * 4
 mobilenet_v1_int8_size_mb_value = mobilenet_v1_params_m_value * 1
@@ -109,9 +128,7 @@ mobilenet_flops_ratio_value = (
     RESNET50_FLOPs.to(GFLOPs).magnitude / MOBILENETV2_FLOPs.to(GFLOPs).magnitude
 )
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)
 a100_tflops_fp32_str = fmt(a100_tflops_fp32_value, precision=1, commas=False)
 a100_bw_gbs_str = fmt(a100_bw_gbs_value, precision=0, commas=True)
@@ -221,8 +238,10 @@ Each section of this chapter addresses one dimension of this validation stack. B
 Before examining these dimensions in detail, we must establish the mindset that separates rigorous evaluation from misleading metrics. Three principles distinguish effective practitioners:
 
 1. **Benchmarks are proxies, not truth.** Every benchmark measures specific conditions that may not match your deployment. A system achieving 10,000 samples/second in Offline mode might achieve only 200 QPS in Server mode with latency constraints. Ask: "What does this benchmark NOT measure?"
-2.  **Goodhart's Law applies everywhere.**\index{Goodhart's Law!metric trap} "When a measure becomes a target, it ceases to be a good measure." Teams that optimize for benchmark rankings often produce systems that excel in evaluation but fail in production. Benchmark-specific optimizations frequently degrade characteristics (robustness, calibration, efficiency) that matter for deployment.
+2.  **Goodhart's Law applies everywhere.**[^fn-goodharts-law]\index{Goodhart's Law!metric trap} "When a measure becomes a target, it ceases to be a good measure." Teams that optimize for benchmark rankings often produce systems that excel in evaluation but fail in production. Benchmark-specific optimizations frequently degrade characteristics (robustness, calibration, efficiency) that matter for deployment.
 3. **End-to-end beats component metrics.** Vendors report component latency (5–10 ms for model inference), but production latency includes preprocessing, queuing, and postprocessing (50–100 ms total). A 3× inference speedup in isolation might yield only 1.3× end-to-end improvement, or worse if the optimization increases memory pressure.
+
+[^fn-goodharts-law]: **Goodhart's Law**\index{Goodhart's Law!etymology}: Articulated by Charles Goodhart, a Bank of England economist, in a 1975 paper on monetary policy. Generalized by Marilyn Strathern (1997) as: "When a measure becomes a target, it ceases to be a good measure." Pervasive in ML: BLEU scores incentivize n-gram matching over fluency, ImageNet accuracy rewards architecture tricks over robustness, and benchmark leaderboards incentivize overfitting to test distributions.
 
 These principles reappear throughout this chapter and are examined in depth in @sec-benchmarking-ai-fallacies-pitfalls-9781.
 
@@ -251,7 +270,9 @@ As deployment contexts diversified, a second limitation emerged: single-metric e
 
 A third shift occurred when distributed computing revealed that component-level optimization fails to predict system-level performance. A CPU benchmark cannot predict cluster throughput when network communication dominates. ML training similarly depends on the interplay of accelerator compute (@sec-ai-acceleration), data pipelines, gradient synchronization, and storage throughput. MLPerf evaluates complete workflows, recognizing that performance emerges from component interactions, not from components in isolation.
 
-DAWNBench [@coleman2017dawnbench] emerged as an early ML benchmark that pioneered time-to-accuracy evaluation, directly influencing MLPerf's methodology for measuring training efficiency. These lessons culminate in MLPerf (2018), which synthesizes representative workloads, multi-objective evaluation, and integrated measurement while addressing ML-specific challenges [@ranganathan2024twenty].
+DAWNBench [@coleman2017dawnbench] emerged as an early ML benchmark that pioneered time-to-accuracy evaluation, directly influencing MLPerf's methodology for measuring training efficiency. These lessons culminate in MLPerf[^fn-mlperf] (2018), which synthesizes representative workloads, multi-objective evaluation, and integrated measurement while addressing ML-specific challenges [@ranganathan2024twenty].
+
+[^fn-mlperf]: **MLPerf**\index{MLPerf!etymology}: Founded in 2018 by researchers from Google, NVIDIA, Intel, Harvard, Stanford, and UC Berkeley, led by David Patterson [@mattson2020mlperf]. The name combines "ML" with "Perf" (performance), echoing SPEC's benchmarking tradition. Now maintained by MLCommons, MLPerf provides suites for training (time-to-quality), inference (queries per second under latency constraints), and power (performance per watt). Its design principles---representative workloads, full-system measurement, and open submission---directly address the gaming problems that plagued earlier benchmarks.
 
 ### Energy Benchmarks {#sec-benchmarking-ai-energy-benchmarks-709a}
 
@@ -341,7 +362,7 @@ Beyond workload representativeness, the distinction between statistical signific
 **The Moral**: Small benchmarks are the "Laboratory Fallacy." In AI Engineering, your sensors (the test set) must be sized to match the precision of the change you are trying to measure.
 :::
 
-This principle manifests concretely in practice:
+This principle manifests concretely in practice through *Goodhart's Law in action*:
 
 ::: {.callout-notebook title="Goodhart's Law in Action"}
 **The Metric Trap**: Optimizing for a single metric often degrades others.
@@ -437,13 +458,18 @@ Effective benchmark interpretation requires understanding the performance charac
 # │      BERT batch-1 preview shows memory-bound behavior (~50 FLOPs/byte, low
 # │      util), motivating the detailed worked example that follows.
 # │
-# │ Imports: physx.formatting (fmt); uses a100_bw_tbs_value, a100_tflops_fp16_value
-# │          from earlier cell
+# │ Imports: physx.constants (A100_MEM_BW, A100_FLOPS_FP16_TENSOR, TB, TFLOPs,
+# │          second), physx.formatting (fmt)
 # │ Exports: resnet_ai_str, resnet_util_min_str, resnet_util_max_str,
 # │          resnet_perf_tflops_str, bert_ai_b1_str, bert_perf_b1_str,
 # │          bert_util_b1_str, utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import A100_MEM_BW, A100_FLOPS_FP16_TENSOR, TB, TFLOPs, second
 from physx.formatting import fmt
+
+# --- Inputs (A100 hardware specs, derived locally) ---
+a100_bw_tbs_value = A100_MEM_BW.to(TB/second).magnitude
+a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 
 # --- Inputs (ResNet-50 roofline characteristics at large batch) ---
 resnet_ai_value = 300                                                          # FLOPs/byte arithmetic intensity
@@ -485,17 +511,29 @@ The following worked example applies *roofline analysis for BERT inference* to d
 ```{python}
 #| label: bert-roofline-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BERT ROOFLINE CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Roofline Analysis for BERT Inference" — the worked
+# │          example applying roofline analysis to BERT-Base on A100
+# │
+# │ Why: Demonstrates the full roofline analysis workflow: computing arithmetic
+# │      intensity, predicting throughput from the memory-bound regime, and
+# │      showing how batching shifts workloads from memory-bound to compute-
+# │      bound. This is the chapter's central pedagogical example for roofline.
+# │
+# │ Imports: physx.constants (A100_FLOPS_FP16_TENSOR, TFLOPs, second),
+# │          physx.formatting (fmt)
+# │ Exports: bert_params_m_str, bert_flops_b_str, bert_weight_mb_str,
+# │          bert_ai_b1_str, bert_perf_b1_str, bert_util_b1_str,
+# │          bert_batch32_flops_str, bert_ai_b32_str, bert_ai_eq_str,
+# │          bert_b32_flops_eq_str, bert_perf_b32_str, batch32_str,
+# │          utilization_peak_str, utilization_peak_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from physx.constants import A100_FLOPS_FP16_TENSOR, TFLOPs, second
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Roofline analysis for BERT-Base inference on A100
-# Used in: Callout "Roofline Analysis for BERT Inference"
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (BERT-Base model characteristics) ---
 bert_params_m_value = 110  # million parameters
 bert_flops_b_value = 22  # billion FLOPs per inference
 bert_weight_mb_value = 440  # MB (110M params × 4 bytes)
@@ -503,9 +541,7 @@ batch32_value = 32
 memory_bw_tbs_value = 2.0
 utilization_peak_value = 0.85
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (roofline analysis: batch-1 and batch-32) ---
 bert_ai_b1_value = bert_flops_b_value * 1e9 / (bert_weight_mb_value * 1e6)
 bert_perf_b1_tflops_value = bert_ai_b1_value * memory_bw_tbs_value
 
@@ -517,9 +553,7 @@ bert_ai_b32_value = bert_batch32_flops_value * 1e9 / (bert_weight_mb_value * 1e6
 
 bert_perf_b32_value = utilization_peak_value * a100_peak_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for callout) ---
 bert_params_m_str = fmt(bert_params_m_value, precision=0, commas=False)
 bert_flops_b_str = fmt(bert_flops_b_value, precision=0, commas=False)
 bert_weight_mb_str = fmt(bert_weight_mb_value, precision=0, commas=False)
@@ -824,7 +858,7 @@ To avoid measuring hardware artifacts instead of kernel performance, follow the 
 
 :::
 
-With these measurement principles established, we can now examine how to diagnose specific bottlenecks using the **Iron Law** framework introduced in @sec-ai-acceleration, which decomposes execution time into data movement, compute throughput, and latency overhead terms.
+With these measurement principles established, we can now examine how to diagnose specific bottlenecks by *measuring the Iron Law terms* from the framework introduced in @sec-ai-acceleration, which decomposes execution time into data movement, compute throughput, and latency overhead.
 
 ::: {.callout-notebook title="Measuring the Iron Law Terms"}
 **From Theory to Trace**: How to map the **Iron Law** equation (from @sec-ai-acceleration) to a profiler timeline (like Nsight Systems or PyTorch Profiler).
@@ -1274,7 +1308,7 @@ The 3.4× speedup and 4× size reduction from quantization come at a minimal cos
 
 Before drawing conclusions from benchmark results, apply the vendor claim analysis framework introduced earlier (see the "Decoding Vendor Benchmark Claims" checklist) and extend it with two additional dimensions. First, *is the comparison fair?* Comparing ResNet-50 against MobileNet conflates architecture differences with optimization choices; precision differences (FP32 vs. INT8) alone can explain 2–4$\times$ performance gaps, and batch size, hardware generation, and software framework must all be controlled. Second, *are the statistics meaningful?* Reliable results require multiple runs (minimum 5, preferably 10+), reported variance with confidence intervals, clear handling of outliers, and steady-state operation rather than cold-start effects.
 
-Applying these questions to a concrete vendor claim illustrates how incomplete specifications obscure real performance.
+Applying these questions to *interpreting a benchmark claim* illustrates how incomplete specifications obscure real performance.
 
 ::: {.callout-notebook title="Interpreting a Benchmark Claim"}
 **Problem**: A vendor claims "Our system achieves 10,000 images/second on ResNet-50." Should you trust this number for your deployment planning?
@@ -1672,32 +1706,35 @@ A key metric for evaluating parallelism is *scaling efficiency*, which quantifie
 ```{python}
 #| label: scaling-efficiency-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SCALING EFFICIENCY CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Scaling Efficiency Calculation" — worked example showing
+# │          strong scaling efficiency for multi-GPU ResNet-50 training
+# │
+# │ Why: Makes the abstract concept of scaling efficiency concrete with a
+# │      simple 8-GPU example. Shows that even a modest 4-hour result on 8 GPUs
+# │      (vs. 24 hours on 1 GPU) represents only 75% efficiency, quantifying
+# │      the communication overhead students read about in prose.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: ideal_str, eff_str, loss_str, eff_denom_str, t1_hours_str,
+# │          n_gpus_str, tn_hours_str, scaling_eq_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Calculate scaling efficiency for multi-GPU training
-# Used in: Callout "Scaling Efficiency Calculation"
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (training scenario) ---
 t1_hours_value = 24       # single-GPU training time
 n_gpus_value = 8
 tn_hours_value = 4        # actual N-GPU training time
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (scaling efficiency calculation) ---
 ideal_hours_value = t1_hours_value / n_gpus_value
 efficiency_pct_value = t1_hours_value / (n_gpus_value * tn_hours_value) * 100
 loss_pct_value = 100 - efficiency_pct_value
 eff_denom_value = n_gpus_value * tn_hours_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for callout) ---
 ideal_str = fmt(ideal_hours_value, precision=0, commas=False)
 eff_str = fmt(efficiency_pct_value, precision=0, commas=False)
 loss_str = fmt(loss_pct_value, precision=0, commas=False)
@@ -1760,39 +1797,43 @@ Training large-scale machine learning models requires substantial computational 
 ```{python}
 #| label: energy-breakdown-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY BREAKDOWN CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Why INT8 Saves Energy" — decomposes MobileNet inference
+# │          energy into memory-load and compute components for FP32 vs INT8
+# │
+# │ Why: Students often assume quantization saves energy only through faster
+# │      compute. This calculation reveals the dominant savings come from
+# │      reduced memory traffic (4× fewer bytes loaded from DRAM), not just
+# │      cheaper arithmetic. The load-vs-compute breakdown makes the memory
+# │      wall tangible at the energy level.
+# │
+# │ Imports: physx.constants (ENERGY_DRAM_PJ_PER_BYTE, ENERGY_FLOP_FP32_PJ,
+# │          ENERGY_FLOP_INT8_PJ), physx.formatting (fmt)
+# │ Exports: dram_energy_pj_str, m_params_str, m_macs_str, m_fp32_mb_str,
+# │          m_int8_mb_str, e_fp32_load_str, e_fp32_compute_str,
+# │          e_fp32_total_str, e_int8_load_str, e_int8_compute_str,
+# │          e_int8_total_str, s_load_str, s_compute_str, s_total_str,
+# │          e_fp32_load_mj_str, e_fp32_compute_mj_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 from physx.constants import ENERGY_DRAM_PJ_PER_BYTE, ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compare energy breakdown for FP32 vs INT8 MobileNet
-# Used in: Callout "Why INT8 Saves Energy"
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (MobileNet model characteristics) ---
 m_params_value = 4.3  # Million params (INT8)
 m_macs_value = 300    # Million MACs
 
-# Calculate load energy dynamically based on physics constants
-# FP32 model size = params * 4 bytes
-# Energy = Size * 160 pJ/byte
+# --- Inputs (energy per operation from physics constants) ---
+# FP32 model size = params * 4 bytes; Energy = Size * pJ/byte
 e_fp32_load_value = (m_params_value * 1e6 * 4 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / 1e6 # uJ
-# e_fp32_load_value is now calculated dynamically.
-
-# Calculate compute energy dynamically
 e_fp32_compute_value = (m_macs_value * 1e6 * ENERGY_FLOP_FP32_PJ.magnitude) / 1e6 # uJ
 
 # INT8 model size = params * 1 byte
-# Energy = Size * 160 pJ/byte
 e_int8_load_value = (m_params_value * 1e6 * 1 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / 1e6 # uJ
-
 e_int8_compute_value = (m_macs_value * 1e6 * ENERGY_FLOP_INT8_PJ.magnitude) / 1e6 # uJ
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (totals and savings ratios) ---
 m_fp32_mb_value = m_params_value * 4
 m_int8_mb_value = m_params_value
 
@@ -1803,9 +1844,7 @@ s_load_value = e_fp32_load_value / e_int8_load_value
 s_compute_value = e_fp32_compute_value / e_int8_compute_value
 s_total_value = e_fp32_total_value / e_int8_total_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for callout) ---
 dram_energy_pj_str = fmt(ENERGY_DRAM_PJ_PER_BYTE.magnitude, precision=0, commas=False)
 m_params_str = f"{m_params_value}"
 m_macs_str = fmt(m_macs_value, precision=0, commas=False)
@@ -1905,7 +1944,6 @@ Across all dimensions, measurement accuracy depends on controlling for hardware 
 
 [^fn-thermal-throttling]: **Thermal Throttling**: A protection mechanism that reduces processor frequency when temperatures exceed safe operating limits (typically 83-90°C for GPUs, 100-105°C for CPUs). Thermal throttling can reduce performance by 20–50% during sustained AI workloads, making thermal management essential for consistent benchmark results. Modern systems implement sophisticated thermal monitoring with temperature sensors every few millimeters across the chip.
 
-[]{#sec-benchmarking-ai-training-benchmark-pitfalls-8778}
 Despite the availability of well-defined benchmarking methodologies, certain misconceptions and flawed evaluation practices often lead to misleading conclusions. Understanding these pitfalls is important for interpreting benchmark results correctly.
 
 #### Overemphasis on Raw Throughput
@@ -1960,12 +1998,21 @@ Scaling inference workloads across cloud servers, edge platforms, mobile devices
 #| fig-alt: "Dumbbell chart showing power consumption ranges: Tiny 5.6 to 167 mW, Edge 3.9 to 1100 W, Datacenter 267 to 6300 W, Training 5.5 to 498,000 W on logarithmic scale."
 
 from physx import viz
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ POWER CONSUMPTION DIFFERENTIALS FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-power-differentials — dumbbell chart showing power ranges
+# │          across Tiny, Edge, Datacenter, and Training system types
+# │
+# │ Why: Visualizes the six-orders-of-magnitude spread in power consumption
+# │      that explains why no single benchmark can serve all deployment
+# │      contexts. The logarithmic scale makes the spread viscerally clear.
+# │
+# │ Imports: physx.viz (viz)
+# │ Exports: (figure only, no prose variables)
+# └─────────────────────────────────────────────────────────────────────────────
 
 fig, ax, COLORS, plt = viz.setup_plot()
-
-# =============================================================================
-# PLOT: Power Consumption Differentials
-# =============================================================================
 system_types = ["Tiny", "Edge", "Datacenter", "Training"]
 min_power = [5.6, 3.9, 266.9, 5.5]
 max_power = [166.6, 1100, 6300, 498000]
@@ -2064,24 +2111,32 @@ These component-level contributions explain why optimizing any single stage yiel
 ```{python}
 #| label: amdahl-benchmark-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL'S LAW BENCHMARK CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Amdahl's Law: Optimization Ceiling" — demonstrates why
+# │          optimizing only the inference component of a pipeline yields
+# │          diminishing end-to-end returns
+# │
+# │ Why: A common benchmarking mistake is reporting inference speedups in
+# │      isolation. This calculation shows that a 5× inference speedup
+# │      translates to only ~1.8× end-to-end improvement when preprocessing
+# │      dominates, making Amdahl's ceiling viscerally concrete.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: bench_preprocess_ms_str, bench_inference_ms_str,
+# │          bench_inf_speedup_str, bench_total_ms_str, bench_e2e_str,
+# │          bench_opt_total_str, bench_opt_inf_str, amdahl_ceiling_str,
+# │          preprocess_pct_str, preprocess_fraction_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Apply Amdahl's Law to inference pipeline optimization
-# Used in: Callout "Amdahl's Law: Optimization Ceiling"
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (vision inference pipeline scenario) ---
 bench_preprocess_ms_value = 8
 bench_inference_ms_value = 10
 bench_inf_speedup_value = 5
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (Amdahl's Law application) ---
 bench_total_ms_value = bench_preprocess_ms_value + bench_inference_ms_value
 bench_opt_inference_ms_value = bench_inference_ms_value / bench_inf_speedup_value
 bench_opt_total_ms_value = bench_preprocess_ms_value + bench_opt_inference_ms_value
@@ -2090,9 +2145,7 @@ bench_e2e_improvement_value = bench_total_ms_value / bench_opt_total_ms_value
 preprocess_fraction_value = bench_preprocess_ms_value / bench_total_ms_value
 amdahl_ceiling_value = 1 / preprocess_fraction_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for callout) ---
 bench_preprocess_ms_str = fmt(bench_preprocess_ms_value, precision=0, commas=False)
 bench_inference_ms_str = fmt(bench_inference_ms_value, precision=0, commas=False)
 bench_inf_speedup_str = fmt(bench_inf_speedup_value, precision=0, commas=False)
@@ -2213,7 +2266,6 @@ Different deployment scenarios require distinctly different metric priorities, a
 
 The key insight from @tbl-metric-priorities is that the *same metric* can be primary in one context and irrelevant in another. Latency ranks first for real-time applications (autonomous vehicles must process sensor data within strict timing deadlines) but tertiary for cloud services (which accept higher latency in exchange for cost efficiency per query). A smartphone AI assistant that improves throughput by 50% but increases power consumption by 30% represents a net regression since battery life directly impacts user satisfaction. Medical diagnostic systems prioritize accuracy as non-negotiable — achieving 99.2% accuracy at 10 ms latency provides superior value compared to 98.8% at 5 ms. This context-dependence means that a 2× throughput improvement represents significant value for cloud deployments but minimal benefit for battery-powered edge devices, where 20% power reduction delivers superior operational impact.
 
-[]{#sec-benchmarking-ai-inference-benchmark-pitfalls-1962}
 Even with well-defined metrics, benchmarking inference systems can be challenging. Missteps during the evaluation process often lead to misleading conclusions. Students and practitioners should be aware of common pitfalls when analyzing inference performance.
 
 #### Overemphasis on Average Latency
@@ -2324,17 +2376,27 @@ These scenarios explain why the same hardware can report dramatically different 
 ```{python}
 #| label: edgetpu-speedup-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EDGETPU SPEEDUP CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "MobileNet on EdgeTPU" — validates hardware acceleration
+# │          claims by comparing EdgeTPU vs ARM Cortex-M7 latency and energy
+# │
+# │ Why: Demonstrates that raw inference speedup (7.5×) overstates end-to-end
+# │      gains (3×) because preprocessing is constant. Also shows that despite
+# │      higher power draw, the EdgeTPU's shorter runtime yields a net energy
+# │      advantage — illustrating why energy-per-inference matters more than
+# │      instantaneous power.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: edgetpu_latency_ms_str, cpu_latency_ms_str, edgetpu_e2e_ms_str,
+# │          cpu_e2e_ms_str, edgetpu_power_mw_str, cpu_power_mw_str,
+# │          inference_speedup_str, e2e_speedup_str, edgetpu_power_ratio_str,
+# │          cpu_energy_mj_str, edgetpu_energy_mj_str, energy_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compare EdgeTPU vs Cortex-M7 latency and energy
-# Used in: Callout "MobileNet on EdgeTPU"
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (illustrative EdgeTPU vs Cortex-M7 characteristics) ---
 edgetpu_latency_ms_value = 2
 cpu_latency_ms_value = 15
 edgetpu_e2e_ms_value = 6
@@ -2342,9 +2404,7 @@ cpu_e2e_ms_value = 18
 edgetpu_power_mw_value = 500
 cpu_power_mw_value = 120
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (speedup and energy comparisons) ---
 inference_speedup_value = cpu_latency_ms_value / edgetpu_latency_ms_value
 e2e_speedup_value = cpu_e2e_ms_value / edgetpu_e2e_ms_value
 power_ratio_value = edgetpu_power_mw_value / cpu_power_mw_value
@@ -2353,9 +2413,7 @@ cpu_energy_mj_value = cpu_power_mw_value * cpu_latency_ms_value / 1000
 edgetpu_energy_mj_value = edgetpu_power_mw_value * edgetpu_latency_ms_value / 1000
 energy_ratio_value = cpu_energy_mj_value / edgetpu_energy_mj_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for callout) ---
 edgetpu_latency_ms_str = fmt(edgetpu_latency_ms_value, precision=0, commas=False)
 cpu_latency_ms_str = fmt(cpu_latency_ms_value, precision=0, commas=False)
 edgetpu_e2e_ms_str = fmt(edgetpu_e2e_ms_value, precision=0, commas=False)
@@ -2365,7 +2423,7 @@ cpu_power_mw_str = fmt(cpu_power_mw_value, precision=0, commas=False)
 
 inference_speedup_str = fmt(inference_speedup_value, precision=0, commas=False)
 e2e_speedup_str = fmt(e2e_speedup_value, precision=0, commas=False)
-power_ratio_str = fmt(power_ratio_value, precision=0, commas=False)
+edgetpu_power_ratio_str = fmt(power_ratio_value, precision=0, commas=False)
 cpu_energy_mj_str = fmt(cpu_energy_mj_value, precision=1, commas=False)
 edgetpu_energy_mj_str = fmt(edgetpu_energy_mj_value, precision=1, commas=False)
 energy_ratio_str = fmt(energy_ratio_value, precision=1, commas=False)
@@ -2384,7 +2442,7 @@ Completing our MobileNet lighthouse example, we validate the hardware accelerati
 |:-----------------------|--------------------------------:|------------------------------------:|:---------------------------------------|-------------------------------------------:|
 | **Inference latency**    | ~`{python} cpu_latency_ms_str` ms | ~`{python} edgetpu_latency_ms_str` ms | `{python} inference_speedup_str`× faster |                                            ✓ |
 | **End-to-end latency**   |     ~`{python} cpu_e2e_ms_str` ms |     ~`{python} edgetpu_e2e_ms_str` ms | —                                        |          ~`{python} e2e_speedup_str`× faster |
-| **Power consumption**    |   ~`{python} cpu_power_mw_str` mW |   ~`{python} edgetpu_power_mw_str` mW | —                                        |          ~`{python} power_ratio_str`× higher |
+| **Power consumption**    |   ~`{python} cpu_power_mw_str` mW |   ~`{python} edgetpu_power_mw_str` mW | —                                        |          ~`{python} edgetpu_power_ratio_str`× higher |
 | **Energy per inference** |  ~`{python} cpu_energy_mj_str` mJ |  ~`{python} edgetpu_energy_mj_str` mJ | —                                        | ~`{python} energy_ratio_str`× more efficient |
 
 **What this reveals**: The `{python} inference_speedup_str`× inference speedup is real, but end-to-end improvement is only ~`{python} e2e_speedup_str`× because preprocessing (image capture, resize, normalize) runs on the CPU in both cases. EdgeTPU consumes more power but completes faster, yielding better energy efficiency per inference.
@@ -3383,12 +3441,22 @@ Recall from @fig-imagenet-gpus that ImageNet error rates plummeted alongside GPU
 #| echo: false
 
 from physx import viz
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ IMAGENET CHALLENGE PROGRESSION FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-imagenet-challenge — line plot of ImageNet top-5 error rate
+# │          from 2010 (28.2%) to 2015 (3.57%) with model labels
+# │
+# │ Why: Shows the architectural milestones (AlexNet through ResNet) that
+# │      established the accuracy baselines against which model compression
+# │      techniques are evaluated. The dramatic error reduction motivates why
+# │      benchmarking moved beyond accuracy to multi-dimensional evaluation.
+# │
+# │ Imports: physx.viz (viz)
+# │ Exports: (figure only, no prose variables)
+# └─────────────────────────────────────────────────────────────────────────────
 
 fig, ax, COLORS, plt = viz.setup_plot()
-
-# =============================================================================
-# PLOT: ImageNet Challenge Progression
-# =============================================================================
 years = [2010, 2011, 2012, 2013, 2014, 2014, 2015]
 models = ["Baseline", "Baseline", "AlexNet", "ZFNet", "VGGNet", "GoogleNet", "ResNet"]
 errors = [28.2, 25.8, 16.4, 11.7, 7.3, 6.7, 3.57]
@@ -3442,17 +3510,28 @@ Acceptable degradation depends on deployment context. A 2% accuracy drop might b
 ```{python}
 #| label: mobilenet-int8-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOBILENET INT8 COMPRESSION METRICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "MobileNet INT8 Compression" — complete validation
+# │          protocol for INT8 quantization of MobileNetV2
+# │
+# │ Why: Demonstrates that compression validation requires multi-dimensional
+# │      assessment: top-1/top-5 accuracy, calibration (ECE), and edge-case
+# │      robustness. The 0.9% top-1 drop looks benign, but the 3× ECE
+# │      degradation and 7% edge-case drop reveal hidden failure modes that
+# │      single-metric benchmarks miss entirely.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: mv2_acc_fp32_str, mv2_params_m_str, mv2_size_fp32_mb_str,
+# │          mv2_size_int8_mb_str, mv2_acc_int8_str, mv2_acc_drop_str,
+# │          mv2_top5_fp32_str, mv2_top5_int8_str, mv2_ece_fp32_str,
+# │          mv2_ece_int8_str, mv2_edge_fp32_str, mv2_edge_int8_str,
+# │          mv2_edge_drop_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: MobileNet INT8 compression metrics
-# Used in: Callout "MobileNet INT8 Compression"
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (MobileNetV2 FP32 baseline and INT8 results) ---
 mv2_acc_fp32_value = 71.8
 mv2_params_m_value = 3.5
 mv2_size_fp32_mb_value = 14.0
@@ -3470,9 +3549,7 @@ mv2_edge_fp32_value = 68.2
 mv2_edge_int8_value = 61.4
 mv2_edge_drop_value = mv2_edge_fp32_value - mv2_edge_int8_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for callout) ---
 mv2_acc_fp32_str = fmt(mv2_acc_fp32_value, precision=1, commas=False)
 mv2_params_m_str = fmt(mv2_params_m_value, precision=1, commas=False)
 mv2_size_fp32_mb_str = fmt(mv2_size_fp32_mb_value, precision=1, commas=False)
@@ -3515,7 +3592,7 @@ The INT8 model's ECE of 0.089 indicates borderline calibration: confidence score
 
 **Edge-case definition**: Images with >50% occlusion, <100 lux lighting, or >30° rotation from training distribution (approximately 5% of real-world inputs).
 
-**What this reveals**: Average-case accuracy looks acceptable (0.9% drop), but calibration degraded significantly and edge-case accuracy dropped 10%. If the deployment context uses confidence thresholds (e.g., "only act if confidence > 85%") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNet may fail despite passing aggregate benchmarks.
+**What this reveals**: Average-case accuracy looks acceptable (0.9% drop), but calibration degraded significantly and edge-case accuracy dropped `{python} mv2_edge_drop_str`%. If the deployment context uses confidence thresholds (e.g., "only act if confidence > 85%") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNet may fail despite passing aggregate benchmarks.
 
 **The fix**: Apply temperature scaling post-hoc to restore calibration. Temperature scaling learns a single scalar $T$ to divide logits before softmax: $\text{softmax}(z_i / T)$. Typical values: $T = 1.5$–$2.5$ for quantized models. In parallel, add edge-case examples to the test set to monitor that specific failure mode continuously.
 :::
@@ -3546,30 +3623,33 @@ Generation-specific metrics capture properties absent from discriminative benchm
 ```{python}
 #| label: llm-throughput-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LLM THROUGHPUT CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Prose bullet on "Tokens per second" in the LLM benchmarking
+# │          metrics discussion
+# │
+# │ Why: Makes token-rate differences tangible by converting abstract
+# │      tokens/second into wall-clock response times. A 4× throughput
+# │      difference (25 vs 100 tok/s) translates to 30s vs 7.5s for a
+# │      typical response — the difference between usable and frustrating.
+# │
+# │ Imports: physx.formatting (fmt)
+# │ Exports: slow_str, fast_str, response_tokens_str, slow_toks_str,
+# │          fast_toks_str
+# └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compare LLM response latency at different token rates
-# Used in: LLM throughput discussion
-
-# =============================================================================
-# INPUT
-# =============================================================================
+# --- Inputs (LLM response scenario) ---
 response_tokens_value = 750  # ~500 words
 slow_toks_value = 25
 fast_toks_value = 100
 
-# =============================================================================
-# PROCESS
-# =============================================================================
+# --- Process (wall-clock time for each throughput level) ---
 slow_sec_value = response_tokens_value / slow_toks_value
 fast_sec_value = response_tokens_value / fast_toks_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
+# --- Outputs (formatted strings for prose) ---
 slow_str = fmt(slow_sec_value, precision=0, commas=False)
 fast_str = fmt(fast_sec_value, precision=1, commas=False)
 response_tokens_str = fmt(response_tokens_value, precision=0, commas=False)
@@ -3958,10 +4038,38 @@ These production monitoring challenges—including A/B testing frameworks, canar
 ```{python}
 #| label: fallacies-pitfalls-setup
 #| echo: false
-
-# =============================================================================
-# PURPOSE: Quantitative backing for F&P section examples
-# =============================================================================
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FALLACIES AND PITFALLS SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Fallacies and Pitfalls section — provides quantitative backing
+# │          for all examples in the chapter's F&P discussion
+# │
+# │ Why: Each fallacy/pitfall uses concrete numbers to show how benchmarking
+# │      misconceptions lead to real engineering failures. Pre-computing all
+# │      values here keeps the prose clean and ensures internal consistency
+# │      across the interrelated examples (e.g., the same latency multiplier
+# │      appears in both the fallacy discussion and the pitfall rebuttal).
+# │
+# │ Imports: (none — uses only Python builtins and f-strings)
+# │ Exports: benchmark_accuracy_pct_str, production_accuracy_range_str,
+# │          accuracy_drop_pct_str, benchmark_latency_mean_ms_str,
+# │          production_p99_range_str, latency_multiplier_str,
+# │          pre_quant_latency_ms_str, post_quant_latency_ms_str,
+# │          ranking_improvement_str, energy_increase_pct_str,
+# │          ood_degradation_pct_str, accuracy_improvement_pct_str,
+# │          rec_accuracy_pct_str, rec_p99_latency_ms_str,
+# │          slo_p99_requirement_ms_str, high_throughput_qps_str,
+# │          low_throughput_qps_str, high_power_w_str, low_power_w_str,
+# │          power_ratio_str, throughput_loss_pct_str, battery_multiplier_str,
+# │          imagenet_error_2010_pct_str, imagenet_error_2015_pct_str,
+# │          imagenet_competition_end_year_str, imagenet_teams_above_95_str,
+# │          imagenet_total_teams_str, mnist_accuracy_pct_str,
+# │          edge_memory_constraint_x_str, edge_power_constraint_x_str,
+# │          isolated_throughput_qps_str, production_throughput_range_str,
+# │          production_utilization_pct_str, throughput_degradation_pct_str,
+# │          model_inference_range_str, e2e_latency_range_str,
+# │          availability_nines_str, downtime_minutes_month_str
+# └─────────────────────────────────────────────────────────────────────────────
 
 # Fallacy 1: Benchmark vs. production accuracy gap
 benchmark_accuracy_pct = 92
