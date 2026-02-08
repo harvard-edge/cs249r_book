@@ -113,6 +113,27 @@ Data quality and heterogeneity present the first hurdle...
 
 Note: When converting `**Bold Title.**` or `**Bold Title**` to a header, remove the bold markers and any trailing period. The first sentence of the following paragraph should NOT repeat the header text — rewrite to flow naturally from the header.
 
+**Important exception — too granular for headers:** If a parent section (e.g., `#### Data Challenges`) already names the theme, and the items within it are each only 1-2 paragraphs, do NOT create `#####` sub-headers for each item. Instead, write them as flowing prose with the key term in natural emphasis (italic or just the first word of the sentence). Headers should mark genuine navigational divisions, not every paragraph topic.
+
+```markdown
+<!-- ❌ BAD — headers too granular, fragmenting short prose -->
+#### Data Challenges: Quality, Scale, and Drift
+##### Data Quality and Heterogeneity
+Real-world data is often noisy...
+##### Scale and Infrastructure
+Scale requirements compound...
+##### Data Drift
+Data drift creates...
+
+<!-- ✅ GOOD — flowing prose under a single header -->
+#### Data Challenges: Quality, Scale, and Drift
+Real-world data is often noisy and inconsistent, presenting the first hurdle...
+
+Scale and infrastructure requirements compound these challenges...
+
+Data drift creates an ongoing operational burden...
+```
+
 ### Rule 2: Bold Leads ARE Allowed Inside Callouts
 
 Inside `.callout-*` boxes (notebooks, examples, perspectives), bold labels provide internal structure. These are contained pedagogical units, not chapter sections:
