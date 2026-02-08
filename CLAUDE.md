@@ -269,4 +269,8 @@ Does it introduce a topic with its own paragraph(s)?
 
 After converting, check: is the new header a lone child?
   → YES: Remove it — let content flow under parent (Rule 8)
+
+Are there 3+ parallel named concepts with multi-paragraph discussion?
+  → YES: Give each its own header (sibling headers are justified)
+  → Example: Covariate Shift, Label Shift, Concept Drift → each gets ####
 ```
