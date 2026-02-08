@@ -7,9 +7,14 @@ Usage:
     python debug_chapter_builds.py --vol2          # Test all vol2 chapters
     python debug_chapter_builds.py --vol1 --format html  # Test HTML instead of PDF
     python debug_chapter_builds.py --vol1 -v       # Verbose output + save build artifacts
+    python debug_chapter_builds.py --vol1 --collect-pdfs  # Auto-collect PDFs after builds
     
 Log files are written to: book/tools/scripts/testing/logs/<volume>/<chapter>/
 Build artifacts (index.tex, index.log) are saved to each chapter's folder.
+
+The --collect-pdfs option automatically collects all successfully built PDFs,
+renames them in order (based on _quarto.yml), and places them in a single
+directory: logs/<volume>_collected_pdfs/
 """
 
 import subprocess
@@ -490,6 +495,8 @@ def main():
     )
     parser.add_argument("-v", "--verbose", action="store_true", 
                         help="Show extra status info (verbose build output is always captured in logs)")
+    parser.add_argument("--collect-pdfs", action="store_true",
+                        help="Automatically collect and organize PDFs after successful builds")
     args = parser.parse_args()
     
     if not args.vol1 and not args.vol2:
@@ -726,6 +733,37 @@ def main():
     print(f"  Full logs available in: {log_dir}/{volume}/<chapter>/")
     print(f"  Build artifacts saved in: <chapter>/artifacts/")
     print("=" * 70)
+    
+    # Collect and organize PDFs if requested and there were successful builds
+    if args.collect_pdfs and passed > 0 and args.format == "pdf":
+        print()
+        print("=" * 70)
+        print("  COLLECTING PDFS")
+        print("=" * 70)
+        try:
+            # Import the collect_pdfs module
+            collect_script = Path(__file__).parent / "collect_pdfs.py"
+            if collect_script.exists():
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("collect_pdfs", collect_script)
+                collect_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(collect_module)
+                
+                # Run the collection
+                collected, missing = collect_module.collect_pdfs(vol=volume, output_dir=None)
+                
+                if collected:
+                    print(f"\n✅ Successfully collected {len(collected)} PDFs")
+                    # Show a few examples
+                    for chapter, path in collected[:3]:
+                        print(f"   - {path.name}")
+                    if len(collected) > 3:
+                        print(f"   ... and {len(collected) - 3} more")
+            else:
+                print(f"⚠️  collect_pdfs.py not found at {collect_script}")
+        except Exception as e:
+            print(f"⚠️  Failed to collect PDFs: {e}")
+        print("=" * 70)
     
     # Exit with error code if any failed
     sys.exit(1 if failed > 0 else 0)

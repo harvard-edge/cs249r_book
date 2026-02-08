@@ -8,9 +8,9 @@ engine: jupyter
 
 _What reference numbers and physical laws should every ML systems engineer carry into design decisions?_
 
-In ML systems, performance failures often masquerade as software problems: a training step “mysteriously” slows down, a serving stack misses its SLA, or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs—they are the predictable consequences of **physics** (latency, bandwidth, energy) and **architecture** (memory hierarchy, precision, parallel scaling).
+In ML systems, performance failures often masquerade as software problems: a training step “mysteriously” slows down, a serving stack misses its service-level agreement (SLA), or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs—they are the predictable consequences of physics (latency, bandwidth, energy) and architecture (memory hierarchy, precision, parallel scaling).
 
-This appendix collects the reference numbers and compact models that let you do quick, quantitative reasoning. It begins with a **quick-reference** section of “numbers to know,” then summarizes the tools used throughout the book: roofline analysis, dimensional analysis, scaling laws, and precision trade-offs.
+This appendix collects the reference numbers and compact models that let you do quick, quantitative reasoning. It begins with a quick-reference section of “numbers to know,” then summarizes the tools used throughout the book: roofline analysis, dimensional analysis, scaling laws, and precision trade-offs.
 
 :::: {.callout-tip title="Learning Objectives"}
 
@@ -22,9 +22,10 @@ This appendix collects the reference numbers and compact models that let you do 
 
 ::::
 
+
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a **reference**. When you are stuck, use it to turn a vague symptom ("it’s slow") into a specific constraint ("memory-bound at batch size 1") and then choose the lever that can actually move.
+This appendix is designed as a reference. When you are stuck, use it to turn a vague symptom ("it’s slow") into a specific constraint ("memory-bound at batch size 1") and then choose the lever that can actually move.
 
 Conventions used here follow the book-wide notation in @sec-notation-conventions (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
 
@@ -33,6 +34,7 @@ Conventions used here follow the book-wide notation in @sec-notation-conventions
 - **Reason about scaling limits**: Use Amdahl’s and Gustafson’s Laws to understand why adding accelerators may not reduce time-to-train.
 - **Choose the right precision**: Use @sec-system-foundations-floatingpoint-format-comparison-c861 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
 - **Cross-reference for depth**: When you want the full narrative, jump back to @sec-ai-acceleration, @sec-ai-training, and @sec-model-serving-systems.
+
 
 ## Numbers to Know {#sec-numbers-to-know}
 
@@ -246,13 +248,14 @@ Throughout this book, we often use "GPU" when discussing hardware acceleration. 
 
 Knowing the numbers is only the first step. The real power comes from having compact models that tell you *which* number matters for *your* specific bottleneck. The next section provides exactly these diagnostic tools—starting with the Roofline Model, which translates raw hardware specs into actionable performance ceilings.
 
+
 ## Physics of Computing {#sec-system-foundations-physics-computing-b6a4}
 
-::: {.callout-perspective title="Why This Matters"}
-You have trained a model that achieves good accuracy, but inference takes 200ms when your SLA requires 50ms. Where do you start? Performance analysis models give you a systematic way to diagnose whether you are limited by computation, memory bandwidth, or something else entirely. Without these tools, optimization is guesswork.
-:::
+Raw hardware specs—TFLOP/s, TB/s, watt budgets—are necessary but insufficient for performance reasoning. Without compact analytical models, an engineer cannot distinguish a compute-bound workload from a memory-bound one, or predict whether doubling GPUs will halve training time. The models in this section provide exactly these diagnostic tools.
 
-The models in this section provide the quantitative tools for diagnosing performance bottlenecks.
+::: {.callout-perspective title="Why This Matters"}
+You have trained a model that achieves good accuracy, but inference takes 200 ms when your SLA requires 50 ms. Where do you start? Performance analysis models give you a systematic way to diagnose whether you are limited by computation, memory bandwidth, or something else entirely. Without these tools, optimization is guesswork.
+:::
 
 ### The Roofline Model {#sec-system-foundations-roofline-model-5f7c}
 
@@ -405,7 +408,7 @@ This explains why modern frameworks fuse operations: combining ReLU with the pre
 
 The Roofline Model helps diagnose *where* a bottleneck lies. But before applying any performance equation, we should verify that it is physically meaningful. Dimensional analysis provides this sanity check: any valid equation must be **dimensionally homogeneous**—every term must resolve to the same units. If they do not, the equation contains an error.
 
-Consider the **Iron Law of ML Systems** introduced in @sec-silicon-contract:
+Consider the Iron Law of ML Systems introduced in @sec-silicon-contract:
 
 $$ T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat} $$
 
@@ -417,7 +420,7 @@ $$ T [s] = \underbrace{ \frac{D_{vol} [\text{Bytes}]}{BW [\text{Bytes/s}]} }_{\t
 *   **Compute Term**: $\frac{\text{FLOPs}}{\text{FLOPs/s}} = \text{FLOPs} \times \frac{\text{s}}{\text{FLOPs}} = \mathbf{s}$
 *   **Overhead Term**: Already in seconds.
 
-The equation is physically consistent. Apply this technique to any systems equation you encounter: if the dimensions do not match, the formula is wrong. Note also that you cannot directly trade "FLOPs" for "Bandwidth"—they have different units. Any such trade-off must convert through Time, which is precisely what the **Iron Law** quantifies.
+The equation is physically consistent. Apply this technique to any systems equation you encounter: if the dimensions do not match, the formula is wrong. Note also that you cannot directly trade "FLOPs" for "Bandwidth"—they have different units. Any such trade-off must convert through Time, which is precisely what the Iron Law quantifies.
 
 With tools for diagnosing single-device bottlenecks in hand, we now turn to the fundamental limits of scaling across multiple devices.
 
@@ -429,7 +432,7 @@ Parallelization is the primary tool for scaling ML, but its limits depend on *ho
 
 **Strong scaling** answers the question: *If I add more processors to a fixed-size problem, how much faster will it run?*
 
-**Amdahl's Law** [@amdahl1967validity] states that the speedup is limited by the serial portion of the task.[^fn-amdahl] If a fraction $s$ of your task is serial (cannot be parallelized) and $p = 1-s$ is parallelizable, the maximum speedup with $n$ processors is:
+Amdahl's Law [@amdahl1967validity] states that the speedup is limited by the serial portion of the task.[^fn-amdahl] If a fraction $s$ of your task is serial (cannot be parallelized) and $p = 1-s$ is parallelizable, the maximum speedup with $n$ processors is:
 
 [^fn-amdahl]: **Gene Amdahl** (1922–2015) was a legendary computer architect at IBM, where he was the chief architect of the System/360. He later founded Amdahl Corporation to compete with IBM in the mainframe market.
 
@@ -511,9 +514,9 @@ No matter how many accelerators you buy, you cannot make this fixed workload run
 
 **Weak scaling** answers the question: *If I add more processors, how much larger of a problem can I solve in the same amount of time?*
 
-This is the reality of Large Language Models. We don't use 1,000 GPUs to train GPT-4 on a laptop-sized dataset in milliseconds; we use them to train on a dataset 1,000x larger in reasonable time.
+This is the reality of Large Language Models. We don't use 1,000 GPUs to train GPT-4 on a laptop-sized dataset in milliseconds; we use them to train on a dataset 1,000× larger in reasonable time.
 
-**Gustafson's Law** [@gustafson1988reevaluating] models this "scaled speedup":[^fn-gustafson]
+Gustafson's Law [@gustafson1988reevaluating] models this "scaled speedup":[^fn-gustafson]
 
 [^fn-gustafson]: **John Gustafson** is a computer scientist known for his work in parallel computing and for introducing the Unum (universal number) format. His law was a direct response to the perceived "limits" of **Amdahl's Law** when applied to massive scale.
 
@@ -663,7 +666,7 @@ The computed result: **`{python} T_seconds_str` seconds** (≈ `{python} T_minut
 
 2. Your training pipeline has 10% serial overhead. Using Amdahl's Law, what is the maximum possible speedup regardless of how many GPUs you add? Using Gustafson's Law with 256 GPUs, what is the scaled speedup?
 
-3. An inference service must handle 500 QPS at 100ms latency. Using Little's Law, how many concurrent requests must the system support? If each request needs 2 GB of KV cache memory, what is the minimum GPU memory required?
+3. An inference service must handle 500 queries per second (QPS) at 100 ms latency. Using Little's Law, how many concurrent requests must the system support? If each request needs 2 GB of KV cache memory, what is the minimum GPU memory required?
 
 :::
 
@@ -717,13 +720,16 @@ max_concurrent_str = str(max_concurrent_value)
 eq_max_throughput = md_math(f"L/W = {max_concurrent_value} / {w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}")
 ```
 
-To see this in practice, consider sustaining `{python} lambda_qps_str` queries per second (QPS) with `{python} w_latency_ms_str`ms average latency. The law tells us the system must support `{python} lambda_qps_raw_str` × `{python} w_latency_s_str` = `{python} L_concurrent_str` concurrent requests.
+To see this in practice, consider sustaining `{python} lambda_qps_str` queries per second (QPS) with `{python} w_latency_ms_str` ms average latency. The law tells us the system must support `{python} lambda_qps_raw_str` × `{python} w_latency_s_str` = `{python} L_concurrent_str` concurrent requests.
 
 This directly determines how to size inference worker pools. If serving one request requires `{python} mem_per_req_gb_str` GB of temporary memory (KV cache, activations), handling `{python} L_concurrent_str` concurrent requests requires `{python} L_concurrent_str` GB of memory. If your accelerator only has `{python} gpu_mem_gb_str` GB, you are physically limited to `{python} max_concurrent_str` concurrent requests. Your maximum throughput is capped at `{python} eq_max_throughput`, regardless of how many requests arrive.
 
+These physics-based models—Roofline, Amdahl, Gustafson, and Little—diagnose *where* bottlenecks lie. But translating those diagnoses into actionable optimizations requires understanding the concrete hardware structures that impose them: caches, memory buses, and interconnects.
+
+
 ## Computer Architecture Essentials {#sec-system-foundations-computer-architecture-essentials-bb18}
 
-While physics sets theoretical performance bounds, computer architecture defines the machinery to approach them. The gap between peak performance (Roofline) and actual throughput lies in how effectively we utilize the memory hierarchy. This section covers the latency and bandwidth trade-offs that shape system design.
+A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The missing 97% is not a software bug—it is the cost of moving data through a memory hierarchy that spans five orders of magnitude in latency. While physics sets theoretical performance bounds, computer architecture defines the machinery that determines how close a real workload can get. This section covers the latency, bandwidth, and energy trade-offs that shape system design.
 
 ### Latencies Every Programmer Should Know
 
@@ -732,7 +738,7 @@ The first step in systems intuition is understanding the cost of distance. @tbl-
 | **Component**            |         **Latency (ns)** | **Cycles (Approx)** | **Relative "Distance"** |
 |:-----------------------|-----------------------:|------------------:|:---------------------:|
 | **Register**             |               ~0.3 ns |            1 cycle |        10 seconds       |
-| **L1 Cache**             |     ~`{python} l1_ns` ns |          3-4 cycles |         1 minute        |
+| **L1 Cache**             |     ~`{python} l1_ns` ns |          3–4 cycles |         1 minute        |
 | **L2 Cache**             |     ~`{python} l2_ns` ns |           12 cycles |        4 minutes        |
 | **HBM3 (GPU Memory)**    |    ~`{python} hbm_ns` ns |        1,000 cycles |         5 hours         |
 | **NVLink (GPU-GPU)**     | ~`{python} nvlink_ns` ns |        1,500 cycles |         8 hours         |
@@ -760,7 +766,7 @@ While latency tells us how long we wait for the *first* byte, bandwidth tells us
 
 Computer systems use a hierarchy because no single technology provides both high capacity and low latency. Examine the pyramid in @fig-memory-hierarchy to see how each level balances this tradeoff: every technique that keeps data higher in the pyramid (registers/cache) directly improves performance.
 
-::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Performance depends on data proximity. Accessing HBM is ~100x slower than registers; accessing SSD is ~100,000x slower." fig-alt="Pyramid showing Registers at top, followed by Cache, HBM/DRAM, and Storage at bottom."}
+::: {#fig-memory-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Memory Hierarchy**: Performance depends on data proximity. Accessing HBM is ~100× slower than registers; accessing SSD is ~100,000× slower." fig-alt="Pyramid showing Registers at top, followed by Cache, HBM/DRAM, and Storage at bottom."}
 ```{.tikz}
 \begin{tikzpicture}[line cap=round, line join=round, font=\usefont{T1}{phv}{m}{n}\small, scale=1.0]
   \tikzset{
@@ -819,7 +825,7 @@ ping_ms_str = "10"
 data_kb_str = "1"
 ```
 
-Consider sending data over a `{python} bw_gbps_str` Gbps link with `{python} ping_ms_str`ms ping (latency). The dominant bottleneck depends entirely on the transfer size:
+Consider sending data over a `{python} bw_gbps_str` Gbps link with `{python} ping_ms_str` ms ping (latency). The dominant bottleneck depends entirely on the transfer size:
 
 ```{python}
 #| label: bandwidth-latency-example
@@ -860,21 +866,22 @@ eq_large_tx = md_math(f"{large_data_gb_value}\\text{{GB}} / {int(bw_gbps_value/1
 eq_large_total = md_math(f"\\approx {int(ping_ms_value)}\\text{{ms}} + {int(large_tx_time_s_value*1000)}\\text{{ms}} = {int(total_large_time_ms_value)}\\text{{ms}}")
 ```
 
-*   **Latency-Bound (`{python} data_kb_str`KB Packet)**:
-    *   Transmission: `{python} data_kb_str`KB / `{python} bw_gbps_str`Gbps ≈ `{python} tx_time_us_str` μs.
-    *   Total Time ≈ `{python} ping_ms_str`ms + `{python} tx_time_us_str` μs ≈ `{python} ping_ms_str`ms.
+*   **Latency-Bound (`{python} data_kb_str` KB Packet)**:
+    *   Transmission: `{python} data_kb_str` KB / `{python} bw_gbps_str` Gbps ≈ `{python} tx_time_us_str` μs.
+    *   Total Time ≈ `{python} ping_ms_str` ms + `{python} tx_time_us_str` μs ≈ `{python} ping_ms_str` ms.
     *   *Result*: The bandwidth is irrelevant; the speed of light (ping) is the bottleneck.
 
-*   **Bandwidth-Bound (`{python} large_data_gb_str`GB Checkpoint)**:
+*   **Bandwidth-Bound (`{python} large_data_gb_str` GB Checkpoint)**:
     *   Transmission: `{python} eq_large_tx`.
     *   Total Time `{python} eq_large_total`.
     *   *Result*: The ping is negligible; the pipe size is the bottleneck.
 
 Architecture determines how fast data can move, but there is another lever that directly controls *how much* data must move: the numerical precision of each value. Halving precision from FP32 to FP16 halves the bytes per parameter, which doubles effective bandwidth for free—if the model can tolerate the reduced precision. Understanding these trade-offs requires a closer look at how numbers are represented in hardware.
 
+
 ## Numerical Representations {#sec-system-foundations-numerical-representations-7b2f}
 
-While statistics helps us understand data distributions, **Numerical Representations** determine how we store the values themselves. In ML systems, the choice of precision (FP32 vs. BF16 vs. INT8) is a direct trade-off between statistical fidelity and hardware throughput.
+While statistics helps us understand data distributions, numerical representations determine how we store the values themselves. In ML systems, the choice of precision (FP32 vs. BF16 vs. INT8) is a direct trade-off between statistical fidelity and hardware throughput.
 
 ::: {.callout-perspective title="Why This Matters"}
 Your production model runs at 50 QPS in FP32 but your target is 200 QPS. Switching to INT8 could get you there, but will accuracy suffer? Understanding numerical formats lets you make this trade-off quantitatively rather than hoping for the best.
@@ -959,46 +966,52 @@ Among these formats, BF16[^fn-bf16] deserves special attention [@google_bfloat16
 
 ### Integer Quantization {#sec-system-foundations-integer-quantization-9d02}
 
-Quantization maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers.
+Quantization maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers. Two approaches dominate.
 
-**Symmetric quantization** centers the mapping at zero:
+Symmetric quantization centers the mapping at zero:
+
 $$ x_{int} = \text{round}\left(\frac{x}{\alpha} \times 127\right) $$
 
 where $\alpha$ is the scale factor (typically the maximum absolute value). This works well for weight distributions centered around zero.
 
-**Asymmetric quantization** handles distributions that are not centered (common after ReLU, which produces only non-negative values) by shifting the range before scaling. If $x_{min}$ is the minimum of the range and $\alpha$ is the range width ($x_{max} - x_{min}$):
+Asymmetric quantization handles distributions that are not centered (common after ReLU, which produces only non-negative values) by shifting the range before scaling. If $x_{min}$ is the minimum of the range and $\alpha$ is the range width ($x_{max} - x_{min}$):
+
 $$ x_{int} = \text{round}\left(\frac{x - x_{min}}{\alpha} \times 255\right) $$
 
 The choice between symmetric and asymmetric quantization depends on your tensor's distribution and has measurable accuracy implications.
 
 With the full toolkit assembled—reference numbers, performance models, architectural constraints, and numerical trade-offs—it is worth pausing to address the most common ways engineers misapply these concepts. The following section catalogs fallacies and pitfalls that violate the physical and architectural principles covered above.
 
+
 ## Fallacies and Pitfalls {#sec-machine-foundations-fallacies-pitfalls}
 
+Even experienced engineers fall into traps when reasoning about hardware performance. The following misconceptions violate the physical and architectural principles covered in this appendix.
+
 ::: {.callout-warning title="Fallacy: Doubling GPUs halves training time."}
-**The Reality**: This assumes perfect **strong scaling** (**Amdahl's Law**). In practice, communication overhead (all-reduce) grows with $N$, and batch size constraints may limit parallelism. At large scale, you often hit diminishing returns unless you also scale the problem size (Weak Scaling).
+This assumes perfect strong scaling (Amdahl's Law). In practice, communication overhead (all-reduce) grows with $N$, and batch size constraints may limit parallelism. At large scale, you often hit diminishing returns unless you also scale the problem size (weak scaling).
 :::
 
 A related misconception concerns numerical precision.
 
 ::: {.callout-warning title="Fallacy: Higher precision (FP32) is always better."}
-**The Reality**: For deep learning, FP32 often hurts performance without improving convergence. It consumes 2x memory bandwidth and energy compared to BF16. Since neural networks are resilient to noise, the extra mantissa bits in FP32 are often modeling random variance rather than signal.
+For deep learning, FP32 often hurts performance without improving convergence. It consumes 2× memory bandwidth and energy compared to BF16. Since neural networks are resilient to noise, the extra mantissa bits in FP32 are often modeling random variance rather than signal.
 
 :::
 
 With the common misconceptions addressed, use the reference numbers and models in this appendix as your first line of defense whenever a system behaves unexpectedly. A quick back-of-envelope calculation often reveals whether the culprit is physics, architecture, or a genuine software bug.
 
-:::: {.callout-takeaways title="Key Takeaways"}
+:::: {.callout-takeaways}
 
 - **Energy dominates**: Moving data costs ~600× more energy than computing on it. Arithmetic intensity—the ratio of compute to data movement—is the single most important metric for ML workload performance.
 - **The Roofline Model** reveals whether a workload is compute-bound or memory-bound. Most inference workloads fall below the ridge point and are memory-bound; batch size is the primary lever to shift toward compute-bound operation.
 - **Amdahl's Law** caps strong-scaling speedup at $1/s$ (where $s$ is the serial fraction). **Gustafson's Law** shows that scaling the problem alongside hardware yields near-linear throughput gains—the paradigm that makes large-scale training feasible.
 - **Little's Law** ($L = \lambda W$) directly sizes inference infrastructure: concurrency, memory, and maximum throughput are all linked by this simple identity.
 - **Memory hierarchy** spans five orders of magnitude in latency (register at ~0.3 ns to SSD at ~100,000 ns). Keeping data close to compute is not an optimization—it is the optimization.
-- **Numerical precision** is a systems lever, not just a modeling choice. BF16 matches FP32's dynamic range at half the memory cost; INT8 quantization can deliver 2-4× inference speedup with careful calibration.
+- **Numerical precision** is a systems lever, not just a modeling choice. BF16 matches FP32's dynamic range at half the memory cost; INT8 quantization can deliver 2–4× inference speedup with careful calibration.
 - **Physics is non-negotiable**: speed of light sets latency floors, energy ratios set efficiency ceilings, and no amount of software optimization can violate these constraints.
 
 ::::
+
 
 ## Further Reading {.unnumbered}
 
