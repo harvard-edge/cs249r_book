@@ -40,44 +40,73 @@ def _ensure_parent_dir(path: Path) -> None:
 
 def _uncomment_quarto_toggles(yml_text: str) -> str:
     """
-    Undo binder "fast build" commenting in Quarto config files.
+    Undo binder "fast build" commenting in Quarto config files, **without touching filters**.
 
-    Binder's selective PDF/EPUB builds work by commenting out YAML list items.
-    If binder crashes, those comments can persist and poison subsequent builds.
+    Binder's selective PDF/EPUB builds work by commenting out entries in
+    `book: chapters:` / `book: appendices:`. If a binder run is interrupted,
+    those comments can persist and poison subsequent builds.
 
-    We aggressively uncomment lines that look like structural toggles:
-    - "# - <something>" list items
-    - "# chapters:" / "# appendices:" keys
-    - "# - part:" declarations
-
-    We do NOT try to fully parse YAML; this is a resilient text transform.
+    This function is intentionally conservative: it only uncomments structural
+    lines and list items *inside* the book chapter lists, and will not modify
+    other sections like `filters:` (e.g., it will never uncomment
+    `filters/inject_quizzes.lua`).
     """
+    lines = yml_text.splitlines()
     out: list[str] = []
-    for raw in yml_text.splitlines():
+
+    in_book = False
+    in_chapters = False
+    in_appendices = False
+
+    def _indent_len(s: str) -> int:
+        return len(s) - len(s.lstrip(" \t"))
+
+    for raw in lines:
         line = raw.rstrip("\n")
-        # Preserve original indentation
-        indent_len = len(line) - len(line.lstrip(" \t"))
-        indent = line[:indent_len]
-        stripped = line[indent_len:]
+        stripped = line.lstrip()
+
+        # Track high-level YAML sections with simple indentation heuristics.
+        # We assume top-level keys start at column 0.
+        if _indent_len(line) == 0 and stripped.endswith(":"):
+            # Leaving book section unless we're entering it
+            in_book = stripped.startswith("book:")
+            in_chapters = False
+            in_appendices = False
+
+        # Track book subsections: chapters/appendices keys are indented under book:
+        if in_book and stripped.startswith("chapters:"):
+            in_chapters = True
+            in_appendices = False
+        elif in_book and stripped.startswith("appendices:"):
+            in_appendices = True
+            in_chapters = False
+        elif in_book and _indent_len(line) <= 2 and stripped.endswith(":") and not stripped.startswith(("chapters:", "appendices:")):
+            # Another book subkey starts (e.g., bibliography:), stop chapter-list mode.
+            in_chapters = False
+            in_appendices = False
 
         if not stripped.startswith("#"):
             out.append(line)
             continue
 
+        # Only uncomment within the book chapter lists.
+        if not (in_chapters or in_appendices):
+            out.append(line)
+            continue
+
+        indent_len = _indent_len(line)
+        indent = line[:indent_len]
+        after_indent = line[indent_len:]
+
         # Remove leading "#", then one optional space (binder uses "# ").
-        rest = stripped[1:]
+        rest = after_indent[1:]
         if rest.startswith(" "):
             rest = rest[1:]
 
         rest_l = rest.lstrip()
-        # Only uncomment lines that represent Quarto structure/list items
-        if (
-            rest_l.startswith("- ")
-            or rest_l.startswith("chapters:")
-            or rest_l.startswith("appendices:")
-            or rest_l.startswith("- part:")
-            or rest_l.startswith("part:")
-        ):
+
+        # Only uncomment structural/list lines relevant to chapter lists.
+        if rest_l.startswith("- ") or rest_l.startswith("- part:") or rest_l.startswith("part:"):
             out.append(indent + rest)
         else:
             out.append(line)
@@ -130,6 +159,18 @@ def _expand_name_patterns(tokens: list[str], candidates: list[str]) -> list[str]
                     add(m)
             else:
                 add(tok)
+            continue
+
+        # Plain token (no glob/regex): try exact match first, then substring match.
+        if tok in candidates:
+            add(tok)
+            continue
+
+        t = tok.lower()
+        contains = [c for c in candidates if t in c.lower()]
+        if contains:
+            for m in contains:
+                add(m)
             continue
 
         add(tok)
