@@ -38,6 +38,7 @@ class FloatElement:
     definition_line: Optional[int] = None
     first_reference_line: Optional[int] = None
     all_reference_lines: list = field(default_factory=list)
+    code_lines_in_gap: int = 0  # Lines occupied by code blocks between ref and def
 
     @property
     def gap(self) -> Optional[int]:
@@ -46,19 +47,36 @@ class FloatElement:
         return None
 
     @property
+    def prose_gap(self) -> Optional[int]:
+        """Gap excluding code block lines between reference and definition."""
+        if self.gap is not None:
+            return self.gap - self.code_lines_in_gap
+        return None
+
+    # The closest reference line to the definition (set by scan_chapter).
+    closest_reference_line: Optional[int] = None
+
+    @property
     def status(self) -> str:
         if not self.definition_line:
             return "XREF"  # cross-chapter or broken reference
         if not self.first_reference_line:
             return "ORPHAN"  # defined but never referenced
-        gap = self.gap
-        # gap = definition_line - first_reference_line
-        # gap > 0: definition comes AFTER reference (good if small)
-        # gap < 0: definition comes BEFORE reference (figure appears early)
-        if gap > 30:
-            # Definition is well AFTER reference (reader waits too long for figure)
+        prose = self.prose_gap
+        # prose gap = definition_line - first_reference_line - code_lines
+        # prose > 0: definition comes AFTER reference (good if small)
+        # prose < 0: definition comes BEFORE reference (figure appears early)
+        if prose > 30:
+            # Check if there's a closer reference near the definition.
+            # Forward references (e.g., "see @tbl-foo later") are common in
+            # textbook prose; what matters is that SOME reference exists
+            # close to the definition.
+            if self.closest_reference_line is not None:
+                closest_gap = self.definition_line - self.closest_reference_line
+                if -5 <= closest_gap <= 30:
+                    return "OK"
             return "LATE"
-        if gap < -5:
+        if prose < -5:
             # Definition is way BEFORE reference (figure appears before it's mentioned)
             return "EARLY"
         return "OK"
@@ -93,12 +111,15 @@ def scan_chapter(filepath: Path) -> dict[str, FloatElement]:
     code_block_start = 0
     cell_options: dict[str, str] = {}
 
+    # Track all code block spans (start_line, end_line) for gap calculation
+    code_block_spans: list[tuple[int, int]] = []
+
     for line_num, line in enumerate(lines, start=1):
         stripped = line.rstrip()
 
         # --- Code-cell figure detection ---
-        # Detect code block start: ```{python}, ```{r}, etc.
-        if not in_code_block and re.match(r'^```\{(?:python|r|julia|ojs)', stripped):
+        # Detect code block start: ```{python}, ```{r}, ```{.tikz}, etc.
+        if not in_code_block and re.match(r'^```\{', stripped):
             in_code_block = True
             code_block_start = line_num
             cell_options = {}
@@ -106,6 +127,7 @@ def scan_chapter(filepath: Path) -> dict[str, FloatElement]:
 
         # Detect code block end
         if in_code_block and stripped == '```':
+            code_block_spans.append((code_block_start, line_num))
             label = cell_options.get('label', '')
             if label.startswith('fig-') or label.startswith('tbl-'):
                 kind = "figure" if label.startswith("fig-") else "table"
@@ -171,6 +193,33 @@ def scan_chapter(filepath: Path) -> dict[str, FloatElement]:
             if (elements[label].first_reference_line is None or
                     line_num < elements[label].first_reference_line):
                 elements[label].first_reference_line = line_num
+
+    # Compute code_lines_in_gap and closest_reference_line for each element.
+    for elem in elements.values():
+        if elem.first_reference_line and elem.definition_line:
+            ref_line = elem.first_reference_line
+            def_line = elem.definition_line
+
+            # Count code block lines between first reference and definition
+            if def_line > ref_line:
+                code_lines = 0
+                for cb_start, cb_end in code_block_spans:
+                    overlap_start = max(ref_line, cb_start)
+                    overlap_end = min(def_line, cb_end)
+                    if overlap_start <= overlap_end:
+                        code_lines += overlap_end - overlap_start + 1
+                elem.code_lines_in_gap = code_lines
+
+        # Find the closest reference to the definition (for forward-ref tolerance)
+        if elem.definition_line and elem.all_reference_lines:
+            closest = None
+            min_dist = float('inf')
+            for rl in elem.all_reference_lines:
+                dist = abs(elem.definition_line - rl)
+                if dist < min_dist:
+                    min_dist = dist
+                    closest = rl
+            elem.closest_reference_line = closest
 
     return elements
 

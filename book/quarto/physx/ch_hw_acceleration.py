@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import sys
+import warnings
 
 # Ensure the 'quarto' directory is in sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -11,7 +12,10 @@ from physx import viz
 
 def plot_technology_s_curve(ax=None):
     if ax is None: fig, ax = plt.subplots(figsize=(10, 6))
-    
+
+    # Suppress Matplotlib annotation warnings (text placed near axis limits)
+    warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
     # Time range: 1980 to 2030
     years = np.linspace(1980, 2030, 500)
     

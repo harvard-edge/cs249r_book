@@ -52,14 +52,13 @@ PATTERNS = {
         'message': 'Dollar sign instead of backtick before {python} - will render raw text',
         'fix_hint': 'Replace $ with backtick: $`{python} var_name` (add backtick between $ and {python})'
     },
-    'python_in_dollar_math': {
-        # {python} inside $...$ math (not escaped \$)
-        # Excludes $` pattern (currency dollar + backtick, e.g., $`{python} cost`)
-        'regex': re.compile(r'(?<!\\)\$(?!`)[^$]*\{python\}[^$]*(?<!\\)\$'),
-        'severity': 'error',
-        'message': 'Inline Python inside $...$ math block - will not render correctly',
-        'fix_hint': 'Use md_math() from physx.formatting to create a Markdown() object'
-    },
+    # NOTE: 'python_in_dollar_math' is handled by a custom function
+    # (check_python_in_dollar_math) instead of a regex pattern, because
+    # regex cannot reliably distinguish separate $...$ blocks on the same
+    # line from a single $...$ block containing {python}. The greedy regex
+    # previously produced false positives on lines like:
+    #   $\times$ `{python} foo` $\times$
+    # where {python} is BETWEEN two separate math blocks, not inside one.
     'inconsistent_arith_units': {
         # Catch non-standard arithmetic intensity units (should be FLOPs/byte)
         # Excludes the correct form "FLOPs/byte" and "FLOP/byte"
@@ -110,6 +109,41 @@ PATTERNS = {
 }
 
 
+def check_python_in_dollar_math(line: str, line_num: int) -> list[Issue]:
+    """Check if inline Python appears inside a $...$ math block.
+
+    Properly parses $...$ spans by finding the shortest matching pairs,
+    avoiding false positives when multiple $...$ blocks appear on the
+    same line with {python} between them (not inside them).
+
+    Exception: {python} inside LaTeX exponents (^{...}) is allowed because
+    exponents are always integers, which don't have decimal points that
+    LaTeX would strip. Example: $\\times 10^{`{python} exp_str`}$
+    """
+    issues = []
+    # Find all $...$ math spans (shortest match, non-escaped)
+    # Pattern: unescaped $ followed by non-$ chars, ending at next unescaped $
+    math_spans = re.finditer(r'(?<!\\)\$(?!\$)(?!`)(.+?)(?<!\\)\$', line)
+    for match in math_spans:
+        inner = match.group(1)
+        if '{python}' not in inner:
+            continue
+        # Allow {python} inside exponents: ^{`{python} var`}
+        # Remove all ^{...`{python}...`...} patterns before checking
+        inner_without_exponents = re.sub(
+            r'\^\{[^}]*`\{python\}[^`]*`[^}]*\}', '', inner
+        )
+        if '{python}' in inner_without_exponents:
+            issues.append(Issue(
+                line_num=line_num,
+                pattern_type='python_in_dollar_math',
+                severity='error',
+                message='Inline Python inside $...$ math block - will not render correctly',
+                context=match.group(0)[:60]
+            ))
+    return issues
+
+
 def check_file(filepath: Path) -> list[Issue]:
     """Check a file for rendering issues."""
     content = filepath.read_text()
@@ -140,9 +174,14 @@ def check_file(filepath: Path) -> list[Issue]:
     
     # Check line by line for other patterns
     for i, line in enumerate(lines):
+        # Custom check: Python inside $...$ math (not handled by regex)
+        issues.extend(check_python_in_dollar_math(line, i + 1))
+
         for pattern_name, pattern_info in PATTERNS.items():
             if pattern_name == 'grid_table_with_python':
                 continue  # Already handled above
+            if 'regex' not in pattern_info:
+                continue  # Skip non-regex entries (e.g., comment-only)
             
             matches = pattern_info['regex'].findall(line)
             if matches:
@@ -241,7 +280,9 @@ Exit codes:
         error_count = sum(1 for _, i in all_issues if i.severity == 'error')
         warning_count = sum(1 for _, i in all_issues if i.severity == 'warning')
         print(f"\n{'❌' if error_count else '⚠️'} Found {error_count} error(s) and {warning_count} warning(s) in {len(files_with_issues)} file(s).")
-        return 1
+        # Only fail on errors; warnings are informational (e.g., LaTeX symbols
+        # adjacent to inline Python render correctly but are worth noting).
+        return 1 if error_count > 0 else 0
     
     print("✓ No rendering issues found.")
     return 0
