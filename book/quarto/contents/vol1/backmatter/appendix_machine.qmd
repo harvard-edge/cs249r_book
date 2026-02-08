@@ -240,11 +240,11 @@ These numbers reflect the current generation. Use them for back-of-envelope calc
 
 : **Arithmetic Intensity Thresholds (c. 2024).** Most inference workloads are <10 ops/byte—firmly memory-bound. {#tbl-ridge-current-ref}
 
----
-
 ::: {.callout-perspective title="A Note on Terminology: GPUs and Accelerators"}
 Throughout this book, we often use "GPU" when discussing hardware acceleration. However, the principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply equally to **TPUs**, **NPUs**, **custom ASICs**, and other specialized AI accelerators. We use "GPU" as convenient shorthand given its prevalence in the ML ecosystem, but readers should understand these concepts as **accelerator-general** unless we explicitly discuss vendor-specific features (e.g., CUDA, NVLink).
 :::
+
+Knowing the numbers is only the first step. The real power comes from having compact models that tell you *which* number matters for *your* specific bottleneck. The next section provides exactly these diagnostic tools—starting with the Roofline Model, which translates raw hardware specs into actionable performance ceilings.
 
 ## Physics of Computing {#sec-system-foundations-physics-computing-b6a4}
 
@@ -468,7 +468,7 @@ s_str = "0.05"
 p_str = "0.95"
 ```
 
-**Example**: If `{python} s_pct_str`% of your training step is serial overhead (e.g., Python GIL, kernel launch latency) and `{python} p_pct_str`% is parallelizable matrix math:
+To see Amdahl's Law in action, suppose `{python} s_pct_str`% of your training step is serial overhead (e.g., Python GIL, kernel launch latency) and `{python} p_pct_str`% is parallelizable matrix math:
 
 ```{python}
 #| label: amdahl-example
@@ -543,7 +543,7 @@ s_g_pct_str = "5"
 s_g_str = "0.05"
 ```
 
-**Example**: Using the same `{python} s_g_pct_str`% serial overhead ($s$ = `{python} s_g_str`):
+Using the same `{python} s_g_pct_str`% serial overhead ($s$ = `{python} s_g_str`), Gustafson's Law tells a very different story:
 
 ```{python}
 #| label: gustafson-example
@@ -657,6 +657,16 @@ The computed result: **`{python} T_seconds_str` seconds** (≈ `{python} T_minut
 
 :::
 
+::: {.callout-checkpoint title="Check Your Understanding: Performance Models"}
+
+1. A new accelerator doubles compute throughput but keeps memory bandwidth the same. For a workload that is **memory-bound** on the current hardware, how much speedup do you expect? What about a **compute-bound** workload?
+
+2. Your training pipeline has 10% serial overhead. Using Amdahl's Law, what is the maximum possible speedup regardless of how many GPUs you add? Using Gustafson's Law with 256 GPUs, what is the scaled speedup?
+
+3. An inference service must handle 500 QPS at 100ms latency. Using Little's Law, how many concurrent requests must the system support? If each request needs 2 GB of KV cache memory, what is the minimum GPU memory required?
+
+:::
+
 ### Little's Law {#sec-system-foundations-littles-law-9c4c}
 
 For capacity planning in inference systems, **Little's Law** [@little1961proof] relates concurrency ($L$), arrival rate ($\lambda$), and latency ($W$):[^fn-little]
@@ -707,9 +717,9 @@ max_concurrent_str = str(max_concurrent_value)
 eq_max_throughput = md_math(f"L/W = {max_concurrent_value} / {w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}")
 ```
 
-**Example**: To sustain `{python} lambda_qps_str` queries per second (QPS) with `{python} w_latency_ms_str`ms average latency, your system must support `{python} lambda_qps_raw_str` × `{python} w_latency_s_str` = `{python} L_concurrent_str` concurrent requests.
+To see this in practice, consider sustaining `{python} lambda_qps_str` queries per second (QPS) with `{python} w_latency_ms_str`ms average latency. The law tells us the system must support `{python} lambda_qps_raw_str` × `{python} w_latency_s_str` = `{python} L_concurrent_str` concurrent requests.
 
-**Implication for Memory**: This tells you exactly how to size your inference worker pools. If serving one request requires `{python} mem_per_req_gb_str` GB of temporary memory (KV cache, activations), handling `{python} L_concurrent_str` concurrent requests requires `{python} L_concurrent_str` GB of memory. If your accelerator only has `{python} gpu_mem_gb_str` GB, you are physically limited to `{python} max_concurrent_str` concurrent requests. Your maximum throughput is capped at `{python} eq_max_throughput`, regardless of how many requests arrive.
+This directly determines how to size inference worker pools. If serving one request requires `{python} mem_per_req_gb_str` GB of temporary memory (KV cache, activations), handling `{python} L_concurrent_str` concurrent requests requires `{python} L_concurrent_str` GB of memory. If your accelerator only has `{python} gpu_mem_gb_str` GB, you are physically limited to `{python} max_concurrent_str` concurrent requests. Your maximum throughput is capped at `{python} eq_max_throughput`, regardless of how many requests arrive.
 
 ## Computer Architecture Essentials {#sec-system-foundations-computer-architecture-essentials-bb18}
 
@@ -809,7 +819,7 @@ ping_ms_str = "10"
 data_kb_str = "1"
 ```
 
-**Example**: Sending data over a `{python} bw_gbps_str` Gbps link with `{python} ping_ms_str`ms ping (latency).
+Consider sending data over a `{python} bw_gbps_str` Gbps link with `{python} ping_ms_str`ms ping (latency). The dominant bottleneck depends entirely on the transfer size:
 
 ```{python}
 #| label: bandwidth-latency-example
@@ -859,6 +869,8 @@ eq_large_total = md_math(f"\\approx {int(ping_ms_value)}\\text{{ms}} + {int(larg
     *   Transmission: `{python} eq_large_tx`.
     *   Total Time `{python} eq_large_total`.
     *   *Result*: The ping is negligible; the pipe size is the bottleneck.
+
+Architecture determines how fast data can move, but there is another lever that directly controls *how much* data must move: the numerical precision of each value. Halving precision from FP32 to FP16 halves the bytes per parameter, which doubles effective bandwidth for free—if the model can tolerate the reduced precision. Understanding these trade-offs requires a closer look at how numbers are represented in hardware.
 
 ## Numerical Representations {#sec-system-foundations-numerical-representations-7b2f}
 
@@ -941,7 +953,7 @@ The choice of numerical format is a direct application of the **Iron Law of ML S
 
 :::
 
-**Brain Float 16 (BF16)** deserves special attention [@google_bfloat16]. It matches FP32's 8-bit exponent (preserving dynamic range) while truncating the mantissa to 7 bits. This avoids the gradient underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason.[^fn-bf16]
+Among these formats, BF16[^fn-bf16] deserves special attention [@google_bfloat16]. By matching FP32's 8-bit exponent while truncating the mantissa to just 7 bits, BF16 preserves the full dynamic range needed for gradient representation. This avoids the underflow problems that plague FP16 training, eliminating the need for complex loss scaling. Most modern training uses BF16 for this reason—it is effectively a "drop-in" half-precision replacement for FP32 that just works.
 
 [^fn-bf16]: **BF16** was originally introduced with the Google TPUv2 and has since been adopted by Intel, Arm, and NVIDIA (starting with Ampere architectures).
 
@@ -959,6 +971,8 @@ $$ x_{int} = \text{round}\left(\frac{x - x_{min}}{\alpha} \times 255\right) $$
 
 The choice between symmetric and asymmetric quantization depends on your tensor's distribution and has measurable accuracy implications.
 
+With the full toolkit assembled—reference numbers, performance models, architectural constraints, and numerical trade-offs—it is worth pausing to address the most common ways engineers misapply these concepts. The following section catalogs fallacies and pitfalls that violate the physical and architectural principles covered above.
+
 ## Fallacies and Pitfalls {#sec-machine-foundations-fallacies-pitfalls}
 
 ::: {.callout-warning title="Fallacy: Doubling GPUs halves training time."}
@@ -972,7 +986,19 @@ A related misconception concerns numerical precision.
 
 :::
 
-With the common misconceptions out of the way, the best next step is to connect these reference numbers back to the concrete system design problems—training throughput, serving latency, and accelerator selection—in the main chapters.
+With the common misconceptions addressed, use the reference numbers and models in this appendix as your first line of defense whenever a system behaves unexpectedly. A quick back-of-envelope calculation often reveals whether the culprit is physics, architecture, or a genuine software bug.
+
+:::: {.callout-takeaways title="Key Takeaways"}
+
+- **Energy dominates**: Moving data costs ~600× more energy than computing on it. Arithmetic intensity—the ratio of compute to data movement—is the single most important metric for ML workload performance.
+- **The Roofline Model** reveals whether a workload is compute-bound or memory-bound. Most inference workloads fall below the ridge point and are memory-bound; batch size is the primary lever to shift toward compute-bound operation.
+- **Amdahl's Law** caps strong-scaling speedup at $1/s$ (where $s$ is the serial fraction). **Gustafson's Law** shows that scaling the problem alongside hardware yields near-linear throughput gains—the paradigm that makes large-scale training feasible.
+- **Little's Law** ($L = \lambda W$) directly sizes inference infrastructure: concurrency, memory, and maximum throughput are all linked by this simple identity.
+- **Memory hierarchy** spans five orders of magnitude in latency (register at ~0.3 ns to SSD at ~100,000 ns). Keeping data close to compute is not an optimization—it is the optimization.
+- **Numerical precision** is a systems lever, not just a modeling choice. BF16 matches FP32's dynamic range at half the memory cost; INT8 quantization can deliver 2-4× inference speedup with careful calibration.
+- **Physics is non-negotiable**: speed of light sets latency floors, energy ratios set efficiency ceilings, and no amount of software optimization can violate these constraints.
+
+::::
 
 ## Further Reading {.unnumbered}
 

@@ -24,7 +24,7 @@ This appendix collects the reference calculations and statistical tools that let
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a **reference**. Use it when you are debugging “slow training,” “low GPU utilization,” or “production accuracy drift,” and you need the quickest path from symptom to measurement.
+This appendix is designed as a *reference*. Use it when you are debugging “slow training,” “low GPU utilization,” or “production accuracy drift,” and you need the quickest path from symptom to measurement.
 
 Conventions used here follow the book-wide notation in @sec-notation-conventions (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
 
@@ -144,15 +144,15 @@ This appendix covers the principles of data engineering and statistical monitori
 
 ## Data Engineering Foundations {#sec-system-foundations-data-engineering-foundations-9ba2}
 
-Understanding hardware constraints is only half the battle; we must also shape our data to fit them. **Data Engineering** applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves.
-
-This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
+Understanding hardware constraints is only half the battle; we must also shape our data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
 
 ### Napkin Math: The Physics of Data Gravity
 
-**Data Gravity** is not a metaphor; it is a calculation of transfer time. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When we speak of "Data Gravity," we are describing the phenomenon where datasets become so large that they effectively become stationary.
+Data gravity[^fn-data-gravity] is not a metaphor; it is a calculation of transfer time. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When datasets grow large enough, they effectively become stationary—moving them costs more time and energy than moving the computation to where the data already lives.
 
-**Transfer Time Equation**: $T = \text{Data Volume} / \text{Bandwidth}$ (for the large volumes here, latency is negligible; see @sec-system-foundations-bandwidth-vs-latency-e155 for the full equation). @tbl-data-gravity illustrates the sobering reality:
+[^fn-data-gravity]: **Data Gravity**: Coined by Dave McCrory in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
+
+The transfer time for moving a dataset is simply $T = \text{Data Volume} / \text{Bandwidth}$ (for the large volumes here, latency is negligible; see @sec-system-foundations-bandwidth-vs-latency-e155 for the full equation). @tbl-data-gravity illustrates the sobering reality:
 
 | **Data Volume** | **1 Gbps (Standard WAN)** | **10 Gbps (High-End WAN)** | **100 Gbps (Direct Connect)** | **Snowmobile (Truck)** |
 |:--------------|------------------------:|-------------------------:|----------------------------:|:---------------------|
@@ -164,7 +164,9 @@ This process begins with recognizing that data is physical—it has volume, it t
 
 ### The Cost of Serialization
 
-Even after data arrives at the machine, we face one final hurdle: **The Serialization Tax**. As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JSON or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
+Even after data arrives at the machine, we face one final hurdle: the serialization tax.[^fn-serialization] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JSON or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
+
+[^fn-serialization]: **Serialization**: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time. See @sec-data-engineering-ml for pipeline design strategies.
 
 | **Format**          |             **Decoding Speed (MB/s)** |                  **CPU Cycles per Byte** | **Suitability**         |
 |:------------------|------------------------------------:|---------------------------------------:|:----------------------|
@@ -243,12 +245,14 @@ Feature engineering is built on three SQL primitives. Understanding their comput
     *   **Broadcast Join**: One small table is sent to all workers.
         *   *Cost*: Minimal network, but the small table *must* fit in RAM.
 
+Understanding data formats, serialization costs, and algebraic primitives tells us how to *move* data efficiently. But even a perfectly engineered pipeline can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
+
 ## Probability and Statistics {#sec-system-foundations-probability-statistics-systems-a2cb}
 
-Once data is flowing through our pipelines, we need mathematical tools to ensure its quality and consistency. **Probability & Statistics** provide the language for monitoring system health, detecting the silent failures of data drift, and managing uncertainty.
+Once data is flowing through our pipelines, we need mathematical tools to ensure its quality and consistency. Probability and statistics provide the language for monitoring system health, detecting the silent failures of data drift, and managing uncertainty.
 
-::: {.callout-perspective title="Why This Matters"}
-Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability.
+::: {.callout-perspective title="Why Statistics Matters for Systems"}
+Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
 :::
 
 ### Distributions and the Long Tail {#sec-system-foundations-distributions-long-tail-37cc}
@@ -300,22 +304,56 @@ Because distributions have long tails where the most dangerous failures hide, si
 
 How do we know if serving data ($Q$) has drifted from training data ($P$)? We measure the "distance" between their distributions.
 
-**KL Divergence** measures how much information is lost if we approximate $P$ with $Q$ [@kullback1951information]:
+KL divergence[^fn-kl] measures how much information is lost if we approximate $P$ with $Q$ [@kullback1951information]:
+
 $$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
 
-**Population Stability Index (PSI)** is a symmetric, industry-standard metric derived from KL divergence. A PSI > `{python} psi_threshold` typically triggers an alert for retraining.
+::: {.callout-notebook title="Worked Example: KL Divergence for Drift Detection"}
+
+**Scenario**: A sentiment classifier was trained on data where 60% of reviews were positive, 30% negative, and 10% neutral. After deployment, the serving distribution shifts to 45% positive, 40% negative, and 15% neutral.
+
+Training distribution $P$: [0.60, 0.30, 0.10]. Serving distribution $Q$: [0.45, 0.40, 0.15].
+
+$D_{KL}(P || Q) = 0.60 \log\frac{0.60}{0.45} + 0.30 \log\frac{0.30}{0.40} + 0.10 \log\frac{0.10}{0.15}$
+
+$= 0.60 \times 0.288 + 0.30 \times (-0.288) + 0.10 \times (-0.405) = 0.173 - 0.086 - 0.041 = 0.046$ nats
+
+$D_{KL}(Q || P) = 0.45 \log\frac{0.45}{0.60} + 0.40 \log\frac{0.40}{0.30} + 0.15 \log\frac{0.15}{0.10}$
+
+$= 0.45 \times (-0.288) + 0.40 \times 0.288 + 0.15 \times 0.405 = -0.130 + 0.115 + 0.061 = 0.047$ nats
+
+Notice the asymmetry: $D_{KL}(P||Q) \neq D_{KL}(Q||P)$. The PSI symmetrizes this:
+
+$\text{PSI} = \sum (P_i - Q_i) \log\frac{P_i}{Q_i} = (0.15)(0.288) + (-0.10)(-0.288) + (-0.05)(-0.405) = 0.043 + 0.029 + 0.020 = 0.092$
+
+Since PSI = 0.092 < 0.2, this drift is noticeable but does not yet trigger a retraining alert. However, monitoring should increase in frequency.
+
+:::
+
+Because KL divergence is asymmetric ($D_{KL}(P||Q) \neq D_{KL}(Q||P)$), practitioners often use the Population Stability Index (PSI), a symmetric metric derived from KL divergence that is easier to threshold. A PSI > `{python} psi_threshold` typically triggers an alert for retraining.
+
+[^fn-kl]: **KL Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected number of extra bits needed to encode samples from $P$ using a code optimized for $Q$. In production ML, KL divergence is the theoretical backbone of most drift-detection metrics.
+
+Both KL divergence and PSI are grounded in a deeper framework—information theory—which provides the units and bounds that make these metrics principled rather than ad hoc.
 
 ### Information Theory for Systems {#sec-system-foundations-information-theory-a8f2}
 
-In the "Information Roofline" model (@sec-appendix-dam), we treat data quality as a physical constraint similar to bandwidth. Information Theory provides the units for this constraint.
+In the "Information Roofline" model (@sec-appendix-dam), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
 
-*   **Entropy ($H$)**: The average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. A uniform distribution has maximum entropy (maximum uncertainty). Note that this connects directly to KL Divergence above: $D_{KL}$ measures excess bits needed when using the wrong distribution.
-*   **Information Density**: The amount of useful signal per unit of storage. High-quality data has high information density; noisy data has low density.
-*   **Signal-to-Noise Ratio (SNR)**: The ratio of useful information to irrelevant variance. In ML, training on low-SNR data is like trying to learn a pattern from static—you hit the "Information Roofline" where adding more compute yields no improvement.
+**Entropy ($H$)**:[^fn-entropy] the average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. A uniform distribution has maximum entropy (maximum uncertainty). This connects directly to KL divergence above: $D_{KL}$ measures excess bits needed when using the wrong distribution.
+
+**Information Density**: the amount of useful signal per unit of storage. High-quality data has high information density; noisy data has low density.
+
+**Signal-to-Noise Ratio (SNR)**: the ratio of useful information to irrelevant variance. In ML, training on low-SNR data is like trying to learn a pattern from static—you hit the "Information Roofline" where adding more compute yields no improvement.
+
+[^fn-entropy]: **Entropy**: From Greek *entropia* (transformation). Shannon borrowed the term from thermodynamics in 1948 to quantify information content. In systems terms, entropy tells you the theoretical minimum number of bits needed to encode a message from a source—directly relevant to compression ratios and data pipeline sizing.
 
 ### Logits and Numerical Stability {#sec-system-foundations-logits-numerical-stability-9f55}
 
-Neural networks output **logits** (unnormalized scores), not probabilities. We convert them using Softmax:
+Neural networks output *logits*[^fn-logit] (unnormalized scores), not probabilities. We convert them using Softmax:
+
+[^fn-logit]: **Logit**: From *log* + *unit*, coined by Joseph Berkson in 1944. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(p) = \log(p/(1-p))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
+
 $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
 **The Problem**: If $z_i$ is large (e.g., `{python} logit_val`), the exponential $e^{z_i}$ overflows floating-point range.
@@ -323,8 +361,70 @@ $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
 [^fn-logsumexp]: **Log-Sum-Exp**: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log(\sum e^{x_i}) = a + \log(\sum e^{x_i - a})$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
 
+::: {.callout-notebook title="Worked Example: Log-Sum-Exp in Action"}
+
+**The setup**: A 3-class classifier outputs logits $z = [100, 101, 102]$.
+
+**Without the trick (naive softmax)**:
+
+$e^{100} \approx 2.7 \times 10^{43}$, $e^{101} \approx 7.2 \times 10^{43}$, $e^{102} \approx 1.9 \times 10^{44}$
+
+These numbers are representable in FP64 but overflow FP32 (max $\approx 3.4 \times 10^{38}$). With FP16 (max $\approx 65{,}504$), even $e^{12}$ overflows. In practice, logits of magnitude 100 are not unusual in deep networks, and FP16/BF16 is the standard training precision—so naive softmax fails routinely.
+
+**With the trick**: Subtract $a = \max(z) = 102$:
+
+$z - a = [-2, -1, 0]$
+
+$e^{-2} \approx 0.135$, $e^{-1} \approx 0.368$, $e^{0} = 1.0$
+
+Sum = 1.503. LogSumExp = $102 + \log(1.503) = 102.407$.
+
+Softmax: $[0.135/1.503,\; 0.368/1.503,\; 1.0/1.503] = [0.090,\; 0.245,\; 0.665]$
+
+All intermediate values are in $[0, 1]$—no overflow risk, even in FP16.
+
+:::
+
+
+::: {.callout-checkpoint title="Check Your Understanding"}
+
+1. A training pipeline reads 500 GB of CSV data over a 10 Gbps link. Estimate the transfer time. Now estimate how long it would take if the data were stored as Parquet and only 20% of columns were needed—what changes and why?
+
+2. Your model's average latency is 50 ms, but P99 is 800 ms. If a typical user session involves 50 requests, what is the probability that a user experiences at least one P99 spike? Does "average latency" adequately describe user experience?
+
+3. Explain why KL divergence is asymmetric and why this matters when choosing a drift metric for production monitoring. When would you prefer PSI over raw KL divergence?
+
+:::
+
+The tools in this section—tail-aware metrics, drift divergences, information-theoretic bounds, and numerical stability tricks—give us the vocabulary to diagnose data-related failures quantitatively rather than anecdotally. The fallacies that follow highlight the most common ways these tools are ignored.
+
 ## Fallacies and Pitfalls {#sec-data-foundations-fallacies-pitfalls}
 
-::: {.callout-warning title="Pitfall: Ignoring data serialization cost."}
-**The Reality**: Engineers meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. See @sec-system-foundations-data-engineering-foundations-9ba2 for why this is often the hidden bottleneck.
+**Fallacy:** *Moving a petabyte to the cloud is just a bandwidth problem.*
+
+Transfer time is only the beginning. Data gravity encompasses not just transfer duration but also the re-engineering of pipelines, re-validation of data quality, and synchronization of dependent services. Organizations that plan only for bandwidth discover that the true cost is measured in engineering months, not network hours.
+
+**Pitfall:** *Ignoring data serialization cost.*
+
+Engineers meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. As @tbl-serialization-cost shows, text-based formats can be 10--100$\times$ slower to decode than columnar binary formats, making the CPU—not the accelerator—the bottleneck. See @sec-system-foundations-data-engineering-foundations-9ba2 for the full analysis.
+
+**Fallacy:** *Average latency is a good summary of system performance.*
+
+The mean hides the tail. At scale, the P99 latency becomes the *median user experience* because each session involves many requests. Monitoring only the mean creates a dangerous blind spot where thousands of users suffer degraded service while dashboards show green.
+
+**Pitfall:** *Monitoring accuracy instead of input distributions.*
+
+A model's accuracy can remain stable even as the input distribution drifts, because the model memorizes enough of the old distribution to maintain aggregate metrics. By the time accuracy visibly degrades, the drift has often been accumulating for weeks. Monitoring input distributions with metrics like PSI catches drift earlier and allows proactive retraining.
+
+## Summary
+
+::: {.callout-takeaways title="Key Takeaways"}
+
+- Data has *physical inertia*: transfer time scales linearly with volume and inversely with bandwidth, making petabyte-scale datasets effectively immovable. Design pipelines around data locality rather than data movement.
+- Serialization format is a first-order performance decision. Columnar binary formats (Parquet, Arrow) can be 10--100$\times$ faster to decode than text formats (CSV, JSON), directly determining whether accelerators starve or stay fed.
+- The three algebraic primitives—selection, projection, and join—have radically different I/O costs. Joins in particular can amplify network traffic by orders of magnitude; choosing between shuffle and broadcast joins depends on relative table sizes.
+- Average metrics lie. Long-tailed distributions mean that the P99 latency becomes the typical user experience at scale, and monitoring only the mean creates dangerous blind spots.
+- Drift detection requires comparing full distributions, not summary statistics. KL divergence and its symmetric derivative PSI provide principled measures of distribution shift that catch problems before accuracy metrics react.
+- Numerical stability is not optional. The log-sum-exp trick and log-space computation prevent overflow in softmax and loss calculations, making them essential building blocks of any training or inference pipeline.
+
 :::
