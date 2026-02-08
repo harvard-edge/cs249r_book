@@ -411,7 +411,11 @@ A single forward pass through GPT-2 requires roughly `{python} gpt2_fwd_flops_st
 
 Three characteristics make training workloads fundamentally different from general-purpose computing. First, *computational intensity*: that `{python} gpt2_total_flops_str` operation budget spread over days of wall-clock time demands sustained petaFLOPS-scale throughput from hardware that rarely exceeds 30 to 70 percent utilization. Second, *memory pressure*: storing `{python} gpt2_params_b_str` billion weights requires `{python} gpt2_params_gb_fp32_str` GB in FP32; the Adam optimizer adds two additional state tensors per parameter, consuming another `{python} gpt2_adam_gb_str` GB; and activation storage across `{python} gpt2_layers_str` transformer layers can double or triple this total, easily exceeding a single GPU's memory capacity. Third, *data dependencies*: each gradient update depends on the result of the previous one, creating sequential bottlenecks that limit how much parallelism the system can exploit.
 
-Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration (@sec-ai-acceleration) and precision reduction (using the **BF16/FP8** formats discussed in @sec-model-compression). Memory pressure responds to techniques like **gradient checkpointing** (a specific application of **Rematerialization**—discarding and recomputing intermediate values to save memory—from @sec-ai-frameworks), which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement, heavily relying on the **Data Loading** throughput optimized in @sec-data-engineering-ml, so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that constitute an advanced topic beyond our current scope. We use the *Iron Law of Training Performance* as our organizing framework, examining how each optimization technique targets specific terms in the performance equation. Before formalizing that framework, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
+Each of these challenges opens a corresponding optimization pathway. Computational intensity can be addressed through hardware acceleration (@sec-ai-acceleration) and precision reduction (using the **BF16/FP8** formats discussed in @sec-model-compression). Memory pressure responds to techniques like **gradient checkpointing** (a specific application of **Rematerialization**—discarding and recomputing intermediate values to save memory—from @sec-ai-frameworks), which trades recomputation for reduced activation storage, and **mixed-precision training**, which halves the memory footprint of weights and activations. Data dependencies motivate pipeline designs that overlap computation with data movement, heavily relying on the **Data Loading** throughput optimized in @sec-data-engineering-ml, so the GPU never sits idle waiting for the next batch. This chapter focuses on single-machine and single-node multi-GPU training; scaling to hundreds of machines across network boundaries introduces communication and fault tolerance challenges that constitute an advanced topic beyond our current scope.
+
+The chapter proceeds through five stages. First, we formalize the **Iron Law of Training Performance**, a specialized application of the general Iron Law (@sec-silicon-contract) that decomposes training time into total operations, peak throughput, and utilization—three levers that every optimization technique in this chapter targets. Second, we examine the **mathematical foundations** that underpin training: neural network computation as a systems workload, optimization algorithms that navigate loss landscapes, backpropagation mechanics, and the arithmetic intensity analysis that determines whether training is compute-bound or memory-bound. Third, we dissect the **pipeline architecture** of a training system—data loading, forward pass, backward pass, and parameter updates—as a staged pipeline where each component's throughput constrains the next. Fourth, we develop **pipeline optimizations**—mixed-precision training, FlashAttention, gradient accumulation, and checkpointing—that target specific Iron Law terms to close the gap between theoretical peak and actual training speed. Fifth, we explore how training **scales** beyond a single GPU to multi-GPU and multi-node configurations, where communication overhead introduces new bottlenecks.
+
+Before formalizing the Iron Law, consider how these constraints interact in practice when a single *gradient explosion* can erase days of expensive computation.
 
 ::: {.callout-example title="The 3AM Gradient Explosion"}
 **The Scenario**: You are training a 7B parameter LLM. The loss curve has been decreasing smoothly for 4 days. You go to sleep.
@@ -427,7 +431,7 @@ Each of these challenges opens a corresponding optimization pathway. Computation
 3.  **BF16**: Use Brain Float 16 format, which trades precision for range, making overflows far less likely than in standard FP16. The bit-level comparison of BF16 vs FP16 dynamic range appears in @tbl-numerical-formats (BF16 preserves FP32's dynamic range while FP16 offers greater precision within a narrower range), and @fig-float-formats breaks down the bit-level layout to make this precision-range tradeoff concrete.
 :::
 
-### The Iron Law of Training Performance {#sec-ai-training-iron-law-training-performance-a53f}
+## Iron Law of Training Performance {#sec-ai-training-iron-law-training-performance-a53f}
 
 \index{Training!Iron Law of Performance}Frameworks provide abstractions for expressing training algorithms, but training systems engineering determines whether those algorithms can execute within physical resource limits. The Iron Law provides the organizing framework for understanding how every optimization technique improves training time. This is a specialized application of the general **Iron Law of ML Systems** introduced in @sec-silicon-contract, focused specifically on maximizing computational throughput.
 
@@ -572,7 +576,17 @@ To illustrate the scale of these operations concretely, consider the *attention 
 # =============================================================================
 # INPUT
 # =============================================================================
-from physx.constants import GPT2_HIDDEN_DIM, GPT2_LAYERS, V100_FLOPS_FP16_TENSOR, TFLOPs, second
+from physx.constants import (
+    GPT2_HIDDEN_DIM,
+    GPT2_LAYERS,
+    V100_FLOPS_FP16_TENSOR,
+    TFLOPs,
+    second,
+    flop,
+    GFLOP,
+    TFLOP,
+    PFLOPs,
+)
 from physx.formatting import fmt
 
 batch_value = 32
@@ -1380,11 +1394,9 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 #### Memory-Computation Trade-offs {#sec-ai-training-memorycomputation-tradeoffs-411e}
 
-\index{Memory-Computation Tradeoff!training systems}\index{Training!memory management}Training systems must balance memory usage against computational efficiency. Each forward pass through the network generates a set of activations that must be stored for the backward pass. For a neural network with $L$ layers, processing a batch of $B$ examples requires storing the memory specified by @eq-activation-memory-per-batch:
+\index{Memory-Computation Tradeoff!training systems}\index{Training!memory management}Training systems must balance memory usage against computational efficiency. Each forward pass through the network generates a set of activations that must be stored for the backward pass. For a neural network with $L$ layers, let $s_l$ represent the size of intermediate computations (like $z^{(l)}$) and $a_l$ represent the activation outputs at layer $l$. Processing a batch of $B$ examples requires storing the memory specified by @eq-activation-memory-per-batch:
 
 $$ \text{Memory per batch} = B \times \sum_{l=1}^L (s_l + a_l) $$ {#eq-activation-memory-per-batch}
-
-where $s_l$ represents the size of intermediate computations (like $z^{(l)}$) and $a_l$ represents the activation outputs at layer l.
 
 This memory requirement compounds with the optimizer's memory needs discussed in the previous section. @eq-total-training-memory gives the total memory consumption of a training system, including both the stored activations and the optimizer state:
 

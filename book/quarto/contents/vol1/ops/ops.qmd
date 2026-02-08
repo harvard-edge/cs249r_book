@@ -68,7 +68,9 @@ A concrete example illustrates *why* this discipline is necessary. Consider depl
 
 This framing connects directly to the book's analytical foundations. If benchmarking provides the *sensors* for our system, MLOps is the complete *control system*. It closes the **Verification Gap**\index{Verification Gap!MLOps closure} (the recognition that ML testing is statistical, not deterministic, formalized in @sec-conclusion-twelve-invariants) by continuously recalibrating against a changing world, ensuring that model performance does not silently erode between evaluation cycles. MLOps operationalizes the **Degradation Equation**\index{Degradation Equation!operational implementation} (formalized in @sec-conclusion-twelve-invariants): accuracy decay is not a failure of the code, but an inevitable consequence of the distributional divergence between the world we trained on and the world we serve. MLOps also formalizes interfaces and responsibilities across traditionally isolated domains: data science, machine learning engineering, and systems operations [@amershi2019software]. Mature implementations provide continuous retraining as new data arrives, A/B evaluation against production baselines, graduated rollout strategies, and real-time performance assessment without service disruption. Standardized tracking of model versions, data lineage, and configuration parameters establishes reproducible, auditable artifact trails essential for regulated domains where provenance constitutes a compliance requirement.
 
-This chapter focuses on what we term **single-model operations**\index{Single-Model Operations!ML Node scope}: the practices required to deploy, monitor, and maintain one ML system in production. To scope our discussion precisely, we introduce a dedicated term for this operational unit. We define the *ML Node*\index{ML Node!operational unit definition}, a complete system comprising data pipelines, feature computation, model training, serving infrastructure, and monitoring for a single machine learning application. The chapter covers operating one ML system end-to-end through training, deployment, monitoring, and retraining; technical debt patterns that emerge within a single model's lifecycle; feature stores and CI/CD pipelines for individual model workflows; monitoring and drift detection for a single production model; and deployment strategies for different risk profiles. Platform operations at larger scale---managing hundreds of models, cross-model dependencies, multi-region coordination, and organization-wide ML platform engineering---constitute advanced topics that build on these single-model foundations.
+This chapter focuses on what we term **single-model operations**\index{Single-Model Operations!ML Node scope}: the practices required to deploy, monitor, and maintain one ML system in production. To scope our discussion precisely, we introduce a dedicated term for this operational unit. We define the *ML Node*\index{ML Node!operational unit definition}, a complete system comprising data pipelines, feature computation, model training, serving infrastructure, and monitoring for a single machine learning application. Platform operations at larger scale—managing hundreds of models, cross-model dependencies, multi-region coordination, and organization-wide ML platform engineering—constitute advanced topics that build on these single-model foundations.
+
+The chapter proceeds in five stages. First, we formally define **MLOps** as an engineering discipline and examine the **technical debt** patterns that accumulate in ML systems—the hidden complexity that makes production ML far more expensive to maintain than to build. Second, we develop the **development infrastructure** that supports reproducible ML workflows: feature stores that ensure training-serving consistency, CI/CD pipelines adapted for non-deterministic systems, and experiment tracking that manages the combinatorial explosion of hyperparameters, data versions, and code changes. Third, we turn to **production operations**—monitoring, drift detection, deployment strategies, and incident response—that keep models healthy over their operational lifetime. Fourth, we present a **system design and maturity** framework that helps organizations assess where they stand and what infrastructure investments will yield the highest returns. Fifth, **case studies** ground these practices in real-world scenarios that reveal how theoretical principles translate into operational decisions.
 
 The single-model operational challenge can be decomposed into three distinct interface problems. Each interface has its own failure modes, its own tooling ecosystem, and its own organizational responsibilities. Understanding *the three critical interfaces* helps identify where operational investments will have the highest impact.
 
@@ -84,11 +86,11 @@ Operationalizing machine learning requires coordinating three distinct system bo
 The infrastructure components, production operations, and maturity frameworks that follow address these three interfaces systematically.
 :::
 
-Telemetry\index{Telemetry!ML system observability}[^fn-telemetry-etymology] forms the foundation of the production-monitoring interface, enabling teams to detect drift before it impacts users.
+Telemetry\index{Telemetry!ML system observability}[^fn-telemetry-etymology] forms the foundation of the production-monitoring interface, enabling teams to detect drift before it impacts users. To build this telemetry infrastructure systematically, we need a disciplined framework that extends traditional DevOps practices to handle the unique challenges of non-deterministic, data-dependent systems.
 
 [^fn-telemetry-etymology]: **Telemetry**: From Greek *tele* (far, remote) and *metron* (measure), literally "remote measurement." The term originated in the 1930s for transmitting measurements from remote locations via radio. In ML systems, telemetry refers to the automated collection and transmission of model performance metrics, feature distributions, and system health indicators from production environments back to development teams.
 
-### MLOps {#sec-machine-learning-operations-mlops-mlops-3ea3}
+## MLOps {#sec-machine-learning-operations-mlops-mlops-3ea3}
 
 \index{MLOps!DevOps comparison}MLOps builds on DevOps\index{DevOps!MLOps extension} but addresses the specific demands of ML system development and deployment. DevOps achieved remarkable success for traditional software by assuming deterministic behavior: the same code with the same inputs produces the same outputs. Machine learning systems violate this assumption fundamentally because they depend on training data distributions, learned parameters, and environmental conditions that shift over time.
 
@@ -173,6 +175,8 @@ This separation enables teams to update serving infrastructure without retrainin
 \index{Consistency Imperative!training-serving parity}Training and serving environments must process data identically. The cost of inconsistency grows with system scale, as @eq-skew-cost quantifies:
 
 $$\text{Skew Cost} = \text{Base Error Rate} \times \text{Query Volume} \times \text{Error Impact}$$ {#eq-skew-cost}
+
+where **Base Error Rate** is the fraction of queries affected by training-serving skew, **Query Volume** is the number of queries per time period, and **Error Impact** is the cost per erroneous prediction.
 
 ```{python}
 #| label: skew-cost-calc
@@ -1374,9 +1378,11 @@ The following framework formalizes the derivation used in the calculation above,
 
 $$A(t) = A_0 \cdot e^{-\lambda t}$$ {#eq-accuracy-decay}
 
-The cost of staleness accumulates based on query volume $Q$ per time period and the value impact $V$ of each accuracy point, as @eq-staleness-cost formalizes:
+The cost of staleness accumulates based on query volume $Q$ per time period and the value impact $V$ of each accuracy point. Integrating the instantaneous accuracy loss $(A_0 - A(t))$ over the retraining interval $T$ yields @eq-staleness-cost:
 
 $$\text{Staleness Cost}(T) = \int_0^T Q \cdot V \cdot (A_0 - A(t)) \, dt = Q \cdot V \cdot A_0 \cdot \left(T - \frac{1-e^{-\lambda T}}{\lambda}\right)$$ {#eq-staleness-cost}
+
+The integral accumulates cost over time $t$ from 0 to $T$, and the closed form follows from substituting @eq-accuracy-decay for $A(t)$.
 
 ###### The Retraining Cost Function {.unnumbered}
 

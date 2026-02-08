@@ -121,23 +121,19 @@ dlrm_embedding_str = f"{dlrm_embedding_gb_value}"        # e.g. "100" GB
 
 Consider two extremes: a wake-word detector on a smartwatch and a recommendation engine in a data center. The wake-word detector represents a **TinyML** workload operating under milliwatt power budgets and kilobyte memory limits; the recommendation engine exemplifies a **Cloud ML** workload requiring terabytes of embedding tables and megawatt-scale infrastructure. These systems solve different problems under opposite physical constraints, and the infrastructure that supports them shares almost nothing in common. This reality transforms deployment from an operational afterthought into a first-order engineering decision, one that the AI Triad from @sec-introduction helps us reason about by foregrounding infrastructure alongside data and algorithms.
 
-What makes these systems so different? The physical constraints that govern each environment—latency, power, and memory—force ML deployment into four distinct paradigms: Cloud, Edge, Mobile, and TinyML, each with its own engineering trade-offs and system design patterns. The next subsection introduces these paradigms concretely before examining the physics behind them.
+What makes these systems so different? The physical constraints that govern each environment—latency, power, and memory—force ML deployment into four distinct paradigms, each with its own engineering trade-offs and system design patterns. **Cloud ML**\index{Cloud ML!characteristics} aggregates computational resources in data centers, offering virtually unlimited compute and storage at the cost of network latency. **Edge ML**\index{Edge ML!latency benefits} moves computation closer to where data originates—factory floors, retail stores, hospitals—achieving lower latency and keeping sensitive data on-premises. **Mobile ML**\index{Mobile ML!energy constraints} brings intelligence directly to smartphones and tablets, balancing computational capability against battery life and thermal constraints. **TinyML**\index{TinyML!always-on sensing} pushes intelligence to the smallest devices—microcontrollers costing dollars and consuming milliwatts—enabling always-on sensing that runs for months on a coin-cell battery. These four paradigms span nine orders of magnitude in power consumption (megawatts to milliwatts) and memory capacity (terabytes to kilobytes), a range so vast that the engineering principles governing one end of the spectrum barely apply at the other.
 
-This section builds the analytical framework for understanding *why* these four paradigms exist and *how* to reason about which one fits a given workload. We introduce the physical laws that govern each regime, apply the ***Iron Law of ML Systems*** (@sec-introduction) as a quantitative tool for analyzing performance bottlenecks, and define a set of reference workloads that serve as concrete examples throughout the book. Each paradigm then receives detailed treatment, with quantitative analysis of its operational characteristics and engineering trade-offs. The chapter concludes with a comparative decision framework and hybrid architectures that combine paradigms to satisfy requirements no single deployment target can meet alone.
+*Why do these paradigms exist?* The answer lies not in engineering choices but in physical laws that no amount of optimization can overcome. Three fundamental constraints—the speed of light (establishing latency floors), thermodynamic limits on power dissipation (capping computation per watt), and the energy cost of memory signaling (creating the Memory Wall)—carve the deployment landscape into distinct operating regimes. These are not design preferences but physical boundaries: you cannot serve a self-driving car from a data center 100 ms away, and you cannot train a 175-billion-parameter model on a microcontroller. Understanding *why* these boundaries exist, not just *where* they fall, is what separates systems engineering from ad hoc deployment.
 
-### The Four Deployment Paradigms {#sec-ml-system-architecture-four-deployment-paradigms}
+These physical constraints interact with the **Iron Law of ML Systems** (@sec-silicon-contract), which decomposes end-to-end latency into data movement, computation, and overhead. Different deployment environments stress different terms of this equation: cloud systems are typically compute-bound, mobile systems hit power walls, and TinyML devices are memory-capacity-limited. By pairing the physical constraints with the Iron Law, we develop a quantitative vocabulary for reasoning about *which* paradigm fits a given workload and *why*. To anchor this analysis concretely, the chapter introduces five **Lighthouse Models**—ResNet-50, GPT-2, DLRM, MobileNet, and a Keyword Spotter—that span the deployment spectrum and isolate distinct system bottlenecks. These reference workloads recur throughout the book, providing a consistent basis for comparing optimization techniques across chapters.
 
-\index{deployment paradigms!four paradigms} \index{Cloud ML|seealso{Edge ML}} \index{Edge ML|seealso{Mobile ML}} \index{Mobile ML|seealso{TinyML}}Before diving into the physics that creates these boundaries, it helps to have a concrete picture of each paradigm. Think of them as four distinct "operating envelopes"—each defined by how much power, memory, and network connectivity is available. Every ML application must fit within at least one of these envelopes, and that fit determines which algorithms, hardware, and engineering trade-offs apply. These four paradigms are:
+This chapter proceeds in three stages. First, we examine the physics that creates the paradigm boundaries—the Light Barrier, Power Wall, and Memory Wall—and develop the analytical tools (Iron Law, Bottleneck Principle, Workload Archetypes) for mapping workloads to deployment targets. Second, we trace each paradigm in depth, from Cloud through Edge, Mobile, and TinyML, analyzing the infrastructure, trade-offs, and representative applications that define each operating regime. Third, we develop a comparative decision framework and explore the hybrid architectures that combine paradigms when no single deployment target can satisfy all requirements. The chapter concludes with the fallacies and pitfalls that commonly mislead practitioners making deployment decisions.
 
-**Cloud ML**\index{Cloud ML!characteristics} aggregates computational resources in data centers, offering virtually unlimited compute and storage at the cost of network latency. When you train a large language model or run complex inference that can tolerate 100+ ms delays, Cloud ML is the natural choice.
+The next section grounds these paradigms in the physical laws that create them.
 
-**Edge ML**\index{Edge ML!latency benefits} moves computation closer to where data originates—factory floors, retail stores, hospitals. By processing locally rather than sending data to distant servers, edge systems achieve lower latency (10-100 ms) and keep sensitive data on-premises.
+## Four Deployment Paradigms {#sec-ml-system-architecture-four-deployment-paradigms}
 
-**Mobile ML**\index{Mobile ML!energy constraints} brings intelligence directly to smartphones and tablets. These devices must balance computational capability against battery life and thermal constraints, making them ideal for personal AI applications that need to work offline.
-
-**TinyML**\index{TinyML!always-on sensing} pushes intelligence to the smallest devices—microcontrollers costing dollars and consuming milliwatts. When you need always-on sensing (wake-word detection, motion recognition) that runs for months on a coin-cell battery, TinyML is the only viable option.
-
-*Why do these four paradigms exist?* The answer lies not in engineering choices but in physical laws that no amount of optimization can overcome. The four paradigms span a continuous spectrum from centralized cloud infrastructure to distributed ultra-low-power devices—trace this spectrum visually in @fig-cloud-edge-TinyML-comparison and compare the quantitative trade-offs in @tbl-deployment-paradigms-overview. The figure maps where each paradigm sits along the centralization axis; the table pins down the numbers behind each one.
+\index{deployment paradigms!four paradigms} \index{Cloud ML|seealso{Edge ML}} \index{Edge ML|seealso{Mobile ML}} \index{Mobile ML|seealso{TinyML}}Think of the four deployment paradigms as distinct "operating envelopes"—each defined by how much power, memory, and network connectivity is available. Every ML application must fit within at least one of these envelopes, and that fit determines which algorithms, hardware, and engineering trade-offs apply. The four paradigms span a continuous spectrum from centralized cloud infrastructure to distributed ultra-low-power devices—trace this spectrum visually in @fig-cloud-edge-TinyML-comparison and compare the quantitative trade-offs in @tbl-deployment-paradigms-overview. The figure maps where each paradigm sits along the centralization axis; the table pins down the numbers behind each one.
 
 ::: {#fig-cloud-edge-TinyML-comparison fig-env="figure" fig-pos="t" fig-cap="**Distributed Intelligence Spectrum**: Machine learning deployment spans from centralized cloud infrastructure to resource-constrained TinyML devices, each balancing processing location, device capability, and network dependence. Source: [@abiresearch2024tinyml]." fig-alt="Horizontal spectrum showing 5 deployment tiers from left to right: ultra-low-power devices and sensors, intelligent device, gateway, on-premise servers, and cloud. Arrows indicate TinyML, Edge AI, and Cloud AI spans across the spectrum."}
 ```{.tikz}
@@ -322,11 +318,11 @@ pics/mobile/.style = {
 
 : **The Deployment Spectrum (Conceptual)**\index{deployment spectrum!power range}\index{deployment spectrum!memory range}: Four paradigms span nine orders of magnitude in power (MW to mW) and memory (TB to KB). This conceptual overview defines each paradigm by its operating regime; @tbl-representative-systems later grounds these categories in specific hardware platforms and quantitative decision thresholds. {#tbl-deployment-paradigms-overview}
 
-### Physical Constraints: Why Paradigms Exist {#sec-ml-system-architecture-deployment-spectrum-71be}
+## Physical Constraints: Why Paradigms Exist {#sec-ml-system-architecture-deployment-spectrum-71be}
 
 \index{Silicon Contract!physical constraints} \index{physical constraints!speed of light} \index{physical constraints!thermodynamics} \index{physical constraints!memory signaling}The physical laws of **speed of light**, **power thermodynamics**, and **memory signaling** dictate that no single "ideal" computer exists. Where a system runs fundamentally alters the contract between model and hardware. These three constraints—which we call the *Light Barrier*, *Power Wall*, and *Memory Wall*—govern the engineering trade-offs ahead.[^fn-paradigm]
 
-#### The Light Barrier {.unnumbered}
+### The Light Barrier {.unnumbered}
 
 \index{Light Barrier!latency floor}The Light Barrier establishes the absolute latency[^fn-latency-etymology] floor. The minimum round-trip time is governed by @eq-latency-physics:
 
@@ -364,9 +360,9 @@ distance_str = f"{distance_km_value:,}"                                  # e.g. 
 
 California to Virginia (~`{python} distance_str` km straight-line) requires **~`{python} min_latency_str` ms minimum** before any computation begins. Actual cloud services typically add 60–150 ms of software overhead. Applications requiring sub-10 ms response *cannot* use distant cloud infrastructure—physics forbids it. This constraint creates the need for **Edge ML** and **TinyML**: when latency budgets are tight, computation must move closer to the data source.
 
-#### The Power Wall {.unnumbered}
+### The Power Wall {.unnumbered}
 
-\index{Power Wall!thermal limits}\index{Power Wall!frequency scaling}\index{thermal design power (TDP)|see{Power Wall}}The Power Wall emerged because thermodynamics limits how much computation can occur in a given volume. Under classical Dennard scaling (which held until approximately 2006), the relationship between power and frequency was cubic, as @eq-power-scaling shows:
+\index{Power Wall!thermal limits}\index{Power Wall!frequency scaling}\index{thermal design power (TDP)|see{Power Wall}}The Power Wall emerged because thermodynamics limits how much computation can occur in a given volume. Under classical Dennard scaling (which held until approximately 2006), the relationship between power and frequency was cubic. Here $C$ is effective capacitance, $V$ is voltage, and $f$ is clock frequency. As voltage tracks frequency ($V \propto f$), power rises as $f^3$, as @eq-power-scaling shows:
 
 $$\text{Power} \propto C \times V^2 \times f \quad \text{where } V \propto f \implies \text{Power} \propto f^3$$ {#eq-power-scaling}
 
@@ -402,7 +398,7 @@ mem_bw_growth_str = fmt(mem_bw_growth_per_yr_value, precision=1, commas=False)  
 mem_wall_ratio_str = fmt(mem_wall_ratio_value, precision=2, commas=False)         # "1.33"
 ```
 
-#### The Memory Wall {.unnumbered}
+### The Memory Wall {.unnumbered}
 
 \index{Memory Wall!bandwidth divergence}\index{Memory Wall!compute-memory gap}\index{memory bandwidth|see{Memory Wall}}The Memory Wall [@wulf1995memory] reflects the widening bandwidth[^fn-bandwidth] gap:
 
@@ -422,7 +418,7 @@ These physical laws explain *why* the four paradigms exist. Physics creates the 
 
 Given a specific ML workload, *how* do we determine which paradigm fits? The answer requires analytical tools that connect workload characteristics to physical constraints. The following section introduces these tools.
 
-### Analyzing Workloads: The Iron Law and Archetypes {#sec-ml-system-architecture-analyzing-workloads}
+## Analyzing Workloads {#sec-ml-system-architecture-analyzing-workloads}
 
 \index{Iron Law of ML Systems!components} \index{Silicon Contract!Iron Law}@sec-introduction established the **Iron Law of ML Systems** (@sec-silicon-contract), restated here as @eq-iron-law:
 
@@ -430,7 +426,7 @@ $$T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$$ {#eq-iron-l
 
 This equation decomposes total latency into three terms: data movement ($D_{vol}/BW$), compute ($O / (R_{peak} \cdot \eta)$), and fixed overhead ($L_{lat}$). For a single inference, these costs simply add up—you pay each one sequentially. But in production systems, tasks are processed continuously as a stream, and the question shifts from "how long does one task take?" to "which of these three terms actually limits the system?" The answer depends entirely on the deployment environment: a model that is compute-bound during training may become memory-bound during inference; a system that runs efficiently in the cloud may hit power limits on mobile devices.
 
-#### The Bottleneck Principle {#sec-ml-systems-bottleneck-principle}
+### The Bottleneck Principle {#sec-ml-systems-bottleneck-principle}
 
 \index{bottleneck principle!pipelined execution} \index{system bottlenecks!identifying} \index{compute-bound vs memory-bound!definition}The Iron Law tells us the cost of each term. The **Bottleneck Principle** tells us which term *matters*. Unlike traditional software where optimizing the average case works, ML systems are dominated by their slowest component—optimizing fast operations yields zero benefit while the slowest stage remains unchanged. Modern accelerators use **pipelined execution** to overlap data movement with computation: while the GPU computes on batch $n$, the memory system prefetches batch $n+1$. With this overlap, the system's throughput is determined by whichever operation is slower—the faster one "hides" behind it. The Iron Law's sum becomes a maximum, as @eq-bottleneck formalizes:
 
@@ -515,7 +511,7 @@ The **Iron Law** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{l
 
 To summarize: the Iron Law tells you the *cost of each ingredient*; the Bottleneck Principle tells you the *speed of the assembly line*. As a rule of thumb, use the **additive form** (@eq-iron-law) when analyzing the **latency** of a single task, and the **max form** (@eq-bottleneck) when analyzing the **throughput** of a continuous stream of tasks.
 
-#### Workload Archetypes
+### Workload Archetypes
 
 Now that we understand bottlenecks, we can classify workloads by which constraint dominates. Recall the **D·A·M taxonomy** from @sec-introduction: every ML system comprises **Data**, **Algorithm**, and **Machine**. Different deployment environments create different bottlenecks along these axes—a cloud server with terabytes of memory faces Algorithm constraints, while a microcontroller with kilobytes faces Machine constraints.
 
@@ -606,7 +602,7 @@ To ground the abstract interdependencies of the Iron Law in concrete practice, w
 
 These five Lighthouse Models will serve as concrete anchors throughout the book, each isolating a distinct system bottleneck that we will revisit in every chapter.
 
-### From Framework to Practice {#sec-ml-system-architecture-framework-to-practice}
+## From Framework to Practice {#sec-ml-system-architecture-framework-to-practice}
 
 \index{latency!decision thresholds} \index{latency vs throughput!trade-offs}How do physical constraints translate into engineering decisions? The answer starts with numbers. @tbl-latency-numbers provides order-of-magnitude latencies that should inform every deployment decision—spanning eight orders of magnitude from nanosecond compute operations to hundreds of milliseconds for cross-region network calls. Detailed hardware latencies and bandwidth constraints are covered in @sec-ai-acceleration. The key decision rule: if your latency budget is $X$ ms, you cannot use any operation with latency $> X$ in your critical path[^fn-critical-path].
 
@@ -1263,7 +1259,7 @@ labor_pct_str = f"{labor_pct_value:.0f}%"
 | **DevOps labor**     |      `{python} devops_fte_str` FTE × `{python} devops_salary_str` salary |     `{python} e_labor_str` |
 | **Total Edge**       |                                                                          | **`{python} e_total_str`** |
 
-**Break-even Analysis**: @eq-edge-breakeven determines when edge deployment becomes cost-effective:
+**Break-even Analysis**: @eq-edge-breakeven determines when edge deployment becomes cost-effective. **Edge Fixed Costs** include hardware amortization and maintenance, **Cloud Variable Cost per Unit** is the per-inference cloud pricing, and **Capacity** is the maximum inference rate of the edge system:
 
 $$\text{Break-even utilization} = \frac{\text{Edge Fixed Costs}}{\text{Cloud Variable Cost per Unit} \times \text{Capacity}}$$ {#eq-edge-breakeven}
 
