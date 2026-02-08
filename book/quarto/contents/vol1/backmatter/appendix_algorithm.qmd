@@ -4,6 +4,35 @@ engine: jupyter
 
 # Algorithm Foundations {#sec-algorithm-foundations}
 
+## Purpose {.unnumbered}
+
+_What algorithmic building blocks determine both what neural networks compute and how efficiently systems can run them?_
+
+Many performance problems that look “hardware-bound” are actually rooted in the algorithm’s structure: a model may be dominated by matrix multiplies, but its *shapes*, *layouts*, and *sparsity patterns* decide whether those multiplies hit fast tensor cores or fall back to slow kernels. Likewise, training instabilities often trace back to the mechanics of differentiation and the memory footprint of activations.
+
+This appendix collects the compact linear algebra and learning mechanics you need for ML systems work. It focuses on the pieces that show up repeatedly in profiling traces and back-of-the-envelope estimates: GEMM intensity, tensor shapes and strides, sparse storage overheads, and the true components of training memory.
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Explain why GEMM dominates deep learning compute and how its arithmetic intensity scales with problem size
+- Identify when sparsity reduces memory and when metadata overhead eliminates the win
+- Diagnose common tensor-shape, stride, and broadcasting mistakes that break performance (or correctness)
+- Describe the forward/backward passes of backpropagation and why activations dominate training memory
+- Apply quick parameter/FLOP formulas to estimate feasibility before provisioning hardware
+
+:::
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix is designed as a **reference**. Use it when you need to translate a profiler symptom (“slow matmul,” “shape mismatch,” “OOM during training”) into a concrete computational or memory cause.
+
+Conventions used here follow the book-wide notation in @sec-notation-conventions (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
+
+- **When GEMMs are slow**: Use @sec-system-foundations-general-matrix-multiply-gemm-5f92 and compare intensity to your hardware’s ridge point.
+- **When memory blows up in training**: Use @sec-system-foundations-mechanics-learning-78b6 and the training memory decomposition.
+- **When tensor code “should work” but doesn’t**: Use @sec-system-foundations-shapes-strides-bfd9 and @sec-system-foundations-broadcasting-3387.
+- **When sparsity is proposed as a fix**: Use @sec-system-foundations-sparse-matrix-formats-7920 to check density and metadata overhead.
+
 ```{python}
 #| label: appendix-algorithm-setup
 #| echo: false
@@ -109,9 +138,9 @@ In deep learning, this is our primary tool for measuring **similarity**. In Atte
 
 GEMM is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in **FP16** ({python} bytes_fp16_str bytes/element):
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in **FP16** (`{python} bytes_fp16_str` bytes/element):
 
-{python} gemm_intensity_eq
+`{python} gemm_intensity_eq`
 
 This explains several important phenomena:
 
@@ -133,8 +162,8 @@ CSR is essential for recommendation systems (sparse embedding tables) and pruned
 
 **Example**: A vocabulary embedding matrix of size `{python} vocab_size_str`×`{python} embed_dim_str` (`{python} total_elements_str` billion parameters).
 
-*   **Dense (FP32)**: `{python} total_elements_str` × 10⁹ × {python} bytes_fp32_str bytes = **`{python} dense_gb_str` GB**.
-*   **Sparse (`{python} sparsity_pct_str`% density)**: Storing only non-zeros requires roughly `{python} nonzeros_str` × 10⁶ × ({python} bytes_fp32_str bytes value + {python} bytes_int32_str bytes index) ≈ **`{python} sparse_mb_str` MB**.
+*   **Dense (FP32)**: `{python} total_elements_str` × 10⁹ × `{python} bytes_fp32_str` bytes = **`{python} dense_gb_str` GB**.
+*   **Sparse (`{python} sparsity_pct_str`% density)**: Storing only non-zeros requires roughly `{python} nonzeros_str` × 10⁶ × (`{python} bytes_fp32_str` bytes value + `{python} bytes_int32_str` bytes index) ≈ **`{python} sparse_mb_str` MB**.
 *   *Result*: A `{python} reduction_factor_str`× reduction in memory footprint, fitting a model that would otherwise OOM (Out of Memory).
 
 ## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
@@ -281,9 +310,9 @@ $$ M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations} $$
 
 For a standard Adam optimizer in Mixed Precision:
 
-*   **Weights**: {python} bytes_fp16_str bytes (FP16/BF16) or {python} bytes_fp32_str bytes (FP32).
+*   **Weights**: `{python} bytes_fp16_str` bytes (FP16/BF16) or `{python} bytes_fp32_str` bytes (FP32).
 *   **Gradients**: Same size as weights.
-*   **Optimizer State**: {python} optimizer_overhead_str bytes per parameter (Momentum + Variance + FP32 Master Weights).
+*   **Optimizer State**: `{python} optimizer_overhead_str` bytes per parameter (Momentum + Variance + FP32 Master Weights).
 *   **Activations**: The hidden giant. $O(Batch \times Sequence \times Layers \times Width)$.
 
 **The Activation Explosion**: While weights are fixed ($O(P)$), activations grow linearly with **Batch Size** and **Sequence Length**. For Large Language Models, activations can be 10-50x larger than the weights. This is why techniques like **Gradient Checkpointing**[^fn-grad-checkpoint] [@chen2016training] and FlashAttention (tiling attention to reduce memory round-trips) are mandatory, not optional.

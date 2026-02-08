@@ -375,6 +375,39 @@ Never skip heading levels:
 - `#####` — Fine-grained topics (use sparingly)
 - `######` — Avoid; restructure instead
 
+### Rule 7b: When to Use `{.unnumbered}` on Sub-Headers
+
+Use `{.unnumbered}` on sub-headers in exactly two contexts:
+
+1. **Structural/frontmatter/backmatter elements** that should never be numbered: `## Purpose {.unnumbered}`, `# Welcome {.unnumbered}`, `# References {.unnumbered}`, etc.
+
+2. **Named sub-items within a parent section** where the parent already provides the numbered TOC entry and the sub-items are tightly coupled components of a single argument. These would clutter the TOC if numbered.
+
+```markdown
+<!-- ✅ GOOD — three named items within a numbered parent -->
+## Physical Constraints: Why Paradigms Exist {#sec-physical-constraints}
+
+The physical laws create three barriers...
+
+### The Light Barrier {.unnumbered}
+Physics content...
+
+### The Power Wall {.unnumbered}
+Physics content...
+
+### The Memory Wall {.unnumbered}
+Physics content...
+```
+
+```markdown
+<!-- ✅ GOOD — procedural steps within a numbered parent -->
+#### Step 1: Hardware Limits {.unnumbered}
+#### Step 2: Model Characteristics {.unnumbered}
+#### Step 3: Performance Prediction {.unnumbered}
+```
+
+**Do NOT use `{.unnumbered}`** on headers that represent major navigational divisions of the chapter. If a section is important enough to appear in the TOC or to be cross-referenced from other chapters, it needs a number and a `{#sec-...}` ID.
+
 ### Rule 8: No Lone Sub-Headers
 
 If a section header has exactly ONE child header at the next level (no siblings), remove the child — it fragments prose without adding navigational value. The content should flow directly under the parent.

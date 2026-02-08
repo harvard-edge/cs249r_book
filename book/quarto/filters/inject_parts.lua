@@ -368,9 +368,11 @@ function RawBlock(el)
         local part_number = get_next_part_number()
         local roman_numeral = to_roman(part_number)
 
-        part_cmd = "\\numberedpart{" .. formatted_title .. "}"  -- Use custom command instead
-        -- Use \tocpartentry (defined in header-includes.tex) which checks
-        -- \ifetoclocaltoc to suppress Part headings inside chapter mini-TOCs.
+        part_cmd = "\\numberedpart{" .. formatted_title .. "}"
+        -- TOC entry: \protect prevents expansion at write time so \tocpartentry
+        -- survives into the .toc file. At read time, \tocpartentry checks
+        -- \ifminitoc to render in the global TOC but hide in chapter mini-TOCs.
+        -- See header-includes.tex for the full mechanism.
         local toc_cmd = "\\addtocontents{toc}{\\protect\\tocpartentry{Part~" .. roman_numeral .. "~" .. formatted_title .. "}}"
         local reset_cmd = "\\haspartsummaryfalse"  -- Reset flag after display
         -- Skip part pages when building single chapters to avoid Float(s) lost errors
