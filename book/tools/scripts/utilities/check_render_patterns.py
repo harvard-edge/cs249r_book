@@ -6,11 +6,10 @@ Detects patterns known to cause PDF/LaTeX rendering issues:
 1. Missing opening backtick: {python} var` (renders raw {python} text)
 2. Dollar sign instead of backtick: ${python} var` (same rendering failure)
 3. Inline Python inside $...$ math blocks (LaTeX escaping breaks output)
-4. Non-standard arithmetic intensity units (should be FLOPs/byte)
-5. LaTeX symbols adjacent to inline Python: `{python}` $\times$
-6. Quad asterisks (malformed bold): ****text**
-7. Footnotes in table cells: | text[^fn-xxx] |
-8. Grid tables (should be pipe tables for inline Python)
+4. LaTeX symbols with space adjacent to inline Python: `{python} var` $\times$
+5. Quad asterisks (malformed bold): ****text**
+6. Footnotes in table cells: | text[^fn-xxx] |
+7. Grid tables (should be pipe tables for inline Python)
 
 Usage:
   python check_render_patterns.py --check book/quarto/contents/
@@ -59,28 +58,26 @@ PATTERNS = {
     # previously produced false positives on lines like:
     #   $\times$ `{python} foo` $\times$
     # where {python} is BETWEEN two separate math blocks, not inside one.
-    'inconsistent_arith_units': {
-        # Catch non-standard arithmetic intensity units (should be FLOPs/byte)
-        # Excludes the correct form "FLOPs/byte" and "FLOP/byte"
-        'regex': re.compile(r'(?:Ops/Byte|Ops/byte|ops/byte|FLOPS/byte|FLOPS per byte|FLOPs per byte)'),
-        'severity': 'warning',
-        'message': 'Non-standard arithmetic intensity unit - should be "FLOPs/byte"',
-        'fix_hint': 'Standardize to "FLOPs/byte" (capital F, capital L, lowercase s)'
-    },
+    # NOTE: 'inconsistent_arith_units' check removed — different chapters
+    # legitimately use different phrasings ("FLOPs per byte", "ops/byte", etc.)
+    # depending on context, and enforcing a single form is not useful.
     # NOTE: The original 'latex_inline_python' check was removed because it
     # produced false positives on currency patterns like $`{python} cost_str`.
     # The 'python_in_dollar_math' check above handles real $...{python}...$ cases.
-    'latex_adjacent_python_after': {
-        'regex': re.compile(r'`\{python\}[^`]+`\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)'),
+    'latex_adjacent_python_after_space': {
+        # Only flag when there's a SPACE between the closing backtick and the $
+        # No-space pattern (`{python} var`$\times) renders correctly.
+        'regex': re.compile(r'`\{python\}[^`]+`\s+\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)'),
         'severity': 'warning', 
-        'message': 'LaTeX symbol after inline Python - may not render correctly in PDF',
-        'fix_hint': 'Use Unicode: × instead of $\\times$, ≈ instead of $\\approx$'
+        'message': 'Space between inline Python and LaTeX symbol - may not render correctly in PDF',
+        'fix_hint': 'Remove space: `{python} var`$\\times$ (no space before $)'
     },
-    'latex_adjacent_python_before': {
-        'regex': re.compile(r'\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)\$\s*`\{python\}'),
+    'latex_adjacent_python_before_space': {
+        # Only flag when there's a SPACE between the $ and the opening backtick
+        'regex': re.compile(r'\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)\$\s+`\{python\}'),
         'severity': 'warning',
-        'message': 'LaTeX symbol before inline Python - may not render correctly in PDF',
-        'fix_hint': 'Use Unicode: × instead of $\\times$, ≈ instead of $\\approx$'
+        'message': 'Space between LaTeX symbol and inline Python - may not render correctly in PDF',
+        'fix_hint': 'Remove space: $\\times$`{python} var` (no space after $)'
     },
     'quad_asterisks': {
         'regex': re.compile(r'\*{4,}'),
