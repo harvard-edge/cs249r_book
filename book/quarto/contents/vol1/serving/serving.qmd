@@ -189,7 +189,7 @@ bf_collapse_latency_s_str = f"{bf_collapse_latency_s_value}"  # e.g. "10" second
 
 **The Event**: On Black Friday, traffic spikes `{python} bf_spike_factor_str`x to `{python} bf_qps_spike_str` QPS.
 
-**The Failure**: The system does not just slow down `{python} bf_spike_factor_str`x. It **collapses**. Latency hits `{python} bf_collapse_latency_s_str` seconds, then requests start timing out. The servers are 100% utilized, but *useful* throughput drops to near zero—most completed requests have already timed out from the client's perspective.
+**The Failure**: The system does not just slow down `{python} bf_spike_factor_str`x. It **collapses**. Latency hits `{python} bf_collapse_latency_s_str` seconds, then requests start timing out. The servers are 100% utilized, but *useful* throughput drops to near zero because most completed requests have already timed out from the client's perspective.
 
 **The Physics**: This is **Little's Law** and **Queueing Theory** in action. As utilization approaches 100%, queue lengths grow exponentially, not linearly. The system spends more time managing the queue (context switching, thrashing) than doing useful work.
 
@@ -440,7 +440,7 @@ Latency constraints directly dictate infrastructure costs. Consider a GPU server
 
 :::
 
-Most production systems combine both approaches. Common queries hit a cache populated by batch inference while uncommon requests trigger dynamic computation. Understanding this spectrum is essential because it determines which subsequent optimization strategies apply. Static inference optimizes for throughput during batch computation and storage efficiency for serving. Dynamic inference optimizes for per-request latency under concurrent load, which requires understanding *where* time goes within each request.
+Most production systems combine both approaches. Common queries hit a cache populated by batch inference while uncommon requests trigger dynamic computation. Understanding this spectrum matters because it determines which subsequent optimization strategies apply. Static inference optimizes for throughput during batch computation and storage efficiency for serving. Dynamic inference optimizes for per-request latency under concurrent load, which requires understanding *where* time goes within each request.
 
 The static-versus-dynamic decision is the first of several architectural choices that shape serving system design. Equally important is *where* the model executes, since deployment context constrains every subsequent optimization.
 
@@ -597,9 +597,9 @@ The same ResNet-50 architecture requires dramatically different serving strategi
 
 The preceding spectrum focused on *how* deployment context shapes serving constraints, from datacenter GPUs to microcontroller SRAM. What happens when traffic exceeds what a single machine can handle? For cloud and datacenter deployments specifically—where multiple replicas serve the same model—an additional infrastructure layer becomes essential: the load balancer. Production serving systems place load balancers\index{Load Balancer!serving infrastructure} between clients and model servers, providing three essential functions for serving infrastructure.
 
-The first function, request distribution, routes incoming requests to available model replicas using algorithms like round-robin or least-connections. For latency-sensitive ML serving, algorithms that route away from slow or overloaded replicas improve tail latency. The second, health monitoring\index{Health Monitoring!replica readiness}, continuously verifies that replicas are ready to serve, routing traffic away from unhealthy instances. For ML systems, health checks must verify not just process liveness but model readiness, confirming that weights are loaded and warmup is complete. The third, deployment support, enables safe model updates by gradually shifting traffic between versions. @sec-machine-learning-operations-mlops examines deployment strategies including canary testing, blue-green deployments, and shadow mode validation.
+Request distribution, the first function, routes incoming requests to available model replicas using algorithms like round-robin or least-connections. For latency-sensitive ML serving, algorithms that route away from slow or overloaded replicas improve tail latency. The second, health monitoring\index{Health Monitoring!replica readiness}, continuously verifies that replicas are ready to serve, routing traffic away from unhealthy instances. For ML systems, health checks must verify not just process liveness but model readiness, confirming that weights are loaded and warmup is complete. The third, deployment support, enables safe model updates by gradually shifting traffic between versions. @sec-machine-learning-operations-mlops examines deployment strategies including canary testing, blue-green deployments, and shadow mode validation.
 
-For single-machine serving with multiple model instances, such as running several ONNX Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes essential when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
+For single-machine serving with multiple model instances, such as running several ONNX Runtime sessions, the framework and operating system handle request queuing. The full complexity of load balancing becomes necessary when scaling to distributed inference systems, where multiple machines serve the same model. The implementation details of request distribution algorithms and multi-replica architectures belong to that distributed context.
 
 When capacity planning considers "the server" in this chapter, it means the single machine's model serving capacity. The queuing dynamics analyzed in @sec-model-serving-systems-queuing-theory-tail-latency-29a6 apply to understanding single-machine behavior and determining when scaling to multiple machines becomes necessary.
 
@@ -619,7 +619,7 @@ These isolation principles transform a simple "model script" into a **determinis
 
 ## Serving System Architecture {#sec-model-serving-systems-serving-system-architecture-4879}
 
-Building a high-performance serving system requires coordinating multiple software components to minimize overhead and maximize hardware utilization. This section examines the internal architecture of inference servers and the protocols that connect them to clients.
+Building a high-performance serving system requires coordinating multiple software components to minimize overhead and maximize hardware utilization. This section examines inference server internals and the protocols that connect them to clients.
 
 ### Internal Architecture and Request Flow {#sec-model-serving-systems-anatomy-inference-server-f12e}
 
@@ -663,11 +663,11 @@ Every request traverses a multi-stage pipeline designed to maximize hardware thr
 ```
 :::
 
-The server architecture serves three critical functions. First, *concurrency management*: servers use asynchronous event loops or thread pools to handle thousands of concurrent client connections without blocking, ensuring that network I/O wait times do not idle the accelerator. Second, *request transformation*\index{Request Transformation!tensor formats}: the server converts network payloads (JSON/Protobuf) into the specific tensor formats required by the optimized model runtime. Image tensors, for example, can be stored as NCHW[^fn-nchw-nhwc]\index{NCHW!tensor layout} (batch, channels, height, width) or NHWC\index{NHWC!tensor layout} (batch, height, width, channels). PyTorch and TensorRT prefer NCHW because it places channel data contiguously, enabling efficient convolution on GPUs. TensorFlow defaults to NHWC, which is more efficient on CPUs.
+This architecture serves three functions. First, *concurrency management*: servers use asynchronous event loops or thread pools to handle thousands of concurrent client connections without blocking, ensuring that network I/O wait times do not idle the accelerator. Second, *request transformation*\index{Request Transformation!tensor formats}: the server converts network payloads (JSON/Protobuf) into the specific tensor formats required by the optimized model runtime. Image tensors, for example, can be stored as NCHW[^fn-nchw-nhwc]\index{NCHW!tensor layout} (batch, channels, height, width) or NHWC\index{NHWC!tensor layout} (batch, height, width, channels). PyTorch and TensorRT prefer NCHW because it places channel data contiguously, enabling efficient convolution on GPUs. TensorFlow defaults to NHWC, which is more efficient on CPUs.
 
 [^fn-nchw-nhwc]: **NCHW and NHWC**: These acronyms encode the memory layout order of 4D image tensors: N (batch), C (channels), H (height), W (width). The layout determines which elements are contiguous in memory, with profound performance implications. NCHW places all values for one channel together, enabling vectorized convolution filters to read contiguous memory blocks on GPUs. NHWC interleaves channels at each spatial position, which aligns better with CPU SIMD instructions that process multiple channels simultaneously. The choice dates to framework design decisions: Caffe (2014) established NCHW as the GPU convention; TensorFlow (2015) chose NHWC for CPU compatibility. A format mismatch between client and server silently corrupts inference: the model interprets pixel rows as color channels, producing garbage outputs without raising errors.
 
-Third, *model management*: servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and ensuring that warmup inferences are completed before exposing the model to live traffic.
+Third, *model management*: inference servers manage the lifecycle of models, including loading weights into VRAM, managing versioning, and ensuring that warmup inferences are completed before exposing the model to live traffic.
 
 Of these components, the scheduler deserves special attention because it embodies the core serving tradeoff between throughput and latency.
 
@@ -762,7 +762,7 @@ The architectural components and protocols examined so far describe *how* servin
 
 ## Request Lifecycle {#sec-model-serving-systems-request-lifecycle-d9c6}
 
-With the serving architecture established, we now trace *what* happens to a single request as it flows through the system. Understanding *where* time goes within each request is essential for effective optimization: you cannot improve what you do not measure.
+With the serving architecture established, we now trace *what* happens to a single request as it flows through the system. Understanding *where* time goes within each request is essential for effective optimization: one cannot improve what one does not measure.
 
 ### The Latency Budget {#sec-model-serving-systems-latency-budget-ef40}
 
@@ -1004,7 +1004,7 @@ dlrm_total_str = f"{dlrm_total_ms_value}ms"                                  # e
 | **Total**          |                              | **`{python} dlrm_total_str`** |                |
 
 **Key Systems Insight**:
-In DLRM, the "Inference" (MLP) is only ~15% of the latency. The majority of time is spent in **Embedding Lookups**—retrieving massive 128-dim vectors from terabyte-scale tables. This is an **IO-bound** workload where adding more GPUs doesn't help unless you also add more **Memory Bandwidth** and **Capacity**.
+In DLRM, the "Inference" (MLP) is only ~15% of the latency. The majority of time is spent in **Embedding Lookups**, retrieving massive 128-dim vectors from terabyte-scale tables. This is an IO-bound workload where adding more GPUs does not help unless memory bandwidth and capacity also increase.
 :::
 
 This breakdown reveals why straightforward optimization efforts often fail. Engineers focus on model optimization (quantization, pruning) because that is where ML expertise applies, but the actual bottleneck is image decoding running on CPU. Adopting *the quantitative approach to serving* exposes these hidden bottlenecks before engineering effort is misallocated.
@@ -1314,11 +1314,11 @@ response = {
 ```
 :::
 
-Each step adds latency but improves response utility. Calibration in particular can add significant computation but is essential when downstream systems make decisions based on confidence scores.
+Each step adds latency but improves response utility. Calibration in particular can add significant computation but is necessary when downstream systems make decisions based on confidence scores.
 
 #### Output Formatting {#sec-model-serving-systems-output-formatting-3b24a}
 
-Production systems rarely return raw predictions. Outputs must conform to API contracts that specify JSON serialization schemas, confidence score formatting, and thresholding rules. Error handling must address edge cases—what does the system return when no prediction exceeds the confidence threshold, or when the input appears out-of-distribution? Response metadata (model version, inference time, feature attributions) enables downstream monitoring and debugging.
+Production systems rarely return raw predictions. Outputs must conform to API contracts that specify JSON serialization schemas, confidence score formatting, and thresholding rules. Error handling must address edge cases: what does the system return when no prediction exceeds the confidence threshold, or when the input appears out-of-distribution? Response metadata (model version, inference time, feature attributions) enables downstream monitoring and debugging.
 
 The latency budget analysis reveals *where* time goes within a single request. Production systems, however, do not process requests in isolation: they must handle hundreds or thousands of concurrent requests competing for finite resources. Understanding this concurrency requires a different analytical framework.
 
@@ -1405,7 +1405,7 @@ Little's Law has immediate practical implications. If your inference service ave
 
 ### The Utilization-Latency Relationship {#sec-model-serving-systems-utilizationlatency-relationship-a2f0}
 
-Little's Law tells us what the system looks like on average, but it does not reveal *how* latency changes as load approaches capacity. To answer the critical question of *how* much spare capacity a serving system needs, we turn to the M/M/1 queue model. For a system with Poisson arrivals\index{Poisson Arrivals!queuing model} and exponential service times, the average time in system follows:
+Little's Law describes average system behavior, but it does not reveal *how* latency changes as load approaches capacity. To answer the critical question of *how* much spare capacity a serving system needs, we turn to the M/M/1 queue model. For a system with Poisson arrivals\index{Poisson Arrivals!queuing model} and exponential service times, the average time in system follows:
 
 $$W = \frac{1}{\mu - \lambda} = \frac{\text{service time}}{1 - \rho}$$ {#eq-mm1-wait}
 
@@ -1429,7 +1429,7 @@ The M/M/1 model assumes exponentially distributed service times, but ML inferenc
 
 ### Multi-Server Considerations {#sec-model-serving-systems-multiserver-considerations-00fc}
 
-The preceding analysis focuses on a single ML node (one machine serving inference requests). This scope aligns with this book's focus on mastering the basic unit of ML systems. Single-node queuing dynamics are prerequisite to effective scaling. You cannot optimize a distributed system without first understanding the behavior of its components.
+The preceding analysis focuses on a single ML node (one machine serving inference requests). This scope aligns with this book's focus on mastering the basic unit of ML systems. Single-node queuing dynamics are prerequisite to effective scaling. Engineers cannot optimize a distributed system without first understanding the behavior of its components.
 
 #### When Single-Node Analysis Applies {#sec-model-serving-systems-single-node-analysis-00fc1}
 
@@ -1453,7 +1453,7 @@ At 70 percent utilization, p99 latency is approximately fifteen times the servic
 
 Dean and Barroso's analysis reveals *why* tail latency\index{Tail at Scale!fan-out amplification} becomes critical as systems scale beyond single machines [@dean2013tail]. When requests fan out to multiple servers, the probability of experiencing at least one slow response grows rapidly with server count. This "tail at scale" effect makes individual server tail latency critical for overall system performance.
 
-For single-machine serving, this principle has two implications. First, tail latency on individual machines matters because it will compound when systems eventually scale. Second, the tail-tolerant techniques described below (hedging, graceful degradation) provide value even on single machines and become essential at scale.
+For single-machine serving, this principle has two implications. First, tail latency on individual machines matters because it will compound when systems eventually scale. Second, the tail-tolerant techniques described below (hedging, graceful degradation) provide value even on single machines and become indispensable at scale.
 
 Tail-tolerant techniques such as request hedging send redundant requests after a timeout, accepting whichever response arrives first. Backup requests and load balancing away from slow servers directly address latency variance. These techniques apply to single-machine serving with multiple GPU streams or model replicas, and become essential when scaling to distributed inference systems.
 
@@ -1731,7 +1731,7 @@ Without warmup, the first real request triggers compilation and memory allocatio
 
 ### Loading Strategies {#sec-model-serving-systems-loading-strategies-eb38}
 
-Different loading strategies trade off cold start duration against serving performance and memory efficiency. The simplest approach, *full loading*\index{Model Loading!full loading}, reads the entire model into memory before serving begins. This maximizes inference speed since all weights are immediately available, but extends cold start duration and limits model size to available memory—appropriate when cold start latency is acceptable and models comfortably fit in memory.
+Different loading strategies trade off cold start duration against serving performance and memory efficiency. The simplest approach, *full loading*\index{Model Loading!full loading}, reads the entire model into memory before serving begins. This maximizes inference speed since all weights are immediately available, but extends cold start duration and limits model size to available memory. The approach is appropriate when cold start latency is acceptable and models comfortably fit in memory.
 
 When models are too large for immediate full loading, *memory mapping*\index{Memory Mapping!on-demand loading}\index{mmap!model loading} offers an alternative by mapping model files directly into the address space and loading pages on demand as accessed. This reduces cold start time since inference can begin before the full model loads, but causes unpredictable latency as pages fault in during initial requests. Memory mapping works well for infrequently accessed model components but can cause latency spikes if critical weights are not preloaded.
 
@@ -1739,7 +1739,7 @@ A third strategy, *lazy initialization*\index{Lazy Initialization!deferred compi
 
 ### Model Caching Infrastructure {#sec-model-serving-systems-model-caching-infrastructure-4f1a}
 
-Production systems cache model weights at the infrastructure level to reduce cold start for common deployment scenarios. One approach, *container image embedding*\index{Model Caching!container embedding}, bundles model weights directly in the container image. This produces a single deployment artifact and eliminates network fetches at startup, but creates large images (often 10–50 GB) that slow container pulls and consume registry storage—best suited for models that rarely update.
+Production systems cache model weights at the infrastructure level to reduce cold start for common deployment scenarios. One approach, *container image embedding*\index{Model Caching!container embedding}, bundles model weights directly in the container image. This produces a single deployment artifact and eliminates network fetches at startup, but creates large images (often 10-50 GB) that slow container pulls and consume registry storage. This approach works best for models that rarely update.
 
 For organizations with many models and frequent updates, a *shared filesystem* (EFS, GCS FUSE) containing model weights provides a more flexible alternative. Multiple replicas share cached weights, and updates propagate immediately without redeployment. The tradeoff is that network latency affects cold start, and filesystem availability becomes a critical dependency.
 
@@ -1935,7 +1935,7 @@ latency_increase_str = fmt(latency_increase_value, precision=0, commas=False)   
 **The Systems Conclusion**: By accepting a **`{python} latency_increase_str`× increase in latency** (`{python} batch1_ms_str` ms → `{python} batch8_user_latency_str` ms), you have achieved nearly **`{python} latency_increase_str`× higher throughput** on the same hardware. As long as `{python} batch8_user_latency_str` ms is under your 20ms budget, this is "free" capacity. This trade-off is the primary lever of serving economics.
 :::
 
-Look for the **"Knee"** in @fig-throughput-latency-knee—the point where the blue throughput curve begins to plateau just as the orange latency curve starts its sharp upward spike. This is the optimal operating point: push batch size beyond the knee and queuing delays dominate; stay below it and you leave hardware capacity on the table. The numbers are representative rather than tied to a single benchmark.
+Look for the **"Knee"** in @fig-throughput-latency-knee, the point where the blue throughput curve begins to plateau just as the orange latency curve starts its sharp upward spike. This is the optimal operating point: push batch size beyond the knee and queuing delays dominate; stay below it and you leave hardware capacity on the table. The numbers are representative rather than tied to a single benchmark.
 
 ```{python}
 #| label: fig-throughput-latency-knee
