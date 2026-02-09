@@ -413,30 +413,10 @@
         }
     </style>
 
-    <!-- Sky Shader Vertex -->
-    <script id="sky-vs" type="x-shader/x-vertex">
-        varying vec2 vUv;
-        varying vec3 vWorldPosition;
-        void main() {
-            vUv = uv;
-            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-            vWorldPosition = worldPosition.xyz;
-            gl_Position = projectionMatrix * viewMatrix * worldPosition;
-        }
-    </script>
-
-    <!-- Sky Shader Fragment -->
-    <script id="sky-fs" type="x-shader/x-fragment">
-        uniform vec3 uColor;
-
-        void main() {
-            gl_FragColor = vec4(uColor, 1.0);
-        }
-    </script>
-
     <script type="module" src="app.js"></script>
     <script type="module">
         import { ArxivService } from './arxiv_service.js';
+        import { DotismScene } from './modules/dotism.js';
 
         // --- Configuration & Data ---
         const arxiv = new ArxivService();
@@ -465,133 +445,21 @@
             { year: 2024, name: "DeepSeek-V2", authors: "DeepSeek AI", z: -480 }
         ];
 
-        const Noise = (function() {
-            var p = [151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142,8,99,37,240,21,10,23,
-            190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117,35,11,32,57,177,33,88,237,149,56,87,174,20,125,136,171,168,
-            68,175,74,165,71,134,139,48,27,166,77,146,158,231,83,111,229,122,60,211,133,230,220,105,92,41,55,46,245,40,244,
-            102,143,54,65,25,63,161,1,216,80,73,209,76,132,187,208,89,18,169,200,196,135,130,116,188,159,86,164,100,109,198,173,
-            186,3,64,52,217,226,250,124,123,5,202,38,147,118,126,255,82,85,212,207,206,59,227,47,16,58,17,182,189,28,42,
-            223,183,170,213,119,248,152,2,44,154,163,70,221,153,101,155,167,43,172,9,129,22,39,253,19,98,108,110,79,113,224,232,
-            178,185,112,104,218,246,97,228,251,34,242,193,238,210,144,12,191,179,162,241,81,51,145,235,249,14,239,107,49,192,
-            214,31,181,199,106,157,184,84,204,176,115,121,50,45,127,4,150,254,138,236,205,93,222,114,67,29,24,72,243,141,128,
-            195,78,66,215,61,156,180];
-            for (var i=0; i < 256 ; i++) p[256+i] = p[i];
-            function fade(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
-            function lerp(t, a, b) { return a + t * (b - a); }
-            function grad(hash, x, y, z) {
-                var h = hash & 15;
-                var u = h<8 ? x : y, v = h<4 ? y : h==12||h==14 ? x : z;
-                return ((h&1) == 0 ? u : -u) + ((h&2) == 0 ? v : -v);
-            }
-            return {
-                perlin2: function(x, y) {
-                    var X = Math.floor(x) & 255, Y = Math.floor(y) & 255;
-                    x -= Math.floor(x); y -= Math.floor(y);
-                    var u = fade(x), v = fade(y);
-                    var A = p[X]+Y, AA = p[A], AB = p[A+1], B = p[X+1]+Y, BA = p[B], BB = p[B+1];
-                    return lerp(v, lerp(u, grad(p[AA], x, y, 0), grad(p[BA], x-1, y, 0)),
-                                   lerp(u, grad(p[AB], x, y-1, 0), grad(p[BB], x-1, y-1, 0)));
-                }
-            };
-        })();
-
-        // --- Scene Setup ---
+        let flyOverY = 0;
+        let targetFlyOverY = 0;
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
-        // Updated background color (Brighter)
         const initialBgColor = new THREE.Color(0xeeeee6);
+        scene.background = initialBgColor;
+        scene.fog = new THREE.Fog(initialBgColor, 20, 140);
 
-        // FOG Adjustment (Dense fog to hide distant moire/aliasing)
-        scene.fog = new THREE.Fog(initialBgColor, 10, 75);
-
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 150);
-        camera.position.set(0, 6, 12);
-        camera.rotation.x = -Math.PI / 6;
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 20);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         container.appendChild(renderer.domElement);
-
-        // --- Sky Mesh Setup ---
-        const skyGeo = new THREE.SphereGeometry(100, 64, 64);
-        const skyMat = new THREE.ShaderMaterial({
-            vertexShader: document.getElementById('sky-vs').textContent,
-            fragmentShader: document.getElementById('sky-fs').textContent,
-            uniforms: {
-                uTime: { value: 0 },
-                // Updated background color (Brighter)
-                uColor: { value: new THREE.Color(0xeeeee6) },
-                uCloudDramatic: { value: 1.0 } // Default to dramatic
-            },
-            side: THREE.BackSide,
-            fog: false
-        });
-        const skyMesh = new THREE.Mesh(skyGeo, skyMat);
-        scene.add(skyMesh);
-
-        // --- Terrain ---
-        const width = 50;
-        const depth = 80;
-        const widthSegments = 50; // Reduced to minimize aliasing
-        const depthSegments = 60; // Reduced to minimize aliasing
-
-        const geometry = new THREE.PlaneGeometry(width, depth, widthSegments, depthSegments);
-        geometry.rotateX(-Math.PI / 2);
-
-        const count = geometry.attributes.position.count;
-        geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-
-        const material = new THREE.MeshBasicMaterial({
-            vertexColors: true,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.5 // Increased opacity
-        });
-
-        const terrain = new THREE.Mesh(geometry, material);
-        scene.add(terrain);
-
-        // --- Solid Terrain Background (The Fix) ---
-        // Instead of a flat backdrop plane (which creates a horizon line),
-        // we create a solid mesh that shares the SAME geometry as the wireframe.
-        // This makes the hills opaque, blocking the sky behind them naturally.
-        const solidMat = new THREE.MeshBasicMaterial({
-            color: 0xf5f5f0, // Initial color
-            polygonOffset: true,
-            polygonOffsetFactor: 2, // Increased offset to prevent z-fighting flicker
-            polygonOffsetUnits: 1
-        });
-        const terrainSolid = new THREE.Mesh(geometry, solidMat);
-        scene.add(terrainSolid);
-
-        // --- Timeline Path ---
-        const historyLineGeo = new THREE.BufferGeometry();
-        const futureLineGeo = new THREE.BufferGeometry();
-        const linePoints = 400;
-        historyLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePoints * 3), 3));
-        historyLineGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(linePoints * 3), 3));
-        futureLineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePoints * 3), 3));
-
-        // Start invisible (opacity 0) for scroll-triggered fade-in
-        const historyMat = new THREE.LineBasicMaterial({ vertexColors: true, linewidth: 4, transparent: true, opacity: 0 });
-        const futureMat = new THREE.LineDashedMaterial({
-            color: 0xff4500, dashSize: 0.5, gapSize: 0.3, scale: 1, linewidth: 2, opacity: 0, transparent: true
-        });
-
-        const historyLine = new THREE.Line(historyLineGeo, historyMat);
-        const futureLine = new THREE.Line(futureLineGeo, futureMat);
-        futureLine.computeLineDistances();
-
-        const glowGeo = new THREE.BufferGeometry();
-        glowGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(linePoints * 3), 3));
-        const glowMat = new THREE.PointsMaterial({
-            color: 0xff6600, size: 0.15, transparent: true, opacity: 0
-        });
-        const glowPoints = new THREE.Points(glowGeo, glowMat);
-        scene.add(glowPoints);
-        // scene.add(historyLine);
-        // scene.add(futureLine);
 
         // --- Markers ---
         const markersContainer = document.getElementById('markers-container');
@@ -611,33 +479,23 @@
             markerElements.push({ data: m, element: div });
         });
 
-        // --- Logic & Animation ---
-        const noiseScale = 0.15;
-        const heightScale = 4.0;
-        const positionAttribute = geometry.attributes.position;
-        const colorAttribute = geometry.attributes.color;
-        const originalPositions = positionAttribute.array.slice();
+        // Initialize Dotism Scene
+        DotismScene.init({
+            scene,
+            camera,
+            renderer
+        });
 
-        const colorWater = new THREE.Color(0x3498db);
-        const colorSand = new THREE.Color(0xf1c40f);
-        const colorGrass = new THREE.Color(0x2ecc71);
-        const colorRock = new THREE.Color(0xe74c3c);
-
-        const colorTimelineOrange = new THREE.Color(0xff4500);
-        const colorTimelineGray = new THREE.Color(0x888888);
-
-        let flyOverY = 0;
-        let targetFlyOverY = 0;
         const heroTitle = document.getElementById('hero-title');
 
-        // Sky Cycle Colors (Updated for brighter start)
+        // Sky Cycle Colors
         const skyColors = [
-            { pos: 0, color: new THREE.Color(0xeeeee6), dramatic: 1.0 },    // Morning (Bright, dramatic)
-            { pos: 150, color: new THREE.Color(0x8a929a), dramatic: 0.8 },  // Noon
-            { pos: 300, color: new THREE.Color(0x5a626a), dramatic: 0.3 },  // Dusk
-            { pos: 450, color: new THREE.Color(0x2a323a), dramatic: 0.1 },  // Night (Calm)
-            { pos: 550, color: new THREE.Color(0x5a626a), dramatic: 0.3 },  // Dawn
-            { pos: 700, color: new THREE.Color(0xeeeee6), dramatic: 1.0 }   // Day (Bright, dramatic)
+            { pos: 0, color: new THREE.Color(0xeeeee6), dramatic: 1.0 },
+            { pos: 150, color: new THREE.Color(0x8a929a), dramatic: 0.8 },
+            { pos: 300, color: new THREE.Color(0x5a626a), dramatic: 0.3 },
+            { pos: 450, color: new THREE.Color(0x2a323a), dramatic: 0.1 },
+            { pos: 550, color: new THREE.Color(0x5a626a), dramatic: 0.3 },
+            { pos: 700, color: new THREE.Color(0xeeeee6), dramatic: 1.0 }
         ];
 
         function getSkyState(y) {
@@ -659,53 +517,39 @@
 
         function lerp(t, a, b) { return a + t * (b - a); }
 
-        function getPathX(z) {
-            return Math.sin(z * 0.1) * 8 + Math.cos(z * 0.03) * 12;
-        }
-
-        function getColorForHeight(h) {
-            let finalColor = new THREE.Color();
-            if (h < -0.2) finalColor.copy(colorWater);
-            else if (h < 0.1) finalColor.lerpColors(colorWater, colorSand, (h + 0.2) / 0.3);
-            else if (h < 0.6) finalColor.lerpColors(colorSand, colorGrass, (h - 0.1) / 0.5);
-            else finalColor.lerpColors(colorGrass, colorRock, Math.min((h - 0.6) / 0.9, 1));
-            return finalColor;
-        }
-
         // Initialize ArXiv
+        const MARKER_SCALE = 8;
         let lastZ = MILESTONES[MILESTONES.length - 1].z;
-        const Z_INTERVAL = 20; // Distance between papers
+        const Z_INTERVAL = 30; // Spacing for new papers
         let nextPaperZ = lastZ - Z_INTERVAL;
         let spawningPapers = true;
 
         function updateScene() {
             flyOverY += (targetFlyOverY - flyOverY) * 0.08;
 
-            // --- ArXiv Paper Spawning Logic ---
-            // As we scroll down (flyOverY increases), negative Z milestones come closer to 0.
-            // When we get close to the "end" of the current list, spawn more.
-            // Check the last milestone's world Z position.
-            // wZ = lastZ + flyOverY. If wZ > -300 (it's getting closer), spawn next.
+            // Move camera through the dot landscape (matching dotism.html behavior)
+            camera.position.z = 20 - (flyOverY * 4);
+            camera.position.x = Math.sin(flyOverY * 0.2) * 2;
+            camera.position.y = 5 + Math.cos(flyOverY * 0.12) * 1;
+            camera.lookAt(0, 0, camera.position.z - 50);
             
-            const lastMilestoneWorldZ = lastZ + flyOverY;
-            if (spawningPapers && lastMilestoneWorldZ > -500) { 
-                // We are within range, try to get a paper
-                // We can't await in animation loop easily, so we poll
-                const paper = arxiv.papers.shift(); // Synchronous grab from buffer
-                
+            // Ensure camera matrices are updated before projection in updateMarkers
+            camera.updateMatrixWorld();
+
+            // --- ArXiv Paper Spawning Logic ---
+            const cameraZ = camera.position.z;
+            const lastMilestoneWorldZ = lastZ * MARKER_SCALE;
+            
+            if (spawningPapers && lastMilestoneWorldZ > cameraZ - 300) {
+                const paper = arxiv.papers.shift();
                 if (paper) {
-                    // Create marker data
                     const newM = {
                         year: paper.year,
                         name: paper.name,
                         authors: paper.authors,
                         z: nextPaperZ
                     };
-                    
-                    // Add to data structures
                     MILESTONES.push(newM);
-                    
-                    // Create DOM Element
                     const div = document.createElement('div');
                     div.className = 'marker';
                     div.innerHTML = `
@@ -717,244 +561,79 @@
                     `;
                     markersContainer.appendChild(div);
                     markerElements.push({ data: newM, element: div });
-                    
-                    // Update indices
                     lastZ = nextPaperZ;
                     nextPaperZ -= Z_INTERVAL;
                 } else {
-                    // Trigger fetch if empty (service handles dedup/busy state)
-                    arxiv.getNextPaper(); 
+                    arxiv.getNextPaper();
                 }
             }
-
 
             const skyState = getSkyState(flyOverY);
+            scene.background.copy(skyState.color);
 
-            // Sync Fog, Sky Mesh
-            scene.fog.color.copy(skyState.color);
-            skyMesh.material.uniforms.uColor.value.copy(skyState.color);
-            skyMesh.material.uniforms.uCloudDramatic.value = skyState.dramatic;
-            // Slower time for cloud movement
-            skyMesh.material.uniforms.uTime.value += 0.01;
+            // Update Dotism Scene
+            DotismScene.update(skyState);
 
-            // Sync solid terrain color so the ground darkens with the sky cycle
-            terrainSolid.material.color.copy(skyState.color);
-            
-            const Y_OFFSET = -12.0; 
-            
-            // Palette for patches (Vibrant, Brighter Variety)
-            if (!window.randomPalette) {
-                const hueBase = Math.random(); 
-                window.randomPalette = [];
-                for(let i=0; i<8; i++) {
-                    const color = new THREE.Color();
-                    const h = (hueBase + (Math.random() * 0.5 - 0.25) + i*0.1) % 1.0; 
-                    const s = 0.8 + Math.random() * 0.2;
-                    const l = 0.5 + Math.random() * 0.3;
-                    color.setHSL(h, s, l);
-                    window.randomPalette.push(color);
-                }
-            }
-            const palette = window.randomPalette;
+            // Update marker positions for the dotism camera movement
+            updateMarkers();
+        }
 
-            for (let i = 0; i < count; i++) {
-                const ix = i * 3;
-                const iz = i * 3 + 2;
-                const x = originalPositions[ix];
-                const z = originalPositions[iz];
-                const vZ = z - flyOverY;
-                
-                // --- Geometry ---
-                const noiseVal = Noise.perlin2(x * noiseScale, vZ * noiseScale);
-                // Lower frequency for jagged noise to reduce "ant crawling"
-                const jaggedNoise = Noise.perlin2(x * noiseScale * 2.0, vZ * noiseScale * 2.0);
-                
-                // Mountain Layer: Compound noise for variety
-                // Base low-freq shape
-                const mNoise1 = Noise.perlin2(x * 0.03, vZ * 0.03); 
-                // Secondary shape to break symmetry
-                const mNoise2 = Noise.perlin2(x * 0.1 + 123.4, vZ * 0.1 + 567.8);
-                
-                // Combine and threshold
-                let mountainShape = Math.max(0, mNoise1 + mNoise2 * 0.4 - 0.45);
-                
-                // Variable sharpness/height per peak (using low freq noise to map regions)
-                const regionVar = Noise.perlin2(x * 0.01, vZ * 0.01);
-                const peakHeight = 35.0 + regionVar * 15.0; // 20 to 50 height
-                const peakSharpness = 2.0 + (mNoise2 * 0.5); // Vary exponent
-                
-                // Reduced exponent from 2.5 to 1.7 to avoid "icicle" needles
-                mountainShape = Math.pow(mountainShape, 1.7) * peakHeight;
-                
-                // Add jaggedness SPECIFICALLY to mountains (rocky texture)
-                if (mountainShape > 0.5) {
-                    mountainShape += jaggedNoise * 1.5;
-                }
-                
-                // Jagged peaks only on higher ground
-                const jaggedFactor = Math.max(0, noiseVal - 0.2); 
-                const finalHeightVal = noiseVal + (jaggedFactor * jaggedNoise * 0.8) + mountainShape;
+        function getPathX(z) {
+            return Math.sin(z * 0.1) * 8 + Math.cos(z * 0.03) * 12;
+        }
 
-                let height = (finalHeightVal * heightScale) + Y_OFFSET;
-                // Clamp bottom
-                if (height < -1 + Y_OFFSET) height = -1 + Y_OFFSET;
-                
-                positionAttribute.setY(i, height);
-                
-                // --- Color ---
-                // 1. Patch Base Color (Randomized patches)
-                const patchNoise = Noise.perlin2(x * 0.15 + 100, vZ * 0.15 + 100); 
-                const normPatch = (patchNoise + 1) * 0.5; // 0..1
-                
-                // Interpolate palette
-                const scaledPatch = normPatch * (palette.length - 1);
-                const idx0 = Math.floor(scaledPatch);
-                const idx1 = Math.min(idx0 + 1, palette.length - 1);
-                const tColor = scaledPatch - idx0;
-                
-                const c = new THREE.Color().lerpColors(palette[idx0], palette[idx1], tColor);
-                
-                // 2. Linear Chunks / Streaks (Visibility Noise)
-                // "Shorter linear patches": Higher Frequency in Z (0.2)
-                const visNoise = Noise.perlin2(x * 0.5 + 200, vZ * 0.2 + 200); 
-                
-                if (visNoise < -0.15) {
-                     // Faint linear chunks
-                     c.lerp(skyState.color, 0.85);
-                } else {
-                     // Bright areas
-                     c.multiplyScalar(0.95); 
-                }
-
-                // 3. Snow Caps (Light on top)
-                // Check relative height of mountain part
-                if (mountainShape > 6.0) {
-                     // Blend to white based on height
-                     const snowFactor = Math.min(1, (mountainShape - 6.0) / 4.0);
-                     c.lerp(new THREE.Color(0xffffff), snowFactor);
-                }
-                
-                colorAttribute.setXYZ(i, c.r, c.g, c.b);
-            }
-            positionAttribute.needsUpdate = true;
-            colorAttribute.needsUpdate = true;
-
-            const lineStartZ = 10;
-            const lineEndZ = -70;
-            const step = (lineStartZ - lineEndZ) / linePoints;
-            const histPos = historyLine.geometry.attributes.position;
-            const histCol = historyLine.geometry.attributes.color;
-            const futPos = futureLine.geometry.attributes.position;
-            const glowPos = glowPoints.geometry.attributes.position;
-            // Update presentZ dynamically as we add papers?
-            // Actually, keep presentZ at the "Current" date (2024ish) or let it move?
-            // Let's keep the timeline line strictly for the "History" part (up to DeepSeek).
-            // Future papers appear beyond the timeline line.
-            const presentZ = -480; 
-
-            for (let i = 0; i < linePoints; i++) {
-                const worldZ = lineStartZ - (i * step);
-                const virtualZ = worldZ - flyOverY;
-                const pX = getPathX(virtualZ);
-                const noiseVal = Noise.perlin2(pX * noiseScale, virtualZ * noiseScale);
-                
-                // Match Terrain Logic for Line Height
-                const mNoise1 = Noise.perlin2(pX * 0.03, virtualZ * 0.03); 
-                const mNoise2 = Noise.perlin2(pX * 0.1 + 123.4, virtualZ * 0.1 + 567.8);
-                let mountainShape = Math.max(0, mNoise1 + mNoise2 * 0.4 - 0.45);
-                const regionVar = Noise.perlin2(pX * 0.01, virtualZ * 0.01);
-                const peakHeight = 35.0 + regionVar * 15.0; 
-                // Match reduced exponent
-                mountainShape = Math.pow(mountainShape, 1.7) * peakHeight;
-                if (mountainShape > 0.5) mountainShape += (Noise.perlin2(pX * noiseScale * 1.5, virtualZ * noiseScale * 1.5) * 1.5);
-                
-                const jaggedNoise = Noise.perlin2(pX * noiseScale * 1.5, virtualZ * noiseScale * 1.5);
-                const jaggedFactor = Math.max(0, noiseVal - 0.2);
-                const roughness = Noise.perlin2(pX * 0.15, virtualZ * 0.15) * 0.15;
-                const finalHeightVal = noiseVal + (jaggedFactor * jaggedNoise * 0.8) + roughness + mountainShape;
-
-                const pY = Math.max(finalHeightVal * heightScale, -1) + 0.5 + Y_OFFSET;
-                
-                glowPos.setXYZ(i, pX, pY, worldZ);
-                
-                // Hide lines for now per user request, but logic remains
-                /*
-                if (virtualZ > presentZ) {
-                    histPos.setXYZ(i, pX, pY, worldZ);
-                    futPos.setXYZ(i, 0, 0, 99999);
-                    if (worldZ > 4) {
-                        histCol.setXYZ(i, colorTimelineGray.r, colorTimelineGray.g, colorTimelineGray.b);
-                    } else {
-                        histCol.setXYZ(i, colorTimelineOrange.r, colorTimelineOrange.g, colorTimelineOrange.b);
-                    }
-                } else {
-                    histPos.setXYZ(i, 0, 0, 99999);
-                    futPos.setXYZ(i, pX, pY, worldZ);
-                }
-                */
-            }
-            // histPos.needsUpdate = true;
-            // histCol.needsUpdate = true;
-            // futPos.needsUpdate = true;
-            glowPos.needsUpdate = true;
-            futureLine.computeLineDistances();
-
+        function updateMarkers() {
             const tempV = new THREE.Vector3();
             markerElements.forEach(item => {
                 const m = item.data;
                 const el = item.element;
-                const wZ = m.z + flyOverY;
-                const vZ = m.z;
 
-                if (wZ > -60 && wZ < 20) {
-                    const wX = getPathX(vZ);
-                    const noiseVal = Noise.perlin2(wX * noiseScale, vZ * noiseScale);
-                    
-                    // Adjust marker height logic
-                    const mNoise1 = Noise.perlin2(wX * 0.03, vZ * 0.03); 
-                    const mNoise2 = Noise.perlin2(wX * 0.1 + 123.4, vZ * 0.1 + 567.8);
-                    let mountainShape = Math.max(0, mNoise1 + mNoise2 * 0.4 - 0.45);
-                    const regionVar = Noise.perlin2(wX * 0.01, vZ * 0.01);
-                    const peakHeight = 35.0 + regionVar * 15.0; 
-                    // Match reduced exponent
-                    mountainShape = Math.pow(mountainShape, 1.7) * peakHeight;
-                    if (mountainShape > 0.5) mountainShape += (Noise.perlin2(wX * noiseScale * 1.5, vZ * noiseScale * 1.5) * 1.5);
+                // Markers are stationary in world space, scaled to match scroll
+                const worldZ = m.z * MARKER_SCALE;
 
-                    const jaggedNoise = Noise.perlin2(wX * noiseScale * 1.5, vZ * noiseScale * 1.5);
-                    const jaggedFactor = Math.max(0, noiseVal - 0.2);
-                    const roughness = Noise.perlin2(wX * 0.15, vZ * 0.15) * 0.15;
-                    const finalHeightVal = noiseVal + (jaggedFactor * jaggedNoise * 0.8) + roughness + mountainShape;
-                    
-                    const wY = Math.max(finalHeightVal * heightScale, -1) + 2.5 + Y_OFFSET;
-                    
-                    tempV.set(wX, wY, wZ);
-                    tempV.project(camera);
-                    const x = (tempV.x * .5 + .5) * window.innerWidth;
-                    const y = (-(tempV.y * .5) + .5) * window.innerHeight;
+                const wX = getPathX(worldZ * 0.005); // Use lower frequency for path scaling
+                const simplex = DotismScene.getSimplex();
+                const h1 = simplex.noise2D(wX * 0.01, worldZ * 0.01) * 25;
+                const h2 = simplex.noise2D(wX * 0.03, worldZ * 0.03) * 8;
+                const baseHeight = h1 + h2 - 10;
+                const wY = baseHeight + 2.5;
 
-                    if (wZ > 5) el.classList.add('past');
-                    else el.classList.remove('past');
+                tempV.set(wX, wY, worldZ);
+                tempV.project(camera);
 
-                    const dist = Math.abs(wZ);
-                    let opacity = 1;
-                    if (wZ > 12) opacity = 0;
-                    else if (wZ < -40) opacity = Math.max(0, 1 - (Math.abs(wZ) - 40) / 10);
-                    
-                    // --- NEW: Global Fade In for Markers (Post-Header) ---
-                    // Header fades out by scrollY=600. targetFlyOverY = scrollY * 0.25 = 150.
-                    // smooth step from 150 to 200
-                    let globalFade = (flyOverY - 150) / 50;
-                    if (globalFade < 0) globalFade = 0;
-                    if (globalFade > 1) globalFade = 1;
-                    
-                    opacity *= globalFade;
+                const screenX = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+                const screenY = (-tempV.y * 0.5 + 0.5) * window.innerHeight;
 
-                    el.style.opacity = opacity;
-                    el.style.left = `${x}px`;
-                    el.style.top = `${y}px`;
-                } else {
-                    el.style.opacity = 0;
+                // Past check based on camera position
+                if (worldZ > camera.position.z) el.classList.add('past');
+                else el.classList.remove('past');
+
+                // Fade in as marker approaches, fade out as it passes behind
+                const viewDistance = 150;
+                const fadeInStart = camera.position.z - viewDistance;
+                const fadeInEnd = camera.position.z - 60;
+                const fadeOutStart = camera.position.z + 10;
+                const fadeOutEnd = camera.position.z + 40;
+
+                let opacity = 1;
+                if (worldZ > fadeOutStart) {
+                    opacity = Math.max(0, 1 - (worldZ - fadeOutStart) / (fadeOutEnd - fadeOutStart));
+                } else if (worldZ < fadeInStart) {
+                    opacity = Math.max(0, (worldZ - fadeInStart) / (fadeInEnd - fadeInStart));
                 }
+
+                // Global fade for hero section
+                let globalFade = (flyOverY * 4 - 150) / 50;
+                if (globalFade < 0) globalFade = 0;
+                if (globalFade > 1) globalFade = 1;
+                opacity *= globalFade;
+
+                el.style.opacity = opacity;
+                el.style.left = `${screenX}px`;
+                el.style.top = `${screenY}px`;
+                
+                // Hide if too far behind or ahead in projection
+                if (tempV.z < -1 || tempV.z > 1) el.style.opacity = 0;
             });
         }
 
@@ -968,6 +647,7 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            DotismScene.resize();
         });
 
         window.addEventListener('scroll', () => {
@@ -996,10 +676,10 @@
                 tlOpacity = (scrollY - tlStart) / (tlEnd - tlStart);
                 if (tlOpacity > 1) tlOpacity = 1;
             }
-            // Update materials
-            historyMat.opacity = tlOpacity;
-            futureMat.opacity = 0.6 * tlOpacity;
-            glowMat.opacity = 0.8 * tlOpacity;
+            // Update materials (timeline lines removed)
+            // historyMat.opacity = tlOpacity;
+            // futureMat.opacity = 0.6 * tlOpacity;
+            // glowMat.opacity = 0.8 * tlOpacity;
 
             // Show card logic
             const processCard = document.getElementById('process-card');
