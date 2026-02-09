@@ -1,6 +1,5 @@
 export class ArxivService {
     constructor() {
-        this.baseUrl = "https://export.arxiv.org/api/query";
         this.category = "cat:cs.AI";
         this.maxResults = 10;
         this.papers = [];
@@ -13,11 +12,20 @@ export class ArxivService {
         this.fetching = true;
 
         try {
-            // Sort by submittedDate descending (newest first)
-            // Use corsproxy.io to bypass CORS in browser environment
-            const query = `https://corsproxy.io/?${encodeURIComponent(this.baseUrl + `?search_query=${this.category}&sortBy=submittedDate&sortOrder=descending&start=${this.nextStart}&max_results=${this.maxResults}`)}`;
-            
-            const response = await fetch(query);
+            // Using custom Supabase Edge Function to bypass CORS and manage rate limits
+            const url = new URL("https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1/arxiv-get");
+            url.searchParams.append('search_query', this.category);
+            url.searchParams.append('sortBy', 'submittedDate');
+            url.searchParams.append('sortOrder', 'descending');
+            url.searchParams.append('start', this.nextStart);
+            url.searchParams.append('max_results', this.maxResults);
+
+            const response = await fetch(url, {
+                method: 'GET',
+                headers: {
+                    'apikey': 'sb_publishable_AP2UzNWC3T1GQGjtuTr_PQ_9q6l7AC0'
+                }
+            });
             const str = await response.text();
             
             // Parse XML
