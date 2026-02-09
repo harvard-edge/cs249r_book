@@ -487,15 +487,7 @@ The "easy" gains from shrinking transistors are gone. To sustain the exponential
 
 Historically, improvements in processor performance depended on semiconductor process scaling and increasing clock speeds. As power density limitations restricted further frequency scaling and transistor miniaturization encountered increasing physical and economic constraints, architects explored alternative approaches to sustain computational growth. The result was a shift toward domain-specific architectures, which dedicate silicon resources to optimize computation for specific application domains, trading flexibility for efficiency.
 
-Domain-specific architectures achieve superior performance and energy efficiency through several key principles:
-
-1. **Customized data paths**\index{Data Path!customization}: Design processing paths specifically optimized for target application patterns, enabling direct hardware execution of common operations. For example, matrix multiplication units in AI accelerators implement **systolic arrays**\index{Systolic Arrays!definition} (grid-like networks of processing elements that rhythmically compute and pass data through neighboring units) tailored for neural network computations.
-
-2. **Specialized memory hierarchies**\index{Memory Hierarchy!domain-specific}: Optimize memory systems around domain-specific access patterns and data reuse characteristics. This includes custom cache configurations\index{Cache!specialized configuration}, prefetching logic\index{Prefetching!accelerator optimization}, and memory controllers tuned for expected workloads.
-
-3. **Reduced instruction overhead**: Implement domain-specific instruction sets that minimize decode and dispatch complexity by encoding common operation sequences into single instructions. This improves both performance and energy efficiency.
-
-4. **Direct hardware implementation**: Create dedicated circuit blocks that natively execute frequently used operations without software intervention. This eliminates instruction processing overhead and maximizes throughput.
+Domain-specific architectures achieve superior performance and energy efficiency through several reinforcing principles. First, they employ customized data paths\index{Data Path!customization} specifically optimized for target application patterns, enabling direct hardware execution of common operations. Matrix multiplication units in AI accelerators, for example, implement **systolic arrays**\index{Systolic Arrays!definition} — grid-like networks of processing elements that rhythmically compute and pass data through neighboring units — tailored for neural network computations. Second, they build specialized memory hierarchies\index{Memory Hierarchy!domain-specific} around domain-specific access patterns and data reuse characteristics, with custom cache configurations\index{Cache!specialized configuration}, prefetching logic\index{Prefetching!accelerator optimization}, and memory controllers tuned for expected workloads. Third, they reduce instruction overhead by implementing domain-specific instruction sets that encode common operation sequences into single instructions, minimizing decode and dispatch complexity. Finally, they provide direct hardware implementation of frequently used operations through dedicated circuit blocks that bypass software interpretation entirely, eliminating instruction processing overhead and maximizing throughput.
 
 Modern smartphones illustrate these principles compellingly. They can decode 4K video at 60 frames per second while consuming only a few watts of power, despite video processing requiring billions of operations per second. This efficiency is achieved through dedicated hardware video codecs that implement industry standards such as H.264/AVC (introduced in 2003) and H.265/HEVC (finalized in 2013) [@sullivan2012overview]. These specialized circuits provide 100–1000$\times$ improvements in both performance and power efficiency compared to software-based decoding on general-purpose processors.
 
@@ -1100,17 +1092,11 @@ for feature in range(512):
 ```
 :::
 
-These operations introduce several key inefficiencies:
-
-1. Multiple passes over data, increasing memory bandwidth requirements
-2. Complex arithmetic requiring many instruction cycles
-3. Conditional operations that can cause pipeline stalls
-4. Additional memory storage for intermediate results
-5. Poor utilization of vector processing units
+These operations introduce several interrelated inefficiencies that compound across the deep layers of modern networks. Multiple passes over data inflate memory bandwidth requirements, while complex arithmetic operations like square root and exponential demand many instruction cycles each. Conditional operations such as ReLU's max function cause pipeline stalls on traditional processors, and the need for intermediate storage between passes further increases memory pressure. Vector processing units, designed for regular computations, cannot fully utilize their width on operations like exponentials and square roots that require scalar evaluation.
 
 More specifically, each operation introduces distinct challenges. Batch normalization requires multiple passes through data: one for mean computation, another for variance, and a final pass for output transformation. Each pass loads and stores data through the memory hierarchy. Operations that appear simple in mathematical notation often expand into many instructions. The square root computation typically requires 10–20 iterations of numerical methods like Newton-Raphson approximation for suitable precision [@Goldberg1991]. Conditional operations like ReLU's max function require branch instructions that can stall the processor's pipeline. The implementation needs temporary storage for intermediate values, increasing memory usage and bandwidth consumption. While vector units excel at regular computations, functions like exponentials and square roots often require scalar operations that cannot fully utilize vector processing capabilities.
 
-#### Hardware Acceleration
+#### SFU Hardware Implementation
 
 SFUs address these inefficiencies through dedicated hardware implementation. Modern ML accelerators include specialized circuits that transform these complex operations into single-cycle or fixed-latency computations. @lst-sfu_vector_ops demonstrates this efficiency: loading a vector of values allows the accelerator to apply ReLU, sigmoid, and square root operations directly in 1–8 cycles, eliminating multiple passes and complex instruction sequences.
 
@@ -1248,16 +1234,8 @@ While unstructured pruning reduces model size, it rarely translates to hardware 
 
 [^fn-sparsity-hardware]: **Sparsity**: From Latin "sparsus" (scattered), describing how zeros are distributed throughout a matrix rather than densely packed. In ML, sparse matrices have most elements as zero. The N:M notation indicates that exactly N elements must be non-zero in every M-element block, combining the computational benefits of zeros with the predictable access patterns hardware requires.
 
-##### The 2:4 Pattern
-
 \index{Structured Sparsity!2:4 hardware support}
-NVIDIA's Sparse Tensor Cores utilize a 2:4 pattern, requiring that in every contiguous block of 4 values, at least 2 must be zero. This constraint allows the hardware to compress the matrix by 50% in memory and metadata.
-
-##### Hardware Execution
-
-1.  **Compression**: The hardware stores only the 2 non-zero values and 2 bits of metadata (indices) for every 4-element block.
-2.  **Compute**: During matrix multiplication, the Sparse Tensor Core reads the metadata to select the corresponding activations and performs math only on the non-zero weights.
-3.  **Result**: This effectively doubles the FLOP/byte ratio, providing a theoretical $2\times$ speedup over dense matrix multiplication with minimal accuracy loss, provided the model is fine-tuned to respect the 2:4 constraint.
+NVIDIA's Sparse Tensor Cores implement a concrete instance of this pattern: the 2:4 constraint, which requires that in every contiguous block of 4 values, at least 2 must be zero. This constraint allows the hardware to compress the matrix by 50% in memory and metadata. The execution proceeds in three stages: first, the hardware stores only the 2 non-zero values and 2 bits of metadata (indices) for every 4-element block (compression); second, during matrix multiplication, the Sparse Tensor Core reads the metadata to select the corresponding activations and performs math only on the non-zero weights (compute); third, this effectively doubles the FLOP/byte ratio, providing a theoretical $2\times$ speedup over dense matrix multiplication with minimal accuracy loss, provided the model is fine-tuned to respect the 2:4 constraint.
 
 To understand why "Structured" patterns are required for hardware speedup, consider how sparse matrices are actually stored in memory. Compare the storage layouts in @fig-sparse-formats: a sparse format (like CSR or Block Sparse) must store indices alongside values. If the sparsity is random, the index overhead and irregular access kill performance. Structured sparsity, whether at the **Large Block** scale or the **Fine-Grained N:M** scale, makes this indexing predictable and compact, allowing hardware to fetch data efficiently.
 
@@ -1794,7 +1772,7 @@ node[right]{Data};
 The systolic array architecture achieves computational efficiency through synchronized data movement across a structured grid of processing elements. Systolic arrays organize computation around four components:
 
 1. **Control Unit**: Coordinates timing and data distribution across the array, maintaining synchronized operation throughout the computational grid
-2. Data Streams: Input matrices propagate through coordinated pathways where matrix A elements traverse horizontally while matrix B elements flow vertically through the processing grid
+2. **Data Streams**: Input matrices propagate through coordinated pathways where matrix A elements traverse horizontally while matrix B elements flow vertically through the processing grid
 3. **Processing Element Grid**: Individual processing elements execute multiply-accumulate operations on streaming data, generating partial results that accumulate toward the final computation
 4. **Output Collection**: Results aggregate at designated output boundaries where accumulated partial sums form complete matrix elements
 
@@ -2702,7 +2680,7 @@ $$\text{AI} = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$$ {#eq-arithmetic-in
 
 The roofline visualization shows performance (TFLOPS) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, performance increases linearly with intensity (memory-bound region). Above a threshold called the ridge point, performance saturates at peak compute (compute-bound region).
 
-#### Hardware Ridge Points
+### Hardware Ridge Points
 
 \index{Ridge Point!definition}The ridge point determines the arithmetic intensity threshold where the transition from memory-bound to compute-bound occurs. @tbl-ridge-points quantifies how different accelerators exhibit distinct characteristics based on their compute-to-bandwidth ratios:
 
@@ -2893,7 +2871,7 @@ This analysis explains why FlashAttention\index{FlashAttention!memory optimizati
 
 These classifications directly inform optimization strategy. Memory-bound operations benefit from reducing data movement through operator fusion, using reduced precision (FP16, INT8), and increasing arithmetic intensity through algorithmic changes like FlashAttention. Compute-bound operations, by contrast, benefit from maximizing hardware utilization through batching and parallelism, exploiting Tensor Cores and specialized compute units, and optimizing compute efficiency through tiling and scheduling.
 
-#### Calculating Memory Bandwidth Bounds
+### Calculating Memory Bandwidth Bounds
 
 The roofline model's memory-bound region is determined by the peak memory bandwidth. For an operation to achieve throughput $T_{\text{ops}}$ (FLOPs/second, often expressed in TFLOPS) in the memory-bound regime, @eq-required-bandwidth gives the required bandwidth:
 
@@ -3152,13 +3130,13 @@ LayerNorm with input shape (batch=32, seq=512, hidden=768):
 **Arithmetic Intensity**:
 AI = `{python} ln_total_mflops_str` MFLOPs / `{python} ln_total_mb_str` MB = `{python} ln_ai_str` FLOP/byte
 
-This is **severely memory-bound** (156× below ridge point). Performance is limited to:
+This is **severely memory-bound** (102× below ridge point). Performance is limited to:
 Pattainable = `{python} a100_bw_str` GB/s × `{python} ln_ai_str` FLOP/byte = `{python} ln_attainable_str` TFLOPS
 
 This represents less than 1% of A100's compute capacity, explaining why normalization layers contribute negligible compute time but significant latency.
 :::
 
-#### Optimization by Intensity Regime
+### Optimization by Intensity Regime
 
 The roofline analysis directly informs optimization priorities:
 
@@ -4789,6 +4767,8 @@ Beyond raw performance, we must evaluate hardware through the lens of **Silicon 
 
 **The Systems Conclusion**: Custom silicon is the ultimate "Green" technology for ML. Investing in specialized accelerators like the **specialized NPU** is not just about speed; it is the single most effective way to reduce the carbon footprint of intelligence.
 :::
+
+The sustainability perspective reinforces a theme that has recurred throughout this chapter: hardware selection is never a purely technical decision. Performance per watt, carbon cost, and total cost of ownership must all enter the decision framework alongside peak FLOPS and memory bandwidth. With these considerations in place, we can now synthesize the principles that span from silicon physics to system-level optimization.
 
 ## Summary {#sec-ai-acceleration-summary-a5f8}
 

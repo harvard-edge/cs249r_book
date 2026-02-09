@@ -534,6 +534,8 @@ Scaling challenges translate into concrete workflow requirements. Training workf
 
 [^fn-transformer-training]: **Transformer Training**: Large-scale transformer training requires specialized techniques including gradient checkpointing (saving memory by recomputing activations), mixed-precision training (FP16 forward/backward with FP32 accumulation), and sequence parallelism distributing long contexts across devices. GPT-3 training used 1024 V100s for months, detailed in @sec-dnn-architectures.
 
+These scaling challenges share a common thread: every bottleneck traces back to the cost of specific mathematical operations---matrix multiplications that consume trillions of FLOPs, activation functions constrained by memory bandwidth, and optimizer states that triple the memory footprint. Before we can design effective systems to execute these operations at scale, we need to understand exactly what they cost.
+
 ## Mathematical Foundations {#sec-ai-training-mathematical-foundations-d894}
 
 \index{Training!mathematical foundations}\index{Training!computational cost}@sec-deep-learning-systems-foundations established *what* neural network operations compute and *why* they enable learning. This section shifts perspective to *what they cost*---the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between ReLU and sigmoid determines whether Tensor Cores can accelerate computation.
@@ -1108,8 +1110,6 @@ This explains why GPT-2 training requires `{python} v100_mem_gib_str` GB+ V100 G
 Adam's memory overhead is a necessary trade-off for convergence. GPT-2 converges in ~50K steps vs. ~150K+ steps with SGD+Momentum, saving weeks of training time despite higher per-step cost.
 
 :::
-
-#### Optimizer Trade-offs
 
 \index{AdamW!decoupled weight decay}
 The costs quantified in @tbl-optimizer-properties create a design tension: Adam's 3× memory overhead buys faster convergence, but that overhead determines maximum feasible model size and batch size on a given GPU. Variants like AdamW [@loshchilov2019adamw] decouple weight decay from the gradient update, improving generalization without increasing memory cost. Training frameworks continue developing techniques like optimizer state sharding, mixed-precision storage, and fused operations to reduce the per-parameter overhead while preserving adaptive convergence benefits.
@@ -2278,7 +2278,7 @@ These operations initiate a sequence of memory accesses and computations. The sy
 
 The optimizer memory hierarchy established in @tbl-optimizer-properties manifests concretely during each training iteration. Each parameter update involves reading current values, accessing gradients, computing the update rule, and writing modified parameters back to memory. For Adam, this includes updating and accessing the momentum and variance buffers, creating substantial memory traffic for large models.
 
-At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-ai-training-optimization-algorithm-system-implications-f9f2), a `{python} gpt2_params_b_str`B parameter model requires `{python} adam_state_gb_str` GB for optimizer state alone in FP32—before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
+At billion-parameter scale, optimizer state dominates the memory budget. As quantified in the GPT-2 worked example (@sec-ai-training-optimization-algorithm-system-implications-f9f2), a `{python} gpt2_params_b_str`B parameter model requires `{python} adam_state_gb_str` GB of static training state (parameters, gradients, and optimizer) in FP32—before accounting for activations. This challenge has motivated memory-efficient optimizer variants. Compare the memory bars in @fig-galore-llm-memory-breakdown to see how GaLoRE attacks this constraint: by computing updates in a compressed space [@zhao2024galorememoryefficientllmtraining], the technique reduces the memory footprint dominated by optimizer states to a fraction of its original size, enabling training of larger models on fixed hardware.
 
 ::: {#fig-galore-llm-memory-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Memory Footprint Breakdown**: Memory usage of LLaMA-7B across four optimizer configurations, decomposed into weights, activations, optimizer state, weight gradients, and other components. The dashed red line marks the RTX 4090 24 GB memory limit, illustrating how standard Adam exceeds single-GPU capacity while GaLoRE compression reduces optimizer state enough to fit within this budget." fig-alt="Stacked horizontal bar chart comparing memory usage across four optimizers for LLaMA-7B. Shows components: others, weight gradient, optimization, activation, and weight. Dashed red line marks RTX 4090 memory limit at 24 GB."}
 ```{.tikz}
@@ -3279,7 +3279,7 @@ $$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right
 # │
 # │ Imports: physx.constants (BYTES_FP32, MB, GB, byte),
 # │          physx.formatting (fmt)
-# │ Exports: seq_len_str, embed_dim_str, n_heads_str, bytes_fp32_str,
+# │ Exports: fa_seq_len_str, embed_dim_str, fa_n_heads_str, bytes_fp32_str,
 # │          attn_matrix_mb_str, total_attn_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from physx.constants import BYTES_FP32, MB, GB, byte
@@ -3296,15 +3296,15 @@ total_attn_mb = attn_matrix_mb * n_heads
 total_attn_gb = (total_attn_mb * MB).to(GB).magnitude
 
 # --- Outputs (formatted strings for prose) ---
-seq_len_str = f"{seq_len:,}"
+fa_seq_len_str = f"{seq_len:,}"
 embed_dim_str = f"{embed_dim}"
-n_heads_str = f"{n_heads}"
+fa_n_heads_str = f"{n_heads}"
 bytes_fp32_str = f"{BYTES_FP32.to(byte).magnitude:.0f}"
 attn_matrix_mb_str = fmt(attn_matrix_mb, precision=0, commas=False)
 total_attn_gb_str = fmt(total_attn_gb, precision=0, commas=False)
 ```
 
-The memory bottleneck emerges from materializing the n × n intermediate matrices for scores and probabilities. For a sequence length of `{python} seq_len_str` tokens with embedding dimension `{python} embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} seq_len_str`^2 × `{python} bytes_fp32_str` bytes = `{python} attn_matrix_mb_str` MB in FP32. With `{python} n_heads_str` attention heads, this grows to `{python} total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
+The memory bottleneck emerges from materializing the n × n intermediate matrices for scores and probabilities. For a sequence length of `{python} fa_seq_len_str` tokens with embedding dimension `{python} embed_dim_str` (typical for a single attention head), the attention score matrix alone requires `{python} fa_seq_len_str`^2 × `{python} bytes_fp32_str` bytes = `{python} attn_matrix_mb_str` MB in FP32. With `{python} fa_n_heads_str` attention heads, this grows to `{python} total_attn_gb_str` GB just for intermediate attention matrices, not including the keys, queries, values, or output tensors.
 
 \index{HBM!memory bandwidth}\index{SRAM!on-chip memory}Modern GPU memory hierarchy exacerbates this bottleneck. HBM provides 40–80 GB capacity with 1–2 TB/s bandwidth, while SRAM provides only 20–40 MB capacity but delivers 20+ TB/s bandwidth (10× faster). Standard attention stores these large matrices in slow HBM and repeatedly loads them during the backward pass. For GPT-2 scale models processing 2048-token sequences, attention operations spend 70--80% of execution time waiting for memory transfers rather than computing, leaving expensive tensor cores underutilized.
 
@@ -3522,7 +3522,7 @@ In practice, deep learning frameworks handle Flash Attention integration transpa
 2. Use FP16 or BF16 for maximum speedup (Flash Attention optimized for mixed precision)
 3. Combine with gradient checkpointing for further memory savings (4--8× larger models trainable)
 
-The integration is typically a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (as shown in @lst-flash-attention-comparison). **By using the framework's optimized primitive, the developer delegates the complex tiling and SRAM management required to bypass the HBM bandwidth bottleneck to the underlying library.**
+The integration is typically a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (as shown in @lst-flash-attention-comparison). By using the framework's optimized primitive, the developer delegates the complex tiling and SRAM management required to bypass the HBM bandwidth bottleneck to the underlying library.
 
 #### Systems Implications and Broader Principles {#sec-ai-training-systems-implications-broader-principles-c4f0}
 
@@ -3945,7 +3945,7 @@ To answer that question, let us walk through optimizing GPT-2 (1.5B parameters) 
 # │ Exports: params_fp32_str, grads_fp32_str, adam_fp32_str, act_fp32_str,
 # │          total_fp32_str, params_fp16_str, grads_fp16_str,
 # │          master_weights_str, adam_amp_str, act_fp16_str, total_amp_str,
-# │          static_mem_str, act_ckpt_str, total_ckpt_str, v100_mem_str,
+# │          static_mem_str, act_ckpt_str, total_ckpt_str, wt_v100_mem_str,
 # │          amp_reduction_str, recompute_overhead_str, checkpoint_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB
@@ -3979,8 +3979,8 @@ static_mem_gb = params_fp16_gb + grads_fp16_gb + master_weights_gb + adam_amp_gb
 act_ckpt_gb = act_fp16_gb / checkpoint_factor
 total_ckpt_gb = static_mem_gb + act_ckpt_gb
 
-# V100 capacity
-v100_mem_gb = V100_MEM_CAPACITY.to('GB').magnitude
+# V100 capacity (use GiB for industry-convention "32 GB" display)
+v100_mem_gb = V100_MEM_CAPACITY.to(GiB).magnitude
 
 # Improvement calculations
 amp_reduction_pct = (1 - total_amp_gb / total_fp32_gb) * 100
@@ -4003,7 +4003,7 @@ static_mem_str = fmt(static_mem_gb, precision=1, commas=False)
 act_ckpt_str = fmt(act_ckpt_gb, precision=1, commas=False)
 total_ckpt_str = fmt(total_ckpt_gb, precision=1, commas=False)
 
-v100_mem_str = fmt(v100_mem_gb, precision=0, commas=False)
+wt_v100_mem_str = fmt(v100_mem_gb, precision=0, commas=False)
 amp_reduction_str = fmt(amp_reduction_pct, precision=0, commas=False)
 recompute_overhead_str = f"{recompute_overhead_pct}"
 checkpoint_factor_str = f"{checkpoint_factor}"
@@ -4670,6 +4670,8 @@ Scaling trades compute bottlenecks for communication bottlenecks.
 - [ ] **Data vs. model parallelism**: Given a model that does not fit on one GPU, can you justify why data parallelism fails and what model parallelism must partition?
 - [ ] **Communication tax**: Can you explain why scaling efficiency degrades with GPU count, and what quantity (synchronization fraction) controls the ceiling?
 ::::
+
+The journey from single-GPU optimization through multi-device parallelism reveals a consistent pattern: every technique involves trade-offs, and every optimization introduces new constraints. The systematic methodology developed throughout this chapter---profiling to identify bottlenecks, selecting targeted techniques, composing solutions, and re-profiling---provides a principled framework. Yet even with this framework, experienced practitioners still encounter recurring traps that waste compute, delay research, and cause production failures.
 
 ```{python}
 #| label: fallacies-pitfalls-setup

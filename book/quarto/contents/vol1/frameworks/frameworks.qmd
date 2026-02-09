@@ -111,7 +111,9 @@ With these three problems in mind, we can now define *what* a machine learning f
 
 The scale of this translation is not obvious from the API surface. A single call to `loss.backward()` triggers operation recording, memory allocation for gradients, reverse-order graph traversal, and hardware-optimized kernel dispatch---machinery that would require hundreds of lines of manual calculus for even a three-layer network. For a contemporary language model, the framework additionally orchestrates billions of floating-point operations across distributed hardware, coordinating memory hierarchies, communication protocols, and numerical precision. Building this from scratch would be economically prohibitive for most organizations, which is why the history of ML frameworks is a history of progressively automating these layers.
 
-## How Frameworks Evolved {#sec-ai-frameworks-frameworks-evolved-ac68}
+The three problems---execution, differentiation, and abstraction---did not emerge simultaneously. Each arose as a response to scaling limitations in the previous generation of tools. Tracing this evolution reveals why modern frameworks are designed as they are and why the particular trade-offs they embody were, in hindsight, inevitable.
+
+## Framework Evolution {#sec-ai-frameworks-frameworks-evolved-ac68}
 
 \index{ML Framework!historical evolution}
 \index{NumPy!framework foundation}
@@ -1313,7 +1315,9 @@ The dispatch tax analysis reveals that small operations are overhead-bound regar
 
 \index{TinyML!micro-runtimes}
 \index{Edge Deployment!TinyML frameworks}
-The compilation continuum reaches its extreme at the far edge. While cloud frameworks like PyTorch and TensorFlow 2.x prioritize flexibility through eager execution, **TinyML** systems operating on microcontrollers (MCUs) with kilobytes of memory cannot afford the overhead of a Python interpreter or a dynamic runtime.
+The compilation continuum reaches its extreme at the far edge. While cloud frameworks like PyTorch and TensorFlow 2.x prioritize flexibility through eager execution, **TinyML**[^fn-tinyml] systems operating on microcontrollers (MCUs) with kilobytes of memory cannot afford the overhead of a Python interpreter or a dynamic runtime.
+
+[^fn-tinyml]: **TinyML**: A term popularized by Pete Warden and Daniel Situnayake's 2019 book *TinyML*, referring to machine learning inference on microcontrollers with power budgets under 1 milliwatt and memory measured in kilobytes. The "Tiny" distinguishes these deployments from edge ML (megabytes of memory, milliwatts to watts) and cloud ML (gigabytes, hundreds of watts). TinyML frameworks like TensorFlow Lite Micro and PyTorch ExecuTorch compile models into bare-metal C/C++ with no dynamic memory allocation, representing the extreme AOT endpoint of the compilation continuum. See @sec-model-compression for the model optimization techniques that make this possible.
 
 ::: {.callout-lighthouse title="Lighthouse Example: Smart Doorbell (TinyML)"}
 
@@ -1680,12 +1684,7 @@ resnet_training_max_gb_str = fmt(resnet_training_max_gb_value, precision=0, comm
 resnet_training_ratio_str = fmt(resnet_training_ratio_min_value, precision=0, commas=False)  # e.g. "100"
 ```
 
-For a network with $L$ layers, the system must save approximately $L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} resnet_params_m_str` M parameters (~`{python} resnet_fp32_mb_str` MB in FP32) and processes batch size 64 with 224x224 images. The memory breakdown reveals the scale of this trade-off:
-
-- **Forward activations**: ~8--12 GB (varies by implementation and checkpointing)
-- **Parameter gradients**: ~`{python} resnet_fp32_mb_str` MB (same size as parameters)
-- **Optimizer state (Adam)**: ~`{python} resnet_adam_mb_str` MB (two momentum buffers per parameter)
-- **Total training footprint**: ~`{python} resnet_training_min_gb_str`–`{python} resnet_training_max_gb_str` GB versus ~`{python} resnet_fp32_mb_str` MB for inference
+For a network with $L$ layers, the system must save approximately $L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} resnet_params_m_str` M parameters (~`{python} resnet_fp32_mb_str` MB in FP32) and processes batch size 64 with 224x224 images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} resnet_fp32_mb_str` MB (the same size as the parameters themselves), and Adam optimizer state contributes ~`{python} resnet_adam_mb_str` MB for its two momentum buffers per parameter. The total training footprint reaches `{python} resnet_training_min_gb_str`--`{python} resnet_training_max_gb_str` GB, compared to just ~`{python} resnet_fp32_mb_str` MB for inference alone.
 
 This `{python} resnet_training_ratio_str`x ratio between training and inference memory quantifies why the Data Movement ($D_{vol}$) term dominates training latency in the **Iron Law**. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. For a complete derivation of the four-component training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$) and worked examples at larger model scales, see @sec-system-foundations-training-memory-cost.
 
@@ -2914,13 +2913,17 @@ The abstraction problem is the bridge between *portable code* and *efficient exe
 - [ ] **Execution control**: Can you describe what the runtime is doing when it overlaps independent work (streams) and inserts synchronization only where dependencies require it?
 ::::
 
+The hardware-facing half of the abstraction problem---tensors, kernels, streams, and memory managers---makes individual operations fast on diverse silicon. But no practitioner writes code at that level. A ResNet-50 has dozens of layers, each with multiple parameter tensors, buffers, and mode-dependent behaviors; manually wiring every tensor to a device, registering it with an optimizer, and toggling dropout between training and inference would be overwhelming. The remaining half of the abstraction problem is *organizational*: composing these low-level primitives into the clean, reusable APIs that practitioners actually use.
+
 ## nn.Module Abstraction {#sec-ai-frameworks-nnmodule-abstraction-2622}
 
 \index{Module Abstraction!PyTorch nn.Module}
 \index{Module Abstraction!hierarchical composition}
 The abstraction problem has two layers, and so far we have examined only the lower one. Tensors, device placement, kernel dispatch, and memory management solve the hardware-facing half: making operations execute efficiently on diverse silicon. But a ResNet-50 contains fifty layers, each with multiple parameter tensors, buffers, and mode-dependent behaviors. Manually wiring each tensor to the correct device, registering it with an optimizer, toggling dropout behavior between training and inference, and serializing state for checkpointing---for every layer---would drown practitioners in bookkeeping that has nothing to do with model design. The upper layer of the abstraction problem is organizational: how do frameworks compose thousands of low-level primitives into the clean, composable APIs that practitioners actually use?
 
-Every major framework answers this question through a *module abstraction* that bundles parameters, forward computation, and state management into a single reusable unit. PyTorch's `nn.Module` provides an instructive case study because its design patterns recur across frameworks: Keras uses similar layer abstractions, JAX's Flax employs analogous module structures, and TensorFlow's functional API shares conceptual parallels. Rather than catalog its API, we extract three enduring design principles that every framework must address regardless of its syntax or programming paradigm.
+Every major framework answers this question through a *module abstraction* that bundles parameters, forward computation, and state management into a single reusable unit. PyTorch's `nn.Module`[^fn-nn-module] provides an instructive case study because its design patterns recur across frameworks: Keras uses similar layer abstractions, JAX's Flax employs analogous module structures, and TensorFlow's functional API shares conceptual parallels. Rather than catalog its API, we extract three enduring design principles that every framework must address regardless of its syntax or programming paradigm.
+
+[^fn-nn-module]: **nn.Module**: PyTorch's base class for all neural network components, introduced in PyTorch's first release (2016). The `nn` namespace abbreviates "neural network," and "Module" borrows from software engineering's module pattern—a self-contained unit with defined inputs, outputs, and internal state. The class provides three mechanisms automatically: parameter registration (via Python's `__setattr__` metaclass interception), recursive tree traversal (for device placement, serialization, and optimizer access), and mode propagation (training vs. evaluation flags). Every layer, block, and full model inherits from `nn.Module`, creating a uniform interface that enables the three principles described in this section.
 
 ### Principle 1: Automatic Parameter Discovery {#sec-nnmodule-param-discovery .unnumbered}
 
@@ -3890,7 +3893,7 @@ Machine learning frameworks exist to solve three fundamental problems that would
 
 These problems are interconnected and constrained by the **Iron Law** of performance (@sec-silicon-contract): execution strategy determines dispatch overhead ($L_{lat}$), differentiation determines memory traffic ($D_{vol}$), and abstraction determines hardware utilization ($\eta$). The memory wall makes data movement often more expensive than computation, explaining why frameworks invest in kernel fusion, activation checkpointing, mixed-precision training, and compilation pipelines.
 
-::: {.callout-takeaways title="Key Takeaways"}
+::: {.callout-takeaways}
 
 * **Three problems define every framework**: Execution (how to run), differentiation (how to train), and abstraction (how to express). TensorFlow prioritizes abstraction for deployment breadth, PyTorch prioritizes execution for research velocity, and JAX reframes differentiation through composable function transformations. These are infrastructure commitments, not tooling preferences.
 * **The memory wall drives optimization**: Compute has grown approximately 1000× faster than memory bandwidth. Kernel fusion, activation checkpointing, mixed-precision training, and data layout optimizations all target the data movement term ($D_{vol}$) in the Iron Law, not the compute term.

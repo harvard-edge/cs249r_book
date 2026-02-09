@@ -27,7 +27,9 @@ engine: jupyter
 
 _Why do the models that win benchmarks rarely become the models that run in production?_
 
-Training produced a capable model, yet capability alone does not guarantee deployability. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore: memory budgets measured in megabytes rather than gigabytes, latency targets measured in milliseconds rather than seconds, power envelopes measured in milliwatts rather than kilowatts. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond. The model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets. Bridging it requires a systematic discipline of *compression*: trading capabilities the deployment does not need for constraints the deployment cannot violate. The key insight is that trained models are vastly over-specified for most production tasks—they carry more precision, more connections, and more capacity than the deployment context demands, and that surplus can be systematically removed. The techniques differ in what they trade away, but they share a common principle: find what the model has learned that the deployment does not need, and remove it without destroying what the deployment requires. When applied well, compression can reduce model size by one to two orders of magnitude, transforming a research artifact that runs only in a datacenter into a production asset that meets the physics of a phone, a sensor, or a microcontroller. The discipline is not about making models smaller but about *making the right models possible*.
+Training produced a capable model, yet capability alone does not guarantee deployability. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore: memory budgets measured in megabytes rather than gigabytes, latency targets measured in milliseconds rather than seconds, power envelopes measured in milliwatts rather than kilowatts. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond. The model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets.
+
+Bridging that gap requires a systematic discipline of *compression*: trading capabilities the deployment does not need for constraints the deployment cannot violate. The key insight is that trained models are vastly over-specified for most production tasks — they carry more precision, more connections, and more capacity than the deployment context demands, and that surplus can be systematically removed. The techniques differ in what they trade away, but they share a common principle: find what the model has learned that the deployment does not need, and remove it without destroying what the deployment requires. When applied well, compression can reduce model size by one to two orders of magnitude, transforming a research artifact that runs only in a datacenter into a production asset that meets the physics of a phone, a sensor, or a microcontroller. The discipline is not about making models smaller but about *making the right models possible*.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -163,7 +165,7 @@ mcu_ram_str = f"{mcu_ram_kb_value}"
 gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp_value}}}$"
 ```
 
-## Model Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
+## Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
 
 A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving-systems) is not a minor inconvenience but a defining challenge of model compression.
 
@@ -1937,11 +1939,9 @@ While LTH presents a compelling theoretical perspective on pruning, practical im
 
 #### Pruning in Practice {#sec-model-compression-pruning-practice-bb32}
 
-Modern machine learning frameworks provide dedicated APIs to automate the pruning and fine-tuning workflow.
+Modern machine learning frameworks provide dedicated APIs to automate the pruning and fine-tuning workflow. In PyTorch\index{Framework Toolkits!pruning support}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. Users can apply unstructured pruning (e.g., `l1_unstructured`) or structured pruning (e.g., `ln_structured`) with just a few lines of code. PyTorch uses "masks" to handle pruning: the original parameters are preserved, but a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
 
-In **PyTorch**\index{Framework Toolkits!pruning support}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. Users can apply unstructured pruning (e.g., `l1_unstructured`) or structured pruning (e.g., `ln_structured`) with just a few lines of code. PyTorch uses "masks" to handle pruning: the original parameters are preserved, but a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
-
-**TensorFlow** implements pruning through the **TensorFlow Model Optimization Toolkit (TF-MOT)**. Unlike PyTorch's post-training approach, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
+TensorFlow takes a different approach through the TensorFlow Model Optimization Toolkit (TF-MOT). Unlike PyTorch's post-training workflow, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
 
 \index{BERT!compression techniques}
 These trade-offs become concrete when examining real-world deployments. Several high-profile models have successfully integrated pruning to optimize performance. MobileNet, designed for mobile and embedded applications, has been pruned to reduce inference latency while preserving accuracy [@howard2017mobilenets]. BERT[^fn-bert-compression], a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert]. In computer vision, EfficientNet[^fn-efficientnet-pruning] has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].
@@ -1958,7 +1958,7 @@ This limitation motivates **knowledge distillation**, a categorically different 
 
 \index{Knowledge Distillation!etymology}
 \index{Hinton, Geoffrey!knowledge distillation}
-**Knowledge distillation**\index{Knowledge Distillation!teacher-student framework}\index{Knowledge Distillation!definition}[^fn-distillation-etymology] trains a smaller **student**\index{Knowledge Distillation!student model} model using guidance from a larger, pre-trained **teacher**\index{Knowledge Distillation!teacher model} model. A well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label\index{Knowledge Distillation!hard labels} is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**\index{Knowledge Distillation!soft labels}, showing that a cat shares more features with a dog than a fox. Notice in @fig-kd-targets how this "dark knowledge" embedded in the teacher's probability distribution reveals inter-class relationships that guide the student to generalize better.
+Knowledge distillation[^fn-distillation-etymology]\index{Knowledge Distillation!teacher-student framework}\index{Knowledge Distillation!definition} trains a smaller *student*\index{Knowledge Distillation!student model} model using guidance from a larger, pre-trained *teacher*\index{Knowledge Distillation!teacher model} model. A well-trained teacher provides a richer learning signal than simple ground-truth labels. While a hard label\index{Knowledge Distillation!hard labels} is binary (e.g., $[1, 0, 0]$ for cat), a teacher's probability distribution (e.g., $[0.85, 0.10, 0.05]$) reveals **inter-class similarity**\index{Knowledge Distillation!soft labels}, showing that a cat shares more features with a dog than a fox. Notice in @fig-kd-targets how this "dark knowledge" embedded in the teacher's probability distribution reveals inter-class relationships that guide the student to generalize better.
 
 [^fn-distillation-etymology]: **Distillation**: Borrowed from chemistry, where distillation separates mixtures by selective evaporation and condensation, extracting the essence while leaving impurities behind. The concept predates its famous 2015 formulation: Rich Caruana and colleagues at Cornell demonstrated in 2006 that ensemble models could be "compressed" into single networks by training on the ensemble's predictions, achieving a model "a thousand times smaller and faster." Geoffrey Hinton, Oriol Vinyals, and Jeff Dean at Google [@hinton2015distilling] transformed this into a practical technique for deep networks by introducing temperature-scaled softmax, which controls how much "dark knowledge" about class relationships the student can absorb. The temperature parameter $T$ even mirrors the literal temperature control in chemical distillation—higher temperatures reveal more of the teacher's uncertainty structure.
 
@@ -2686,11 +2686,7 @@ Quantization[^fn-quantization-etymology] affects every neural network weight and
 
 [^fn-quantization-etymology]: **Quantization**: From Latin "quantus" (how much), via quantum physics where it describes discrete energy levels. The technique's theoretical foundations trace to Claude Shannon at Bell Labs, whose 1948 paper "A Mathematical Theory of Communication" established the fundamental limits of representing continuous signals with discrete values. In signal processing (1940s-1960s), quantization meant mapping continuous values to discrete levels, introducing "quantization error"—and Shannon proved exactly how much precision you could sacrifice before information was irretrievably lost. ML borrowed both the term and the mathematics directly: converting FP32 weights to INT8 maps continuous values to 256 discrete levels, trading precision for efficiency. When we analyze quantization error in neural networks, we are applying Shannon's six-decade-old framework to a new domain.
 
-This choice directly impacts three system properties:
-
-- **Memory**: An INT8 model is 4× smaller than FP32, enabling deployment on smaller devices
-- **Bandwidth**: Loading INT8 weights requires 4× less memory bandwidth, directly accelerating bandwidth-bound inference
-- **Compute**: INT8 arithmetic is faster and cheaper than FP32 on most hardware [@gupta2015deep; @wang2019benchmarking]
+This choice directly impacts three system properties. Memory shrinks because an INT8 model is 4× smaller than FP32, enabling deployment on devices that could never hold the full-precision weights. Bandwidth demand drops proportionally: loading INT8 weights requires 4× less memory traffic, directly accelerating the bandwidth-bound inference that dominates LLM generation. Compute cost falls as well, since INT8 arithmetic is faster and cheaper than FP32 on most hardware with dedicated low-precision units [@gupta2015deep; @wang2019benchmarking].
 
 The accuracy cost of reduced precision varies by model and technique. CNNs typically tolerate INT8 quantization with <1% accuracy loss; transformers may require more care. This section covers three approaches in increasing complexity: **post-training quantization**\index{Quantization!post-training (PTQ)} (PTQ) for rapid deployment, **quantization-aware training**\index{Quantization!aware training (QAT)} (QAT) for production systems requiring minimal accuracy loss, and **extreme quantization**\index{Quantization!extreme (INT4, binary)} (INT4, binary) for the most constrained environments.
 
@@ -4485,6 +4481,12 @@ bandwidth_reduction_pct_value = (1 - total_fused_mb_value / total_unfused_mb_val
 saved_latency_us_value = (kernels_unfused_value - kernels_fused_value) * latency_per_kernel_us_value
 saved_latency_ms_value = saved_latency_us_value / 1000
 
+# V100 timing analysis (memory-bound)
+v100_bw_gbs_local_value = v100_bw_gbs_value  # from earlier cell
+unfused_time_us_value = total_unfused_mb_value / v100_bw_gbs_local_value * 1000  # MB / (GB/s) * 1000 = us
+fused_time_us_value = total_fused_mb_value / v100_bw_gbs_local_value * 1000
+fusion_speedup_value = unfused_time_us_value / fused_time_us_value
+
 # --- Outputs (formatted strings for prose) ---
 conv_bn_relu_intermediate_mb_str = fmt(conv_bn_relu_intermediate_mb_value, precision=1, commas=False)
 gemm_intermediate_mb_str = fmt(gemm_intermediate_mb_value, precision=1, commas=False)
@@ -4503,6 +4505,9 @@ bandwidth_reduction_pct_str = fmt(bandwidth_reduction_pct_value, precision=0, co
 kernels_unfused_str = fmt(kernels_unfused_value, precision=0, commas=False)
 kernels_fused_str = fmt(kernels_fused_value, precision=0, commas=False)
 saved_latency_ms_str = fmt(saved_latency_ms_value, precision=0, commas=False)
+unfused_time_us_str = fmt(unfused_time_us_value, precision=0, commas=False)
+fused_time_us_str = fmt(fused_time_us_value, precision=1, commas=False)
+fusion_speedup_str = fmt(fusion_speedup_value, precision=2, commas=False)
 ```
 
 #### Operator Fusion {#sec-model-compression-operator-fusion-c1b4}
@@ -4687,7 +4692,7 @@ This fusion pattern[^fn-flashattention-compression] achieves 2–4× speedup on 
 
 Memory bandwidth analysis quantifies these fusion benefits concretely. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (`{python} feat_map_kb_str` KB). Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} feat_map_kb_str` KB) plus weights (`{python} weights_mb_str` MB) and writes output (`{python} feat_map_kb_str` KB), totaling `{python} unfused_conv_mb_str` MB. BN then reads that output, adds its parameters (`{python} bn_params_kb_str` KB), and writes again, for `{python} unfused_bn_mb_str` MB. ReLU repeats the pattern for another `{python} unfused_relu_mb_str` MB. The total unfused memory traffic is `{python} total_unfused_mb_str` MB. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} total_fused_mb_str` MB — a `{python} bandwidth_reduction_pct_str`% bandwidth reduction.
 
-On a V100 GPU with `{python} v100_bw_gbs_str` GB/s HBM bandwidth and `{python} v100_tflops_fp32_str` TFLOPS FP32 compute, the unfused sequence takes approximately 8 microseconds (memory-bound), while the fused version takes 4.3 microseconds (1.86× speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
+On a V100 GPU with `{python} v100_bw_gbs_str` GB/s HBM bandwidth and `{python} v100_tflops_fp32_str` TFLOPS FP32 compute, the unfused sequence takes approximately `{python} unfused_time_us_str` microseconds (memory-bound), while the fused version takes approximately `{python} fused_time_us_str` microseconds (`{python} fusion_speedup_str`× speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
 
 Operator fusion implementation occurs at multiple levels in the software stack:
 
@@ -6331,15 +6336,9 @@ yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
 Modern hardware accelerators provide specialized support for sparse operations, though the degree of acceleration depends on sparsity structure and hardware capabilities. @sec-ai-acceleration examines these accelerators in depth; here we summarize their sparsity-specific features.
 
 \index{Sparse Tensor Cores}
-**GPUs** with Sparse Tensor Cores\index{Tensor Cores!sparse acceleration}\index{Hardware-Aware Optimization!sparse tensor cores} (NVIDIA Ampere and later) accelerate structured sparsity patterns like 2:4, achieving up to 2× speedup by skipping zero multiplications [@NVIDIA2020]. However, this acceleration requires the sparsity pattern to match hardware expectations, and unstructured sparsity typically sees limited benefit [@hoefler2021sparsity].
+GPUs\index{Tensor Cores!sparse acceleration}\index{Hardware-Aware Optimization!sparse tensor cores} with Sparse Tensor Cores (NVIDIA Ampere and later) accelerate structured sparsity patterns like 2:4, achieving up to 2× speedup by skipping zero multiplications [@NVIDIA2020]. However, this acceleration requires the sparsity pattern to match hardware expectations, and unstructured sparsity typically sees limited benefit [@hoefler2021sparsity]. TPUs\index{TPU!sparse matrix support} provide support for sparse weight matrices, though this capability has evolved across generations. The original TPU was designed primarily for dense operations; later versions and research adaptations (such as Sparse-TPU) have added sparse matrix support. The systolic array architecture can process non-zero elements efficiently when sparsity patterns are predictable, making this particularly beneficial for transformer models where large matrix multiplications dominate [@jouppi2021ten]. FPGAs\index{FPGA!custom sparsity patterns} offer the most flexibility: unlike GPUs and TPUs, they can be programmed to handle arbitrary sparse formats, making them suitable for unstructured pruning or application-specific patterns where general-purpose accelerators underperform.
 
-\index{TPU!sparse matrix support}
-**TPUs** provide support for sparse weight matrices, though this capability has evolved across generations. The original TPU was designed primarily for dense operations; later versions and research adaptations (such as Sparse-TPU) have added sparse matrix support. The systolic array architecture can process non-zero elements efficiently when sparsity patterns are predictable, making this particularly beneficial for transformer models where large matrix multiplications dominate [@jouppi2021ten].
-
-\index{FPGA!custom sparsity patterns}
-**FPGAs** offer flexibility for custom sparsity patterns. Unlike GPUs and TPUs, FPGAs can be programmed to handle arbitrary sparse formats, making them suitable for unstructured pruning or application-specific patterns where general-purpose accelerators underperform.
-
-**Memory and Energy Benefits**: Across all platforms, sparse operations reduce memory bandwidth requirements and energy consumption by accessing fewer elements[^fn-sparse-energy-savings]. This benefit compounds with quantization: a sparse INT8 model requires less memory traffic than either technique alone [@Gale2020].
+Across all platforms, sparse operations reduce memory bandwidth requirements and energy consumption by accessing fewer elements[^fn-sparse-energy-savings]. This benefit compounds with quantization: a sparse INT8 model requires less memory traffic than either technique alone [@Gale2020].
 
 [^fn-sparse-energy-savings]: **Sparse Energy Savings**: Sparse operations significantly reduce energy consumption by accessing fewer elements. For example, structured 2:4 sparsity patterns enable GPU acceleration while maintaining model accuracy. Energy savings vary by hardware platform and sparsity pattern.
 
@@ -6386,7 +6385,7 @@ Unlike software functions that compose predictably, optimization techniques inte
 
 With the three optimization dimensions now fully explored—structural methods, precision techniques, and architectural approaches—practitioners need systematic guidance for translating this knowledge into deployment decisions.
 
-## Technique Selection Guide {#sec-model-compression-technique-selection-guide-ac37}
+## Technique Selection {#sec-model-compression-technique-selection-guide-ac37}
 
 The preceding sections have systematically explored all three dimensions of our optimization framework: structural methods (pruning, distillation, factorization, NAS) determine *what* computations occur; precision techniques (quantization, mixed-precision) determine *how precisely* to compute; and architectural approaches (operator fusion, dynamic computation, sparsity exploitation) determine *how efficiently* to execute on hardware. With this complete toolkit established, practitioners need systematic guidance for selecting and combining these techniques based on deployment constraints.
 
@@ -6408,39 +6407,40 @@ Although each system constraint primarily aligns with one or more optimization d
 
 ### Decision Framework {#sec-model-compression-decision-framework-1896}
 
-The following decision framework guides technique selection based on primary deployment constraints:
+The following decision framework guides technique selection based on primary deployment constraints.
 
-**If your primary constraint is model size (storage/download):**
+#### Model Size (Storage/Download) {.unnumbered}
 
 - **First choice**: INT8 quantization via PTQ (4× reduction, minimal accuracy loss)
 - **If more reduction needed**: INT4 quantization (8× reduction, 1–3% accuracy loss typical)
 - **If accuracy-critical**: Knowledge distillation to smaller architecture + quantization
 
-**If your primary constraint is inference latency:**
+#### Inference Latency {.unnumbered}
 
 - **First choice**: Structured pruning (removes operations, not just parameters)
 - **If hardware supports INT8**: Add quantization for faster arithmetic
 - **If latency-critical with accuracy flexibility**: Early-exit architectures
 
 \index{Quantization!weight-only for LLMs}
-**If your primary constraint is memory bandwidth (LLM generation):**
+
+#### Memory Bandwidth (LLM Generation) {.unnumbered}
 
 - **First choice**: Weight-only quantization (INT4/INT8 weights, FP16 activations)
 - **Key insight**: Memory bandwidth dominates; quantization provides linear speedup
 
-**If your primary constraint is energy/power:**
+#### Energy and Power {.unnumbered}
 
 - **First choice**: Quantization (reduces both compute and memory energy)
 - **Second choice**: Structured pruning (reduces operation count)
 - **Combined approach**: Pruning + quantization for multiplicative benefits
 
-**If you have time for fine-tuning:**
+#### With Fine-Tuning Budget {.unnumbered}
 
 - Use QAT instead of PTQ for better accuracy at same precision
 - Consider knowledge distillation for maximum accuracy preservation
 - Explore NAS for hardware-specific architecture optimization
 
-**If you need rapid deployment (no fine-tuning):**
+#### Rapid Deployment (No Fine-Tuning) {.unnumbered}
 
 - PTQ with calibration dataset (hours, not days)
 - Magnitude-based pruning with fine-tuning (days)
@@ -6661,7 +6661,7 @@ This example illustrates why sequencing matters: pruning first concentrates impo
 
 With dozens of techniques across three optimization dimensions, each with multiple hyperparameters and hardware-specific considerations, rigorous measurement is essential for validating that optimizations achieve their intended goals. A practitioner who prunes, quantizes, and fuses without measuring the actual impact on target hardware is optimizing blindly. The following section provides the methodological foundation for profiling systems and evaluating optimization effectiveness.
 
-## Measuring Model Efficiency {#sec-model-compression-measuring-model-efficiency-00c7}
+## Efficiency Measurement {#sec-model-compression-measuring-model-efficiency-00c7}
 
 The major compression techniques and strategies for combining them are now established, and we turn to formalizing how to measure their effectiveness. The preceding sections discussed optimization choices in terms of latency reduction, memory savings, and accuracy trade-offs, but translating those goals into measurable improvements requires systematic evaluation approaches. Production systems employ coordinated optimization strategies that balance multiple constraints simultaneously, and effective deployment requires structured approaches for profiling systems, measuring optimization impact, and validating that technique combinations achieve deployment goals.
 
@@ -6673,7 +6673,7 @@ Optimization begins with profiling\index{Profiling!model compression} to identif
 
 Modern machine learning models exhibit heterogeneous resource consumption: specific layers, operations, or data paths contribute disproportionately to memory usage, computational cost, or latency. Understanding these patterns is essential for prioritizing optimization efforts and achieving maximum impact with minimal accuracy degradation.
 
-Effective profiling begins with establishing baseline measurements across relevant performance dimensions. Memory profiling reveals both static consumption (model parameters and buffers) and dynamic allocation patterns during training and inference. Computational profiling identifies bottleneck operations, measured in FLOPs and actual wall-clock execution time. Energy profiling matters for battery-powered and edge deployment scenarios, where power consumption directly impacts operational feasibility. Latency profiling measures end-to-end response times and identifies which operations contribute most to inference delay.
+Effective profiling begins with establishing baseline measurements across relevant performance dimensions. Memory consumption — both static (model parameters and buffers) and dynamic allocation during inference — determines whether a model fits on the target device at all. Computational bottlenecks, measured in both FLOPs and actual wall-clock execution time, reveal which layers dominate the inference budget. For battery-powered and edge deployments, power consumption profiles determine operational feasibility: a model that drains a phone battery in an hour is unusable regardless of its accuracy. End-to-end latency measurements identify which operations contribute most to inference delay, often revealing that memory-bound operations like layer normalization consume disproportionate wall-clock time relative to their FLOP count.
 
 A critical caveat applies when translating profiling metrics into optimization estimates.
 
@@ -6802,6 +6802,8 @@ With all three major optimization approaches explored in depth, along with frame
 
 \index{Model Compression!sequential application}
 These techniques combine synergistically, with quantization often applied after pruning or distillation to achieve compound compression benefits. Production systems frequently employ sequential application: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers any accuracy loss. Sequential application enables compression ratios of 10–50× while maintaining competitive accuracy across diverse deployment scenarios.
+
+With the complete optimization toolkit now surveyed—from individual techniques through combination strategies—the most instructive lessons often come not from what works but from what fails. The following fallacies and pitfalls capture the most common mistakes engineers make when applying these techniques, each grounded in the quantitative trade-offs we have established throughout the chapter.
 
 ## Fallacies and Pitfalls {#sec-model-compression-fallacies-pitfalls-1b5e}
 

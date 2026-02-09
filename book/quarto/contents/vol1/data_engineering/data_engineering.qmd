@@ -196,6 +196,11 @@ kws_memory_limit_design_kb_str = f"{kws_memory_limit_design_kb_value}"
 kws_memory_limit_edge_kb_str = f"{kws_memory_limit_edge_kb_value}"
 kws_dataset_size_m_str = f"{kws_dataset_size_m_value}"
 kws_dataset_size_m_round_str = f"{kws_dataset_size_m_round_value}"
+kws_label_seconds_per_example = 10
+kws_label_hours_value = kws_dataset_size_m_value * 1e6 * kws_label_seconds_per_example / 3600
+kws_label_years_value = kws_label_hours_value / 2000  # full-time work hours/year
+kws_label_hours_str = fmt(kws_label_hours_value, precision=0, commas=True)
+kws_label_years_str = fmt(kws_label_years_value, precision=1, commas=False)
 kws_languages_str = f"{kws_languages_value}"
 kws_dataset_size_gb_str = f"{kws_dataset_size_gb_value}"
 kws_sample_duration_ms_low_str = f"{kws_sample_duration_ms_low_value}"
@@ -291,7 +296,7 @@ A corollary of the **Iron Law** (@sec-silicon-contract) for data engineering is 
 
 | **Operation**                      |                    **Energy (pJ)** |                    **Relative Cost** |
 |:---------------------------------|---------------------------------:|-----------------------------------:|
-| **32-bit Floating Point Add**      | `{python} energy_flop_fp32_str` pJ |                                   1× |
+| **32-bit Floating Point MAC**      | `{python} energy_flop_fp32_str` pJ |                                   1× |
 | **DRAM Memory Access (32-bit)**    |  **`{python} energy_dram_str` pJ** |  **`{python} dram_multiplier_str`×** |
 | **Local SSD Access (per bit)**     |                         ~10,000 pJ | `{python} local_ssd_multiplier_str`× |
 | **Network Transfer (Data Center)** |                         ~50,000 pJ |   `{python} network_multiplier_str`× |
@@ -494,7 +499,7 @@ Data cascades occur when teams skip establishing clear quality criteria, reliabi
 
 With the cascade pattern understood, we now define the four pillars that prevent these failures.
 
-### The Four Foundational Pillars {#sec-data-engineering-ml-four-foundational-pillars-c119}
+### Four Foundational Pillars {#sec-data-engineering-ml-four-foundational-pillars-c119}
 
 Every data engineering decision, from choosing storage formats to designing ingestion pipelines, should be evaluated against four principles. Study @fig-four-pillars to see how these pillars surround and support the central ML data system—note especially the dashed trade-off lines connecting them, which highlight that strengthening one pillar can create tension with another. Balancing these interdependencies is the core challenge of systematic data engineering.
 
@@ -891,7 +896,7 @@ Embedded device constraints impose hard boundaries on these architectural choice
 
 Data quality and diversity ultimately determine whether these constraints can be met. The dataset must capture demographic diversity—speakers with various accents, ages, and genders—to ensure broad recognition. Keyword variations require attention since people pronounce wake words differently, and background noise diversity proves essential for training models that perform across real-world scenarios ranging from quiet environments to noisy conditions. Once a prototype system is developed, iterative feedback and refinement ensure the system remains aligned with objectives as deployment scenarios evolve, requiring testing in real-world conditions and systematic refinement based on observed failure patterns.
 
-### The KWS Design Space
+### KWS Design Space {#sec-data-engineering-ml-kws-design-space}
 
 These requirements create a multi-dimensional design space where data engineering choices cascade through system performance. @tbl-kws-design-space quantifies key trade-offs, enabling principled decisions rather than ad-hoc selection.
 
@@ -2623,7 +2628,7 @@ These principles manifest at scale across safety-critical domains. Autonomous ve
 
 \index{Keyword Spotting (KWS)!automated labeling}Our KWS case study has now progressed through problem definition (@sec-data-engineering-ml-framework-application-keyword-spotting-case-study-c8e9), data collection, ingestion, and processing. At the labeling stage, we confront a challenge unique to speech systems at scale. Generating millions of labeled wake word samples without proportional human annotation cost requires moving beyond the manual and crowdsourced approaches we examined earlier. The Multilingual Spoken Words Corpus (MSWC) [@mazumder2021multilingual] demonstrates how automated labeling addresses this challenge through its innovative approach to generating labeled wake word data, containing over `{python} kws_dataset_size_m_str` million one-second spoken examples across 340,000 keywords in `{python} kws_languages_str` different languages.
 
-This scale makes manual annotation infeasible: `{python} kws_dataset_size_m_str` million examples at even 10 seconds per label would require approximately 7,400 person-hours—roughly 3.7 person-years of full-time effort. Achieving `{python} kws_accuracy_target_str`% accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} kws_languages_str` languages ensures the technology serves diverse speaker populations.
+This scale makes manual annotation infeasible: `{python} kws_dataset_size_m_str` million examples at even 10 seconds per label would require approximately `{python} kws_label_hours_str` person-hours—roughly `{python} kws_label_years_str` person-years of full-time effort. Achieving `{python} kws_accuracy_target_str`% accuracy across diverse environments requires millions of training examples covering acoustic variations (background noises, speaking styles, recording environments), and transparent sourcing across `{python} kws_languages_str` languages ensures the technology serves diverse speaker populations.
 
 Walk through the pipeline in @fig-mswc to see how this automated system works. It begins with paired sentence audio recordings and corresponding transcriptions from projects like [Common Voice](https://commonvoice.mozilla.org/en) or multilingual captioned content platforms, processing these inputs through forced alignment\index{Forced Alignment!speech labeling}\index{Speech Recognition!forced alignment}[^fn-forced-alignment] to identify precise word boundaries within continuous speech.
 
@@ -2652,11 +2657,7 @@ Optimizing this term requires understanding two core storage performance metrics
 1.  **IOPS (Input/Output Operations Per Second)**: The number of distinct read/write requests a device can handle per second. This limits performance for **random access** workloads (e.g., fetching small batches of images or individual user profiles).
 2.  **Throughput (Bandwidth)**: The volume of data transferred per second, typically $\text{IOPS} \times \text{Block Size}$. This limits performance for **sequential access** workloads (e.g., scanning a Parquet file for training).
 
-The choice between databases, data warehouses, and data lakes is a choice about which of these metrics to optimize:
-
--   **Databases (OLTP)**: Optimize for high IOPS with small block sizes (random access). Suited for serving individual feature vectors in real-time where per-request latency dominates.
--   **Data Warehouses (OLAP)**: Optimize for high Throughput with large block sizes (sequential access). Ideal for feature engineering and batch analytics.
--   **Data Lakes**: Prioritize capacity and throughput for unstructured data. Essential for training jobs where the "Data" numerator is measured in petabytes and aggregate bandwidth must scale to thousands of GPUs.
+The choice between databases, data warehouses, and data lakes is fundamentally a choice about which of these metrics to optimize. Databases (OLTP systems) optimize for high IOPS with small block sizes, making them suited for serving individual feature vectors in real-time where per-request latency dominates. Data warehouses (OLAP systems) optimize for high throughput with large block sizes and sequential access, making them ideal for feature engineering and batch analytics. Data lakes prioritize capacity and throughput for unstructured data, essential for training jobs where the "Data" numerator is measured in petabytes and aggregate bandwidth must scale to thousands of GPUs.
 
 Each storage architecture exhibits distinct strengths when applied to specific ML tasks. For online feature serving, the high-IOPS characteristics of databases enable millisecond lookups of individual records. The DLRM recommendation lighthouse introduced in @sec-data-engineering-ml-four-foundational-pillars-c119 exemplifies this challenge at its most extreme: its terabyte-scale embedding tables must serve billions of sparse lookups per second, requiring storage architectures that optimize IOPS over sequential throughput. More generally, a recommendation system looking up a user's profile during real-time inference requires random access optimized for per-request latency.
 
@@ -2975,11 +2976,11 @@ time_diff_str = fmt(time_diff_min_value, precision=0, commas=False)
 total_diff_hours_str = fmt(total_diff_hours_value, precision=0, commas=False)
 snappy_decompress_mbs_str = f"{snappy_decompress_mbs_value}"
 gzip_decompress_mbs_str = f"{gzip_decompress_mbs_value}"
-dataset_gb_str = f"{dataset_gb_value}"
+compress_dataset_gb_str = f"{dataset_gb_value}"
 n_epochs_str = f"{n_epochs_value}"
 ```
 
-Compression algorithm\index{Compression!algorithm selection} selection involves trade-offs between compression ratio and decompression speed. While gzip achieves higher compression ratios of six to eight times, Snappy achieves only two to three times compression but decompresses at `{python} snappy_decompress_mbs_str` megabytes per second—roughly `{python} decompress_speedup_str` times faster than gzip's `{python} gzip_decompress_mbs_str` megabytes per second. For ML training where throughput matters more than storage costs, Snappy's speed advantage often outweighs gzip's space savings. Training on a `{python} dataset_gb_str` gigabyte dataset compressed with gzip requires `{python} gzip_min_str` minutes of decompression time, while Snappy requires only `{python} snappy_min_str` minutes. When training iterates over data for `{python} n_epochs_str` epochs, this `{python} time_diff_str`-minute difference per epoch compounds to `{python} total_diff_hours_str` hours total—potentially the difference between running experiments overnight versus waiting multiple days for results. The choice cascades through the system: faster decompression enables higher batch sizes (fitting more examples in memory after decompression), reduced buffering requirements (less decompressed data needs staging), and better GPU utilization (less time idle waiting for data).
+Compression algorithm\index{Compression!algorithm selection} selection involves trade-offs between compression ratio and decompression speed. While gzip achieves higher compression ratios of six to eight times, Snappy achieves only two to three times compression but decompresses at `{python} snappy_decompress_mbs_str` megabytes per second—roughly `{python} decompress_speedup_str` times faster than gzip's `{python} gzip_decompress_mbs_str` megabytes per second. For ML training where throughput matters more than storage costs, Snappy's speed advantage often outweighs gzip's space savings. Training on a `{python} compress_dataset_gb_str` gigabyte dataset compressed with gzip requires `{python} gzip_min_str` minutes of decompression time, while Snappy requires only `{python} snappy_min_str` minutes. When training iterates over data for `{python} n_epochs_str` epochs, this `{python} time_diff_str`-minute difference per epoch compounds to `{python} total_diff_hours_str` hours total—potentially the difference between running experiments overnight versus waiting multiple days for results. The choice cascades through the system: faster decompression enables higher batch sizes (fitting more examples in memory after decompression), reduced buffering requirements (less decompressed data needs staging), and better GPU utilization (less time idle waiting for data).
 
 Storage performance optimization extends beyond format and compression to data layout strategies. Data partitioning\index{Data Partitioning!query optimization} based on frequently used query parameters dramatically improves retrieval efficiency. A recommendation system processing user interactions might partition data by date and user demographic attributes, enabling training on recent data subsets or specific user segments without scanning the entire dataset. Partitioning strategies interact with distributed training patterns: range partitioning by user ID enables data parallel training where each worker processes a consistent user subset, while random partitioning ensures workers see diverse data distributions. The partitioning granularity matters—too few partitions limit parallelism, while too many partitions increase metadata overhead and reduce efficiency of sequential reads within partitions.
 
@@ -3220,6 +3221,8 @@ Most production ML failures trace to data, not models. Check in this order (appr
 Debugging the model before verifying data consistency wastes engineering cycles on the wrong 10–15%.
 
 [^fn-failure-proportions]: **ML Failure Distribution**: These proportions represent synthesized estimates from industry reports and practitioner experience, including findings from @sculley2015hidden on ML technical debt and platform experiences at companies like Uber, Google, and Meta. Actual proportions vary by domain and organizational maturity; the key insight is that data-related issues collectively dominate model-related issues.
+
+The patterns in this section—data debt accumulation, diagnostic debugging, and systematic remediation—close the loop on the data engineering lifecycle. From acquisition through storage, every pipeline stage we have examined introduces opportunities for both excellence and failure. The following fallacies and pitfalls distill the most consequential misconceptions that lead teams astray.
 
 ## Fallacies and Pitfalls {#sec-data-engineering-ml-fallacies-pitfalls}
 

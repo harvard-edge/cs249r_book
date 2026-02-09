@@ -695,11 +695,9 @@ Binary formats like Protocol Buffers[^fn-protobuf] (Protobuf) or FlatBuffers[^fn
 
 #### REST vs gRPC {#sec-model-serving-systems-rest-vs-grpc-c7b7}
 
-Two dominant paradigms define modern serving interfaces, each with distinct system characteristics:
+Two dominant paradigms define modern serving interfaces, each with distinct system characteristics. REST (Representational State Transfer)[^fn-rest]\index{REST!HTTP/1.1 protocol} typically uses HTTP/1.1 and JSON. It is universally supported, human-readable, and stateless, making it the default choice for public-facing APIs. However, standard HTTP/1.1 requires a new TCP handshake for each request (unless keep-alive is carefully tuned), and JSON serialization adds significant latency for numerical data like tensors.
 
-**REST (Representational State Transfer)**[^fn-rest]\index{REST!HTTP/1.1 protocol} typically uses HTTP/1.1 and JSON. It is universally supported, human-readable, and stateless, making it the default choice for public-facing APIs. However, standard HTTP/1.1 requires a new TCP handshake for each request (unless keep-alive is carefully tuned), and JSON serialization adds significant latency for numerical data like tensors.
-
-**gRPC (gRPC Remote Procedure Call)**\index{gRPC!inference protocol}[^fn-grpc] uses HTTP/2 and Protobuf\index{Protocol Buffers!serialization}. HTTP/2 enables multiplexing multiple requests over a single persistent TCP connection, eliminating handshake latency and allowing efficient binary streaming. Protobuf provides strict type safety and efficient binary serialization, making it the standard for internal service-to-service communication where latency is critical.
+In contrast, gRPC (gRPC Remote Procedure Call)\index{gRPC!inference protocol}[^fn-grpc] uses HTTP/2 and Protobuf\index{Protocol Buffers!serialization}. HTTP/2 enables multiplexing multiple requests over a single persistent TCP connection, eliminating handshake latency and allowing efficient binary streaming. Protobuf provides strict type safety and efficient binary serialization, making it the standard for internal service-to-service communication where latency is critical.
 
 [^fn-rest]: **REST (Representational State Transfer)**\index{REST!etymology}: Defined by Roy Fielding [@fielding2000rest] in his 2000 PhD dissertation at UC Irvine. An *architectural style* rather than a protocol, REST distills the web's design principles into six constraints: client-server separation, statelessness, cacheability, uniform interface, layered system, and code on demand. Its simplicity made it the dominant paradigm for web APIs, though text-based HTTP/1.1 and JSON serialization create overhead for ML inference, where binary tensor data dominates the payload.
 
@@ -1994,9 +1992,9 @@ The efficiency gains from batching come at a cost: requests must wait for the ba
 
 ### Static vs Dynamic Batching {#sec-model-serving-systems-static-vs-dynamic-batching-fd0a}
 
-**Static batching**\index{Static Batching!fixed batch size} waits for a fixed batch size before processing. Simple to implement but problematic in practice: during low traffic, requests wait indefinitely for a full batch. During high traffic, large batches increase per-request latency.
+Static batching\index{Static Batching!fixed batch size} waits for a fixed batch size before processing. Simple to implement but problematic in practice: during low traffic, requests wait indefinitely for a full batch, and during high traffic, large batches increase per-request latency.
 
-**Dynamic batching**\index{Dynamic Batching!time window} collects requests within a time window, processing whatever has arrived when the window closes [@olston2017tensorflow]. This bounds maximum wait time regardless of traffic level. The window size represents a direct tradeoff: shorter windows reduce latency but sacrifice throughput; longer windows improve throughput but increase latency.
+Dynamic batching\index{Dynamic Batching!time window} addresses these limitations by collecting requests within a time window and processing whatever has arrived when the window closes [@olston2017tensorflow]. This bounds maximum wait time regardless of traffic level. The window size represents a direct tradeoff: shorter windows reduce latency but sacrifice throughput; longer windows improve throughput but increase latency.
 
 Typical configurations use windows of 5–50 ms with maximum batch sizes of 8–32 for latency-sensitive applications. The optimal configuration depends on request arrival patterns, model characteristics, and latency requirements.
 
@@ -2214,7 +2212,7 @@ s2_throughput_value = 1280
 # --- Process (wait times, budget, and tradeoff metrics) ---
 s1_wait_ms_value = s1_window_ms_value / 2
 s1_budget_ms_value = 50 - s1_wait_ms_value
-s1_max_batch_value = 71 # Theoretical
+s1_max_batch_value = 70 # Theoretical: floor((50 - 2.5 - 5) / 0.6) = 70
 
 s2_wait_ms_value = s2_window_ms_value / 2
 s2_budget_ms_value = 50 - s2_wait_ms_value
@@ -2850,9 +2848,9 @@ TensorRT\index{Inference Engine!specialized}\index{TensorRT!GPU optimization}[^f
 
 [^fn-tensorrt-serving]: **TensorRT**: NVIDIA's inference optimization SDK that applies layer fusion, kernel auto-tuning, and precision calibration to neural networks. Unlike framework-native runtimes that preserve training-time graph structure, TensorRT rebuilds the computation graph for the specific target GPU during a build phase. This GPU-specific compilation means TensorRT engines are not portable across GPU architectures, requiring separate builds for V100, A100, and H100 deployments. The build phase can take minutes but produces engines that often achieve 2–5× speedup over PyTorch.
 
-**Layer fusion**\index{Layer Fusion!kernel optimization} combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15–60 μs saved per fusion) and reduces memory traffic by 2–3×. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
+Layer fusion\index{Layer Fusion!kernel optimization} combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15–60 μs saved per fusion) and reduces memory traffic by 2–3×. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
 
-**Kernel auto-tuning**\index{Kernel Auto-Tuning!algorithm selection}\index{Algorithm Selection!convolution implementations} selects the fastest algorithm for each operation on the specific GPU. A single convolution can be implemented using dozens of algorithms (direct, FFT-based, Winograd, various tiling strategies), each optimal for different input sizes and GPU architectures. Auto-tuning benchmarks each candidate and caches the winner, trading compilation time for runtime performance.
+Kernel auto-tuning\index{Kernel Auto-Tuning!algorithm selection}\index{Algorithm Selection!convolution implementations} selects the fastest algorithm for each operation on the specific GPU. A single convolution can be implemented using dozens of algorithms (direct, FFT-based, Winograd, various tiling strategies), each optimal for different input sizes and GPU architectures. Auto-tuning benchmarks each candidate and caches the winner, trading compilation time for runtime performance.
 
 These optimizations typically achieve 2–5× speedup over framework-native serving but require explicit export and may not support all operations. A *runtime comparison* on a standard model quantifies these gains across the optimization spectrum.
 
