@@ -20,15 +20,60 @@ import sys
 from pathlib import Path
 
 
-def clear_cache(quarto_dir: Path) -> None:
-    """Clear stale figure data from previous builds."""
-    latex_file = quarto_dir / 'index_figures.txt'
-    
-    if latex_file.exists():
-        latex_file.unlink()
-        print(f"[Figure List] Cleared: {latex_file.name}", file=sys.stderr)
-    else:
-        print(f"[Figure List] Clean (no stale data)", file=sys.stderr)
+MANIFEST_HEADER = 'LATEX FIGURE MANIFEST'
+
+
+def _is_latex_manifest(path: Path) -> bool:
+    """Check whether a file is a LaTeX figure manifest."""
+    try:
+        return MANIFEST_HEADER in path.read_text(encoding='utf-8')[:200]
+    except Exception:
+        return False
+
+
+def _find_manifests_in(directory: Path) -> list[Path]:
+    """Return all *_figures.txt files in *directory* that are LaTeX manifests."""
+    if not directory.exists():
+        return []
+    return [f for f in directory.glob('*_figures.txt') if _is_latex_manifest(f)]
+
+
+def find_latex_manifest(quarto_dir: Path, output_dir: Path | None = None) -> Path | None:
+    r"""Find the LaTeX figure manifest written by header-includes.tex.
+
+    LaTeX writes \jobname_figures.txt into the quarto root during PDF
+    compilation.  The post-render step moves it into the build output
+    directory so the source tree stays clean.  This function searches
+    *output_dir* first (moved copy), then *quarto_dir* (fresh from LaTeX).
+    Returns the most recently modified match, or None.
+    """
+    candidates: list[Path] = []
+    if output_dir:
+        candidates.extend(_find_manifests_in(output_dir))
+    candidates.extend(_find_manifests_in(quarto_dir))
+
+    if not candidates:
+        return None
+
+    # Most recently modified wins
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
+def clear_cache(quarto_dir: Path, output_dir: Path | None = None) -> None:
+    """Clear stale figure manifests from previous builds.
+
+    Searches both the quarto root (where LaTeX writes) and the build
+    output directory (where post-render moves them).
+    """
+    cleared = False
+    for directory in filter(None, [quarto_dir, output_dir]):
+        for f in _find_manifests_in(directory):
+            f.unlink()
+            print(f"[Figure List] Cleared: {f.relative_to(quarto_dir) if f.is_relative_to(quarto_dir) else f}", file=sys.stderr)
+            cleared = True
+    if not cleared:
+        print("[Figure List] Clean (no stale data)", file=sys.stderr)
 
 
 def parse_latex_figures(latex_file: Path) -> list[dict]:
@@ -260,25 +305,29 @@ def main():
     # Get quarto directory
     script_dir = Path(__file__).parent
     quarto_dir = script_dir.parent.parent
+
+    # Get output directory from Quarto environment or use default
+    output_dir = Path(
+        args.output
+        or os.environ.get('QUARTO_PROJECT_OUTPUT_DIR', '')
+        or str(quarto_dir / '_build/pdf-vol1')
+    )
     
     # Pre-render mode: just clear cache and exit
     if args.clear:
-        clear_cache(quarto_dir)
+        clear_cache(quarto_dir, output_dir)
         return
     
-    # Get output directory from Quarto environment or use default
-    output_dir = args.output or os.environ.get('QUARTO_PROJECT_OUTPUT_DIR', '')
-    if output_dir:
-        output_dir = Path(output_dir)
+    # Find LaTeX figures file (written by header-includes.tex via \jobname).
+    # LaTeX writes into the quarto root; a previous post-render may have
+    # already moved it into output_dir.
+    latex_file = find_latex_manifest(quarto_dir, output_dir)
+    if latex_file:
+        print(f"[Figure List] LaTeX manifest: {latex_file.name}", file=sys.stderr)
     else:
-        # Default to _build/pdf-vol1
-        script_dir = Path(__file__).parent
-        output_dir = script_dir.parent.parent / '_build/pdf-vol1'
+        print(f"[Figure List] WARNING: No LaTeX manifest (*_figures.txt) found", file=sys.stderr)
     
-    # Find LaTeX figures file (written by header-includes.tex)
-    latex_file = quarto_dir / 'index_figures.txt'
-    
-    latex_figures = parse_latex_figures(latex_file)
+    latex_figures = parse_latex_figures(latex_file) if latex_file else []
     print(f"[Figure List] LaTeX: {len(latex_figures)} figures with page numbers", file=sys.stderr)
     
     # Extract QMD figures (reads chapter order from config, or scans all)
@@ -288,8 +337,8 @@ def main():
     # Merge: only include figures if counts match (both from same build)
     if len(latex_figures) != len(qmd_figures):
         print(f"[Figure List] WARNING: LaTeX ({len(latex_figures)}) and QMD ({len(qmd_figures)}) counts don't match!", file=sys.stderr)
-        print(f"[Figure List] The LaTeX file may be from a previous build.", file=sys.stderr)
-        print(f"[Figure List] Delete 'index_figures.txt' and rebuild to fix.", file=sys.stderr)
+        print(f"[Figure List] The LaTeX manifest may be from a previous build.", file=sys.stderr)
+        print(f"[Figure List] Run with --clear and rebuild to fix.", file=sys.stderr)
     
     # Merge by position - trust QMD count as source of truth
     merged = []
@@ -347,6 +396,19 @@ def main():
     
     print(f"[Figure List] Written: {output_path}", file=sys.stderr)
     print(f"[Figure List] Total: {len(merged)} figures", file=sys.stderr)
+
+    # --- Cleanup: move LaTeX manifest from source tree into _build/ ---
+    # LaTeX can only write into the quarto root (TeX working directory).
+    # Move the manifest into the build output so the source tree stays clean.
+    for manifest in _find_manifests_in(quarto_dir):
+        dest = output_dir / manifest.name
+        try:
+            import shutil
+            output_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(manifest), str(dest))
+            print(f"[Figure List] Moved {manifest.name} → {output_dir.name}/", file=sys.stderr)
+        except Exception as exc:
+            print(f"[Figure List] WARNING: Could not move {manifest.name}: {exc}", file=sys.stderr)
 
 
 if __name__ == '__main__':

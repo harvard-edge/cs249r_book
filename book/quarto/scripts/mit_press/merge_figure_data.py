@@ -3,7 +3,7 @@
 Merge Figure Data from LaTeX and QMD Sources
 
 Combines:
-  - LaTeX output: Figure numbers and page numbers (from index_figures.txt)
+  - LaTeX output: Figure numbers and page numbers (from *_figures.txt)
   - QMD source: Labels, captions, alt-text (parsed from .qmd files)
 
 Usage:
@@ -17,12 +17,36 @@ import sys
 from pathlib import Path
 
 
+MANIFEST_HEADER = 'LATEX FIGURE MANIFEST'
+
+
+def find_latex_manifest(quarto_dir: Path, output_dir: Path | None = None) -> Path | None:
+    r"""Find the LaTeX figure manifest written by header-includes.tex.
+
+    LaTeX writes \jobname_figures.txt into the quarto root during PDF
+    compilation.  The post-render step in generate_figure_list.py moves
+    it into the build output directory.  This function searches both
+    locations and returns the most recently modified match, or None.
+    """
+    candidates: list[Path] = []
+    for directory in filter(None, [output_dir, quarto_dir]):
+        if directory.exists():
+            candidates.extend(
+                f for f in directory.glob('*_figures.txt')
+                if MANIFEST_HEADER in f.read_text(encoding='utf-8')[:200]
+            )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
 def parse_latex_figures(latex_file: Path) -> list[dict]:
     """Parse LaTeX-generated figure manifest."""
     figures = []
     
-    if not latex_file.exists():
-        print(f"[Merge] LaTeX file not found: {latex_file}", file=sys.stderr)
+    if not latex_file or not latex_file.exists():
+        print(f"[Merge] LaTeX file not found", file=sys.stderr)
         return figures
     
     content = latex_file.read_text()
@@ -121,9 +145,14 @@ def main():
     
     script_dir = Path(__file__).parent
     quarto_dir = script_dir.parent.parent
+    build_dir = quarto_dir / f'_build/pdf-vol{args.vol}'
     
-    # Parse LaTeX figures
-    latex_file = quarto_dir / 'index_figures.txt'
+    # Parse LaTeX figures (find manifest dynamically — \jobname varies by build)
+    latex_file = find_latex_manifest(quarto_dir, build_dir)
+    if latex_file:
+        print(f"[Merge] LaTeX manifest: {latex_file.name}", file=sys.stderr)
+    else:
+        print(f"[Merge] WARNING: No LaTeX manifest (*_figures.txt) found", file=sys.stderr)
     latex_figures = parse_latex_figures(latex_file)
     print(f"[Merge] LaTeX: {len(latex_figures)} figures with page numbers", file=sys.stderr)
     
