@@ -8,7 +8,6 @@ engine: jupyter
 
 # Model Compression {#sec-model-compression}
 
-\index{Model Compression!overview}
 
 ::: {layout-narrow}
 ::: {.column-margin}
@@ -28,7 +27,6 @@ engine: jupyter
 
 _Why do the models that win benchmarks rarely become the models that run in production?_
 
-\index{Model Compression!deployability gap}
 Training produced a capable model, yet capability alone does not guarantee deployability. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore: memory budgets measured in megabytes rather than gigabytes, latency targets measured in milliseconds rather than seconds, power envelopes measured in milliwatts rather than kilowatts. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond. The model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets. Bridging it requires a systematic discipline of *compression*: trading capabilities the deployment does not need for constraints the deployment cannot violate. The key insight is that trained models are vastly over-specified for most production tasks—they carry more precision, more connections, and more capacity than the deployment context demands, and that surplus can be systematically removed. The techniques differ in what they trade away, but they share a common principle: find what the model has learned that the deployment does not need, and remove it without destroying what the deployment requires. When applied well, compression can reduce model size by one to two orders of magnitude, transforming a research artifact that runs only in a datacenter into a production asset that meets the physics of a phone, a sensor, or a microcontroller. The discipline is not about making models smaller but about *making the right models possible*.
 
 ::: {.content-visible when-format="pdf"}
@@ -166,7 +164,6 @@ gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp_value}}}
 ```
 
 ## Model Optimization Fundamentals {#sec-model-compression-model-optimization-fundamentals-c0d7}
-\index{Model Optimization|see{Model Compression}}
 
 A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving-systems) is not a minor inconvenience but a defining challenge of model compression.
 
@@ -178,9 +175,6 @@ The scale of this renegotiation makes model optimization an engineering discipli
 \index{Operator Fusion!framework introduction}
 This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers (exploiting **Tensor Cores** discussed in @sec-ai-acceleration-tensor-cores-771f), which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50% of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
 
-\index{ResNet-50!lighthouse model for compression}
-\index{MobileNetV2!lighthouse model for compression}
-\index{DS-CNN!keyword spotter lighthouse}
 Throughout this chapter, we ground each technique in concrete systems: ResNet-50 and MobileNetV2 (our **Lighthouse Models** from @sec-dnn-architectures) for vision workloads, transformer-based language models for sequence tasks, and the DS-CNN keyword spotter for TinyML deployment. These recurring models let us compare techniques under consistent conditions, making the trade-offs between accuracy, latency, memory, and energy tangible rather than abstract.
 
 ::: {.callout-definition title="Model Compression"}
@@ -191,7 +185,7 @@ The chapter follows the optimization stack from software to hardware. We begin w
 
 ## Optimization Framework {#sec-model-compression-optimization-framework-9e21}
 
-Model optimization is not a single technique but a *framework* with three complementary dimensions\index{Model Compression!optimization stack (software to hardware)}, each addressing different bottlenecks. These dimensions form a natural hierarchy: we first decide *what* computations the model should perform (representation), then *how precisely* to perform them (numerics), and finally *how efficiently* to execute them on physical hardware (implementation). As you trace the stack in @fig-3-sections from top to bottom, notice how each layer moves from pure software concerns toward hardware-level execution.
+Model optimization is not a single technique but a *framework* with three complementary dimensions, each addressing different bottlenecks. These dimensions form a natural hierarchy: we first decide *what* computations the model should perform (representation), then *how precisely* to perform them (numerics), and finally *how efficiently* to execute them on physical hardware (implementation). As you trace the stack in @fig-3-sections from top to bottom, notice how each layer moves from pure software concerns toward hardware-level execution.
 
 ::: {#fig-3-sections fig-env="figure" fig-pos="htb" fig-cap="**Optimization Stack**: Model optimization progresses through three layers: efficient model representation, efficient numerics representation, and efficient hardware implementation." fig-alt="Three stacked rectangular boxes labeled from top to bottom: Efficient Model Representation, Efficient Numerics Representation, Efficient Hardware Implementation. A vertical arrow spans the stack with More software at top and More hardware at bottom."}
 ```{.tikz}
@@ -223,7 +217,7 @@ The top layer, *efficient model representation*, focuses on eliminating redundan
 
 The middle layer, *efficient numerics representation*, optimizes how numerical values are stored and processed. Quantization and mixed-precision\index{Mixed-Precision Training} training reduce the bit-width of weights and activations (e.g., from 32-bit floating point to 8-bit integers), enabling faster execution and lower memory usage on specialized hardware.
 
-The bottom layer, *efficient hardware implementation*, ensures operations run efficiently on target processors. Techniques like operator fusion, sparsity exploitation, and hardware-aware scheduling\index{Hardware-Aware Optimization!overview} align computational patterns with hardware capabilities (memory hierarchy, vector units) to maximize utilization and throughput.
+The bottom layer, *efficient hardware implementation*, ensures operations run efficiently on target processors. Techniques like operator fusion, sparsity exploitation, and hardware-aware scheduling align computational patterns with hardware capabilities (memory hierarchy, vector units) to maximize utilization and throughput.
 
 These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-decision-framework-1896 provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
 
@@ -396,9 +390,9 @@ Optimization requirements vary dramatically across deployment contexts. What mat
 
 ### Deployment Scenarios {#sec-model-compression-deployment-scenarios-70c9}
 
-Cloud inference\index{Inference Optimization!cloud} optimizes for throughput (requests/second/dollar). Quantization enables serving more concurrent requests; operator fusion reduces per-request latency [@choudhary2020comprehensive; @dean2018new]. Mobile and edge\index{Inference Optimization!mobile}\index{Inference Optimization!edge} deployments must fit device memory while meeting real-time targets. A camera app processing 30 fps has 33 ms per frame, so any optimization reducing inference below this threshold directly improves user experience.
+Cloud inference optimizes for throughput (requests/second/dollar). Quantization enables serving more concurrent requests; operator fusion reduces per-request latency [@choudhary2020comprehensive; @dean2018new]. Mobile and edge deployments must fit device memory while meeting real-time targets. A camera app processing 30 fps has 33 ms per frame, so any optimization reducing inference below this threshold directly improves user experience.
 
-TinyML\index{TinyML!model compression}\index{Inference Optimization!TinyML}[^fn-microcontroller-constraints] makes optimization existential, not optional. A microcontroller with 256KB RAM cannot run a 100MB model regardless of accuracy. The model must compress below hardware limits or deployment is impossible [@banbury2020benchmarking]. Even on mobile devices with comparatively generous resources, a single optimization technique can deliver a *4× performance win* that means the difference between a feature that ships and one that never leaves the prototype stage.
+TinyML\index{TinyML!model compression}[^fn-microcontroller-constraints] makes optimization existential, not optional. A microcontroller with 256KB RAM cannot run a 100MB model regardless of accuracy. The model must compress below hardware limits or deployment is impossible [@banbury2020benchmarking]. Even on mobile devices with comparatively generous resources, a single optimization technique can deliver a *4× performance win* that means the difference between a feature that ships and one that never leaves the prototype stage.
 
 \index{MobileNetV3!NAS-optimized architecture}
 ::: {.callout-example title="The 4× MobileNet Win"}
@@ -562,8 +556,6 @@ Optimization is about trading one resource for another.
 With the deployment context established and the trade-off landscape mapped, we now examine each optimization dimension in depth. We begin with structural methods that modify *what* computations occur, then turn to precision techniques that reduce numerical fidelity, and finally address architectural approaches that improve execution efficiency on physical hardware.
 
 ## Structural Optimization {#sec-model-compression-structural-model-optimization-methods-8ed4}
-\index{Network Pruning|see{Pruning}}
-\index{Weight Pruning|see{Pruning}}
 \index{Model Compression!structural optimization}
 
 Structural optimization addresses the first dimension of our framework — **Efficient Model Representation** — by modifying *what* the model computes. Modern neural networks are heavily overparameterized[^fn-gradient-checkpointing], often containing far more parameters than are strictly necessary to solve a task. This redundancy is not a design flaw; it is essential for training, where over-capacity helps optimization navigate complex loss landscapes. But at deployment time, that surplus becomes pure waste: unnecessary memory, unnecessary computation, unnecessary energy.
@@ -584,7 +576,7 @@ These three techniques address the challenge through complementary approaches. P
 \index{Optimal Brain Surgeon!Hassibi 1993}
 \index{LeCun, Yann!optimal brain damage}
 \index{Han, Song!modern pruning revival}
-Pruning\index{Pruning!overview}[^fn-pruning-etymology] directly addresses memory efficiency constraints by eliminating redundant parameters. Modern neural networks are heavily overparameterized, often containing far more weights than are strictly necessary to solve a task. This redundancy allows us to remove a significant fraction of weights without substantial performance degradation. As we will explore in @sec-ai-acceleration, specialized hardware can further exploit these sparse structures.
+Pruning[^fn-pruning-etymology] directly addresses memory efficiency constraints by eliminating redundant parameters. Modern neural networks are heavily overparameterized, often containing far more weights than are strictly necessary to solve a task. This redundancy allows us to remove a significant fraction of weights without substantial performance degradation. As we will explore in @sec-ai-acceleration, specialized hardware can further exploit these sparse structures.
 
 [^fn-pruning-etymology]: **Pruning**: Borrowed from horticulture, where gardeners prune branches to improve plant health and growth. The ML metaphor fits precisely: just as removing unproductive branches redirects resources to productive growth, removing low-magnitude weights redirects computational resources to parameters that matter. The technique dates to Yann LeCun's "Optimal Brain Damage" (Bell Labs, 1989) [@lecun1990optimal], which formalized the gardener's intuition with second-derivative analysis. Babak Hassibi and colleagues at Stanford extended this with "Optimal Brain Surgeon" (1993), using full Hessian information for more precise cuts. The field then lay largely dormant for two decades until Song Han (Stanford, later MIT) revived it for deep learning in 2015 [@han2015deep], demonstrating that modern networks could be pruned by 90% without accuracy loss—a finding that launched the modern model compression era.
 
@@ -1073,7 +1065,6 @@ The primary advantage of unstructured pruning is memory efficiency. By reducing 
 However, unstructured pruning does not necessarily improve computational efficiency on modern machine learning hardware. Standard GPUs and TPUs are optimized for dense matrix multiplications, and a sparse weight matrix often cannot fully utilize hardware acceleration unless specialized sparse computation kernels are available. Unstructured pruning therefore primarily benefits model storage rather than inference acceleration, and it does not alter the structural organization of the network.
 
 \index{Pruning!structured}
-\index{Structured Pruning|see{Pruning}}
 #### Structured Pruning {#sec-model-compression-structured-pruning-b651}
 
 Where unstructured pruning removes individual weights, structured pruning [@li2017pruning][^fn-structured-pruning] eliminates entire computational units: neurons, filters, channels, or layers. This approach produces smaller dense models that map directly to modern machine learning accelerators. Because the resulting architecture remains fully dense, structured pruning leads to more efficient inference on general-purpose hardware than unstructured pruning, which requires specialized execution kernels to exploit its sparse weight matrices.
@@ -1685,7 +1676,7 @@ Development timeline matters as well. One-shot methods enable faster deployment 
 
 The pruning strategies discussed above share a common assumption: we start with a trained network and then decide which parameters to remove. What if the relationship between network structure and trainability runs deeper? What if the "winning" sparse network already exists at initialization, hidden within the dense structure?
 
-Pruning is widely used to reduce the size and computational cost of neural networks, but the process of determining which parameters to remove is not always straightforward.\index{Lottery Ticket Hypothesis!overview} While traditional pruning methods eliminate weights based on magnitude, structure, or dynamic conditions, pruning may also reveal inherently efficient subnetworks within the original model.
+Pruning is widely used to reduce the size and computational cost of neural networks, but the process of determining which parameters to remove is not always straightforward. While traditional pruning methods eliminate weights based on magnitude, structure, or dynamic conditions, pruning may also reveal inherently efficient subnetworks within the original model.
 
 This perspective leads to the Lottery Ticket Hypothesis\index{Lottery Ticket Hypothesis!winning tickets}\index{Lottery Ticket Hypothesis!sparse subnetworks}[^fn-lottery-ticket] (LTH), which challenges conventional pruning workflows by proposing that within large neural networks, there exist small, well-initialized subnetworks ("winning tickets") that can achieve comparable accuracy to the full model when trained in isolation. Rather than viewing pruning as a post-training compression step, LTH suggests it can serve as a discovery mechanism to identify these efficient subnetworks early in training.
 
@@ -1944,9 +1935,9 @@ While LTH presents a compelling theoretical perspective on pruning, practical im
 
 Modern machine learning frameworks provide dedicated APIs to automate the pruning and fine-tuning workflow.
 
-In **PyTorch**\index{PyTorch!pruning APIs}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. Users can apply unstructured pruning (e.g., `l1_unstructured`) or structured pruning (e.g., `ln_structured`) with just a few lines of code. PyTorch uses "masks" to handle pruning: the original parameters are preserved, but a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
+In **PyTorch**\index{Framework Toolkits!pruning support}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. Users can apply unstructured pruning (e.g., `l1_unstructured`) or structured pruning (e.g., `ln_structured`) with just a few lines of code. PyTorch uses "masks" to handle pruning: the original parameters are preserved, but a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
 
-**TensorFlow**\index{TensorFlow!Model Optimization Toolkit} implements pruning through the **TensorFlow Model Optimization Toolkit (TF-MOT)**. Unlike PyTorch's post-training approach, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
+**TensorFlow** implements pruning through the **TensorFlow Model Optimization Toolkit (TF-MOT)**. Unlike PyTorch's post-training approach, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
 
 \index{BERT!compression techniques}
 These trade-offs become concrete when examining real-world deployments. Several high-profile models have successfully integrated pruning to optimize performance. MobileNet, designed for mobile and embedded applications, has been pruned to reduce inference latency while preserving accuracy [@howard2017mobilenets]. BERT[^fn-bert-compression], a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert]. In computer vision, EfficientNet[^fn-efficientnet-pruning] has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].
@@ -2134,7 +2125,6 @@ The factor $T^2$ ensures that gradient scales remain consistent when $T$ is chan
 
 ##### Efficiency Gains and Trade-offs {#sec-model-compression-efficiency-gains-3a1d}
 
-\index{DistilBERT!performance metrics}
 Distillation's primary advantage over pruning is that it produces a *dense* model, not a sparse one. A distilled student runs efficiently on commodity hardware — GPUs, TPUs, edge AI chips — without requiring specialized sparse execution kernels. Models such as **DistilBERT**\index{DistilBERT}\index{Knowledge Distillation!DistilBERT}[^fn-distilbert-metrics] retain up to 97% of the teacher's accuracy with 40% fewer parameters and 60% faster inference, a compression level difficult to achieve through pruning alone [@sanh2019distilbert]. MobileNet distillation variants [@howard2017mobilenets] demonstrate similar results in computer vision. The student also inherits the teacher's generalization properties\index{Knowledge Distillation!memory efficiency}: large models trained on extensive datasets are less sensitive to noise and data shifts, and well-trained students inherit this robustness — particularly valuable in low-data regimes where training a small model from scratch leads to poor generalization.
 
 [^fn-distilbert-metrics]: **DistilBERT Performance**: Achieves 97% of BERT-Base performance with 40% fewer parameters (66M vs. 110M) and 60% faster inference. On SQuAD v1.1, DistilBERT scores 86.9 F1 vs. BERT's 88.5 F1, while reducing memory from 1.35GB to 0.54GB and latency from 85 ms to 34 ms.
@@ -2504,8 +2494,6 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 ```
 :::
 
-\index{CP Decomposition|see{Tensor Decomposition}}
-\index{Tucker Decomposition|see{Tensor Decomposition}}
 - **CP decomposition**\index{Tensor Decomposition!CP decomposition}: Expresses a tensor as a sum of rank-one components: $\mathcal{A} \approx \sum_{r=1}^{k} u_r \otimes v_r \otimes w_r$
 - **Tucker decomposition**\index{Tensor Decomposition!Tucker decomposition}: Uses a core tensor with factor matrices: $\mathcal{A} \approx \mathcal{G} \times_1 U \times_2 V \times_3 W$
 - **Tensor-Train (TT)**\index{Tensor Decomposition!Tensor-Train}: Factorizes into a sequence of lower-rank matrices, particularly effective for very high-dimensional tensors
@@ -2679,13 +2667,12 @@ Test your understanding of the structural optimization techniques covered so far
 
 ## Quantization and Precision {#sec-model-compression-quantization-precision-optimization-31d3}
 \index{Model Compression!precision optimization}
-\index{Precision Reduction|see{Quantization}}
 
-*Quantization*\index{Quantization!overview}, the process of reducing numerical precision, offers one of the most impactful optimizations for deployment: trading bits for speed and efficiency with minimal accuracy loss.
+*Quantization*, the process of reducing numerical precision, offers one of the most impactful optimizations for deployment: trading bits for speed and efficiency with minimal accuracy loss.
 
 ::: {.callout-definition title="Quantization"}
 
-***Quantization***\index{Quantization!definition}\index{INT8|see{Quantization}} is the reduction of **Information Fidelity** to match the **Noise Floor** of the model. It maps continuous values to discrete bins (e.g., FP32 to INT8), linearly reducing **Memory Bandwidth** and **Energy** consumption while exploiting the robustness of neural networks to low-precision arithmetic.
+***Quantization***\index{Quantization} is the reduction of **Information Fidelity** to match the **Noise Floor** of the model. It maps continuous values to discrete bins (e.g., FP32 to INT8), linearly reducing **Memory Bandwidth** and **Energy** consumption while exploiting the robustness of neural networks to low-precision arithmetic.
 
 :::
 
@@ -3366,11 +3353,10 @@ Binary/Ternary Networks Extreme Quantization};
 
 #### Post-Training Quantization {#sec-model-compression-posttraining-quantization-924a}
 
-Post-training quantization\index{Post-Training Quantization (PTQ)!definition} (PTQ) reduces numerical precision after training, converting weights and activations from high-precision formats (FP32)\index{FP32|see{Quantization}} to lower-precision representations (INT8\index{INT8!inference} or FP16\index{FP16!inference}) without retraining [@jacob2018quantization]. This achieves smaller model sizes, faster computation, and reduced energy consumption, making it practical for resource-constrained environments such as mobile devices, edge AI systems, and cloud inference platforms [@wu2020integer].
+Post-training quantization\index{Post-Training Quantization (PTQ)!definition} (PTQ) reduces numerical precision after training, converting weights and activations from high-precision formats (FP32) to lower-precision representations (INT8\index{INT8!inference} or FP16\index{FP16!inference}) without retraining [@jacob2018quantization]. This achieves smaller model sizes, faster computation, and reduced energy consumption, making it practical for resource-constrained environments such as mobile devices, edge AI systems, and cloud inference platforms [@wu2020integer].
 
-\index{TensorFlow Lite!PTQ support}
-\index{ONNX Runtime!PTQ support}
-PTQ's key advantage is low computational cost: it requires no retraining or access to training data. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks (TensorFlow Lite\index{TensorFlow Lite}, ONNX Runtime\index{ONNX Runtime}, PyTorch) provide built-in PTQ support.
+\index{Framework Toolkits!quantization support}
+PTQ's key advantage is low computational cost: it requires no retraining or access to training data. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks (TensorFlow Lite, ONNX Runtime, PyTorch) provide built-in PTQ support.
 
 ##### PTQ Functionality {#sec-model-compression-ptq-functionality-3aaf}
 
@@ -3940,7 +3926,7 @@ Box/.style={inner xsep=2pt,
 Activation Quantization refers to the process of quantizing the activation values, or outputs of the layers, during model inference. This quantization can reduce the computational resources required during inference, particularly when targeting hardware optimized for integer arithmetic. It introduces challenges related to maintaining model accuracy, as the precision of intermediate computations is reduced. For instance, in a CNN, the activation maps (or feature maps) produced by convolutional layers, originally represented in Float32, may be quantized to INT8 during inference. This can significantly accelerate computation on hardware capable of efficiently processing lower-precision integers.
 
 \index{LLaMA!AWQ quantization}
-Recent advancements have explored **Activation-aware Weight Quantization (AWQ)**\index{Quantization!activation-aware weight (AWQ)}\index{AWQ|see{Quantization, activation-aware weight}}[^fn-awq] for the compression and acceleration of large language models (LLMs). This approach is particularly relevant for our **GPT-2 / Llama Lighthouse**, which is memory-bandwidth bound. By protecting only a small fraction of the most salient weights (approximately 1%) based on activation magnitude, AWQ enables effective 4-bit weight quantization. This reduces the memory traffic required to load the massive parameter set for every token generation, directly attacking the primary bottleneck of generative inference [@lin2023awq].
+Recent advancements have explored **Activation-aware Weight Quantization (AWQ)**\index{Quantization!activation-aware weight (AWQ)}[^fn-awq] for the compression and acceleration of large language models (LLMs). This approach is particularly relevant for our **GPT-2 / Llama Lighthouse**, which is memory-bandwidth bound. By protecting only a small fraction of the most salient weights (approximately 1%) based on activation magnitude, AWQ enables effective 4-bit weight quantization. This reduces the memory traffic required to load the massive parameter set for every token generation, directly attacking the primary bottleneck of generative inference [@lin2023awq].
 
 [^fn-awq]: **Activation-aware Weight Quantization (AWQ)**: Observes that only approximately 1% of weights disproportionately affect accuracy based on activation patterns. By protecting these salient weights while aggressively quantizing others, AWQ achieves INT4 quantization of LLaMA-7B with <1% perplexity degradation. Delivers 3.2× speedup on A100 GPUs by reducing memory bandwidth requirements from 14GB to 3.5GB per inference.
 
@@ -4313,7 +4299,7 @@ The gap arises from several sources. Sparse matrices stored in dense format wast
 
 ## Architectural Efficiency {#sec-model-compression-architectural-efficiency-techniques-daa6}
 
-Architectural efficiency\index{Architectural Efficiency!overview} optimization ensures that computations execute efficiently on target hardware by aligning model operations with processor capabilities and memory hierarchies. Unlike representation optimization (which determines what computations to perform) and precision optimization (which determines numerical fidelity), architectural efficiency addresses how operations are scheduled, how memory is accessed, and how workloads adapt to input characteristics and hardware constraints. This optimization dimension is particularly important for resource-constrained scenarios examined in @sec-introduction.
+Architectural efficiency optimization ensures that computations execute efficiently on target hardware by aligning model operations with processor capabilities and memory hierarchies. Unlike representation optimization (which determines what computations to perform) and precision optimization (which determines numerical fidelity), architectural efficiency addresses how operations are scheduled, how memory is accessed, and how workloads adapt to input characteristics and hardware constraints. This optimization dimension is particularly important for resource-constrained scenarios examined in @sec-introduction.
 
 Four complementary approaches to architectural efficiency are examined: hardware-aware design principles that proactively integrate deployment constraints during model development, sparsity exploitation techniques that accelerate computation on pruned models, dynamic computation strategies that adapt workload to input complexity, and operator fusion methods that reduce memory traffic by combining operations. These techniques transform algorithmic optimizations into realized performance gains.
 
@@ -4354,7 +4340,6 @@ $$
 $$
 where $d$ is depth, $w$ is width, and $r$ is the input resolution. Increasing all three dimensions without considering the hardware limitations can result in suboptimal performance, especially on devices with limited computational power or memory bandwidth.
 
-\index{Compound Scaling!formula}
 For efficient model scaling, managing these parameters in a balanced way becomes essential, ensuring that the model remains within hardware limits while maximizing performance. How do we find the right balance? Trial and error across three dimensions (depth × width × resolution) creates an enormous search space. This is where compound scaling\index{Compound Scaling!definition} comes into play. Instead of adjusting depth, width, and resolution independently, compound scaling balances all three dimensions together by applying fixed ratios $(\alpha, \beta, \gamma)$ relative to a base model:
 $$
 d = \alpha^\phi d_0, \quad w = \beta^\phi w_0, \quad r = \gamma^\phi r_0
@@ -4702,13 +4687,10 @@ On a V100 GPU with `{python} v100_bw_gbs_str` GB/s HBM bandwidth and `{python} v
 
 Operator fusion implementation occurs at multiple levels in the software stack:
 
-\index{TensorFlow!Grappler optimizer}
-\index{PyTorch!TorchScript fusion}
+\index{ML Compiler!framework-level fusion}
 1. **Framework-level fusion**: TensorFlow's Grappler and PyTorch's TorchScript identify fusible patterns in the computational graph and apply transformations automatically.
 
-\index{TVM!compiler-level fusion}
-\index{XLA!compiler-level fusion}
-\index{TensorRT!runtime fusion}
+\index{ML Compiler!graph-level fusion}
 2. **Compiler-level fusion**: TVM, XLA, and TensorRT perform more aggressive fusion using polyhedral optimization and code generation.
 
 3. **Runtime-level fusion**: ONNX Runtime and TensorRT apply runtime fusion based on input shapes and hardware characteristics.
@@ -5267,6 +5249,7 @@ Achieving actual speedups from sparsity requires hardware that can efficiently s
 
 #### Structured Patterns {#sec-model-compression-structured-patterns-b9bb}
 
+\index{cuSPARSE!block sparse operations}
 Various sparsity formats have been developed, each with unique structural characteristics and implications. Two of the most prominent are block sparse matrices\index{Sparsity!block sparse} and N:M sparsity patterns. Block sparse matrices generally have isolated blocks of zero and non-zero dense submatrices such that a matrix operation on the large sparse matrix can be easily re-expressed as a smaller (overall arithmetic-wise) number of dense operations on submatrices. This sparsity allows more efficient storage of the dense submatricies while maintaining shape compatibility for operations like matrix or vector products. For example, @fig-block-sparse-gemm shows how NVIDIA's cuSPARSE [@nvidia_cusparse_block] library supports sparse block matrix operations and storage. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have extended on this block-sparsity to strike an improved balance between matrix expressivity and compute/memory efficiency.
 
 ::: {#fig-block-sparse-gemm fig-env="figure" fig-pos="htb" fig-cap="**Block Sparse Representation**: NVIDIA's cusparse library efficiently stores block sparse matrices by exploiting dense submatrix structures, enabling accelerated matrix operations while maintaining compatibility with dense matrix computations through block indexing. This approach reduces memory footprint and arithmetic complexity for sparse linear algebra, important for scaling machine learning models. *Source: NVIDIA.*" fig-alt="Grid of 3x3 matrix blocks with varying shades indicating dense submatrices. Adjacent index array shows non-zero block positions. Gray blocks represent zeros, colored blocks represent dense submatrices stored separately."}
@@ -6343,10 +6326,13 @@ yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
 
 Modern hardware accelerators provide specialized support for sparse operations, though the degree of acceleration depends on sparsity structure and hardware capabilities. @sec-ai-acceleration examines these accelerators in depth; here we summarize their sparsity-specific features.
 
+\index{Sparse Tensor Cores}
 **GPUs** with Sparse Tensor Cores\index{Tensor Cores!sparse acceleration}\index{Hardware-Aware Optimization!sparse tensor cores} (NVIDIA Ampere and later) accelerate structured sparsity patterns like 2:4, achieving up to 2× speedup by skipping zero multiplications [@NVIDIA2020]. However, this acceleration requires the sparsity pattern to match hardware expectations, and unstructured sparsity typically sees limited benefit [@hoefler2021sparsity].
 
+\index{TPU!sparse matrix support}
 **TPUs** provide support for sparse weight matrices, though this capability has evolved across generations. The original TPU was designed primarily for dense operations; later versions and research adaptations (such as Sparse-TPU) have added sparse matrix support. The systolic array architecture can process non-zero elements efficiently when sparsity patterns are predictable, making this particularly beneficial for transformer models where large matrix multiplications dominate [@jouppi2021ten].
 
+\index{FPGA!custom sparsity patterns}
 **FPGAs** offer flexibility for custom sparsity patterns. Unlike GPUs and TPUs, FPGAs can be programmed to handle arbitrary sparse formats, making them suitable for unstructured pruning or application-specific patterns where general-purpose accelerators underperform.
 
 **Memory and Energy Benefits**: Across all platforms, sparse operations reduce memory bandwidth requirements and energy consumption by accessing fewer elements[^fn-sparse-energy-savings]. This benefit compounds with quantization: a sparse INT8 model requires less memory traffic than either technique alone [@Gale2020].
@@ -6368,6 +6354,7 @@ While sparsity offers significant efficiency advantages, several challenges limi
 
 : **Sparsity Optimization Challenges**: Unstructured sparsity, while reducing model size, hinders hardware acceleration due to irregular memory access patterns, limiting potential computational savings and requiring specialized hardware or software to realize efficiency gains. {#tbl-sparsity-optimization}
 
+\index{Compressed Sparse Row!storage format}
 The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats (such as Compressed Sparse Row; see @sec-system-foundations-sparse-matrix-formats-7920) add indexing overhead that can offset computational savings—a rule of thumb is that sparsity typically must exceed 90–95% to be worthwhile for performance.
 
 The accuracy-efficiency trade-off requires careful calibration. Aggressive sparsity can degrade accuracy beyond acceptable thresholds, and the relationship is often non-linear, as models may tolerate 70% sparsity with minimal impact but collapse at 80%. Finding the optimal operating point requires extensive experimentation.
@@ -6431,6 +6418,7 @@ The following decision framework guides technique selection based on primary dep
 - **If hardware supports INT8**: Add quantization for faster arithmetic
 - **If latency-critical with accuracy flexibility**: Early-exit architectures
 
+\index{Quantization!weight-only for LLMs}
 **If your primary constraint is memory bandwidth (LLM generation):**
 
 - **First choice**: Weight-only quantization (INT4/INT8 weights, FP16 activations)
@@ -6657,6 +6645,7 @@ Neural architecture search enables co-design approaches that optimize model stru
 ```
 :::
 
+\index{BERT!mobile deployment pipeline}
 Sequencing critically impacts results, as the following example demonstrates.
 
 ::: {.callout-example title="BERT-Base Mobile Deployment Pipeline"}
@@ -6717,7 +6706,7 @@ This software infrastructure transforms theoretical optimization techniques into
 
 Leading frameworks such as TensorFlow, PyTorch, and MXNet provide comprehensive APIs enabling practitioners to apply optimization techniques without implementing complex algorithms from scratch. @sec-ai-frameworks examines these frameworks in depth. Built-in optimizations enhance model efficiency while ensuring adherence to established best practices.
 
-TensorFlow's Model Optimization Toolkit\index{TensorFlow!Model Optimization Toolkit} facilitates quantization, pruning, and clustering. QAT converts floating-point models to lower-precision formats (INT8) while preserving accuracy, systematically managing both weight and activation quantization across diverse architectures. Pruning algorithms introduce sparsity by removing redundant connections at varying granularity levels, from individual weights to entire layers, allowing practitioners to tailor strategies to specific requirements. Weight clustering\index{Weight Clustering}\index{Model Compression!weight clustering} groups similar weights for compression while preserving functionality, providing multiple pathways for improving model efficiency.
+TensorFlow's Model Optimization Toolkit\index{Framework Toolkits!optimization support} facilitates quantization, pruning, and clustering. QAT converts floating-point models to lower-precision formats (INT8) while preserving accuracy, systematically managing both weight and activation quantization across diverse architectures. Pruning algorithms introduce sparsity by removing redundant connections at varying granularity levels, from individual weights to entire layers, allowing practitioners to tailor strategies to specific requirements. Weight clustering\index{Weight Clustering}\index{Model Compression!weight clustering} groups similar weights for compression while preserving functionality, providing multiple pathways for improving model efficiency.
 
 Similarly, PyTorch offers optimization support through built-in modules for quantization and pruning. The `torch.quantization` package provides tools for converting models to lower-precision representations, supporting both post-training quantization and quantization-aware training. @lst-qat_example demonstrates PyTorch's quantization-aware training API:
 
@@ -6769,7 +6758,9 @@ Built-in optimization APIs provide pre-tested, production-ready tools with stand
 
 ### Hardware-Specific Optimization Libraries {#sec-model-compression-hardwarespecific-optimization-libraries-2653}
 
-The optimization techniques in this chapter produce models ready for hardware-specific acceleration. Libraries like TensorRT\index{TensorRT}\index{Model Compression!TensorRT}, XLA\index{XLA}[^fn-xla-compiler], OpenVINO\index{OpenVINO}, and TVM\index{TVM}[^fn-tvm-compiler] translate these optimized models into efficient execution on target platforms. @sec-ai-acceleration examines the hardware acceleration principles underlying how these tools exploit accelerator capabilities for pruned, quantized, and architecturally optimized models.
+\index{Inference Runtime!optimization}
+\index{ML Compiler!hardware-specific optimization}
+The optimization techniques in this chapter produce models ready for hardware-specific acceleration. Libraries like TensorRT, XLA[^fn-xla-compiler], OpenVINO, and TVM[^fn-tvm-compiler] translate these optimized models into efficient execution on target platforms. @sec-ai-acceleration examines the hardware acceleration principles underlying how these tools exploit accelerator capabilities for pruned, quantized, and architecturally optimized models.
 
 [^fn-xla-compiler]: **XLA (Accelerated Linear Algebra)**: Google's ML compiler that optimizes computational graphs for efficient execution on TPUs and GPUs, examined in @sec-ai-acceleration.
 
@@ -6805,6 +6796,7 @@ With all three major optimization approaches explored in depth, along with frame
 
 : **Optimization Technique Trade-offs**: Comparison of the three major optimization approaches across key performance dimensions, highlighting how each technique addresses different constraints and deployment scenarios. Pruning excels for computational reduction but requires sparse hardware support, quantization provides balanced size and speed improvements with wide hardware compatibility, while distillation produces high-quality compressed models at higher training cost. {#tbl-optimization-comparison}
 
+\index{Model Compression!sequential application}
 These techniques combine synergistically, with quantization often applied after pruning or distillation to achieve compound compression benefits. Production systems frequently employ sequential application: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers any accuracy loss. Sequential application enables compression ratios of 10–50× while maintaining competitive accuracy across diverse deployment scenarios.
 
 ## Fallacies and Pitfalls {#sec-model-compression-fallacies-pitfalls-1b5e}
