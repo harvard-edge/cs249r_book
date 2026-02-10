@@ -14,7 +14,7 @@
 
 # %% [markdown]
 """
-# Module 16: Compression - Pruning and Model Compression
+# Module 16: Compression - Pruning and Model Optimization
 
 Welcome to Module 16! You're about to build model compression techniques that make neural networks smaller and more efficient while preserving their intelligence.
 
@@ -41,11 +41,11 @@ Let's get started!
 
 ## 📦 Where This Code Lives in the Final Package
 
-**Learning Side:** You work in `modules/16_compression/compression_dev.py`
-**Building Side:** Code exports to `tinytorch.perf.compression`
+**Learning Side:** You work in modules/16_compression/compression_dev.py
+**Building Side:** Code exports to tinytorch.perf.compression
 
 ```python
-# How to use this module:
+# Final package structure:
 from tinytorch.perf.compression import magnitude_prune, structured_prune, measure_sparsity
 ```
 
@@ -78,9 +78,36 @@ MB_TO_BYTES = 1024 * 1024  # Megabytes to bytes conversion
 
 # %% [markdown]
 """
-### 🚨 CRITICAL: Why No Sequential Container in TinyTorch
+## 📋 Module Dependencies
 
-**TinyTorch teaches ATOMIC COMPONENTS, not compositions!**
+**Prerequisites**: Modules 01-15 must be completed (especially 14 Profiling, 15 Quantization)
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `copy` (for model duplication during compression)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class)
+- `tinytorch.core.layers` (Linear, Sequential)
+- `tinytorch.core.activations` (ReLU)
+- `tinytorch.perf.profiling` (Profiler, analyze_weight_distribution)
+
+**Dependency Flow**:
+```
+Module 14 (Profiling) → Module 15 (Quantization) → Module 16 (Compression)
+       ↓                        ↓                         ↓
+  Measure size           Reduce precision           Remove weights
+```
+
+Students completing this module will have built compression techniques
+that integrate with profiling and quantization for complete model optimization.
+"""
+
+# %% [markdown]
+"""
+### Why No Sequential Container in TinyTorch
+
+TinyTorch teaches ATOMIC COMPONENTS, not compositions!
 
 **FORBIDDEN Pattern:**
 ```python
@@ -132,7 +159,7 @@ def show_weight_distribution_motivation():
     # Profile basic characteristics
     profile = profiler.profile_forward_pass(model, input_data)
 
-    print("🔬 Profiling Parameter Distribution:\n")
+    print("🧪 Profiling Parameter Distribution:\n")
     print(f"   Total parameters: {profile['parameters']:,}")
     print(f"   Model memory: {profile['parameters'] * BYTES_PER_FLOAT32 / MB_TO_BYTES:.1f} MB (FP32)")
 
@@ -180,7 +207,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 💡 Introduction: What is Model Compression?
+## 💡 Introduction: Model Compression Concepts
 
 Imagine you have a massive library with millions of books, but you only reference 10% of them regularly. Model compression is like creating a curated collection that keeps the essential knowledge while dramatically reducing storage space.
 
@@ -317,7 +344,7 @@ Reconstruction Error:
 
 # %% [markdown]
 """
-## 🏗️ Sparsity Measurement - Understanding Model Density
+## 🏗️ Implementation: Sparsity Measurement
 
 Before we can compress models, we need to understand how dense they are. Sparsity measurement tells us what percentage of weights are zero (or effectively zero).
 
@@ -342,7 +369,7 @@ Storage: 28 values                   Storage: 7 values + indices
 Why this matters: Sparsity directly relates to memory savings, but achieving speedup requires special sparse computation libraries.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "measure-sparsity", "solution": true, "schema_version": 3}
+# %% nbgrader={"grade": false, "grade_id": "measure-sparsity", "solution": true}
 #| export
 def measure_sparsity(model) -> float:
     """
@@ -390,10 +417,21 @@ def measure_sparsity(model) -> float:
     return (zero_params / total_params) * 100.0
     ### END SOLUTION
 
-# %% nbgrader={"grade": true, "grade_id": "test-measure-sparsity", "locked": true, "points": 5, "solution": false, "schema_version": 3}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Sparsity Measurement
+
+This test validates our sparsity measurement function works correctly.
+
+**What we're testing**: Zero weight counting and percentage calculation
+**Why it matters**: Accurate sparsity measurement is essential for compression evaluation
+**Expected**: Correct sparsity percentages for dense and sparse models
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-measure-sparsity", "locked": true, "points": 5}
 def test_unit_measure_sparsity():
-    """🔬 Test sparsity measurement functionality."""
-    print("🔬 Unit Test: Measure Sparsity...")
+    """🧪 Test sparsity measurement functionality."""
+    print("🧪 Unit Test: Measure Sparsity...")
 
     # Test with dense model - explicit composition shows structure
     layer1 = Linear(4, 3)
@@ -416,7 +454,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Magnitude-Based Pruning - Removing Small Weights
+## 🏗️ Implementation: Magnitude-Based Pruning
 
 Magnitude pruning is the simplest and most intuitive compression technique. It's based on the observation that weights with small magnitudes contribute little to the model's output.
 
@@ -476,7 +514,7 @@ Global thresholding treats the entire model as one big collection of weights, fi
 - Can hurt performance if layers have very different weight distributions
 """
 
-# %% nbgrader={"grade": false, "grade_id": "magnitude-prune", "solution": true, "schema_version": 3}
+# %% nbgrader={"grade": false, "grade_id": "magnitude-prune", "solution": true}
 #| export
 def magnitude_prune(model, sparsity=0.9):
     """
@@ -532,10 +570,21 @@ def magnitude_prune(model, sparsity=0.9):
     return model
     ### END SOLUTION
 
-# %% nbgrader={"grade": true, "grade_id": "test-magnitude-prune", "locked": true, "points": 10, "solution": false, "schema_version": 3}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Magnitude Pruning
+
+This test validates magnitude-based pruning works correctly with threshold selection.
+
+**What we're testing**: Weight removal based on magnitude threshold
+**Why it matters**: Core technique for creating sparse neural networks
+**Expected**: Achieves target sparsity with smallest weights removed
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-magnitude-prune", "locked": true, "points": 10}
 def test_unit_magnitude_prune():
-    """🔬 Test magnitude-based pruning functionality."""
-    print("🔬 Unit Test: Magnitude Prune...")
+    """🧪 Test magnitude-based pruning functionality."""
+    print("🧪 Unit Test: Magnitude Prune...")
 
     # Create test model with explicit composition - students see structure
     layer1 = Linear(4, 3)
@@ -573,7 +622,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Structured Pruning - Hardware-Friendly Compression
+## 🏗️ Implementation: Structured Pruning
 
 While magnitude pruning creates scattered zeros throughout the network, structured pruning removes entire computational units (channels, neurons, heads). This creates sparsity patterns that modern hardware can actually accelerate.
 
@@ -643,7 +692,7 @@ Structured sparsity enables real hardware acceleration because:
 4. **Cache Efficiency**: Better spatial locality of memory access
 """
 
-# %% nbgrader={"grade": false, "grade_id": "structured-prune", "solution": true, "schema_version": 3}
+# %% nbgrader={"grade": false, "grade_id": "structured-prune", "solution": true}
 #| export
 def structured_prune(model, prune_ratio=0.5):
     """
@@ -701,10 +750,21 @@ def structured_prune(model, prune_ratio=0.5):
     return model
     ### END SOLUTION
 
-# %% nbgrader={"grade": true, "grade_id": "test-structured-prune", "locked": true, "points": 10, "solution": false, "schema_version": 3}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Structured Pruning
+
+This test validates structured pruning removes entire channels correctly.
+
+**What we're testing**: Channel-wise pruning based on L2 norm importance
+**Why it matters**: Creates hardware-friendly sparsity patterns
+**Expected**: Entire channels zeroed, not scattered weights
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-structured-prune", "locked": true, "points": 10}
 def test_unit_structured_prune():
-    """🔬 Test structured pruning functionality."""
-    print("🔬 Unit Test: Structured Prune...")
+    """🧪 Test structured pruning functionality."""
+    print("🧪 Unit Test: Structured Prune...")
 
     # Create test model with explicit layers - students see the architecture
     layer1 = Linear(4, 6)
@@ -746,7 +806,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Low-Rank Approximation - Matrix Compression Through Factorization
+## 🏗️ Implementation: Low-Rank Approximation
 
 Low-rank approximation discovers that large weight matrices often contain redundant information that can be captured with much smaller matrices through mathematical decomposition.
 
@@ -815,7 +875,7 @@ It works poorly when:
 - **High precision required**: SVD introduces approximation error
 """
 
-# %% nbgrader={"grade": false, "grade_id": "low-rank-approx", "solution": true, "schema_version": 3}
+# %% nbgrader={"grade": false, "grade_id": "low-rank-approx", "solution": true}
 #| export
 
 def low_rank_approximate(weight_matrix, rank_ratio=0.5):
@@ -859,10 +919,21 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
     return U_truncated, S_truncated, V_truncated
     ### END SOLUTION
 
-# %% nbgrader={"grade": true, "grade_id": "test-low-rank", "locked": true, "points": 10, "solution": false, "schema_version": 3}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Low-Rank Approximation
+
+This test validates SVD-based matrix factorization for compression.
+
+**What we're testing**: Truncated SVD decomposition and reconstruction
+**Why it matters**: Enables significant parameter reduction for large matrices
+**Expected**: Correct factorization with acceptable reconstruction error
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-low-rank", "locked": true, "points": 10}
 def test_unit_low_rank_approximate():
-    """🔬 Test low-rank approximation functionality."""
-    print("🔬 Unit Test: Low-Rank Approximate...")
+    """🧪 Test low-rank approximation functionality."""
+    print("🧪 Unit Test: Low-Rank Approximate...")
 
     # Create test weight matrix
     original_weight = np.random.randn(20, 15)
@@ -896,7 +967,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Knowledge Distillation - Learning from Teacher Models
+## 🏗️ Implementation: Knowledge Distillation
 
 Knowledge distillation is like having an expert teacher simplify complex concepts for a student. The large "teacher" model shares its knowledge with a smaller "student" model, achieving similar performance with far fewer parameters.
 
@@ -989,7 +1060,7 @@ Temperature T:
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "distillation", "solution": true, "schema_version": 3}
+# %% nbgrader={"grade": false, "grade_id": "distillation", "solution": true}
 #| export
 class KnowledgeDistillation:
     """
@@ -1105,10 +1176,21 @@ class KnowledgeDistillation:
         else:
             return -np.mean(np.sum(labels * np.log(predictions + 1e-8), axis=1))
 
-# %% nbgrader={"grade": true, "grade_id": "test-distillation", "locked": true, "points": 15, "solution": false, "schema_version": 3}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Knowledge Distillation
+
+This test validates teacher-student knowledge transfer with temperature scaling.
+
+**What we're testing**: Distillation loss combining soft and hard targets
+**Why it matters**: Enables training small models with teacher knowledge
+**Expected**: Valid loss computation for teacher-student training
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-distillation", "locked": true, "points": 15}
 def test_unit_knowledge_distillation():
-    """🔬 Test knowledge distillation functionality."""
-    print("🔬 Unit Test: Knowledge Distillation...")
+    """🧪 Test knowledge distillation functionality."""
+    print("🧪 Unit Test: Knowledge Distillation...")
 
     # Create teacher model with more capacity - explicit composition
     teacher_l1 = Linear(10, 20)
@@ -1212,7 +1294,7 @@ CLOUD SERVICE (Minimal compression):
 ```
 """
 
-# %% nbgrader={"grade": false, "grade_id": "compress-model-comprehensive", "solution": true, "schema_version": 3}
+# %% nbgrader={"grade": false, "grade_id": "compress-model-comprehensive", "solution": true}
 def compress_model(model, compression_config):
     """
     Apply comprehensive model compression based on configuration.
@@ -1273,10 +1355,21 @@ def compress_model(model, compression_config):
     return stats
     ### END SOLUTION
 
-# %% nbgrader={"grade": true, "grade_id": "test-compression-integration", "locked": true, "points": 20, "solution": false, "schema_version": 3}
+# %% [markdown]
+"""
+### 🧪 Unit Test: Comprehensive Model Compression
+
+This test validates the complete compression pipeline with multiple techniques.
+
+**What we're testing**: Sequential application of compression techniques
+**Why it matters**: Real deployments combine multiple compression methods
+**Expected**: Cumulative sparsity increase and tracking of applied techniques
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-compression-integration", "locked": true, "points": 20}
 def test_unit_compress_model():
-    """🔬 Test comprehensive model compression."""
-    print("🔬 Unit Test: Compress Model...")
+    """🧪 Test comprehensive model compression."""
+    print("🧪 Unit Test: Compress Model...")
 
     # Create test model with explicit layers - students see the full architecture
     layer1 = Linear(20, 15)
@@ -1314,11 +1407,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Compression Techniques
+## 📊 Systems Analysis: Compression Trade-offs
 
 Understanding the real-world effectiveness of different compression techniques through systematic measurement and comparison.
-
-### Accuracy vs Compression Trade-offs
 
 The fundamental challenge in model compression is balancing three competing objectives: model size, inference speed, and prediction accuracy.
 """
@@ -1403,9 +1494,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 📊 Advanced Systems Analysis - Compression Techniques
+### Comparing Compression Techniques
 
-Understanding the real-world effectiveness of different compression techniques.
+Let's analyze compression ratios across different techniques systematically.
 """
 
 # %%
@@ -1509,8 +1600,6 @@ if __name__ == "__main__":
     analyze_distillation_effectiveness()
 
 # %% [markdown]
-
-# %% [markdown]
 """
 ## 🔧 Consolidated Compression Classes for Export
 
@@ -1589,38 +1678,68 @@ class Compressor:
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Compression Foundations
+## 🤔 ML Systems Reflection Questions
 
-### Question 1: Compression Trade-offs
-You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
+Answer these to deepen your understanding of compression techniques and their systems implications:
+
+### 1. Compression Trade-offs
+**Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
+
+**Consider**:
 - How many parameters remain active? _____ M parameters
 - If the original model was 40MB, what's the theoretical minimum storage? _____ MB
-- Why might actual speedup be less than 10x? _____________
+- Why might actual speedup be less than 10x?
 
-### Question 2: Structured vs Unstructured Sparsity
-Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
-- Which enables better hardware acceleration? _____________
-- Which preserves accuracy better at high sparsity? _____________
-- Which creates more predictable memory access patterns? _____________
+**Real-world context**: Sparse matrix formats have indexing overhead, and many hardware accelerators cannot efficiently exploit unstructured sparsity.
 
-### Question 3: Knowledge Distillation Efficiency
-A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
-- What's the compression ratio? _____x
+---
+
+### 2. Structured vs Unstructured Sparsity
+**Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
+
+**Consider**:
+- Which enables better hardware acceleration?
+- Which preserves accuracy better at high sparsity?
+- Which creates more predictable memory access patterns?
+
+**Think about**: How would you choose between these approaches for different deployment targets (GPU, CPU, mobile)?
+
+---
+
+### 3. Knowledge Distillation Efficiency
+**Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
+
+**Calculate**:
+- Compression ratio: _____x
 - If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
-- Why is the speedup greater than the compression ratio? _____________
+- Why is the speedup greater than the compression ratio?
 
-### Question 4: Low-Rank Decomposition
-You approximate a (512, 256) weight matrix with rank 64 using SVD.
+**Real-world context**: Smaller models often have better cache locality and fewer memory bottlenecks.
+
+---
+
+### 4. Low-Rank Decomposition
+**Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
+
+**Calculate**:
 - Original parameter count: _____ parameters
-- Decomposed parameter count: _____ parameters
+- Decomposed parameter count: (512 x 64) + 64 + (64 x 256) = _____ parameters
 - Compression ratio: _____x
 - At what rank does compression become ineffective? rank > _____
 
-### Question 5: Pruning Strategy Selection
-For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
+**Trade-offs to consider**: Reconstruction error vs. compression ratio, and the overhead of two matrix multiplications vs. one.
+
+---
+
+### 5. Pruning Strategy Selection
+**Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
+
+**Consider**:
 - Which pruning strategy optimizes for memory? [magnitude/structured/both]
 - Which pruning strategy optimizes for speed? [magnitude/structured/both]
-- What order should you apply compression techniques? _____________
+- What order should you apply compression techniques?
+
+**Real-world context**: Mobile devices have limited memory bandwidth, making structured sparsity more beneficial for latency.
 """
 
 # %% [markdown]
@@ -1653,7 +1772,7 @@ def verify_pruning_works(model, target_sparsity=0.8):
         >>> results = verify_pruning_works(model, target_sparsity=0.8)
         >>> assert results['verified']  # Pruning actually works!
     """
-    print("🔬 Verifying pruning sparsity with actual zero counting...")
+    print("🧪 Verifying pruning sparsity with actual zero counting...")
 
     # Count actual zeros in model parameters
     zeros = sum(np.sum(p.data == 0) for p in model.parameters())
@@ -1693,10 +1812,10 @@ def verify_pruning_works(model, target_sparsity=0.8):
 """
 ## 🧪 Module Integration Test
 
-Final validation that all compression techniques work together correctly.
+Final validation that everything works together correctly before module completion.
 """
 
-# %%
+# %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
 def test_module():
     """🧪 Module Test: Complete Integration
 
@@ -1722,7 +1841,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test 1: Complete compression pipeline
-    print("🔬 Integration Test: Complete compression pipeline...")
+    print("🧪 Integration Test: Complete compression pipeline...")
 
     # Create a realistic model with explicit layers - students see the architecture
     input_layer = Linear(784, 512)    # Input layer (like MNIST)
@@ -1751,7 +1870,7 @@ def test_module():
     print(f"✅ Achieved {final_sparsity:.1f}% sparsity with {len(stats['applied_techniques'])} techniques")
 
     # Test 2: Knowledge distillation setup
-    print("🔬 Integration Test: Knowledge distillation...")
+    print("🧪 Integration Test: Knowledge distillation...")
 
     # Create teacher with more capacity - explicit layers show architecture
     teacher_l1 = Linear(100, 200)
@@ -1776,7 +1895,7 @@ def test_module():
     print(f"✅ Knowledge distillation: {compression_ratio:.2f}x size reduction")
 
     # Test 3: Low-rank approximation
-    print("🔬 Integration Test: Low-rank approximation...")
+    print("🧪 Integration Test: Low-rank approximation...")
 
     large_matrix = np.random.randn(200, 150)
     U, S, V = low_rank_approximate(large_matrix, rank_ratio=0.3)
@@ -1854,27 +1973,17 @@ Congratulations! You've built a comprehensive model compression system that can 
 - Implemented knowledge distillation for teacher-student compression with temperature scaling
 - Created low-rank approximation using SVD decomposition for matrix factorization
 - Developed sparsity measurement and comprehensive compression pipeline
-- Analyzed compression trade-offs between size, speed, and accuracy with real measurements
-- All tests pass ✅ (validated by `test_module()`)
+- All tests pass (validated by `test_module()`)
 
-### Systems Insights Gained
-- **Structured vs Unstructured**: Hardware-friendly sparsity patterns vs maximum compression ratios
-- **Compression Cascading**: Multiple techniques compound benefits but require careful sequencing
-- **Accuracy Preservation**: Knowledge distillation maintains performance better than pruning alone
-- **Memory vs Speed**: Parameter reduction doesn't guarantee proportional speedup without sparse libraries
-- **Deployment Strategy**: Different scenarios (mobile, edge, cloud) require different compression approaches
-
-### Technical Mastery
-- **Sparsity Measurement**: Calculate and track zero weight percentages across models
-- **Magnitude Pruning**: Global thresholding based on weight importance ranking
-- **Structured Pruning**: Channel-wise removal using L2 norm importance metrics
-- **Knowledge Distillation**: Teacher-student training with temperature-scaled soft targets
-- **Low-Rank Approximation**: SVD-based matrix factorization for parameter reduction
-- **Pipeline Integration**: Sequential application of multiple compression techniques
+### Systems Insights Discovered
+- **Structured vs Unstructured**: Hardware-friendly patterns vs maximum compression
+- **Compression Cascading**: Multiple techniques compound but need careful sequencing
+- **Memory vs Speed**: Parameter reduction needs sparse libraries for speedup
+- **Deployment Strategy**: Different scenarios require different compression approaches
 
 ### Ready for Next Steps
 Your compression implementation enables efficient model deployment across diverse hardware constraints!
 Export with: `tito module complete 16`
 
-**Next**: Module 17 will add acceleration techniques including vectorization and kernel fusion, building on compression for maximum efficiency!
+**Next**: Module 17 will add acceleration techniques including vectorization and kernel fusion!
 """

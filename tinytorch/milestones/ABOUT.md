@@ -14,14 +14,14 @@ This isn't a demo - it's proof that you understand ML systems engineering from t
 
 ## The Journey
 
-| Year | Milestone | What You'll Build | Unlocked After |
+| Year | Milestone | What You'll Build | Required Modules |
 |------|-----------|-------------------|----------------|
-| **1958** | Perceptron | Binary classification with gradient descent | Module 04 |
-| **1969** | XOR Crisis | Hidden layers solve non-linear problems | Module 08 |
-| **1986** | MLP Revival | Multi-class vision (95%+ MNIST) | Module 08 |
-| **1998** | CNN Revolution | Convolutions (70%+ CIFAR-10) | Module 09 |
-| **2017** | Transformers | Language generation with attention | Module 13 |
-| **2018** | MLPerf | Production optimization pipeline | Module 19 |
+| **1958** | Perceptron | First neural network (forward pass) | 01-03 |
+| **1969** | XOR Crisis | Experience the AI Winter trigger | 01-03 |
+| **1986** | MLP Revival | Backprop solves XOR + digit recognition | 01-08 |
+| **1998** | CNN Revolution | Convolutions (70%+ CIFAR-10) | 01-09 |
+| **2017** | Transformers | Language generation with attention | 01-08, 11-13 |
+| **2018** | MLPerf | Production optimization pipeline | 01-08, 14-19 |
 
 ## Why Milestones Transform Learning
 

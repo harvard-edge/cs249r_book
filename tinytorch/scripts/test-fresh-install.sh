@@ -70,13 +70,14 @@ echo "════════════════════════�
 echo ""
 echo "▶ Step 1: Running install script (branch: $BRANCH)..."
 export TINYTORCH_BRANCH="$BRANCH"
-curl -sSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh" -o /tmp/install.sh
-
-# Auto-accept prompts
-echo "tinytorch" | bash /tmp/install.sh << 'EOF'
-tinytorch
-y
-EOF
+export TINYTORCH_NON_INTERACTIVE=1
+curl -fsSL "https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh" -o /tmp/install.sh || {
+    echo "✗ Failed to download install script for branch: $BRANCH"
+    echo "  URL: https://raw.githubusercontent.com/harvard-edge/cs249r_book/${BRANCH}/tinytorch/site/extra/install.sh"
+    echo "  Hint: Does the branch '${BRANCH}' exist and contain tinytorch/site/extra/install.sh?"
+    exit 1
+}
+bash /tmp/install.sh
 
 cd tinytorch
 source .venv/bin/activate
@@ -143,7 +144,7 @@ OUTER_EOF
 echo "Testing TinyTorch installation from branch: $BRANCH"
 
 # Build test script with branch substituted
-TEST_SCRIPT=$(build_test_script | sed "s/__BRANCH__/$BRANCH/g")
+TEST_SCRIPT=$(build_test_script | sed "s|__BRANCH__|$BRANCH|g")
 
 if [ "$CI_MODE" = true ]; then
     print_step "Running in CI mode (no Docker)"

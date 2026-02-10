@@ -1,0 +1,626 @@
+name: '🔥 TinyTorch · ✅ Validate (Dev)'
+
+# =============================================================================
+# TinyTorch Validate (Dev) - Comprehensive Testing Workflow
+# =============================================================================
+#
+# Test Progression (sequential, fail-fast):
+#
+#   Stage 1: INLINE BUILD
+#     └─ Build package from src/ modules (if this fails, nothing works)
+#
+#   Stage 2-4: PARALLEL TESTS (all depend on Stage 1 only)
+#     ├─ Stage 2: UNIT TESTS - Test individual module functions
+#     ├─ Stage 3: INTEGRATION TESTS - Cross-module validation
+#     └─ Stage 4: CLI TESTS - Verify CLI commands work correctly
+#
+#   Stage 5: E2E TESTS (depends on Stages 2-4 all passing)
+#     └─ Full user journey validation
+#
+#   Stage 6: RELEASE VALIDATION (runs after all stages pass)
+#     └─ Destructive full journey test (resets modules, full student simulation)
+#
+# Triggers:
+#   - Push to dev: ALL tests (dev must be rock solid)
+#   - Push to main: ALL tests (production ready)
+#   - PR: Standard tests (stages 1-5)
+#   - Feature branches: Quick tests (unit + cli only)
+#   - Manual: Any test type + OS selection (linux/windows/all)
+#   - Called by publish: all (pre-release gate)
+#
+# OS Support:
+#   - Default: Both Linux and Windows (ubuntu-latest, windows-latest)
+#   - Manual trigger can select: linux, windows, or all
+#   - Windows uses Git Bash (shell: bash) for cross-platform compatibility
+#
+# =============================================================================
+
+on:
+  push:
+    branches: [dev]
+    paths:
+      - 'tinytorch/**'
+      - '.github/workflows/tinytorch-*.yml'
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'tinytorch/**'
+      - '.github/workflows/tinytorch-*.yml'
+  workflow_call:
+    inputs:
+      test_type:
+        description: 'Test type to run'
+        required: false
+        default: 'all'
+        type: string
+      os:
+        description: 'Operating system (linux, windows, all)'
+        required: false
+        default: 'all'
+        type: string
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Test type to run (matches: tito dev test --<type>)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all           # --all: Full validation (stages 1-7)
+          - quick         # --unit --cli: Fast feedback, no inline build
+          - standard      # Stages 1-5: inline + unit + integration + cli + e2e
+          - user-journey  # --user-journey: Full destructive journey test
+      os:
+        description: 'Operating system to test'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all         # Both Linux and Windows (default)
+          - linux       # Ubuntu only
+          - windows     # Windows only
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: tinytorch-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TITO_ALLOW_SYSTEM: "1"
+  TINYTORCH_QUIET: "1"
+  PYTHONIOENCODING: "utf-8"  # Required for Windows emoji support in Rich
+  PYTHONUTF8: "1"            # Force UTF-8 for all Python I/O (subprocess pipes)
+
+jobs:
+  # ===========================================================================
+  # Configuration: Determine what tests to run
+  # ===========================================================================
+  configure:
+    name: 📋 Configure
+    runs-on: ubuntu-latest
+    outputs:
+      test_type: ${{ steps.config.outputs.test_type }}
+      os_matrix: ${{ steps.config.outputs.os_matrix }}
+      run_inline: ${{ steps.config.outputs.run_inline }}
+      run_unit: ${{ steps.config.outputs.run_unit }}
+      run_integration: ${{ steps.config.outputs.run_integration }}
+      run_cli: ${{ steps.config.outputs.run_cli }}
+      run_e2e: ${{ steps.config.outputs.run_e2e }}
+      run_release: ${{ steps.config.outputs.run_release }}
+
+    steps:
+      - name: Determine test configuration
+        id: config
+        run: |
+          # Determine test type based on trigger
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            TEST_TYPE="${{ inputs.test_type }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TEST_TYPE="${{ github.event.inputs.test_type }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            TEST_TYPE="standard"
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            TEST_TYPE="all"
+          elif [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            # dev must be rock solid - run everything
+            TEST_TYPE="all"
+          else
+            # feature branches get quick feedback
+            TEST_TYPE="quick"
+          fi
+
+          echo "test_type=$TEST_TYPE" >> $GITHUB_OUTPUT
+
+          # Determine OS matrix based on input (default: both Linux and Windows)
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            OS_INPUT="${{ inputs.os }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            OS_INPUT="${{ github.event.inputs.os }}"
+          else
+            # Automatic triggers run both Linux and Windows
+            OS_INPUT="all"
+          fi
+
+          case "$OS_INPUT" in
+            windows)
+              # Use windows-2022: windows-latest (2025) has D: drive removed but runner still expects D:\a
+              # See: https://github.com/actions/runner-images/issues/12416
+              echo 'os_matrix=["windows-2022"]' >> $GITHUB_OUTPUT
+              ;;
+            all)
+              # Use windows-2022: windows-latest (2025) has D: drive removed but runner still expects D:\a
+              echo 'os_matrix=["ubuntu-latest","windows-2022"]' >> $GITHUB_OUTPUT
+              ;;
+            *)
+              # Default: Linux only
+              echo 'os_matrix=["ubuntu-latest"]' >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+          # Set flags based on test type
+          # Stages: inline → unit → integration → cli → e2e → fresh-install → user-journey
+          case "$TEST_TYPE" in
+            quick)
+              # Fast feedback: skip inline build, just unit + cli
+              echo "run_inline=false" >> $GITHUB_OUTPUT
+              echo "run_unit=true" >> $GITHUB_OUTPUT
+              echo "run_integration=false" >> $GITHUB_OUTPUT
+              echo "run_cli=true" >> $GITHUB_OUTPUT
+              echo "run_e2e=false" >> $GITHUB_OUTPUT
+              echo "run_release=false" >> $GITHUB_OUTPUT
+              ;;
+            standard)
+              # Stages 1-5: inline + unit + integration + cli + e2e
+              echo "run_inline=true" >> $GITHUB_OUTPUT
+              echo "run_unit=true" >> $GITHUB_OUTPUT
+              echo "run_integration=true" >> $GITHUB_OUTPUT
+              echo "run_cli=true" >> $GITHUB_OUTPUT
+              echo "run_e2e=true" >> $GITHUB_OUTPUT
+              echo "run_release=false" >> $GITHUB_OUTPUT
+              ;;
+            all|user-journey)
+              # All stages 1-7 (full validation including destructive user journey)
+              echo "run_inline=true" >> $GITHUB_OUTPUT
+              echo "run_unit=true" >> $GITHUB_OUTPUT
+              echo "run_integration=true" >> $GITHUB_OUTPUT
+              echo "run_cli=true" >> $GITHUB_OUTPUT
+              echo "run_e2e=true" >> $GITHUB_OUTPUT
+              echo "run_release=true" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
+          echo "📋 Test configuration: $TEST_TYPE"
+
+  # ===========================================================================
+  # STAGE 1: INLINE BUILD - Build package from src/
+  # ===========================================================================
+  stage-1-inline:
+    name: 📝 Stage 1 · Inline Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: configure
+    if: needs.configure.outputs.run_inline == 'true'
+    timeout-minutes: 30
+    # Windows runners have flaky infrastructure issues - don't block CI
+    continue-on-error: ${{ contains(matrix.os, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.configure.outputs.os_matrix) }}
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Inline Tests (Progressive Build)
+        run: |
+          echo "📝 Building package from src/ modules..."
+          echo "   Tests each module exports correctly in sequence."
+          ./bin/tito dev test --inline --ci
+
+  # ===========================================================================
+  # STAGE 2: UNIT TESTS - Test individual module functions
+  # Runs in PARALLEL with Stages 3 and 4 (all depend only on Stage 1)
+  # ===========================================================================
+  stage-2-unit:
+    name: 🧪 Stage 2 · Unit Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [configure, stage-1-inline]
+    if: |
+      always() &&
+      needs.configure.outputs.run_unit == 'true' &&
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
+    timeout-minutes: 30
+    # Windows runners have flaky infrastructure issues - don't block CI
+    continue-on-error: ${{ contains(matrix.os, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.configure.outputs.os_matrix) }}
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Unit Tests
+        run: |
+          ./bin/tito dev test --unit --ci
+
+  # ===========================================================================
+  # STAGE 3: INTEGRATION TESTS - Cross-module validation
+  # Runs in PARALLEL with Stages 2 and 4 (all depend only on Stage 1)
+  # ===========================================================================
+  stage-3-integration:
+    name: 🔗 Stage 3 · Integration (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [configure, stage-1-inline]
+    if: |
+      always() &&
+      needs.configure.outputs.run_integration == 'true' &&
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
+    timeout-minutes: 15
+    # Windows runners have flaky infrastructure issues - don't block CI
+    continue-on-error: ${{ contains(matrix.os, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.configure.outputs.os_matrix) }}
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Integration Tests
+        run: |
+          ./bin/tito dev test --integration --ci
+
+  # ===========================================================================
+  # STAGE 4: CLI TESTS - Verify CLI commands work
+  # Runs in PARALLEL with Stages 2 and 3 (all depend only on Stage 1)
+  # ===========================================================================
+  stage-4-cli:
+    name: 💻 Stage 4 · CLI Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [configure, stage-1-inline]
+    if: |
+      always() &&
+      needs.configure.outputs.run_cli == 'true' &&
+      (needs.stage-1-inline.result == 'success' || needs.stage-1-inline.result == 'skipped')
+    timeout-minutes: 10
+    # Windows runners have flaky infrastructure issues - don't block CI
+    continue-on-error: ${{ contains(matrix.os, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.configure.outputs.os_matrix) }}
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run CLI Tests
+        run: |
+          ./bin/tito dev test --cli --ci
+
+  # ===========================================================================
+  # STAGE 5: E2E TESTS - Full user journey validation
+  # Depends on Stages 2, 3, and 4 ALL passing (the integration gate)
+  # ===========================================================================
+  stage-5-e2e:
+    name: 🌐 Stage 5 · E2E Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    needs: [configure, stage-2-unit, stage-3-integration, stage-4-cli]
+    if: |
+      always() &&
+      needs.configure.outputs.run_e2e == 'true' &&
+      (needs.stage-2-unit.result == 'success' || needs.stage-2-unit.result == 'skipped') &&
+      (needs.stage-3-integration.result == 'success' || needs.stage-3-integration.result == 'skipped') &&
+      (needs.stage-4-cli.result == 'success' || needs.stage-4-cli.result == 'skipped')
+    timeout-minutes: 15
+    # Windows runners have flaky infrastructure issues - don't block CI
+    continue-on-error: ${{ contains(matrix.os, 'windows') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJson(needs.configure.outputs.os_matrix) }}
+
+    defaults:
+      run:
+        working-directory: tinytorch
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run E2E Tests
+        run: |
+          ./bin/tito dev test --e2e --ci
+
+  # ===========================================================================
+  # STAGE 6: FRESH INSTALL - Simulates real student experience
+  # ===========================================================================
+  # Note: Skipped for fork PRs because the branch doesn't exist in main repo
+  stage-6-fresh-install:
+    name: 📦 Stage 6 · Fresh Install
+    runs-on: ubuntu-latest
+    needs: [configure, stage-5-e2e]
+    # Run on standard/all/release test types, after stage 5 passes
+    # Skip for fork PRs (branch doesn't exist in main repo for install script)
+    if: |
+      always() &&
+      (needs.configure.outputs.run_e2e == 'true' || needs.configure.outputs.run_release == 'true') &&
+      (needs.stage-5-e2e.result == 'success' || needs.stage-5-e2e.result == 'skipped') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout (for test script only)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            tinytorch/scripts/test-fresh-install.sh
+
+      - name: Run Fresh Install Test (Docker)
+        run: |
+          chmod +x tinytorch/scripts/test-fresh-install.sh
+          # For PRs, github.ref_name is the merge ref (e.g. "1159/merge") which doesn't
+          # exist as a real branch on raw.githubusercontent.com. Use head_ref (the actual
+          # source branch) for PRs, falling back to ref_name for push events.
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+          ./tinytorch/scripts/test-fresh-install.sh --branch "$BRANCH"
+
+  # ===========================================================================
+  # STAGE 7: USER JOURNEY - Destructive full journey (after all stages)
+  # ===========================================================================
+  stage-7-user-journey:
+    name: 🎓 Stage 7 · User Journey
+    runs-on: ubuntu-latest
+    needs: [configure, stage-5-e2e]
+    # Only run if: release enabled AND all previous stages passed
+    if: |
+      always() &&
+      needs.configure.outputs.run_release == 'true' &&
+      (needs.stage-5-e2e.result == 'success' || needs.stage-5-e2e.result == 'skipped')
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: tinytorch
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run User Journey Validation
+        run: |
+          echo "🎓 Running user journey validation..."
+          echo "   This resets all modules and runs the full user journey."
+          ./bin/tito dev test --user-journey --ci
+
+  # ===========================================================================
+  # Summary: Collect and report all results
+  # ===========================================================================
+  summary:
+    name: 📊 Summary
+    runs-on: ubuntu-latest
+    needs: [configure, stage-1-inline, stage-2-unit, stage-3-integration, stage-4-cli, stage-5-e2e, stage-6-fresh-install, stage-7-user-journey]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 🔥 TinyTorch CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Test Type** | \`${{ needs.configure.outputs.test_type }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Trigger** | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "### Test Progression (Sequential)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Test | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Stage 1: Inline
+          if [ "${{ needs.configure.outputs.run_inline }}" = "true" ]; then
+            case "${{ needs.stage-1-inline.result }}" in
+              success) echo "| 1 | 📝 Inline Build | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 1 | 📝 Inline Build | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 1 | 📝 Inline Build | ⏭️ ${{ needs.stage-1-inline.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 1 | 📝 Inline Build | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 2: Unit
+          if [ "${{ needs.configure.outputs.run_unit }}" = "true" ]; then
+            case "${{ needs.stage-2-unit.result }}" in
+              success) echo "| 2 | 🧪 Unit Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 2 | 🧪 Unit Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 2 | 🧪 Unit Tests | ⏭️ ${{ needs.stage-2-unit.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 2 | 🧪 Unit Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 3: Integration
+          if [ "${{ needs.configure.outputs.run_integration }}" = "true" ]; then
+            case "${{ needs.stage-3-integration.result }}" in
+              success) echo "| 3 | 🔗 Integration | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 3 | 🔗 Integration | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 3 | 🔗 Integration | ⏭️ ${{ needs.stage-3-integration.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 3 | 🔗 Integration | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 4: CLI
+          if [ "${{ needs.configure.outputs.run_cli }}" = "true" ]; then
+            case "${{ needs.stage-4-cli.result }}" in
+              success) echo "| 4 | 💻 CLI Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 4 | 💻 CLI Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 4 | 💻 CLI Tests | ⏭️ ${{ needs.stage-4-cli.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 4 | 💻 CLI Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 5: E2E
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ]; then
+            case "${{ needs.stage-5-e2e.result }}" in
+              success) echo "| 5 | 🌐 E2E Tests | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 5 | 🌐 E2E Tests | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 5 | 🌐 E2E Tests | ⏭️ ${{ needs.stage-5-e2e.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 5 | 🌐 E2E Tests | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 6: Fresh Install
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] || [ "${{ needs.configure.outputs.run_release }}" = "true" ]; then
+            case "${{ needs.stage-6-fresh-install.result }}" in
+              success) echo "| 6 | 📦 Fresh Install | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 6 | 📦 Fresh Install | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 6 | 📦 Fresh Install | ⏭️ ${{ needs.stage-6-fresh-install.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 6 | 📦 Fresh Install | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Stage 7: User Journey
+          if [ "${{ needs.configure.outputs.run_release }}" = "true" ]; then
+            case "${{ needs.stage-7-user-journey.result }}" in
+              success) echo "| 7 | 🎓 User Journey | ✅ Passed |" >> $GITHUB_STEP_SUMMARY ;;
+              failure) echo "| 7 | 🎓 User Journey | ❌ Failed |" >> $GITHUB_STEP_SUMMARY ;;
+              *) echo "| 7 | 🎓 User Journey | ⏭️ ${{ needs.stage-7-user-journey.result }} |" >> $GITHUB_STEP_SUMMARY ;;
+            esac
+          else
+            echo "| 7 | 🎓 User Journey | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Check for failures
+        run: |
+          FAILED=false
+
+          # Check each enabled test
+          if [ "${{ needs.configure.outputs.run_inline }}" = "true" ] && [ "${{ needs.stage-1-inline.result }}" = "failure" ]; then
+            echo "❌ Stage 1 (Inline Build) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_unit }}" = "true" ] && [ "${{ needs.stage-2-unit.result }}" = "failure" ]; then
+            echo "❌ Stage 2 (Unit Tests) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_integration }}" = "true" ] && [ "${{ needs.stage-3-integration.result }}" = "failure" ]; then
+            echo "❌ Stage 3 (Integration) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_cli }}" = "true" ] && [ "${{ needs.stage-4-cli.result }}" = "failure" ]; then
+            echo "❌ Stage 4 (CLI Tests) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] && [ "${{ needs.stage-5-e2e.result }}" = "failure" ]; then
+            echo "❌ Stage 5 (E2E Tests) failed"
+            FAILED=true
+          fi
+          if { [ "${{ needs.configure.outputs.run_e2e }}" = "true" ] || [ "${{ needs.configure.outputs.run_release }}" = "true" ]; } && [ "${{ needs.stage-6-fresh-install.result }}" = "failure" ]; then
+            echo "❌ Stage 6 (Fresh Install) failed"
+            FAILED=true
+          fi
+          if [ "${{ needs.configure.outputs.run_release }}" = "true" ] && [ "${{ needs.stage-7-user-journey.result }}" = "failure" ]; then
+            echo "❌ Stage 7 (User Journey) failed"
+            FAILED=true
+          fi
+
+          if [ "$FAILED" = "true" ]; then
+            echo ""
+            echo "❌ CI FAILED - See above for details"
+            exit 1
+          else
+            echo "✅ All enabled tests passed"
+          fi

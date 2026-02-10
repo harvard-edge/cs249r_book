@@ -79,9 +79,10 @@ class DevTestCommand(BaseCommand):
             help="Run all test types"
         )
         parser.add_argument(
-            "--release",
+            "--user-journey",
             action="store_true",
-            help="Full release validation (destructive - resets all modules)"
+            dest="user_journey",
+            help="Full user journey validation (destructive - resets all modules, runs milestones at checkpoints)"
         )
         parser.add_argument(
             "--milestone",
@@ -125,11 +126,11 @@ class DevTestCommand(BaseCommand):
 
         # Determine what tests to run
         run_inline = args.inline or args.all
-        run_unit = args.unit or args.all or (not any([args.unit, args.integration, args.e2e, args.cli, args.all, args.release, args.milestone, args.inline]))
+        run_user_journey = getattr(args, 'user_journey', False)
+        run_unit = args.unit or args.all or (not any([args.unit, args.integration, args.e2e, args.cli, args.all, run_user_journey, args.milestone, args.inline]))
         run_integration = args.integration or args.all
         run_e2e = args.e2e or args.all
         run_cli = args.cli or args.all
-        run_release = args.release
         run_milestone = args.milestone or args.all
 
         # Build test type list for display
@@ -146,8 +147,8 @@ class DevTestCommand(BaseCommand):
             test_types.append("cli")
         if run_milestone:
             test_types.append("milestone")
-        if run_release:
-            test_types.append("release")
+        if run_user_journey:
+            test_types.append("user-journey")
 
         # Header
         if not args.ci:
@@ -164,7 +165,7 @@ class DevTestCommand(BaseCommand):
                 f"  [bold]--cli[/bold]              CLI command tests\n"
                 f"  [bold]--milestone[/bold]        Milestone script tests\n"
                 f"  [bold]--all[/bold] (-a)         All of the above\n"
-                f"  [bold]--release[/bold]          Full validation (destructive)\n\n"
+                f"  [bold]--user-journey[/bold]     Full user journey (destructive, with milestone checkpoints)\n\n"
                 f"[bold]Options:[/bold]\n"
                 f"  [bold]-m N[/bold]               Test specific module\n"
                 f"  [bold]--no-build[/bold]         Skip export (assume already built)\n"
@@ -183,7 +184,7 @@ class DevTestCommand(BaseCommand):
         # - --no-build: User explicitly skips
         # - --release: Will reset and rebuild each module
         # - --inline: Will test and export each module progressively
-        if not args.no_build and not run_release and not run_inline:
+        if not args.no_build and not run_user_journey and not run_inline:
             if not args.ci:
                 console.print("[bold]Step 1: Build Package[/bold]")
 
@@ -278,11 +279,11 @@ class DevTestCommand(BaseCommand):
                 self._print_result(result)
                 console.print()
 
-        if run_release:
+        if run_user_journey:
             if not args.ci:
-                console.print("[bold]Running: Release Validation[/bold]")
+                console.print("[bold]Running: User Journey Validation[/bold]")
                 console.print("[yellow]⚠️  This will reset and rebuild ALL modules![/yellow]")
-            result = self._run_release_validation(project_root, args)
+            result = self._run_user_journey(project_root, args)
             results.append(result)
             if not args.ci:
                 self._print_result(result)
@@ -426,7 +427,7 @@ class DevTestCommand(BaseCommand):
         env = os.environ.copy()
         pythonpath = env.get('PYTHONPATH', '')
         if pythonpath:
-            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+            env['PYTHONPATH'] = f"{project_root}{os.pathsep}{pythonpath}"
         else:
             env['PYTHONPATH'] = str(project_root)
 
@@ -658,7 +659,17 @@ class DevTestCommand(BaseCommand):
                     failed_module = f"{module_num}:export"
                     if ci_mode:
                         print("✗ EXPORT FAILED")
-                        print(f"      Error: {export_result.stderr[:100] if export_result.stderr else 'Export failed'}")
+                        print(f"      Exit code: {export_result.returncode}")
+                        if export_result.stdout:
+                            print(f"      Stdout (last 500 chars):")
+                            for line in export_result.stdout[-500:].split('\n')[-10:]:
+                                if line.strip():
+                                    print(f"        {line}")
+                        if export_result.stderr:
+                            print(f"      Stderr (last 500 chars):")
+                            for line in export_result.stderr[-500:].split('\n')[-10:]:
+                                if line.strip():
+                                    print(f"        {line}")
                     break
             except subprocess.TimeoutExpired:
                 failed_module = f"{module_num}:export_timeout"
@@ -758,7 +769,7 @@ class DevTestCommand(BaseCommand):
 
         return self._run_pytest(
             project_root, test_path, name, verbose,
-            extra_args=["--ignore=tests/e2e/", "--ignore=tests/integration/", "--ignore=tests/cli/"],
+            extra_args=["--ignore=tests/e2e/", "--ignore=tests/integration/", "--ignore=tests/cli/", "-m", "not slow"],
             ci_mode=ci_mode
         )
 
@@ -785,16 +796,25 @@ class DevTestCommand(BaseCommand):
         """
         return self._run_pytest(
             project_root, "tests/milestones", "Milestone tests", verbose,
-            timeout=900, ci_mode=ci_mode  # 15 min for all milestones
+            timeout=900, extra_args=["-m", "slow or not slow"], ci_mode=ci_mode  # 15 min, run all including slow tests
         )
 
-    def _run_release_validation(self, project_root: Path, args: Namespace) -> TestResult:
-        """Run full release validation (destructive).
+    def _run_user_journey(self, project_root: Path, args: Namespace) -> TestResult:
+        """Run full user journey validation (destructive).
 
-        This simulates the complete student journey:
-        1. Reset (clear modules/ and tinytorch/core/)
-        2. For each module: export from src, then run module complete
-        3. Run all milestones
+        This simulates exactly what a user does:
+        1. Reset (clear modules/ and tinytorch/core/) - like fresh install
+        2. For each module:
+           a. tito module start XX --no-jupyter (creates notebook)
+           b. tito module complete XX (tests + exports)
+        3. Run milestones at unlock checkpoints (not all at the end)
+
+        Milestone checkpoints (based on required_modules):
+        - After Module 03: Milestones 01, 02 (Perceptron, XOR Crisis)
+        - After Module 08: Milestone 03 (MLP Revival)
+        - After Module 09: Milestone 04 (CNN Revolution)
+        - After Module 13: Milestone 05 (Transformer Era)
+        - After Module 19: Milestone 06 (MLPerf)
         """
         import shutil
         from ..milestone import MILESTONE_SCRIPTS
@@ -802,16 +822,31 @@ class DevTestCommand(BaseCommand):
 
         start = time.time()
         console = self.console
+        ci_mode = args.ci
+
+        # Define milestone checkpoints: module_num -> list of milestones to run
+        MILESTONE_CHECKPOINTS = {
+            "03": ["01", "02"],  # After Layers: Perceptron, XOR Crisis
+            "08": ["03"],        # After Training: MLP Revival
+            "09": ["04"],        # After Convolutions: CNN Revolution
+            "13": ["05"],        # After Transformers: Transformer Era
+            "19": ["06"],        # After Benchmarking: MLPerf
+        }
 
         # Get module list
         module_mapping = get_module_mapping()
         module_nums = sorted(module_mapping.keys(), key=lambda x: int(x))
 
         # =====================================================================
-        # Step 1: Reset to clean state
+        # Step 1: Reset to clean state (like fresh install)
         # =====================================================================
-        if not args.ci:
-            console.print("  [dim]Resetting to clean state...[/dim]")
+        if ci_mode:
+            print(f"\n{'='*60}")
+            print("  USER JOURNEY: Reset to clean state")
+            print(f"{'='*60}")
+
+        if not ci_mode:
+            console.print("  [dim]Resetting to clean state (simulating fresh install)...[/dim]")
 
         try:
             # Clear modules/ (remove all module subdirectories)
@@ -827,45 +862,87 @@ class DevTestCommand(BaseCommand):
                 for py_file in core_dir.glob("*.py"):
                     if py_file.name != "__init__.py":
                         py_file.unlink()
+
+            # Clear progress tracking
+            tito_dir = project_root / ".tito"
+            if tito_dir.exists():
+                shutil.rmtree(tito_dir)
+
+            if ci_mode:
+                print("  ✓ Reset complete")
+
         except Exception as e:
             return TestResult(
-                name="Release validation",
+                name="User journey",
                 passed=False,
                 duration=time.time() - start,
                 message=f"Reset failed: {str(e)[:50]}"
             )
 
         # =====================================================================
-        # Step 2: Validate all modules
+        # Step 2: User journey - start + complete each module
         # =====================================================================
         failed_modules = []
         passed_modules = 0
+        failed_milestones = []
+        passed_milestones = 0
+
+        if ci_mode:
+            print(f"\n{'='*60}")
+            print(f"  USER JOURNEY: {len(module_nums)} modules + milestone checkpoints")
+            print(f"{'='*60}")
 
         for module_num in module_nums:
             module_name = module_mapping[module_num]
-            if not args.ci:
+            module_start_time = time.time()
+
+            if ci_mode:
+                print(f"\n  ┌─ MODULE {module_num}: {module_name}")
+                print(f"  │  [{passed_modules + 1}/{len(module_nums)}]")
+            else:
                 console.print(f"  [dim]Module {module_num} ({module_name})...[/dim]")
 
-            # Export from src
+            # Step A: tito module start --no-jupyter (creates notebook from src/)
+            if ci_mode:
+                print(f"  │  → Step 1: tito module start {module_num} --no-jupyter", end=" ", flush=True)
             try:
                 result = subprocess.run(
-                    [sys.executable, str(project_root / "bin" / "tito"), "dev", "export", module_num],
+                    [sys.executable, str(project_root / "bin" / "tito"),
+                     "module", "start", module_num, "--no-jupyter"],
                     capture_output=True,
                     text=True,
                     cwd=project_root,
                     timeout=120
                 )
                 if result.returncode != 0:
-                    failed_modules.append(f"{module_num}:export")
+                    failed_modules.append(f"{module_num}:start")
+                    if ci_mode:
+                        print("✗ FAILED")
+                        print(f"  │    Error: {result.stderr[:100] if result.stderr else 'See output'}")
+                        print(f"  └─ MODULE {module_num}: FAILED (start)")
                     continue
-            except Exception:
-                failed_modules.append(f"{module_num}:export")
+                if ci_mode:
+                    print("✓")
+            except subprocess.TimeoutExpired:
+                failed_modules.append(f"{module_num}:start_timeout")
+                if ci_mode:
+                    print("✗ TIMEOUT (>120s)")
+                    print(f"  └─ MODULE {module_num}: FAILED (start timeout)")
+                continue
+            except Exception as e:
+                failed_modules.append(f"{module_num}:start")
+                if ci_mode:
+                    print(f"✗ ERROR: {str(e)[:30]}")
+                    print(f"  └─ MODULE {module_num}: FAILED (start error)")
                 continue
 
-            # Run module complete
+            # Step B: tito module complete (tests + exports notebook to tinytorch/core/)
+            if ci_mode:
+                print(f"  │  → Step 2: tito module complete {module_num}", end=" ", flush=True)
             try:
                 result = subprocess.run(
-                    [sys.executable, str(project_root / "bin" / "tito"), "module", "complete", module_num],
+                    [sys.executable, str(project_root / "bin" / "tito"),
+                     "module", "complete", module_num],
                     capture_output=True,
                     text=True,
                     cwd=project_root,
@@ -873,45 +950,104 @@ class DevTestCommand(BaseCommand):
                 )
                 if result.returncode != 0:
                     failed_modules.append(f"{module_num}:complete")
+                    if ci_mode:
+                        print("✗ FAILED")
+                        # Show last few lines of output for debugging
+                        print(f"  │    Output (last 5 lines):")
+                        for line in result.stdout.split('\n')[-5:]:
+                            if line.strip():
+                                print(f"  │      {line}")
+                        print(f"  └─ MODULE {module_num}: FAILED (complete)")
                     continue
-            except Exception:
+                if ci_mode:
+                    print("✓")
+            except subprocess.TimeoutExpired:
+                failed_modules.append(f"{module_num}:complete_timeout")
+                if ci_mode:
+                    print("✗ TIMEOUT (>300s)")
+                    print(f"  └─ MODULE {module_num}: FAILED (complete timeout)")
+                continue
+            except Exception as e:
                 failed_modules.append(f"{module_num}:complete")
+                if ci_mode:
+                    print(f"✗ ERROR: {str(e)[:30]}")
+                    print(f"  └─ MODULE {module_num}: FAILED (complete error)")
                 continue
 
             passed_modules += 1
+            module_duration = time.time() - module_start_time
+            if ci_mode:
+                print(f"  └─ MODULE {module_num}: PASSED ({module_duration:.1f}s)")
+
+            # Step C: Run milestones at checkpoints
+            if module_num in MILESTONE_CHECKPOINTS:
+                milestones_to_run = MILESTONE_CHECKPOINTS[module_num]
+                if ci_mode:
+                    print(f"\n  ┌─ MILESTONE CHECKPOINT (after Module {module_num})")
+                    print(f"  │  Milestones unlocked: {', '.join(milestones_to_run)}")
+
+                for milestone_id in milestones_to_run:
+                    if milestone_id not in MILESTONE_SCRIPTS:
+                        continue
+
+                    milestone_name = MILESTONE_SCRIPTS[milestone_id].get("name", milestone_id)
+                    milestone_start = time.time()
+                    if ci_mode:
+                        print(f"  │  → tito milestone run {milestone_id} ({milestone_name})", end=" ", flush=True)
+
+                    try:
+                        result = subprocess.run(
+                            [sys.executable, str(project_root / "bin" / "tito"),
+                             "milestone", "run", milestone_id, "--skip-checks"],
+                            capture_output=True,
+                            text=True,
+                            cwd=project_root,
+                            timeout=300  # 5 min for heavy milestones (CNN, Transformer)
+                        )
+                        milestone_duration = time.time() - milestone_start
+                        if result.returncode == 0:
+                            passed_milestones += 1
+                            if ci_mode:
+                                print(f"✓ ({milestone_duration:.1f}s)")
+                        else:
+                            failed_milestones.append(milestone_id)
+                            if ci_mode:
+                                print(f"✗ FAILED ({milestone_duration:.1f}s)")
+                    except subprocess.TimeoutExpired:
+                        failed_milestones.append(milestone_id)
+                        if ci_mode:
+                            print("✗ TIMEOUT (>180s)")
+                    except Exception as e:
+                        failed_milestones.append(milestone_id)
+                        if ci_mode:
+                            print(f"✗ ERROR: {str(e)[:30]}")
+
+                if ci_mode:
+                    checkpoint_passed = all(m not in failed_milestones for m in milestones_to_run)
+                    status = "PASSED" if checkpoint_passed else "FAILED"
+                    print(f"  └─ CHECKPOINT: {status}")
 
         # =====================================================================
-        # Step 3: Run all milestones
+        # Summary
         # =====================================================================
-        failed_milestones = []
-        passed_milestones = 0
-
-        if not args.ci:
-            console.print("  [dim]Running milestones...[/dim]")
-
-        for milestone_id in sorted(MILESTONE_SCRIPTS.keys()):
-            try:
-                result = subprocess.run(
-                    [sys.executable, str(project_root / "bin" / "tito"), "milestone", "run", milestone_id, "--skip-checks"],
-                    capture_output=True,
-                    text=True,
-                    cwd=project_root,
-                    timeout=180
-                )
-                if result.returncode == 0:
-                    passed_milestones += 1
-                else:
-                    failed_milestones.append(milestone_id)
-            except Exception:
-                failed_milestones.append(milestone_id)
-
-        # Build result
         total_time = time.time() - start
         all_passed = len(failed_modules) == 0 and len(failed_milestones) == 0
 
+        if ci_mode:
+            print(f"\n{'='*60}")
+            if all_passed:
+                print(f"  RESULT: ALL PASSED ({passed_modules} modules, {passed_milestones} milestones)")
+            else:
+                print(f"  RESULT: FAILED")
+                if failed_modules:
+                    print(f"    Failed modules: {', '.join(failed_modules[:5])}")
+                if failed_milestones:
+                    print(f"    Failed milestones: {', '.join(failed_milestones)}")
+            print(f"{'='*60}\n")
+
         if all_passed:
             return TestResult(
-                name="Release validation",
+                name="User journey",
                 passed=True,
                 duration=total_time,
                 test_count=passed_modules + passed_milestones,
@@ -924,7 +1060,7 @@ class DevTestCommand(BaseCommand):
             if failed_milestones:
                 failures.append(f"milestones: {', '.join(failed_milestones)}")
             return TestResult(
-                name="Release validation",
+                name="User journey",
                 passed=False,
                 duration=total_time,
                 message="; ".join(failures)[:100]

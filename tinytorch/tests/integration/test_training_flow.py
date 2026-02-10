@@ -192,6 +192,13 @@ class TestGradientChainNotBroken:
         np.random.seed(42)
 
         layers = [Linear(4, 4) for _ in range(5)]
+
+        # Enable gradient tracking on all layer parameters
+        for layer in layers:
+            layer.weight.requires_grad = True
+            if layer.bias is not None:
+                layer.bias.requires_grad = True
+
         relu = ReLU()
 
         x = Tensor(np.random.randn(1, 4), requires_grad=True)
@@ -223,6 +230,10 @@ class TestGradientChainNotBroken:
     def test_input_receives_gradients(self):
         """Input tensor must receive gradients for visualization/debugging"""
         layer = Linear(3, 2)
+        layer.weight.requires_grad = True
+        if layer.bias is not None:
+            layer.bias.requires_grad = True
+
         x = Tensor([[1., 2., 3.]], requires_grad=True)
         target = Tensor([[1., 0.]])
 
@@ -249,6 +260,9 @@ class TestZeroGradWorks:
     def test_gradients_dont_accumulate_after_zero_grad(self):
         """Gradients must not accumulate when zero_grad is called"""
         layer = Linear(2, 1)
+        layer.weight.requires_grad = True
+        if layer.bias is not None:
+            layer.bias.requires_grad = True
         optimizer = SGD([layer.weight, layer.bias], lr=0.1)
 
         x = Tensor([[1., 2.]], requires_grad=True)
@@ -299,6 +313,9 @@ class TestBatchTraining:
     def test_batch_gradients_are_averaged(self):
         """Gradients should be averaged over batch (not summed)"""
         layer = Linear(2, 1)
+        layer.weight.requires_grad = True
+        if layer.bias is not None:
+            layer.bias.requires_grad = True
 
         # Single sample
         x1 = Tensor([[1., 2.]], requires_grad=True)
@@ -342,6 +359,9 @@ class TestQuickTrainingSmoke:
     def test_simple_training_step(self):
         """One training step should not crash"""
         layer = Linear(2, 1)
+        layer.weight.requires_grad = True
+        if layer.bias is not None:
+            layer.bias.requires_grad = True
         opt = SGD([layer.weight, layer.bias], lr=0.1)
 
         x = Tensor([[1., 2.]], requires_grad=True)

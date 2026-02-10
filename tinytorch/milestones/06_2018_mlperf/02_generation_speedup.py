@@ -46,7 +46,7 @@ WITHOUT KV Cache (Slow):              WITH KV Cache (Fast):
   Module 18 (Memoization)   : YOUR KV cache implementation
 
 📊 EXPECTED RESULTS:
-  | Generation Mode      | Time/Token | Speedup | Memory  |
+  | Generation Mode     | Time/Token | Speedup | Memory  |
   |---------------------|------------|---------|---------|
   | Baseline (no cache) |   ~10ms    |   1×    |  Low    |
   | With KV Cache       |   ~1.5ms   |  6-10×  |  Higher |
@@ -69,6 +69,13 @@ from rich import box
 
 console = Console()
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 def main():
     # ========================================================================
@@ -77,7 +84,7 @@ def main():
 
     console.print(Panel(
         "[bold cyan]╔═══ Milestone 06.2 ════╗[/bold cyan]\n"
-        "[bold cyan]║[/bold cyan] [bold]⚡ GENERATION SPEEDUP  [/bold][bold cyan]║[/bold cyan]\n"
+        "[bold cyan]║[/bold cyan] [bold]⚡ GENERATION SPEEDUP [/bold][bold cyan]║[/bold cyan]\n"
         "[bold cyan]║[/bold cyan] [bold]  with KV Caching     [/bold][bold cyan]║[/bold cyan]\n"
         "[bold cyan]║[/bold cyan]                       [bold cyan]║[/bold cyan]\n"
         "[bold cyan]║[/bold cyan] Make YOUR Transformer [bold cyan]║[/bold cyan]\n"
@@ -85,12 +92,13 @@ def main():
         "[bold cyan]╚═══════════════════════╝[/bold cyan]",
         border_style="bright_cyan"
     ))
+    press_enter_to_continue()
 
     # ========================================================================
     # IMPORT YOUR IMPLEMENTATIONS
     # ========================================================================
 
-    console.print("\n[bold cyan]📦 Loading YOUR Tiny🔥Torch implementations...[/bold cyan]\n")
+    console.print("[bold cyan]📦 Loading YOUR Tiny🔥Torch implementations...[/bold cyan]\n")
 
     try:
         # Core components
@@ -124,7 +132,8 @@ def main():
         ))
         return 1
 
-    console.print("\n[green]✅ All implementations loaded![/green]\n")
+    console.print("\n[green]✅ All implementations loaded![/green]")
+    press_enter_to_continue()
 
     # ========================================================================
     # CREATE A SIMPLE TRANSFORMER
@@ -151,8 +160,9 @@ def main():
     console.print(f"  [green]✓[/green] Vocabulary: {vocab_size} tokens (A-Z)")
     console.print(f"  [green]✓[/green] Embedding dim: {embed_dim}")
     console.print(f"  [green]✓[/green] Attention heads: {num_heads}")
-    console.print(f"  [green]✓[/green] Max sequence: {max_seq_len}\n")
-
+    console.print(f"  [green]✓[/green] Max sequence: {max_seq_len}")
+    press_enter_to_continue()
+    
     # Simple forward pass function
     def forward_no_cache(tokens):
         """Standard forward pass - recomputes everything."""
@@ -180,6 +190,7 @@ def main():
         "[bold green]Solution:[/bold green] Cache the Key and Value projections!",
         border_style="yellow"
     ))
+    press_enter_to_continue()
 
     # ========================================================================
     # BENCHMARK WITHOUT CACHE
@@ -212,7 +223,8 @@ def main():
     total_no_cache = sum(times_no_cache)
 
     console.print(f"  [red]Total time: {total_no_cache:.1f}ms[/red]")
-    console.print(f"  [red]Average per token: {avg_no_cache:.2f}ms[/red]\n")
+    console.print(f"  [red]Average per token: {avg_no_cache:.2f}ms[/red]")
+    press_enter_to_continue()
 
     # ========================================================================
     # BENCHMARK WITH KV CACHE
@@ -268,7 +280,8 @@ def main():
 
     console.print(f"  [green]Total time: {total_with_cache:.1f}ms[/green]")
     console.print(f"  [green]Average per token: {avg_with_cache:.2f}ms[/green]")
-    console.print(f"  [bold green]Speedup: {speedup:.1f}×[/bold green]\n")
+    console.print(f"  [bold green]Speedup: {speedup:.1f}×[/bold green]")
+    press_enter_to_continue()
 
     # ========================================================================
     # RESULTS COMPARISON
@@ -298,7 +311,7 @@ def main():
     )
 
     console.print(table)
-    console.print()
+    press_enter_to_continue()
 
     # ========================================================================
     # MEMORY TRADEOFF
@@ -318,6 +331,7 @@ def main():
         "[dim]This is why ALL production LLMs use KV caching![/dim]",
         border_style="cyan"
     ))
+    press_enter_to_continue()
 
     # ========================================================================
     # SUCCESS
@@ -342,6 +356,7 @@ def main():
         box=box.DOUBLE,
         padding=(1, 2)
     ))
+    press_enter_to_continue()
 
     return 0
 

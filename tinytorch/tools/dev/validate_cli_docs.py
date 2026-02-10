@@ -36,7 +36,7 @@ VALID_COMMANDS: Dict[str, List[str]] = {
     "logo": [],  # No subcommands
     "system": ["info", "health", "jupyter", "update", "logo"],
     "module": ["start", "view", "resume", "complete", "test", "reset", "status", "list"],
-    "dev": ["preflight", "export", "validate", "test"],
+    "dev": ["test", "export"],
     "src": ["export", "test"],
     "package": ["reset", "nbdev"],
     "nbgrader": ["init", "generate", "release", "collect", "autograde", "feedback", "status", "analytics", "report"],

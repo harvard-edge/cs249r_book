@@ -65,6 +65,7 @@ set -e  # Exit on any error
 # These can be overridden via environment variables for testing:
 #   TINYTORCH_BRANCH=dev curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
 #   TINYTORCH_VERSION=0.1.5 TINYTORCH_BRANCH=feature/foo ./install.sh
+#   TINYTORCH_NON_INTERACTIVE=1 ./install.sh  # Skip all prompts (for CI)
 REPO_URL="https://github.com/harvard-edge/cs249r_book.git"
 REPO_SHORT="harvard-edge/cs249r_book"
 TAGS_API="https://api.github.com/repos/harvard-edge/cs249r_book/tags"
@@ -72,6 +73,8 @@ TAG_PREFIX="tinytorch-v"
 BRANCH="${TINYTORCH_BRANCH:-main}"
 INSTALL_DIR="${TINYTORCH_INSTALL_DIR:-tinytorch}"
 SPARSE_PATH="tinytorch"
+# Non-interactive mode: skip prompts, use defaults (for CI/testing)
+NON_INTERACTIVE="${TINYTORCH_NON_INTERACTIVE:-}"
 # Version is fetched from GitHub tags (single source of truth)
 # Can be overridden for testing: TINYTORCH_VERSION=0.1.5 ./install.sh
 TINYTORCH_VERSION="${TINYTORCH_VERSION:-}"
@@ -217,6 +220,19 @@ get_python_cmd() {
     echo ""
 }
 
+# Find the system platform (linux, macos, windows)
+# Contributed by @rnjema (PR #1105)
+get_platform() {
+    local uname_out
+    uname_out=$(uname -s)
+    case "${uname_out}" in
+        Linux*)     echo "linux";;
+        Darwin*)    echo "macos";;
+        CYGWIN*|MINGW*|MSYS*) echo "windows";;
+        *)          echo "unknown";;
+    esac
+}
+
 # ============================================================================
 # Pre-flight Checks
 # These run before any installation to catch problems early
@@ -263,6 +279,7 @@ check_prerequisites() {
 
     # Check for Python 3.10+
     PYTHON_CMD=$(get_python_cmd)
+    PLATFORM=$(get_platform)
     if [ -n "$PYTHON_CMD" ]; then
         # We know it's good because get_python_cmd validates it, but we run check again to get the version string
         PY_VERSION=$(check_python_version "$PYTHON_CMD")
@@ -290,6 +307,11 @@ check_prerequisites() {
         fi
     fi
 
+    # Show Windows-specific guidance (contributed by @rnjema)
+    if [ "$PLATFORM" = "windows" ]; then
+        print_info "Windows detected - using Git Bash/WSL compatible mode"
+    fi
+
     if [ $errors -gt 0 ]; then
         echo ""
         print_error "Missing prerequisites. Please fix the issues above."
@@ -311,6 +333,16 @@ check_existing_directory() {
 # ============================================================================
 
 prompt_install_directory() {
+    # Non-interactive mode: use INSTALL_DIR as-is (from env var or default)
+    if [ -n "$NON_INTERACTIVE" ]; then
+        return
+    fi
+
+    # No TTY available: use defaults silently
+    if ! [ -t 0 ] && ! [ -e /dev/tty ]; then
+        return
+    fi
+
     echo ""
     echo -e "Where would you like to install Tiny${YELLOW}🔥Torch${NC}?"
     echo -e "  ${DIM}Press Enter for default: ${BOLD}$PWD/tinytorch${NC}"
@@ -446,16 +478,25 @@ do_install() {
     
     # Use the detected 3.10+ command explicitly
     $PYTHON_CMD -m venv .venv
-    source .venv/bin/activate
+
+    # Activate venv (handle Windows Git Bash vs Unix)
+    if [ -f ".venv/Scripts/activate" ]; then
+        # Windows (Git Bash)
+        source .venv/Scripts/activate
+    else
+        # macOS/Linux
+        source .venv/bin/activate
+    fi
     print_success "Created virtual environment using $PYTHON_CMD"
 
     # -------------------------------------------------------------------------
     # Step 3: Install dependencies
+    # Uses $PYTHON_CMD -m pip for reliability (contributed by @rnjema)
     # -------------------------------------------------------------------------
     echo -e "${BLUE}[3/4]${NC} Installing dependencies..."
 
     # Upgrade pip first
-    pip install --upgrade pip -q 2>/dev/null &
+    $PYTHON_CMD -m pip install --upgrade pip -q 2>/dev/null &
     local pip_pid=$!
     spin $pip_pid "Upgrading pip..."
     wait $pip_pid
@@ -463,14 +504,14 @@ do_install() {
     # Install from requirements.txt
     if [ -f "requirements.txt" ]; then
         total_pkgs=$(grep -c -E "^[^#]" requirements.txt 2>/dev/null || echo "?")
-        pip install -r requirements.txt -q 2>/dev/null &
+        $PYTHON_CMD -m pip install -r requirements.txt -q 2>/dev/null &
         local req_pid=$!
         spin $req_pid "Installing $total_pkgs packages..."
         wait $req_pid
     fi
 
     # Install TinyTorch package in editable mode (includes tito CLI)
-    pip install -e . -q 2>/dev/null &
+    $PYTHON_CMD -m pip install -e . -q 2>/dev/null &
     local tt_pid=$!
     spin $tt_pid "Installing TinyTorch..."
     wait $tt_pid
@@ -492,13 +533,20 @@ do_install() {
 print_success_message() {
     local install_path="$PWD"
 
+    # Determine correct activation command for the platform
+    local activate_cmd="source .venv/bin/activate"
+    if [ -f ".venv/Scripts/activate" ]; then
+        # Windows (Git Bash)
+        activate_cmd="source .venv/Scripts/activate"
+    fi
+
     echo ""
     echo -e "${GREEN}✓${NC} Tiny${YELLOW}🔥Torch${NC} installed successfully!"
     echo ""
     echo -e "${BOLD}Next steps:${NC}"
     echo ""
     echo -e "  ${CYAN}cd $install_path${NC}"
-    echo -e "  ${CYAN}source .venv/bin/activate${NC}"
+    echo -e "  ${CYAN}$activate_cmd${NC}"
     echo -e "  ${CYAN}tito setup${NC}"
     echo ""
     echo -e "${BOLD}Then start building:${NC}"
@@ -533,14 +581,16 @@ main() {
     # Check directory doesn't exist (after user chooses)
     check_existing_directory
 
-    # Show plan and confirm
-    show_plan_and_confirm
+    # Show plan and confirm (skip in non-interactive mode)
+    if [ -z "$NON_INTERACTIVE" ] && { [ -t 0 ] || [ -e /dev/tty ]; }; then
+        show_plan_and_confirm
 
-    printf "Continue? [Y/n] "
-    read -r REPLY </dev/tty
-    if [[ $REPLY =~ ^[Nn]$ ]]; then
-        print_info "Installation cancelled"
-        exit 0
+        printf "Continue? [Y/n] "
+        read -r REPLY </dev/tty
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            print_info "Installation cancelled"
+            exit 0
+        fi
     fi
 
     # Run installation

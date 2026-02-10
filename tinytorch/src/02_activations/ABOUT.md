@@ -14,8 +14,17 @@ If you can create a Tensor and perform element-wise arithmetic (`x + y`, `x * 2`
 :::
 
 `````{only} html
-````{grid} 1 2 3 3
+````{grid} 1 1 3 3
 :gutter: 3
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/02_activations.mp3" type="audio/mpeg">
+</audio>
+```
 
 ```{grid-item-card} 🚀 Launch Binder
 
@@ -28,19 +37,286 @@ Run interactively in your browser.
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/02_activations/02_activations.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
-```
-
-```{grid-item-card} 🎧 Audio Overview
-
-Listen to an AI-generated overview.
-
-<audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/02_activations.mp3" type="audio/mpeg">
-</audio>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/02_activations/02_activations.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ````
+
+```{raw} html
+<style>
+.slide-viewer-container {
+  margin: 0.5rem 0 1.5rem 0;
+  background: #0f172a;
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.slide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.03);
+}
+.slide-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.slide-subtitle {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+.slide-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.slide-toolbar button {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slide-toolbar button:hover {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+.slide-nav-group {
+  display: flex;
+  align-items: center;
+}
+.slide-page-info {
+  color: #64748b;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+  font-weight: 500;
+}
+.slide-zoom-group {
+  display: flex;
+  align-items: center;
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+.slide-canvas-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.5rem 1rem 1rem 1rem;
+  min-height: 380px;
+  background: #0f172a;
+}
+.slide-canvas {
+  max-width: 100%;
+  max-height: 350px;
+  height: auto;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+.slide-progress-wrapper {
+  padding: 0 1rem 0.5rem 1rem;
+}
+.slide-progress-bar {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 1.5px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.slide-progress-fill {
+  height: 100%;
+  background: #f97316;
+  border-radius: 1.5px;
+  transition: width 0.2s ease;
+}
+.slide-loading {
+  color: #f97316;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.slide-loading::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(249, 115, 22, 0.2);
+  border-top-color: #f97316;
+  border-radius: 50%;
+  animation: slide-spin 0.8s linear infinite;
+}
+@keyframes slide-spin {
+  to { transform: rotate(360deg); }
+}
+.slide-footer {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.02);
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.slide-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: #f97316;
+  color: white;
+  padding: 0.4rem 0.9rem;
+  border-radius: 2rem;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+.slide-footer a:hover {
+  background: #ea580c;
+  color: white;
+}
+.slide-footer a.secondary {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.slide-footer a.secondary:hover {
+  background: rgba(255,255,255,0.05);
+  color: #f8fafc;
+}
+@media (max-width: 600px) {
+  .slide-header { flex-direction: column; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+  .slide-toolbar button { width: 28px; height: 28px; }
+  .slide-canvas-wrapper { min-height: 260px; padding: 0.5rem; }
+  .slide-canvas { max-height: 220px; }
+}
+</style>
+
+<div class="slide-viewer-container" id="slide-viewer-02_activations">
+  <div class="slide-header">
+    <div class="slide-title">
+      <span>🔥</span>
+      <span>Slide Deck</span>
+      <span class="slide-subtitle">· AI-generated</span>
+    </div>
+    <div class="slide-toolbar">
+      <div class="slide-nav-group">
+        <button onclick="slideNav('02_activations', -1)" title="Previous">‹</button>
+        <span class="slide-page-info"><span id="slide-num-02_activations">1</span> / <span id="slide-count-02_activations">-</span></span>
+        <button onclick="slideNav('02_activations', 1)" title="Next">›</button>
+      </div>
+      <div class="slide-zoom-group">
+        <button onclick="slideZoom('02_activations', -0.25)" title="Zoom out">−</button>
+        <button onclick="slideZoom('02_activations', 0.25)" title="Zoom in">+</button>
+      </div>
+    </div>
+  </div>
+  <div class="slide-canvas-wrapper">
+    <div id="slide-loading-02_activations" class="slide-loading">Loading slides...</div>
+    <canvas id="slide-canvas-02_activations" class="slide-canvas" style="display:none;"></canvas>
+  </div>
+  <div class="slide-progress-wrapper">
+    <div class="slide-progress-bar" onclick="slideProgress('02_activations', event)">
+      <div class="slide-progress-fill" id="slide-progress-02_activations" style="width: 0%;"></div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <a href="../_static/slides/02_activations.pdf" download>⬇ Download</a>
+    <a href="#" onclick="slideFullscreen('02_activations'); return false;" class="secondary">⛶ Fullscreen</a>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function() {
+  if (window.slideViewersInitialized) return;
+  window.slideViewersInitialized = true;
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  window.slideViewers = {};
+
+  window.initSlideViewer = function(id, pdfUrl) {
+    const viewer = { pdf: null, page: 1, scale: 1.3, rendering: false, pending: null };
+    window.slideViewers[id] = viewer;
+
+    const canvas = document.getElementById('slide-canvas-' + id);
+    const ctx = canvas.getContext('2d');
+
+    function render(num) {
+      viewer.rendering = true;
+      viewer.pdf.getPage(num).then(function(page) {
+        const viewport = page.getViewport({scale: viewer.scale});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        page.render({canvasContext: ctx, viewport: viewport}).promise.then(function() {
+          viewer.rendering = false;
+          if (viewer.pending !== null) { render(viewer.pending); viewer.pending = null; }
+        });
+      });
+      document.getElementById('slide-num-' + id).textContent = num;
+      document.getElementById('slide-progress-' + id).style.width = (num / viewer.pdf.numPages * 100) + '%';
+    }
+
+    function queue(num) { if (viewer.rendering) viewer.pending = num; else render(num); }
+
+    pdfjsLib.getDocument(pdfUrl).promise.then(function(pdf) {
+      viewer.pdf = pdf;
+      document.getElementById('slide-count-' + id).textContent = pdf.numPages;
+      document.getElementById('slide-loading-' + id).style.display = 'none';
+      canvas.style.display = 'block';
+      render(1);
+    }).catch(function() {
+      document.getElementById('slide-loading-' + id).innerHTML = 'Unable to load. <a href="' + pdfUrl + '" style="color:#f97316;">Download PDF</a>';
+    });
+
+    viewer.queue = queue;
+  };
+
+  window.slideNav = function(id, dir) {
+    const v = window.slideViewers[id];
+    if (!v || !v.pdf) return;
+    const newPage = v.page + dir;
+    if (newPage >= 1 && newPage <= v.pdf.numPages) { v.page = newPage; v.queue(newPage); }
+  };
+
+  window.slideZoom = function(id, delta) {
+    const v = window.slideViewers[id];
+    if (!v) return;
+    v.scale = Math.max(0.5, Math.min(3, v.scale + delta));
+    v.queue(v.page);
+  };
+
+  window.slideProgress = function(id, event) {
+    const v = window.slideViewers[id];
+    if (!v || !v.pdf) return;
+    const bar = event.currentTarget;
+    const pct = (event.clientX - bar.getBoundingClientRect().left) / bar.offsetWidth;
+    const newPage = Math.max(1, Math.min(v.pdf.numPages, Math.ceil(pct * v.pdf.numPages)));
+    if (newPage !== v.page) { v.page = newPage; v.queue(newPage); }
+  };
+
+  window.slideFullscreen = function(id) {
+    const el = document.getElementById('slide-viewer-' + id);
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  };
+})();
+
+initSlideViewer('02_activations', '../_static/slides/02_activations.pdf');
+</script>
+```
 `````
 
 ## Overview
@@ -228,7 +504,7 @@ class ReLU:
 
 This simplicity is ReLU's greatest strength. The operation is a single comparison per element: O(n) with a tiny constant factor. Modern CPUs can execute billions of comparisons per second. Compare this to sigmoid, which requires computing an exponential for every element.
 
-ReLU creates **sparsity**. When half your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
+ReLU creates **sparsity**. When half of your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
 
 The discontinuity at zero is both a feature and a bug. During training (Module 08), you'll discover that ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
 
@@ -408,7 +684,7 @@ probs = F.softmax(logits, dim=-1)  # [0.09, 0.24, 0.67], sum = 1
 Let's walk through the key similarities and differences:
 
 - **Line 1 (Import)**: TinyTorch imports activation classes; PyTorch uses functional interface `torch.nn.functional`. Both approaches work; PyTorch also supports class-based activations via `torch.nn.ReLU()`.
-- **Line 4-6 (ReLU)**: Identical semantics. Both zero out negative values, preserve positive values.
+- **Line 4-6 (ReLU)**: Identical semantics. Both zero out negative values, preserving positive values.
 - **Line 9-10 (Sigmoid)**: Identical mathematical function. Both use numerically stable implementations to prevent overflow.
 - **Line 13-15 (Softmax)**: Same mathematical operation. Both require specifying the dimension for multidimensional tensors. PyTorch uses `dim` keyword argument; TinyTorch defaults to `dim=-1`.
 
@@ -461,7 +737,7 @@ At scale, this matters: if you have 100 activation layers in your model, switchi
 
 Why does softmax subtract the maximum value before computing exponentials? What would happen without this step?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Without max subtraction**: Computing `softmax([1000, 1001, 1002])` requires `exp(1000)`, which overflows to infinity in float32/float64, producing NaN.
@@ -475,7 +751,7 @@ exp(x - max) / Σ exp(x - max) = [exp(x) / exp(max)] / [Σ exp(x) / exp(max)]
 ```
 
 The `exp(max)` factor cancels out, so the result is mathematically identical. But numerically, it prevents overflow. This is a classic example of why production ML requires careful numerical engineering, not just correct math.
-```
+````
 
 **Q4: Sparsity Analysis**
 
@@ -503,7 +779,7 @@ This is why ReLU is so effective: it creates natural sparsity without requiring 
 
 You're building a sentiment classifier that outputs "positive" or "negative". Which activation should you use for the output layer, and why?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Use Sigmoid** for the output layer.
@@ -525,7 +801,7 @@ Input → Linear + ReLU → Linear + ReLU → Linear + Sigmoid → Binary Probab
 ```
 
 For multi-class sentiment (positive/negative/neutral), you'd use Softmax instead to get a 3-element probability distribution.
-```
+````
 
 ## Further Reading
 

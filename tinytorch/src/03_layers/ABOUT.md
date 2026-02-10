@@ -14,8 +14,17 @@ If you can multiply tensors, apply activations, and understand shape transformat
 :::
 
 `````{only} html
-````{grid} 1 2 3 3
+````{grid} 1 1 3 3
 :gutter: 3
+
+```{grid-item-card} 🎧 Audio Overview
+
+Listen to an AI-generated overview.
+
+<audio controls style="width: 100%; height: 54px; margin-top: auto;">
+  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/03_layers.mp3" type="audio/mpeg">
+</audio>
+```
 
 ```{grid-item-card} 🚀 Launch Binder
 
@@ -28,19 +37,286 @@ Run interactively in your browser.
 
 Browse the source code on GitHub.
 
-<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/03_layers/03_layers.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #6b7280; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
-```
-
-```{grid-item-card} 🎧 Audio Overview
-
-Listen to an AI-generated overview.
-
-<audio controls style="width: 100%; height: 54px; margin-top: auto;">
-  <source src="https://github.com/harvard-edge/cs249r_book/releases/download/tinytorch-audio-v0.1.1/03_layers.mp3" type="audio/mpeg">
-</audio>
+<a href="https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/03_layers/03_layers.py" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #14b8a6; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">View on GitHub →</a>
 ```
 
 ````
+
+```{raw} html
+<style>
+.slide-viewer-container {
+  margin: 0.5rem 0 1.5rem 0;
+  background: #0f172a;
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+.slide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.03);
+}
+.slide-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a3b8;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.slide-subtitle {
+  color: #64748b;
+  font-weight: 400;
+  font-size: 0.75rem;
+}
+.slide-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+.slide-toolbar button {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  width: 32px;
+  height: 32px;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slide-toolbar button:hover {
+  background: rgba(249, 115, 22, 0.15);
+  color: #f97316;
+}
+.slide-nav-group {
+  display: flex;
+  align-items: center;
+}
+.slide-page-info {
+  color: #64748b;
+  font-size: 0.75rem;
+  padding: 0 0.5rem;
+  font-weight: 500;
+}
+.slide-zoom-group {
+  display: flex;
+  align-items: center;
+  margin-left: 0.25rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid rgba(255,255,255,0.1);
+}
+.slide-canvas-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0.5rem 1rem 1rem 1rem;
+  min-height: 380px;
+  background: #0f172a;
+}
+.slide-canvas {
+  max-width: 100%;
+  max-height: 350px;
+  height: auto;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+}
+.slide-progress-wrapper {
+  padding: 0 1rem 0.5rem 1rem;
+}
+.slide-progress-bar {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 1.5px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.slide-progress-fill {
+  height: 100%;
+  background: #f97316;
+  border-radius: 1.5px;
+  transition: width 0.2s ease;
+}
+.slide-loading {
+  color: #f97316;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.slide-loading::before {
+  content: '';
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(249, 115, 22, 0.2);
+  border-top-color: #f97316;
+  border-radius: 50%;
+  animation: slide-spin 0.8s linear infinite;
+}
+@keyframes slide-spin {
+  to { transform: rotate(360deg); }
+}
+.slide-footer {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+  background: rgba(255,255,255,0.02);
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.slide-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  background: #f97316;
+  color: white;
+  padding: 0.4rem 0.9rem;
+  border-radius: 2rem;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.75rem;
+  transition: all 0.15s;
+}
+.slide-footer a:hover {
+  background: #ea580c;
+  color: white;
+}
+.slide-footer a.secondary {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.slide-footer a.secondary:hover {
+  background: rgba(255,255,255,0.05);
+  color: #f8fafc;
+}
+@media (max-width: 600px) {
+  .slide-header { flex-direction: column; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+  .slide-toolbar button { width: 28px; height: 28px; }
+  .slide-canvas-wrapper { min-height: 260px; padding: 0.5rem; }
+  .slide-canvas { max-height: 220px; }
+}
+</style>
+
+<div class="slide-viewer-container" id="slide-viewer-03_layers">
+  <div class="slide-header">
+    <div class="slide-title">
+      <span>🔥</span>
+      <span>Slide Deck</span>
+      <span class="slide-subtitle">· AI-generated</span>
+    </div>
+    <div class="slide-toolbar">
+      <div class="slide-nav-group">
+        <button onclick="slideNav('03_layers', -1)" title="Previous">‹</button>
+        <span class="slide-page-info"><span id="slide-num-03_layers">1</span> / <span id="slide-count-03_layers">-</span></span>
+        <button onclick="slideNav('03_layers', 1)" title="Next">›</button>
+      </div>
+      <div class="slide-zoom-group">
+        <button onclick="slideZoom('03_layers', -0.25)" title="Zoom out">−</button>
+        <button onclick="slideZoom('03_layers', 0.25)" title="Zoom in">+</button>
+      </div>
+    </div>
+  </div>
+  <div class="slide-canvas-wrapper">
+    <div id="slide-loading-03_layers" class="slide-loading">Loading slides...</div>
+    <canvas id="slide-canvas-03_layers" class="slide-canvas" style="display:none;"></canvas>
+  </div>
+  <div class="slide-progress-wrapper">
+    <div class="slide-progress-bar" onclick="slideProgress('03_layers', event)">
+      <div class="slide-progress-fill" id="slide-progress-03_layers" style="width: 0%;"></div>
+    </div>
+  </div>
+  <div class="slide-footer">
+    <a href="../_static/slides/03_layers.pdf" download>⬇ Download</a>
+    <a href="#" onclick="slideFullscreen('03_layers'); return false;" class="secondary">⛶ Fullscreen</a>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function() {
+  if (window.slideViewersInitialized) return;
+  window.slideViewersInitialized = true;
+
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  window.slideViewers = {};
+
+  window.initSlideViewer = function(id, pdfUrl) {
+    const viewer = { pdf: null, page: 1, scale: 1.3, rendering: false, pending: null };
+    window.slideViewers[id] = viewer;
+
+    const canvas = document.getElementById('slide-canvas-' + id);
+    const ctx = canvas.getContext('2d');
+
+    function render(num) {
+      viewer.rendering = true;
+      viewer.pdf.getPage(num).then(function(page) {
+        const viewport = page.getViewport({scale: viewer.scale});
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        page.render({canvasContext: ctx, viewport: viewport}).promise.then(function() {
+          viewer.rendering = false;
+          if (viewer.pending !== null) { render(viewer.pending); viewer.pending = null; }
+        });
+      });
+      document.getElementById('slide-num-' + id).textContent = num;
+      document.getElementById('slide-progress-' + id).style.width = (num / viewer.pdf.numPages * 100) + '%';
+    }
+
+    function queue(num) { if (viewer.rendering) viewer.pending = num; else render(num); }
+
+    pdfjsLib.getDocument(pdfUrl).promise.then(function(pdf) {
+      viewer.pdf = pdf;
+      document.getElementById('slide-count-' + id).textContent = pdf.numPages;
+      document.getElementById('slide-loading-' + id).style.display = 'none';
+      canvas.style.display = 'block';
+      render(1);
+    }).catch(function() {
+      document.getElementById('slide-loading-' + id).innerHTML = 'Unable to load. <a href="' + pdfUrl + '" style="color:#f97316;">Download PDF</a>';
+    });
+
+    viewer.queue = queue;
+  };
+
+  window.slideNav = function(id, dir) {
+    const v = window.slideViewers[id];
+    if (!v || !v.pdf) return;
+    const newPage = v.page + dir;
+    if (newPage >= 1 && newPage <= v.pdf.numPages) { v.page = newPage; v.queue(newPage); }
+  };
+
+  window.slideZoom = function(id, delta) {
+    const v = window.slideViewers[id];
+    if (!v) return;
+    v.scale = Math.max(0.5, Math.min(3, v.scale + delta));
+    v.queue(v.page);
+  };
+
+  window.slideProgress = function(id, event) {
+    const v = window.slideViewers[id];
+    if (!v || !v.pdf) return;
+    const bar = event.currentTarget;
+    const pct = (event.clientX - bar.getBoundingClientRect().left) / bar.offsetWidth;
+    const newPage = Math.max(1, Math.min(v.pdf.numPages, Math.ceil(pct * v.pdf.numPages)));
+    if (newPage !== v.page) { v.page = newPage; v.queue(newPage); }
+  };
+
+  window.slideFullscreen = function(id) {
+    const el = document.getElementById('slide-viewer-' + id);
+    if (el.requestFullscreen) el.requestFullscreen();
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  };
+})();
+
+initSlideViewer('03_layers', '../_static/slides/03_layers.pdf');
+</script>
+```
 `````
 
 ## Overview
@@ -55,7 +331,7 @@ By the end, your layers will support parameter management, proper initialization
 
 ```{tip} By completing this module, you will:
 
-- **Implement** Linear layers with Xavier initialization and proper parameter management for gradient-based training
+- **Implement** Linear layers with proper weight initialization and parameter management for gradient-based training
 - **Master** the mathematical operation `y = xW + b` and understand how parameter counts scale with layer dimensions
 - **Understand** memory usage patterns (parameter memory vs activation memory) and computational complexity of matrix operations
 - **Connect** your implementation to production PyTorch patterns, including `nn.Linear`, `nn.Dropout`, and parameter tracking
@@ -90,7 +366,7 @@ flowchart LR
 | Part | What You'll Implement | Key Concept |
 |------|----------------------|-------------|
 | 1 | `Layer` base class with `forward()`, `__call__()`, `parameters()` | Consistent interface for all layers |
-| 2 | `Linear` layer with Xavier initialization | Learned transformation `y = xW + b` |
+| 2 | `Linear` layer with proper initialization | Learned transformation `y = xW + b` |
 | 3 | `Dropout` with training/inference modes | Regularization through random masking |
 | 4 | `Sequential` container for layer composition | Chaining layers together |
 
@@ -157,7 +433,7 @@ Linear (fully connected) layer implementing `y = xW + b`.
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `forward` | `forward(x) -> Tensor` | Apply linear transformation `y = xW + b` |
+| `forward` | `forward(x) -> Tensor` | Applies linear transformation `y = xW + b` |
 | `parameters` | `parameters() -> List[Tensor]` | Returns `[weight, bias]` or `[weight]` |
 
 ### Dropout Layer
@@ -173,7 +449,7 @@ Dropout layer for regularization. During training, randomly zeros elements with 
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `forward` | `forward(x, training=True) -> Tensor` | Apply dropout during training, passthrough during inference |
+| `forward` | `forward(x, training=True) -> Tensor` | Applies dropout during training, passthrough during inference |
 | `parameters` | `parameters() -> List[Tensor]` | Returns empty list (no trainable parameters) |
 
 ### Sequential Container
@@ -222,7 +498,7 @@ The elegance is in the simplicity. Matrix multiplication handles all the feature
 
 How you initialize weights determines whether your network can learn at all. Initialize too small and gradients vanish, making learning impossibly slow. Initialize too large and gradients explode, making training unstable. The sweet spot ensures stable gradient flow through the network.
 
-Xavier (Glorot) initialization solves this by scaling weights based on the number of inputs. For a layer with `in_features` inputs, Xavier uses scale `sqrt(1/in_features)`. This keeps the variance of activations roughly constant as data flows through layers, preventing vanishing or exploding gradients.
+We use LeCun-style initialization, which scales weights by `sqrt(1/in_features)`. This keeps the variance of activations roughly constant as data flows through layers, preventing vanishing or exploding gradients. (True Xavier/Glorot uses `sqrt(2/(fan_in+fan_out))` which also considers output dimensions, but the simpler LeCun formula works well in practice.)
 
 Here's your initialization code:
 
@@ -232,8 +508,8 @@ def __init__(self, in_features, out_features, bias=True):
     self.in_features = in_features
     self.out_features = out_features
 
-    # Xavier/Glorot initialization for stable gradients
-    scale = np.sqrt(XAVIER_SCALE_FACTOR / in_features)
+    # LeCun-style initialization for stable gradients
+    scale = np.sqrt(INIT_SCALE_FACTOR / in_features)
     weight_data = np.random.randn(in_features, out_features) * scale
     self.weight = Tensor(weight_data)
 
@@ -450,10 +726,10 @@ def parameters(self):
 
 **Cause**: Weights initialized too large (exploding gradients) or too small (vanishing gradients).
 
-**Fix**: Use Xavier initialization with proper scale:
+**Fix**: Use proper initialization scaling:
 
 ```python
-scale = np.sqrt(1.0 / in_features)  # Not just random()!
+scale = np.sqrt(1.0 / in_features)  # LeCun-style, not just random()!
 weight_data = np.random.randn(in_features, out_features) * scale
 ```
 
@@ -466,7 +742,7 @@ Your TinyTorch layers and PyTorch's `nn.Linear` and `nn.Dropout` share the same 
 | Feature | Your Implementation | PyTorch |
 |---------|---------------------|---------|
 | **Backend** | NumPy (Python) | C++/CUDA |
-| **Initialization** | Xavier manual | Multiple schemes (`init.xavier_uniform_`) |
+| **Initialization** | LeCun-style manual | Multiple schemes (`init.xavier_uniform_`, `init.kaiming_normal_`) |
 | **Parameter Management** | Manual `parameters()` list | `nn.Module` base class with auto-registration |
 | **Training Mode** | Manual `training` flag | `model.train()` / `model.eval()` state |
 | **Layer Types** | Linear, Dropout | 100+ layer types (Conv, LSTM, Attention, etc.) |
@@ -639,7 +915,7 @@ What happens if you initialize all weights to zero? To the same non-zero value?
 
 **Same non-zero value (e.g., all 1s)**: Same problem - symmetry. All neurons remain identical throughout training. You need randomness to break symmetry.
 
-**Xavier initialization**: Random values scaled by `sqrt(1/in_features)` break symmetry AND maintain stable gradient variance. This is why proper initialization is essential for learning.
+**Proper initialization**: Random values scaled by `sqrt(1/in_features)` break symmetry AND maintain stable gradient variance. This is why proper initialization is essential for learning.
 ```
 
 **Q6: Batch Size vs Throughput**

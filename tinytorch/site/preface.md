@@ -132,6 +132,12 @@ Each module follows a **Build-Use-Reflect** cycle: implement from scratch, apply
 
 Take your time. The goal is not to finish fast. The goal is to understand deeply.
 
+<div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 1.5rem 2rem; border-radius: 0.5rem; margin: 2rem 0; text-align: center;">
+<p style="color: #f8fafc; font-size: 1.2rem; font-style: italic; margin: 0; font-weight: 500;">
+"Building systems creates irreversible understanding."
+</p>
+</div>
+
 ## The Bigger Picture
 
 TinyTorch is part of a larger effort to educate a million learners at the edge of AI. The [Machine Learning Systems](https://mlsysbook.ai) textbook provides the conceptual foundation. TinyTorch provides the hands-on implementation experience. Together, they form a complete path into ML systems engineering.

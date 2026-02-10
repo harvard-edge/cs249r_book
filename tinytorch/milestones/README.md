@@ -14,12 +14,12 @@ After completing a set of modules, you unlock the ability to run a milestone. Ea
 
 | ID | Name | Year | Required Modules | What You'll Do |
 |----|------|------|------------------|----------------|
-| 01 | Perceptron | 1957 | Part 1: 01-04, Part 2: 01-08 | Build Rosenblatt's first neural network |
-| 02 | XOR Crisis | 1969 | Part 1: 01-03, Part 2: 01-08 | Experience and solve the XOR impossibility |
-| 03 | MLP Revival | 1986 | 01-08 | Train MLPs on TinyDigits with backpropagation |
+| 01 | Perceptron | 1958 | 01-03 | Build Rosenblatt's first neural network (forward pass) |
+| 02 | XOR Crisis | 1969 | 01-03 | Experience the XOR limitation that triggered AI Winter |
+| 03 | MLP Revival | 1986 | 01-08 | Train MLPs to solve XOR + recognize digits |
 | 04 | CNN Revolution | 1998 | 01-09 | Build LeNet for image recognition |
-| 05 | Transformer Era | 2017 | 01-13 | Build attention and generate text |
-| 06 | MLPerf Benchmarks | 2018 | 01-19 | Optimize and benchmark your neural networks |
+| 05 | Transformer Era | 2017 | 01-08, 11-13 | Build attention and generate text |
+| 06 | MLPerf Benchmarks | 2018 | 01-08, 14-19 | Optimize and benchmark your neural networks |
 
 ## Running Milestones
 

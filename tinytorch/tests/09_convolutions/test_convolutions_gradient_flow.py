@@ -10,6 +10,7 @@ These tests ensure that:
 Prevents regression of gradient flow issues discovered in milestone testing.
 """
 
+import pytest
 import numpy as np
 import sys
 from pathlib import Path
