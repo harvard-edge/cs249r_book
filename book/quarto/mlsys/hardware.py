@@ -1,0 +1,67 @@
+# hardware.py
+# Hierarchical Hardware Definitions for MLSys Textbook
+
+from dataclasses import dataclass
+from typing import Optional, Tuple
+from .constants import (
+    ureg, Q_,
+    V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP,
+    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP,
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP,
+    B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP,
+    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP,
+    TPUV4_MEM_BW, TPUV4_FLOPS_BF16,
+    MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8,
+    ESP32_RAM, ESP32_FLASH, ESP32_POWER_MAX,
+    MCU_RAM_KIB
+)
+
+@dataclass(frozen=True)
+class HardwareSpec:
+    name: str
+    release_year: int
+    memory_bw: Q_
+    peak_flops: Q_
+    memory_capacity: Q_
+    tdp: Optional[Q_] = None
+    
+    def ridge_point(self) -> Q_:
+        """Calculates the Roofline ridge point (Intensity threshold)."""
+        # FLOPS / BW = Ops/Byte
+        return (self.peak_flops / self.memory_bw).to('flop/byte')
+
+    def __repr__(self):
+        return f"Hardware({self.name}, {self.release_year})"
+
+class Cloud:
+    """Datacenter-scale Accelerators."""
+    V100 = HardwareSpec("NVIDIA V100", 2017, V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP)
+    A100 = HardwareSpec("NVIDIA A100", 2020, A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP)
+    H100 = HardwareSpec("NVIDIA H100", 2022, H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP)
+    B200 = HardwareSpec("NVIDIA B200", 2024, B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP)
+    T4   = HardwareSpec("NVIDIA T4",   2018, T4_MEM_BW,   T4_FLOPS_FP16_TENSOR,   16 * ureg.GiB,     T4_TDP)
+    
+    TPUv4 = HardwareSpec("Google TPU v4", 2021, TPUV4_MEM_BW, TPUV4_FLOPS_BF16, 32 * ureg.GiB)
+
+class Edge:
+    """Mobile and Robotics Hardware."""
+    Generic_Phone = HardwareSpec("Smartphone", 2024, MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8, 8 * ureg.GiB)
+    # Future: Pixel 6, Jetson Orin, etc.
+
+class Tiny:
+    """Microcontrollers and Embedded Systems."""
+    ESP32 = HardwareSpec("ESP32-CAM", 2019, 0.1 * ureg.GB/ureg.second, 0.01 * ureg.TFLOPs/ureg.second, ESP32_RAM, ESP32_POWER_MAX)
+    Generic_MCU = HardwareSpec("Cortex-M7", 2020, 0.05 * ureg.GB/ureg.second, 0.001 * ureg.TFLOPs/ureg.second, MCU_RAM_KIB)
+
+class Hardware:
+    Cloud = Cloud
+    Edge = Edge
+    Tiny = Tiny
+    
+    # Aliases for the most common ones
+    V100 = Cloud.V100
+    A100 = Cloud.A100
+    H100 = Cloud.H100
+    B200 = Cloud.B200
+    TPUv4 = Cloud.TPUv4
+    ESP32 = Tiny.ESP32

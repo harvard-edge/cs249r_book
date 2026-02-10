@@ -91,12 +91,12 @@ def main():
 
     # Ensure we're in the quarto directory for imports
     cwd = os.getcwd()
-    if not os.path.exists("physx"):
+    if not os.path.exists("mlsys"):
         quarto_dir = os.path.join(
             os.path.dirname(os.path.abspath(__file__)),
             "..", "..", "..", "quarto",
         )
-        if os.path.exists(os.path.join(quarto_dir, "physx")):
+        if os.path.exists(os.path.join(quarto_dir, "mlsys")):
             os.chdir(quarto_dir)
             print(f"Changed to {quarto_dir}")
 

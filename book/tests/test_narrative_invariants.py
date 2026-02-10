@@ -10,7 +10,7 @@ import pytest
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(project_root, 'quarto'))
 
-from physx.constants import (
+from mlsys.constants import (
     ureg,
     SPEED_OF_LIGHT_FIBER_KM_S,
     NETWORK_10G_BW,
@@ -25,7 +25,7 @@ from physx.constants import (
     NETWORK_5G_ENERGY_PER_MB_MJ, ENERGY_MOBILENET_INF_MJ,
     MB, GB
 )
-from physx.formulas import (
+from mlsys.formulas import (
     calc_network_latency_ms,
     calc_monthly_egress_cost,
     calc_fleet_tco,

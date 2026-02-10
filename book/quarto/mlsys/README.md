@@ -1,6 +1,6 @@
 # The MLSys Physics Engine: Owner's Manual
 
-This directory (`book/quarto/physx/`) contains the MLSys Physics Engine — the "source of truth"
+This directory (`book/quarto/mlsys/`) contains the MLSys Physics Engine — the "source of truth"
 for all quantitative claims in the textbook. Instead of hardcoding numbers (which rot), we
 calculate them from first principles with unit safety and reusable formulas.
 
@@ -95,7 +95,7 @@ This creates a traceable link from computation → narrative.
 # =============================================================================
 # INPUT (SOURCES)
 # =============================================================================
-# from physx.constants import ...
+# from mlsys.constants import ...
 
 # =============================================================================
 # INPUT (ASSUMPTIONS)
@@ -123,7 +123,7 @@ This creates a traceable link from computation → narrative.
 # ratio_str = f"{ratio_value:.2f}"
 
 # Optional: LaTeX output goes here (still OUTPUT)
-# from physx.formatting import md_math
+# from mlsys.formatting import md_math
 # ratio_math = md_math(rf"\frac{{{a_str}}}{{{b_str}}} \approx {ratio_str}")
 ```
 ````
@@ -133,12 +133,12 @@ This creates a traceable link from computation → narrative.
 ### 6) Use display strings in text blocks
 Inline prose should use `{python} <name>_str` or `{python} <name>_math`.
 Do not hardcode derived numbers in prose.
-Prefer `physx.formatting` helpers (`fmt`, `display_value`, `md_math`, `md_frac`) over inline f-strings.
+Prefer `mlsys.formatting` helpers (`fmt`, `display_value`, `md_math`, `md_frac`) over inline f-strings.
 
 ### 6a) Use `Markdown()` for LaTeX output
 If the output contains LaTeX (fractions, `\times`, exponents), return a `Markdown()` object (via `md_math`, `md_frac`, `md_sci`) and reference it inline:
 ```python
-from physx.formatting import md_math
+from mlsys.formatting import md_math
 ratio_math = md_math(r"\frac{4.1 \times 10^{9}}{3.1 \times 10^{14}}")
 ```
 Then in prose:
@@ -196,20 +196,20 @@ Figure blocks can use `SETUP/DATA/PLOT`, but should still start with a PURPOSE h
 - Use the PIPO+ template exactly (Purpose, Input, Process, Output; optional Context/Checks).
 - Keep one calc block per narrative chunk.
 - Name outputs with explicit suffixes: `*_value`, `*_str`, `*_math`.
-- Use `physx.formatting` helpers instead of inline f-strings.
+- Use `mlsys.formatting` helpers instead of inline f-strings.
 - Inline prose should reference only `*_str` or `*_math`.
 
 ## 📌 Where should the code live?
 
 **Default (recommended):** Keep calculations inline in the QMD for context.
-Use `physx/` helpers for shared math, units, and formatting.
+Use `mlsys/` helpers for shared math, units, and formatting.
 
 **Why:** It keeps prose clean, enables reuse, and makes tests easy.
 
 ### A) Chapter calculator modules (preferred)
 Create a chapter module:
 ```python
-# book/quarto/physx/ch_introduction.py
+# book/quarto/mlsys/ch_introduction.py
 def calc_intro_setup():
     return {"google_search_b": "8.5"}
 ```
@@ -219,7 +219,7 @@ In the QMD:
 ```{python}
 #| label: intro-setup
 #| echo: false
-from physx.ch_introduction import calc_intro_setup
+from mlsys.ch_introduction import calc_intro_setup
 _intro = calc_intro_setup()
 google_search_b = _intro["google_search_b"]
 ```
@@ -227,7 +227,7 @@ google_search_b = _intro["google_search_b"]
 
 ### B) Inline QMD blocks (only for tiny one-offs)
 Inline blocks are fine for **small, local** calculations that are not reused and don’t warrant a chapter module.
-If a value appears in more than one place, move it into `physx/`.
+If a value appears in more than one place, move it into `mlsys/`.
 
 ## 🧭 Naming & structure conventions
 
@@ -250,7 +250,7 @@ If a value appears in more than one place, move it into `physx/`.
 Don't write `$4.1 \times 10^9$`.
 Write:
 ```python
-from physx.formatting import sci
+from mlsys.formatting import sci
 {python} sci(RESNET50_FLOPs)
 ```
 This renders as $4.10 \times 10^{9}$ and auto-updates if the model changes.

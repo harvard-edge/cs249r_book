@@ -1,7 +1,7 @@
 """
 Unit conversion validation for the textbook's physics engine.
 
-Run:  python3 book/quarto/physx/test_units.py
+Run:  python3 book/quarto/mlsys/test_units.py
 From: repository root (mlsysbook-vols/)
 
 Catches regressions where pint .to() returns raw base-unit magnitudes
@@ -19,9 +19,9 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 _quarto_dir = os.path.dirname(_script_dir)
 sys.path.insert(0, _quarto_dir)
 
-from physx.constants import *
-from physx.formulas import *
-from physx.formatting import fmt, sci
+from mlsys.constants import *
+from mlsys.formulas import *
+from mlsys.formatting import fmt, sci
 
 FAILURES = []
 

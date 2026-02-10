@@ -26,9 +26,9 @@ found now will be permanently published.
 
 CONTEXT FILES TO READ FIRST (in this order):
 1. /Users/VJ/GitHub/mlsysbook-vols/CLAUDE.md — project conventions
-2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/physx/constants.py — the single
+2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/mlsys/constants.py — the single
    source of truth for all hardware specs and physical constants
-3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/physx/formulas.py — formula helpers
+3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/mlsys/formulas.py — formula helpers
 4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/parts/summaries.yml
    — book structure and part descriptions
 
@@ -132,7 +132,7 @@ SPECIAL ATTENTION:
 - Check that any "preview of upcoming chapters" text accurately matches the
   actual chapter titles and ordering in the config.
 - Verify any historical timeline claims (Moore's Law dates, key milestones).
-- This chapter has calculations from physx/ch_introduction.py — read that file
+- This chapter has calculations from mlsys/ch_introduction.py — read that file
   and verify all computed values.
 ```
 
@@ -150,7 +150,7 @@ SPECIAL ATTENTION:
   accurate and well-supported.
 - Check that any system architecture diagrams are correctly described in prose.
 - Verify any performance/efficiency comparisons have correct numbers.
-- Read physx/_legacy_ch_ml_systems.py if referenced.
+- Read mlsys/_legacy_ch_ml_systems.py if referenced.
 ```
 
 #### 3. Workflow
@@ -262,10 +262,10 @@ CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/data_selectio
 
 ADDITIONAL CONTEXT:
 - Covers coreset selection, curriculum learning, active learning.
-- Has calculations in physx/ch_data_selection.py.
+- Has calculations in mlsys/ch_data_selection.py.
 
 SPECIAL ATTENTION:
-- Read physx/ch_data_selection.py and verify all computed values appear
+- Read mlsys/ch_data_selection.py and verify all computed values appear
   correctly in the chapter prose.
 - Verify any efficiency claims (e.g., "using 10% of data achieves 95% accuracy").
 - Check that theoretical foundations (submodularity, etc.) are correctly stated.
@@ -298,11 +298,11 @@ CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/hw_accelerati
 
 ADDITIONAL CONTEXT:
 - Covers GPUs, TPUs, NPUs, systolic arrays, roofline model.
-- Heavy use of physx calculations — has ch_hw_acceleration.py.
+- Heavy use of mlsys calculations — has ch_hw_acceleration.py.
 - Central to the "Machine" axis of D·A·M.
 
 SPECIAL ATTENTION:
-- Read physx/ch_hw_acceleration.py AND constants.py together.
+- Read mlsys/ch_hw_acceleration.py AND constants.py together.
 - Verify EVERY hardware specification in the chapter against constants.py:
   FLOPS, bandwidth, memory capacity, TDP for V100, A100, H100, T4, TPUv4.
 - Verify roofline model calculations: ridge point = peak_compute / peak_bandwidth.
@@ -414,7 +414,7 @@ SPECIAL ATTENTION:
 ```
 CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/backmatter/appendix_machine.qmd
 
-ADDITIONAL CONTEXT: Read physx/constants.py first.
+ADDITIONAL CONTEXT: Read mlsys/constants.py first.
 
 SPECIAL ATTENTION:
 - Verify ALL hardware specifications match constants.py.
@@ -426,7 +426,7 @@ SPECIAL ATTENTION:
 ```
 CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/backmatter/appendix_algorithm.qmd
 
-ADDITIONAL CONTEXT: Read physx/ch_appendix_algorithm.py first.
+ADDITIONAL CONTEXT: Read mlsys/ch_appendix_algorithm.py first.
 
 SPECIAL ATTENTION:
 - Verify all computed values from ch_appendix_algorithm.py.
@@ -474,7 +474,7 @@ to other Parts are valid.
 CONTEXT FILES TO READ FIRST:
 1. /Users/VJ/GitHub/mlsysbook-vols/CLAUDE.md
 2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/parts/summaries.yml
-3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/physx/constants.py
+3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/mlsys/constants.py
 4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/config/_quarto-pdf-vol1.yml
    (lines 62-119 for chapter ordering)
 
@@ -591,7 +591,7 @@ SPECIAL ATTENTION:
   cross-references between them are accurate (e.g., "quantization to INT8
   enables tensor core acceleration").
 - Benchmarking should reference techniques from all three preceding chapters.
-- This Part has the heaviest calculation load — verify that physx calculations
+- This Part has the heaviest calculation load — verify that mlsys calculations
   are consistent across all four chapters.
 - Check that hardware specs (A100, H100, etc.) are identical in Model
   Compression and Hardware Acceleration chapters.

@@ -10,7 +10,7 @@ Checks:
 4. No grid tables with inline Python (use pipe tables instead)
 
 Usage:
-    python3 book/quarto/physx/validate_inline_refs.py [--verbose] [--check-patterns]
+    python3 book/quarto/mlsys/validate_inline_refs.py [--verbose] [--check-patterns]
 
 Exit codes:
     0 = all checks pass
