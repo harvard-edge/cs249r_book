@@ -2,11 +2,15 @@
 # Hierarchical Model Definitions for MLSys Textbook
 
 from dataclasses import dataclass
+from typing import Optional, Tuple
 from .constants import (
     ureg, Q_,
-    GPT2_PARAMS, GPT3_PARAMS,
-    RESNET50_PARAMS, MOBILENETV2_PARAMS,
-    KWS_DSCNN_PARAMS, BYTES_FP32, BYTES_FP16, BYTES_INT8
+    GPT2_PARAMS, GPT3_PARAMS, GPT4_TRAINING_GPU_DAYS,
+    BERT_BASE_PARAMS, BERT_LARGE_PARAMS,
+    ALEXNET_PARAMS, RESNET50_PARAMS, MOBILENETV2_PARAMS,
+    KWS_DSCNN_PARAMS, ANOMALY_MODEL_PARAMS,
+    BYTES_FP32, BYTES_FP16, BYTES_INT8,
+    GPT3_TRAINING_OPS
 )
 
 @dataclass(frozen=True)
@@ -14,7 +18,13 @@ class ModelSpec:
     name: str
     parameters: Q_
     architecture: str # "Transformer", "CNN", "MLP"
+    training_ops: Optional[Q_] = None
+    training_gpu_days: Optional[float] = None
     
+    def __post_init__(self):
+        """Validate model specs."""
+        assert self.parameters.magnitude > 0, f"{self.name}: Parameter count must be positive."
+
     def size_in_bytes(self, precision: Q_ = BYTES_FP16) -> Q_:
         """Calculates the weight storage size for a given precision."""
         return (self.parameters.magnitude * precision).to('byte')
@@ -22,20 +32,31 @@ class ModelSpec:
     def __repr__(self):
         return f"Model({self.name}, {self.architecture})"
 
+class GPT:
+    """GPT Model Family."""
+    GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer")
+    GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer", training_ops=GPT3_TRAINING_OPS)
+    GPT4 = ModelSpec("GPT-4", 1.8e12 * ureg.count, "Transformer", training_gpu_days=GPT4_TRAINING_GPU_DAYS)
+
 class Language:
     """Large Language Models."""
-    GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer")
-    GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer")
+    GPT = GPT
+    BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer", training_ops=22e9 * ureg.flop)
+    BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer")
     Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.count, "Transformer")
 
 class Vision:
     """Image Classification and Detection."""
+    ALEXNET = ModelSpec("AlexNet", ALEXNET_PARAMS, "CNN")
     ResNet50 = ModelSpec("ResNet-50", RESNET50_PARAMS, "CNN")
+    MobileNetV1 = ModelSpec("MobileNetV1", 4.2e6 * ureg.param, "CNN")
     MobileNetV2 = ModelSpec("MobileNetV2", MOBILENETV2_PARAMS, "CNN")
+    YOLOv8_Nano = ModelSpec("YOLOv8-Nano", 3.2e6 * ureg.param, "CNN", training_ops=8.7e9 * ureg.flop)
 
 class Tiny:
     """Always-on and Embedded models."""
     DS_CNN = ModelSpec("DS-CNN (KWS)", KWS_DSCNN_PARAMS, "CNN")
+    AnomalyDetector = ModelSpec("Anomaly Detector", ANOMALY_MODEL_PARAMS, "MLP")
 
 class Models:
     Language = Language
@@ -43,7 +64,10 @@ class Models:
     Tiny = Tiny
     
     # Common aliases
-    GPT2 = Language.GPT2
-    GPT3 = Language.GPT3
+    GPT2 = GPT.GPT2
+    GPT3 = GPT.GPT3
+    GPT4 = GPT.GPT4
+    BERT = Language.BERT_Base
     ResNet50 = Vision.ResNet50
     MobileNetV2 = Vision.MobileNetV2
+    ALEXNET = Vision.ALEXNET

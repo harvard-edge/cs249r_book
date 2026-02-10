@@ -3,6 +3,7 @@
 
 from .hardware import Hardware
 from .models import Models
+from .deployment import Tiers
 
 # Export constants and registry for legacy support
 from .constants import ureg, Q_

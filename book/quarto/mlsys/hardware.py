@@ -25,6 +25,14 @@ class HardwareSpec:
     memory_capacity: Q_
     tdp: Optional[Q_] = None
     
+    def __post_init__(self):
+        """Validate hardware specs."""
+        assert self.memory_bw.magnitude > 0, f"{self.name}: Memory bandwidth must be positive."
+        assert self.peak_flops.magnitude > 0, f"{self.name}: Peak FLOPS must be positive."
+        assert self.memory_capacity.magnitude > 0, f"{self.name}: Memory capacity must be positive."
+        if self.tdp:
+            assert self.tdp.magnitude > 0, f"{self.name}: TDP must be positive."
+
     def ridge_point(self) -> Q_:
         """Calculates the Roofline ridge point (Intensity threshold)."""
         # FLOPS / BW = Ops/Byte

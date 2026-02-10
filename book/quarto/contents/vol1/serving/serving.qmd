@@ -510,6 +510,8 @@ To make these architectural differences concrete, consider *how* a single model 
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: cloud_*, mobile_*, tiny_* formatted strings
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys import Models, Tiers
+from mlsys.constants import BYTES_FP16, BYTES_INT8
 from mlsys.formatting import fmt
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -520,15 +522,20 @@ class ResNetServingSpectrum:
     """
 
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    m_resnet = Models.ResNet50
+    m_mobilenet = Models.MobileNetV2
+
+    t_cloud = Tiers.Cloud
+    t_mobile = Tiers.Mobile
+    t_tiny = Tiers.Tiny
+
     # Cloud (V100)
-    cloud_size_mb = 49
     cloud_inf_b1_ms = 1.4
     cloud_inf_b16_ms = 14.0
     cloud_throughput = 1143
     cloud_vram_gb = 2
 
     # Mobile (Pixel 6)
-    mobile_size_mb = 25
     mobile_inf_npu_ms = 12.0
     mobile_inf_cpu_ms = 45.0
     mobile_throughput = 80
@@ -536,29 +543,34 @@ class ResNetServingSpectrum:
     mobile_energy_cpu_mj = 4.2
 
     # TinyML (Cortex-M7)
-    tiny_original_mb = 98 # ResNet-50
-    tiny_limit_mb = 2.0   # Flash limit for many MCUs
-    tiny_alt_mb = 1.4     # MobileNetV2-0.35 INT8
     tiny_inf_ms = 120.0
     tiny_energy_mj = 12.0
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Calculate sizes using the Digital Twins
+    cloud_size_mb = m_resnet.size_in_bytes(BYTES_FP16).to('MB').magnitude
+    mobile_size_mb = m_resnet.size_in_bytes(BYTES_INT8).to('MB').magnitude
+    tiny_original_mb = m_resnet.size_in_bytes(BYTES_INT8).to('MB').magnitude
+    tiny_alt_mb = m_mobilenet.size_in_bytes(BYTES_INT8).to('MB').magnitude
+
+    tiny_limit_mb = t_tiny.storage.to('MB').magnitude
     tiny_feasibility = tiny_original_mb < tiny_limit_mb
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     if tiny_feasibility:
-        raise ValueError(f"Narrative broken: ResNet-50 ({tiny_original_mb}MB) should NOT fit on TinyML (<{tiny_limit_mb}MB).")
+        # ResNet-50 (INT8) is ~25MB, and typical MCU Flash is 2MB-4MB
+        raise ValueError(f"Narrative broken: ResNet-50 ({tiny_original_mb:.1f}MB) should NOT fit on TinyML (<{tiny_limit_mb:.1f}MB).")
     if mobile_energy_cpu_mj < mobile_energy_npu_mj * 3:
         raise ValueError("Narrative broken: NPU should be significantly more energy efficient than CPU.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    cloud_model_mb_str = f"{cloud_size_mb}"
+    cloud_model_mb_str = fmt(cloud_size_mb, precision=0)
     cloud_inf_b1_ms_str = f"{cloud_inf_b1_ms}"
     cloud_inf_b16_ms_str = f"{cloud_inf_b16_ms}"
     cloud_throughput_str = f"{cloud_throughput:,}"
     cloud_vram_gb_str = f"{cloud_vram_gb}"
 
-    mobile_model_mb_str = f"{mobile_size_mb}"
+    mobile_model_mb_str = fmt(mobile_size_mb, precision=0)
     mobile_inf_npu_ms_str = f"{mobile_inf_npu_ms}"
     mobile_inf_cpu_ms_str = f"{mobile_inf_cpu_ms}"
     mobile_throughput_str = f"{mobile_throughput}"
@@ -566,8 +578,8 @@ class ResNetServingSpectrum:
     mobile_energy_cpu_mj_str = f"{mobile_energy_cpu_mj}"
     mobile_mem_mb_str = "150"
 
-    tiny_model_mb_str = f"{tiny_original_mb}"
-    tiny_alt_mb_str = f"{tiny_alt_mb}"
+    tiny_model_mb_str = fmt(tiny_original_mb, precision=0)
+    tiny_alt_mb_str = fmt(tiny_alt_mb, precision=1)
     tiny_inf_ms_str = f"{tiny_inf_ms}"
     tiny_throughput_str = "8"
     tiny_arena_kb_str = "320"
