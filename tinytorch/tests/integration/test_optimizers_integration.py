@@ -232,7 +232,7 @@ def test_unit_shape_manipulation():
         t.reshape(2, 2)  # 6 elements can't fit in 2×2=4
         assert False, "Should have raised ValueError"
     except ValueError as e:
-        assert "Total elements must match" in str(e)
+        assert "element count mismatch" in str(e).lower()
 
     print("✅ Shape manipulation works!")
 
@@ -290,6 +290,11 @@ def test_gradient_preparation_linear():
     """Test that Linear layer gradients are prepared correctly."""
     print("🧪 Unit Test: Linear Gradient Preparation...")
     layer = Linear(2, 2)
+
+    # Enable gradient tracking on layer parameters
+    layer.weight.requires_grad = True
+    if layer.bias is not None:
+        layer.bias.requires_grad = True
 
     x = Tensor(np.array([[1.0, 2.0]]), requires_grad=True)
     output = layer(x)

@@ -240,7 +240,7 @@ class TestConvOutputShapes:
 
     def test_conv_padding_same(self):
         """
-        WHAT: Verify 'same' padding preserves spatial dimensions.
+        WHAT: Verify padding preserves spatial dimensions.
 
         WHY: Same padding is convenient - output = input size.
         Used when you want to stack many conv layers.
@@ -248,16 +248,20 @@ class TestConvOutputShapes:
         STUDENT LEARNING: For 'same' padding with odd kernel:
         padding = (kernel_size - 1) / 2
         For kernel=3: padding=1, for kernel=5: padding=2
+
+        NOTE: TinyTorch uses explicit integer padding (padding=1) rather than
+        PyTorch's padding='same' string. This teaches the formula directly.
         """
-        # With padding='same', output should match input spatial dims
-        conv = Conv2d(in_channels=3, out_channels=8, kernel_size=3, padding='same')
+        # With padding=1 and kernel=3, output should match input spatial dims
+        # Formula: output = input - kernel + 2*padding + 1 = 32 - 3 + 2 + 1 = 32
+        conv = Conv2d(in_channels=3, out_channels=8, kernel_size=3, padding=1)
 
         # NCHW format
         x = Tensor(np.random.randn(4, 3, 32, 32))
         output = conv(x)
 
         assert output.shape == (4, 8, 32, 32), (
-            f"'same' padding should preserve spatial dims.\n"
+            f"padding=1 with kernel=3 should preserve spatial dims.\n"
             f"  Input: (4, 3, 32, 32) NCHW\n"
             f"  Expected: (4, 8, 32, 32)\n"
             f"  Got: {output.shape}"
@@ -338,6 +342,7 @@ class TestConvGradientFlow:
         enable_autograd()
 
         conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
+        conv.weight.requires_grad = True  # Enable gradient tracking for weights
         # NCHW format
         x = Tensor(np.random.randn(1, 1, 8, 8), requires_grad=True)
 

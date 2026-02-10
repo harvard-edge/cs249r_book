@@ -64,8 +64,9 @@ from tinytorch.perf.acceleration import vectorized_matmul, fused_gelu
 - **Integration:** Works seamlessly with neural network layers for complete performance optimization
 """
 
-# %% nbgrader={"grade": false, "grade_id": "cell-imports-core", "solution": false}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| export
+
 import numpy as np
 import time
 from typing import Dict, List, Tuple, Optional, Any, Union
@@ -78,7 +79,32 @@ BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
 
 # %% [markdown]
 """
-## 💡 Motivation: Why Acceleration Matters
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-15 must be working
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `time` (for performance measurement)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` (Tensor class from Module 01)
+- `tinytorch.perf.profiling` (Profiler from Module 14)
+
+**Dependency Flow**:
+```
+Module 01 (Tensor) → Module 14 (Profiling) → Module 17 (Acceleration)
+     ↓                       ↓                      ↓
+  Foundation          Measurement Tools      Performance Optimization
+```
+
+Students completing this module will have built acceleration techniques
+that work with the complete TinyTorch performance optimization stack.
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: The Performance Challenge
 
 Before we learn acceleration techniques, let's understand the performance gap.
 Neural networks often underutilize hardware due to:
@@ -88,15 +114,10 @@ Neural networks often underutilize hardware due to:
 - Separate operations (memory bandwidth waste)
 
 We'll fix these issues with vectorization and kernel fusion, achieving 2-5× speedups!
-"""
-
-# %% [markdown]
-"""
-## 💡 Introduction - The Performance Challenge
-
-Modern neural networks face two fundamental bottlenecks that limit their speed:
 
 ### The Two Enemies of Performance
+
+Modern neural networks face two fundamental bottlenecks that limit their speed:
 
 **1. Compute Bound Operations:**
 ```
@@ -155,7 +176,7 @@ from tinytorch.core.tensor import Tensor
 
 # %% [markdown]
 """
-## 📐 Foundations - Vectorization: From Loops to Lightning
+## 📐 Foundations: Vectorization - From Loops to Lightning
 
 ### The SIMD Revolution
 
@@ -262,15 +283,18 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     # Input validation for matrix multiplication
     if len(a.shape) < 2 or len(b.shape) < 2:
         raise ValueError(
-            f"Matrix multiplication requires 2D+ tensors, got shapes {a.shape} and {b.shape}. "
-            f"💡 HINT: Use reshape() to add dimensions if needed."
+            f"Matrix multiplication requires 2D+ tensors\n"
+            f"  ❌ Got shapes {a.shape} and {b.shape} ({len(a.shape)}D and {len(b.shape)}D tensors)\n"
+            f"  💡 Matrix multiplication computes dot products between rows and columns, which requires at least 2D tensors\n"
+            f"  🔧 Add dimensions with reshape: a.reshape(1, {a.shape[-1] if len(a.shape) >= 1 else 'n'}) for a row vector"
         )
 
     if a.shape[-1] != b.shape[-2]:
         raise ValueError(
-            f"Matrix multiplication shape mismatch: {a.shape} @ {b.shape}. "
-            f"Inner dimensions must match: a.shape[-1]={a.shape[-1]} != b.shape[-2]={b.shape[-2]}. "
-            f"💡 HINT: For A@B, A's columns must equal B's rows."
+            f"Matrix multiplication shape mismatch: {a.shape} @ {b.shape}\n"
+            f"  ❌ Inner dimensions don't match: a.shape[-1]={a.shape[-1]} vs b.shape[-2]={b.shape[-2]}\n"
+            f"  💡 For A @ B, each row of A (length {a.shape[-1]}) must match each column of B (length {b.shape[-2]})\n"
+            f"  🔧 Try: b.reshape({a.shape[-1]}, -1) or a.reshape(-1, {b.shape[-2]})"
         )
 
     # Use NumPy's highly optimized matrix multiplication
@@ -285,8 +309,8 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
 
 # %% nbgrader={"grade": true, "grade_id": "test-vectorized-matmul", "locked": true, "points": 10}
 def test_unit_vectorized_matmul():
-    """🔬 Test vectorized matrix multiplication implementation."""
-    print("🔬 Unit Test: Vectorized Matrix Multiplication...")
+    """🧪 Test vectorized matrix multiplication implementation."""
+    print("🧪 Unit Test: Vectorized Matrix Multiplication...")
 
     # Test basic 2D multiplication
     a = Tensor([[1, 2], [3, 4]])
@@ -326,13 +350,12 @@ def test_unit_vectorized_matmul():
 
     print("✅ vectorized_matmul works correctly!")
 
-# Test is callable but runs via test_module() in main block below
-# if __name__ == "__main__":
-#     test_unit_vectorized_matmul()
+if __name__ == "__main__":
+    test_unit_vectorized_matmul()
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Kernel Fusion: Eliminating Memory Bottlenecks
+## 🏗️ Implementation: Kernel Fusion - Eliminating Memory Bottlenecks
 
 ### The Memory Bandwidth Crisis
 
@@ -459,7 +482,7 @@ def fused_gelu(x: Tensor) -> Tensor:
 # %% nbgrader={"grade": true, "grade_id": "test-fused-gelu", "locked": true, "points": 10}
 def test_unit_fused_gelu():
     """🔬 Test fused GELU activation implementation."""
-    print("🔬 Unit Test: Fused GELU...")
+    print("🧪 Unit Test: Fused GELU...")
 
     # Test basic properties
     x = Tensor([-3, -1, 0, 1, 3])
@@ -496,13 +519,12 @@ def test_unit_fused_gelu():
 
     print("✅ fused_gelu works correctly!")
 
-# Test is callable but runs via test_module() in main block below
-# if __name__ == "__main__":
-#     test_unit_fused_gelu()
+if __name__ == "__main__":
+    test_unit_fused_gelu()
 
 # %% [markdown]
 """
-### 🔬 Performance Analysis: Measuring Fusion Benefits
+### 🧪 Unit Test: Fusion Performance
 
 Let's quantify the impact of kernel fusion by comparing fused vs unfused implementations.
 """
@@ -563,8 +585,8 @@ def unfused_gelu(x: Tensor) -> Tensor:
 
 # %% nbgrader={"grade": true, "grade_id": "test-fusion-speedup", "locked": true, "points": 10}
 def test_unit_fusion_speedup():
-    """🔬 Measure the performance impact of kernel fusion."""
-    print("🔬 Unit Test: Kernel Fusion Performance Impact...")
+    """🧪 Measure the performance impact of kernel fusion."""
+    print("🧪 Unit Test: Kernel Fusion Performance Impact...")
 
     # Create moderately large tensor for meaningful timing
     size = 2000
@@ -626,13 +648,12 @@ def test_unit_fusion_speedup():
 
     print("✅ Fusion performance analysis completed!")
 
-# Test is callable but runs via test_module() in main block below
-# if __name__ == "__main__":
-#     test_unit_fusion_speedup()
+if __name__ == "__main__":
+    test_unit_fusion_speedup()
 
 # %% [markdown]
 """
-## 🏗️ Cache-Aware Matrix Multiplication
+## 🏗️ Implementation: Cache-Aware Matrix Multiplication
 
 For large matrices that don't fit in cache, we need **tiling** (also called blocking).
 This breaks the computation into cache-sized chunks for better performance.
@@ -696,15 +717,18 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
     # Input validation
     if len(a.shape) < 2 or len(b.shape) < 2:
         raise ValueError(
-            f"Tiled matmul requires 2D+ tensors, got shapes {a.shape} and {b.shape}. "
-            f"💡 HINT: Tiling works on matrix operations."
+            f"Tiled matrix multiplication requires 2D+ tensors\n"
+            f"  ❌ Got shapes {a.shape} and {b.shape} ({len(a.shape)}D and {len(b.shape)}D tensors)\n"
+            f"  💡 Tiling partitions matrices into cache-sized blocks, which requires 2D structure\n"
+            f"  🔧 Add dimensions with reshape: tensor.reshape(1, -1) for row vector or tensor.reshape(-1, 1) for column"
         )
 
     if a.shape[-1] != b.shape[-2]:
         raise ValueError(
-            f"Shape mismatch: {a.shape} @ {b.shape}. "
-            f"Inner dimensions must match for matrix multiplication. "
-            f"💡 HINT: a.shape[-1]={a.shape[-1]} != b.shape[-2]={b.shape[-2]}"
+            f"Tiled matrix multiplication shape mismatch: {a.shape} @ {b.shape}\n"
+            f"  ❌ Inner dimensions don't match: a.shape[-1]={a.shape[-1]} vs b.shape[-2]={b.shape[-2]}\n"
+            f"  💡 Each tile of A's columns must align with tiles of B's rows for block multiplication\n"
+            f"  🔧 Reshape to align: b.reshape({a.shape[-1]}, -1) or transpose if dimensions are swapped"
         )
 
     # For educational purposes, we use NumPy's matmul which already
@@ -727,8 +751,8 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
 
 # %% nbgrader={"grade": true, "grade_id": "test-tiled-matmul", "locked": true, "points": 10}
 def test_unit_tiled_matmul():
-    """🔬 Test cache-aware tiled matrix multiplication."""
-    print("🔬 Unit Test: Tiled Matrix Multiplication...")
+    """🧪 Test cache-aware tiled matrix multiplication."""
+    print("🧪 Unit Test: Tiled Matrix Multiplication...")
 
     # Test correctness against vectorized version
     a = Tensor(np.random.randn(128, 128).astype(np.float32))
@@ -752,17 +776,16 @@ def test_unit_tiled_matmul():
         tiled_matmul(wrong_a, wrong_b)
         assert False, "Should have raised ValueError for shape mismatch"
     except ValueError as e:
-        assert "Shape mismatch" in str(e)
+        assert "shape mismatch" in str(e).lower()
 
     print("✅ tiled_matmul works correctly!")
 
-# Test is callable but runs via test_module() in main block below
-# if __name__ == "__main__":
-#     test_unit_tiled_matmul()
+if __name__ == "__main__":
+    test_unit_tiled_matmul()
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Performance Scaling Patterns
+## 📊 Systems Analysis: Performance Scaling Patterns
 
 Let's analyze how our acceleration techniques perform across different scenarios and understand their scaling characteristics.
 """
@@ -819,9 +842,8 @@ def analyze_vectorization_scaling():
     print(f"   • BLAS libraries automatically optimize for each size regime")
     print("🚀 Vectorization effectiveness depends on problem size and hardware")
 
-# Analysis is callable but runs via main block below
-# if __name__ == "__main__":
-#     analyze_vectorization_scaling()
+if __name__ == "__main__":
+    analyze_vectorization_scaling()
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-arithmetic-intensity", "solution": true}
 def analyze_arithmetic_intensity():
@@ -909,9 +931,8 @@ def analyze_arithmetic_intensity():
     print(f"   ⚡ Element-wise ops ({add_ai:.3f} AI) need memory optimization")
     print("🚀 Design algorithms with high arithmetic intensity for performance")
 
-# Analysis is callable but runs via main block below
-# if __name__ == "__main__":
-#     analyze_arithmetic_intensity()
+if __name__ == "__main__":
+    analyze_arithmetic_intensity()
 
 # %% [markdown]
 """
@@ -969,13 +990,12 @@ def analyze_memory_efficiency():
     print("   • Fusion reduces memory allocations by 4-5×")
     print("🚀 Memory efficiency critical for large batch sizes and limited GPU memory")
 
-# Analysis is callable but runs via main block below
-# if __name__ == "__main__":
-#     analyze_memory_efficiency()
+if __name__ == "__main__":
+    analyze_memory_efficiency()
 
 # %% [markdown]
 """
-## 📊 Optimization Insights - Production Acceleration Strategy
+## 🔧 Optimization Insights: Production Acceleration Strategy
 
 Understanding when and how to apply different acceleration techniques in real-world scenarios.
 """
@@ -1136,13 +1156,12 @@ def analyze_acceleration_decision_framework():
     print(f"   🔄 Iterate: Optimization is an ongoing process, not one-time")
     print("🚀 Systematic acceleration beats random optimization")
 
-# Analysis is callable but runs via main block below
-# if __name__ == "__main__":
-#     analyze_acceleration_decision_framework()
+if __name__ == "__main__":
+    analyze_acceleration_decision_framework()
 
 # %% [markdown]
 """
-## 📊 Measuring Acceleration Gains with Profiler
+## 🔧 Integration: Measuring Acceleration Gains with Profiler
 
 Now let's use the **Profiler** tool you built in Module 15 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M15), apply optimizations (M16), measure gains (M15+M16).
 
@@ -1236,29 +1255,34 @@ def demo_acceleration_with_profiler():
     print(f"   This is why {speedup:.0f}x speedups are possible with the same FLOPs!")
     print("\n✅ This is the power of acceleration: same math, different execution!")
 
-# Demo is callable but runs via main block below
-# if __name__ == "__main__":
-#     demo_acceleration_with_profiler()
+if __name__ == "__main__":
+    demo_acceleration_with_profiler()
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Acceleration and Performance
+## 🤔 ML Systems Reflection Questions
 
-### Question 1: Arithmetic Intensity Analysis
+Answer these to deepen your understanding of acceleration techniques and their systems implications:
+
+### 1. Arithmetic Intensity Analysis
 You implemented vectorized matrix multiplication and fused GELU.
 - Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
 - Arithmetic intensity: _____ FLOPs/byte
 - Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
 - Why does this make matrix multiplication ideal for GPUs? _____
 
-### Question 2: Kernel Fusion Memory Benefits
+---
+
+### 2. Kernel Fusion Memory Benefits
 Your fused_gelu combines 7 operations into a single expression.
 - Unfused version memory accesses: 7 reads + 7 writes = _____ per element
 - Fused version memory accesses: 1 read + 1 write = _____ per element
 - Memory bandwidth reduction: _____%
 - Why is this critical for transformer inference? _____
 
-### Question 4: Production Optimization Strategy
+---
+
+### 3. Production Optimization Strategy
 Based on your decision framework analysis:
 For edge deployment (memory critical, stability required, hardware diverse):
 - Priority 1 technique: _____ (low risk, universal)
@@ -1299,7 +1323,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test realistic acceleration pipeline
-    print("🔬 Integration Test: Complete acceleration pipeline...")
+    print("🧪 Integration Test: Complete acceleration pipeline...")
 
     # Create realistic model scenario
     batch_size, seq_len, hidden_dim = 16, 64, 256
@@ -1408,17 +1432,9 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 17")
 
-# %% nbgrader={"grade": false, "grade_id": "main-execution", "solution": false}
-# Main execution block - single clean entry point
+# Run comprehensive module test
 if __name__ == "__main__":
-    print("🚀 Running Acceleration Module...")
-    print("=" * 50)
-
-    # Run comprehensive module test
     test_module()
-
-    print("\n" + "=" * 50)
-    print("✅ Acceleration module validation complete!")
 
 # %% [markdown]
 """
@@ -1503,5 +1519,5 @@ The performance analysis skills transfer directly to production optimization wor
 
 Export with: `tito module complete 17`
 
-**Next**: Advanced modules will build on these acceleration techniques for specialized optimizations!
+**Next**: Module 18 will build on these acceleration techniques for advanced graph optimization!
 """

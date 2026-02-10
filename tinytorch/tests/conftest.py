@@ -129,8 +129,7 @@ try:
 except ImportError:
     pass  # test_utils not yet created or has issues
 
-# Register the TinyTorch educational test plugin
-pytest_plugins = ['tests.pytest_tinytorch']
+# Register plugins (note: pytest_tinytorch was removed during test cleanup)
 
 
 # =============================================================================

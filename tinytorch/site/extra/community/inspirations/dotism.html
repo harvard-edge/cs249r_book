@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pointillist Landscape</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #ffffff; font-family: 'Courier New', Courier, monospace; }
+        canvas { display: block; }
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #555; /* Neutral grey to match any palette */
+            background: rgba(255, 255, 255, 0.8);
+            padding: 10px 20px;
+            border-radius: 20px;
+            pointer-events: none;
+            font-size: 14px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #555;
+            font-size: 24px;
+            transition: opacity 1s;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading">Generating Landscape...</div>
+    <div id="instructions">Scroll to Explore</div>
+
+    <!-- Import Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // --- 1. SIMPLEX NOISE IMPLEMENTATION (Minimal) ---
+        // A standard implementation of Simplex Noise for procedural generation
+        // without needing external dependencies.
+        const SimplexNoise = (function() {
+            function SimplexNoise(random) {
+                if (!random) random = Math.random;
+                this.p = new Uint8Array(256);
+                this.perm = new Uint8Array(512);
+                this.permMod12 = new Uint8Array(512);
+                for (var i = 0; i < 256; i++) {
+                    this.p[i] = Math.floor(random() * 256);
+                }
+                for (i = 0; i < 512; i++) {
+                    this.perm[i] = this.p[i & 255];
+                    this.permMod12[i] = this.perm[i] % 12;
+                }
+            }
+            SimplexNoise.prototype.dot = function(g, x, y) {
+                return g[0] * x + g[1] * y;
+            };
+            SimplexNoise.prototype.noise2D = function(xin, yin) {
+                var grad3 = [[1, 1], [-1, 1], [1, -1], [-1, -1],
+                             [1, 0], [-1, 0], [1, 0], [-1, 0],
+                             [0, 1], [0, -1], [0, 1], [0, -1]];
+                var n0, n1, n2;
+                var F2 = 0.5 * (Math.sqrt(3.0) - 1.0);
+                var G2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+                var s = (xin + yin) * F2;
+                var i = Math.floor(xin + s);
+                var j = Math.floor(yin + s);
+                var t = (i + j) * G2;
+                var X0 = i - t;
+                var Y0 = j - t;
+                var x0 = xin - X0;
+                var y0 = yin - Y0;
+                var i1, j1;
+                if (x0 > y0) { i1 = 1; j1 = 0; } else { i1 = 0; j1 = 1; }
+                var x1 = x0 - i1 + G2;
+                var y1 = y0 - j1 + G2;
+                var x2 = x0 - 1.0 + 2.0 * G2;
+                var y2 = y0 - 1.0 + 2.0 * G2;
+                var ii = i & 255;
+                var jj = j & 255;
+                var gi0 = this.permMod12[ii + this.perm[jj]];
+                var gi1 = this.permMod12[ii + i1 + this.perm[jj + j1]];
+                var gi2 = this.permMod12[ii + 1 + this.perm[jj + 1]];
+                var t0 = 0.5 - x0 * x0 - y0 * y0;
+                if (t0 < 0) n0 = 0.0;
+                else { t0 *= t0; n0 = t0 * t0 * this.dot(grad3[gi0], x0, y0); }
+                var t1 = 0.5 - x1 * x1 - y1 * y1;
+                if (t1 < 0) n1 = 0.0;
+                else { t1 *= t1; n1 = t1 * t1 * this.dot(grad3[gi1], x1, y1); }
+                var t2 = 0.5 - x2 * x2 - y2 * y2;
+                if (t2 < 0) n2 = 0.0;
+                else { t2 *= t2; n2 = t2 * t2 * this.dot(grad3[gi2], x2, y2); }
+                return 70.0 * (n0 + n1 + n2);
+            };
+            return SimplexNoise;
+        })();
+
+        // --- 2. CONFIGURATION & STATE ---
+
+        // --- PALETTE GENERATOR ---
+        const palettes = {
+            "Spring (Original)": ['#1a5e3a', '#3cb371', '#9acd32', '#f0e68c', '#8fbc8f'],
+            "Autumn": ['#4a2511', '#a64b1e', '#d99029', '#f2dca2', '#cc6633'],
+            "Winter": ['#0f2e47', '#2b5975', '#7db3c9', '#e3f4f7', '#538da3'],
+            "Lavender": ['#2d1b4e', '#583671', '#9e6eb3', '#e6d4f0', '#7a528a'],
+            "Charcoal": ['#1a1a1a', '#404040', '#808080', '#e0e0e0', '#606060']
+        };
+
+        // Pick random palette
+        const paletteKeys = Object.keys(palettes);
+        const randomKey = paletteKeys[Math.floor(Math.random() * paletteKeys.length)];
+        const selectedPalette = palettes[randomKey];
+
+        console.log("Using Palette:", randomKey);
+
+        const config = {
+            chunkSize: 100,      // Depth of each chunk
+            chunkWidth: 200,     // Width of terrain
+            fogDensity: 0.015,
+            scrollSpeed: 0.1,
+            // Convert hex strings to THREE.Color objects
+            colors: selectedPalette.map(hex => new THREE.Color(hex))
+        };
+
+        let scene, camera, renderer;
+        let simplex = new SimplexNoise();
+        let chunks = [];
+        let lastChunkZ = 0;
+        let scrollY = 0; // Virtual scroll position
+        let targetScrollY = 0;
+
+        // Texture for the points (soft circle)
+        function createDotTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 32;
+            canvas.height = 32;
+            const ctx = canvas.getContext('2d');
+
+            // Draw a soft, slightly irregular circle
+            ctx.beginPath();
+            ctx.arc(16, 16, 12, 0, Math.PI * 2);
+            ctx.fillStyle = '#ffffff';
+            ctx.fill();
+
+            const texture = new THREE.CanvasTexture(canvas);
+            return texture;
+        }
+
+        const dotTexture = createDotTexture();
+
+        // --- 3. CHUNK GENERATION LOGIC ---
+
+        function generateChunk(offsetZ) {
+            // We create a BufferGeometry for the particles in this chunk
+            const geometry = new THREE.BufferGeometry();
+            const positions = [];
+            const colors = [];
+            const sizes = [];
+
+            // Pattern Noise: Determines "Biome" (Swirls vs Dots vs Sparse)
+            // Height Noise: Determines Terrain shape
+
+            const density = 0.8; // Base density
+            const numParticles = 60000; // Massive increase for opacity
+
+            for (let i = 0; i < numParticles; i++) {
+                // Random position within chunk bounds
+                let x = (Math.random() - 0.5) * config.chunkWidth;
+                let zLocal = Math.random() * config.chunkSize;
+                let z = offsetZ - zLocal; // Negative Z is forward
+
+                // 1. Determine Biome based on large scale noise
+                // We use noise to create "patches" of textures like the image
+                let biomeVal = simplex.noise2D(x * 0.02, z * 0.02);
+
+                // 2. Determine Height (Terrain Shape)
+                // Layered noise for rolling hills
+                let h1 = simplex.noise2D(x * 0.01, z * 0.01) * 25; // Increased amplitude
+                let h2 = simplex.noise2D(x * 0.03, z * 0.03) * 8; // Increased detail
+                let y = h1 + h2 - 10; // Base height
+
+                // 3. Apply Style based on Biome
+
+                let pColor;
+                let pSize;
+                let includeParticle = false;
+
+                // -- Biome A: Sparse Light Fields (High biomeVal) --
+                if (biomeVal > 0.4) {
+                    if (Math.random() > 0.5) { // Less sparse than before, but still airy
+                        includeParticle = true;
+                        pColor = config.colors[3]; // Lightest / Accent color
+                        pSize = 0.8 + Math.random() * 0.5; // Larger dots to fill space
+                        y += Math.random() * 3; // Floating dust/pollen effect
+                    }
+                }
+                // -- Biome B: Deep Swirls (Low biomeVal) --
+                else if (biomeVal < -0.3) {
+                    // Create flow lines
+                    let flow = Math.sin(x * 0.1 + z * 0.05 + simplex.noise2D(x*0.05, z*0.05)*5);
+                    if (Math.abs(flow) > 0.6) { // Thicker bands (was > 0.8)
+                        includeParticle = true;
+                        pColor = config.colors[0]; // Darkest color
+                        pSize = 1.0 + Math.random() * 0.6; // Big chunky dots
+
+                        // Jitter to make it look hand-painted not perfect math
+                        x += (Math.random() - 0.5) * 2;
+
+                        // Thick layers for opacity
+                        y -= 5;
+                        y += (Math.random() - 0.5) * 2.0;
+                    }
+                }
+                // -- Biome C: Standard Rolling Hills (Mid biomeVal) --
+                else {
+                    // Pointillist gradient
+                    // Mix colors based on height
+                    includeParticle = true;
+                    // No random discard here -> Maximum Density
+
+                    // Color blending logic
+                    // Higher = Lighter/Yellower, Lower = Darker Green
+                    // Normalize height roughly -20 to 20
+                    let hNorm = (y + 20) / 40;
+                    hNorm += (Math.random() - 0.5) * 0.2; // Noise in color selection
+
+                    if (hNorm < 0.3) pColor = config.colors[0];
+                    else if (hNorm < 0.5) pColor = config.colors[1];
+                    else if (hNorm < 0.7) pColor = config.colors[4];
+                    else pColor = config.colors[2];
+
+                    pSize = 0.7 + Math.random() * 0.8; // Generally larger
+
+                    // VOLUME: Add vertical thickness to the hills so they aren't thin sheets
+                    // This creates the "can't see through" effect
+                    y += (Math.random() - 0.5) * 4.0;
+
+                    // Pattern: Dashed lines?
+                    // The image has these dashed texture areas.
+                    // Let's create small "clusters"
+                    if (Math.random() > 0.5) {
+                        x += (Math.random() - 0.5) * 3; // Spread out a bit
+                    } else {
+                        // Align slightly
+                        x = Math.floor(x / 2) * 2 + (Math.random()*0.5);
+                    }
+                }
+
+                if (includeParticle) {
+                    positions.push(x, y, z);
+                    colors.push(pColor.r, pColor.g, pColor.b);
+                    sizes.push(pSize);
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            geometry.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+
+            // Material
+            // Patch shader to support varying point sizes if needed,
+            // but standard PointsMaterial supports sizeAttenuation.
+            // However, to use the 'size' attribute we generated, we need a slight tweak or
+            // we just rely on randomness in the loop.
+            // Since Three.js PointsMaterial size is global, to get variable size per particle
+            // without a custom shader is tricky in standard material.
+            // BUT: We can use a custom shader or just accept uniform size.
+            // Let's use a custom shader for the "Artsiest" look.
+
+            const shaderMaterial = new THREE.ShaderMaterial({
+                uniforms: {
+                    pointTexture: { value: dotTexture },
+                    fogColor: { value: scene.fog.color },
+                    fogNear: { value: scene.fog.near },
+                    fogFar: { value: scene.fog.far }
+                },
+                vertexShader: `
+                    attribute float size;
+                    varying vec3 vColor;
+                    varying float vFogDepth;
+
+                    void main() {
+                        vColor = color;
+                        vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+                        gl_PointSize = size * ( 300.0 / -mvPosition.z );
+                        gl_Position = projectionMatrix * mvPosition;
+                        vFogDepth = - mvPosition.z;
+                    }
+                `,
+                fragmentShader: `
+                    uniform sampler2D pointTexture;
+                    uniform vec3 fogColor;
+                    uniform float fogNear;
+                    uniform float fogFar;
+                    varying vec3 vColor;
+                    varying float vFogDepth;
+
+                    void main() {
+                        gl_FragColor = vec4( vColor, 1.0 );
+                        gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord );
+                        if ( gl_FragColor.a < 0.5 ) discard;
+
+                        // Fog logic
+                        float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+                        gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+                    }
+                `,
+                transparent: true,
+                depthTest: true,
+                vertexColors: true // Essential for the 'color' attribute to be passed to the shader
+            });
+
+            const points = new THREE.Points(geometry, shaderMaterial);
+            scene.add(points);
+
+            return {
+                mesh: points,
+                zStart: offsetZ,
+                zEnd: offsetZ - config.chunkSize
+            };
+        }
+
+
+        // --- 4. INITIALIZATION ---
+
+        function init() {
+            // Setup Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xffffff); // White background like canvas
+            scene.fog = new THREE.Fog(0xffffff, 20, 140); // White fog to hide loading
+
+            // Setup Camera
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 20);
+
+            // Setup Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Performance opt
+            document.body.appendChild(renderer.domElement);
+
+            // Initial Generation
+            for (let i = 0; i < 3; i++) {
+                let chunk = generateChunk(lastChunkZ);
+                chunks.push(chunk);
+                lastChunkZ -= config.chunkSize;
+            }
+
+            // Remove loading text
+            setTimeout(() => {
+                document.getElementById('loading').style.opacity = 0;
+            }, 500);
+
+            // Events
+            window.addEventListener('resize', onWindowResize, false);
+            window.addEventListener('wheel', onScroll, { passive: false });
+
+            // Touch events for mobile
+            let touchStartY = 0;
+            window.addEventListener('touchstart', e => { touchStartY = e.touches[0].clientY; }, {passive: false});
+            window.addEventListener('touchmove', e => {
+                let deltaY = touchStartY - e.touches[0].clientY;
+                targetScrollY += deltaY * 0.1;
+                touchStartY = e.touches[0].clientY;
+                e.preventDefault();
+            }, {passive: false});
+
+            animate();
+        }
+
+        // --- 5. INTERACTION & ANIMATION ---
+
+        function onScroll(event) {
+            // Normalize scroll speed
+            targetScrollY += event.deltaY * 0.05;
+            event.preventDefault();
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function manageChunks(currentZ) {
+            // If camera is getting close to the end of generated terrain
+            // Generate more in front
+            const lookAhead = 120;
+
+            // Generate forward
+            if (lastChunkZ > currentZ - lookAhead) {
+                let chunk = generateChunk(lastChunkZ);
+                chunks.push(chunk);
+                lastChunkZ -= config.chunkSize;
+            }
+
+            // Remove behind
+            // If a chunk is completely behind the camera + fog distance
+            const removeThreshold = currentZ + 20;
+
+            chunks = chunks.filter(chunk => {
+                if (chunk.zEnd > removeThreshold) {
+                    scene.remove(chunk.mesh);
+                    chunk.mesh.geometry.dispose();
+                    chunk.mesh.material.dispose();
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Smooth scroll physics
+            // Easing the scrollY towards target
+            let delta = (targetScrollY - scrollY) * 0.05;
+            scrollY += delta;
+
+            // Move camera
+            // We move along -Z axis.
+            // Camera Z starts at 20. Moving "Deeper" means Z decreases.
+            camera.position.z = 20 - scrollY;
+
+            // Add a subtle sway to the camera to simulate walking/flying
+            camera.position.x = Math.sin(scrollY * 0.05) * 2;
+            camera.position.y = 5 + Math.cos(scrollY * 0.03) * 1;
+
+            // Look slightly ahead
+            camera.lookAt(0, 0, camera.position.z - 50);
+
+            // Infinite Terrain Logic
+            manageChunks(camera.position.z);
+
+            renderer.render(scene, camera);
+        }
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>

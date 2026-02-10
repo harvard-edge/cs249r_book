@@ -56,7 +56,7 @@ from tinytorch.core.training import Trainer, CosineSchedule, clip_grad_norm
 - **Integration:** Works seamlessly with optimizers and losses for complete learning pipelines
 """
 
-# %% nbgrader={"grade": false, "grade_id": "imports", "locked": false, "solution": false}
+# %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
 #| default_exp core.training
 #| export
 
@@ -85,7 +85,34 @@ DEFAULT_TOTAL_EPOCHS = 100  # Default total epochs for learning rate schedule
 
 # %% [markdown]
 """
-## 💡 Introduction - What is Training?
+## 📋 Module Dependencies
+
+**Prerequisites**: Modules 01-07 must be working
+
+**External Dependencies**:
+- `numpy` (for array operations and numerical computing)
+- `pickle` (for checkpoint serialization)
+
+**TinyTorch Dependencies**:
+- `tinytorch.core.tensor` - Tensor class from Module 01
+- `tinytorch.core.layers` - Linear layer from Module 03
+- `tinytorch.core.losses` - Loss functions from Module 04
+- `tinytorch.core.autograd` - Gradient tracking from Module 06
+- `tinytorch.core.optimizers` - SGD, AdamW from Module 07
+
+**Dependency Flow**:
+```
+Tensor → Layers → Losses → Autograd → Optimizers → Training
+(01)     (03)     (04)     (06)       (07)         (08)
+```
+
+Students completing this module will have built a complete training
+infrastructure that orchestrates all previous components.
+"""
+
+# %% [markdown]
+"""
+## 💡 Introduction: What is Training?
 
 Training is where the magic happens - it's the process that transforms a randomly initialized neural network into an intelligent system that can solve problems. Think of training as teaching: you show the model examples, it makes predictions, you measure how wrong it is, and then you adjust its parameters to do better next time.
 
@@ -109,7 +136,7 @@ But production training systems need much more than this basic loop. They need l
 
 # %% [markdown]
 """
-## 📐 Foundations - Mathematical Background
+## 📐 Foundations: Mathematical Background
 
 ### Training Loop Mathematics
 
@@ -151,7 +178,7 @@ This mode switching is crucial for proper model behavior and performance.
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Training Infrastructure
+## 🏗️ Implementation: Building Training Infrastructure
 
 Now let's implement the complete training system. We'll build each component step by step: learning rate scheduling, gradient utilities, and finally the complete Trainer class.
 
@@ -160,7 +187,7 @@ Each component will follow the pattern: **Explanation → Implementation → Tes
 
 # %% [markdown]
 """
-### Learning Rate Scheduling - Adaptive Training Speed
+### 🏗️ Learning Rate Scheduling: Adaptive Training Speed
 
 Learning rate scheduling is like adjusting your driving speed based on road conditions. You start fast on the highway (high learning rate for quick progress), then slow down in neighborhoods (low learning rate for fine-tuning).
 
@@ -235,7 +262,9 @@ class CosineSchedule:
 # %% [markdown]
 """
 ### 🧪 Unit Test: CosineSchedule
+
 This test validates our learning rate scheduling implementation.
+
 **What we're testing**: Cosine annealing produces correct learning rates
 **Why it matters**: Proper scheduling often makes the difference between convergence and failure
 **Expected**: Smooth decrease from max_lr to min_lr following cosine curve
@@ -243,8 +272,8 @@ This test validates our learning rate scheduling implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test_scheduler", "locked": true, "points": 10}
 def test_unit_cosine_schedule():
-    """🔬 Test CosineSchedule implementation."""
-    print("🔬 Unit Test: CosineSchedule...")
+    """🧪 Test CosineSchedule implementation."""
+    print("🧪 Unit Test: CosineSchedule...")
 
     # Test basic schedule
     schedule = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=100)
@@ -274,7 +303,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### Gradient Clipping - Preventing Training Explosions
+### 🏗️ Gradient Clipping: Preventing Training Explosions
 
 Gradient clipping is like having a speed governor on your car - it prevents dangerous situations where gradients become so large they destroy training progress.
 
@@ -377,7 +406,9 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
 # %% [markdown]
 """
 ### 🧪 Unit Test: Gradient Clipping
+
 This test validates our gradient clipping implementation.
+
 **What we're testing**: Global norm clipping properly rescales large gradients
 **Why it matters**: Prevents exploding gradients that can destroy training
 **Expected**: Gradients scaled down when norm exceeds threshold
@@ -385,8 +416,8 @@ This test validates our gradient clipping implementation.
 
 # %% nbgrader={"grade": true, "grade_id": "test_clipping", "locked": true, "points": 10}
 def test_unit_clip_grad_norm():
-    """🔬 Test clip_grad_norm implementation."""
-    print("🔬 Unit Test: Gradient Clipping...")
+    """🧪 Test clip_grad_norm implementation."""
+    print("🧪 Unit Test: Gradient Clipping...")
 
     # Use real Tensor from Module 01
     import sys
@@ -438,7 +469,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### The Trainer Class - Orchestrating Complete Training
+### 🏗️ The Trainer Class: Orchestrating Complete Training
 
 The Trainer class is like a conductor orchestrating a symphony - it coordinates all the components (model, optimizer, loss function, scheduler) to create beautiful music (successful training).
 
@@ -775,7 +806,9 @@ class Trainer:
 # %% [markdown]
 """
 ### 🧪 Unit Test: Trainer Class
+
 This test validates our complete training system.
+
 **What we're testing**: Trainer orchestrates training loop correctly
 **Why it matters**: This is the backbone that enables all neural network training
 **Expected**: Training reduces loss, evaluation works, checkpointing preserves state
@@ -783,8 +816,8 @@ This test validates our complete training system.
 
 # %% nbgrader={"grade": true, "grade_id": "test_trainer", "locked": true, "points": 15}
 def test_unit_trainer():
-    """🔬 Test Trainer implementation."""
-    print("🔬 Unit Test: Trainer...")
+    """🧪 Test Trainer implementation."""
+    print("🧪 Unit Test: Trainer...")
 
     # Use REAL components from previous modules (already imported at module level)
 
@@ -851,7 +884,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🔧 Integration - Complete Training Example
+## 🔧 Integration: Complete Training Example
 
 Now let's create a complete training example that demonstrates how all the components work together. This integration shows the full power of our training infrastructure.
 
@@ -974,7 +1007,7 @@ def demonstrate_complete_training_pipeline():
 
 # %% [markdown]
 """
-## 📊 Systems Analysis - Training Performance and Memory
+## 📊 Systems Analysis: Training Performance and Memory
 
 Training systems have significant resource requirements. Understanding memory usage, checkpoint sizes, and training overhead helps optimize production ML pipelines.
 
@@ -1024,7 +1057,7 @@ Total Training Memory ≈ 5-6× Model Parameters
 - Compression: Pickle overhead ~10-20%
 """
 
-# %% nbgrader={"grade": false, "grade_id": "analyze_training_memory", "solution": true}
+# %%
 def analyze_training_memory():
     """📊 Analyze memory overhead of training components."""
     print("📊 Analyzing Training Memory Overhead...")
@@ -1076,7 +1109,7 @@ def analyze_training_memory():
     print("- Adam: 4× parameter memory (params + grads + 2 moment buffers)")
     print("- Gradient accumulation reduces memory but increases training time")
 
-# %% nbgrader={"grade": false, "grade_id": "analyze_checkpoint_overhead", "solution": true}
+# %%
 def analyze_checkpoint_overhead():
     """📊 Analyze checkpoint size and overhead."""
     print("\n📊 Analyzing Checkpoint Overhead...")
@@ -1138,6 +1171,11 @@ def analyze_checkpoint_overhead():
     print("- Adam optimizer doubles checkpoint size vs SGD")
     print("- Use checkpoint frequency wisely in production (memory vs fault tolerance)")
 
+# Run the systems analysis
+if __name__ == "__main__":
+    analyze_training_memory()
+    analyze_checkpoint_overhead()
+
 # %% [markdown]
 """
 ## 🧪 Module Integration Test
@@ -1168,7 +1206,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test complete training pipeline integration with REAL components
-    print("🔬 Integration Test: Complete Training Pipeline...")
+    print("🧪 Integration Test: Complete Training Pipeline...")
 
     # Use REAL components from previous modules (already imported at module level)
 
@@ -1263,31 +1301,58 @@ if __name__ == "__main__":
 """
 ## 🤔 ML Systems Reflection Questions
 
-Before we complete this module, let's reflect on the systems aspects of training infrastructure.
+Answer these to deepen your understanding of training systems and their implications:
 
-Use only knowledge from Modules 01-07 to answer these questions:
+### 1. Memory Trade-offs
+**Question**: If you have a model with 1 million parameters and use Adam optimizer, what's the total training memory required?
 
-**1. Memory Trade-offs:**
-   - If you have a model with 1 million parameters and use Adam optimizer, estimate the total training memory required (parameters + gradients + optimizer state).
-   - How does gradient accumulation help when you want batch_size=128 but can only fit batch_size=32 in memory?
+**Consider**:
+- Parameters: 1M parameters at 4 bytes each
+- Gradients: Same size as parameters
+- Adam state: 2 buffers (momentum and variance) per parameter
+- How does gradient accumulation help when you want batch_size=128 but only batch_size=32 fits?
 
-**2. Gradient Clipping:**
-   - Why do we clip gradients by *global norm* rather than clipping each gradient independently?
-   - What happens to training if gradients consistently exceed max_norm? What does this signal?
+---
 
-**3. Learning Rate Scheduling:**
-   - Why does cosine annealing start with high learning rate and end with low learning rate?
-   - Compare training with fixed lr=0.1 vs cosine schedule (0.1 → 0.01). When might fixed LR be better?
+### 2. Gradient Clipping
+**Question**: Why do we clip gradients by *global norm* rather than clipping each gradient independently?
 
-**4. Checkpointing Strategy:**
-   - You're training for 100 epochs. Checkpoints are large (1GB each). How often should you save checkpoints?
-   - What information MUST be in a checkpoint to resume training exactly where you left off?
+**Consider**:
+- What happens if each parameter's gradient is clipped to 1.0 separately?
+- How does global norm preserve the gradient direction?
+- What does it signal when gradients consistently exceed max_norm?
 
-**5. Train vs Eval Modes:**
-   - Why is it crucial to set model.training = False during evaluation?
-   - What would happen if you forgot to zero gradients between training steps?
+---
 
-**Think about these questions. The answers reveal deep understanding of training systems!**
+### 3. Learning Rate Scheduling
+**Question**: Why does cosine annealing start with high learning rate and end with low learning rate?
+
+**Consider**:
+- What phase of optimization benefits from large vs. small updates?
+- Compare: fixed lr=0.1 vs cosine schedule (0.1 to 0.01)
+- When might a fixed learning rate actually be better?
+
+---
+
+### 4. Checkpointing Strategy
+**Question**: You're training for 100 epochs with 1GB checkpoints. How often should you save?
+
+**Consider**:
+- Disk space: 100 checkpoints = 100GB
+- Recovery time: If training crashes at epoch 95, how much work is lost?
+- What information MUST be in a checkpoint to resume training exactly?
+
+---
+
+### 5. Train vs Eval Modes
+**Question**: Why is it crucial to set model.training = False during evaluation?
+
+**Consider**:
+- What layers behave differently in training vs eval? (Dropout, BatchNorm)
+- What would happen if you forgot to zero gradients between training steps?
+- How does gradient accumulation intentionally exploit not zeroing?
+
+**The answers reveal deep understanding of training systems!**
 """
 
 # %% [markdown]
@@ -1349,36 +1414,22 @@ if __name__ == "__main__":
 """
 ## 🚀 MODULE SUMMARY: Training
 
-Congratulations! You've built a complete training infrastructure that orchestrates the entire machine learning training process!
+Congratulations! You've built the complete training infrastructure that orchestrates neural network learning!
 
 ### Key Accomplishments
-- Built Trainer class with complete training/evaluation loops
-- Implemented CosineSchedule for adaptive learning rate management
-- Created clip_grad_norm for training stability and gradient management
-- Added comprehensive checkpointing for training persistence
-- Analyzed training memory overhead and checkpoint costs
-- All tests pass ✅ (validated by `test_module()`)
+- **Built a complete Trainer class** with training/evaluation loops and gradient management
+- **Implemented CosineSchedule** for adaptive learning rate management
+- **Created clip_grad_norm** for training stability via global norm clipping
+- **Added checkpointing** for training persistence and resumption
+- **All tests pass** (validated by `test_module()`)
 
-### Systems Insights Gained
-Through hands-on implementation and analysis, you discovered:
-- **Training memory is 4-6× model size**: Parameters + gradients + optimizer buffers
-- **Gradient accumulation trades time for memory**: Enables larger effective batch sizes
-- **Checkpoints include full training state**: Model + optimizer + scheduler + metadata
-- **Learning rate scheduling improves convergence**: Cosine annealing balances speed and stability
-- **Gradient clipping prevents instability**: Global norm preserves gradient direction
+### Systems Insights Discovered
+- **Memory scaling**: Training requires 4-6x model size (params + grads + optimizer state)
+- **Gradient accumulation**: Trades time for memory, enabling larger effective batch sizes
+- **Checkpoint overhead**: Pickle adds 10-30% overhead, optimizer state doubles size
+- **Scheduling behavior**: Cosine annealing balances aggressive initial learning with fine-tuning
 
-### Real-World Context
-Your training infrastructure mirrors production ML systems:
-- **PyTorch Lightning Trainer**: Similar architecture with training/eval loops
-- **Hugging Face Transformers**: Uses same checkpoint patterns
-- **Production Training**: All major ML frameworks use gradient clipping and scheduling
+Export with: `tito module complete 08`
 
-### Ready for Next Steps
-Your training implementation enables sophisticated model training with proper scheduling, stability controls, and state management.
-
-**Export with:** `tito module complete 08`
-
-**Next**: Module 09 (Convolutions) will add spatial neural network operations, enabling CNN architectures for computer vision!
-
-**🎓 You now understand the complete training infrastructure that powers modern ML systems!**
+**Next**: Module 09 will add convolution operations for spatial neural network processing!
 """

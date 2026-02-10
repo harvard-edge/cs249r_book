@@ -37,6 +37,8 @@ As you complete modules, you unlock milestones that recreate landmark moments in
 
 ## Step 1: Install & Setup (2 Minutes)
 
+`````{tab-set}
+````{tab-item} macOS / Linux
 ```bash
 # Install TinyTorch (run from a project folder like ~/projects)
 curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
@@ -46,6 +48,30 @@ cd tinytorch
 source .venv/bin/activate
 tito setup
 ```
+````
+
+````{tab-item} Windows
+TinyTorch works on Windows using **Git Bash** (included with Git for Windows).
+
+**Step 1: Install Git for Windows** (if you don't have it)
+- Download from [git-scm.com/download/win](https://git-scm.com/download/win)
+- Run the installer with default options
+
+**Step 2: Open Git Bash**
+- Search "Git Bash" in the Start menu and open it
+
+**Step 3: Install TinyTorch**
+```bash
+# In Git Bash (run from a project folder like ~/projects)
+curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+
+# Activate and verify
+cd tinytorch
+source .venv/Scripts/activate
+tito setup
+```
+````
+`````
 
 **What this does:**
 - Checks your system (Python 3.8+, git)
@@ -157,13 +183,14 @@ You're recreating ML history with your own code. *By Module 19, you'll benchmark
 
 As you complete more modules, you unlock more milestones:
 
-| Modules Completed | Milestone Unlocked | What You Recreate |
-|-------------------|-------------------|-------------------|
-| 01-04 | `perceptron` | The 1958 Perceptron |
-| 01-08 | `backprop` | 1986 Backpropagation |
-| 01-09 | `lenet` | 1998 LeNet CNN |
-| 01-13 | `transformer` | 2017 Transformer |
-| 01-19 | `mlperf` | MLPerf Benchmarks |
+| Modules Completed | Milestone | What You Recreate |
+|-------------------|-----------|-------------------|
+| 01-03 | Perceptron (1958) | First neural network (forward pass) |
+| 01-03 | XOR Crisis (1969) | The limitation that triggered AI Winter |
+| 01-08 | MLP Revival (1986) | Backprop solves XOR + real digit recognition |
+| 01-09 | CNN Revolution (1998) | Convolutions for spatial understanding |
+| 01-08 + 11-13 | Transformers (2017) | Language generation with attention |
+| 01-08 + 14-19 | MLPerf (2018) | Production optimization pipeline |
 
 See all milestones and their requirements:
 

@@ -36,15 +36,8 @@ real-world problems. Let's recreate that breakthrough using YOUR Tiny🔥Torch!
 
     Sample 8×8 Digit Images:              What the Hidden Layer Learns:
 
-    ┌────────┐  ┌────────┐               • Edge detectors (horizontal, vertical)
-    │░░██░░░░│  │░░░██░░░│               • Curve patterns (loops in 0, 6, 8, 9)
-    │░██░░░░░│  │░░░██░░░│               • Stroke endings (1, 7 vs 8, 0)
-    │░██░░░░░│  │░░░██░░░│               • Intersection points (4, 8)
-    │░██░░░░░│  │░░░██░░░│
-    │░██░░░░░│  │░░░██░░░│               32 hidden units = 32 feature detectors
-    │░░██████│  │░░░██░░░│               that YOUR network learns automatically!
-    └────────┘  └────────┘
-       "1"         "7"
+can 
+       "0"         "1"
 
 🔍 MLP LIMITATION (Why CNNs will be better):
     MLP treats each pixel INDEPENDENTLY - no spatial awareness!
@@ -111,7 +104,7 @@ console = Console()
 # │                     │ layer (64→32)                  │ digit patterns              │
 # │                     │                                │                             │
 # │ Module 03: Linear   │ Two layers: feature extraction │ 2,378 parameters total      │
-# │                     │ (64→32) + classification (32→10)│ learned by YOUR autograd    │
+# │                     │ (64→32)+classification (32→10 )│ learned by YOUR autograd    │
 # │                     │                                │                             │
 # │ Module 04: Loss     │ CrossEntropyLoss for           │ Multi-class loss guides     │
 # │                     │ 10-way classification          │ learning of all 10 digits   │
@@ -262,6 +255,13 @@ def evaluate_accuracy(model, images, labels):
 
     return accuracy, predictions
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 def compare_batch_sizes(train_images, train_labels, test_images, test_labels):
     """
@@ -281,12 +281,14 @@ def compare_batch_sizes(train_images, train_labels, test_images, test_labels):
         border_style="yellow"
     ))
 
+    press_enter_to_continue()
+
     batch_sizes = [16, 64, 256]
     epochs = 5  # Quick experiment
     results = []
 
     for batch_size in batch_sizes:
-        console.print(f"\n[bold]Testing batch_size={batch_size}[/bold]")
+        console.print(f"[bold]Testing batch_size={batch_size}[/bold]")
 
         # Create DataLoader with this batch size
         train_dataset = TensorDataset(train_images, train_labels)
@@ -329,9 +331,9 @@ def compare_batch_sizes(train_images, train_labels, test_images, test_labels):
         })
 
         console.print(f"  Time: {elapsed*1000:.0f}ms, Accuracy: {final_acc:.1f}%")
+        press_enter_to_continue()
 
     # Show comparison table
-    console.print("\n")
     table = Table(title="📊 Batch Size Comparison", box=box.ROUNDED)
     table.add_column("Batch Size", style="cyan", justify="center")
     table.add_column("Training Time", style="green")
@@ -350,8 +352,9 @@ def compare_batch_sizes(train_images, train_labels, test_images, test_labels):
 
     console.print(table)
 
+    press_enter_to_continue()
+
     # Key insights
-    console.print("\n")
     console.print(Panel.fit(
         "[bold]💡 Key Systems Insights:[/bold]\n\n"
         "[green]✓ Larger batches process data faster[/green] (fewer Python loops)\n"
@@ -371,6 +374,7 @@ def compare_batch_sizes(train_images, train_labels, test_images, test_labels):
         border_style="cyan"
     ))
 
+    press_enter_to_continue()
 
 def train_mlp():
     """Train MLP on digit recognition task."""
@@ -387,8 +391,9 @@ def train_mlp():
         border_style="cyan",
         box=box.DOUBLE
     ))
+    press_enter_to_continue()
 
-    console.print("\n[bold]📊 The Data:[/bold]")
+    console.print("[bold]📊 The Data:[/bold]")
     train_images, train_labels, test_images, test_labels = load_digit_dataset()
     console.print("  • Dataset: 8×8 handwritten digits (UCI repository)")
     console.print(f"  • Training samples: {len(train_images.data)}")
@@ -396,7 +401,7 @@ def train_mlp():
     console.print("  • Classes: 10 digits (0-9)")
     console.print("  • Challenge: Recognize handwritten digits from pixels!")
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 2: THE SETUP 🏗️
@@ -431,7 +436,7 @@ def train_mlp():
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     console.print(f"  • Batches per epoch: {len(train_loader)}")
 
-    console.print("\n" + "─" * 70 + "\n")
+    press_enter_to_continue()
 
     # ═══════════════════════════════════════════════════════════════════════
     # ACT 3: THE EXPERIMENT 🔬
@@ -446,7 +451,9 @@ def train_mlp():
     console.print(f"  Initial accuracy: {initial_acc:.1f}% (random ~10%)")
     console.print("  Model has random weights - knows nothing about digits yet!")
 
-    console.print("\n[bold]🔥 Training in Progress...[/bold]")
+    press_enter_to_continue()
+
+    console.print("[bold]🔥 Training in Progress...[/bold]")
     console.print("[dim](Watch backpropagation optimize through hidden layers!)[/dim]\n")
 
     epochs = 20
@@ -549,7 +556,9 @@ def train_mlp():
     # Also get predictions for later use
     _, predictions = evaluate_accuracy(model, test_images, test_labels)
 
-    console.print("\n[bold]🔍 Sample Predictions:[/bold]")
+    press_enter_to_continue()
+
+    console.print("[bold]🔍 Sample Predictions:[/bold]")
     console.print("[dim](First 10 test images)[/dim]\n")
 
     n_samples = 10
@@ -560,11 +569,15 @@ def train_mlp():
         color = "green" if pred_label == true_label else "red"
         console.print(f"  {status} True: {true_label}, Predicted: {pred_label}", style=color)
 
-    console.print("\n[bold]💡 Key Insights:[/bold]")
+    press_enter_to_continue()
+
+    console.print("[bold]💡 Key Insights:[/bold]")
     console.print("  • MLP learned to recognize handwritten digits from pixels")
     console.print("  • Hidden layer discovered useful digit features")
     console.print("  • DataLoader enabled efficient batch processing")
     console.print("  • Backprop through hidden layers works on image data!")
+
+    press_enter_to_continue()
 
     console.print("\n" + "─" * 70 + "\n")
 
