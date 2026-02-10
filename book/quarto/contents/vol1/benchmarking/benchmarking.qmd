@@ -511,35 +511,74 @@ Effective benchmark interpretation requires knowing the performance characterist
 from physx.constants import A100_MEM_BW, A100_FLOPS_FP16_TENSOR, TB, TFLOPs, second
 from physx.formatting import fmt
 
-# --- Inputs (A100 hardware specs, derived locally) ---
-a100_bw_tbs_value = A100_MEM_BW.to(TB/second).magnitude
-a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class RooflineExamples:
+    """
+    Namespace for Roofline Analysis Examples (ResNet vs BERT).
+    Scenario: Comparing compute-bound vs memory-bound workloads on A100.
+    """
 
-# --- Inputs (ResNet-50 roofline characteristics at large batch) ---
-resnet_ai_value = 300                                                          # FLOPs/byte arithmetic intensity
-resnet_util_min_value = 85                                                     # min utilization %
-resnet_util_max_value = 90                                                     # max utilization %
-resnet_perf_tflops_value = 280                                                 # achieved TFLOPS
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # A100 Specs (re-derived locally for safety)
+    peak_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+    peak_bw = A100_MEM_BW.to(TB/second).magnitude
+    ridge_point = (peak_flops * 1e12) / (peak_bw * 1e12) # ~153
 
-# --- Inputs (BERT roofline preview at batch=1) ---
-_bert_flops_b = 22                                                             # billion FLOPs per inference
-_bert_weight_mb = 440                                                          # MB (110M params × 4 bytes)
-_utilization_peak = 0.85                                                       # peak utilization factor
+    # ResNet (Compute Bound)
+    resnet_ai = 300.0
+    resnet_util_min = 85
+    resnet_util_max = 90
 
-# --- Process (BERT roofline calculation) ---
-bert_ai_b1_value = _bert_flops_b * 1e9 / (_bert_weight_mb * 1e6)
-bert_perf_b1_tflops_value = bert_ai_b1_value * a100_bw_tbs_value
-bert_util_b1_value = bert_perf_b1_tflops_value / a100_tflops_fp16_value * 100
+    # BERT (Memory Bound at Batch=1)
+    bert_flops_b = 22.0
+    bert_weight_mb = 440.0
+    bert_util_peak = 0.85
 
-# --- Outputs (formatted strings for prose) ---
-resnet_ai_str = fmt(resnet_ai_value, precision=0, commas=False)                # e.g. "300" FLOPs/byte
-resnet_util_min_str = fmt(resnet_util_min_value, precision=0, commas=False)    # e.g. "85" %
-resnet_util_max_str = fmt(resnet_util_max_value, precision=0, commas=False)    # e.g. "90" %
-resnet_perf_tflops_str = fmt(resnet_perf_tflops_value, precision=0, commas=False)  # e.g. "280" TFLOPS
-bert_ai_b1_str = fmt(bert_ai_b1_value, precision=0, commas=False)              # e.g. "50" FLOPs/byte
-bert_perf_b1_str = fmt(bert_perf_b1_tflops_value, precision=0, commas=False)   # e.g. "100" TFLOPS
-bert_util_b1_str = fmt(bert_util_b1_value, precision=0, commas=False)          # e.g. "32" %
-utilization_peak_pct_str = fmt(_utilization_peak * 100, precision=0, commas=False)  # e.g. "85" %
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # ResNet Performance
+    resnet_perf_tflops = peak_flops * (resnet_util_max / 100.0)
+
+    # BERT Performance
+    bert_ai_b1 = (bert_flops_b * 1e9) / (bert_weight_mb * 1e6)
+    bert_perf_b1 = bert_ai_b1 * peak_bw
+    bert_util_b1 = (bert_perf_b1 / peak_flops) * 100.0
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if resnet_ai <= ridge_point:
+        raise ValueError(f"Narrative broken: ResNet AI ({resnet_ai}) must be > Ridge ({ridge_point:.0f}) to be compute-bound.")
+    if bert_ai_b1 >= ridge_point:
+        raise ValueError(f"Narrative broken: BERT AI ({bert_ai_b1:.0f}) must be < Ridge ({ridge_point:.0f}) to be memory-bound.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    # A100 context
+    a100_tflops_fp16_str = fmt(peak_flops, precision=0, commas=False)
+    a100_bw_tbs_str = fmt(peak_bw, precision=1, commas=False)
+    a100_ridge_str = fmt(ridge_point, precision=0, commas=False)
+
+    # ResNet
+    resnet_ai_str = fmt(resnet_ai, precision=0, commas=False)
+    resnet_util_min_str = fmt(resnet_util_min, precision=0, commas=False)
+    resnet_util_max_str = fmt(resnet_util_max, precision=0, commas=False)
+    resnet_perf_tflops_str = fmt(resnet_perf_tflops, precision=0, commas=False)
+
+    # BERT
+    bert_ai_b1_str = fmt(bert_ai_b1, precision=0, commas=False)
+    bert_perf_b1_str = fmt(bert_perf_b1, precision=0, commas=False)
+    bert_util_b1_str = fmt(bert_util_b1, precision=0, commas=False)
+    utilization_peak_pct_str = fmt(bert_util_peak * 100, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_tflops_fp16_str = RooflineExamples.a100_tflops_fp16_str
+a100_bw_tbs_str = RooflineExamples.a100_bw_tbs_str
+a100_ridge_str = RooflineExamples.a100_ridge_str # Needed for next cell too
+resnet_ai_str = RooflineExamples.resnet_ai_str
+resnet_util_min_str = RooflineExamples.resnet_util_min_str
+resnet_util_max_str = RooflineExamples.resnet_util_max_str
+resnet_perf_tflops_str = RooflineExamples.resnet_perf_tflops_str
+bert_ai_b1_str = RooflineExamples.bert_ai_b1_str
+bert_perf_b1_str = RooflineExamples.bert_perf_b1_str
+bert_util_b1_str = RooflineExamples.bert_util_b1_str
+utilization_peak_pct_str = RooflineExamples.utilization_peak_pct_str
 ```
 
 [^fn-flops-throughput]: **FLOPS**: Floating-Point Operations Per Second (see @sec-ai-acceleration for hardware details). The A100 delivers `{python} a100_tflops_fp16_str` TFLOPS for FP16/BF16 Tensor Core operations (624 TFLOPS with structured sparsity), while high-end CPUs achieve 1--10 TFLOPS. FLOPS measurements help compare hardware and identify computational bottlenecks.
@@ -583,46 +622,97 @@ The following worked example applies *roofline analysis for BERT inference* to d
 from physx.constants import A100_FLOPS_FP16_TENSOR, TFLOPs, second
 from physx.formatting import fmt
 
-# --- Inputs (BERT-Base model characteristics) ---
-bert_params_m_value = 110  # million parameters
-bert_flops_b_value = 22  # billion FLOPs per inference
-bert_weight_mb_value = 440  # MB (110M params × 4 bytes)
-batch32_value = 32
-memory_bw_tbs_value = a100_bw_tbs_value  # Use actual A100 bandwidth (2.039 TB/s)
-utilization_peak_value = 0.85
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class BertRoofline:
+    """
+    Namespace for BERT Roofline Calculation.
+    Scenario: Comparing Batch-1 (Memory Bound) vs Batch-32 (Shift to Compute).
+    """
 
-# --- Process (roofline analysis: batch-1 and batch-32) ---
-bert_ai_b1_value = bert_flops_b_value * 1e9 / (bert_weight_mb_value * 1e6)
-bert_perf_b1_tflops_value = bert_ai_b1_value * memory_bw_tbs_value
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Model
+    params_m = 110.0
+    flops_b_per_inf = 22.0
+    weight_mb = 440.0
 
-a100_peak_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
-bert_util_b1_value = bert_perf_b1_tflops_value / a100_peak_value * 100
+    # Hardware (A100)
+    peak_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+    peak_bw = A100_MEM_BW.to(TB/second).magnitude
+    ridge_point = (peak_flops * 1e12) / (peak_bw * 1e12) # ~153
 
-bert_batch32_flops_value = bert_flops_b_value * batch32_value
-bert_ai_b32_value = bert_batch32_flops_value * 1e9 / (bert_weight_mb_value * 1e6)
+    # Scenarios
+    batch_1 = 1
+    batch_32 = 32
+    util_peak = 0.85
 
-bert_perf_b32_value = utilization_peak_value * a100_peak_value
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Batch 1
+    ai_b1 = (flops_b_per_inf * 1e9) / (weight_mb * 1e6)
+    perf_b1 = ai_b1 * peak_bw
+    util_b1 = (perf_b1 / peak_flops) * 100.0
 
-# --- Outputs (formatted strings for callout) ---
-bert_params_m_str = fmt(bert_params_m_value, precision=0, commas=False)
-bert_flops_b_str = fmt(bert_flops_b_value, precision=0, commas=False)
-bert_weight_mb_str = fmt(bert_weight_mb_value, precision=0, commas=False)
+    # Batch 32
+    flops_b32 = flops_b_per_inf * batch_32
+    # Note: Weights loaded once for batch! That's the key.
+    # AI = (FLOPs/Inf * Batch) / Weights
+    ai_b32 = (flops_b32 * 1e9) / (weight_mb * 1e6)
 
-bert_ai_b1_str = fmt(bert_ai_b1_value, precision=0, commas=False)
-bert_perf_b1_str = fmt(bert_perf_b1_tflops_value, precision=0, commas=False)
-bert_util_b1_str = fmt(bert_util_b1_value, precision=0, commas=False)
+    # Is it compute bound now?
+    is_compute_bound_b32 = ai_b32 > ridge_point
 
-bert_batch32_flops_str = f"{bert_batch32_flops_value}"
-bert_ai_b32_str = fmt(bert_ai_b32_value, precision=0, commas=False)
+    # Performance at Batch 32 (capped by compute if AI > Ridge)
+    perf_b32 = peak_flops * util_peak if is_compute_bound_b32 else (ai_b32 * peak_bw)
 
-bert_ai_eq_str = f"{bert_flops_b_value} × 10⁹ ÷ {bert_weight_mb_value} × 10⁶"
-bert_b32_flops_eq_str = f"{bert_flops_b_value} × 10⁹ × {batch32_value}"
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if ai_b32 <= ai_b1:
+        raise ValueError("Narrative broken: Batching must increase Arithmetic Intensity.")
+    if ai_b32 < 1000: # Sanity check, should be huge (50 * 32 = 1600)
+        pass
 
-bert_perf_b32_str = fmt(bert_perf_b32_value, precision=0, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    bert_params_m_str = fmt(params_m, precision=0, commas=False)
+    bert_flops_b_str = fmt(flops_b_per_inf, precision=0, commas=False)
+    bert_weight_mb_str = fmt(weight_mb, precision=0, commas=False)
 
-batch32_str = str(batch32_value)
-utilization_peak_str = f"{utilization_peak_value}"
-utilization_peak_pct_str = fmt(utilization_peak_value * 100, precision=0, commas=False)
+    bert_ai_b1_str = fmt(ai_b1, precision=0, commas=False)
+    bert_perf_b1_str = fmt(perf_b1, precision=0, commas=False)
+    bert_util_b1_str = fmt(util_b1, precision=0, commas=False)
+
+    bert_batch32_flops_str = f"{flops_b32:.0f}"
+    bert_ai_b32_str = fmt(ai_b32, precision=0, commas=False)
+
+    bert_ai_eq_str = f"{flops_b_per_inf} × 10⁹ ÷ {weight_mb} × 10⁶"
+    bert_b32_flops_eq_str = f"{flops_b_per_inf} × 10⁹ × {batch_32}"
+
+    bert_perf_b32_str = fmt(perf_b32, precision=0, commas=False)
+
+    batch32_str = str(batch_32)
+    utilization_peak_str = f"{util_peak}"
+    utilization_peak_pct_str = fmt(util_peak * 100, precision=0, commas=False)
+
+    # Re-export A100 constants for this cell context
+    a100_tflops_fp16_str = fmt(peak_flops, precision=0, commas=False)
+    a100_bw_tbs_str = fmt(peak_bw, precision=1, commas=False)
+    a100_ridge_str = fmt(ridge_point, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+bert_params_m_str = BertRoofline.bert_params_m_str
+bert_flops_b_str = BertRoofline.bert_flops_b_str
+bert_weight_mb_str = BertRoofline.bert_weight_mb_str
+bert_ai_b1_str = BertRoofline.bert_ai_b1_str
+bert_perf_b1_str = BertRoofline.bert_perf_b1_str
+bert_util_b1_str = BertRoofline.bert_util_b1_str
+bert_batch32_flops_str = BertRoofline.bert_batch32_flops_str
+bert_ai_b32_str = BertRoofline.bert_ai_b32_str
+bert_ai_eq_str = BertRoofline.bert_ai_eq_str
+bert_b32_flops_eq_str = BertRoofline.bert_b32_flops_eq_str
+bert_perf_b32_str = BertRoofline.bert_perf_b32_str
+batch32_str = BertRoofline.batch32_str
+utilization_peak_str = BertRoofline.utilization_peak_str
+utilization_peak_pct_str = BertRoofline.utilization_peak_pct_str
+a100_tflops_fp16_str = BertRoofline.a100_tflops_fp16_str
+a100_bw_tbs_str = BertRoofline.a100_bw_tbs_str
+a100_ridge_str = BertRoofline.a100_ridge_str
 
 ```
 

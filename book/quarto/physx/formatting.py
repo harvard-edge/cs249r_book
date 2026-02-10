@@ -17,10 +17,13 @@ def _get_markdown():
     return _Markdown
 
 
-def fmt(quantity, unit=None, precision=1, commas=True):
+def fmt(quantity, unit=None, precision=1, commas=True, allow_zero=False):
     """
     Format a Pint Quantity for narrative text.
     Returns ONLY the number string (no unit suffix).
+    
+    Safety: Raises ValueError if a non-zero value is formatted as "0" 
+    due to insufficient precision (unless allow_zero=True).
     """
     if unit:
         # If a raw number is passed, assume it is already in base units.
@@ -32,8 +35,25 @@ def fmt(quantity, unit=None, precision=1, commas=True):
     else:
         val = quantity
 
+    # Primary formatting
     fmt_str = f",.{precision}f" if commas else f".{precision}f"
-    return f"{val:{fmt_str}}"
+    result = f"{val:{fmt_str}}"
+    
+    # --- Precision Safety Check ---
+    # Check if we accidentally rounded a non-zero value to zero
+    try:
+        numeric_result = float(result.replace(",", ""))
+    except ValueError:
+        numeric_result = None # Case for non-numeric strings if any
+        
+    if numeric_result == 0.0 and abs(val) > 1e-12 and not allow_zero:
+        raise ValueError(
+            f"Formatting Precision Error: Value {val} was formatted as '{result}' "
+            f"with precision={precision}. This hides the actual value. "
+            f"Increase precision or set allow_zero=True if this was intentional."
+        )
+
+    return result
 
 
 def sci(val, precision=2):

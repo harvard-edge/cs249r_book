@@ -49,38 +49,67 @@ from physx.constants import (
 )
 from physx.formatting import md_frac, md_sci, md_math, md
 
-# --- Inputs (Llama-2-70B model specs) ---
-llama_params = 70e9                      # 70 billion parameters
-llama_dvol = llama_params * BYTES_FP16   # data volume per token (FP16)
-llama_compute_per_token = 2 * llama_params  # 2 FLOPs per param per token
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ConclusionRoofline:
+    """
+    Namespace for Conclusion Roofline Analysis.
+    Scenario: Llama-2-70B inference on H100 (Memory Bound).
+    """
 
-# --- Inputs (H100 hardware specs) ---
-h100_bw = H100_MEM_BW                    # memory bandwidth
-h100_peak = H100_FLOPS_FP16_TENSOR       # peak FP16 tensor compute
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Model: Llama-2-70B
+    params = 70e9
+    bytes_per_param = 2 # FP16
+    flops_per_param = 2
 
-# --- Derived calculations ---
-t_mem = (llama_dvol / h100_bw).to('ms')  # memory-bound latency
-t_comp = (llama_compute_per_token / h100_peak).to('ms')  # compute-bound latency
-ratio = t_mem / t_comp                    # memory/compute ratio
+    # Hardware: H100 PCIe
+    # Note: Using approximate values consistent with Chapter 1 logic
+    mem_bw = 3.35e12 # 3.35 TB/s (HBM3)
+    peak_flops = 1979e12 # ~2 PFLOPS (FP16 Tensor)
 
-# --- Outputs (formatted strings for prose) ---
-llama_params_str = "70B"                                                       # e.g. "70B" params
-llama_dvol_gb_str = f"{llama_dvol.to('GB').magnitude:.0f}"                     # e.g. "140" GB
-llama_compute_gflops_str = f"{(llama_compute_per_token * flop).to(GFLOPs).magnitude:.0f}"  # e.g. "140" GFLOPs
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    d_vol = params * bytes_per_param
+    compute_req = params * flops_per_param
 
-h100_bw_tb_str = f"{h100_bw.to('TB/s').magnitude:.2f}"                         # e.g. "3.35" TB/s
-h100_peak_tflops_str = f"{h100_peak.to('TFLOPs/s').magnitude:.0f}"             # e.g. "1979" TFLOPS
+    t_mem = d_vol / mem_bw
+    t_comp = compute_req / peak_flops
 
-t_mem_ms_str = f"{t_mem.magnitude:.1f}"                                        # e.g. "41.8" ms
-t_comp_ms_str = f"{t_comp.magnitude:.2f}"                                      # e.g. "0.07" ms
-ratio_str = f"{ratio.magnitude:.0f}"                                           # e.g. "41" x ratio
+    ratio = t_mem / t_comp
 
-# --- Outputs (LaTeX math equations for inline display) ---
-h100_bw_gb_val = h100_bw.to('GB/s').magnitude
-t_mem_eq = md_math(f"T_{{mem}} = \\frac{{{llama_dvol_gb_str} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_str} \\text{{ ms}}")
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if ratio < 10:
+        raise ValueError(f"Narrative broken: LLM Inference should be heavily memory bound. Ratio is only {ratio:.1f}x")
 
-h100_peak_tflops_val = h100_peak.to('TFLOPs/s').magnitude
-t_comp_eq = md_math(f"T_{{comp}} = \\frac{{{llama_compute_gflops_str} \\times 10^9}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}}}} = {t_comp_ms_str} \\text{{ ms}}")
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    llama_params_str = "70B"
+    llama_dvol_gb_str = f"{d_vol / 1e9:.0f}"
+    llama_compute_gflops_str = f"{compute_req / 1e9:.0f}"
+
+    h100_bw_tb_str = f"{mem_bw / 1e12:.2f}"
+    h100_peak_tflops_str = f"{peak_flops / 1e12:.0f}"
+
+    t_mem_ms_str = f"{t_mem * 1000:.1f}"
+    t_comp_ms_str = f"{t_comp * 1000:.2f}"
+    ratio_str = f"{ratio:.0f}"
+
+    # LaTeX equations
+    h100_bw_gb_val = mem_bw / 1e9
+    t_mem_eq = md_math(f"T_{{mem}} = \\frac{{{llama_dvol_gb_str} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_str} \\text{{ ms}}")
+
+    h100_peak_tflops_val = peak_flops / 1e12
+    t_comp_eq = md_math(f"T_{{comp}} = \\frac{{{llama_compute_gflops_str} \\times 10^9}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}}}} = {t_comp_ms_str} \\text{{ ms}}")
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+llama_params_str = ConclusionRoofline.llama_params_str
+llama_dvol_gb_str = ConclusionRoofline.llama_dvol_gb_str
+llama_compute_gflops_str = ConclusionRoofline.llama_compute_gflops_str
+h100_bw_tb_str = ConclusionRoofline.h100_bw_tb_str
+h100_peak_tflops_str = ConclusionRoofline.h100_peak_tflops_str
+t_mem_ms_str = ConclusionRoofline.t_mem_ms_str
+t_comp_ms_str = ConclusionRoofline.t_comp_ms_str
+ratio_str = ConclusionRoofline.ratio_str
+t_mem_eq = ConclusionRoofline.t_mem_eq
+t_comp_eq = ConclusionRoofline.t_comp_eq
 ```
 
 # Conclusion {#sec-conclusion}
@@ -343,17 +372,29 @@ Building and optimizing a model, however, is only half the engineering challenge
 # └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# --- Inputs (typical production latency values) ---
-conclusion_mean_latency_ms_value = 50    # mean latency in ms
-conclusion_p99_latency_ms_value = 2000   # P99 tail latency in ms
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TailLatencyRatio:
+    """
+    Namespace for Tail Latency Ratio Calculation.
+    Scenario: Comparing mean latency vs P99 tail latency.
+    """
 
-# --- Derived calculations ---
-conclusion_tail_ratio_value = (
-    conclusion_p99_latency_ms_value / conclusion_mean_latency_ms_value
-)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    mean_latency_ms = 50.0
+    p99_latency_ms = 2000.0
 
-# --- Outputs (formatted strings for prose) ---
-conclusion_tail_ratio_str = fmt(conclusion_tail_ratio_value, precision=0, commas=False)  # e.g. "40" x
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    ratio = p99_latency_ms / mean_latency_ms
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if ratio < 10:
+        raise ValueError(f"Narrative broken: P99 tail latency ({ratio:.1f}x) is not significant enough.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    conclusion_tail_ratio_str = fmt(ratio, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+conclusion_tail_ratio_str = TailLatencyRatio.conclusion_tail_ratio_str
 ```
 
 ### Navigating Production Reality {#sec-conclusion-navigating-production-reality .unnumbered}

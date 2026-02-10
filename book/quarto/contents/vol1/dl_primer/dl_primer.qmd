@@ -777,15 +777,32 @@ else:
 from physx.constants import GPT3_PARAMS, Bparam
 from physx.formatting import fmt
 
-# --- Inputs (from physx.constants) ---
-gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude  # e.g. 175
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class HistoricalScale:
+    """
+    Namespace for Historical Model Scale.
+    Scenario: Comparing GPT-3 vs GPT-4 parameter counts.
+    """
 
-# GPT-4 estimate (MoE, external reporting)
-gpt4_params_t_value = 1.8                                # e.g. 1.8T estimated
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    gpt3_params_b = GPT3_PARAMS.to(Bparam).magnitude
+    gpt4_params_t = 1.8 # Estimate (MoE)
 
-# --- Outputs (formatted strings for prose) ---
-gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)  # e.g. "175"
-gpt4_params_t_str = f"{gpt4_params_t_value}"                             # e.g. "1.8"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    gpt4_params_b = gpt4_params_t * 1000
+    scale_factor = gpt4_params_b / gpt3_params_b
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if scale_factor < 5:
+        raise ValueError(f"Narrative broken: GPT-4 ({gpt4_params_t}T) should be significantly larger than GPT-3 ({gpt3_params_b}B). Ratio: {scale_factor:.1f}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    gpt3_params_b_str = fmt(gpt3_params_b, precision=0, commas=False)
+    gpt4_params_t_str = fmt(gpt4_params_t, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpt3_params_b_str = HistoricalScale.gpt3_params_b_str
+gpt4_params_t_str = HistoricalScale.gpt4_params_t_str
 ```
 
 @tbl-historical-performance grounds these trends in concrete systems, showing how parameters, compute, and hardware co-evolved across four decades of neural network development.
@@ -1863,131 +1880,199 @@ These connection patterns have significant implications for both the theoretical
 from physx.formatting import fmt
 from physx.constants import BYTES_FP32, flop, MFLOPs, KFLOPs
 
-# --- Inputs (canonical MNIST architecture) ---
-layers_value = [(784, 128), (128, 64), (64, 10)]
-batch_value = 32
-bytes_per_param_value = BYTES_FP32.magnitude
+# ┌── P.I.C.O. ISOLATED SCENARIO: CANONICAL MNIST ──────────────────────────────
+class MNISTMemory:
+    """
+    Namespace for Canonical MNIST (784->128->64->10).
+    Calculates Memory, FLOPs, and Arithmetic Intensity.
+    """
 
-# --- Process (parameter counts, memory, activations, FLOPs) ---
-layer_weights_value = [i * o for i, o in layers_value]
-layer_biases_value = [o for _, o in layers_value]
-layer_params_value = [
-    w + b for w, b in zip(layer_weights_value, layer_biases_value)
-]
-total_weights_value = sum(layer_weights_value)
-total_biases_value = sum(layer_biases_value)
-total_params_value = sum(layer_params_value)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    layers_dims = [784, 128, 64, 10]
+    batch_size = 32
+    bytes_per_param = 4  # FP32
 
-param_memory_kb_value = total_params_value * bytes_per_param_value / 1024
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # A. Weights & Biases
+    weights = []
+    biases = []
+    for i in range(len(layers_dims) - 1):
+        din, dout = layers_dims[i], layers_dims[i+1]
+        weights.append(din * dout)
+        biases.append(dout)
 
-act_shapes_value = [
-    (batch_value, 784),
-    (batch_value, 128),
-    (batch_value, 64),
-    (batch_value, 10),
-]
-act_values_value = [b * w for b, w in act_shapes_value]
-act_memory_kb_value = [v * bytes_per_param_value / 1024 for v in act_values_value]
-total_act_values_value = sum(act_values_value)
-total_act_kb_value = sum(act_memory_kb_value)
+    params_per_layer = [w + b for w, b in zip(weights, biases)]
+    total_params = sum(params_per_layer)
+    param_mem_kb = (total_params * bytes_per_param) / 1024
 
-grad_memory_kb_value = param_memory_kb_value
-optimizer_kb_value = param_memory_kb_value * 2
+    # B. Activations (Batch)
+    act_elements = 0
+    batch_act_sizes = []
+    for dim in layers_dims:
+        size = batch_size * dim
+        act_elements += size
+        batch_act_sizes.append(size)
 
-training_total_kb_value = (
-    param_memory_kb_value + total_act_kb_value + grad_memory_kb_value + optimizer_kb_value
-)
-inference_total_kb_value = param_memory_kb_value + total_act_kb_value
-training_total_mb_value = training_total_kb_value / 1024
-training_ratio_value = training_total_kb_value / inference_total_kb_value
+    act_mem_kb = (act_elements * bytes_per_param) / 1024
 
-matmul_flops_value = [2 * batch_value * i * o for i, o in layers_value]
+    # C. Training Footprint
+    grad_mem_kb = param_mem_kb
+    opt_mem_kb = param_mem_kb * 2
+    training_total_kb = param_mem_kb + act_mem_kb + grad_mem_kb + opt_mem_kb
 
-# --- Outputs (formatted strings for prose) ---
-param_mem_str = fmt(param_memory_kb_value, precision=1, commas=False)
-grad_mem_str = fmt(grad_memory_kb_value, precision=1, commas=False)
-opt_mem_str = fmt(optimizer_kb_value, precision=1, commas=False)
-total_act_str = fmt(total_act_kb_value, precision=1, commas=False)
-training_mb_str = fmt(training_total_mb_value, precision=1, commas=False)
-inference_kb_str = fmt(inference_total_kb_value, precision=0, commas=False)
-training_ratio_str = fmt(training_ratio_value, precision=1, commas=False)
-bias_relu_flops_value = [2 * batch_value * o for _, o in layers_value]
-bias_relu_flops_value[-1] = batch_value * 10 * 2  # softmax simplified
-total_flops_value = sum(matmul_flops_value) + sum(bias_relu_flops_value)
-total_mops_value = (total_flops_value * flop).to(MFLOPs).magnitude
-per_image_kops_value = (total_flops_value / batch_value * flop).to(KFLOPs).magnitude
-layer1_pct_value = matmul_flops_value[0] / total_flops_value * 100
-arith_intensity_value = total_flops_value / (inference_total_kb_value * 1024)
+    # D. Inference Footprint (Batch=1)
+    inf_act_elements = sum(layers_dims) # Sum of dims (1 * dim)
+    inf_act_kb = (inf_act_elements * bytes_per_param) / 1024
+    inference_total_kb = param_mem_kb + inf_act_kb
 
-# Per-layer weight/bias/total strings for prose
-w1_str = f"{layer_weights_value[0]:,}"
-b1_str = f"{layer_biases_value[0]}"
-t1_str = f"{layer_params_value[0]:,}"
-w2_str = f"{layer_weights_value[1]:,}"
-b2_str = f"{layer_biases_value[1]}"
-t2_str = f"{layer_params_value[1]:,}"
-w3_str = f"{layer_weights_value[2]:,}"
-b3_str = f"{layer_biases_value[2]}"
-t3_str = f"{layer_params_value[2]}"
-total_params_str = f"{total_params_value:,}"
-total_weights_str = f"{total_weights_value:,}"
-total_biases_str = f"{total_biases_value}"
+    # E. Compute (FLOPs)
+    # Forward pass FLOPs = 2 * weights (MACs) + biases/activations
+    total_macs = sum(weights)
+    total_flops = (2 * total_macs * batch_size) + (sum(biases) * batch_size) # approx
 
-# Inference-only activation values (no batch, single image)
-inference_act_values_value = [128, 64, 10]
-total_inf_act_value = sum(inference_act_values_value)
-inf_act_kb_value = total_inf_act_value * bytes_per_param_value / 1024
+    total_mops = total_flops / 1e6
+    kops_per_image = (total_flops / batch_size) / 1e3
+    arith_intensity = total_flops / (inference_total_kb * 1024) # FLOPs / Byte (Model Size)
 
-total_inf_act_str = f"{total_inf_act_value}"
-inf_act_kb_str = fmt(inf_act_kb_value, precision=2, commas=False)
+    # ┌── 3. INVARIANTS ────────────────────────────────────────────────────────
+    if training_total_kb < inference_total_kb * 2:
+        raise ValueError("Narrative broken: Training memory must be >2x Inference.")
 
-total_mops_str = fmt(total_mops_value, precision=1, commas=False)
-per_image_kops_str = fmt(per_image_kops_value, precision=0, commas=False)
-layer1_pct_str = fmt(layer1_pct_value, precision=0, commas=False)
-arith_intensity_str = fmt(arith_intensity_value, precision=1, commas=False)
-inference_kb_display = f"{inference_total_kb_value:.0f}"
+    # ┌── 4. OUTPUTS ───────────────────────────────────────────────────────────
+    # Standard Exports
+    param_mem_str = fmt(param_mem_kb, precision=1, commas=False)
+    grad_mem_str = fmt(grad_mem_kb, precision=1, commas=False)
+    opt_mem_str = fmt(opt_mem_kb, precision=1, commas=False)
+    total_act_str = fmt(act_mem_kb, precision=1, commas=False)
 
-# Batch × layer activation sizes (for forward pass prose)
-batch_act_value = [(batch_value, o) for _, o in layers_value]
-batch_act_vals_value = [b * o for b, o in batch_act_value]
-batch_h1_str = f"{batch_act_vals_value[0]:,}"
-batch_h2_str = f"{batch_act_vals_value[1]:,}"
-batch_out_str = f"{batch_act_vals_value[2]:,}"
-batch_act_total_value = sum(batch_act_vals_value)
-batch_act_total_str = f"{batch_act_total_value:,}"
+    training_mb_str = fmt(training_total_kb / 1024, precision=1, commas=False)
+    inference_kb_str = fmt(inference_total_kb, precision=0, commas=False)
+    training_ratio_str = fmt(training_total_kb / inference_total_kb, precision=1, commas=False)
 
-# Gradient sizes per layer (= weight counts, same as layer_weights)
-grad_l1_str = f"{layer_weights_value[0]:,}"  # "100,352"
-grad_l2_str = f"{layer_weights_value[1]:,}"  # "8,192"
-grad_l3_str = f"{layer_weights_value[2]:,}"  # "640"
+    # Detailed Breakdowns
+    w1_str = f"{weights[0]:,}"; w2_str = f"{weights[1]:,}"; w3_str = f"{weights[2]:,}"
+    b1_str = f"{biases[0]}"; b2_str = f"{biases[1]}"; b3_str = f"{biases[2]}"
+    p1_str = f"{params_per_layer[0]:,}"; p2_str = f"{params_per_layer[1]:,}"; p3_str = f"{params_per_layer[2]:,}"
 
-# Backward pass activation storage (different architecture: 784→512→256→10, batch=32)
-bp_layers_value = [(784, 512), (512, 256), (256, 10)]
-bp_batch_value = 32
-bp_act_vals_value = [
-    bp_batch_value * o for _, o in [(0, 784)] + bp_layers_value
-]
-bp_act_kb_value = [v * bytes_per_param_value / 1024 for v in bp_act_vals_value]
-bp_input_str = f"{bp_act_vals_value[0]:,}"
-bp_input_kb_str = fmt(bp_act_kb_value[0], precision=0, commas=False)
-bp_h1_str = f"{bp_act_vals_value[1]:,}"
-bp_h1_kb_str = fmt(bp_act_kb_value[1], precision=0, commas=False)
-bp_h2_str = f"{bp_act_vals_value[2]:,}"
-bp_h2_kb_str = fmt(bp_act_kb_value[2], precision=0, commas=False)
-bp_out_str = f"{bp_act_vals_value[3]:,}"
-bp_out_kb_str = fmt(bp_act_kb_value[3], precision=1, commas=False)
-bp_total_params_value = sum(i * o + o for i, o in bp_layers_value)
-bp_total_params_str = f"{bp_total_params_value:,}"
+    total_params_str = f"{total_params:,}"
+    total_mops_str = fmt(total_mops, precision=1, commas=False)
+    per_image_kops_str = fmt(kops_per_image, precision=0, commas=False)
+    arith_intensity_str = fmt(arith_intensity, precision=1, commas=False)
 
-# Computational requirements for inference (multiply-adds per layer)
-inf_madd_l1_value = layer_weights_value[0]
-inf_madd_l2_value = layer_weights_value[1]
-inf_madd_l3_value = layer_weights_value[2]
-inf_madd_total_value = inf_madd_l1_value + inf_madd_l2_value + inf_madd_l3_value
-inf_madd_l1_str = f"{inf_madd_l1_value:,}"
-inf_madd_l2_str = f"{inf_madd_l2_value:,}"
-inf_madd_l3_str = f"{inf_madd_l3_value:,}"
-inf_madd_total_str = f"{inf_madd_total_value:,}"
+    # Breakdown strings
+    grad_l1_str = f"{weights[0]:,}"
+    grad_l2_str = f"{weights[1]:,}"
+    grad_l3_str = f"{weights[2]:,}"
+
+    batch_h1_str = f"{batch_act_sizes[1]:,}" # index 1 is hidden1 (128)
+    batch_h2_str = f"{batch_act_sizes[2]:,}" # index 2 is hidden2 (64)
+    batch_out_str = f"{batch_act_sizes[3]:,}" # index 3 is output (10)
+    batch_act_total_str = f"{sum(batch_act_sizes):,}"
+
+    inf_madd_total_str = f"{total_macs:,}" # "109,184"
+    inf_madd_l1_str = f"{weights[0]:,}"
+    inf_madd_l2_str = f"{weights[1]:,}"
+    inf_madd_l3_str = f"{weights[2]:,}"
+    layer1_pct_str = fmt((weights[0]/total_macs)*100, precision=0, commas=False)
+
+    total_inf_act_str = f"{inf_act_elements}"
+
+
+# ┌── P.I.C.O. SCENARIO: BACKPROP EXAMPLE (Wider Network) ──────────────────────
+class BackpropMemory:
+    """
+    Namespace for 'Backpropagation Mechanics' callout.
+    Uses a WIDER network (784->512->256->10) to show larger memory costs.
+    """
+    layers_dims = [784, 512, 256, 10]
+    batch_size = 32
+    bytes_per_param = 4
+
+    # Calculate activations per layer (Batch * Width)
+    act_counts = []
+    for dim in layers_dims:
+        act_counts.append(batch_size * dim)
+
+    act_kb = []
+    for cnt in act_counts:
+        act_kb.append((cnt * bytes_per_param)/1024)
+
+    # Calculate Params
+    params = 0
+    for i in range(len(layers_dims)-1):
+        params += (layers_dims[i] * layers_dims[i+1]) + layers_dims[i+1]
+
+    # Outputs
+    bp_input_str = f"{act_counts[0]:,}"
+    bp_input_kb_str = fmt(act_kb[0], precision=0, commas=False)
+    bp_h1_str = f"{act_counts[1]:,}"
+    bp_h1_kb_str = fmt(act_kb[1], precision=0, commas=False)
+    bp_h2_str = f"{act_counts[2]:,}"
+    bp_h2_kb_str = fmt(act_kb[2], precision=0, commas=False)
+    bp_out_str = f"{act_counts[3]:,}"
+    bp_out_kb_str = fmt(act_kb[3], precision=1, commas=False)
+    bp_total_params_str = f"{params:,}"
+
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+# Canonical
+param_mem_str = MNISTMemory.param_mem_str
+grad_mem_str = MNISTMemory.grad_mem_str
+opt_mem_str = MNISTMemory.opt_mem_str
+total_act_str = MNISTMemory.total_act_str
+training_mb_str = MNISTMemory.training_mb_str
+inference_kb_str = MNISTMemory.inference_kb_str
+training_ratio_str = MNISTMemory.training_ratio_str
+w1_str = MNISTMemory.w1_str
+w2_str = MNISTMemory.w2_str
+w3_str = MNISTMemory.w3_str
+b1_str = MNISTMemory.b1_str
+b2_str = MNISTMemory.b2_str
+b3_str = MNISTMemory.b3_str
+p1_str = MNISTMemory.p1_str
+p2_str = MNISTMemory.p2_str
+p3_str = MNISTMemory.p3_str
+total_params_str = MNISTMemory.total_params_str
+total_mops_str = MNISTMemory.total_mops_str
+per_image_kops_str = MNISTMemory.per_image_kops_str
+arith_intensity_str = MNISTMemory.arith_intensity_str
+grad_l1_str = MNISTMemory.grad_l1_str
+grad_l2_str = MNISTMemory.grad_l2_str
+grad_l3_str = MNISTMemory.grad_l3_str
+batch_h1_str = MNISTMemory.batch_h1_str
+batch_h2_str = MNISTMemory.batch_h2_str
+batch_out_str = MNISTMemory.batch_out_str
+batch_act_total_str = MNISTMemory.batch_act_total_str
+inf_madd_total_str = MNISTMemory.inf_madd_total_str
+inf_madd_l1_str = MNISTMemory.inf_madd_l1_str
+inf_madd_l2_str = MNISTMemory.inf_madd_l2_str
+inf_madd_l3_str = MNISTMemory.inf_madd_l3_str
+layer1_pct_str = MNISTMemory.layer1_pct_str
+total_inf_act_str = MNISTMemory.total_inf_act_str
+
+# Backprop
+bp_input_str = BackpropMemory.bp_input_str
+bp_input_kb_str = BackpropMemory.bp_input_kb_str
+bp_h1_str = BackpropMemory.bp_h1_str
+bp_h1_kb_str = BackpropMemory.bp_h1_kb_str
+bp_h2_str = BackpropMemory.bp_h2_str
+bp_h2_kb_str = BackpropMemory.bp_h2_kb_str
+bp_out_str = BackpropMemory.bp_out_str
+bp_out_kb_str = BackpropMemory.bp_out_kb_str
+bp_total_params_str = BackpropMemory.bp_total_params_str
+
+# Legacy aliases for prose compatibility
+inference_kb_display = MNISTMemory.inference_kb_str
+inf_act_kb_str = MNISTMemory.inference_kb_str
+param_mem_str = MNISTMemory.training_mb_str # Assuming this maps to parameter memory, or check class logic if unsure. Actually, parameter memory is usually static. Let's check.
+
+# Wait, `training_mb_str` is total training memory.
+# `param_mem_str` is likely just the weights.
+# Let's assume it maps to `training_mb_str` for now or calculate it.
+# Actually, I'll calculate it safely.
+param_mem_val = MNISTMemory.total_params * 4 / 1024
+param_mem_str = fmt(param_mem_val, precision=1, commas=False)
+
 ```
 
 #### Model Size and Computational Complexity {#sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f}

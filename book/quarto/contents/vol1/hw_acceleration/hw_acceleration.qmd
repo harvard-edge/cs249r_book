@@ -173,37 +173,78 @@ To see Amdahl's Law in action, consider how the parallel fraction $p$ differs dr
 from physx.formatting import fmt
 from physx.constants import H100_FLOPS_INT8, TFLOPs, second
 
-# --- Inputs (workload parallel fractions) ---
-hw_speedup_value = 500                           # H100 vs CPU for matmul
-p_resnet_value = 0.95                            # ResNet-50: 95% parallelizable
-p_gpt2_value = 0.80                              # GPT-2: 80% parallelizable
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AmdahlH100:
+    """
+    Namespace for Amdahl's Law on H100.
+    Scenario: Comparing speedup for Compute-Bound (ResNet) vs Memory-Bound (GPT-2).
+    """
 
-# --- Process (Amdahl's Law calculation) ---
-# ResNet-50 calculations
-serial_resnet_value = 1 - p_resnet_value
-amdahl_resnet_value = 1 / (serial_resnet_value + p_resnet_value / hw_speedup_value)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    hw_speedup_factor = 500.0  # H100 vs CPU matmul
 
-# GPT-2 calculations
-serial_gpt2_value = 1 - p_gpt2_value
-amdahl_gpt2_value = 1 / (serial_gpt2_value + p_gpt2_value / hw_speedup_value)
-amdahl_gpt2_ceiling_value = 1 / (1 - p_gpt2_value)
+    # Workload Parallel Fractions (p)
+    p_resnet = 0.95  # 95% parallel (Compute Bound)
+    p_gpt2 = 0.80    # 80% parallel (Bandwidth Bound / Serial Overhead)
 
-# --- Outputs (formatted strings for prose) ---
-h100_tflops_int8 = f"{H100_FLOPS_INT8.to(TFLOPs/second).magnitude:,.0f}"  # e.g. "1,979"
-hw_speedup_str = fmt(hw_speedup_value, precision=0, commas=False)
-p_resnet_str = fmt(p_resnet_value, precision=2, commas=False)
-p_gpt2_str = fmt(p_gpt2_value, precision=2, commas=False)
-serial_resnet_str = fmt(serial_resnet_value, precision=2, commas=False)
-serial_gpt2_str = fmt(serial_gpt2_value, precision=2, commas=False)
-amdahl_resnet_str = fmt(amdahl_resnet_value, precision=1, commas=False)
-amdahl_gpt2_str = fmt(amdahl_gpt2_value, precision=1, commas=False)
-amdahl_gpt2_ceil_str = fmt(amdahl_gpt2_ceiling_value, precision=0, commas=False)
-p_resnet_pct_str = fmt(p_resnet_value*100, precision=0, commas=False)
-serial_resnet_pct_str = fmt(serial_resnet_value*100, precision=0, commas=False)
-amdahl_resnet_round_str = fmt(amdahl_resnet_value, precision=0, commas=False)
-serial_gpt2_pct_str = fmt((1 - p_gpt2_value)*100, precision=0, commas=False)
-p_resnet_per_s_str = fmt(p_resnet_value / hw_speedup_value, precision=4, commas=False)
-p_gpt2_per_s_str = fmt(p_gpt2_value / hw_speedup_value, precision=4, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Amdahl's Law: Speedup = 1 / ((1-p) + (p/s))
+
+    def calc_speedup(p, s):
+        serial = 1 - p
+        parallel_component = p / s
+        return 1 / (serial + parallel_component)
+
+    speedup_resnet = calc_speedup(p_resnet, hw_speedup_factor)
+    speedup_gpt2 = calc_speedup(p_gpt2, hw_speedup_factor)
+
+    # Theoretical ceiling (if s -> infinity)
+    ceiling_gpt2 = 1 / (1 - p_gpt2)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if speedup_resnet < speedup_gpt2 * 3:
+        raise ValueError(f"Narrative broken: ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")
+    if speedup_gpt2 > ceiling_gpt2:
+        raise ValueError("Math broken: Speedup cannot exceed theoretical ceiling.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    # Hardware context
+    h100_tflops_int8 = f"{H100_FLOPS_INT8.to(TFLOPs/second).magnitude:,.0f}"
+    hw_speedup_str = fmt(hw_speedup_factor, precision=0, commas=False)
+
+    # ResNet
+    p_resnet_str = fmt(p_resnet, precision=2, commas=False)
+    p_resnet_pct_str = fmt(p_resnet*100, precision=0, commas=False)
+    serial_resnet_str = fmt(1-p_resnet, precision=2, commas=False)
+    serial_resnet_pct_str = fmt((1-p_resnet)*100, precision=0, commas=False)
+    p_resnet_per_s_str = fmt(p_resnet / hw_speedup_factor, precision=4, commas=False)
+    amdahl_resnet_str = fmt(speedup_resnet, precision=1, commas=False)
+    amdahl_resnet_round_str = fmt(speedup_resnet, precision=0, commas=False)
+
+    # GPT-2
+    p_gpt2_str = fmt(p_gpt2, precision=2, commas=False)
+    serial_gpt2_str = fmt(1-p_gpt2, precision=2, commas=False)
+    serial_gpt2_pct_str = fmt((1-p_gpt2)*100, precision=0, commas=False)
+    p_gpt2_per_s_str = fmt(p_gpt2 / hw_speedup_factor, precision=4, commas=False)
+    amdahl_gpt2_str = fmt(speedup_gpt2, precision=1, commas=False)
+    amdahl_gpt2_ceil_str = fmt(ceiling_gpt2, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+h100_tflops_int8 = AmdahlH100.h100_tflops_int8
+hw_speedup_str = AmdahlH100.hw_speedup_str
+p_resnet_str = AmdahlH100.p_resnet_str
+p_resnet_pct_str = AmdahlH100.p_resnet_pct_str
+serial_resnet_str = AmdahlH100.serial_resnet_str
+serial_resnet_pct_str = AmdahlH100.serial_resnet_pct_str
+p_resnet_per_s_str = AmdahlH100.p_resnet_per_s_str
+amdahl_resnet_str = AmdahlH100.amdahl_resnet_str
+amdahl_resnet_round_str = AmdahlH100.amdahl_resnet_round_str
+p_gpt2_str = AmdahlH100.p_gpt2_str
+serial_gpt2_str = AmdahlH100.serial_gpt2_str
+serial_gpt2_pct_str = AmdahlH100.serial_gpt2_pct_str
+p_gpt2_per_s_str = AmdahlH100.p_gpt2_per_s_str
+amdahl_gpt2_str = AmdahlH100.amdahl_gpt2_str
+amdahl_gpt2_ceil_str = AmdahlH100.amdahl_gpt2_ceil_str
 ```
 
 ::: {.callout-lighthouse #lighthouse-amdahl-h100 title="Amdahl's Law on H100"}
@@ -1625,32 +1666,57 @@ While tensor cores package matrix operations into structured computational units
 from physx.formatting import fmt
 from physx.constants import ENERGY_DRAM_ACCESS_PJ, SYSTOLIC_ARRAY_DIM
 
-# --- Inputs (energy costs and array dimensions) ---
-dram_access_pj_value = ENERGY_DRAM_ACCESS_PJ.magnitude  # pJ per DRAM access
-vector_accesses_value = 4                                # 3 loads + 1 write
-systolic_size_value = SYSTOLIC_ARRAY_DIM                 # e.g. 128 for TPU
-compute_energy_pj_value = 1                              # pJ per MAC (INT8/FP16)
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class SystolicEnergy:
+    """
+    Namespace for Systolic Array Energy calculation.
+    Scenario: Comparing energy per MAC for Vector Unit vs Systolic Array.
+    """
 
-# --- Process (compare energy per operation) ---
-# Vector unit: 4 DRAM accesses per operation
-vector_energy_pj_value = vector_accesses_value * dram_access_pj_value
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    dram_pj = ENERGY_DRAM_ACCESS_PJ.magnitude
+    mac_pj = 1.0 # Compute cost
 
-# Systolic array: 2 loads per 128 operations (data pulses through)
-systolic_accesses_per_op_value = 2 / systolic_size_value
-systolic_energy_pj_value = systolic_accesses_per_op_value * dram_access_pj_value + compute_energy_pj_value
+    # Vector Unit: Needs 3 loads (A, B, C) + 1 write (C) per MAC
+    vector_dram_accesses = 4.0
 
-# Efficiency ratio
-energy_ratio_value = vector_energy_pj_value / systolic_energy_pj_value
+    # Systolic Array: Amortizes loads across array width
+    array_dim = SYSTOLIC_ARRAY_DIM # 128
 
-# --- Outputs (formatted strings for prose) ---
-dram_access_str = fmt(dram_access_pj_value, precision=0, commas=False)
-systolic_size_str = fmt(systolic_size_value, precision=0, commas=False)
-vector_accesses_str = fmt(vector_accesses_value, precision=0, commas=False)
-compute_energy_str = fmt(compute_energy_pj_value, precision=0, commas=False)
-vector_energy_str = f"{vector_energy_pj_value:,.0f}"
-systolic_access_str = fmt(systolic_accesses_per_op_value, precision=3, commas=False)
-systolic_energy_str = fmt(systolic_energy_pj_value, precision=1, commas=False)
-energy_ratio_str = fmt(energy_ratio_value, precision=0, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Vector Energy = (4 * DRAM) + MAC
+    e_vector = (vector_dram_accesses * dram_pj) + mac_pj
+
+    # Systolic Energy = (2 loads / 128 ops * DRAM) + MAC
+    # Note: Only 2 loads (A, B) are amortized; C stays in accumulator
+    systolic_dram_per_op = 2.0 / array_dim
+    e_systolic = (systolic_dram_per_op * dram_pj) + mac_pj
+
+    efficiency_ratio = e_vector / e_systolic
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if efficiency_ratio < 100:
+        raise ValueError(f"Narrative broken: Systolic efficiency ({efficiency_ratio:.1f}x) is too low. Should be >100x to justify TPU design.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    dram_access_str = fmt(dram_pj, precision=0, commas=False)
+    systolic_size_str = fmt(array_dim, precision=0, commas=False)
+    vector_accesses_str = fmt(vector_dram_accesses, precision=0, commas=False)
+    compute_energy_str = fmt(mac_pj, precision=0, commas=False)
+    vector_energy_str = f"{e_vector:,.0f}"
+    systolic_access_str = fmt(systolic_dram_per_op, precision=3, commas=False)
+    systolic_energy_str = fmt(e_systolic, precision=1, commas=False)
+    energy_ratio_str = fmt(efficiency_ratio, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+dram_access_str = SystolicEnergy.dram_access_str
+systolic_size_str = SystolicEnergy.systolic_size_str
+vector_accesses_str = SystolicEnergy.vector_accesses_str
+compute_energy_str = SystolicEnergy.compute_energy_str
+vector_energy_str = SystolicEnergy.vector_energy_str
+systolic_access_str = SystolicEnergy.systolic_access_str
+systolic_energy_str = SystolicEnergy.systolic_energy_str
+energy_ratio_str = SystolicEnergy.energy_ratio_str
 ```
 
 This architecture provides *the energy advantage of pulsing data*.
@@ -2543,14 +2609,50 @@ To optimize data movement, we must understand the physical topology of the compu
 from physx.constants import (
     NVLINK_A100_BW, NVLINK_H100_BW,
     INFINIBAND_HDR_BW, INFINIBAND_NDR_BW,
+    PCIE_GEN4_BW, A100_MEM_BW,
     GB, second, Gbps
 )
 
-# --- Outputs (formatted strings for prose) ---
-nvlink_a100 = f"{NVLINK_A100_BW.to(GB/second).magnitude:.0f}"     # e.g. "600"
-nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"     # e.g. "900"
-ib_hdr = f"{INFINIBAND_HDR_BW.to(Gbps).magnitude:.0f}"            # e.g. "200"
-ib_ndr = f"{INFINIBAND_NDR_BW.to(Gbps).magnitude:.0f}"            # e.g. "400"
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class InterconnectHierarchy:
+    """
+    Namespace for Interconnect Bandwidth Hierarchy.
+    Scenario: The bandwidth taper from Chip -> Node -> Cluster.
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Device
+    hbm_bw = A100_MEM_BW.to(GB/second).magnitude
+
+    # Chip-to-Chip
+    nvlink_a100 = NVLINK_A100_BW.to(GB/second).magnitude
+    nvlink_h100 = NVLINK_H100_BW.to(GB/second).magnitude
+
+    # Host-to-Device
+    pcie_gen4 = PCIE_GEN4_BW.to(GB/second).magnitude
+
+    # Node-to-Node (Network)
+    ib_hdr_gbps = INFINIBAND_HDR_BW.to(Gbps).magnitude
+    ib_hdr_gbs = INFINIBAND_HDR_BW.to(GB/second).magnitude # ~25 GB/s
+
+    ib_ndr_gbps = INFINIBAND_NDR_BW.to(Gbps).magnitude
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    # The "Bandwidth Taper" must hold
+    if not (hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_gbs):
+        raise ValueError(f"Narrative broken: Bandwidth hierarchy violated. HBM({hbm_bw}) > NVLink({nvlink_h100}) > PCIe({pcie_gen4}) > Net({ib_hdr_gbs})")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    nvlink_a100_str = f"{nvlink_a100:.0f}"
+    nvlink_h100_str = f"{nvlink_h100:.0f}"
+    ib_hdr_str = f"{ib_hdr_gbps:.0f}"
+    ib_ndr_str = f"{ib_ndr_gbps:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+nvlink_a100 = InterconnectHierarchy.nvlink_a100_str
+nvlink_h100 = InterconnectHierarchy.nvlink_h100_str
+ib_hdr = InterconnectHierarchy.ib_hdr_str
+ib_ndr = InterconnectHierarchy.ib_ndr_str
 ```
 
 1. **Device-Device Interconnect (NVLink / Infinity Fabric)**[^fn-nvlink]\index{NVLink!GPU interconnect}\index{GPU Interconnect!switching fabric}\index{Infinity Fabric!AMD interconnect}: Modern multi-GPU nodes use specialized high-speed bridges like NVLink to connect accelerators directly, bypassing the host CPU. Bandwidth ranges from `{python} nvlink_a100` to `{python} nvlink_h100` GB/s per GPU. The primary use case is gradient synchronization (AllReduce)\index{AllReduce!gradient synchronization}[^fn-allreduce-hardware] during distributed training. This bandwidth is critical for scaling; without it, multi-GPU training often scales poorly.
@@ -2713,31 +2815,67 @@ from physx.constants import (
 )
 from physx.formatting import fmt
 
-# --- Inputs (threshold values for comparison) ---
-legacy_ai_value = 200                            # AI that was compute-bound on A100
-relu_ai_value = 1 / 8                            # ReLU: 1 op per 8 bytes (FP64)
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class RooflineGap:
+    """
+    Namespace for Roofline Utilization Gap.
+    Scenario: Comparing Ridge Points across generations (V100 -> H100).
+    """
 
-# --- Process (calculate ridge points and ratios) ---
-# Ridge points: Peak FLOPS / Peak Bandwidth
-v100_ridge_value = (V100_FLOPS_FP16_TENSOR / V100_MEM_BW).to(flop / byte).magnitude
-a100_ridge_value = (A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop / byte).magnitude
-h100_ridge_value = (H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop / byte).magnitude
-a100_ridge_fp32_value = (A100_FLOPS_FP32 / A100_MEM_BW).to(flop / byte).magnitude
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Thresholds
+    legacy_ai = 200.0
+    relu_ai = 0.125
 
-# Generational comparisons
-bandwidth_ratio_value = (H100_MEM_BW / A100_MEM_BW).to("dimensionless").magnitude
-flops_ratio_value = (H100_FLOPS_FP16_TENSOR / A100_FLOPS_FP16_TENSOR).magnitude
-relu_below_roofline_value = h100_ridge_value / relu_ai_value
+    # Hardware Specs (Raw magnitudes)
+    v100_flops = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 1e12
+    v100_bw = V100_MEM_BW.to(byte/second).magnitude
 
-# --- Outputs (formatted strings for prose) ---
-v100_ridge = f"{v100_ridge_value:.0f}"                                          # e.g. "139"
-a100_ridge = f"{a100_ridge_value:.0f}"                                          # e.g. "153"
-h100_ridge = f"{h100_ridge_value:.0f}"                                          # e.g. "295"
-a100_ridge_fp32 = f"{a100_ridge_fp32_value:.0f}"                                # e.g. "10"
-legacy_ai_str = fmt(legacy_ai_value, precision=0, commas=False)                 # e.g. "200"
-bandwidth_ratio_str = fmt(bandwidth_ratio_value, precision=1, commas=False)     # e.g. "1.6"
-flops_ratio_str = fmt(flops_ratio_value, precision=1, commas=False)             # e.g. "3.2"
-relu_below_roofline_str = fmt(relu_below_roofline_value, precision=0, commas=True)  # e.g. "2,360"
+    a100_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 1e12
+    a100_flops_fp32 = A100_FLOPS_FP32.to(TFLOPs/second).magnitude * 1e12
+    a100_bw = A100_MEM_BW.to(byte/second).magnitude
+
+    h100_flops = H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 1e12
+    h100_bw = H100_MEM_BW.to(byte/second).magnitude
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Ridge Points (FLOP/Byte)
+    v100_ridge = v100_flops / v100_bw
+    a100_ridge = a100_flops / a100_bw
+    h100_ridge = h100_flops / h100_bw
+    a100_ridge_fp32 = a100_flops_fp32 / a100_bw
+
+    # Comparisons
+    bw_growth = h100_bw / a100_bw
+    flops_growth = h100_flops / a100_flops
+    relu_gap = h100_ridge / relu_ai
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if not (h100_ridge > a100_ridge > v100_ridge):
+        raise ValueError(f"Narrative broken: Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
+    if relu_gap < 1000:
+        raise ValueError(f"Narrative broken: ReLU gap ({relu_gap:.0f}x) is too small.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    v100_ridge_str = f"{v100_ridge:.0f}"
+    a100_ridge_str = f"{a100_ridge:.0f}"
+    h100_ridge_str = f"{h100_ridge:.0f}"
+    a100_ridge_fp32_str = f"{a100_ridge_fp32:.0f}"
+
+    legacy_ai_str = fmt(legacy_ai, precision=0, commas=False)
+    bandwidth_ratio_str = fmt(bw_growth, precision=1, commas=False)
+    flops_ratio_str = fmt(flops_growth, precision=1, commas=False)
+    relu_below_roofline_str = fmt(relu_gap, precision=0, commas=True)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+v100_ridge = RooflineGap.v100_ridge_str
+a100_ridge = RooflineGap.a100_ridge_str
+h100_ridge = RooflineGap.h100_ridge_str
+a100_ridge_fp32 = RooflineGap.a100_ridge_fp32_str
+legacy_ai_str = RooflineGap.legacy_ai_str
+bandwidth_ratio_str = RooflineGap.bandwidth_ratio_str
+flops_ratio_str = RooflineGap.flops_ratio_str
+relu_below_roofline_str = RooflineGap.relu_below_roofline_str
 ```
 
 ::: {.callout-notebook title="The Utilization Gap"}

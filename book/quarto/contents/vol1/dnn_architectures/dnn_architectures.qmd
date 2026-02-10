@@ -218,63 +218,102 @@ from physx.constants import (
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
-# --- ResNet-50 specs (from physx.constants) ---
-resnet_params_m_value = RESNET50_PARAMS.to(Mparam).magnitude
-resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
-resnet_fp32_mb_value = model_memory(RESNET50_PARAMS, BYTES_FP32, MB)
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class LighthouseSpecs:
+    """
+    Namespace for Lighthouse Model Comparison Table.
+    Aggregates specs for ResNet, GPT-2, DLRM, MobileNet, and KWS.
+    """
 
-# --- GPT-2 XL specs (1.5B params) ---
-gpt2_params_b_value = GPT2_PARAMS.to(Bparam).magnitude
-gpt2_fp32_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
-gpt2_gflops_per_token_value = 3.0                                # approximate
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # ResNet-50
+    resnet_params = RESNET50_PARAMS.to(Mparam).magnitude
+    resnet_flops = RESNET50_FLOPs.to(GFLOPs).magnitude
+    resnet_mem_mb = model_memory(RESNET50_PARAMS, BYTES_FP32, MB)
 
-# --- GPT-3 specs (175B params, used later in DLRM comparison) ---
-gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)
+    # GPT-2 XL
+    gpt2_params = GPT2_PARAMS.to(Bparam).magnitude
+    gpt2_flops_token = 3.0 # Approximate
+    gpt2_mem_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
 
-# --- DLRM specs ---
-dlrm_entries_b_value = DLRM_EMBEDDING_ENTRIES / 1e9
-dlrm_model_size_gb_value = DLRM_MODEL_SIZE_FP32.to(GB).magnitude
+    # DLRM
+    dlrm_entries_b = DLRM_EMBEDDING_ENTRIES / 1e9
+    dlrm_mem_gb = DLRM_MODEL_SIZE_FP32.to(GB).magnitude
 
-# --- MobileNetV2 specs ---
-mobilenet_params_m_value = MOBILENETV2_PARAMS.to(Mparam).magnitude
-mobilenet_mflops_value = MOBILENETV2_FLOPs.to(MFLOPs).magnitude
-mobilenet_fp32_mb_value = model_memory(MOBILENETV2_PARAMS, BYTES_FP32, MB)
-mobilenet_size_ratio_value = RESNET50_PARAMS.magnitude / MOBILENETV2_PARAMS.magnitude
-mobilenet_flops_ratio_value = RESNET50_FLOPs.magnitude / MOBILENETV2_FLOPs.magnitude
+    # MobileNetV2
+    mobilenet_params = MOBILENETV2_PARAMS.to(Mparam).magnitude
+    mobilenet_flops = MOBILENETV2_FLOPs.to(MFLOPs).magnitude
+    mobilenet_mem_mb = model_memory(MOBILENETV2_PARAMS, BYTES_FP32, MB)
 
-# --- KWS DS-CNN specs ---
-kws_params_k_value = KWS_DSCNN_PARAMS.to(Kparam).magnitude
-kws_mflops_value = KWS_DSCNN_FLOPs.to(MFLOPs).magnitude
-kws_fp32_kb_value = model_memory(KWS_DSCNN_PARAMS, BYTES_FP32, KB)
+    # KWS (DS-CNN)
+    kws_params_k = KWS_DSCNN_PARAMS.to(Kparam).magnitude
+    kws_flops_m = KWS_DSCNN_FLOPs.to(MFLOPs).magnitude
+    kws_mem_kb = model_memory(KWS_DSCNN_PARAMS, BYTES_FP32, KB)
 
-# --- A100 memory (for capacity wall calculation) ---
-a100_mem_value = A100_MEM_CAPACITY.to(GiB).magnitude
+    # Ratios
+    mobilenet_size_ratio = RESNET50_PARAMS.magnitude / MOBILENETV2_PARAMS.magnitude
+    mobilenet_flops_ratio = RESNET50_FLOPs.magnitude / MOBILENETV2_FLOPs.magnitude
 
-# --- Outputs (formatted strings for prose) ---
-resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)   # e.g. "25.6"
-resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)       # e.g. "4.1"
-resnet_fp32_mb_str = fmt(resnet_fp32_mb_value, precision=0, commas=False)     # e.g. "102"
+    # Reference Hardware
+    a100_mem = A100_MEM_CAPACITY.to(GiB).magnitude
 
-gpt2_params_b_str = fmt(gpt2_params_b_value, precision=1, commas=False)       # e.g. "1.5"
-gpt2_fp32_gb_str = fmt(gpt2_fp32_gb_value, precision=1, commas=False)         # e.g. "6.0"
-gpt2_gflops_per_token_str = fmt(gpt2_gflops_per_token_value, precision=1, commas=False)  # e.g. "3.0"
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    # Hierarchy Check: ResNet > MobileNet > KWS
+    if resnet_params <= mobilenet_params:
+        raise ValueError("Narrative broken: ResNet should be larger than MobileNet.")
+    if mobilenet_params * 1000 <= kws_params_k: # M vs K units
+        raise ValueError("Narrative broken: MobileNet should be larger than KWS.")
 
-gpt3_fp16_gb_str = fmt(gpt3_fp16_gb_value, precision=0, commas=False)         # e.g. "350"
+    # Memory Check: DLRM is the "Capacity Beast"
+    if dlrm_mem_gb < gpt2_mem_gb:
+        raise ValueError("Narrative broken: DLRM should be larger than GPT-2 (Memory Capacity).")
 
-dlrm_entries_b_str = fmt(dlrm_entries_b_value, precision=0, commas=False)     # e.g. "26"
-dlrm_model_size_gb_str = fmt(dlrm_model_size_gb_value, precision=0, commas=False)  # e.g. "540"
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    resnet_params_m_str = fmt(resnet_params, precision=1, commas=False)
+    resnet_gflops_str = fmt(resnet_flops, precision=1, commas=False)
+    resnet_fp32_mb_str = fmt(resnet_mem_mb, precision=0, commas=False)
 
-mobilenet_params_m_str = fmt(mobilenet_params_m_value, precision=1, commas=False)  # e.g. "3.5"
-mobilenet_mflops_str = fmt(mobilenet_mflops_value, precision=0, commas=False)      # e.g. "300"
-mobilenet_fp32_mb_str = fmt(mobilenet_fp32_mb_value, precision=0, commas=False)    # e.g. "14"
-mobilenet_size_ratio_str = fmt(mobilenet_size_ratio_value, precision=0, commas=False)   # e.g. "7"
-mobilenet_flops_ratio_str = fmt(mobilenet_flops_ratio_value, precision=0, commas=False) # e.g. "14"
+    gpt2_params_b_str = fmt(gpt2_params, precision=1, commas=False)
+    gpt2_fp32_gb_str = fmt(gpt2_mem_gb, precision=1, commas=False)
+    gpt2_gflops_per_token_str = fmt(gpt2_flops_token, precision=1, commas=False)
 
-kws_params_k_str = fmt(kws_params_k_value, precision=0, commas=False)         # e.g. "26"
-kws_mflops_str = fmt(kws_mflops_value, precision=0, commas=False)             # e.g. "6"
-kws_fp32_kb_str = fmt(kws_fp32_kb_value, precision=0, commas=False)           # e.g. "104"
+    # GPT-3 only needed for DLRM comparison context
+    gpt3_fp16_gb_str = fmt(model_memory(GPT3_PARAMS, BYTES_FP16, GB), precision=0, commas=False)
 
-a100_mem_str = fmt(a100_mem_value, precision=0, commas=False)                 # e.g. "80"
+    dlrm_entries_b_str = fmt(dlrm_entries_b, precision=0, commas=False)
+    dlrm_model_size_gb_str = fmt(dlrm_mem_gb, precision=0, commas=False)
+
+    mobilenet_params_m_str = fmt(mobilenet_params, precision=1, commas=False)
+    mobilenet_mflops_str = fmt(mobilenet_flops, precision=0, commas=False)
+    mobilenet_fp32_mb_str = fmt(mobilenet_mem_mb, precision=0, commas=False)
+    mobilenet_size_ratio_str = fmt(mobilenet_size_ratio, precision=0, commas=False)
+    mobilenet_flops_ratio_str = fmt(mobilenet_flops_ratio, precision=0, commas=False)
+
+    kws_params_k_str = fmt(kws_params_k, precision=0, commas=False)
+    kws_mflops_str = fmt(kws_flops_m, precision=0, commas=False)
+    kws_fp32_kb_str = fmt(kws_mem_kb, precision=0, commas=False)
+
+    a100_mem_str = fmt(a100_mem, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+resnet_params_m_str = LighthouseSpecs.resnet_params_m_str
+resnet_gflops_str = LighthouseSpecs.resnet_gflops_str
+resnet_fp32_mb_str = LighthouseSpecs.resnet_fp32_mb_str
+gpt2_params_b_str = LighthouseSpecs.gpt2_params_b_str
+gpt2_fp32_gb_str = LighthouseSpecs.gpt2_fp32_gb_str
+gpt2_gflops_per_token_str = LighthouseSpecs.gpt2_gflops_per_token_str
+gpt3_fp16_gb_str = LighthouseSpecs.gpt3_fp16_gb_str
+dlrm_entries_b_str = LighthouseSpecs.dlrm_entries_b_str
+dlrm_model_size_gb_str = LighthouseSpecs.dlrm_model_size_gb_str
+mobilenet_params_m_str = LighthouseSpecs.mobilenet_params_m_str
+mobilenet_mflops_str = LighthouseSpecs.mobilenet_mflops_str
+mobilenet_fp32_mb_str = LighthouseSpecs.mobilenet_fp32_mb_str
+mobilenet_size_ratio_str = LighthouseSpecs.mobilenet_size_ratio_str
+mobilenet_flops_ratio_str = LighthouseSpecs.mobilenet_flops_ratio_str
+kws_params_k_str = LighthouseSpecs.kws_params_k_str
+kws_mflops_str = LighthouseSpecs.kws_mflops_str
+kws_fp32_kb_str = LighthouseSpecs.kws_fp32_kb_str
+a100_mem_str = LighthouseSpecs.a100_mem_str
 ```
 
 | **Model**        | **Domain**  |                          **Params** | **FLOPs/Inf**                                     |                           **Memory** | **Bottleneck** | **Role in Textbook**                     |
@@ -403,41 +442,49 @@ The classic *MNIST* handwritten digit benchmark illustrates this gap between *re
 
 from physx.constants import param, Mparam, Kparam
 
-# --- MLP architecture: 784 → 4096 → 4096 → 10 ---
-mlp_input_value = 784                                            # flattened 28x28
-mlp_hidden_value = 4096                                          # hidden layer width
-mlp_output_value = 10                                            # digit classes
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MLPvsCNN:
+    """
+    Namespace for MNIST Parameter Comparison.
+    Scenario: Comparing a naive MLP vs a CNN for the same task.
+    """
 
-# --- CNN architecture: Conv(32) → Pool → Conv(64) → Pool → FC(128) → 10 ---
-conv1_k_value = 3                                                # 3x3 kernel
-conv1_in_value = 1                                               # grayscale input
-conv1_out_value = 32                                             # first conv filters
-conv2_k_value = 3                                                # 3x3 kernel
-conv2_in_value = 32                                              # from conv1
-conv2_out_value = 64                                             # second conv filters
-fc1_in_value = 64 * 7 * 7                                        # after two 2x2 pools
-fc1_out_value = 128                                              # FC hidden layer
-fc2_in_value = 128
-fc2_out_value = 10                                               # digit classes
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # MLP: 784 -> 4096 -> 4096 -> 10
+    mlp_in = 784
+    mlp_h = 4096
+    mlp_out = 10
 
-# --- Parameter counts ---
-mlp_params_value = (
-    (mlp_input_value * mlp_hidden_value)                         # input → hidden1
-    + (mlp_hidden_value * mlp_hidden_value)                      # hidden1 → hidden2
-    + (mlp_hidden_value * mlp_output_value)                      # hidden2 → output
-)
-cnn_params_value = (
-    (conv1_k_value * conv1_k_value * conv1_out_value)            # conv1: 3x3x1x32
-    + (conv2_k_value * conv2_k_value * conv2_in_value * conv2_out_value)  # conv2
-    + (fc1_in_value * fc1_out_value)                             # FC1
-    + (fc2_in_value * fc2_out_value)                             # FC2
-)
-param_ratio_value = mlp_params_value // cnn_params_value
+    # CNN: Conv(32) -> Pool -> Conv(64) -> Pool -> FC(128) -> 10
+    c1_k, c1_out = 3, 32
+    c2_k, c2_out = 3, 64
+    fc1_in, fc1_out = 64*7*7, 128
 
-# --- Outputs (formatted strings for prose) ---
-mlp_params_str = f"{(mlp_params_value * param).to(Mparam).magnitude:.0f}M"  # e.g. "20M"
-cnn_params_str = f"{(cnn_params_value * param).to(Kparam).magnitude:.0f}K"  # e.g. "421K"
-param_ratio_str = f"{param_ratio_value}"                                     # e.g. "47"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # MLP Params
+    mlp_p = (mlp_in * mlp_h) + (mlp_h * mlp_h) + (mlp_h * mlp_out)
+
+    # CNN Params
+    cnn_p = (c1_k*c1_k*1*c1_out) + \
+            (c2_k*c2_k*c1_out*c2_out) + \
+            (fc1_in*fc1_out) + \
+            (fc1_out*10)
+
+    ratio = mlp_p // cnn_p
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if ratio < 10:
+        raise ValueError(f"Narrative broken: MLP ({mlp_p}) isn't significantly larger than CNN ({cnn_p}). Ratio: {ratio}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    mlp_params_str = f"{(mlp_p * param).to(Mparam).magnitude:.0f}M"
+    cnn_params_str = f"{(cnn_p * param).to(Kparam).magnitude:.0f}K"
+    param_ratio_str = f"{ratio}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mlp_params_str = MLPvsCNN.mlp_params_str
+cnn_params_str = MLPvsCNN.cnn_params_str
+param_ratio_str = MLPvsCNN.param_ratio_str
 ```
 
 ::: {.callout-example title="MNIST: Representation vs Learnability"}
@@ -820,17 +867,33 @@ from physx.constants import param, BYTES_FP32, MB
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
-# --- Inputs (typical hidden layer width) ---
-mlp_large_dim_value = 2048                                       # common layer width
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class LargeMLP:
+    """
+    Namespace for Large MLP Memory Scaling.
+    Scenario: The O(N^2) cost of dense layers (2048 -> 2048).
+    """
 
-# --- Computation ---
-mlp_large_params_value = mlp_large_dim_value * mlp_large_dim_value  # 2048 x 2048
-mlp_large_mem_mb_value = model_memory(mlp_large_params_value * param, BYTES_FP32, MB)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    width = 2048
 
-# --- Outputs (formatted strings for prose) ---
-mlp_large_dim_str = f"{mlp_large_dim_value}"                     # e.g. "2048"
-mlp_large_params_str = fmt(mlp_large_params_value, precision=0, commas=False)  # e.g. "4194304"
-mlp_large_mem_mb_str = fmt(mlp_large_mem_mb_value, precision=0, commas=False)  # e.g. "16"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    params = width * width
+    mem_mb = model_memory(params * param, BYTES_FP32, MB)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if params < 1_000_000:
+        raise ValueError(f"Narrative broken: {width}x{width} layer should be large (>1M params).")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    dim_str = f"{width}"
+    params_str = fmt(params, precision=0, commas=False)
+    mem_str = fmt(mem_mb, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mlp_large_dim_str = LargeMLP.dim_str
+mlp_large_params_str = LargeMLP.params_str
+mlp_large_mem_mb_str = LargeMLP.mem_str
 ```
 
 #### Memory Requirements
@@ -1693,19 +1756,39 @@ RNN sequential processing creates computational patterns different from both MLP
 
 from physx.formatting import fmt
 
-# --- Inputs (typical RNN layer dimensions) ---
-rnn_input_dim_value = 100                                        # input embedding size
-rnn_hidden_dim_value = 128                                       # hidden state size
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class RNNCompute:
+    """
+    Namespace for RNN Computation Costs.
+    Scenario: Per-step MACs for a standard RNN layer (100 input, 128 hidden).
+    """
 
-# --- Computation costs per time step ---
-rnn_recurrent_macs_value = rnn_hidden_dim_value * rnn_hidden_dim_value  # h x W_hh
-rnn_input_macs_value = rnn_input_dim_value * rnn_hidden_dim_value       # x x W_xh
-rnn_macs_step_value = rnn_recurrent_macs_value + rnn_input_macs_value   # total per step
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    input_dim = 100
+    hidden_dim = 128
 
-# --- Outputs (formatted strings for prose) ---
-rnn_recurrent_macs_str = fmt(rnn_recurrent_macs_value, precision=0, commas=True)  # e.g. "16,384"
-rnn_input_macs_str = fmt(rnn_input_macs_value, precision=0, commas=True)          # e.g. "12,800"
-rnn_macs_step_str = fmt(rnn_macs_step_value, precision=0, commas=True)            # e.g. "29,184"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Recurrent: h_prev x W_hh (H x H)
+    macs_recurrent = hidden_dim * hidden_dim
+
+    # Input: x_t x W_xh (I x H)
+    macs_input = input_dim * hidden_dim
+
+    macs_total = macs_recurrent + macs_input
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if macs_recurrent <= macs_input:
+        raise ValueError(f"Narrative broken: Recurrent cost ({macs_recurrent}) should dominate Input cost ({macs_input}) for large hidden states.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    recurrent_str = fmt(macs_recurrent, precision=0, commas=True)
+    input_str = fmt(macs_input, precision=0, commas=True)
+    total_str = fmt(macs_total, precision=0, commas=True)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+rnn_recurrent_macs_str = RNNCompute.recurrent_str
+rnn_input_macs_str = RNNCompute.input_str
+rnn_macs_step_str = RNNCompute.total_str
 ```
 
 @lst-rnn_layer_step demonstrates the operation using high-level matrix operations found in deep learning frameworks. The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_xh` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
@@ -2634,17 +2717,31 @@ The **DLRM** architecture [@naumov2019deep] standardizes this pattern, combining
 from physx.formatting import fmt
 from physx.constants import BYTES_FP32, byte, GB
 
-# --- Inputs (industrial-scale recommendation) ---
-num_users_value = 1_000_000_000                                  # 1 billion users
-embed_dim_value = 128                                            # embedding dimension
-bytes_per_param_value = BYTES_FP32.magnitude                     # FP32 precision
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DLRMEmbedding:
+    """
+    Namespace for DLRM Embedding Table calculation.
+    Scenario: 1 Billion users x 128 dim x FP32 = Capacity Wall.
+    """
 
-# --- Computation ---
-embed_table_bytes_value = num_users_value * embed_dim_value * bytes_per_param_value
-embed_table_gb_value = (embed_table_bytes_value * byte).to(GB).magnitude
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    num_users = 1_000_000_000
+    embed_dim = 128
+    bytes_per_param = 4 # FP32
 
-# --- Outputs (formatted strings for prose) ---
-embed_table_gb_str = fmt(embed_table_gb_value, precision=0, commas=False)  # e.g. "512"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    table_bytes = num_users * embed_dim * bytes_per_param
+    table_gb = (table_bytes * byte).to(GB).magnitude
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if table_gb < 80:
+        raise ValueError(f"Narrative broken: DLRM table ({table_gb:.1f} GB) fits on an A100. It must be larger to justify model parallelism.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    embed_table_gb_str = fmt(table_gb, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+embed_table_gb_str = DLRMEmbedding.embed_table_gb_str
 ```
 
 2.  **Sparse Features (Embedding Tables)**\index{Embedding!table}**:** Categorical features (User ID, Item ID) are looked up in massive embedding tables. A table for 1 billion users with 128-dimensional vectors requires $10^9 \times 128 \times 4$ bytes ≈ `{python} embed_table_gb_str` GB of memory. This component is memory-intensive but compute-light (just a memory copy).

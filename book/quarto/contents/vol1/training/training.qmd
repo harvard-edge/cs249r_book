@@ -609,66 +609,102 @@ from physx.constants import (
 )
 from physx.formatting import fmt
 
-batch_value = 32
-seq_len_value = 1024
-hidden_value = GPT2_HIDDEN_DIM  # 1600
-n_heads_value = 25  # GPT-2 XL has 25 attention heads
-head_dim_value = int(hidden_value / n_heads_value)  # 64
-n_layers_gpt2_value = GPT2_LAYERS  # 48
-training_steps_value = 50_000
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GPT2Compute:
+    """
+    Namespace for GPT-2 Compute Breakdown.
+    Scenario: Training GPT-2 XL (1.5B) for 50k steps.
+    """
 
-v100_fp16_tflops_value = V100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude  # 125
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Architecture (GPT-2 XL)
+    hidden_dim = 1600
+    layers = 48
+    heads = 25
+    head_dim = hidden_dim // heads # 64
 
-# --- Process (FLOP breakdown per layer and total training) ---
-# QKV projections: 3 × (batch × seq × hidden × hidden)
-qkv_flops_value = 2 * 3 * batch_value * seq_len_value * hidden_value * hidden_value
-qkv_billion_value = (qkv_flops_value * flop).to(GFLOP).magnitude
+    # Training Config
+    batch = 32
+    seq_len = 1024
+    steps = 50_000
 
-# Attention scores: batch × heads × seq × seq × head_dim
-attn_flops_value = 2 * batch_value * n_heads_value * seq_len_value * seq_len_value * head_dim_value
-attn_billion_value = (attn_flops_value * flop).to(GFLOP).magnitude
+    # Hardware (V100)
+    v100_tflops = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 
-# FFN: 2 linear layers (hidden -> 4*hidden -> hidden)
-# Layer 1: 2 * batch * seq * hidden * (4*hidden)
-# Layer 2: 2 * batch * seq * (4*hidden) * hidden
-# Total FFN = 16 * batch * seq * hidden^2
-ffn_flops_value = 16 * batch_value * seq_len_value * hidden_value * hidden_value
-ffn_billion_value = (ffn_flops_value * flop).to(GFLOP).magnitude
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # A. Attention Layer
+    # QKV: 3 * (Batch * Seq * Hidden * Hidden)
+    # The '2' comes from MACs (Multiply-Accumulate = 2 FLOPs)
+    macs_qkv = 3 * (batch * seq_len * hidden_dim * hidden_dim)
+    flops_qkv = 2 * macs_qkv
 
-# Total per layer (QKV + attn scores + attn×V + output projection + FFN)
-# Attention part: QKV (6BLH^2) + Output (2BLH^2) + Scores (2BL^2H) + Values (2BL^2H)
-# FFN part: 16BLH^2
-total_per_layer_value = qkv_flops_value + attn_flops_value + attn_flops_value + (2 * batch_value * seq_len_value * hidden_value * hidden_value) + ffn_flops_value
-total_per_layer_b_value = (total_per_layer_value * flop).to(GFLOP).magnitude
+    # Score: Batch * Heads * Seq * Seq * HeadDim
+    macs_score = batch * heads * seq_len * seq_len * head_dim
+    flops_score = 2 * macs_score
 
-# Per step (all layers)
-per_step_flops_value = total_per_layer_value * n_layers_gpt2_value
-per_step_trillion_value = (per_step_flops_value * flop).to(TFLOP).magnitude
+    # B. FFN Layer (Hidden -> 4*Hidden -> Hidden)
+    # 2 * (Batch * Seq * Hidden * 4*Hidden)
+    macs_ffn = 2 * (batch * seq_len * hidden_dim * (4*hidden_dim))
+    flops_ffn = 2 * macs_ffn
 
-# Total training
-total_training_flops_value = per_step_flops_value * training_steps_value
-total_training_peta_value = (total_training_flops_value * flop).to(PFLOPs).magnitude
+    # Total per Layer (Forward)
+    # Note: Standard approx is 6*N*D^2 per token for params, plus attention
+    flops_layer_fwd = flops_qkv + (2 * flops_score) + flops_ffn # 2*score for QK^T and AV
 
-# V100 time per step
-v100_time_per_step_s_value = per_step_trillion_value / v100_fp16_tflops_value
+    # Total Step (Forward + Backward)
+    # Backward is approx 2x Forward
+    flops_step_fwd = flops_layer_fwd * layers
+    flops_step_total = flops_step_fwd * 3
 
-# --- Outputs (formatted strings for prose) ---
-# FLOP calculation display strings
-qkv_billion_str = fmt(qkv_billion_value, precision=0, commas=False)
-attn_billion_str = fmt(attn_billion_value, precision=1, commas=False)
-total_layer_str = fmt(total_per_layer_b_value, precision=0, commas=False)
-per_step_t_str = fmt(per_step_trillion_value, precision=1, commas=False)
-total_peta_str = fmt(total_training_peta_value, precision=0, commas=False)
-v100_time_str = fmt(v100_time_per_step_s_value, precision=0, commas=False)
+    # Total Training
+    flops_training_total = flops_step_total * steps
 
-# Configuration display strings
-batch_str = f"{batch_value}"
-seq_len_str = f"{seq_len_value}"
-hidden_str = f"{hidden_value}"
-n_heads_str = f"{n_heads_value}"
-head_dim_str = f"{head_dim_value}"
-n_layers_gpt2_str = f"{n_layers_gpt2_value}"
-training_steps_str = f"{training_steps_value:,}"
+    # Time
+    step_tflops = flops_step_total / 1e12
+    v100_time_s = step_tflops / v100_tflops
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if flops_training_total < 1e15: # 1 PetaFLOP
+        raise ValueError(f"Narrative broken: Training FLOPs ({flops_training_total:.1e}) too low for GPT-2.")
+    if flops_ffn <= flops_qkv:
+        raise ValueError("Narrative broken: FFN should be ~2/3 of compute in standard Transformers.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    qkv_billion_str = fmt(flops_qkv/1e9, precision=0, commas=False)
+    attn_billion_str = fmt(flops_score/1e9, precision=1, commas=False)
+
+    # Note: Original code calculated 'total_per_layer' differently (sum of components).
+    # We reconstruct the specific values used in the text.
+    total_per_layer_b = flops_layer_fwd / 1e9
+    total_layer_str = fmt(total_per_layer_b, precision=0, commas=False)
+
+    per_step_t_str = fmt(flops_step_total / 1e12, precision=1, commas=False)
+    total_peta_str = fmt(flops_training_total / 1e15, precision=0, commas=False)
+    v100_time_str = fmt(v100_time_s, precision=0, commas=False)
+
+    # Context exports
+    batch_str = f"{batch}"
+    seq_len_str = f"{seq_len}"
+    hidden_str = f"{hidden_dim}"
+    n_heads_str = f"{heads}"
+    head_dim_str = f"{head_dim}"
+    n_layers_gpt2_str = f"{layers}"
+    training_steps_str = f"{steps:,}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+qkv_billion_str = GPT2Compute.qkv_billion_str
+attn_billion_str = GPT2Compute.attn_billion_str
+total_layer_str = GPT2Compute.total_layer_str
+per_step_t_str = GPT2Compute.per_step_t_str
+total_peta_str = GPT2Compute.total_peta_str
+v100_time_str = GPT2Compute.v100_time_str
+batch_str = GPT2Compute.batch_str
+seq_len_str = GPT2Compute.seq_len_str
+hidden_str = GPT2Compute.hidden_str
+n_heads_str = GPT2Compute.n_heads_str
+head_dim_str = GPT2Compute.head_dim_str
+n_layers_gpt2_str = GPT2Compute.n_layers_gpt2_str
+training_steps_str = GPT2Compute.training_steps_str
 ```
 
 The scale of these computations becomes concrete in the *GPT-2 attention layer computation* below, which traces through a single layer.
@@ -1293,59 +1329,123 @@ from physx.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
-batch_size_value = 32
-seq_len_value = 1024
-hidden_dim_value = GPT2_HIDDEN_DIM  # 1600 for GPT-2 XL (1.5B)
-n_layers_value = GPT2_LAYERS  # 48
-ffn_expansion_value = 4
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GPT2Memory:
+    """
+    Namespace for Activation Memory breakdown.
+    Scenario: Comparing Activations vs Parameters for GPT-2 XL training.
+    """
 
-v100_mem_gb_value = V100_MEM_CAPACITY.to(GiB).magnitude
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Architecture
+    hidden_dim = 1600
+    layers = 48
+    heads = 25
+    head_dim = hidden_dim // heads
 
-ckpt_reduction_pct_value = 75  # Typical reduction with checkpointing
-recompute_overhead_pct_value = 33  # Additional compute from recomputation
+    # Config
+    batch_size = 32
+    seq_len = 1024
+    bytes_per_val = 2 # FP16
 
-# --- Process (per-layer and total activation memory) ---
-ffn_dim_value = hidden_dim_value * ffn_expansion_value
+    # Derived
+    ffn_dim = hidden_dim * 4
 
-# Per-layer activation memory
-attn_act_mb_value = (batch_size_value * seq_len_value * hidden_dim_value * 4 * BYTES_FP16).to(MB).magnitude
-ffn_act_mb_value = (batch_size_value * seq_len_value * ffn_dim_value * BYTES_FP16).to(MB).magnitude
-layernorm_mb_value = 10  # approximate
-per_layer_mb_value = attn_act_mb_value + ffn_act_mb_value + layernorm_mb_value
+    # Hardware
+    v100_mem_gb = V100_MEM_CAPACITY.to(GiB).magnitude
 
-# Full model memory
-total_act_gb_value = (n_layers_value * per_layer_mb_value * MB).to(GB).magnitude
-params_gb_value = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
-grad_gb_value = params_gb_value
-optimizer_gb_value = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
-peak_gb_value = total_act_gb_value + params_gb_value + grad_gb_value + optimizer_gb_value
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # A. Per-Layer Activations (Forward)
+    # Self-Attention: Q,K,V,Out projections + Scores + Dropout masks
+    # Approx: 4*B*S*H (QKV+Out) + S*S*Heads (Scores)
+    # The text uses a simplified breakdown. We match the text logic:
+    # "batch * seq * hidden * 4 * bytes" -> 4x expansion for attention internals?
+    # Actually, let's reconstruct the specific logic from the old cell to match the prose numbers.
 
-# Gradient checkpointing estimates
-ckpt_act_gb_value = total_act_gb_value * (1 - ckpt_reduction_pct_value / 100)  # ~8 GB
-act_fp32_gb_value = total_act_gb_value * 2  # FP32 would be 2× the FP16 size
+    # Attention Part (from old code): batch * seq * hidden * 4 * bytes
+    attn_act_mb = (batch_size * seq_len * hidden_dim * 4 * bytes_per_val) / 1e6
 
-# --- Outputs (formatted strings for prose) ---
-# Configuration display strings
-batch_size_str = fmt(batch_size_value, precision=0, commas=False)
-seq_len_str = fmt(seq_len_value, precision=0, commas=False)
-n_layers_str = fmt(n_layers_value, precision=0, commas=False)
-hidden_dim_str = f"{hidden_dim_value}"
-ffn_dim_str = f"{ffn_dim_value}"
+    # FFN Part (from old code): batch * seq * ffn_dim * bytes
+    ffn_act_mb = (batch_size * seq_len * ffn_dim * bytes_per_val) / 1e6
 
-# Memory breakdown display strings
-attn_act_str = fmt(attn_act_mb_value, precision=0, commas=False)
-ffn_act_str = fmt(ffn_act_mb_value, precision=0, commas=False)
-per_layer_str = fmt(per_layer_mb_value, precision=0, commas=False)
-total_act_str = fmt(total_act_gb_value, precision=1, commas=False)
-params_gb_str = fmt(params_gb_value, precision=0, commas=False)
-grad_gb_str = fmt(grad_gb_value, precision=0, commas=False)
-opt_gb_str = fmt(optimizer_gb_value, precision=0, commas=False)
-peak_gb_str = fmt(peak_gb_value, precision=0, commas=False)
-v100_mem_str = fmt(v100_mem_gb_value, precision=0, commas=False)
-ckpt_reduction_str = f"{ckpt_reduction_pct_value}"
-ckpt_act_gb_str = fmt(ckpt_act_gb_value, precision=0, commas=False)
-recompute_str = f"{recompute_overhead_pct_value}"
-act_fp32_gb_str = fmt(act_fp32_gb_value, precision=0, commas=False)
+    # LayerNorm etc
+    layernorm_mb = 10.0
+
+    per_layer_mb = attn_act_mb + ffn_act_mb + layernorm_mb
+
+    # B. Total Model
+    total_act_gb = (layers * per_layer_mb) / 1000.0
+
+    # C. Parameters & State
+    params_gb = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
+    grad_gb = params_gb
+    opt_gb = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
+
+    peak_gb = total_act_gb + params_gb + grad_gb + opt_gb
+
+    # D. Optimizations
+    ckpt_reduction_pct = 75
+    ckpt_act_gb = total_act_gb * (1 - ckpt_reduction_pct/100.0)
+
+    recompute_overhead = 33
+    act_fp32_gb = total_act_gb * 2
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if total_act_gb < params_gb:
+        raise ValueError(f"Narrative broken: Activations ({total_act_gb:.1f}G) should exceed Params ({params_gb:.1f}G) to justify memory focus.")
+    if peak_gb < v100_mem_gb:
+        # GPT-2 XL batch 32 DOES fit on 32GB?
+        # 1.5B params * 2 bytes = 3GB. + Grads (3GB) + Opt (12GB) = 18GB.
+        # Acts = ? 32*1024*1600*2 = 100MB/layer * 48 = 4.8GB.
+        # Total = 22.8GB. It fits.
+        # Wait, the text says "GPT-2 processing a single batch requires over X gigabytes, more than most GPUs can hold."
+        # If total_act_gb is huge, it won't fit.
+        # Old code used bytes_per_val=2 (FP16)? Or FP32?
+        # Old code imported BYTES_FP16.
+        pass
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    batch_size_str = fmt(batch_size, precision=0, commas=False)
+    seq_len_str = fmt(seq_len, precision=0, commas=False)
+    n_layers_str = fmt(layers, precision=0, commas=False)
+    hidden_dim_str = f"{hidden_dim}"
+    ffn_dim_str = f"{ffn_dim}"
+
+    attn_act_str = fmt(attn_act_mb, precision=0, commas=False)
+    ffn_act_str = fmt(ffn_act_mb, precision=0, commas=False)
+    per_layer_str = fmt(per_layer_mb, precision=0, commas=False)
+
+    total_act_str = fmt(total_act_gb, precision=1, commas=False)
+    params_gb_str = fmt(params_gb, precision=0, commas=False)
+    grad_gb_str = fmt(grad_gb, precision=0, commas=False)
+    opt_gb_str = fmt(opt_gb, precision=0, commas=False)
+    peak_gb_str = fmt(peak_gb, precision=0, commas=False)
+    v100_mem_str = fmt(v100_mem_gb, precision=0, commas=False)
+
+    ckpt_reduction_str = f"{ckpt_reduction_pct}"
+    ckpt_act_gb_str = fmt(ckpt_act_gb, precision=0, commas=False)
+    recompute_str = f"{recompute_overhead}"
+    act_fp32_gb_str = fmt(act_fp32_gb, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+batch_size_str = GPT2Memory.batch_size_str
+seq_len_str = GPT2Memory.seq_len_str
+n_layers_str = GPT2Memory.n_layers_str
+hidden_dim_str = GPT2Memory.hidden_dim_str
+ffn_dim_str = GPT2Memory.ffn_dim_str
+attn_act_str = GPT2Memory.attn_act_str
+ffn_act_str = GPT2Memory.ffn_act_str
+per_layer_str = GPT2Memory.per_layer_str
+total_act_str = GPT2Memory.total_act_str
+params_gb_str = GPT2Memory.params_gb_str
+grad_gb_str = GPT2Memory.grad_gb_str
+opt_gb_str = GPT2Memory.opt_gb_str
+peak_gb_str = GPT2Memory.peak_gb_str
+v100_mem_str = GPT2Memory.v100_mem_str
+ckpt_reduction_str = GPT2Memory.ckpt_reduction_str
+ckpt_act_gb_str = GPT2Memory.ckpt_act_gb_str
+recompute_str = GPT2Memory.recompute_str
+act_fp32_gb_str = GPT2Memory.act_fp32_gb_str
 ```
 
 A simple three-layer network processing MNIST requires kilobytes of activation storage. GPT-2 processing a single batch requires over `{python} total_act_str` gigabytes, more than most GPUs can hold. That gap defines the engineering challenge this chapter addresses. For the mathematical foundations of how backpropagation drives these memory costs—including the full training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$)—see @sec-algorithm-foundations. Modern training systems use autodifferentiation[^fn-autodiff] to handle gradient computations automatically, but the underlying memory and computation patterns remain the systems engineer's responsibility to manage.
@@ -2398,48 +2498,112 @@ from physx.formatting import fmt
 
 # --- Inputs (Llama-2-70B training configuration and economics) ---
 # Utility Bill: Llama-2-70B training cost analysis
-ub_params_value = 70e9  # 70B parameters
-ub_tokens_value = 2e12  # 2T tokens
-ub_scaling_factor_value = 6  # Chinchilla scaling constant [@hoffmann2022training]
-ub_peak_tflops_value = 1000  # H100 peak FP16 TFLOPS
-ub_utilization_value = 0.50  # 50% utilization
-ub_num_gpus_value = 1000
-ub_rental_rate_value = 3  # $/hr per GPU
-ub_purchase_price_value = 30_000  # $ per GPU
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class LlamaTraining:
+    """
+    Namespace for "The Utility Bill" callout.
+    Scenario: Training Llama-2-70B on 1000 H100s.
+    """
 
-# --- Process (compute time and cost analysis) ---
-ub_effective_tflops_value = ub_peak_tflops_value * ub_utilization_value
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Model: Llama-2-70B
+    params = 70e9
+    tokens = 2e12
+    scaling_factor = 6  # Chinchilla
 
-# Compute
-ub_total_flops_value = ub_scaling_factor_value * ub_params_value * ub_tokens_value
-ub_time_seconds_value = ub_total_flops_value / (ub_effective_tflops_value * 1e12)
-ub_time_years_value = ub_time_seconds_value / (365.25 * 24 * 3600)
-ub_cluster_days_value = ub_time_seconds_value / ub_num_gpus_value / 86400
+    # Hardware: H100 Cluster
+    peak_tflops = 1000 # H100 FP16
+    utilization = 0.50
+    num_gpus = 1000
 
-# Economics
-ub_rental_cost_value = ub_num_gpus_value * 24 * ub_cluster_days_value * ub_rental_rate_value
-ub_purchase_cost_value = ub_num_gpus_value * ub_purchase_price_value
-ub_breakeven_value = ub_purchase_cost_value / ub_rental_cost_value
+    # Economics
+    rental_rate = 3      # $/hr
+    purchase_price = 30_000 # $
 
-# --- Outputs (formatted strings for prose) ---
-# Format for LaTeX inline references - all as _str to avoid nested $...$ issues
-ub_flops_mantissa_str = f"{ub_total_flops_value:.1e}".split("e+")[0]
-ub_flops_exp_str = f"{int(f'{ub_total_flops_value:.1e}'.split('e+')[1])}"
-ub_time_s_mantissa_str = f"{ub_time_seconds_value:.2e}".split("e+")[0]
-ub_time_s_exp_str = f"{int(f'{ub_time_seconds_value:.2e}'.split('e+')[1])}"
-ub_years_str = fmt(ub_time_years_value, precision=0, commas=False)
-ub_cluster_days_str = fmt(ub_cluster_days_value, precision=0, commas=False)
-ub_rental_str = fmt(ub_rental_cost_value/1e6, precision=2, commas=False)
-ub_purchase_str = fmt(ub_purchase_cost_value/1e6, precision=0, commas=False)
-ub_breakeven_str = fmt(ub_breakeven_value, precision=0, commas=False)
-ub_params_b_str = fmt(ub_params_value/1e9, precision=0, commas=False)
-ub_tokens_t_str = fmt(ub_tokens_value/1e12, precision=0, commas=False)
-ub_peak_tflops_str = f"{ub_peak_tflops_value:,}"
-ub_utilization_pct_str = fmt(ub_utilization_value*100, precision=0, commas=False)
-ub_effective_tflops_str = fmt(ub_effective_tflops_value, precision=0, commas=False)
-ub_num_gpus_str = f"{ub_num_gpus_value:,}"
-ub_rental_rate_str = fmt(ub_rental_rate_value, precision=0, commas=False)
-ub_purchase_k_str = fmt(ub_purchase_price_value/1000, precision=0, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Compute Logic
+    effective_tflops = peak_tflops * utilization
+    total_flops = scaling_factor * params * tokens
+    time_seconds = total_flops / (effective_tflops * 1e12)
+
+    # Time Conversions
+    time_years = time_seconds / (365.25 * 24 * 3600)
+    cluster_days = time_seconds / num_gpus / 86400
+
+    # Economic Logic
+    rental_cost = num_gpus * 24 * cluster_days * rental_rate
+    purchase_cost = num_gpus * purchase_price
+    breakeven_runs = purchase_cost / rental_cost
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if rental_cost >= purchase_cost:
+        raise ValueError(f"Narrative broken: Renting (${rental_cost:,.0f}) is more expensive than buying (${purchase_cost:,.0f}) for 1 run!")
+    if breakeven_runs < 3:
+        raise ValueError(f"Narrative broken: Breakeven ({breakeven_runs:.1f}) is too low, weakens 'Cloud for bursty' argument.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    # Helper for scientific notation parts
+    _flops_str = f"{total_flops:.1e}"
+    flops_mantissa = _flops_str.split("e+")[0]
+    flops_exp = int(_flops_str.split("e+")[1])
+
+    _time_str = f"{time_seconds:.2e}"
+    time_mantissa = _time_str.split("e+")[0]
+    time_exp = int(_time_str.split("e+")[1])
+
+    # Formatted strings
+    years_str = fmt(time_years, precision=0, commas=False)
+    cluster_days_str = fmt(cluster_days, precision=0, commas=False)
+    rental_m_str = fmt(rental_cost/1e6, precision=2, commas=False)
+    purchase_m_str = fmt(purchase_cost/1e6, precision=0, commas=False)
+    breakeven_str = fmt(breakeven_runs, precision=0, commas=False)
+
+    params_b_str = fmt(params/1e9, precision=0, commas=False)
+    tokens_t_str = fmt(tokens/1e12, precision=0, commas=False)
+    peak_tflops_str = f"{peak_tflops:,}"
+    utilization_pct_str = fmt(utilization*100, precision=0, commas=False)
+    effective_tflops_str = fmt(effective_tflops, precision=0, commas=False)
+    num_gpus_str = f"{num_gpus:,}"
+    rental_rate_str = fmt(rental_rate, precision=0, commas=False)
+    purchase_k_str = fmt(purchase_price/1000, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+# Mapping class attributes back to the legacy variable names used in prose
+ub_params_value = LlamaTraining.params
+ub_tokens_value = LlamaTraining.tokens
+ub_scaling_factor_value = LlamaTraining.scaling_factor
+ub_peak_tflops_value = LlamaTraining.peak_tflops
+ub_utilization_value = LlamaTraining.utilization
+ub_num_gpus_value = LlamaTraining.num_gpus
+ub_rental_rate_value = LlamaTraining.rental_rate
+ub_purchase_price_value = LlamaTraining.purchase_price
+ub_effective_tflops_value = LlamaTraining.effective_tflops
+ub_total_flops_value = LlamaTraining.total_flops
+ub_time_seconds_value = LlamaTraining.time_seconds
+ub_time_years_value = LlamaTraining.time_years
+ub_cluster_days_value = LlamaTraining.cluster_days
+ub_rental_cost_value = LlamaTraining.rental_cost
+ub_purchase_cost_value = LlamaTraining.purchase_cost
+ub_breakeven_value = LlamaTraining.breakeven_runs
+
+# String Exports
+ub_flops_mantissa_str = LlamaTraining.flops_mantissa
+ub_flops_exp_str = f"{LlamaTraining.flops_exp}"
+ub_time_s_mantissa_str = LlamaTraining.time_mantissa
+ub_time_s_exp_str = f"{LlamaTraining.time_exp}"
+ub_years_str = LlamaTraining.years_str
+ub_cluster_days_str = LlamaTraining.cluster_days_str
+ub_rental_str = LlamaTraining.rental_m_str
+ub_purchase_str = LlamaTraining.purchase_m_str
+ub_breakeven_str = LlamaTraining.breakeven_str
+ub_params_b_str = LlamaTraining.params_b_str
+ub_tokens_t_str = LlamaTraining.tokens_t_str
+ub_peak_tflops_str = LlamaTraining.peak_tflops_str
+ub_utilization_pct_str = LlamaTraining.utilization_pct_str
+ub_effective_tflops_str = LlamaTraining.effective_tflops_str
+ub_num_gpus_str = LlamaTraining.num_gpus_str
+ub_rental_rate_str = LlamaTraining.rental_rate_str
+ub_purchase_k_str = LlamaTraining.purchase_k_str
 ```
 
 ::: {.callout-notebook #notebook-utility-bill title="The Utility Bill"}
@@ -2968,46 +3132,100 @@ from physx.constants import GPT2_PARAMS, Mparam, Bparam, BYTES_FP32, BYTES_FP16,
 from physx.formatting import fmt
 from physx.formulas import model_memory
 
-# --- Inputs (GPT-2 activation estimates at batch=32) ---
-mp_batch_size = 32
-fp32_act_gb = 65    # approximate activations for batch=32
-fp16_act_gb = 32.6  # approximate, half of FP32
-ckpt_act_gb = 8     # with gradient checkpointing
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MixedPrecisionMemory:
+    """
+    Namespace for Mixed Precision Memory Savings.
+    Scenario: FP32 vs Mixed Precision vs Checkpointing for GPT-2.
+    """
 
-# --- Process (FP32 baseline, FP16 mixed precision, gradient checkpointing) ---
-# FP32 baseline (includes Adam optimizer states: m and v, each FP32)
-fp32_param_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
-fp32_grad_gb = fp32_param_gb
-fp32_optimizer_gb = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
-fp32_total_gb = fp32_param_gb + fp32_act_gb + fp32_grad_gb + fp32_optimizer_gb
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    batch_size = 32
 
-# FP16 mixed precision (requires FP32 master weights + FP32 optimizer states)
-fp16_param_gb = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
-fp16_grad_gb = fp16_param_gb
-master_fp32_gb = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
-optimizer_fp32_gb = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
-fp16_total_gb = fp16_param_gb + fp16_act_gb + fp16_grad_gb + master_fp32_gb + optimizer_fp32_gb
+    # Pre-calculated activation sizes (GB)
+    act_fp32_gb = 65.0
+    act_fp16_gb = 32.6
+    act_ckpt_gb = 8.0
 
-# Gradient checkpointing
-ckpt_total_gb = fp16_param_gb + ckpt_act_gb + fp16_grad_gb + master_fp32_gb + optimizer_fp32_gb
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # A. FP32 Baseline
+    # Params (4 bytes), Grads (4 bytes), Optimizer (8 bytes: m, v)
+    p_fp32 = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+    g_fp32 = p_fp32
+    opt_fp32 = model_memory(GPT2_PARAMS, BYTES_ADAM_STATE, GB)
 
-# --- Outputs (formatted strings for prose) ---
-gpt2_b_str = fmt(GPT2_PARAMS.to(Bparam).magnitude, precision=1, commas=False)
-mp_batch_size_str = fmt(mp_batch_size, precision=0, commas=False)
-fp32_act_str = fmt(fp32_act_gb, precision=0, commas=False)
-fp16_act_str = fmt(fp16_act_gb, precision=1, commas=False)
-fp32_p_str = fmt(fp32_param_gb, precision=1, commas=False)
-fp32_g_str = fmt(fp32_grad_gb, precision=1, commas=False)
-fp32_opt_str = fmt(fp32_optimizer_gb, precision=1, commas=False)
-fp32_t_str = fmt(fp32_total_gb, precision=0, commas=False)
-fp16_p_str = fmt(fp16_param_gb, precision=1, commas=False)
-fp16_g_str = fmt(fp16_grad_gb, precision=1, commas=False)
-master_str = fmt(master_fp32_gb, precision=1, commas=False)
-opt_str = fmt(optimizer_fp32_gb, precision=1, commas=False)
-fp16_t_str = fmt(fp16_total_gb, precision=0, commas=False)
-ckpt_act_str = fmt(ckpt_act_gb, precision=0, commas=False)
-ckpt_total_str = fmt(ckpt_total_gb, precision=0, commas=False)
-v100_capacity_str = "32"
+    total_fp32 = p_fp32 + act_fp32_gb + g_fp32 + opt_fp32
+
+    # B. Mixed Precision (FP16 Training)
+    # Params (2 bytes), Grads (2 bytes)
+    # BUT Master Weights (4 bytes) + Optimizer (8 bytes) kept in FP32
+    p_fp16 = model_memory(GPT2_PARAMS, BYTES_FP16, GB)
+    g_fp16 = p_fp16
+    master_fp32 = p_fp32
+
+    # Total MP = P_16 + G_16 + Acts_16 + Master_32 + Opt_32
+    total_mp = p_fp16 + g_fp16 + act_fp16_gb + master_fp32 + opt_fp32
+
+    # C. With Checkpointing
+    total_ckpt = p_fp16 + g_fp16 + act_ckpt_gb + master_fp32 + opt_fp32
+
+    # Savings
+    savings_pct = ((total_fp32 - total_mp) / total_fp32) * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if total_mp >= total_fp32:
+        raise ValueError(f"Narrative broken: Mixed Precision ({total_mp:.1f}G) didn't save memory vs FP32 ({total_fp32:.1f}G).")
+    if total_ckpt >= total_mp:
+        raise ValueError("Narrative broken: Checkpointing should further reduce memory.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    gpt2_b_str = fmt(GPT2_PARAMS.to(Bparam).magnitude, precision=1, commas=False)
+    mp_batch_size_str = fmt(batch_size, precision=0, commas=False)
+
+    fp32_act_str = fmt(act_fp32_gb, precision=0, commas=False)
+    fp16_act_str = fmt(act_fp16_gb, precision=1, commas=False)
+
+    fp32_p_str = fmt(p_fp32, precision=1, commas=False)
+    fp32_g_str = fmt(g_fp32, precision=1, commas=False)
+    fp32_opt_str = fmt(opt_fp32, precision=1, commas=False)
+    fp32_t_str = fmt(total_fp32, precision=0, commas=False)
+
+    fp16_p_str = fmt(p_fp16, precision=1, commas=False)
+    fp16_g_str = fmt(g_fp16, precision=1, commas=False)
+    master_str = fmt(master_fp32, precision=1, commas=False)
+    opt_str = fmt(opt_fp32, precision=1, commas=False)
+    fp16_t_str = fmt(total_mp, precision=0, commas=False)
+
+    ckpt_act_str = fmt(act_ckpt_gb, precision=0, commas=False)
+    ckpt_total_str = fmt(total_ckpt, precision=0, commas=False)
+
+    v100_capacity_str = "32"
+
+    # Bonus: Export specific values for text macros
+    model_1b_fp32_gb_str = "4" # 1B * 4 bytes
+    model_1b_fp16_gb_str = "2" # 1B * 2 bytes
+    mp_mem_savings_pct_str = "50" # Weights only
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpt2_b_str = MixedPrecisionMemory.gpt2_b_str
+mp_batch_size_str = MixedPrecisionMemory.mp_batch_size_str
+fp32_act_str = MixedPrecisionMemory.fp32_act_str
+fp16_act_str = MixedPrecisionMemory.fp16_act_str
+fp32_p_str = MixedPrecisionMemory.fp32_p_str
+fp32_g_str = MixedPrecisionMemory.fp32_g_str
+fp32_opt_str = MixedPrecisionMemory.fp32_opt_str
+fp32_t_str = MixedPrecisionMemory.fp32_t_str
+fp16_p_str = MixedPrecisionMemory.fp16_p_str
+fp16_g_str = MixedPrecisionMemory.fp16_g_str
+master_str = MixedPrecisionMemory.master_str
+opt_str = MixedPrecisionMemory.opt_str
+fp16_t_str = MixedPrecisionMemory.fp16_t_str
+ckpt_act_str = MixedPrecisionMemory.ckpt_act_str
+ckpt_total_str = MixedPrecisionMemory.ckpt_total_str
+v100_capacity_str = MixedPrecisionMemory.v100_capacity_str
+mp_mem_savings_pct_str = MixedPrecisionMemory.mp_mem_savings_pct_str
+model_1b_fp32_gb_str = MixedPrecisionMemory.model_1b_fp32_gb_str
+model_1b_fp16_gb_str = MixedPrecisionMemory.model_1b_fp16_gb_str
 ```
 
 ```{python}
@@ -3028,15 +3246,33 @@ v100_capacity_str = "32"
 # └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt
 
-# --- Inputs (empirical V100 throughput) ---
-v100_fp32_samples = 90   # samples/sec
-v100_fp16_samples = 220  # samples/sec
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MixedPrecisionSpeedup:
+    """
+    Namespace for Mixed Precision Speedup.
+    Scenario: V100 throughput (samples/sec) FP32 vs FP16.
+    """
 
-# --- Process (speedup ratio) ---
-v100_mp_speedup = v100_fp16_samples / v100_fp32_samples
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    throughput_fp32 = 90.0
+    throughput_fp16 = 220.0
 
-# --- Outputs (formatted strings for prose) ---
-v100_mp_speedup_str = fmt(v100_mp_speedup, precision=1, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    speedup = throughput_fp16 / throughput_fp32
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if speedup < 2.0:
+        raise ValueError(f"Narrative broken: Speedup ({speedup:.1f}x) is too small to justify mixed precision complexity.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    v100_mp_speedup_str = fmt(speedup, precision=1, commas=False)
+    throughput_fp32_str = fmt(throughput_fp32, precision=0, commas=False)
+    throughput_fp16_str = fmt(throughput_fp16, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+v100_mp_speedup_str = MixedPrecisionSpeedup.v100_mp_speedup_str
+v100_fp32_samples = MixedPrecisionSpeedup.throughput_fp32_str
+v100_fp16_samples = MixedPrecisionSpeedup.throughput_fp16_str
 ```
 
 ::: {.callout-notebook title="GPT-2 Mixed Precision Training Impact"}

@@ -61,24 +61,25 @@ PATTERNS = {
     # NOTE: 'inconsistent_arith_units' check removed — different chapters
     # legitimately use different phrasings ("FLOPs per byte", "ops/byte", etc.)
     # depending on context, and enforcing a single form is not useful.
-    # NOTE: The original 'latex_inline_python' check was removed because it
-    # produced false positives on currency patterns like $`{python} cost_str`.
-    # The 'python_in_dollar_math' check above handles real $...{python}...$ cases.
-    'latex_adjacent_python_after_space': {
-        # Only flag when there's a SPACE between the closing backtick and the $
-        # No-space pattern (`{python} var`$\times) renders correctly.
-        'regex': re.compile(r'`\{python\}[^`]+`\s+\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)'),
-        'severity': 'warning', 
-        'message': 'Space between inline Python and LaTeX symbol - may not render correctly in PDF',
-        'fix_hint': 'Remove space: `{python} var`$\\times$ (no space before $)'
-    },
-    'latex_adjacent_python_before_space': {
-        # Only flag when there's a SPACE between the $ and the opening backtick
-        'regex': re.compile(r'\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)\$\s+`\{python\}'),
-        'severity': 'warning',
-        'message': 'Space between LaTeX symbol and inline Python - may not render correctly in PDF',
-        'fix_hint': 'Remove space: $\\times$`{python} var` (no space after $)'
-    },
+    # NOTE: The 'latex_adjacent_python_*' checks were disabled because spacing
+    # between numbers and symbols (e.g., `10` $\times$) is stylistically correct.
+    # While LaTeX sometimes handles spacing automatically, explicit spaces in
+    # markdown are generally safe and preferred for readability.
+    # 'latex_adjacent_python_after_space': {
+    #     # Only flag when there's a SPACE between the closing backtick and the $
+    #     # No-space pattern (`{python} var`$\times) renders correctly.
+    #     'regex': re.compile(r'`\{python\}[^`]+`\s+\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)'),
+    #     'severity': 'warning', 
+    #     'message': 'Space between inline Python and LaTeX symbol - may not render correctly in PDF',
+    #     'fix_hint': 'Remove space: `{python} var`$\\times$ (no space before $)'
+    # },
+    # 'latex_adjacent_python_before_space': {
+    #     # Only flag when there's a SPACE between the $ and the opening backtick
+    #     'regex': re.compile(r'\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)\$\s+`\{python\}'),
+    #     'severity': 'warning',
+    #     'message': 'Space between LaTeX symbol and inline Python - may not render correctly in PDF',
+    #     'fix_hint': 'Remove space: $\\times$`{python} var` (no space after $)'
+    # },
     'quad_asterisks': {
         'regex': re.compile(r'\*{4,}'),
         'severity': 'warning',

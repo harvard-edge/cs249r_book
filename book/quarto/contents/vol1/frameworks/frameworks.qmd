@@ -217,13 +217,34 @@ Consider two engineers writing the same neural network. The first debugs interac
 from physx.constants import A100_FLOPS_FP16_TENSOR, A100_MEM_BW, TFLOPs, TB, second
 from physx.formatting import fmt
 
-# --- Inputs (from hardware specs) ---
-a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude  # 312 TFLOPS
-a100_bw_tbs_value = A100_MEM_BW.to(TB/second).magnitude                       # ~2 TB/s
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MemoryWallSpecs:
+    """
+    Namespace for A100 Memory Wall Specs.
+    Scenario: Demonstrating the 150x gap between compute and bandwidth.
+    """
 
-# --- Outputs (formatted strings for prose) ---
-a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)  # e.g. "312"  # Note: also defined in a100-specs-blas, device-bandwidth-hierarchy; produces same value
-a100_bw_tbs_str = fmt(a100_bw_tbs_value, precision=1, commas=False)            # e.g. "2.0"
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # From hardware specs (physx.constants)
+    flops_fp16 = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+    bw_tbs = A100_MEM_BW.to(TB/second).magnitude
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Arithmetic Intensity "Ridge Point" (Ops / Byte)
+    # 312 TFLOPS / 2 TB/s = ~156 FLOPs/Byte
+    ridge_point = (flops_fp16 * 1e12) / (bw_tbs * 1e12)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if ridge_point < 100:
+        raise ValueError(f"Narrative broken: A100 ridge point ({ridge_point:.1f}) is too low to claim a 'Memory Wall'.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    a100_tflops_fp16_str = fmt(flops_fp16, precision=0, commas=False)
+    a100_bw_tbs_str = fmt(bw_tbs, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_tflops_fp16_str = MemoryWallSpecs.a100_tflops_fp16_str
+a100_bw_tbs_str = MemoryWallSpecs.a100_bw_tbs_str
 ```
 
 \index{Memory Wall!execution strategy impact}
@@ -768,32 +789,58 @@ The compilation overhead in these examples (approximately 100ms to compile the f
 # │          overhead_speedup_str, bw_efficiency_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (typical overhead values) ---
-python_dispatch_us = 10                                                         # ~10 μs per op
-kernel_launch_us = 5                                                            # ~5 μs per op
-memory_access_us = 1                                                            # ~1 μs (VRAM)
-kernel_launch_us_value = python_dispatch_us + kernel_launch_us                  # combined overhead
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class FusionSpeedup:
+    """
+    Namespace for Kernel Fusion Speedup calculation.
+    Scenario: Comparing Eager (2 launches) vs Fused (1 launch) overheads.
+    """
 
-eager_n_ops_value = 2                                                           # 2 kernel launches
-compiled_n_ops_value = 1                                                        # 1 fused kernel
-eager_mem_factor_value = 4                                                      # 4N bytes (2R + 2W)
-compiled_mem_factor_value = 2                                                   # 2N bytes (fused)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    python_dispatch_us = 10
+    kernel_launch_us = 5
+    memory_access_us = 1
 
-# --- Process ---
-eager_overhead_us_value = eager_n_ops_value * kernel_launch_us_value           # 30 μs
-compiled_overhead_us_value = compiled_n_ops_value * kernel_launch_us_value     # 15 μs
-overhead_speedup_value = eager_overhead_us_value // compiled_overhead_us_value # 2x
-bw_efficiency_value = eager_mem_factor_value // compiled_mem_factor_value      # 2x
+    eager_ops = 2
+    fused_ops = 1
 
-# --- Outputs (formatted strings for prose) ---
-python_dispatch_us_str = f"{python_dispatch_us}"                                # e.g. "10"
-kernel_launch_only_us_str = f"{kernel_launch_us}"                               # e.g. "5"
-memory_access_us_str = f"{memory_access_us}"                                    # e.g. "1"
-kernel_launch_us_str = f"{kernel_launch_us_value}"                              # e.g. "15"
-eager_overhead_str = f"{eager_overhead_us_value}"                               # e.g. "30"
-compiled_overhead_str = f"{compiled_overhead_us_value}"                         # e.g. "15"
-overhead_speedup_str = f"{overhead_speedup_value}"                              # e.g. "2"
-bw_efficiency_str = f"{bw_efficiency_value}"                                    # e.g. "2"
+    eager_mem_factor = 4 # 2R + 2W
+    fused_mem_factor = 2 # 1R + 1W (intermediate fused)
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    launch_overhead = python_dispatch_us + kernel_launch_us
+
+    eager_total_overhead = eager_ops * launch_overhead
+    fused_total_overhead = fused_ops * launch_overhead
+
+    speedup = eager_total_overhead / fused_total_overhead
+    bw_efficiency = eager_mem_factor / fused_mem_factor
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if speedup < 1.5:
+        raise ValueError(f"Narrative broken: Fusion speedup ({speedup:.1f}x) is too small to justify compilation complexity.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    python_dispatch_us_str = f"{python_dispatch_us}"
+    kernel_launch_only_us_str = f"{kernel_launch_us}"
+    memory_access_us_str = f"{memory_access_us}"
+    kernel_launch_us_str = f"{launch_overhead}"
+
+    eager_overhead_str = f"{eager_total_overhead}"
+    compiled_overhead_str = f"{fused_total_overhead}"
+
+    overhead_speedup_str = f"{int(speedup)}"
+    bw_efficiency_str = f"{int(bw_efficiency)}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+python_dispatch_us_str = FusionSpeedup.python_dispatch_us_str
+kernel_launch_only_us_str = FusionSpeedup.kernel_launch_only_us_str
+memory_access_us_str = FusionSpeedup.memory_access_us_str
+kernel_launch_us_str = FusionSpeedup.kernel_launch_us_str
+eager_overhead_str = FusionSpeedup.eager_overhead_str
+compiled_overhead_str = FusionSpeedup.compiled_overhead_str
+overhead_speedup_str = FusionSpeedup.overhead_speedup_str
+bw_efficiency_str = FusionSpeedup.bw_efficiency_str
 ```
 
 ::: {.callout-notebook title="The Physics of Software Overhead"}
@@ -1231,32 +1278,67 @@ From the case study in @sec-ai-frameworks-putting-together-anatomy-training-step
 # └─────────────────────────────────────────────────────────────────────────────
 from physx.formatting import fmt, md_math
 
-# --- Inputs: Scenario 1 (Small MLP - Overhead Bound) ---
-dispatch_n_ops_value = 6                                                        # 6 small ops
-dispatch_us_per_op_value = 5                                                    # 5 μs dispatch/op
-dispatch_hw_time_us_value = 2.6                                                 # 2.6 μs actual compute
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DispatchTax:
+    """
+    Namespace for Dispatch Tax Calculation.
+    Scenario: Comparing overhead impact on Small Ops vs Large Ops.
+    """
 
-# --- Inputs: Scenario 2 (GPT-3 Layer - Compute Bound) ---
-gpt3_hw_time_us_value = 100_000                                                 # 100 ms hardware time
-gpt3_sw_time_us_value = 50                                                      # 50 μs dispatch overhead
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Scenario 1: Small MLP (Overhead Bound)
+    small_ops_count = 6
+    small_dispatch_us = 5.0
+    small_hw_us = 2.6
 
-# --- Process: Scenario 1 ---
-dispatch_sw_time_value = dispatch_n_ops_value * dispatch_us_per_op_value       # 30 μs overhead
-dispatch_ratio_small_value = dispatch_sw_time_value / dispatch_hw_time_us_value  # ~11.5
-dispatch_total_us_value = dispatch_sw_time_value + dispatch_hw_time_us_value   # 32.6 μs total
-dispatch_overhead_pct_value = dispatch_sw_time_value / dispatch_total_us_value * 100  # ~92%
-dispatch_compilation_speedup_value = dispatch_total_us_value / dispatch_hw_time_us_value  # ~13x
+    # Scenario 2: GPT-3 Layer (Compute Bound)
+    large_hw_us = 100_000.0 # 100ms
+    large_dispatch_us = 50.0
 
-# --- Process: Scenario 2 ---
-dispatch_ratio_large_value = gpt3_sw_time_us_value / gpt3_hw_time_us_value     # 0.0005
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Small Model
+    small_sw_total = small_ops_count * small_dispatch_us
+    small_total_time = small_sw_total + small_hw_us
+    small_overhead_ratio = small_sw_total / small_hw_us
+    small_overhead_pct = (small_sw_total / small_total_time) * 100
+    small_speedup_limit = small_total_time / small_hw_us
 
-# --- Outputs (formatted strings for prose) ---
-dispatch_ratio_small_str = fmt(dispatch_ratio_small_value, precision=1, commas=False)  # e.g. "11.5"
-dispatch_sw_time_str = fmt(dispatch_sw_time_value, precision=0, commas=False)  # e.g. "30"
-dispatch_ratio_large_str = fmt(dispatch_ratio_large_value, precision=4, commas=False)  # e.g. "0.0005"
-dispatch_overhead_pct_str = fmt(dispatch_overhead_pct_value, precision=0, commas=False)  # e.g. "92"
-dispatch_compilation_speedup_str = fmt(dispatch_compilation_speedup_value, precision=0, commas=False)  # e.g. "13"
-t_sw_md = md_math(f"T_{{sw}} \\approx {gpt3_sw_time_us_value} \\, \\mu s")
+    # Large Model
+    large_overhead_ratio = large_dispatch_us / large_hw_us
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if small_overhead_ratio < 1.0:
+        raise ValueError(f"Narrative broken: Small model ratio ({small_overhead_ratio:.1f}) implies it is NOT overhead bound.")
+    if large_overhead_ratio > 0.01:
+        raise ValueError(f"Narrative broken: Large model overhead ({large_overhead_ratio:.4f}) is too high.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    dispatch_n_ops_value = small_ops_count
+    dispatch_us_per_op_value = small_dispatch_us
+    dispatch_hw_time_us_value = small_hw_us
+
+    dispatch_sw_time_str = fmt(small_sw_total, precision=0, commas=False)
+    dispatch_ratio_small_str = fmt(small_overhead_ratio, precision=1, commas=False)
+    dispatch_overhead_pct_str = fmt(small_overhead_pct, precision=0, commas=False)
+    dispatch_compilation_speedup_str = fmt(small_speedup_limit, precision=0, commas=False)
+
+    gpt3_hw_time_us_value = large_hw_us
+    gpt3_sw_time_us_value = large_dispatch_us
+    dispatch_ratio_large_str = fmt(large_overhead_ratio, precision=4, commas=False)
+    t_sw_md = md_math(f"T_{{sw}} \\approx {large_dispatch_us} \\, \\mu s")
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+dispatch_n_ops_value = DispatchTax.dispatch_n_ops_value
+dispatch_us_per_op_value = DispatchTax.dispatch_us_per_op_value
+dispatch_hw_time_us_value = DispatchTax.dispatch_hw_time_us_value
+dispatch_sw_time_str = DispatchTax.dispatch_sw_time_str
+dispatch_ratio_small_str = DispatchTax.dispatch_ratio_small_str
+dispatch_overhead_pct_str = DispatchTax.dispatch_overhead_pct_str
+dispatch_compilation_speedup_str = DispatchTax.dispatch_compilation_speedup_str
+gpt3_hw_time_us_value = DispatchTax.gpt3_hw_time_us_value
+gpt3_sw_time_us_value = DispatchTax.gpt3_sw_time_us_value
+dispatch_ratio_large_str = DispatchTax.dispatch_ratio_large_str
+t_sw_md = DispatchTax.t_sw_md
 ```
 
 This cumulative latency creates what is effectively *a dispatch tax* on execution. We define $T_{\text{hw}}$ as hardware execution time and $T_{\text{sw}}$ as software overhead time; both are measured in seconds.

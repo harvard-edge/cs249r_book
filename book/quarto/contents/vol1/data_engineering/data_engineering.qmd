@@ -330,36 +330,63 @@ from physx.constants import (
 )
 from physx.formatting import fmt, md_math
 
-# --- Inputs (network, cloud pricing, and TPU cost) ---
-dataset_pb_value = 1
-network_gbps_value = NETWORK_100G_BW.to(Gbps).magnitude
-egress_cost_per_gb_value = CLOUD_EGRESS_PER_GB.to(USD / GB).magnitude
-tpuv4_cost_per_hour_value = TPU_V4_PER_HOUR.to(USD / hour).magnitude
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DataGravity:
+    """
+    Namespace for Data Gravity calculation.
+    Scenario: Moving 1PB of data vs Moving the Compute.
+    """
 
-# --- Process (transfer time and cost) ---
-dataset_gb_gravity_value = dataset_pb_value * 1_000_000  # 1 PB in GB
-network_gbs_value = NETWORK_100G_BW.to(GB / second).magnitude
-network_10g_gbs_value = 10 / 8
-transfer_seconds_value = dataset_gb_gravity_value / network_gbs_value
-transfer_hours_value = transfer_seconds_value / (SECONDS_PER_MINUTE * MINUTES_PER_HOUR)
-transfer_days_10g_value = dataset_gb_gravity_value / network_10g_gbs_value / (
-    SECONDS_PER_MINUTE * MINUTES_PER_HOUR * HOURS_PER_DAY
-)
-transfer_cost_value = dataset_gb_gravity_value * egress_cost_per_gb_value
-equivalent_tpu_hours_value = transfer_cost_value / tpuv4_cost_per_hour_value
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    dataset_pb = 1
+    network_gbps = NETWORK_100G_BW.to(Gbps).magnitude
+    egress_cost_gb = CLOUD_EGRESS_PER_GB.to(USD / GB).magnitude
+    tpu_hourly_cost = TPU_V4_PER_HOUR.to(USD / hour).magnitude
 
-# --- Outputs (formatted strings for prose) ---
-transfer_seconds_str = fmt(transfer_seconds_value, precision=0, commas=True)
-transfer_hours_str = fmt(transfer_hours_value, precision=0, commas=False)
-transfer_days_10g_str = fmt(transfer_days_10g_value, precision=0, commas=False)
-transfer_time_10g_md = md_math(f"T = D_{{vol}}/BW \\approx {transfer_days_10g_str} \\text{{ days}}")
-transfer_cost_str = fmt(transfer_cost_value, precision=0, commas=True)
-tpu_hours_str = fmt(equivalent_tpu_hours_value, precision=0, commas=True)
-network_gbs_str = fmt(network_gbs_value, precision=1, commas=False)
-dataset_gb_str = f"{dataset_gb_gravity_value:,}"
-network_gbps_str = f"{network_gbps_value}"
-egress_cost_per_gb_str = fmt(egress_cost_per_gb_value, precision=2, commas=False)
-tpu_cost_per_hour_str = fmt(tpuv4_cost_per_hour_value, precision=1, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    dataset_gb = dataset_pb * 1e6
+    network_gbs = network_gbps / 8.0
+
+    # Time
+    transfer_seconds = dataset_gb / network_gbs
+    transfer_hours = transfer_seconds / 3600.0
+    transfer_days_10g = (dataset_gb / (1.25)) / 86400.0 # 10Gbps = 1.25 GB/s
+
+    # Cost
+    transfer_cost = dataset_gb * egress_cost_gb
+    equiv_tpu_hours = transfer_cost / tpu_hourly_cost
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if transfer_hours < 20:
+        raise ValueError(f"Narrative broken: Transfer time ({transfer_hours:.1f}h) is too fast. Data gravity argument fails.")
+    if transfer_cost < 10000:
+        raise ValueError(f"Narrative broken: Transfer cost (${transfer_cost}) is too cheap.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    transfer_seconds_str = fmt(transfer_seconds, precision=0, commas=True)
+    transfer_hours_str = fmt(transfer_hours, precision=0, commas=False)
+    transfer_days_10g_str = fmt(transfer_days_10g, precision=0, commas=False)
+    transfer_time_10g_md = md_math(f"T = D_{{vol}}/BW \\approx {transfer_days_10g_str} \\text{{ days}}")
+    transfer_cost_str = fmt(transfer_cost, precision=0, commas=True)
+    tpu_hours_str = fmt(equiv_tpu_hours, precision=0, commas=True)
+    network_gbs_str = fmt(network_gbs, precision=1, commas=False)
+    dataset_gb_str = f"{dataset_gb:,.0f}"
+    network_gbps_str = f"{network_gbps}"
+    egress_cost_per_gb_str = fmt(egress_cost_gb, precision=2, commas=False)
+    tpu_cost_per_hour_str = fmt(tpu_hourly_cost, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+transfer_seconds_str = DataGravity.transfer_seconds_str
+transfer_hours_str = DataGravity.transfer_hours_str
+transfer_days_10g_str = DataGravity.transfer_days_10g_str
+transfer_time_10g_md = DataGravity.transfer_time_10g_md
+transfer_cost_str = DataGravity.transfer_cost_str
+tpu_hours_str = DataGravity.tpu_hours_str
+network_gbs_str = DataGravity.network_gbs_str
+dataset_gb_str = DataGravity.dataset_gb_str
+network_gbps_str = DataGravity.network_gbps_str
+egress_cost_per_gb_str = DataGravity.egress_cost_per_gb_str
+tpu_cost_per_hour_str = DataGravity.tpu_cost_per_hour_str
 ```
 
 ::: {.callout-notebook title="The Physics of Data Gravity"}
@@ -830,30 +857,46 @@ from physx.constants import (
 )
 from physx.formatting import fmt
 
-# --- Inputs (time constants) ---
-seconds_per_minute_value = SECONDS_PER_MINUTE
-minutes_per_hour_value = MINUTES_PER_HOUR
-hours_per_day_value = HOURS_PER_DAY
-days_per_month_value = DAYS_PER_MONTH
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class FalsePositiveTarget:
+    """
+    Namespace for KWS False Positive Target calculation.
+    Scenario: Always-on device (24h) with 1 false wake-up tolerance per month.
+    """
 
-# --- Process (windows and false-positive rate) ---
-windows_per_month_value = (
-    seconds_per_minute_value
-    * minutes_per_hour_value
-    * hours_per_day_value
-    * days_per_month_value
-)
-fpr_value = 1 / windows_per_month_value
-rejection_pct_value = (1 - fpr_value) * 100
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    duty_cycle_hours = 24
+    window_sec = 1
+    tolerance_per_month = 1
 
-# --- Outputs (formatted strings for prose) ---
-sec_str = fmt(seconds_per_minute_value, precision=0, commas=False)
-min_str = fmt(minutes_per_hour_value, precision=0, commas=False)
-hr_str = fmt(hours_per_day_value, precision=0, commas=False)
-day_str = fmt(days_per_month_value, precision=0, commas=False)
-windows_per_month_str = f"{windows_per_month_value:,}"
-fpr_str = f"{fpr_value:.1e}"
-rejection_pct_str = fmt(rejection_pct_value, precision=5, commas=False)
+    days_month = DAYS_PER_MONTH
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    windows_per_month = (days_month * duty_cycle_hours * 3600) / window_sec
+    target_fpr = tolerance_per_month / windows_per_month
+    rejection_pct = (1 - target_fpr) * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if rejection_pct < 99.999:
+        raise ValueError(f"Narrative broken: Rejection target ({rejection_pct:.4f}%) is too lenient. Should be > 99.999%.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    sec_str = "60"
+    min_str = "60"
+    hr_str = "24"
+    day_str = fmt(days_month, precision=0, commas=False)
+    windows_per_month_str = f"{windows_per_month:,.0f}"
+    fpr_str = f"{target_fpr:.1e}"
+    rejection_pct_str = fmt(rejection_pct, precision=5, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+sec_str = FalsePositiveTarget.sec_str
+min_str = FalsePositiveTarget.min_str
+hr_str = FalsePositiveTarget.hr_str
+day_str = FalsePositiveTarget.day_str
+windows_per_month_str = FalsePositiveTarget.windows_per_month_str
+fpr_str = FalsePositiveTarget.fpr_str
+rejection_pct_str = FalsePositiveTarget.rejection_pct_str
 ```
 
 ::: {.callout-notebook title="False Positive Targets"}
@@ -1630,15 +1673,31 @@ import math
 from physx.constants import KS_TEST_COEFFICIENT
 from physx.formatting import fmt
 
-# --- Inputs (sample size and coefficient) ---
-ks_n_value = 1000
-ks_coefficient_value = KS_TEST_COEFFICIENT
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class KSTest:
+    """
+    Namespace for K-S Test Critical Value calculation.
+    Scenario: Detecting drift with n=1000 samples at alpha=0.05.
+    """
 
-# --- Process (critical value) ---
-ks_dcrit_value = ks_coefficient_value / math.sqrt(ks_n_value)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    n = 1000
+    coeff = KS_TEST_COEFFICIENT # 1.36 for alpha=0.05
 
-# --- Outputs (formatted strings for prose) ---
-ks_dcrit_str = fmt(ks_dcrit_value, precision=3, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    d_crit = coeff / math.sqrt(n)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    if d_crit <= 0:
+        raise ValueError("Narrative broken: Critical value must be positive.")
+    if d_crit > 0.1:
+        raise ValueError(f"Narrative broken: Critical value ({d_crit:.3f}) is too loose for n=1000. Check formula.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    ks_dcrit_str = fmt(d_crit, precision=3, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ks_dcrit_str = KSTest.ks_dcrit_str
 ```
 
 ::: {.callout-example title="Detecting Drift with K-S Test"}
