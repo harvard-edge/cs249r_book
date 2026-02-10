@@ -240,23 +240,21 @@ class Sigmoid:
         """
         ### BEGIN SOLUTION
         # Apply sigmoid: 1 / (1 + exp(-x))
-        # Clip extreme values to prevent overflow (sigmoid(-500) ≈ 0, sigmoid(500) ≈ 1)
-        # Clipping at ±500 ensures exp() stays within float64 range
-        z = np.clip(x.data, -500, 500)
+        x_data = x.data
 
         # Use numerically stable sigmoid
         # For positive values: 1 / (1 + exp(-x))
         # For negative values: exp(x) / (1 + exp(x)) = 1 / (1 + exp(-x)) after clipping
-        result_data = np.zeros_like(z)
+        result_data = np.zeros_like(x_data)
 
         # Positive values (including zero)
-        pos_mask = z >= 0
-        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-z[pos_mask]))
+        pos_mask = x_data >= 0
+        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-x_data[pos_mask]))
 
         # Negative values
-        neg_mask = z < 0
-        exp_z = np.exp(z[neg_mask])
-        result_data[neg_mask] = exp_z / (1.0 + exp_z)
+        neg_mask = x_data < 0
+        exp_x = np.exp(x_data[neg_mask])
+        result_data[neg_mask] = exp_x / (1.0 + exp_x)
 
         return Tensor(result_data)
         ### END SOLUTION
@@ -555,10 +553,21 @@ if __name__ == "__main__":
 GELU (Gaussian Error Linear Unit) is a smooth approximation to ReLU that's become popular in modern architectures like transformers. Unlike ReLU's sharp corner, GELU is smooth everywhere.
 
 ### Mathematical Definition
+
+The exact GELU multiplies x by Φ(x), the probability that a standard
+normal random variable is ≤ x (an S-curve from 0 to 1):
 ```
-f(x) = x * Φ(x) ≈ x * Sigmoid(1.702 * x)
+GELU(x) = x · Φ(x)
 ```
-Where Φ(x) is the cumulative distribution function of standard normal distribution.
+
+Two common approximations exist (Hendrycks & Gimpel, 2016):
+```
+Tanh:    0.5x(1 + tanh[√(2/π)(x + 0.044715x³)])   ← more accurate
+Sigmoid: x · σ(1.702x)                              ← faster, used here
+```
+
+We use the sigmoid form because it reuses sigmoid (which you just built!)
+and the single constant 1.702 is empirically fitted so that σ(1.702x) ≈ Φ(x).
 
 ### Visual Behavior
 ```
@@ -617,7 +626,7 @@ class GELU:
         >>> print(result.data)
         [-0.159, 0.0, 0.841]  # Smooth, like ReLU but differentiable everywhere
 
-        HINT: The 1.702 constant comes from √(2/π) approximation
+        HINT: The 1.702 constant is empirically fitted so that sigmoid(1.702x) ≈ Φ(x)
         """
         ### BEGIN SOLUTION
         # GELU approximation: x * sigmoid(1.702 * x)
@@ -750,20 +759,18 @@ class Softmax:
         """
         ### BEGIN SOLUTION
         # Numerical stability: subtract max to prevent overflow
-        x_max_data = np.max(x.data, axis=dim, keepdims=True)
-        x_max = Tensor(x_max_data)
-        x_shifted = x - x_max  # Tensor subtraction
+        x_max = np.max(x.data, axis=dim, keepdims=True)
+        x_shifted = x.data - x_max
 
         # Compute exponentials
-        exp_values = Tensor(np.exp(x_shifted.data))
+        exp_values = np.exp(x_shifted)
 
         # Sum along dimension
-        exp_sum_data = np.sum(exp_values.data, axis=dim, keepdims=True)
-        exp_sum = Tensor(exp_sum_data)
+        exp_sum = np.sum(exp_values, axis=dim, keepdims=True)
 
         # Normalize to get probabilities
         result = exp_values / exp_sum
-        return result
+        return Tensor(result)
         ### END SOLUTION
 
     def __call__(self, x: Tensor, dim: int = -1) -> Tensor:

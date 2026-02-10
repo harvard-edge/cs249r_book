@@ -330,7 +330,12 @@ class Tokenizer:
         [0, 1, 2]
         """
         ### BEGIN SOLUTION
-        raise NotImplementedError("Subclasses must implement encode()")
+        raise NotImplementedError(
+            f"encode() not implemented in base Tokenizer class\n"
+            f"  ❌ Called encode() on abstract base class {self.__class__.__name__}\n"
+            f"  💡 Tokenizer is an interface - use a concrete implementation like CharTokenizer or BPETokenizer\n"
+            f"  🔧 Example: tokenizer = CharTokenizer(['a', 'b', 'c']); tokenizer.encode('abc')"
+        )
         ### END SOLUTION
 
     def decode(self, tokens: List[int]) -> str:
@@ -349,7 +354,12 @@ class Tokenizer:
         "abc"
         """
         ### BEGIN SOLUTION
-        raise NotImplementedError("Subclasses must implement decode()")
+        raise NotImplementedError(
+            f"decode() not implemented in base Tokenizer class\n"
+            f"  ❌ Called decode() on abstract base class {self.__class__.__name__}\n"
+            f"  💡 Tokenizer is an interface - use a concrete implementation like CharTokenizer or BPETokenizer\n"
+            f"  🔧 Example: tokenizer = CharTokenizer(['a', 'b', 'c']); tokenizer.decode([0, 1, 2])"
+        )
         ### END SOLUTION
 
 # %% [markdown]
@@ -1149,9 +1159,10 @@ def create_tokenizer(strategy: str = "char", vocab_size: int = 1000, corpus: Lis
             tokenizer.train(corpus, vocab_size)
     else:
         raise ValueError(
-            f"Unknown tokenization strategy: '{strategy}'.\n"
-            f"  Available strategies: 'char', 'bpe'.\n"
-            f"  Fix: Use 'char' for character-level or 'bpe' for byte-pair encoding tokenization."
+            f"Unknown tokenization strategy: '{strategy}'\n"
+            f"  ❌ Strategy '{strategy}' is not recognized\n"
+            f"  💡 TinyTorch supports 'char' (character-level) and 'bpe' (byte-pair encoding) strategies\n"
+            f"  🔧 Use: create_tokenizer('char', corpus=texts) or create_tokenizer('bpe', vocab_size=1000, corpus=texts)"
         )
 
     return tokenizer

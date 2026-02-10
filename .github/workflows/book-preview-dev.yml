@@ -1,0 +1,230 @@
+name: '📚 Book · 👁️ Preview (Dev)'
+
+env:
+  ARTIFACT_NAME: dev-html-linux # The name of the artifact produced by the 'validate-dev' workflow
+  # ==========================================================================
+  # PATH CONFIGURATION - Uses GitHub Repository Variables (Settings > Variables)
+  # ==========================================================================
+  # MLSysBook content lives under book/ to accommodate TinyTorch at root
+  # Use ${{ vars.BOOK_ROOT }}, ${{ vars.BOOK_TOOLS }}, etc. in workflow steps
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Optional: Specific commit SHA to deploy. Deploys the latest successful `dev` build if empty.'
+        required: false
+        type: string
+  workflow_run:
+    workflows: ["📚 Book · ✅ Validate (Dev)"]
+    types:
+      - completed
+
+concurrency:
+  group: deploy-preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: '📺 Deploy to GitHub Pages (Dev Preview)'
+    if: (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # Deploys dev branch to: https://harvard-edge.github.io/cs249r_book_dev/
+    permissions:
+      contents: write # Allow write access to repository
+      pages: write
+      actions: read # Allow reading of workflow runs
+
+    steps:
+      - name: ⬇️ Get workflow run ID
+        id: run_info
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "run_id=${{ github.event.workflow_run.id }}" >> $GITHUB_OUTPUT
+            echo "head_sha=${{ github.event.workflow_run.head_sha }}" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          COMMIT_SHA=$(echo "${{ github.event.inputs.commit_sha }}" | xargs)
+          API_URL="repos/${{ github.repository }}/actions/workflows/book-validate-dev.yml/runs"
+
+          if [[ -n "$COMMIT_SHA" ]]; then
+            echo "🔎 Searching for successful 'Validate Dev' run for commit starting with: $COMMIT_SHA"
+            JQ_QUERY=".workflow_runs[] | select((.head_sha | startswith(\"$COMMIT_SHA\")) and .status == \"completed\" and .conclusion == \"success\") | .id"
+          else
+            echo "🔎 No commit SHA provided. Searching for the latest successful 'Validate Dev' run on 'dev' branch."
+            JQ_QUERY=".workflow_runs[] | select(.head_branch == \"dev\" and .status == \"completed\" and .conclusion == \"success\") | .id"
+          fi
+
+          latest_run_id=$(gh api "$API_URL" --jq "$JQ_QUERY" | head -n 1)
+
+          if [ -z "$latest_run_id" ]; then
+              if [[ -n "$COMMIT_SHA" ]]; then
+                echo "::error::Could not find a successful 'Validate Dev' run for commit ${COMMIT_SHA}."
+              else
+                echo "::error::Could not find any successful 'Validate Dev' run on the 'dev' branch."
+              fi
+              exit 1
+          fi
+
+          echo "Found run ID: ${latest_run_id}"
+          echo "run_id=${latest_run_id}" >> $GITHUB_OUTPUT
+
+          latest_run_sha=$(gh api repos/${{ github.repository }}/actions/runs/${latest_run_id} --jq '.head_sha')
+          echo "head_sha=${latest_run_sha}" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📥 Download HTML Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          run-id: ${{ steps.run_info.outputs.run_id }}
+          path: ./preview-site
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📥 Download PDF Artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: dev-pdf-linux
+          run-id: ${{ steps.run_info.outputs.run_id }}
+          path: ./pdf-artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📥 Download EPUB Artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: dev-epub-linux
+          run-id: ${{ steps.run_info.outputs.run_id }}
+          path: ./epub-artifact
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📦 Combine artifacts with PDF and EPUB
+        run: |
+          echo "📦 Preparing combined site with PDF and EPUB..."
+
+          # Create assets and downloads directories
+          mkdir -p ./preview-site/assets/downloads
+
+          # Copy PDF if available
+          if [ -f "./pdf-artifact/Machine-Learning-Systems.pdf" ]; then
+            cp "./pdf-artifact/Machine-Learning-Systems.pdf" "./preview-site/assets/downloads/Machine-Learning-Systems.pdf"
+            PDF_SIZE=$(du -h "./preview-site/assets/downloads/Machine-Learning-Systems.pdf" | cut -f1)
+            echo "✅ PDF deployed to dev site (${PDF_SIZE})"
+          else
+            echo "⚠️ PDF artifact not found - skipping PDF deployment"
+          fi
+
+          # Copy EPUB if available
+          if [ -f "./epub-artifact/Machine-Learning-Systems.epub" ]; then
+            cp "./epub-artifact/Machine-Learning-Systems.epub" "./preview-site/assets/downloads/Machine-Learning-Systems.epub"
+            EPUB_SIZE=$(du -h "./preview-site/assets/downloads/Machine-Learning-Systems.epub" | cut -f1)
+            echo "✅ EPUB deployed to dev site (${EPUB_SIZE})"
+          else
+            echo "⚠️ EPUB artifact not found - skipping EPUB deployment"
+          fi
+
+      - name: 📝 Create .nojekyll file
+        run: touch ./preview-site/.nojekyll
+
+      - name: 📦 Inspect final site contents
+        run: |
+          echo "::group::Site Contents"
+          ls -la ./preview-site
+          echo "::endgroup::"
+
+          echo "::group::Assets/Downloads Contents"
+          if [ -d "./preview-site/assets/downloads" ]; then
+            ls -la ./preview-site/assets/downloads
+          else
+            echo "No assets/downloads directory"
+          fi
+          echo "::endgroup::"
+
+      - name: ⬇️ Checkout repository (for scripts)
+        uses: actions/checkout@v4
+        with:
+          path: ./repo-scripts
+          sparse-checkout: |
+            ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py
+            .github/dev-landing/index.html
+          sparse-checkout-cone-mode: false
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          echo "🔧 Modifying announcement banner for development preview..."
+
+          # Get commit info for display
+          COMMIT_HASH="${{ steps.run_info.outputs.head_sha }}"
+          COMMIT_SHORT="${COMMIT_HASH:0:8}"
+
+          echo "📝 Adding dev preview banner with commit info: $COMMIT_SHORT"
+
+          python3 ./repo-scripts/${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py \
+            ./preview-site \
+            --verbose \
+            --commit-hash "$COMMIT_HASH" \
+            --commit-short "$COMMIT_SHORT"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+          # Add github.com to known hosts to avoid prompt
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          echo "🔧 Configuring git..."
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning target repository (${{ vars.DEV_REPO }})..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+
+          echo "🔄 Entering target repository..."
+          cd target-repo
+
+          echo "🧹 Cleaning /${{ vars.DEV_BOOK_PATH }}/ subdirectory only (preserving /${{ vars.DEV_TINYTORCH_PATH }}/ and landing page)..."
+          # Only remove book subdirectory, preserve other content
+          rm -rf ${{ vars.DEV_BOOK_PATH }}
+          mkdir -p ${{ vars.DEV_BOOK_PATH }}
+
+          echo "🚚 Copying book content to /${{ vars.DEV_BOOK_PATH }}/ subdirectory..."
+          cp -r "${{ github.workspace }}/preview-site/." ${{ vars.DEV_BOOK_PATH }}/
+
+          echo "📄 Deploying landing page to root..."
+          # Copy landing page (preserves tinytorch/ if it exists)
+          cp "${{ github.workspace }}/repo-scripts/.github/dev-landing/index.html" index.html
+          touch .nojekyll
+
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "${{ vars.DEV_BOOK_PATH }}/index.html" ]; then
+            echo "❌ CRITICAL: ${{ vars.DEV_BOOK_PATH }}/index.html is missing after copy. Aborting deployment."
+            exit 1
+          fi
+
+          if [ ! -f "index.html" ]; then
+            echo "❌ CRITICAL: Landing page index.html is missing. Aborting deployment."
+            exit 1
+          fi
+
+          echo "📦 Repository structure:"
+          ls -la
+          echo ""
+          echo "📦 /${{ vars.DEV_BOOK_PATH }}/ contents:"
+          ls -la ${{ vars.DEV_BOOK_PATH }}/ | head -10
+
+          echo "📦 Committing and pushing changes..."
+          git add .
+          git commit -m "🚀 Deploy book dev preview to /${{ vars.DEV_BOOK_PATH }}/ from ${{ steps.run_info.outputs.head_sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main
+
+          # DEV_REPO contains org/repo format, extract just repo name for GitHub Pages URL
+          REPO_NAME="${{ vars.DEV_REPO }}"
+          REPO_NAME="${REPO_NAME##*/}"
+          echo "✅ Book deployed to: https://harvard-edge.github.io/${REPO_NAME}/${{ vars.DEV_BOOK_PATH }}/"

@@ -533,10 +533,20 @@ class KVCache:
         """
         ### BEGIN SOLUTION
         if layer_idx >= self.num_layers:
-            raise ValueError(f"Layer index {layer_idx} >= num_layers {self.num_layers}")
+            raise ValueError(
+                f"Invalid layer index for cache update\n"
+                f"  ❌ layer_idx={layer_idx} is out of range [0, {self.num_layers - 1}]\n"
+                f"  💡 KVCache was initialized with num_layers={self.num_layers}, so valid indices are 0 to {self.num_layers - 1}\n"
+                f"  🔧 Check your transformer block loop: for layer_idx in range({self.num_layers})"
+            )
 
         if self.seq_pos >= self.max_seq_len:
-            raise ValueError(f"Sequence position {self.seq_pos} >= max_seq_len {self.max_seq_len}")
+            raise ValueError(
+                f"KV cache is full - cannot add more tokens\n"
+                f"  ❌ Current position {self.seq_pos} has reached max_seq_len={self.max_seq_len}\n"
+                f"  💡 The cache was pre-allocated for {self.max_seq_len} tokens maximum. Autoregressive generation cannot exceed this limit.\n"
+                f"  🔧 Either: (1) call cache.reset() to start a new sequence, or (2) create a larger cache with max_seq_len > {self.max_seq_len}"
+            )
 
         # Get cache for this layer
         key_cache, value_cache = self.caches[layer_idx]
@@ -599,7 +609,12 @@ class KVCache:
         """
         ### BEGIN SOLUTION
         if layer_idx >= self.num_layers:
-            raise ValueError(f"Layer index {layer_idx} >= num_layers {self.num_layers}")
+            raise ValueError(
+                f"Invalid layer index for cache retrieval\n"
+                f"  ❌ layer_idx={layer_idx} is out of range [0, {self.num_layers - 1}]\n"
+                f"  💡 KVCache was initialized with num_layers={self.num_layers}, so valid indices are 0 to {self.num_layers - 1}\n"
+                f"  🔧 Check your transformer block loop: for layer_idx in range({self.num_layers})"
+            )
 
         # Get cache for this layer
         key_cache, value_cache = self.caches[layer_idx]
@@ -1008,15 +1023,20 @@ def enable_kv_cache(model):
     for attr in required_attrs:
         if not hasattr(model, attr):
             raise AttributeError(
-                f"Model missing '{attr}' - enable_kv_cache() requires a GPT-style model "
-                f"with {', '.join(required_attrs)}"
+                f"Model missing required attribute for KV caching\n"
+                f"  ❌ Model does not have '{attr}' attribute\n"
+                f"  💡 enable_kv_cache() requires a GPT-style transformer with architecture attributes: {', '.join(required_attrs)}\n"
+                f"  🔧 Ensure your model class defines: self.{attr} = <value> in __init__()"
             )
 
     # Calculate head dimension
     head_dim = model.embed_dim // model.num_heads
     if model.embed_dim % model.num_heads != 0:
         raise ValueError(
-            f"embed_dim ({model.embed_dim}) must be divisible by num_heads ({model.num_heads})"
+            f"Invalid model architecture for multi-head attention\n"
+            f"  ❌ embed_dim={model.embed_dim} is not divisible by num_heads={model.num_heads} (remainder: {model.embed_dim % model.num_heads})\n"
+            f"  💡 Each attention head needs equal dimensions. embed_dim must be evenly divisible by num_heads.\n"
+            f"  🔧 Use embed_dim={model.num_heads * (model.embed_dim // model.num_heads + 1)} (next valid size) or num_heads={[h for h in [1,2,4,8,12,16] if model.embed_dim % h == 0]}"
         )
 
     # Create cache for this model

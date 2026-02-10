@@ -11,41 +11,34 @@
 
 TinyTorch uses a **progressive testing hierarchy** that mirrors how the framework builds from simple components to full functionality:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        RELEASE VALIDATION                        │
-│  Full curriculum rebuild + all tests + milestones (destructive)  │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                       MILESTONE TESTS                            │
-│  Historical ML recreations (require full TinyTorch package)      │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                      END-TO-END TESTS                            │
-│  Complete user journeys (setup → module → milestone)             │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                     INTEGRATION TESTS                            │
-│  Cross-module interactions (Module 2 depends on Module 1)        │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                        CLI TESTS                                 │
-│  Command-line interface validation                               │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                        UNIT TESTS                                │
-│  Individual component tests (pytest in tests/)                   │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-┌─────────────────────────────────────────────────────────────────┐
-│                       INLINE TESTS                               │
-│  Embedded nbgrader tests in src/ files (progressive build)       │
-└─────────────────────────────────────────────────────────────────┘
+```{mermaid}
+flowchart TB
+    subgraph hierarchy["Test Hierarchy (Bottom to Top)"]
+        direction TB
+
+        INLINE["🧪 <b>INLINE TESTS</b><br/>Embedded nbgrader tests in src/ files<br/><i>Progressive build validation</i>"]
+        UNIT["🔬 <b>UNIT TESTS</b><br/>Individual component tests<br/><i>pytest in tests/</i>"]
+        CLI["⌨️ <b>CLI TESTS</b><br/>Command-line interface validation<br/><i>TITO command testing</i>"]
+        INTEGRATION["🔗 <b>INTEGRATION TESTS</b><br/>Cross-module interactions<br/><i>Module 2 depends on Module 1</i>"]
+        E2E["🚀 <b>END-TO-END TESTS</b><br/>Complete user journeys<br/><i>setup → module → milestone</i>"]
+        MILESTONE["🏆 <b>MILESTONE TESTS</b><br/>Historical ML recreations<br/><i>Require full TinyTorch package</i>"]
+        RELEASE["⚠️ <b>RELEASE VALIDATION</b><br/>Full curriculum rebuild + all tests<br/><i>DESTRUCTIVE - releases only</i>"]
+
+        INLINE --> UNIT
+        UNIT --> CLI
+        CLI --> INTEGRATION
+        INTEGRATION --> E2E
+        E2E --> MILESTONE
+        MILESTONE --> RELEASE
+    end
+
+    style INLINE fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+    style UNIT fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
+    style CLI fill:#e3f2fd,stroke:#2196f3,stroke-width:2px
+    style INTEGRATION fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style E2E fill:#fff3e0,stroke:#ff9800,stroke-width:2px
+    style MILESTONE fill:#fce4ec,stroke:#e91e63,stroke-width:2px
+    style RELEASE fill:#ffebee,stroke:#f44336,stroke-width:3px
 ```
 
 ## Quick Reference
@@ -247,7 +240,7 @@ assert t.data[0] == 1, "First element should be 1"
 The GitHub Actions workflow supports all test types:
 
 ```yaml
-# .github/workflows/tinytorch-ci.yml
+# .github/workflows/tinytorch-validate-dev.yml
 
 # Quick tests on every push
 - name: Run Quick Tests

@@ -1,0 +1,92 @@
+name: '🔮 Labs · 👁️ Preview (Dev)'
+
+# Builds and deploys Labs site to dev preview
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - 'labs/**'
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: labs-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: '🔮 Build & Deploy Labs (Dev)'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🔨 Build Labs Site
+        working-directory: labs
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: 🔧 Modify announcement for dev preview
+        run: |
+          echo "🔧 Modifying announcement banner for development preview..."
+          COMMIT_SHORT="${{ github.sha }}"
+          COMMIT_SHORT="${COMMIT_SHORT:0:8}"
+
+          python3 book/tools/scripts/publish/modify_dev_announcement.py \
+            labs/_build \
+            --verbose \
+            --commit-hash "${{ github.sha }}" \
+            --commit-short "$COMMIT_SHORT"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          # Add github.com to known hosts
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          echo "🔧 Configuring git..."
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository (${{ vars.DEV_REPO }})..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+
+          cd target-repo
+
+          echo "🧹 Cleaning ${{ vars.DEV_LABS_PATH }} directory..."
+          rm -rf ${{ vars.DEV_LABS_PATH }}
+          mkdir -p ${{ vars.DEV_LABS_PATH }}
+
+          echo "🚚 Copying Labs site content..."
+          cp -r "${{ github.workspace }}/labs/_build/." ${{ vars.DEV_LABS_PATH }}/
+
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "${{ vars.DEV_LABS_PATH }}/index.html" ]; then
+            echo "❌ CRITICAL: ${{ vars.DEV_LABS_PATH }}/index.html is missing. Aborting deployment."
+            exit 1
+          fi
+
+          echo "🔮 Contents of ${{ vars.DEV_LABS_PATH }}/:"
+          ls -la ${{ vars.DEV_LABS_PATH }}/ | head -10
+
+          echo "🔮 Committing and pushing changes..."
+          git add .
+          git commit -m "🔮 Deploy Labs dev to /${{ vars.DEV_LABS_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main
+
+          echo "✅ Labs deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_LABS_PATH }}/"

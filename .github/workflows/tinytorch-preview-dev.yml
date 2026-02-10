@@ -1,0 +1,165 @@
+name: '🔥 TinyTorch · 👁️ Preview (Dev)'
+
+# Builds and deploys TinyTorch site to dev preview
+# Triggers after Validate (Dev) passes, builds PDFs, then deploys
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["🔥 TinyTorch · ✅ Validate (Dev)"]
+    types: [completed]
+    branches: [dev]
+
+concurrency:
+  group: tinytorch-dev-deploy
+  cancel-in-progress: true
+
+jobs:
+  # Build PDFs (only if Validate passed or manual trigger)
+  build-pdfs:
+    name: '📚 Build PDFs'
+    if: (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/tinytorch-build-pdfs.yml
+
+  # Build and deploy (after PDFs complete - deploys even if PDFs fail)
+  build-and-deploy:
+    name: '🔥 Build & Deploy TinyTorch Dev'
+    runs-on: ubuntu-latest
+    needs: [build-pdfs]
+    if: |
+      always() && 
+      ((github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'dev') || github.event_name == 'workflow_dispatch')
+    permissions:
+      contents: read
+      actions: read
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'tinytorch/site/requirements.txt'
+
+      - name: 📦 Install dependencies
+        working-directory: tinytorch
+        run: |
+          pip install --upgrade pip
+          pip install -r site/requirements.txt
+
+      - name: 👥 Generate team page from contributors
+        working-directory: tinytorch/site
+        run: |
+          echo "👥 Generating team page from .all-contributorsrc..."
+          python3 scripts/generate_team.py
+          echo "✅ Team page generated"
+
+      - name: 🔨 Build Jupyter Book
+        working-directory: tinytorch/site
+        run: |
+          echo "🔨 Building TinyTorch Jupyter Book..."
+          jupyter-book build . --all
+          touch _build/html/.nojekyll
+          echo "✅ Build complete"
+
+      - name: 📥 Download PDF Guide
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Guide
+          path: ./pdf-artifacts/guide
+
+      - name: 📥 Download PDF Paper
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: TinyTorch-Paper
+          path: ./pdf-artifacts/paper
+
+      - name: 📁 Inject PDFs into site
+        run: |
+          echo "📁 Injecting PDFs into built site..."
+          mkdir -p tinytorch/site/_build/html/_static/downloads
+
+          if [ -f ./pdf-artifacts/guide/tinytorch-course.pdf ]; then
+            cp ./pdf-artifacts/guide/tinytorch-course.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Guide.pdf
+            echo "✅ Injected TinyTorch-Guide.pdf"
+          else
+            echo "⚠️ Guide PDF not found"
+          fi
+
+          if [ -f ./pdf-artifacts/paper/paper.pdf ]; then
+            cp ./pdf-artifacts/paper/paper.pdf tinytorch/site/_build/html/_static/downloads/TinyTorch-Paper.pdf
+            echo "✅ Injected TinyTorch-Paper.pdf"
+          else
+            echo "⚠️ Paper PDF not found"
+          fi
+
+          echo ""
+          echo "📦 Downloads folder contents:"
+          ls -la tinytorch/site/_build/html/_static/downloads/ || echo "No downloads folder"
+
+      - name: 📊 Download slide decks from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "📊 Downloading slide decks from GitHub release..."
+          mkdir -p tinytorch/site/_build/html/_static/slides
+
+          # Download all PDFs from the slides release
+          gh release download tinytorch-slides-v0.1.0 \
+            --repo harvard-edge/cs249r_book \
+            --pattern "*.pdf" \
+            --dir tinytorch/site/_build/html/_static/slides
+
+          echo ""
+          echo "📦 Slides folder contents:"
+          ls -la tinytorch/site/_build/html/_static/slides/ || echo "No slides folder"
+          echo "✅ Downloaded $(ls tinytorch/site/_build/html/_static/slides/*.pdf 2>/dev/null | wc -l) slide decks"
+
+      - name: 🚀 Deploy to Dev Site via SSH
+        env:
+          SSH_DEPLOY_KEY: ${{ secrets.SSH_DEPLOY_KEY }}
+        run: |
+          echo "🔐 Starting ssh-agent..."
+          eval "$(ssh-agent -s)"
+          echo "$SSH_DEPLOY_KEY" | tr -d '\r' | ssh-add - > /dev/null
+
+          # Add github.com to known hosts
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          echo "🔧 Configuring git..."
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+
+          echo "🔄 Cloning dev preview repository (${{ vars.DEV_REPO }})..."
+          git clone --depth=1 ${{ vars.DEV_REPO_URL }} target-repo
+
+          cd target-repo
+
+          echo "🧹 Cleaning ${{ vars.DEV_TINYTORCH_PATH }} directory..."
+          rm -rf ${{ vars.DEV_TINYTORCH_PATH }}
+          mkdir -p ${{ vars.DEV_TINYTORCH_PATH }}
+
+          echo "🚚 Copying TinyTorch site content..."
+          cp -r "${{ github.workspace }}/tinytorch/site/_build/html/." ${{ vars.DEV_TINYTORCH_PATH }}/
+
+          echo "🔍 Validating deployment content..."
+          if [ ! -f "${{ vars.DEV_TINYTORCH_PATH }}/index.html" ]; then
+            echo "❌ CRITICAL: ${{ vars.DEV_TINYTORCH_PATH }}/index.html is missing. Aborting deployment."
+            exit 1
+          fi
+
+          echo "📦 Contents of ${{ vars.DEV_TINYTORCH_PATH }}/:"
+          ls -la ${{ vars.DEV_TINYTORCH_PATH }}/ | head -10
+
+          echo "📦 Committing and pushing changes..."
+          git add .
+          git commit -m "🔥 Deploy TinyTorch dev to /${{ vars.DEV_TINYTORCH_PATH }}/ from ${{ github.sha }}" --allow-empty || echo "🟡 Nothing to commit"
+          git push origin main
+
+          echo "✅ TinyTorch deployed to: https://harvard-edge.github.io/${{ vars.DEV_REPO }}/${{ vars.DEV_TINYTORCH_PATH }}/"

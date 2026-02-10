@@ -236,6 +236,13 @@ def visualize_data_points(X, y, predictions=None, weights=None):
 
     return "\n".join(lines)
 
+def press_enter_to_continue() :
+    if sys.stdin.isatty() and sys.stdout.isatty() :
+        try :
+            console.input("\n[yellow]Press Enter to continue...[/yellow] ")
+        except EOFError :
+            pass
+        console.print()
 
 def main():
     """Demonstrate Rosenblatt's Perceptron using YOUR Tiny🔥Torch system!"""
@@ -248,7 +255,7 @@ def main():
         "[dim]Components: YOUR Tensor + YOUR Linear + YOUR Sigmoid[/dim]",
         border_style="cyan"
     ))
-    console.print()
+    press_enter_to_continue()
 
     # Introduction - What to expect
     intro = (
@@ -267,7 +274,7 @@ def main():
         "  That's why you need Modules 04-07: Losses, Autograd, Optimizers, Training!"
     )
     console.print(Panel(intro, title="[bold cyan]📖 Introduction[/bold cyan]", border_style="cyan"))
-    console.print()
+    press_enter_to_continue()
 
     # Step 1: Prepare synthetic data
     console.print("[bold]📊 Step 1: Preparing Data[/bold]")
@@ -284,7 +291,8 @@ def main():
     console.print()
     data_viz = visualize_data_points(X, y)
     console.print(Panel(data_viz, title="[cyan]Training Data[/cyan]", border_style="cyan"))
-    console.print(f"   [green]✓[/green] Created {X.shape[0]} points in 2 clearly separated clusters\n")
+    console.print(f"   [green]✓[/green] Created {X.shape[0]} points in 2 clearly separated clusters")
+    press_enter_to_continue()
 
     # Step 2: Create the Perceptron model with YOUR components
     console.print("[bold]🧠 Step 2: Building Model[/bold]")
@@ -300,7 +308,7 @@ def main():
     # Show network architecture
     network_diagram = draw_network_architecture()
     console.print(Panel(network_diagram, title="[cyan]🏗️  Network Architecture (1957 Design)[/cyan]", border_style="cyan"))
-    console.print()
+    press_enter_to_continue()
 
     # Step 3: Test with random weights
     console.print("[bold]🔬 Step 3: Testing with Random Weights[/bold]")
@@ -339,7 +347,7 @@ def main():
 
     results_table.add_row("Accuracy", accuracy_display)
     console.print(results_table)
-    console.print()
+    press_enter_to_continue()
 
     # Extract weights for visualization and display
     w1 = model.linear.weight.data[0,0]
@@ -352,8 +360,8 @@ def main():
     # Show visualization with predictions AND decision boundary
     pred_viz = visualize_data_points(X, y, pred_classes, weights=(w1, w2, b))
     console.print(Panel(pred_viz, title="[cyan]Predictions with Decision Boundary[/cyan]", border_style=status_color))
-    console.print()
-
+    press_enter_to_continue()
+    
     # Show weights AND equation
     decision_eq = f"z = {w1:.4f}·x₁ + {w2:.4f}·x₂ + {b:.4f}"
     boundary_eq = f"Decision boundary (z=0): x₂ = {-w1/w2:.4f}·x₁ + {-b/w2:.4f}" if abs(w2) > 0.001 else "Decision boundary: vertical line"
@@ -370,7 +378,7 @@ def main():
         f"  [dim](Everything above line → Class 1, below → Class 0)[/dim]"
     )
     console.print(Panel(weights_content, title="[yellow]🔧 Model Parameters[/yellow]", border_style="yellow"))
-    console.print()
+    press_enter_to_continue()
 
     # Diagnosis
     if status == "FAILED":
@@ -389,6 +397,7 @@ def main():
         )
 
     console.print(Panel(diagnosis, title=f"[{status_color}]🔍 Diagnosis: {status}[/{status_color}]", border_style=status_color))
+    press_enter_to_continue()
 
     # Tip for multiple runs
     tip = (
@@ -400,7 +409,7 @@ def main():
         "[dim]This demonstrates why training is essential - it must work EVERY time![/dim]"
     )
     console.print(Panel(tip, title="[bold yellow]💡 Experiment[/bold yellow]", border_style="yellow"))
-    console.print()
+    press_enter_to_continue()
 
     # Next steps
     next_steps = (
@@ -412,7 +421,7 @@ def main():
         "You'll see random → intelligent through the power of learning![/dim]"
     )
     console.print(Panel(next_steps, title="[bold green]🚀 Next Steps[/bold green]", border_style="green"))
-    console.print()
+    press_enter_to_continue()
 
 if __name__ == "__main__":
     main()

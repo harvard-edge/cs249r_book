@@ -64,6 +64,11 @@ class ModuleWorkflowCommand(BaseCommand):
             'module_number',
             help='Module number to start (01, 02, 03, etc.)'
         )
+        start_parser.add_argument(
+            '--no-jupyter',
+            action='store_true',
+            help='Create notebook but skip opening Jupyter (for CI/testing)'
+        )
 
         # VIEW command - just open the notebook
         view_parser = subparsers.add_parser(
@@ -184,8 +189,13 @@ class ModuleWorkflowCommand(BaseCommand):
 
     # Module mapping and normalization now imported from core.modules
 
-    def start_module(self, module_number: str) -> int:
-        """Start working on a module with prerequisite checking and visual feedback."""
+    def start_module(self, module_number: str, no_jupyter: bool = False) -> int:
+        """Start working on a module with prerequisite checking and visual feedback.
+        
+        Args:
+            module_number: The module to start (e.g., "01", "02")
+            no_jupyter: If True, create notebook but don't open Jupyter (for CI/testing)
+        """
         from rich import box
         from rich.table import Table
 
@@ -312,6 +322,12 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Mark as started
         self.mark_module_started(normalized)
+
+        if no_jupyter:
+            # CI/testing mode - just create notebook, don't open Jupyter
+            self.console.print(f"[green]✅ Module {normalized} ready (notebook created)[/green]")
+            self.console.print(f"💡 Next: [bold cyan]tito module complete {normalized}[/bold cyan]")
+            return 0
 
         # Instructions
         self.console.print("💡 [bold]What to do:[/bold]")
@@ -548,7 +564,8 @@ class ModuleWorkflowCommand(BaseCommand):
             export_result = self.export_module(module_name)
             if export_result != 0:
                 self.console.print(f"[red]   ❌ Export failed for {module_name}[/red]")
-                success = False
+                self.console.print("   💡 Fix the issues and try again")
+                return 1
             else:
                 # Extract export path (simplified)
                 export_path = f"tinytorch/core/{module_name.split('_')[1]}.py"
@@ -851,7 +868,7 @@ class ModuleWorkflowCommand(BaseCommand):
         env = os.environ.copy()
         pythonpath = env.get('PYTHONPATH', '')
         if pythonpath:
-            env['PYTHONPATH'] = f"{project_root}:{pythonpath}"
+            env['PYTHONPATH'] = f"{project_root}{os.pathsep}{pythonpath}"
         else:
             env['PYTHONPATH'] = str(project_root)
 
@@ -1092,30 +1109,41 @@ class ModuleWorkflowCommand(BaseCommand):
             if export_target != "unknown":
                 ensure_writable_target(export_target)
             
-            # Run nbdev_export directly on the student's notebook
+            # Run nbdev_export using Python API directly (more reliable than subprocess)
+            from nbdev.export import nb_export
+
             self.console.print(f"[dim]📦 Exporting {notebook_path.name} → tinytorch/core/...[/dim]")
-            
-            result = subprocess.run(
-                ["nbdev_export", "--path", str(notebook_path)],
-                capture_output=True,
-                text=True,
-                cwd=Path.cwd()
-            )
-            
-            if result.returncode == 0:
-                self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
-                return 0
-            else:
-                self.console.print(f"[red]❌ Export failed[/red]")
-                if result.stderr.strip():
-                    self.console.print(f"[dim]Error: {result.stderr.strip()}[/dim]")
-                return 1
-                
-        except FileNotFoundError:
-            self.console.print("[red]❌ nbdev not found. Is your environment set up?[/red]")
+
+            lib_path = Path.cwd() / "tinytorch"
+            nb_export(notebook_path, lib_path=lib_path)
+
+            # Verify the export actually produced a file
+            if export_target != "unknown":
+                target_file = lib_path / (export_target.replace(".", "/") + ".py")
+                if not target_file.exists():
+                    self.console.print(f"[red]❌ Export verification failed: {target_file} was not created[/red]")
+                    self.console.print(f"[dim]   Expected from #| default_exp: {export_target}[/dim]")
+                    self.console.print("[yellow]   Check that your notebook has #| export cells with code[/yellow]")
+                    return 1
+
+                # Verify the file has actual content (not empty)
+                content = target_file.read_text(encoding="utf-8")
+                code_lines = [l for l in content.split('\n')
+                              if l.strip() and not l.strip().startswith('#')]
+                if len(code_lines) < 2:
+                    self.console.print(f"[red]❌ Export verification failed: {target_file} is empty[/red]")
+                    self.console.print("[yellow]   Your notebook's #| export cells may not contain code[/yellow]")
+                    return 1
+
+            self.console.print(f"[dim]✅ Your code is now part of the tinytorch package![/dim]")
+            return 0
+
+        except ImportError:
+            self.console.print("[red]❌ nbdev not found — cannot export module[/red]")
+            self.console.print("[yellow]   Fix: pip install nbdev[/yellow]")
             return 1
         except Exception as e:
-            self.console.print(f"[red]Error exporting module: {e}[/red]")
+            self.console.print(f"[red]❌ Export failed: {e}[/red]")
             return 1
 
     def get_progress_data(self) -> dict:
@@ -1451,7 +1479,10 @@ class ModuleWorkflowCommand(BaseCommand):
         # Handle subcommands
         if hasattr(args, 'module_command') and args.module_command:
             if args.module_command == 'start':
-                return self.start_module(args.module_number)
+                return self.start_module(
+                    args.module_number,
+                    no_jupyter=getattr(args, 'no_jupyter', False)
+                )
             elif args.module_command == 'view':
                 return self.view_module(args.module_number)
             elif args.module_command == 'resume':

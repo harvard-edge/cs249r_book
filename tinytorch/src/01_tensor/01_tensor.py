@@ -453,14 +453,26 @@ class Tensor:
         """
         ### BEGIN SOLUTION
         if not isinstance(other, Tensor):
-            raise TypeError(f"Expected Tensor for matrix multiplication, got {type(other)}")
+            raise TypeError(
+                f"Matrix multiplication requires Tensor, got {type(other).__name__}\n"
+                f"  ❌ Cannot perform: Tensor @ {type(other).__name__}\n"
+                f"  💡 Matrix multiplication (@) only works between two Tensors\n"
+                f"  🔧 Wrap your data: Tensor({other}) @ other_tensor"
+            )
         if len(self.shape) == 0 or len(other.shape) == 0:
-            raise ValueError("Both arguments to matmul need to be at least 1D, but one is 0D")
+            raise ValueError(
+                f"Matrix multiplication requires at least 1D tensors\n"
+                f"  ❌ Got shapes: {self.shape} @ {other.shape}\n"
+                f"  💡 Scalars (0D tensors) cannot be matrix-multiplied; use * for element-wise\n"
+                f"  🔧 Reshape scalar to 1D: tensor.reshape(1) or use tensor * scalar"
+            )
         if len(self.shape) >= 2 and len(other.shape) >= 2:
             if self.shape[-1] != other.shape[-2]:
                 raise ValueError(
-                    f"Cannot perform matrix multiplication: {self.shape} @ {other.shape}. "
-                    f"Inner dimensions must match: {self.shape[-1]} ≠ {other.shape[-2]}"
+                    f"Matrix multiplication shape mismatch: {self.shape} @ {other.shape}\n"
+                    f"  ❌ Inner dimensions don't match: {self.shape[-1]} vs {other.shape[-2]}\n"
+                    f"  💡 For A @ B, A's last dim must equal B's second-to-last dim\n"
+                    f"  🔧 Try: other.transpose() to get shape {other.shape[::-1]}, or reshape self"
                 )
 
         # Educational implementation: explicit loops to show what matrix multiplication does
@@ -556,7 +568,12 @@ class Tensor:
             new_shape = shape
         if -1 in new_shape:
             if new_shape.count(-1) > 1:
-                raise ValueError("Can only specify one unknown dimension with -1")
+                raise ValueError(
+                    f"Cannot reshape {self.shape} with multiple unknown dimensions\n"
+                    f"  ❌ Found {new_shape.count(-1)} dimensions set to -1 in {new_shape}\n"
+                    f"  💡 Only one dimension can be inferred; others must be specified\n"
+                    f"  🔧 Replace all but one -1 with explicit sizes (total elements: {self.size})"
+                )
             known_size = 1
             unknown_idx = new_shape.index(-1)
             for i, dim in enumerate(new_shape):
@@ -569,7 +586,10 @@ class Tensor:
         if np.prod(new_shape) != self.size:
             target_size = int(np.prod(new_shape))
             raise ValueError(
-                f"Total elements must match: {self.size} ≠ {target_size}"
+                f"Cannot reshape {self.shape} to {new_shape}\n"
+                f"  ❌ Element count mismatch: {self.size} elements vs {target_size} elements\n"
+                f"  💡 Reshape preserves data, so total elements must stay the same\n"
+                f"  🔧 Use -1 to infer a dimension: reshape(-1, {new_shape[-1] if len(new_shape) > 0 else 1}) lets NumPy calculate"
             )
         reshaped_data = np.reshape(self.data, new_shape)
         return Tensor(reshaped_data)
@@ -610,7 +630,14 @@ class Tensor:
                 transposed_data = np.transpose(self.data, axes)
         else:
             if dim0 is None or dim1 is None:
-                raise ValueError("Both dim0 and dim1 must be specified")
+                provided = f"dim0={dim0}" if dim1 is None else f"dim1={dim1}"
+                missing = "dim1" if dim1 is None else "dim0"
+                raise ValueError(
+                    f"Transpose requires both dimensions to be specified\n"
+                    f"  ❌ Got {provided}, but {missing} is None\n"
+                    f"  💡 Either provide both dims or neither (default swaps last two)\n"
+                    f"  🔧 Use transpose({dim0 if dim0 is not None else 0}, {dim1 if dim1 is not None else 1}) or just transpose()"
+                )
             axes = list(range(len(self.shape)))
             axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
             transposed_data = np.transpose(self.data, axes)
@@ -909,15 +936,15 @@ Matrix Multiplication Process:
     A (2×3)      B (3×2)         C (2×2)
    ┌       ┐    ┌     ┐       ┌         ┐
    │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 │   ┌      ┐
-   │       │ ×  │ 9 1 │  =    │             │ = │ 28 13│
-   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 │   │ 79 37│
+   │       │ ×  │ 9 1 │  =    │             │ = │ 28 16│
+   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 │   │ 79 49│
    └       ┘    └     ┘       └             ┘   └      ┘
 
 Computation Breakdown:
 C[0,0] = A[0,:] · B[:,0] = [1,2,3] · [7,9,1] = 1×7 + 2×9 + 3×1 = 28
-C[0,1] = A[0,:] · B[:,1] = [1,2,3] · [8,1,2] = 1×8 + 2×1 + 3×2 = 13
+C[0,1] = A[0,:] · B[:,1] = [1,2,3] · [8,1,2] = 1×8 + 2×1 + 3×2 = 16
 C[1,0] = A[1,:] · B[:,0] = [4,5,6] · [7,9,1] = 4×7 + 5×9 + 6×1 = 79
-C[1,1] = A[1,:] · B[:,1] = [4,5,6] · [8,1,2] = 4×8 + 5×1 + 6×2 = 37
+C[1,1] = A[1,:] · B[:,1] = [4,5,6] · [8,1,2] = 4×8 + 5×1 + 6×2 = 49
 
 Key Rule: Inner dimensions must match!
 A(m,n) @ B(n,p) = C(m,p)
@@ -1022,8 +1049,8 @@ def test_unit_matrix_multiplication():
         incompatible_a.matmul(incompatible_b)  # 1×2 @ 3×1 should fail (2 ≠ 3)
         assert False, "Should have raised ValueError for incompatible shapes"
     except ValueError as e:
-        assert "Inner dimensions must match" in str(e)
-        assert "2 ≠ 3" in str(e)  # Should show specific dimensions
+        assert "Inner dimensions don't match" in str(e)
+        assert "2 vs 3" in str(e)  # Should show specific dimensions
 
     print("✅ Matrix multiplication works correctly!")
 
@@ -1166,8 +1193,8 @@ def test_unit_shape_manipulation():
         tensor.reshape(2, 2)  # 6 elements can't fit in 2×2=4
         assert False, "Should have raised ValueError"
     except ValueError as e:
-        assert "Total elements must match" in str(e)
-        assert "6 ≠ 4" in str(e)
+        assert "Element count mismatch" in str(e)
+        assert "6 elements vs 4 elements" in str(e)
 
     # Test matrix transpose (most common case)
     matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # (2, 3)
@@ -1464,12 +1491,12 @@ Step 1: Matrix Multiply
 [[1, 2, 3]] @ [[0.1, 0.2]] = [[1×0.1+2×0.3+3×0.5, 1×0.2+2×0.4+3×0.6]]
 [[4, 5, 6]]   [[0.3, 0.4]]   [[4×0.1+5×0.3+6×0.5, 4×0.2+5×0.4+6×0.6]]
               [[0.5, 0.6]]
-                           = [[1.6, 2.6],
-                              [4.9, 6.8]]
+                           = [[2.2, 2.8],
+                              [4.9, 6.4]]
 
 Step 2: Add Bias (Broadcasting)
-[[1.6, 2.6]] + [0.1, 0.2] = [[1.7, 2.8],
- [4.9, 6.8]]                 [5.0, 7.0]]
+[[2.2, 2.8]] + [0.1, 0.2] = [[2.3, 3.0],
+ [4.9, 6.4]]                 [5.0, 6.6]]
 
 This is the foundation of every neural network layer!
 ```

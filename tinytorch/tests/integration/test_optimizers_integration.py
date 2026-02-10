@@ -232,7 +232,7 @@ def test_unit_shape_manipulation():
         t.reshape(2, 2)  # 6 elements can't fit in 2×2=4
         assert False, "Should have raised ValueError"
     except ValueError as e:
-        assert "Total elements must match" in str(e)
+        assert "element count mismatch" in str(e).lower()
 
     print("✅ Shape manipulation works!")
 

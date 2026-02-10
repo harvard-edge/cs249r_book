@@ -320,9 +320,13 @@ class Embedding:
         """
         # Handle input validation
         if np.any(indices.data >= self.vocab_size) or np.any(indices.data < 0):
+            min_idx = int(np.min(indices.data))
+            max_idx = int(np.max(indices.data))
             raise ValueError(
-                f"Index out of range. Expected 0 <= indices < {self.vocab_size}, "
-                f"got min={np.min(indices.data)}, max={np.max(indices.data)}"
+                f"Embedding index out of range for vocabulary size {self.vocab_size}\n"
+                f"  ❌ Found indices: min={min_idx}, max={max_idx} (valid range: 0 to {self.vocab_size - 1})\n"
+                f"  💡 Token IDs must be within the vocabulary. IDs >= vocab_size reference non-existent tokens\n"
+                f"  🔧 Check your tokenizer output, or increase vocab_size to at least {max_idx + 1}"
             )
 
         # Perform embedding lookup using advanced indexing
@@ -503,19 +507,36 @@ class PositionalEncoding:
         Returns:
             Position-encoded embeddings of same shape
         """
-        if len(x.shape) != 3:
-            raise ValueError(f"Expected 3D input (batch, seq, embed), got shape {x.shape}")
+        if len(x.shape) == 2:
+            raise ValueError(
+                f"Expected 3D input (batch, seq, embed), got 2D: {x.shape}\n"
+                f"  ❌ Missing batch dimension\n"
+                f"  💡 PositionalEncoding expects batched embeddings, not single sequences\n"
+                f"  🔧 Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]})"
+            )
+        elif len(x.shape) != 3:
+            raise ValueError(
+                f"Expected 3D input (batch, seq, embed), got {len(x.shape)}D: {x.shape}\n"
+                f"  ❌ Input must have exactly 3 dimensions\n"
+                f"  💡 PositionalEncoding expects shape (batch_size, sequence_length, embedding_dim)"
+            )
 
         batch_size, seq_len, embed_dim = x.shape
 
         if seq_len > self.max_seq_len:
             raise ValueError(
-                f"Sequence length {seq_len} exceeds maximum {self.max_seq_len}"
+                f"Sequence length exceeds maximum: {seq_len} > {self.max_seq_len}\n"
+                f"  ❌ Input sequence has {seq_len} positions, but max_seq_len is {self.max_seq_len}\n"
+                f"  💡 Learned positional encodings have a fixed maximum length set at initialization\n"
+                f"  🔧 Either truncate input to {self.max_seq_len} tokens, or create a new PositionalEncoding(max_seq_len={seq_len}, ...)"
             )
 
         if embed_dim != self.embed_dim:
             raise ValueError(
-                f"Embedding dimension mismatch: expected {self.embed_dim}, got {embed_dim}"
+                f"Embedding dimension mismatch: input has {embed_dim}, expected {self.embed_dim}\n"
+                f"  ❌ PositionalEncoding was created with embed_dim={self.embed_dim}, but input has embed_dim={embed_dim}\n"
+                f"  💡 Token embeddings and positional encodings must have the same dimension to be added together\n"
+                f"  🔧 Ensure your Embedding layer uses embed_dim={self.embed_dim}, or create PositionalEncoding(embed_dim={embed_dim}, ...)"
             )
 
         # Slice position embeddings for this sequence length using Tensor slicing
@@ -946,7 +967,14 @@ class EmbeddingLayer:
         elif pos_encoding is None:
             self.pos_encoding = None
         else:
-            raise ValueError(f"Unknown pos_encoding: {pos_encoding}. Use 'learned', 'sinusoidal', or None")
+            raise ValueError(
+                f"Unknown positional encoding type: '{pos_encoding}'\n"
+                f"  ❌ pos_encoding must be 'learned', 'sinusoidal', or None\n"
+                f"  💡 'learned' = trainable position embeddings (task-specific but fixed max length)\n"
+                f"     'sinusoidal' = mathematical sin/cos patterns (no parameters, can extrapolate)\n"
+                f"     None = no positional encoding (order-agnostic model)\n"
+                f"  🔧 Use: EmbeddingLayer(..., pos_encoding='learned') or pos_encoding='sinusoidal'"
+            )
 
     def forward(self, tokens: Tensor) -> Tensor:
         """

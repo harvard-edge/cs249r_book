@@ -304,7 +304,16 @@ class Optimizer:
 
         This is abstract - each optimizer implements its own update rule.
         """
-        raise NotImplementedError("Subclasses must implement step()")
+        raise NotImplementedError(
+            f"Abstract method step() not implemented\n"
+            f"  ❌ {self.__class__.__name__} inherits from Optimizer but doesn't define step()\n"
+            f"  💡 Each optimizer must implement its own update rule (SGD, Adam, etc.)\n"
+            f"  🔧 Override step() in your optimizer subclass:\n"
+            f"      def step(self):\n"
+            f"          for param in self.params:\n"
+            f"              if param.grad is not None:\n"
+            f"                  param.data -= self.lr * param.grad.data"
+        )
 
 # %% [markdown]
 """
@@ -521,8 +530,12 @@ class SGD(Optimizer):
 
         if len(state) != len(self.momentum_buffers):
             raise ValueError(
-                f"State length {len(state)} doesn't match "
-                f"optimizer parameters {len(self.momentum_buffers)}"
+                f"Momentum state length mismatch\n"
+                f"  ❌ State has {len(state)} buffers, but optimizer has {len(self.momentum_buffers)} parameters\n"
+                f"  💡 Checkpoint was saved with a different model architecture or parameter count\n"
+                f"  🔧 Ensure you're loading state into an optimizer with the same number of parameters:\n"
+                f"      # Check parameter counts match before restoring\n"
+                f"      assert len(saved_state) == len(optimizer.params)"
             )
 
         for i, buf in enumerate(state):

@@ -16,6 +16,7 @@ from rich.text import Text
 from rich.layout import Layout
 from rich.tree import Tree
 from rich.columns import Columns
+from rich.cells import cell_len
 import sys
 import json
 import time
@@ -1143,11 +1144,19 @@ class MilestoneCommand(BaseCommand):
         else:
             scripts_info = f"[bold]📂 Running:[/bold] {scripts_to_run[0][1]}"
 
+        WIDTH = 48
+
+        line1_text = f"  {milestone['emoji']} Milestone {milestone_id}: {milestone['name']}"
+        line1 = f"[bold magenta]║[/bold magenta]{line1_text}{' ' * (WIDTH - cell_len(line1_text))}[bold magenta]║[/bold magenta]"
+
+        line2_text = f"  {milestone['title']}"
+        line2 = f"[bold magenta]║[/bold magenta]{line2_text}{' ' * (WIDTH - cell_len(line2_text))}[bold magenta]║[/bold magenta]"
+
         console.print(Panel(
-            f"[bold magenta]╔════════════════════════════════════════════════╗[/bold magenta]\n"
-            f"[bold magenta]║[/bold magenta]  {milestone['emoji']} Milestone {milestone_id}: {milestone['name']:<30} [bold magenta]║[/bold magenta]\n"
-            f"[bold magenta]║[/bold magenta]  {milestone['title']:<44} [bold magenta]║[/bold magenta]\n"
-            f"[bold magenta]╚════════════════════════════════════════════════╝[/bold magenta]\n\n"
+            f"[bold magenta]╔{'═' * WIDTH}╗[/bold magenta]\n"
+            f"{line1}\n"
+            f"{line2}\n"
+            f"[bold magenta]╚{'═' * WIDTH}╝[/bold magenta]\n\n"
             f"[bold]📚 Historical Context:[/bold]\n"
             f"{milestone['historical_context']}\n\n"
             f"[bold]🎯 What You'll Do:[/bold]\n"
@@ -1163,7 +1172,7 @@ class MilestoneCommand(BaseCommand):
         import sys
         if sys.stdin.isatty() and sys.stdout.isatty():
             try:
-                input("\n[yellow]Press Enter to begin...[/yellow] ")
+                console.input("\n[yellow]Press Enter to begin...[/yellow] ")
             except EOFError:
                 pass
 
@@ -1421,13 +1430,19 @@ class MilestoneCommand(BaseCommand):
         # Check if user is logged in
         if auth.is_logged_in():
             console.print()
-            try:
-                should_sync = Confirm.ask(
-                    f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
-                    default=True
-                )
-            except EOFError:
-                # Non-interactive mode - skip sync prompt
+            # Only prompt in interactive terminal (skip in CI/pipes)
+            import sys
+            if sys.stdin.isatty() and sys.stdout.isatty():
+                try:
+                    should_sync = Confirm.ask(
+                        f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
+                        default=True
+                    )
+                except EOFError:
+                    # Non-interactive mode - skip sync prompt
+                    should_sync = False
+            else:
+                # Non-interactive mode (CI, pipes, etc.) - skip sync
                 should_sync = False
 
             if should_sync:

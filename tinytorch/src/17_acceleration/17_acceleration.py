@@ -283,15 +283,18 @@ def vectorized_matmul(a: Tensor, b: Tensor) -> Tensor:
     # Input validation for matrix multiplication
     if len(a.shape) < 2 or len(b.shape) < 2:
         raise ValueError(
-            f"Matrix multiplication requires 2D+ tensors, got shapes {a.shape} and {b.shape}. "
-            f"💡 HINT: Use reshape() to add dimensions if needed."
+            f"Matrix multiplication requires 2D+ tensors\n"
+            f"  ❌ Got shapes {a.shape} and {b.shape} ({len(a.shape)}D and {len(b.shape)}D tensors)\n"
+            f"  💡 Matrix multiplication computes dot products between rows and columns, which requires at least 2D tensors\n"
+            f"  🔧 Add dimensions with reshape: a.reshape(1, {a.shape[-1] if len(a.shape) >= 1 else 'n'}) for a row vector"
         )
 
     if a.shape[-1] != b.shape[-2]:
         raise ValueError(
-            f"Matrix multiplication shape mismatch: {a.shape} @ {b.shape}. "
-            f"Inner dimensions must match: a.shape[-1]={a.shape[-1]} != b.shape[-2]={b.shape[-2]}. "
-            f"💡 HINT: For A@B, A's columns must equal B's rows."
+            f"Matrix multiplication shape mismatch: {a.shape} @ {b.shape}\n"
+            f"  ❌ Inner dimensions don't match: a.shape[-1]={a.shape[-1]} vs b.shape[-2]={b.shape[-2]}\n"
+            f"  💡 For A @ B, each row of A (length {a.shape[-1]}) must match each column of B (length {b.shape[-2]})\n"
+            f"  🔧 Try: b.reshape({a.shape[-1]}, -1) or a.reshape(-1, {b.shape[-2]})"
         )
 
     # Use NumPy's highly optimized matrix multiplication
@@ -714,15 +717,18 @@ def tiled_matmul(a: Tensor, b: Tensor, tile_size: int = 64) -> Tensor:
     # Input validation
     if len(a.shape) < 2 or len(b.shape) < 2:
         raise ValueError(
-            f"Tiled matmul requires 2D+ tensors, got shapes {a.shape} and {b.shape}. "
-            f"💡 HINT: Tiling works on matrix operations."
+            f"Tiled matrix multiplication requires 2D+ tensors\n"
+            f"  ❌ Got shapes {a.shape} and {b.shape} ({len(a.shape)}D and {len(b.shape)}D tensors)\n"
+            f"  💡 Tiling partitions matrices into cache-sized blocks, which requires 2D structure\n"
+            f"  🔧 Add dimensions with reshape: tensor.reshape(1, -1) for row vector or tensor.reshape(-1, 1) for column"
         )
 
     if a.shape[-1] != b.shape[-2]:
         raise ValueError(
-            f"Shape mismatch: {a.shape} @ {b.shape}. "
-            f"Inner dimensions must match for matrix multiplication. "
-            f"💡 HINT: a.shape[-1]={a.shape[-1]} != b.shape[-2]={b.shape[-2]}"
+            f"Tiled matrix multiplication shape mismatch: {a.shape} @ {b.shape}\n"
+            f"  ❌ Inner dimensions don't match: a.shape[-1]={a.shape[-1]} vs b.shape[-2]={b.shape[-2]}\n"
+            f"  💡 Each tile of A's columns must align with tiles of B's rows for block multiplication\n"
+            f"  🔧 Reshape to align: b.reshape({a.shape[-1]}, -1) or transpose if dimensions are swapped"
         )
 
     # For educational purposes, we use NumPy's matmul which already
@@ -770,7 +776,7 @@ def test_unit_tiled_matmul():
         tiled_matmul(wrong_a, wrong_b)
         assert False, "Should have raised ValueError for shape mismatch"
     except ValueError as e:
-        assert "Shape mismatch" in str(e)
+        assert "shape mismatch" in str(e).lower()
 
     print("✅ tiled_matmul works correctly!")
 
