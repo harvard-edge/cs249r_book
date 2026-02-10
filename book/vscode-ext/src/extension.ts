@@ -9,6 +9,13 @@ import { registerDebugCommands } from './commands/debugCommands';
 import { registerPrecommitCommands } from './commands/precommitCommands';
 import { registerPublishCommands } from './commands/publishCommands';
 import { registerContextMenuCommands } from './commands/contextMenuCommands';
+import {
+  initializeRunManager,
+  rerunLastCommand,
+  revealRunTerminal,
+  showLastFailureDetails,
+  setExecutionModeInteractively,
+} from './utils/terminal';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -16,6 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showWarningMessage('MLSysBook Workbench: could not find repo root (book/binder not found).');
     return;
   }
+  initializeRunManager(context);
 
   // Tree view providers
   const buildProvider = new BuildTreeProvider(root);
@@ -33,6 +41,11 @@ export function activate(context: vscode.ExtensionContext): void {
   // Refresh command for build tree
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.refreshBuildTree', () => buildProvider.refresh()),
+    vscode.commands.registerCommand('mlsysbook.rerunLastCommand', () => rerunLastCommand(false)),
+    vscode.commands.registerCommand('mlsysbook.rerunLastCommandRaw', () => rerunLastCommand(true)),
+    vscode.commands.registerCommand('mlsysbook.revealTerminal', () => revealRunTerminal(root)),
+    vscode.commands.registerCommand('mlsysbook.openLastFailureDetails', () => showLastFailureDetails()),
+    vscode.commands.registerCommand('mlsysbook.setExecutionMode', () => void setExecutionModeInteractively()),
   );
 
   // Register all command groups

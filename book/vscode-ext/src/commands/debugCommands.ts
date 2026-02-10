@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { VolumeId } from '../types';
 import { getRepoRoot } from '../utils/workspace';
-import { runInTerminal } from '../utils/terminal';
+import { runBookCommand } from '../utils/terminal';
 import { discoverChapters } from '../utils/chapters';
 
 export function registerDebugCommands(context: vscode.ExtensionContext): void {
@@ -11,7 +11,9 @@ export function registerDebugCommands(context: vscode.ExtensionContext): void {
   // Debug full volume
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.debugVolumePdf', (vol: VolumeId) => {
-      runInTerminal(`./book/binder debug pdf --${vol}`, root);
+      void runBookCommand(`./book/binder debug pdf --${vol}`, root, {
+        label: `Debug Volume PDF (${vol})`,
+      });
     })
   );
 
@@ -43,7 +45,9 @@ export function registerDebugCommands(context: vscode.ExtensionContext): void {
       );
       const fmt = fmtPick ?? 'pdf';
 
-      runInTerminal(`./book/binder debug ${fmt} --${volPick.id} --chapter ${chapterPick.id}`, root);
+      void runBookCommand(`./book/binder debug ${fmt} --${volPick.id} --chapter ${chapterPick.id}`, root, {
+        label: `Debug Chapter ${fmt.toUpperCase()} (${volPick.id}/${chapterPick.id})`,
+      });
     })
   );
 }

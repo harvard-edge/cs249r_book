@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { getRepoRoot } from '../utils/workspace';
-import { runInTerminal } from '../utils/terminal';
+import { runBookCommand } from '../utils/terminal';
 
 export function registerPublishCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -9,26 +9,38 @@ export function registerPublishCommands(context: vscode.ExtensionContext): void 
   // Generic action runner (used by tree items that pass a command string)
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.runAction', (command: string) => {
-      runInTerminal(command, root);
+      void runBookCommand(command, root, {
+        label: 'Maintenance action',
+      });
     })
   );
 
   // Named aliases for command palette discoverability
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.cleanArtifacts', () => {
-      runInTerminal('./book/binder clean', root);
+      void runBookCommand('./book/binder clean', root, {
+        label: 'Clean build artifacts',
+      });
     }),
     vscode.commands.registerCommand('mlsysbook.doctor', () => {
-      runInTerminal('./book/binder doctor', root);
+      void runBookCommand('./book/binder doctor', root, {
+        label: 'Doctor (health check)',
+      });
     }),
     vscode.commands.registerCommand('mlsysbook.buildGlossary', () => {
-      runInTerminal('python3 book/tools/scripts/glossary/build_global_glossary.py', root);
+      void runBookCommand('python3 book/tools/scripts/glossary/build_global_glossary.py', root, {
+        label: 'Build global glossary',
+      });
     }),
     vscode.commands.registerCommand('mlsysbook.compressImages', () => {
-      runInTerminal('python3 book/tools/scripts/images/compress_images.py', root);
+      void runBookCommand('python3 book/tools/scripts/images/compress_images.py', root, {
+        label: 'Compress images',
+      });
     }),
     vscode.commands.registerCommand('mlsysbook.repoHealth', () => {
-      runInTerminal('python3 book/tools/scripts/maintenance/repo_health_check.py --health-check', root);
+      void runBookCommand('python3 book/tools/scripts/maintenance/repo_health_check.py --health-check', root, {
+        label: 'Repo health check',
+      });
     }),
   );
 }

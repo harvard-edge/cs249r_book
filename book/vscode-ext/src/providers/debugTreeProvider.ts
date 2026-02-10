@@ -14,6 +14,9 @@ export class DebugTreeProvider implements vscode.TreeDataProvider<ActionTreeItem
       new ActionTreeItem('Debug Vol1 PDF', 'mlsysbook.debugVolumePdf', ['vol1'], 'bug'),
       new ActionTreeItem('Debug Vol2 PDF', 'mlsysbook.debugVolumePdf', ['vol2'], 'bug'),
       new ActionTreeItem('Debug Chapter Sections...', 'mlsysbook.debugChapterSections', [], 'search'),
+      new ActionTreeItem('Open Last Failure Details', 'mlsysbook.openLastFailureDetails', [], 'warning'),
+      new ActionTreeItem('Rerun Last Command', 'mlsysbook.rerunLastCommand', [], 'history'),
+      new ActionTreeItem('Rerun Last Command (Raw)', 'mlsysbook.rerunLastCommandRaw', [], 'terminal'),
     ];
   }
 }

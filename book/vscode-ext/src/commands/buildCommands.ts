@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { VolumeId, BuildFormat } from '../types';
 import { getRepoRoot } from '../utils/workspace';
-import { runInTerminal } from '../utils/terminal';
+import { runBookCommand } from '../utils/terminal';
 
 export function registerBuildCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -12,7 +12,9 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildChapter${fmt}`, (vol: VolumeId, chapter: string) => {
-        runInTerminal(`./book/binder ${fmtLower} ${chapter} --${vol} -v`, root);
+        void runBookCommand(`./book/binder ${fmtLower} ${chapter} --${vol} -v`, root, {
+          label: `Build Chapter ${fmt.toUpperCase()} (${vol}/${chapter})`,
+        });
       })
     );
   }
@@ -20,7 +22,9 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
   // Preview
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.previewChapter', (vol: VolumeId, chapter: string) => {
-      runInTerminal(`./book/binder preview ${chapter}`, root);
+      void runBookCommand(`./book/binder preview ${chapter}`, root, {
+        label: `Preview Chapter (${vol}/${chapter})`,
+      });
     })
   );
 
@@ -29,7 +33,9 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildVolume${fmt}`, (vol: VolumeId) => {
-        runInTerminal(`./book/binder ${fmtLower} --${vol} -v`, root);
+        void runBookCommand(`./book/binder ${fmtLower} --${vol} -v`, root, {
+          label: `Build Volume ${fmt.toUpperCase()} (${vol})`,
+        });
       })
     );
   }

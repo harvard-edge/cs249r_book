@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { getRepoRoot, parseQmdFile } from '../utils/workspace';
-import { runInTerminal } from '../utils/terminal';
+import { runBookCommand } from '../utils/terminal';
 
 export function registerContextMenuCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -13,7 +13,9 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      runInTerminal(`./book/binder ${format} ${ctx.chapter} --${ctx.volume} -v`, root);
+      void runBookCommand(`./book/binder ${format} ${ctx.chapter} --${ctx.volume} -v`, root, {
+        label: `Build ${format.toUpperCase()} (${ctx.volume}/${ctx.chapter})`,
+      });
     };
   };
 
@@ -28,7 +30,9 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      runInTerminal(`./book/binder preview ${ctx.chapter}`, root);
+      void runBookCommand(`./book/binder preview ${ctx.chapter}`, root, {
+        label: `Preview (${ctx.volume}/${ctx.chapter})`,
+      });
     }),
 
     vscode.commands.registerCommand('mlsysbook.contextDebugSections', (uri: vscode.Uri) => {
@@ -37,7 +41,9 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      runInTerminal(`./book/binder debug pdf --${ctx.volume} --chapter ${ctx.chapter}`, root);
+      void runBookCommand(`./book/binder debug pdf --${ctx.volume} --chapter ${ctx.chapter}`, root, {
+        label: `Debug Sections (${ctx.volume}/${ctx.chapter})`,
+      });
     }),
   );
 }
