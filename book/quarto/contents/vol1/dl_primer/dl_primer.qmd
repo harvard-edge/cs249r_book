@@ -1947,6 +1947,7 @@ class MNISTMemory:
 
     training_mb_str = fmt(training_total_kb / 1024, precision=1, commas=False)
     inference_kb_str = fmt(inference_total_kb, precision=0, commas=False)
+    inference_kb_display = inference_kb_str # Alias for consistency
     training_ratio_str = fmt(training_total_kb / inference_total_kb, precision=1, commas=False)
 
     # Detailed Breakdowns
@@ -1998,6 +1999,25 @@ class BackpropMemory:
         act_kb.append((cnt * bytes_per_param)/1024)
 
     # Calculate Params
+    weights = []
+    for i in range(len(layers_dims) - 1):
+        din, dout = layers_dims[i], layers_dims[i+1]
+        weights.append(din * dout)
+
+    # Gradient Memory (same as params)
+    total_params = sum(weights) + sum(layers_dims[1:]) # Weights + Biases
+    grad_kb = (total_params * bytes_per_param) / 1024
+
+    # Outputs
+    act_l1_kb_str = fmt(act_kb[1], precision=0, commas=False) # 512 layer
+    act_l2_kb_str = fmt(act_kb[2], precision=0, commas=False) # 256 layer
+    total_act_kb_str = fmt(sum(act_kb), precision=0, commas=False)
+
+    grad_kb_str = fmt(grad_kb, precision=0, commas=False)
+
+    # Comparison
+    ratio = sum(act_kb) / grad_kb
+    ratio_str = fmt(ratio, precision=1, commas=False)
     params = 0
     for i in range(len(layers_dims)-1):
         params += (layers_dims[i] * layers_dims[i+1]) + layers_dims[i+1]
@@ -2079,7 +2099,7 @@ param_mem_str = fmt(param_mem_val, precision=1, commas=False)
 
 How parameters\index{Model Size!parameter count}\index{Memory Footprint!computational requirements} (weights and biases) are arranged determines both learning capacity and computational cost—this is the model's side of the **Silicon Contract** (@sec-silicon-contract): the parameter count, their numerical precision, and the operations they require collectively define the computational bargain the model strikes with hardware. While topology defines the network's structure, parameter initialization and organization directly affect learning dynamics and final performance.
 
-Parameter count grows with network width and depth. For our MNIST example, consider a network with a `{python} mnist_l1_dim`-dimensional input layer, hidden layers of `{python} mnist_l2_dim` and `{python} mnist_l3_dim` neurons, and a `{python} mnist_l4_dim`-neuron output layer (`{python} mnist_arch_str`). The first layer requires `{python} w1_str` weights and `{python} b1_str` biases, the second layer `{python} w2_str` weights and `{python} b2_str` biases, and the output layer `{python} w3_str` weights and `{python} b3_str` biases, totaling `{python} total_params_str` parameters. Each must be stored in memory and updated during learning.
+Parameter count grows with network width and depth. For our MNIST example, consider a network with a `{python} mnist_l1_dim`-dimensional input layer, hidden layers of `{python} mnist_l2_dim` and `{python} mnist_l3_dim` neurons, and a `{python} mnist_l4_dim`-neuron output layer (`{python} mnist_arch_str`). The first layer requires `{python} MNISTMemory.w1_str` weights and `{python} MNISTMemory.b1_str` biases, the second layer `{python} MNISTMemory.w2_str` weights and `{python} MNISTMemory.b2_str` biases, and the output layer `{python} MNISTMemory.w3_str` weights and `{python} MNISTMemory.b3_str` biases, totaling `{python} MNISTMemory.total_params_str` parameters. Each must be stored in memory and updated during learning.
 
 ```{python}
 #| label: mnist-training-memory-calc
@@ -2156,14 +2176,14 @@ training_ratio_str = fmt(training_ratio_calc, precision=1, commas=False)
 
 #### Step 1: Model Parameters
 
-| **Layer**           |                   **Weights** |        **Biases** |            **Total Parameters** |
-|:------------------|----------------------------:|----------------:|------------------------------:|
-| **Input→Hidden1**   | 784 × 128 = `{python} w1_str` | `{python} b1_str` |               `{python} p1_str` |
-| **Hidden1→Hidden2** |  128 × 64 = `{python} w2_str` | `{python} b2_str` |               `{python} p2_str` |
-| **Hidden2→Output**  |   64 × 10 = `{python} w3_str` | `{python} b3_str` |               `{python} p3_str` |
-| **Total**           |                               |                   | **`{python} total_params_str`** |
+| **Layer**           |                               **Weights** |                    **Biases** |                        **Total Parameters** |
+|:------------------|----------------------------------------:|----------------------------:|------------------------------------------:|
+| **Input→Hidden1**   | 784 × 128 = `{python} MNISTMemory.w1_str` | `{python} MNISTMemory.b1_str` |               `{python} MNISTMemory.p1_str` |
+| **Hidden1→Hidden2** |  128 × 64 = `{python} MNISTMemory.w2_str` | `{python} MNISTMemory.b2_str` |               `{python} MNISTMemory.p2_str` |
+| **Hidden2→Output**  |   64 × 10 = `{python} MNISTMemory.w3_str` | `{python} MNISTMemory.b3_str` |               `{python} MNISTMemory.p3_str` |
+| **Total**           |                                           |                               | **`{python} MNISTMemory.total_params_str`** |
 
-**Parameter memory**: `{python} total_params_str` × 4 bytes = **`{python} param_kib_str` KB**
+**Parameter memory**: `{python} MNISTMemory.total_params_str` × 4 bytes = **`{python} param_kib_str` KB**
 
 #### Step 2: Activations
 
@@ -2190,7 +2210,7 @@ training_ratio_str = fmt(training_ratio_calc, precision=1, commas=False)
 | **Optimizer state** | `{python} opt_kib_str` KB              | —                                      |
 | **Total**           | **~`{python} total_train_mib_str` MB** | **~`{python} total_infer_kib_str` KB** |
 
-**Key insight**: Training requires **`{python} training_ratio_str`× more memory** than inference for the same batch size. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size × layer widths.
+**Key insight**: Training requires **`{python} MNISTMemory.training_ratio_str`× more memory** than inference for the same batch size. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size × layer widths.
 
 :::
 
@@ -2334,11 +2354,11 @@ The distribution of parameters affects information flow through layers. In digit
 
 Different architectures impose specific constraints on parameter organization. Some share weights across network regions to encode position-invariant pattern recognition; others restrict certain weights to zero, implementing sparse connectivity patterns.
 
-Network architecture, neurons, and parameters are now in place, but a central question remains: how do these randomly initialized parameters become useful? A randomly wired network produces outputs no better than chance. Understanding the architecture of a neural network answers *what* the model computes; understanding training answers *how* the model learns. The training process transforms a randomly initialized network into one that captures meaningful patterns in data, and the mechanics of that transformation reveal fundamental systems constraints—why training demands far more memory than inference, why gradient computation dominates energy budgets, and why batch size is ultimately a hardware decision. The answer lies in the learning process, where networks systematically adjust their weights based on feedback from training data—transforming `{python} total_params_str` random numbers into a functioning digit classifier.
+Network architecture, neurons, and parameters are now in place, but a central question remains: how do these randomly initialized parameters become useful? A randomly wired network produces outputs no better than chance. Understanding the architecture of a neural network answers *what* the model computes; understanding training answers *how* the model learns. The training process transforms a randomly initialized network into one that captures meaningful patterns in data, and the mechanics of that transformation reveal fundamental systems constraints—why training demands far more memory than inference, why gradient computation dominates energy budgets, and why batch size is ultimately a hardware decision. The answer lies in the learning process, where networks systematically adjust their weights based on feedback from training data—transforming `{python} MNISTMemory.total_params_str` random numbers into a functioning digit classifier.
 
 ## Learning Process {#sec-deep-learning-systems-foundations-learning-process-0b83}
 
-Our MNIST network currently holds `{python} total_params_str` randomly initialized parameters—numbers that encode no knowledge at all. How do these random values become a digit classifier that achieves over 95% accuracy? Neural networks learn through training on examples, iteratively adjusting weights to reduce prediction errors. This section traces that process from the first random guess to a trained model, covering the four operations that constitute each training step: forward propagation, loss computation, backpropagation, and weight update.
+Our MNIST network currently holds `{python} MNISTMemory.total_params_str` randomly initialized parameters—numbers that encode no knowledge at all. How do these random values become a digit classifier that achieves over 95% accuracy? Neural networks learn through training on examples, iteratively adjusting weights to reduce prediction errors. This section traces that process from the first random guess to a trained model, covering the four operations that constitute each training step: forward propagation, loss computation, backpropagation, and weight update.
 
 ### Supervised Learning from Labeled Examples {#sec-deep-learning-systems-foundations-supervised-learning-labeled-examples-5e6d}
 
@@ -2647,22 +2667,22 @@ double_ratio_exact_str = fmt(double_ratio_value, precision=2, commas=False)
 
 **Solution**:
 
-| **Layer**   | **Operation**  |       **Dimensions** |                                   **Ops** |
-|:----------|:-------------|-------------------:|----------------------------------------:|
-| **Layer 1** | MatMul         | (32×784) × (784×128) | 2 × 32 × 784 × 128 = `{python} l1_mm_str` |
-| **Layer 1** | Bias + ReLU    |             32 × 128 |        2 × 4,096 = `{python} l1_bias_str` |
-| **Layer 2** | MatMul         |  (32×128) × (128×64) |  2 × 32 × 128 × 64 = `{python} l2_mm_str` |
-| **Layer 2** | Bias + ReLU    |              32 × 64 |        2 × 2,048 = `{python} l2_bias_str` |
-| **Layer 3** | MatMul         |    (32×64) × (64×10) |   2 × 32 × 64 × 10 = `{python} l3_mm_str` |
-| **Layer 3** | Bias + Softmax |              32 × 10 |      ~`{python} l3_bias_str` (simplified) |
-| **Total**   |                |                      |       **~`{python} total_mops_str` MOps** |
+| **Layer**   | **Operation**  |       **Dimensions** |                                         **Ops** |
+|:----------|:-------------|-------------------:|----------------------------------------------:|
+| **Layer 1** | MatMul         | (32×784) × (784×128) |       2 × 32 × 784 × 128 = `{python} l1_mm_str` |
+| **Layer 1** | Bias + ReLU    |             32 × 128 |              2 × 4,096 = `{python} l1_bias_str` |
+| **Layer 2** | MatMul         |  (32×128) × (128×64) |        2 × 32 × 128 × 64 = `{python} l2_mm_str` |
+| **Layer 2** | Bias + ReLU    |              32 × 64 |              2 × 2,048 = `{python} l2_bias_str` |
+| **Layer 3** | MatMul         |    (32×64) × (64×10) |         2 × 32 × 64 × 10 = `{python} l3_mm_str` |
+| **Layer 3** | Bias + Softmax |              32 × 10 |            ~`{python} l3_bias_str` (simplified) |
+| **Total**   |                |                      | **~`{python} MNISTMemory.total_mops_str` MOps** |
 
-**Per-image cost**: `{python} total_mops_str` MOps ÷ 32 = **~`{python} per_image_kops_str` KOps per image**
+**Per-image cost**: `{python} MNISTMemory.total_mops_str` MOps ÷ 32 = **~`{python} MNISTMemory.per_image_kops_str` KOps per image**
 
 **Key insights**:
 
-1. **Layer 1 dominates**: The first layer accounts for `{python} layer1_pct_str`% of all operations because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
-2. **Compute vs. Memory**: At `{python} per_image_kops_str` KOps per image and ~`{python} inference_kb_display` KB memory, this network has an arithmetic intensity of ~`{python} arith_intensity_str` FLOPs/byte—firmly in the **memory-bound** regime for most hardware (see the **Roofline Model** in @sec-system-foundations-roofline-model-5f7c for how arithmetic intensity determines whether a workload is memory-bound or compute-bound). A modern GPU achieving 10 TFLOPS would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
+1. **Layer 1 dominates**: The first layer accounts for `{python} MNISTMemory.layer1_pct_str`% of all operations because it processes the largest input (784 dimensions). This is why dimensionality reduction in early layers is so impactful.
+2. **Compute vs. Memory**: At `{python} MNISTMemory.per_image_kops_str` KOps per image and ~`{python} MNISTMemory.inference_kb_display` KB memory, this network has an arithmetic intensity of ~`{python} MNISTMemory.arith_intensity_str` FLOPs/byte—firmly in the **memory-bound** regime for most hardware (see the **Roofline Model** in @sec-system-foundations-roofline-model-5f7c for how arithmetic intensity determines whether a workload is memory-bound or compute-bound). A modern GPU achieving 10 TFLOPS would process each image in ~22 nanoseconds of pure compute, but memory latency typically dominates actual inference time.
 3. **Scaling intuition**: Doubling the hidden layer widths (784→256→128→10) increases $O$ by ~`{python} double_ratio_str`× to ~`{python} double_total_mops_str` MOps. This comes from recomputing each layer: L1 and L3 double, L2 quadruples, so the total grows by about `{python} double_ratio_exact_str`× rather than 4×.
 
 :::
@@ -2673,11 +2693,11 @@ Forward propagation implementation involves practical considerations that affect
 
 Memory management plays a central role during forward propagation. Each layer's activations must be stored for the backward pass during training. For our MNIST example (784-128-64-10) with a batch size of 32, the activation storage requirements are:
 
-* First hidden layer: 32×128 = `{python} batch_h1_str` values
-* Second hidden layer: 32×64 = `{python} batch_h2_str` values
-* Output layer: 32×10 = `{python} batch_out_str` values
+* First hidden layer: 32×128 = `{python} MNISTMemory.batch_h1_str` values
+* Second hidden layer: 32×64 = `{python} MNISTMemory.batch_h2_str` values
+* Output layer: 32×10 = `{python} MNISTMemory.batch_out_str` values
 
-This produces a total of `{python} batch_act_total_str` values that must be maintained in memory for each batch during training, consistent with the worked example in @sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f. The memory requirements scale linearly with batch size and become substantial for larger networks.
+This produces a total of `{python} MNISTMemory.batch_act_total_str` values that must be maintained in memory for each batch during training, consistent with the worked example in @sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f. The memory requirements scale linearly with batch size and become substantial for larger networks.
 
 Batch processing introduces important trade-offs. Larger batches enable more efficient matrix operations and better hardware utilization but require more memory. For example, doubling the batch size to 64 would double the memory requirements for activations. This relationship between batch size, memory usage, and computational efficiency guides the choice of batch size in practice.
 
@@ -2776,7 +2796,7 @@ The loss function's gradients with respect to the network's outputs provide the 
 
 The choice of loss function also influences other training decisions. Larger loss gradients may require smaller learning rates to prevent overshooting, while loss averaging across batches affects gradient stability and thus optimal batch size. The loss landscape's curvature shapes which optimization algorithms work best, and the loss value's trajectory determines when training has converged.
 
-Loss functions answer a key question: how wrong is our prediction? But knowing we made an error does not tell us how to fix it. With `{python} total_params_str` parameters in our MNIST network, which weights should change, by how much, and in what direction? This is the credit assignment problem\index{Credit Assignment Problem!weight responsibility}: determining which of thousands of connections contributed to the error. The next section introduces backpropagation, which solves this problem through the chain rule of calculus, systematically computing each weight's responsibility for the final prediction error.
+Loss functions answer a key question: how wrong is our prediction? But knowing we made an error does not tell us how to fix it. With `{python} MNISTMemory.total_params_str` parameters in our MNIST network, which weights should change, by how much, and in what direction? This is the credit assignment problem\index{Credit Assignment Problem!weight responsibility}: determining which of thousands of connections contributed to the error. The next section introduces backpropagation, which solves this problem through the chain rule of calculus, systematically computing each weight's responsibility for the final prediction error.
 
 ### Gradient Computation and Backpropagation {#sec-deep-learning-systems-foundations-gradient-computation-backpropagation-dacf}
 
@@ -3314,10 +3334,10 @@ Neural networks consume computational resources differently during inference tha
 Memory requirements\index{Memory Footprint!parameter storage}\index{Memory Footprint!activation storage} during inference can be precisely quantified:
 
 1. Static Memory (Model Parameters):
-   * Layer 1: 784 × 128 = `{python} w1_str` weights + `{python} b1_str` biases
-   * Layer 2: 128 × 64 = `{python} w2_str` weights + `{python} b2_str` biases
-   * Layer 3: 64 × 10 = `{python} w3_str` weights + `{python} b3_str` biases
-   * Total: `{python} total_params_str` parameters (≈ `{python} param_mem_str` KB at 32-bit floating point precision[^fn-floating-point])
+   * Layer 1: 784 × 128 = `{python} MNISTMemory.w1_str` weights + `{python} MNISTMemory.b1_str` biases
+   * Layer 2: 128 × 64 = `{python} MNISTMemory.w2_str` weights + `{python} MNISTMemory.b2_str` biases
+   * Layer 3: 64 × 10 = `{python} MNISTMemory.w3_str` weights + `{python} MNISTMemory.b3_str` biases
+   * Total: `{python} MNISTMemory.total_params_str` parameters (≈ `{python} MNISTMemory.param_mem_str` KB at 32-bit floating point precision[^fn-floating-point])
 
 [^fn-floating-point]: **32-bit Floating Point Precision**: Also called "single precision" or FP32, this IEEE 754 standard uses 32 bits to represent real numbers: 1 bit for sign, 8 bits for exponent, and 23 bits for mantissa. While neural network training typically requires FP32 precision to maintain gradient stability, inference often works with FP16 (half precision) or even INT8 (8-bit integers), reducing memory usage by 2× to 4×. Modern AI chips like Google's TPU v4 support "bfloat16" (brain floating point), a custom 16-bit format that maintains FP32's range while halving memory requirements. @sec-system-foundations-numerical-representations-7b2f provides a detailed comparison of numerical formats (FP32, FP16, BF16, FP8, INT8) and their trade-offs between precision, dynamic range, and throughput.
 
@@ -3325,14 +3345,14 @@ Memory requirements\index{Memory Footprint!parameter storage}\index{Memory Footp
    * Layer 1 output: 128 values
    * Layer 2 output: 64 values
    * Layer 3 output: 10 values
-   * Total: `{python} total_inf_act_str` values (≈ `{python} inf_act_kb_str` KB at 32-bit floating point precision)
+   * Total: `{python} MNISTMemory.total_inf_act_str` values (≈ `{python} inf_act_kb_str` KB at 32-bit floating point precision)
 
 Computational requirements follow a fixed pattern for each input:
 
-* First layer: `{python} inf_madd_l1_str` multiply-adds
-* Second layer: `{python} inf_madd_l2_str` multiply-adds
-* Output layer: `{python} inf_madd_l3_str` multiply-adds
-* Total: `{python} inf_madd_total_str` multiply-add operations per inference
+* First layer: `{python} MNISTMemory.inf_madd_l1_str` multiply-adds
+* Second layer: `{python} MNISTMemory.inf_madd_l2_str` multiply-adds
+* Output layer: `{python} MNISTMemory.inf_madd_l3_str` multiply-adds
+* Total: `{python} MNISTMemory.inf_madd_total_str` multiply-add operations per inference
 
 This resource profile differs markedly from training requirements, where additional memory for gradients and computational overhead for backpropagation significantly increase resource demands (see the worked example in @sec-deep-learning-systems-foundations-model-size-computational-complexity-1f0f). The predictable, streamlined nature of inference computations enables various optimization opportunities and efficient hardware utilization.
 
@@ -3397,7 +3417,7 @@ Before examining how these concepts integrate in a real-world deployment, verify
 - [ ] Can you trace a single input (e.g., MNIST digit image) through the complete system: raw input → preprocessing → forward propagation through layers → output probabilities → post-processing → final prediction?
 - [ ] Do you understand the distinction between what happens once (loading trained weights) versus per-input (forward propagation)?
 
-**Self-Test**: For an MNIST digit classifier (`{python} mnist_arch_str`) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} training_ratio_str`× more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and post-processing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
+**Self-Test**: For an MNIST digit classifier (`{python} mnist_arch_str`) deployed in production: (1) Using the memory analysis from this chapter, explain why training requires ~`{python} MNISTMemory.training_ratio_str`× more memory than inference, and identify which components (gradients, optimizer state, activations) contribute to this difference. (2) Trace a single digit image from camera capture through preprocessing, inference, and post-processing to final prediction. (3) Identify where bottlenecks might occur in a real-time system processing 100 images/second. (4) Describe how you would monitor for model degradation in production.
 
 *The following case study demonstrates how these concepts integrate in a production system deployed at massive scale. Pay attention to how architectural choices, training strategies, and deployment constraints combine to create a working ML system.*
 
@@ -3650,7 +3670,7 @@ We opened this chapter with a question: why do deep learning systems engineers n
 
 Neural networks transform computational approaches by replacing rule-based programming with adaptive systems that learn patterns from data. Building on the biological-to-artificial neuron mappings explored throughout this chapter, these systems process complex information and improve performance through experience.
 
-Neural network architecture demonstrates hierarchical processing, where each layer extracts progressively more abstract patterns from raw data. Training adjusts connection weights through iterative optimization to minimize prediction errors, while inference applies learned knowledge to make predictions on new data. This separation between learning and application phases creates distinct system requirements for computational resources, memory usage, and processing latency that shape system design and deployment strategies. Training requires ~`{python} training_ratio_str`× more memory than inference because gradients, optimizer state, and activations must be stored and updated. The USPS digit recognition case study demonstrated that these mathematical principles combine into production systems where the complete pipeline—preprocessing, neural inference, and post-processing—must operate within real-world latency and reliability constraints.
+Neural network architecture demonstrates hierarchical processing, where each layer extracts progressively more abstract patterns from raw data. Training adjusts connection weights through iterative optimization to minimize prediction errors, while inference applies learned knowledge to make predictions on new data. This separation between learning and application phases creates distinct system requirements for computational resources, memory usage, and processing latency that shape system design and deployment strategies. Training requires ~`{python} MNISTMemory.training_ratio_str`× more memory than inference because gradients, optimizer state, and activations must be stored and updated. The USPS digit recognition case study demonstrated that these mathematical principles combine into production systems where the complete pipeline—preprocessing, neural inference, and post-processing—must operate within real-world latency and reliability constraints.
 
 ```{python}
 #| label: mnist-weights-calc
