@@ -9,6 +9,7 @@ from .constants import (
     BERT_BASE_PARAMS, BERT_LARGE_PARAMS,
     ALEXNET_PARAMS, RESNET50_PARAMS, MOBILENETV2_PARAMS,
     KWS_DSCNN_PARAMS, ANOMALY_MODEL_PARAMS,
+    DLRM_MODEL_SIZE_FP32,
     BYTES_FP32, BYTES_FP16, BYTES_INT8,
     GPT3_TRAINING_OPS
 )
@@ -20,13 +21,17 @@ class ModelSpec:
     architecture: str # "Transformer", "CNN", "MLP"
     training_ops: Optional[Q_] = None
     training_gpu_days: Optional[float] = None
+    model_size: Optional[Q_] = None # For models defined by size (DLRM)
     
     def __post_init__(self):
         """Validate model specs."""
-        assert self.parameters.magnitude > 0, f"{self.name}: Parameter count must be positive."
+        if self.parameters is not None:
+            assert self.parameters.magnitude > 0, f"{self.name}: Parameter count must be positive."
 
     def size_in_bytes(self, precision: Q_ = BYTES_FP16) -> Q_:
         """Calculates the weight storage size for a given precision."""
+        if self.model_size:
+            return self.model_size
         return (self.parameters.magnitude * precision).to('byte')
 
     def __repr__(self):
@@ -45,6 +50,10 @@ class Language:
     BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer")
     Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.count, "Transformer")
 
+class Recommendation:
+    """Recommendation Models."""
+    DLRM = ModelSpec("DLRM", 25e9 * ureg.param, "DLRM", model_size=DLRM_MODEL_SIZE_FP32)
+
 class Vision:
     """Image Classification and Detection."""
     ALEXNET = ModelSpec("AlexNet", ALEXNET_PARAMS, "CNN")
@@ -60,6 +69,7 @@ class Tiny:
 
 class Models:
     Language = Language
+    Recommendation = Recommendation
     Vision = Vision
     Tiny = Tiny
     
@@ -68,6 +78,7 @@ class Models:
     GPT3 = GPT.GPT3
     GPT4 = GPT.GPT4
     BERT = Language.BERT_Base
+    DLRM = Recommendation.DLRM
     ResNet50 = Vision.ResNet50
     MobileNetV2 = Vision.MobileNetV2
     ALEXNET = Vision.ALEXNET

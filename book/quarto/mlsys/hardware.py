@@ -13,7 +13,8 @@ from .constants import (
     TPUV4_MEM_BW, TPUV4_FLOPS_BF16,
     MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8,
     ESP32_RAM, ESP32_FLASH, ESP32_POWER_MAX,
-    MCU_RAM_KIB
+    MCU_RAM_KIB,
+    NETWORK_10G_BW, NETWORK_100G_BW
 )
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class HardwareSpec:
     peak_flops: Q_
     memory_capacity: Q_
     tdp: Optional[Q_] = None
+    battery_capacity: Optional[Q_] = None
     
     def __post_init__(self):
         """Validate hardware specs."""
@@ -32,6 +34,8 @@ class HardwareSpec:
         assert self.memory_capacity.magnitude > 0, f"{self.name}: Memory capacity must be positive."
         if self.tdp:
             assert self.tdp.magnitude > 0, f"{self.name}: TDP must be positive."
+        if self.battery_capacity:
+            assert self.battery_capacity.magnitude > 0, f"{self.name}: Battery capacity must be positive."
 
     def ridge_point(self) -> Q_:
         """Calculates the Roofline ridge point (Intensity threshold)."""
@@ -40,6 +44,15 @@ class HardwareSpec:
 
     def __repr__(self):
         return f"Hardware({self.name}, {self.release_year})"
+
+@dataclass(frozen=True)
+class NetworkSpec:
+    name: str
+    bandwidth: Q_
+
+class Networks:
+    Ethernet_10G = NetworkSpec("10GbE", NETWORK_10G_BW)
+    Ethernet_100G = NetworkSpec("100GbE", NETWORK_100G_BW)
 
 class Cloud:
     """Datacenter-scale Accelerators."""
@@ -53,8 +66,15 @@ class Cloud:
 
 class Edge:
     """Mobile and Robotics Hardware."""
-    Generic_Phone = HardwareSpec("Smartphone", 2024, MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8, 8 * ureg.GiB)
-    # Future: Pixel 6, Jetson Orin, etc.
+    Generic_Phone = HardwareSpec("Smartphone", 2024, MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8, 8 * ureg.GiB, battery_capacity=15 * ureg.Wh)
+    
+    # Specific Edge Devices
+    Coral = HardwareSpec("Google Coral Dev", 2019, 25 * ureg.GB/ureg.s, 4 * ureg.TFLOPs/ureg.s, 1 * ureg.GB, 2 * ureg.W) # 4 TOPS INT8
+    JetsonOrinNX = HardwareSpec("NVIDIA Jetson Orin NX", 2023, 102 * ureg.GB/ureg.s, 100 * ureg.TFLOPs/ureg.s, 16 * ureg.GB, 25 * ureg.W) # 100 TOPS INT8
+    NUC_Movidius = HardwareSpec("Intel NUC + Movidius", 2020, 50 * ureg.GB/ureg.s, 4 * ureg.TFLOPs/ureg.s, 16 * ureg.GB, 15 * ureg.W)
+    
+    # Servers
+    GenericServer = HardwareSpec("Edge Server", 2024, 100 * ureg.GB/ureg.s, 1 * ureg.TFLOPs/ureg.s, 128 * ureg.GB, 300 * ureg.W)
 
 class Tiny:
     """Microcontrollers and Embedded Systems."""
@@ -65,6 +85,7 @@ class Hardware:
     Cloud = Cloud
     Edge = Edge
     Tiny = Tiny
+    Networks = Networks
     
     # Aliases for the most common ones
     V100 = Cloud.V100
