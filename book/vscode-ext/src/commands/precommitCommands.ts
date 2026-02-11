@@ -14,15 +14,15 @@ export function registerPrecommitCommands(context: vscode.ExtensionContext): voi
 
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.precommitRunAll', () => {
-      void runBookCommand('pre-commit run --all-files', root, {
+      void vscode.workspace.saveAll(false).then(() => runBookCommand('pre-commit run --all-files', root, {
         label: 'Pre-commit (all hooks)',
-      });
+      }));
     }),
 
     vscode.commands.registerCommand('mlsysbook.precommitRunHook', (command: string) => {
-      void runBookCommand(command, root, {
+      void vscode.workspace.saveAll(false).then(() => runBookCommand(command, root, {
         label: 'Pre-commit (selected hook)',
-      });
+      }));
     }),
 
     vscode.commands.registerCommand('mlsysbook.precommitRunFixersCurrentFile', async () => {
@@ -36,6 +36,13 @@ export function registerPrecommitCommands(context: vscode.ExtensionContext): voi
       if (!filePath.endsWith('.qmd')) {
         vscode.window.showWarningMessage('MLSysBook: current-file fixers only support .qmd files.');
         return;
+      }
+      if (editor.document.isDirty) {
+        const saved = await editor.document.save();
+        if (!saved) {
+          vscode.window.showWarningMessage('MLSysBook: save the file before running current-file fixers.');
+          return;
+        }
       }
 
       const relativePath = path.relative(root, filePath);

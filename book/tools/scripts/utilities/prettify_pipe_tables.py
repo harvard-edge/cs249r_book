@@ -159,7 +159,9 @@ def prettify_table(table_lines: list[str]) -> list[str]:
             # Build separator row
             sep_cells = [make_separator_cell(alignments[j], col_widths[j]) 
                         for j in range(num_cols)]
-            result.append('|' + '|'.join(sep_cells) + '|')
+            # Keep separator visually consistent with data rows by adding
+            # single-space padding around each separator cell.
+            result.append('| ' + ' | '.join(sep_cells) + ' |')
         else:
             # Build data row with padding
             if row_idx < len(rows):
@@ -236,14 +238,13 @@ def find_pipe_tables(content: str) -> list[tuple[int, int, list[str]]]:
 
 
 def tables_are_equal(original: list[str], prettified: list[str]) -> bool:
-    """Check if two tables are equivalent (ignoring whitespace differences)."""
+    """Check if two tables are textually identical for formatting purposes."""
     if len(original) != len(prettified):
         return False
     for orig, pretty in zip(original, prettified):
-        # Normalize: strip and collapse multiple spaces
-        orig_norm = ' '.join(orig.split())
-        pretty_norm = ' '.join(pretty.split())
-        if orig_norm != pretty_norm:
+        # Ignore trailing whitespace-only differences, but keep internal
+        # spacing significant so alignment changes are detected.
+        if orig.rstrip() != pretty.rstrip():
             return False
     return True
 
