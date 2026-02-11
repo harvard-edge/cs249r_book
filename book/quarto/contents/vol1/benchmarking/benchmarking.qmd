@@ -106,7 +106,7 @@ bert_large_params_m_value = BERT_LARGE_PARAMS.to(Mparam).magnitude
 mobilenet_v1_params_m_value = MOBILENET_V1_PARAMS.to(Mparam).magnitude
 resnet50_params_m_value = RESNET50_PARAMS.to(Mparam).magnitude
 v100_tflops_fp32_value = V100_FLOPS_FP32.to(TFLOPs/second).magnitude
-gpt3_tokens_b_value = GPT3_TRAINING_TOKENS.to(count).magnitude / 1e9
+gpt3_tokens_b_value = GPT3_TRAINING_TOKENS.to(count).magnitude / BILLION
 
 energy_reg_value = ENERGY_REG_PJ.magnitude
 energy_l1_value = ENERGY_SRAM_L1_PJ.magnitude
@@ -182,9 +182,9 @@ latency_fast_ms_value = 10
 latency_slow_ms_value = 100
 
 energy_fast_j_value = accel_power_w_value * (latency_fast_ms_value / 1000)
-energy_fast_wh_value = energy_fast_j_value / 3600
+energy_fast_wh_value = energy_fast_j_value / SEC_PER_HOUR
 energy_slow_j_value = accel_power_w_value * (latency_slow_ms_value / 1000)
-energy_slow_wh_value = energy_slow_j_value / 3600
+energy_slow_wh_value = energy_slow_j_value / SEC_PER_HOUR
 
 accel_power_w_str = fmt(accel_power_w_value, precision=0, commas=False)
 latency_fast_ms_str = fmt(latency_fast_ms_value, precision=0, commas=False)
@@ -509,7 +509,8 @@ Effective benchmark interpretation requires knowing the performance characterist
 # │          bert_util_b1_str, utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import A100_MEM_BW, A100_FLOPS_FP16_TENSOR, TB, TFLOPs, second
-from mlsys.formatting import fmt
+from mlsys.constants import BILLION, MILLION
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class RooflineExamples:
@@ -522,7 +523,7 @@ class RooflineExamples:
     # A100 Specs (re-derived locally for safety)
     peak_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
     peak_bw = A100_MEM_BW.to(TB/second).magnitude
-    ridge_point = (peak_flops * 1e12) / (peak_bw * 1e12) # ~153
+    ridge_point = (peak_flops * TRILLION) / (peak_bw * TRILLION) # ~153
 
     # ResNet (Compute Bound)
     resnet_ai = 300.0
@@ -539,15 +540,13 @@ class RooflineExamples:
     resnet_perf_tflops = peak_flops * (resnet_util_max / 100.0)
 
     # BERT Performance
-    bert_ai_b1 = (bert_flops_b * 1e9) / (bert_weight_mb * 1e6)
+    bert_ai_b1 = (bert_flops_b * BILLION) / (bert_weight_mb * MILLION)
     bert_perf_b1 = bert_ai_b1 * peak_bw
     bert_util_b1 = (bert_perf_b1 / peak_flops) * 100.0
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if resnet_ai <= ridge_point:
-        raise ValueError(f"Narrative broken: ResNet AI ({resnet_ai}) must be > Ridge ({ridge_point:.0f}) to be compute-bound.")
-    if bert_ai_b1 >= ridge_point:
-        raise ValueError(f"Narrative broken: BERT AI ({bert_ai_b1:.0f}) must be < Ridge ({ridge_point:.0f}) to be memory-bound.")
+    check(resnet_ai > ridge_point, f"ResNet AI ({resnet_ai}) must be > Ridge ({ridge_point:.0f}) to be compute-bound.")
+    check(bert_ai_b1 < ridge_point, f"BERT AI ({bert_ai_b1:.0f}) must be < Ridge ({ridge_point:.0f}) to be memory-bound.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     # A100 context
@@ -619,8 +618,8 @@ The following worked example applies *roofline analysis for BERT inference* to d
 # │          bert_b32_flops_eq_str, bert_perf_b32_str, batch32_str,
 # │          utilization_peak_str, utilization_peak_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import A100_FLOPS_FP16_TENSOR, TFLOPs, second
-from mlsys.formatting import fmt
+from mlsys.constants import A100_FLOPS_FP16_TENSOR, TFLOPs, second, BILLION, MILLION
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class BertRoofline:
@@ -638,7 +637,7 @@ class BertRoofline:
     # Hardware (A100)
     peak_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
     peak_bw = A100_MEM_BW.to(TB/second).magnitude
-    ridge_point = (peak_flops * 1e12) / (peak_bw * 1e12) # ~153
+    ridge_point = (peak_flops * TRILLION) / (peak_bw * TRILLION) # ~153
 
     # Scenarios
     batch_1 = 1
@@ -647,7 +646,7 @@ class BertRoofline:
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Batch 1
-    ai_b1 = (flops_b_per_inf * 1e9) / (weight_mb * 1e6)
+    ai_b1 = (flops_b_per_inf * BILLION) / (weight_mb * MILLION)
     perf_b1 = ai_b1 * peak_bw
     util_b1 = (perf_b1 / peak_flops) * 100.0
 
@@ -655,7 +654,7 @@ class BertRoofline:
     flops_b32 = flops_b_per_inf * batch_32
     # Note: Weights loaded once for batch! That's the key.
     # AI = (FLOPs/Inf * Batch) / Weights
-    ai_b32 = (flops_b32 * 1e9) / (weight_mb * 1e6)
+    ai_b32 = (flops_b32 * BILLION) / (weight_mb * MILLION)
 
     # Is it compute bound now?
     is_compute_bound_b32 = ai_b32 > ridge_point
@@ -664,8 +663,7 @@ class BertRoofline:
     perf_b32 = peak_flops * util_peak if is_compute_bound_b32 else (ai_b32 * peak_bw)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if ai_b32 <= ai_b1:
-        raise ValueError("Narrative broken: Batching must increase Arithmetic Intensity.")
+    check(ai_b32 > ai_b1, "Batching must increase Arithmetic Intensity.")
     if ai_b32 < 1000: # Sanity check, should be huge (50 * 32 = 1600)
         pass
 
@@ -1869,7 +1867,7 @@ A key metric for evaluating parallelism is *scaling efficiency*, which quantifie
 # │ Exports: ideal_str, eff_str, loss_str, eff_denom_str, t1_hours_str,
 # │          n_gpus_str, tn_hours_str, scaling_eq_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Inputs (training scenario) ---
 t1_hours_value = 24       # single-GPU training time
@@ -1967,7 +1965,7 @@ Training large-scale machine learning models requires substantial computational 
 # │          e_int8_total_str, s_load_str, s_compute_str, s_total_str,
 # │          e_fp32_load_mj_str, e_fp32_compute_mj_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 from mlsys.constants import ENERGY_DRAM_PJ_PER_BYTE, ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ
 
 # --- Inputs (MobileNet model characteristics) ---
@@ -1976,12 +1974,12 @@ m_macs_value = 300    # Million MACs
 
 # --- Inputs (energy per operation from physics constants) ---
 # FP32 model size = params * 4 bytes; Energy = Size * pJ/byte
-e_fp32_load_value = (m_params_value * 1e6 * 4 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / 1e6 # uJ
-e_fp32_compute_value = (m_macs_value * 1e6 * ENERGY_FLOP_FP32_PJ.magnitude) / 1e6 # uJ
+e_fp32_load_value = (m_params_value * MILLION * 4 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / MILLION # uJ
+e_fp32_compute_value = (m_macs_value * MILLION * ENERGY_FLOP_FP32_PJ.magnitude) / MILLION # uJ
 
 # INT8 model size = params * 1 byte
-e_int8_load_value = (m_params_value * 1e6 * 1 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / 1e6 # uJ
-e_int8_compute_value = (m_macs_value * 1e6 * ENERGY_FLOP_INT8_PJ.magnitude) / 1e6 # uJ
+e_int8_load_value = (m_params_value * MILLION * 1 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / MILLION # uJ
+e_int8_compute_value = (m_macs_value * MILLION * ENERGY_FLOP_INT8_PJ.magnitude) / MILLION # uJ
 
 # --- Process (totals and savings ratios) ---
 m_fp32_mb_value = m_params_value * 4
@@ -2288,7 +2286,7 @@ These component-level contributions explain why optimizing any single stage yiel
 # │          bench_opt_total_str, bench_opt_inf_str, amdahl_ceiling_str,
 # │          preprocess_pct_str, preprocess_fraction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Inputs (vision inference pipeline scenario) ---
 bench_preprocess_ms_value = 8
@@ -2563,7 +2561,7 @@ These scenarios explain why the same hardware can report dramatically different 
 # │          inference_speedup_str, e2e_speedup_str, edgetpu_power_ratio_str,
 # │          cpu_energy_mj_str, edgetpu_energy_mj_str, energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Inputs (illustrative EdgeTPU vs Cortex-M7 characteristics) ---
 edgetpu_latency_ms_value = 2
@@ -3706,7 +3704,7 @@ Acceptable degradation depends on deployment context. A 2% accuracy drop might b
 # │          mv2_ece_int8_str, mv2_edge_fp32_str, mv2_edge_int8_str,
 # │          mv2_edge_drop_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Inputs (MobileNetV2 FP32 baseline and INT8 results) ---
 mv2_acc_fp32_value = 71.8
@@ -3819,7 +3817,7 @@ Generation-specific metrics capture properties absent from discriminative benchm
 # │ Exports: slow_str, fast_str, response_tokens_str, slow_toks_str,
 # │          fast_toks_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Inputs (LLM response scenario) ---
 response_tokens_value = 750  # ~500 words

@@ -67,7 +67,7 @@ Bridging that gap requires a systematic discipline of *compression*: trading cap
 # │          mcu_ram_str, gpt3_training_flops_str, and others
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import *
-from mlsys.formatting import fmt, sci
+from mlsys.formatting import fmt, check, sci
 
 # --- Inputs (GPU specs) ---
 a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
@@ -313,8 +313,9 @@ These physics-level savings translate directly into deployment capabilities. A m
 # │          fp16_latency_str, fp16_toks_str, int4_size_str, int4_latency_str,
 # │          int4_toks_str, speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
-from mlsys.constants import BYTES_FP16, BYTES_INT4, byte
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
+from mlsys.constants import BYTES_FP16, BYTES_INT4, byte, MS_PER_SEC
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class QuantizationSpeedup:
@@ -344,14 +345,13 @@ class QuantizationSpeedup:
     int4_latency_ms = (int4_size_gb / mem_bw_gbs) * 1000
 
     # Throughput (Tokens/sec)
-    fp16_toks = 1000 / fp16_latency_ms
-    int4_toks = 1000 / int4_latency_ms
+    fp16_toks = MS_PER_SEC / fp16_latency_ms
+    int4_toks = MS_PER_SEC / int4_latency_ms
 
     speedup = int4_toks / fp16_toks
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if speedup < 3.5 or speedup > 4.5:
-        raise ValueError(f"Narrative broken: INT4 should yield ~4x speedup vs FP16, got {speedup:.1f}x")
+    check(3.5 <= speedup <= 4.5, f"INT4 should yield ~4x speedup vs FP16, got {speedup:.1f}x")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     params_b_str = f"{params_b}"
@@ -2206,7 +2206,9 @@ Rather than eliminating parameters through pruning or transferring knowledge thr
 # │ Exports: full_mb_str, factored_mb_str, data_reduction_str,
 # │          mat_dim_str, rank_k_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
+from mlsys.constants import MIB_TO_BYTES
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class LowRankFactorization:
@@ -2222,16 +2224,15 @@ class LowRankFactorization:
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     full_bytes = mat_dim * mat_dim * bytes_fp32
-    full_mb = full_bytes / (1024**2)
+        full_mb = full_bytes / MIB_TO_BYTES
+        factored_bytes = (mat_dim * rank_k + rank_k * mat_dim) * bytes_fp32
+        factored_mb = factored_bytes / MIB_TO_BYTES
 
-    factored_bytes = (mat_dim * rank_k + rank_k * mat_dim) * bytes_fp32
-    factored_mb = factored_bytes / (1024**2)
+        reduction_factor = full_mb / factored_mb
 
-    reduction_factor = full_mb / factored_mb
+        # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+        check(reduction_factor >= 10, f"Low-rank reduction ({reduction_factor:.1f}x) is too small.")
 
-    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if reduction_factor < 10:
-        raise ValueError(f"Narrative broken: Low-rank reduction ({reduction_factor:.1f}x) is too small.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     full_mb_str = f"{int(full_mb)}"
@@ -2974,7 +2975,8 @@ To make these gains concrete, consider the *quantization savings* when deploying
 # │ Exports: llm_params_b_str, fp16_bytes_str, int4_bytes_str,
 # │          fp16_size_gb_str, int4_size_gb_str, compression_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
 from mlsys.constants import BYTES_FP16, BYTES_INT4, byte, GB
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -2996,8 +2998,7 @@ class QuantizationSavings:
     ratio = fp16_size_gb / int4_size_gb
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if ratio != 4.0:
-        raise ValueError(f"Math broken: FP16/INT4 ratio should be exactly 4.0, got {ratio}")
+    check(ratio == 4.0, f"FP16/INT4 ratio should be exactly 4.0, got {ratio}")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     llm_params_b_str = f"{params_b}"
@@ -3051,7 +3052,8 @@ Beyond storage savings, quantization also accelerates computation through hardwa
 # │ Exports: simd_fp32_str, simd_int8_str, simd_gain_str,
 # │          simd_register_bits_str, simd_fp32_bits_str, simd_int8_bits_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
 from mlsys.constants import SIMD_REGISTER_BITS, FP32_BITS, INT8_BITS
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -3072,8 +3074,7 @@ class SIMDThroughput:
     gain = ops_int8 // ops_fp32
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if gain != 4:
-        raise ValueError(f"Math broken: INT8 vs FP32 should yield 4x ops, got {gain}x")
+    check(gain == 4, f"INT8 vs FP32 should yield 4x ops, got {gain}x")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     simd_fp32_str = f"{ops_fp32}"
@@ -3641,7 +3642,8 @@ Compare the two mapping diagrams side by side in @fig-calibration-ranges. Symmet
 # │ Exports: alpha_str, beta_str, range_str, steps_str, scale_str,
 # │          zero_point_str, x_val_str, x_q_str, x_recon_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
 
 # --- Inputs (activation range example) ---
 alpha_value = -1.0
@@ -4415,7 +4417,8 @@ Beyond reducing what data must be stored, substantial efficiency gains emerge fr
 # │          bandwidth_reduction_pct_str, kernels_unfused_str,
 # │          kernels_fused_str, saved_latency_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
 
 # --- Inputs (Conv-BN-ReLU) ---
 conv_channels_value = 256
@@ -4428,7 +4431,7 @@ gemm_seq_value = 512
 
 # Memory Bandwidth Analysis (ResNet-50 layer)
 # Feature map: 256 channels × 28 × 28 spatial × 4 bytes/element (FP32)
-feat_map_mb_value = conv_channels_value * conv_spatial_value * conv_spatial_value * bytes_per_element_value / 1e6  # SI MB
+feat_map_mb_value = conv_channels_value * conv_spatial_value * conv_spatial_value * bytes_per_element_value / MILLION  # SI MB
 weights_mb_value = 2.4
 bn_params_mb_value = 0.002
 
@@ -4471,7 +4474,7 @@ gemm_intermediate_mb_str = fmt(gemm_intermediate_mb_value, precision=1, commas=F
 
 feat_map_kb_str = fmt(feat_map_mb_value * 1000, precision=0, commas=False)
 weights_mb_str = fmt(weights_mb_value, precision=1, commas=False)
-bn_params_kb_str = fmt(bn_params_mb_value * 1024, precision=0, commas=False)
+bn_params_kb_str = fmt(bn_params_mb_value * KIB_TO_BYTES, precision=0, commas=False)
 
 unfused_conv_mb_str = fmt(unfused_conv_mb_value, precision=1, commas=False)
 unfused_bn_mb_str = fmt(unfused_bn_mb_value, precision=1, commas=False)
@@ -4555,7 +4558,7 @@ def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
 # │ Imports: mlsys.formatting (fmt, md_math)
 # │ Exports: transfer_reduction_str, conv_bn_relu_mem_md
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt, md_math
+from mlsys.formatting import fmt, check, md_math
 
 # --- Inputs (transfer counts) ---
 unfused_transfers_value = 6  # read/write for each of conv, BN, ReLU
@@ -4607,7 +4610,7 @@ output = relu((x + y) * scale) + bias
 # │ Depends: v100_bw_gbs_value (from compression-setup),
 # │          gemm_intermediate_mb_str (from fusion-calc)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt, md_math
+from mlsys.formatting import fmt, check, md_math
 
 # --- Inputs (element-wise fusion scenario) ---
 tensor_mb_value = 1
@@ -4617,7 +4620,7 @@ fused_traffic_mb_value = 3    # 3 memory transfers × 1 MB
 # --- Process ---
 ew_reduction_value = unfused_traffic_mb_value / fused_traffic_mb_value
 saved_traffic_mb_value = unfused_traffic_mb_value - fused_traffic_mb_value
-saved_us_value = saved_traffic_mb_value / (v100_bw_gbs_value * 1000) * 1e6
+saved_us_value = saved_traffic_mb_value / (v100_bw_gbs_value * 1000) * MILLION
 
 # --- Outputs (formatted strings for prose) ---
 ew_reduction_str = fmt(ew_reduction_value, precision=2, commas=False)
@@ -6801,7 +6804,8 @@ With the complete optimization toolkit now surveyed—from individual techniques
 # │          resnet_int8_acc_str, resnet_binary_acc_str, dequant_overhead_str,
 # │          expected_speedup_str, actual_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
+from mlsys.constants import KIB_TO_BYTES
 
 # --- Inputs (common optimization metrics) ---
 int8_size_reduction = 4                  # FP32 to INT8 = 4x size reduction

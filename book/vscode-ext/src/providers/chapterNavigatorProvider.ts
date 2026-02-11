@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
-type NavigatorEntryKind = 'figure' | 'table' | 'listing' | 'equation';
-type NavigatorVisibleEntryKind = 'figures' | 'tables' | 'listings' | 'equations';
+type NavigatorEntryKind = 'figure' | 'table' | 'listing' | 'equation' | 'callout';
+type NavigatorVisibleEntryKind = 'figures' | 'tables' | 'listings' | 'equations' | 'callouts';
 
 interface NavigatorEntry {
   kind: NavigatorEntryKind;
@@ -21,7 +21,11 @@ interface NavigatorSection {
 }
 
 class NavigatorSectionItem extends vscode.TreeItem {
-  constructor(section: NavigatorSection, collapsibleState: vscode.TreeItemCollapsibleState) {
+  constructor(
+    uri: vscode.Uri,
+    section: NavigatorSection,
+    collapsibleState: vscode.TreeItemCollapsibleState,
+  ) {
     const entryCount = section.entries.length;
     super(section.title, collapsibleState);
     this.sectionId = section.id;
@@ -34,10 +38,17 @@ class NavigatorSectionItem extends vscode.TreeItem {
     if (figureCount > 0) { counts.push(`${figureCount} fig`); }
     if (tableCount > 0) { counts.push(`${tableCount} tbl`); }
     if (listingCount > 0) { counts.push(`${listingCount} code`); }
+    const calloutCount = section.entries.filter(entry => entry.kind === 'callout').length;
+    if (calloutCount > 0) { counts.push(`${calloutCount} callout`); }
     const countsText = counts.length > 0 ? ` · ${counts.join(' · ')}` : '';
     this.description = `${depthLabel} · L${section.line + 1} · ${entryCount} items${countsText}`;
     this.contextValue = 'navigator-section';
     this.iconPath = new vscode.ThemeIcon(section.level === 0 ? 'note' : 'list-tree');
+    this.command = {
+      command: 'mlsysbook.openNavigatorLocation',
+      title: 'Open Section',
+      arguments: [uri, section.line],
+    };
   }
 
   readonly sectionId: string;
@@ -54,7 +65,9 @@ class NavigatorEntryItem extends vscode.TreeItem {
         ? 'table'
         : entry.kind === 'listing'
           ? 'code'
-          : 'symbol-operator';
+          : entry.kind === 'equation'
+            ? 'symbol-operator'
+            : 'comment-discussion';
     this.iconPath = new vscode.ThemeIcon(icon);
     if (clickToOpen) {
       this.command = {
@@ -92,7 +105,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       .getConfiguration('mlsysbook')
       .get<NavigatorVisibleEntryKind[]>(
         'navigatorVisibleEntryKinds',
-        ['figures', 'tables', 'listings', 'equations'],
+        ['figures', 'tables', 'listings', 'equations', 'callouts'],
       );
     return new Set(kinds);
   }
@@ -103,6 +116,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       table: 'tables',
       listing: 'listings',
       equation: 'equations',
+      callout: 'callouts',
     };
     return this.getVisibleEntryKinds().has(map[kind]);
   }
@@ -115,7 +129,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
     const state = this.forceExpanded
       ? vscode.TreeItemCollapsibleState.Expanded
       : vscode.TreeItemCollapsibleState.Collapsed;
-    const created = new NavigatorSectionItem(section, state);
+    const created = new NavigatorSectionItem(this.sourceUri!, section, state);
     this.sectionItems.set(section.id, created);
     return created;
   }
@@ -235,6 +249,8 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
     const equationRegex = /#(eq-[A-Za-z0-9_-]+)/g;
     const listingYamlRegex = /#\|\s*(?:label|lst-label):\s*(lst-[A-Za-z0-9_:-]+)/g;
     const equationYamlRegex = /#\|\s*label:\s*(eq-[A-Za-z0-9_:-]+)/g;
+    const calloutStartRegex = /^\s*:{3,}\s*\{[^}]*\.callout-([A-Za-z0-9_-]+)[^}]*\}/;
+    const calloutTitleRegex = /title\s*=\s*"([^"]+)"/;
     const fenceRegex = /^\s*(```|~~~)\s*(.*)$/;
     const listingIds = new Set<string>();
     let inFence = false;
@@ -340,6 +356,17 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
         }
       }
       equationYamlRegex.lastIndex = 0;
+
+      const calloutMatch = text.match(calloutStartRegex);
+      if (calloutMatch) {
+        const calloutType = calloutMatch[1];
+        const titleMatch = text.match(calloutTitleRegex);
+        const title = titleMatch?.[1]?.trim();
+        const id = title && title.length > 0
+          ? `callout-${calloutType}: ${title}`
+          : `callout-${calloutType}`;
+        addEntry({ kind: 'callout', id, line, preview });
+      }
     }
 
     if (rootSection.childSectionIds.length === 0 && rootSection.entries.length > 0) {

@@ -33,9 +33,10 @@ import pint
 from mlsys.constants import (
     MOBILENETV2_PARAMS, MOBILENETV2_FLOPs,
     STORAGE_COST_S3_STD, STORAGE_COST_NVME_LOW,
-    GB, MB, MFLOPs, USD, ureg, byte
+    GB, MB, MFLOPs, USD, ureg, byte,
+    SEC_PER_HOUR
 )
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 from IPython.display import Markdown
 ```
 
@@ -326,8 +327,7 @@ class IterationTax:
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     # Invariant: Small model must CATCH UP or BEAT Large model
-    if small_final_acc < large_final_acc:
-        raise ValueError(f"Narrative broken: Small model ({small_final_acc}%) failed to beat Large model ({large_final_acc}%) despite speed.")
+    check(small_final_acc >= large_final_acc, f"Small model ({small_final_acc}%) failed to beat Large model ({large_final_acc}%) despite speed.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     weeks_str = fmt(weeks_total, precision=0, commas=False)
@@ -715,7 +715,7 @@ class BandwidthCompute:
     # Transmission Time
     uplink_mbs = uplink_mbps / 8.0 # Mbps -> MB/s
     upload_seconds = daily_mb / uplink_mbs
-    upload_hours = upload_seconds / 3600.0
+    upload_hours = upload_seconds / SEC_PER_HOUR.0
 
     # Saturation
     saturation_pct = (upload_hours / clinic_hours) * 100.0
@@ -726,10 +726,8 @@ class BandwidthCompute:
     reduction_factor = original_kb / summary_total_kb
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if upload_hours < clinic_hours:
-        raise ValueError(f"Narrative broken: Upload fits in clinic day ({upload_hours:.1f}h < {clinic_hours}h). Edge not required.")
-    if reduction_factor < 1000:
-        raise ValueError("Narrative broken: Edge compression ratio too small to justify complexity.")
+    check(upload_hours >= clinic_hours, f"Upload fits in clinic day ({upload_hours:.1f}h < {clinic_hours}h). Edge not required.")
+    check(reduction_factor >= 1000, "Edge compression ratio too small to justify complexity.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     bw_patients_str = fmt(patients_day, precision=0, commas=False)
@@ -1196,8 +1194,7 @@ class DeploymentEconomics:
     payback_years = edge_capex / annual_savings
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if payback_years > 3.0:
-        raise ValueError(f"Narrative broken: Payback period ({payback_years:.1f} years) is too long to justify Edge CapEx.")
+    check(payback_years <= 3.0, f"Payback period ({payback_years:.1f} years) is too long to justify Edge CapEx.")
     if edge_capex < cloud_total_year:
         # Edge should be expensive upfront but cheap later
         pass

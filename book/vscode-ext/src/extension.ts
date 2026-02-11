@@ -35,10 +35,10 @@ interface NavigatorPreset {
 }
 
 const NAVIGATOR_PRESETS: NavigatorPreset[] = [
-  { label: 'Show All', id: 'all', kinds: ['figures', 'tables', 'listings', 'equations'] },
-  { label: 'Writing Focus', id: 'writing', kinds: ['figures', 'tables', 'listings'] },
+  { label: 'Show All', id: 'all', kinds: ['figures', 'tables', 'listings', 'equations', 'callouts'] },
+  { label: 'Writing Focus', id: 'writing', kinds: ['figures', 'tables', 'listings', 'callouts'] },
   { label: 'Reference Focus', id: 'reference', kinds: ['figures', 'tables', 'equations'] },
-  { label: 'Structure Focus', id: 'structure', kinds: ['listings', 'equations'] },
+  { label: 'Structure Focus', id: 'structure', kinds: ['listings', 'equations', 'callouts'] },
 ];
 
 export function activate(context: vscode.ExtensionContext): void {

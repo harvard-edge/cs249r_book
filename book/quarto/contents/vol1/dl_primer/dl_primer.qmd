@@ -123,7 +123,7 @@ To ground this arc in a concrete systems story, we start by following a single M
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: *_str variables for inline use in prose
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # === Rule-Based Paradigm ===
 # Simple threshold comparisons on 28×28 = 784 pixels
@@ -162,7 +162,7 @@ dl_total_macs = dl_l1_macs + dl_l2_macs + dl_l3_macs  # 109,184
 dl_params = dl_l1_macs + dl_l2_macs + dl_l3_macs      # same as MACs for dense layers
 dl_params_with_bias = dl_params + 128 + 64 + 10        # 109,386
 dl_weight_bytes = dl_params_with_bias * 4              # FP32 = 4 bytes each
-dl_weight_kb = dl_weight_bytes / 1024                  # ~427 KB
+dl_weight_kb = dl_weight_bytes / KIB_TO_BYTES                  # ~427 KB
 dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)       # "109,184"
 dl_params_str = fmt(dl_params_with_bias, precision=0, commas=True)     # "109,386"
 dl_weight_kb_str = fmt(dl_weight_kb, precision=0, commas=False)        # "427"
@@ -774,8 +774,8 @@ else:
 # │ Imports: mlsys.constants (GPT3_PARAMS, Bparam), mlsys.formatting (fmt)
 # │ Exports: gpt3_params_b_str, gpt4_params_t_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import GPT3_PARAMS, Bparam
-from mlsys.formatting import fmt
+from mlsys.constants import GPT3_PARAMS, Bparam, THOUSAND
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class HistoricalScale:
@@ -789,12 +789,11 @@ class HistoricalScale:
     gpt4_params_t = 1.8 # Estimate (MoE)
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    gpt4_params_b = gpt4_params_t * 1000
+    gpt4_params_b = gpt4_params_t * THOUSAND
     scale_factor = gpt4_params_b / gpt3_params_b
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if scale_factor < 5:
-        raise ValueError(f"Narrative broken: GPT-4 ({gpt4_params_t}T) should be significantly larger than GPT-3 ({gpt3_params_b}B). Ratio: {scale_factor:.1f}x")
+    check(scale_factor >= 5, f"GPT-4 ({gpt4_params_t}T) should be significantly larger than GPT-3 ({gpt3_params_b}B). Ratio: {scale_factor:.1f}x")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(gpt3_params_b, precision=0, commas=False)
@@ -1877,8 +1876,8 @@ These connection patterns have significant implications for both the theoretical
 # │          layer1_pct_str, arith_intensity_str, batch_*_str, grad_l*_str,
 # │          bp_*_str, inf_madd_*_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
-from mlsys.constants import BYTES_FP32, flop, MFLOPs, KFLOPs
+from mlsys.formatting import fmt, check
+from mlsys.constants import BYTES_FP32, flop, MFLOPs, KFLOPs, MILLION, THOUSAND, KIB_TO_BYTES
 
 # ┌── P.I.C.O. ISOLATED SCENARIO: CANONICAL MNIST ──────────────────────────────
 class MNISTMemory:
@@ -1903,7 +1902,7 @@ class MNISTMemory:
 
     params_per_layer = [w + b for w, b in zip(weights, biases)]
     total_params = sum(params_per_layer)
-    param_mem_kb = (total_params * bytes_per_param) / 1024
+    param_mem_kb = (total_params * bytes_per_param) / KIB_TO_BYTES
 
     # B. Activations (Batch)
     act_elements = 0
@@ -1913,7 +1912,7 @@ class MNISTMemory:
         act_elements += size
         batch_act_sizes.append(size)
 
-    act_mem_kb = (act_elements * bytes_per_param) / 1024
+    act_mem_kb = (act_elements * bytes_per_param) / KIB_TO_BYTES
 
     # C. Training Footprint
     grad_mem_kb = param_mem_kb
@@ -1922,7 +1921,7 @@ class MNISTMemory:
 
     # D. Inference Footprint (Batch=1)
     inf_act_elements = sum(layers_dims) # Sum of dims (1 * dim)
-    inf_act_kb = (inf_act_elements * bytes_per_param) / 1024
+    inf_act_kb = (inf_act_elements * bytes_per_param) / KIB_TO_BYTES
     inference_total_kb = param_mem_kb + inf_act_kb
 
     # E. Compute (FLOPs)
@@ -1932,11 +1931,10 @@ class MNISTMemory:
 
     total_mops = total_flops / MILLION
     kops_per_image = (total_flops / batch_size) / THOUSAND
-    arith_intensity = total_flops / (inference_total_kb * 1024) # FLOPs / Byte (Model Size)
+    arith_intensity = total_flops / (inference_total_kb * KIB_TO_BYTES) # FLOPs / Byte (Model Size)
 
     # ┌── 3. INVARIANTS ────────────────────────────────────────────────────────
-    if training_total_kb < inference_total_kb * 2:
-        raise ValueError("Narrative broken: Training memory must be >2x Inference.")
+    check(training_total_kb >= inference_total_kb * 2, "Training memory must be >2x Inference.")
 
     # ┌── 4. OUTPUTS ───────────────────────────────────────────────────────────
     # Standard Exports
@@ -1945,7 +1943,7 @@ class MNISTMemory:
     opt_mem_str = fmt(opt_mem_kb, precision=1, commas=False)
     total_act_str = fmt(act_mem_kb, precision=1, commas=False)
 
-    training_mb_str = fmt(training_total_kb / 1024, precision=1, commas=False)
+    training_mb_str = fmt(training_total_kb / KIB_TO_BYTES, precision=1, commas=False)
     inference_kb_str = fmt(inference_total_kb, precision=0, commas=False)
     inference_kb_display = inference_kb_str # Alias for consistency
     training_ratio_str = fmt(training_total_kb / inference_total_kb, precision=1, commas=False)
@@ -2006,7 +2004,7 @@ class BackpropMemory:
 
     # Gradient Memory (same as params)
     total_params = sum(weights) + sum(layers_dims[1:]) # Weights + Biases
-    grad_kb = (total_params * bytes_per_param) / 1024
+    grad_kb = (total_params * bytes_per_param) / KIB_TO_BYTES
 
     # Outputs
     act_l1_kb_str = fmt(act_kb[1], precision=0, commas=False) # 512 layer
@@ -2090,7 +2088,7 @@ param_mem_str = MNISTMemory.training_mb_str # Assuming this maps to parameter me
 # `param_mem_str` is likely just the weights.
 # Let's assume it maps to `training_mb_str` for now or calculate it.
 # Actually, I'll calculate it safely.
-param_mem_val = MNISTMemory.total_params * 4 / 1024
+param_mem_val = MNISTMemory.total_params * 4 / KIB_TO_BYTES
 param_mem_str = fmt(param_mem_val, precision=1, commas=False)
 
 ```
@@ -2118,7 +2116,7 @@ Parameter count grows with network width and depth. For our MNIST example, consi
 # │ Imports: mlsys.formatting (fmt), mlsys.constants (BYTES_FP32)
 # │ Exports: p1_str, p2_str, p3_str, act_*_str, grad_kib_str, etc.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 from mlsys.constants import BYTES_FP32
 
 # --- Re-derived inputs (same values as mnist-memory-calc) ---
@@ -2129,7 +2127,7 @@ layer_weights_value = [i * o for i, o in layers_value]
 layer_biases_value = [o for _, o in layers_value]
 layer_params_value = [w + b for w, b in zip(layer_weights_value, layer_biases_value)]
 total_params_value = sum(layer_params_value)
-param_memory_kb_value = total_params_value * bytes_per_param_value / 1024
+param_memory_kb_value = total_params_value * bytes_per_param_value / KIB_TO_BYTES
 
 # --- Per-layer parameter totals ---
 p1_str = f"{layer_params_value[0]:,}"
@@ -2140,7 +2138,7 @@ param_kib_str = fmt(param_memory_kb_value, precision=1, commas=False)
 # --- Per-layer activation counts and sizes (batch × layer width) ---
 act_dims = [layers_value[0][0]] + [o for _, o in layers_value]  # 784, 128, 64, 10
 act_counts = [batch_value * d for d in act_dims]
-act_kibs = [c * bytes_per_param_value / 1024 for c in act_counts]
+act_kibs = [c * bytes_per_param_value / KIB_TO_BYTES for c in act_counts]
 
 act_in_count_str = f"{act_counts[0]:,}"
 act_in_kib_str = fmt(act_kibs[0], precision=1, commas=False)
@@ -2158,7 +2156,7 @@ grad_kib_value = param_memory_kb_value
 opt_kib_value = param_memory_kb_value * 2
 total_train_kib = param_memory_kb_value + sum(act_kibs) + grad_kib_value + opt_kib_value
 total_infer_kib = param_memory_kb_value + sum(act_kibs)
-total_train_mib = total_train_kib / 1024
+total_train_mib = total_train_kib / KIB_TO_BYTES
 training_ratio_calc = total_train_kib / total_infer_kib
 
 grad_kib_str = fmt(grad_kib_value, precision=1, commas=False)
@@ -2236,7 +2234,7 @@ The memory requirements above seem modest for our small MNIST classifier. But wh
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import GPT2_PARAMS, BYTES_FP32, param, Kparam, Bparam, KiB, GB
 from mlsys.formulas import model_memory
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Re-derived inputs (MNIST canonical architecture: 784→128→64→10) ---
 mnist_l1_dim = 784                                       # input: 28×28 pixels
@@ -2292,7 +2290,7 @@ The memory calculations above are precise but slow. Experienced engineers develo
 # │ Imports: mlsys.formatting (fmt), mlsys.constants (byte, GB)
 # │ Exports: mm_model_str, mm_remaining_str, mm_params_m_str, mm_gpu_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 from mlsys.constants import byte, GB
 
 # --- Inputs (hypothetical 100M-param model on a 16 GB GPU) ---
@@ -2303,7 +2301,7 @@ mm_gpu_gb_value = 16
 
 # --- Process (total training memory footprint) ---
 mm_model_gb_value = (
-    mm_params_m_value * 1e6 * mm_bytes_value * mm_overhead_value * byte
+    mm_params_m_value * MILLION * mm_bytes_value * mm_overhead_value * byte
 ).to(GB).magnitude
 mm_remaining_gb_value = mm_gpu_gb_value - mm_model_gb_value
 
@@ -2597,7 +2595,7 @@ For each image in the batch, this produces a probability distribution over the p
 # │ Exports: l1_mm_str..l3_bias_str, total_mops_str,
 # │          double_total_mops_str, double_ratio_str, double_ratio_exact_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 from mlsys.constants import flop, MFLOPs
 
 # --- Inputs (MNIST architecture and doubled variant) ---
@@ -3100,7 +3098,7 @@ The transition from training to inference introduces a constraint on model adapt
 # │ Exports: a100_mem_gb_str, a100_tdp_w_str, h100_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import A100_MEM_CAPACITY, A100_TDP, H100_TDP, GiB, watt
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # --- Inputs (from mlsys.constants) ---
 a100_mem_gb_value = A100_MEM_CAPACITY.to(GiB).magnitude      # e.g. 80

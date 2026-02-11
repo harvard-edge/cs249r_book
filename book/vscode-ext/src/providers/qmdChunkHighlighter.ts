@@ -17,6 +17,25 @@ function colorValue(value: string): vscode.ThemeColor | string {
     : new vscode.ThemeColor(value);
 }
 
+interface QmdColorOverrides {
+  sectionH2Bg?: string;
+  sectionH3Bg?: string;
+  sectionH4Bg?: string;
+  sectionH5Bg?: string;
+  sectionH6Bg?: string;
+  figureLineBg?: string;
+  tableLineBg?: string;
+  listingLineBg?: string;
+  tableBg?: string;
+  footnoteBg?: string;
+  inlineRefColor?: string;
+  structuralRefColor?: string;
+  labelDefColor?: string;
+  divFenceColor?: string;
+  footnoteRefColor?: string;
+  footnoteDefColor?: string;
+}
+
 export class QmdChunkHighlighter implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private calloutDecoration: vscode.TextEditorDecorationType | undefined;
@@ -24,7 +43,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
   private codeFenceDecoration: vscode.TextEditorDecorationType | undefined;
   private tableDecoration: vscode.TextEditorDecorationType | undefined;
   private footnoteDecoration: vscode.TextEditorDecorationType | undefined;
-  private figureTableLineDecoration: vscode.TextEditorDecorationType | undefined;
+  private figureLineDecoration: vscode.TextEditorDecorationType | undefined;
+  private tableLineDecoration: vscode.TextEditorDecorationType | undefined;
+  private listingLineDecoration: vscode.TextEditorDecorationType | undefined;
   private sectionHeaderDecorations = new Map<number, vscode.TextEditorDecorationType>();
   private footnoteReferenceDecoration: vscode.TextEditorDecorationType | undefined;
   private footnoteDefinitionMarkerDecoration: vscode.TextEditorDecorationType | undefined;
@@ -57,6 +78,22 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.highlightSectionHeaders')
           || event.affectsConfiguration('mlsysbook.highlightTables')
           || event.affectsConfiguration('mlsysbook.highlightFootnotes')
+          || event.affectsConfiguration('mlsysbook.colorSectionH2Bg')
+          || event.affectsConfiguration('mlsysbook.colorSectionH3Bg')
+          || event.affectsConfiguration('mlsysbook.colorSectionH4Bg')
+          || event.affectsConfiguration('mlsysbook.colorSectionH5Bg')
+          || event.affectsConfiguration('mlsysbook.colorSectionH6Bg')
+          || event.affectsConfiguration('mlsysbook.colorFigureLabelBg')
+          || event.affectsConfiguration('mlsysbook.colorTableLabelBg')
+          || event.affectsConfiguration('mlsysbook.colorListingLabelBg')
+          || event.affectsConfiguration('mlsysbook.colorTableRegionBg')
+          || event.affectsConfiguration('mlsysbook.colorFootnoteRegionBg')
+          || event.affectsConfiguration('mlsysbook.colorInlineReference')
+          || event.affectsConfiguration('mlsysbook.colorStructuralReference')
+          || event.affectsConfiguration('mlsysbook.colorLabelDefinition')
+          || event.affectsConfiguration('mlsysbook.colorDivFenceMarker')
+          || event.affectsConfiguration('mlsysbook.colorFootnoteReference')
+          || event.affectsConfiguration('mlsysbook.colorFootnoteDefinitionMarker')
         ) {
           this.recreateDecorations();
           this.applyToEditor(vscode.window.activeTextEditor);
@@ -111,13 +148,46 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       .get<boolean>('highlightFootnotes', true);
   }
 
+  private readOptionalColor(config: vscode.WorkspaceConfiguration, key: string): string | undefined {
+    const value = config.get<string>(key);
+    if (!value) {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  private getColorOverrides(): QmdColorOverrides {
+    const config = vscode.workspace.getConfiguration('mlsysbook');
+    return {
+      sectionH2Bg: this.readOptionalColor(config, 'colorSectionH2Bg'),
+      sectionH3Bg: this.readOptionalColor(config, 'colorSectionH3Bg'),
+      sectionH4Bg: this.readOptionalColor(config, 'colorSectionH4Bg'),
+      sectionH5Bg: this.readOptionalColor(config, 'colorSectionH5Bg'),
+      sectionH6Bg: this.readOptionalColor(config, 'colorSectionH6Bg'),
+      figureLineBg: this.readOptionalColor(config, 'colorFigureLabelBg'),
+      tableLineBg: this.readOptionalColor(config, 'colorTableLabelBg'),
+      listingLineBg: this.readOptionalColor(config, 'colorListingLabelBg'),
+      tableBg: this.readOptionalColor(config, 'colorTableRegionBg'),
+      footnoteBg: this.readOptionalColor(config, 'colorFootnoteRegionBg'),
+      inlineRefColor: this.readOptionalColor(config, 'colorInlineReference'),
+      structuralRefColor: this.readOptionalColor(config, 'colorStructuralReference'),
+      labelDefColor: this.readOptionalColor(config, 'colorLabelDefinition'),
+      divFenceColor: this.readOptionalColor(config, 'colorDivFenceMarker'),
+      footnoteRefColor: this.readOptionalColor(config, 'colorFootnoteReference'),
+      footnoteDefColor: this.readOptionalColor(config, 'colorFootnoteDefinitionMarker'),
+    };
+  }
+
   private recreateDecorations(): void {
     this.calloutDecoration?.dispose();
     this.divDecoration?.dispose();
     this.codeFenceDecoration?.dispose();
     this.tableDecoration?.dispose();
     this.footnoteDecoration?.dispose();
-    this.figureTableLineDecoration?.dispose();
+    this.figureLineDecoration?.dispose();
+    this.tableLineDecoration?.dispose();
+    this.listingLineDecoration?.dispose();
     this.sectionHeaderDecorations.forEach(decoration => decoration.dispose());
     this.sectionHeaderDecorations.clear();
     this.footnoteReferenceDecoration?.dispose();
@@ -134,6 +204,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       divBg: string;
       codeBg: string;
       labelBg: string;
+      figureLineBg: string;
+      tableLineBg: string;
+      listingLineBg: string;
       tableBg: string;
       footnoteBg: string;
       footnoteRefColor: string;
@@ -150,6 +223,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         divBg: 'editor.selectionHighlightBackground',
         codeBg: 'editor.selectionHighlightBackground',
         labelBg: 'rgba(116, 162, 255, 0.12)',
+        figureLineBg: 'rgba(56, 189, 248, 0.20)',
+        tableLineBg: 'rgba(34, 197, 94, 0.20)',
+        listingLineBg: 'rgba(249, 115, 22, 0.18)',
         tableBg: 'rgba(88, 166, 255, 0.10)',
         footnoteBg: 'rgba(167, 139, 250, 0.11)',
         footnoteRefColor: 'editorInfo.foreground',
@@ -172,6 +248,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         divBg: 'editor.wordHighlightBackground',
         codeBg: 'editor.selectionHighlightBackground',
         labelBg: 'rgba(116, 162, 255, 0.18)',
+        figureLineBg: 'rgba(56, 189, 248, 0.28)',
+        tableLineBg: 'rgba(34, 197, 94, 0.26)',
+        listingLineBg: 'rgba(249, 115, 22, 0.24)',
         tableBg: 'rgba(82, 197, 214, 0.14)',
         footnoteBg: 'rgba(167, 139, 250, 0.16)',
         footnoteRefColor: 'textLink.foreground',
@@ -194,6 +273,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         divBg: 'editor.wordHighlightStrongBackground',
         codeBg: 'editor.findMatchHighlightBackground',
         labelBg: 'rgba(116, 162, 255, 0.24)',
+        figureLineBg: 'rgba(56, 189, 248, 0.34)',
+        tableLineBg: 'rgba(34, 197, 94, 0.32)',
+        listingLineBg: 'rgba(249, 115, 22, 0.30)',
         tableBg: 'rgba(82, 197, 214, 0.22)',
         footnoteBg: 'rgba(167, 139, 250, 0.23)',
         footnoteRefColor: 'textLink.foreground',
@@ -213,7 +295,29 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       },
     };
 
-    const style = styleByPreset[preset];
+    const baseStyle = styleByPreset[preset];
+    const override = this.getColorOverrides();
+    const style = {
+      ...baseStyle,
+      figureLineBg: override.figureLineBg ?? baseStyle.figureLineBg,
+      tableLineBg: override.tableLineBg ?? baseStyle.tableLineBg,
+      listingLineBg: override.listingLineBg ?? baseStyle.listingLineBg,
+      tableBg: override.tableBg ?? baseStyle.tableBg,
+      footnoteBg: override.footnoteBg ?? baseStyle.footnoteBg,
+      inlineRefColor: override.inlineRefColor ?? baseStyle.inlineRefColor,
+      structuralRefColor: override.structuralRefColor ?? baseStyle.structuralRefColor,
+      labelDefColor: override.labelDefColor ?? baseStyle.labelDefColor,
+      divFenceColor: override.divFenceColor ?? baseStyle.divFenceColor,
+      footnoteRefColor: override.footnoteRefColor ?? baseStyle.footnoteRefColor,
+      footnoteDefColor: override.footnoteDefColor ?? baseStyle.footnoteDefColor,
+      sectionHeaderBgByLevel: [
+        override.sectionH2Bg ?? baseStyle.sectionHeaderBgByLevel[0],
+        override.sectionH3Bg ?? baseStyle.sectionHeaderBgByLevel[1],
+        override.sectionH4Bg ?? baseStyle.sectionHeaderBgByLevel[2],
+        override.sectionH5Bg ?? baseStyle.sectionHeaderBgByLevel[3],
+        override.sectionH6Bg ?? baseStyle.sectionHeaderBgByLevel[4],
+      ] as [string, string, string, string, string],
+    };
 
     this.calloutDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
@@ -245,9 +349,17 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       fontWeight: style.fontWeight,
       textDecoration: 'none',
     });
-    this.figureTableLineDecoration = vscode.window.createTextEditorDecorationType({
+    this.figureLineDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: false,
-      backgroundColor: colorValue(style.labelBg),
+      backgroundColor: colorValue(style.figureLineBg),
+    });
+    this.tableLineDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: false,
+      backgroundColor: colorValue(style.tableLineBg),
+    });
+    this.listingLineDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: false,
+      backgroundColor: colorValue(style.listingLineBg),
     });
     for (let level = 2; level <= 6; level++) {
       this.sectionHeaderDecorations.set(
@@ -303,7 +415,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const footnoteRanges: vscode.Range[] = [];
     const footnoteRefRanges: vscode.Range[] = [];
     const footnoteDefinitionMarkerRanges: vscode.Range[] = [];
-    const lineHighlightRanges: vscode.Range[] = [];
+    const figureLineRanges: vscode.Range[] = [];
+    const tableLineRanges: vscode.Range[] = [];
+    const listingLineRanges: vscode.Range[] = [];
     const sectionHeaderRanges = new Map<number, vscode.Range[]>([
       [2, []],
       [3, []],
@@ -458,12 +572,28 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         footnoteRefRegex.lastIndex = 0;
       }
 
-      if (/#(fig-|tbl-|lst-)/.test(text)) {
+      if (/#fig-/.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),
         );
-        lineHighlightRanges.push(range);
+        figureLineRanges.push(range);
+      }
+
+      if (/#tbl-/.test(text)) {
+        const range = new vscode.Range(
+          new vscode.Position(line, 0),
+          new vscode.Position(line, text.length),
+        );
+        tableLineRanges.push(range);
+      }
+
+      if (/#lst-/.test(text)) {
+        const range = new vscode.Range(
+          new vscode.Position(line, 0),
+          new vscode.Position(line, text.length),
+        );
+        listingLineRanges.push(range);
       }
 
       if (highlightLabelDefs) {
@@ -537,8 +667,14 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.footnoteDefinitionMarkerDecoration) {
       editor.setDecorations(this.footnoteDefinitionMarkerDecoration, footnoteDefinitionMarkerRanges);
     }
-    if (this.figureTableLineDecoration) {
-      editor.setDecorations(this.figureTableLineDecoration, lineHighlightRanges);
+    if (this.figureLineDecoration) {
+      editor.setDecorations(this.figureLineDecoration, figureLineRanges);
+    }
+    if (this.tableLineDecoration) {
+      editor.setDecorations(this.tableLineDecoration, tableLineRanges);
+    }
+    if (this.listingLineDecoration) {
+      editor.setDecorations(this.listingLineDecoration, listingLineRanges);
     }
     for (let level = 2; level <= 6; level++) {
       const decoration = this.sectionHeaderDecorations.get(level);
@@ -582,8 +718,14 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.footnoteDefinitionMarkerDecoration) {
       editor.setDecorations(this.footnoteDefinitionMarkerDecoration, []);
     }
-    if (this.figureTableLineDecoration) {
-      editor.setDecorations(this.figureTableLineDecoration, []);
+    if (this.figureLineDecoration) {
+      editor.setDecorations(this.figureLineDecoration, []);
+    }
+    if (this.tableLineDecoration) {
+      editor.setDecorations(this.tableLineDecoration, []);
+    }
+    if (this.listingLineDecoration) {
+      editor.setDecorations(this.listingLineDecoration, []);
     }
     this.sectionHeaderDecorations.forEach(decoration => {
       editor.setDecorations(decoration, []);

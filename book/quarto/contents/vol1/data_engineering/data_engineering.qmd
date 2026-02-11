@@ -169,7 +169,7 @@ class DataEngineeringSetup:
     model_growth_factor = int(gpt3_params_b * BILLION / (alexnet_params_m * MILLION))
 
     # KWS Labeling
-    kws_label_hours = kws_dataset_size_m * MILLION * kws_label_seconds_per_example / 3600
+    kws_label_hours = kws_dataset_size_m * MILLION * kws_label_seconds_per_example / SEC_PER_HOUR
     kws_label_years = kws_label_hours / 2000
 
     # KWS Storage
@@ -394,9 +394,10 @@ from mlsys import Hardware
 from mlsys.constants import (
     CLOUD_EGRESS_PER_GB, TPU_V4_PER_HOUR,
     SECONDS_PER_MINUTE, MINUTES_PER_HOUR, HOURS_PER_DAY,
-    Gbps, GB, USD, hour, second, MILLION
+    Gbps, GB, USD, hour, second, MILLION,
+    SEC_PER_HOUR, SEC_PER_DAY, BITS_PER_BYTE
 )
-from mlsys.formatting import fmt, md_math
+from mlsys.formatting import fmt, check, md_math
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class DataGravity:
@@ -418,18 +419,17 @@ class DataGravity:
 
     # Time
     transfer_seconds = dataset_gb / network_gbs
-    transfer_hours = transfer_seconds / 3600.0
-    transfer_days_10g = (dataset_gb / (1.25)) / 86400.0 # 10Gbps = 1.25 GB/s
+    transfer_hours = transfer_seconds / SEC_PER_HOUR
+    # 10Gbps = 1.25 GB/s
+    transfer_days_10g = (dataset_gb / (10 / BITS_PER_BYTE)) / SEC_PER_DAY
 
     # Cost
     transfer_cost = dataset_gb * egress_cost_gb
     equiv_tpu_hours = transfer_cost / tpu_hourly_cost
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if transfer_hours < 20:
-        raise ValueError(f"Narrative broken: Transfer time ({transfer_hours:.1f}h) is too fast. Data gravity argument fails.")
-    if transfer_cost < 10000:
-        raise ValueError(f"Narrative broken: Transfer cost (${transfer_cost}) is too cheap.")
+    check(transfer_hours >= 20, f"Transfer time ({transfer_hours:.1f}h) is too fast. Data gravity argument fails.")
+    check(transfer_cost >= 10000, f"Transfer cost (${transfer_cost}) is too cheap.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     transfer_seconds_str = fmt(transfer_seconds, precision=0, commas=True)
@@ -910,8 +910,9 @@ Of these metrics, the false positive rate deserves particular attention for alwa
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     SECONDS_PER_MINUTE, MINUTES_PER_HOUR, HOURS_PER_DAY, DAYS_PER_MONTH,
+    SEC_PER_HOUR
 )
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class FalsePositiveTarget:
@@ -928,13 +929,12 @@ class FalsePositiveTarget:
     days_month = DAYS_PER_MONTH
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    windows_per_month = (days_month * duty_cycle_hours * 3600) / window_sec
+    windows_per_month = (days_month * duty_cycle_hours * SEC_PER_HOUR) / window_sec
     target_fpr = tolerance_per_month / windows_per_month
     rejection_pct = (1 - target_fpr) * 100
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if rejection_pct < 99.999:
-        raise ValueError(f"Narrative broken: Rejection target ({rejection_pct:.4f}%) is too lenient. Should be > 99.999%.")
+    check(rejection_pct >= 99.999, f"Rejection target ({rejection_pct:.4f}%) is too lenient. Should be > 99.999%.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     sec_str = "60"
@@ -1727,7 +1727,7 @@ Quality monitoring extends beyond simple schema validation to statistical proper
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsys.constants import KS_TEST_COEFFICIENT
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class KSTest:
@@ -1744,10 +1744,8 @@ class KSTest:
     d_crit = coeff / math.sqrt(n)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if d_crit <= 0:
-        raise ValueError("Narrative broken: Critical value must be positive.")
-    if d_crit > 0.1:
-        raise ValueError(f"Narrative broken: Critical value ({d_crit:.3f}) is too loose for n=1000. Check formula.")
+    check(d_crit > 0, "Critical value must be positive.")
+    check(d_crit <= 0.1, f"Critical value ({d_crit:.3f}) is too loose for n=1000. Check formula.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     ks_dcrit_str = fmt(d_crit, precision=3, commas=False)
@@ -2029,7 +2027,7 @@ throughput_gbs_value = (events_per_sec_value * event_size_kb_value * KB).to(GB).
 stream_cost_day_value = (
     stream_cores_value * stream_hours_value * stream_cost_per_hr_value
 )
-hourly_data_tb_value = (throughput_gbs_value * 3600 * GB).to(TB).magnitude  # TB per hour
+hourly_data_tb_value = (throughput_gbs_value * SEC_PER_HOUR * GB).to(TB).magnitude  # TB per hour
 batch_core_hours_value = 200 * (10 / 60) * 24  # 200 cores × 10min/hr × 24 hours
 batch_cost_day_value = batch_core_hours_value * stream_cost_per_hr_value
 cost_ratio_value = stream_cost_day_value / batch_cost_day_value
@@ -2040,7 +2038,7 @@ hourly_tb_str = fmt(hourly_data_tb_value, precision=1, commas=False)
 stream_cost_str = fmt(stream_cost_day_value, precision=0, commas=False)
 batch_cost_str = fmt(batch_cost_day_value, precision=0, commas=False)
 cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False)
-events_per_sec_str = f"{events_per_sec_value / 1e6:.0f}M"
+events_per_sec_str = f"{events_per_sec_value / MILLION:.0f}M"
 event_size_kb_str = fmt(event_size_kb_value, precision=0, commas=False)
 stream_cores_str = fmt(stream_cores_value, precision=0, commas=False)
 stream_hours_str = fmt(stream_hours_value, precision=0, commas=False)
@@ -2922,7 +2920,7 @@ max_img_per_sec_value = int(a100_flops_val_value / resnet_flops_per_img_value)
 required_bw_gbs_value = (
     max_img_per_sec_value * image_size_kb_value * KB
 ).to(GB).magnitude
-sata_max_img_sec_value = int(sata_bw_mbs_value * 1e6 / (image_size_kb_value * 1e3))
+sata_max_img_sec_value = int(sata_bw_mbs_value * MILLION / (image_size_kb_value * 1e3))
 sata_utilization_pct_value = int(
     round(sata_max_img_sec_value / max_img_per_sec_value * 100)
 )

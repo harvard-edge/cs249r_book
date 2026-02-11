@@ -591,7 +591,11 @@ In weak scaling, efficiency remains high because the useful work (training the m
 ```{python}
 #| label: training-time-example
 #| echo: false
-from mlsys.formatting import fmt, md_math, sci_latex
+from mlsys.constants import (
+    BILLION, TRILLION, SECONDS_PER_MINUTE, SEC_PER_DAY,
+    A100_FLOPS_FP16_TENSOR, TFLOPs, second
+)
+from mlsys.formatting import fmt, check, md_math, sci_latex
 
 # =============================================================================
 # PURPOSE
@@ -599,38 +603,63 @@ from mlsys.formatting import fmt, md_math, sci_latex
 # Purpose: Estimate training time from model scale and utilization
 # Used in: Training time equation example
 
-# =============================================================================
-# INPUT
-# =============================================================================
-p_params_value = 1e9           # 1B parameters
-d_tokens_value = 20e9          # 20B tokens
-n_gpus_value = 1
-x_flops_value = 312e12         # A100 FP16 peak FLOP/s
-u_mfu_value = 0.40             # 40% MFU
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TrainingTimeRef:
+    """
+    Reference calculation for the Training Time Equation.
+    Scenario: Training 1B model on 20B tokens using 1 A100.
+    """
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-total_flops_value = 6 * p_params_value * d_tokens_value
-throughput_value = n_gpus_value * x_flops_value * u_mfu_value
-t_seconds_value = total_flops_value / throughput_value
-t_minutes_value = t_seconds_value / 60
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    p_params = 1 * BILLION
+    d_tokens = 20 * BILLION
+    n_gpus = 1
+    x_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
+    u_mfu = 0.40
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-t_days_value = t_seconds_value / 86400
-T_seconds_str = fmt(t_seconds_value, precision=0, commas=False)
-T_minutes_str = fmt(t_minutes_value, precision=0, commas=False)
-T_days_str = fmt(t_days_value, precision=0, commas=False)
-p_params_str = f"{p_params_value/1e9:.0f}B"
-d_tokens_str = f"{d_tokens_value/1e9:.0f}B"
-n_gpus_str = str(int(n_gpus_value))
-u_mfu_pct_str = str(int(u_mfu_value * 100))
+    # Rename variables for internal logic
+    p_params_value = p_params
+    d_tokens_value = d_tokens
+    n_gpus_value = n_gpus
+    x_flops_value = x_flops * TRILLION
+    u_mfu_value = u_mfu
 
-eq_total_flops = md_math(f"\\text{{Total FLOPs}} = 6 \\times {sci_latex(p_params_value, 0)} \\times {sci_latex(d_tokens_value, 0)} = {sci_latex(total_flops_value, 1)} \\text{{ FLOPs}}")
-eq_throughput = md_math(f"\\text{{Throughput}} = {int(n_gpus_value)} \\times ({sci_latex(x_flops_value, 0)}) \\times {u_mfu_value:.2f} \\approx {sci_latex(throughput_value, 2)} \\text{{ FLOP/s}}")
-eq_time = md_math(f"T = \\frac{{{sci_latex(total_flops_value, 1)}}}{{{sci_latex(throughput_value, 2)}}} \\approx {fmt(t_seconds_value, precision=0, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=0, commas=True)} \\text{{ minutes}}")
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    total_flops = 6 * p_params_value * d_tokens_value
+    # x_flops_value is in TFLOPS (1e12)
+    throughput = n_gpus_value * (x_flops_value) * u_mfu_value
+
+    t_seconds_value = total_flops / throughput
+    t_minutes_value = t_seconds_value / SECONDS_PER_MINUTE
+    t_days_value = t_seconds_value / SEC_PER_DAY
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(t_seconds > 0, "Training time must be positive.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    T_seconds_str = fmt(t_seconds, precision=0, commas=False)
+    T_minutes_str = fmt(t_minutes, precision=0, commas=False)
+    T_days_str = fmt(t_days, precision=0, commas=False)
+    p_params_str = f"{p_params/BILLION:.0f}B"
+    d_tokens_str = f"{d_tokens/BILLION:.0f}B"
+    n_gpus_str = str(int(n_gpus))
+    u_mfu_pct_str = str(int(u_mfu * 100))
+    eq_total_flops = md_math(f"\\text{{Total FLOPs}} = 6 \\times {sci_latex(p_params, 0)} \\times {sci_latex(d_tokens, 0)} = {sci_latex(total_flops, 1)} \\text{{ FLOPs}}")
+    eq_throughput = md_math(f"\\text{{Throughput}} = {int(n_gpus)} \\times ({sci_latex(x_flops*TRILLION, 0)}) \\times {u_mfu:.2f} \\approx {sci_latex(throughput, 2)} \\text{{ FLOP/s}}")
+    eq_time = md_math(f"T = \\frac{{{sci_latex(total_flops, 1)}}}{{{sci_latex(throughput, 2)}}} \\approx {fmt(t_seconds_value, precision=0, commas=True)} \\text{{ seconds}} \\approx {fmt(t_minutes_value, precision=0, commas=True)} \\text{{ minutes}}")
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+T_seconds_str = TrainingTimeRef.T_seconds_str
+T_minutes_str = TrainingTimeRef.T_minutes_str
+T_days_str = TrainingTimeRef.T_days_str
+p_params_str = TrainingTimeRef.p_params_str
+d_tokens_str = TrainingTimeRef.d_tokens_str
+n_gpus_str = TrainingTimeRef.n_gpus_str
+u_mfu_pct_str = TrainingTimeRef.u_mfu_pct_str
+eq_total_flops = TrainingTimeRef.eq_total_flops
+eq_throughput = TrainingTimeRef.eq_throughput
+eq_time = TrainingTimeRef.eq_time
+
 ```
 
 ::: {.callout-notebook title="The Training Time Equation"}
@@ -846,7 +875,7 @@ ping_ms_value = 10
 # PROCESS
 # =============================================================================
 tx_time_s_value = (data_kb_value * 8) / bw_gbps_value
-tx_time_us_value = tx_time_s_value * 1e6
+tx_time_us_value = tx_time_s_value * MILLION
 
 large_data_bits_value = large_data_gb_value * 8e9
 large_tx_time_s_value = large_data_bits_value / bw_gbps_value
@@ -858,7 +887,7 @@ total_large_time_ms_value = ping_ms_value + large_tx_time_s_value * 1000
 tx_time_us_str = fmt(tx_time_us_value, precision=1, commas=False)
 large_data_gb_str = str(large_data_gb_value)
 
-eq_large_tx = md_math(f"{large_data_gb_value}\\text{{GB}} / {int(bw_gbps_value/1e9)}\\text{{Gbps}} \\approx {int(large_tx_time_s_value*1000)}\\text{{ms}}")
+eq_large_tx = md_math(f"{large_data_gb_value}\\text{{GB}} / {int(bw_gbps_value/BILLION)}\\text{{Gbps}} \\approx {int(large_tx_time_s_value*1000)}\\text{{ms}}")
 eq_large_total = md_math(f"\\approx {int(ping_ms_value)}\\text{{ms}} + {int(large_tx_time_s_value*1000)}\\text{{ms}} = {int(total_large_time_ms_value)}\\text{{ms}}")
 ```
 

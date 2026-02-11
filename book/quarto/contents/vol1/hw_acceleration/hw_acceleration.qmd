@@ -170,8 +170,11 @@ To see Amdahl's Law in action, consider how the parallel fraction $p$ differs dr
 # │ Imports: mlsys.constants (H100_FLOPS_INT8), mlsys.formatting (fmt)
 # │ Exports: amdahl_*_str, hw_speedup_str, h100_tflops_int8
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
-from mlsys.constants import H100_FLOPS_INT8, TFLOPs, second
+from mlsys.formatting import fmt, check
+from mlsys.constants import (
+    H100_FLOPS_INT8, TFLOPs, second,
+    BILLION, MILLION, TRILLION, THOUSAND
+)
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class AmdahlH100:
@@ -202,10 +205,9 @@ class AmdahlH100:
     ceiling_gpt2 = 1 / (1 - p_gpt2)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if speedup_resnet < speedup_gpt2 * 3:
-        raise ValueError(f"Narrative broken: ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")
-    if speedup_gpt2 > ceiling_gpt2:
-        raise ValueError("Math broken: Speedup cannot exceed theoretical ceiling.")
+    check(speedup_resnet >= speedup_gpt2 * 3,
+          f"ResNet speedup ({speedup_resnet:.1f}x) should be much higher than GPT-2 ({speedup_gpt2:.1f}x).")
+    check(speedup_gpt2 <= ceiling_gpt2, "Speedup cannot exceed theoretical ceiling.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     # Hardware context
@@ -562,7 +564,8 @@ This shift represents an important engineering lesson: the era of "free" perform
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     A100_FLOPS_FP16_TENSOR, A100_FLOPS_TF32,
-    MOBILE_NPU_TOPS_INT8, TFLOPs, second
+    MOBILE_NPU_TOPS_INT8, TFLOPs, second,
+    KIB_TO_BYTES, MIB_TO_BYTES
 )
 from mlsys.formatting import fmt
 
@@ -1695,8 +1698,7 @@ class SystolicEnergy:
     efficiency_ratio = e_vector / e_systolic
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if efficiency_ratio < 100:
-        raise ValueError(f"Narrative broken: Systolic efficiency ({efficiency_ratio:.1f}x) is too low. Should be >100x to justify TPU design.")
+    check(efficiency_ratio >= 100, f"Systolic efficiency ({efficiency_ratio:.1f}x) is too low. Should be >100x to justify TPU design.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     dram_access_str = fmt(dram_pj, precision=0, commas=False)
@@ -2283,7 +2285,7 @@ from mlsys.constants import (
 # --- KWS audio tensor sizing ---
 kws_samples_value = 16_000
 kws_bytes_fp16_value = BYTES_FP16.magnitude
-kws_tensor_kb_value = kws_samples_value * kws_bytes_fp16_value / 1024
+kws_tensor_kb_value = kws_samples_value * kws_bytes_fp16_value / KIB_TO_BYTES
 kws_tensor_str = fmt(kws_tensor_kb_value, precision=1, commas=False)
 kws_samples_str = fmt(kws_samples_value, precision=0, commas=True)
 kws_bytes_str = fmt(kws_bytes_fp16_value, precision=0, commas=False)
@@ -2638,9 +2640,9 @@ class InterconnectHierarchy:
     ib_ndr_gbps = INFINIBAND_NDR_BW.to(Gbps).magnitude
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    # The "Bandwidth Taper" must hold
-    if not (hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_gbs):
-        raise ValueError(f"Narrative broken: Bandwidth hierarchy violated. HBM({hbm_bw}) > NVLink({nvlink_h100}) > PCIe({pcie_gen4}) > Net({ib_hdr_gbs})")
+    # The "Bandwidth Taper" must hold: HBM > NVLink > PCIe > Network
+    check(hbm_bw > nvlink_h100 > pcie_gen4 > ib_hdr_gbs,
+          f"Bandwidth hierarchy violated. HBM({hbm_bw}) > NVLink({nvlink_h100}) > PCIe({pcie_gen4}) > Net({ib_hdr_gbs})")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     nvlink_a100_str = f"{nvlink_a100:.0f}"
@@ -2828,14 +2830,14 @@ class RooflineGap:
     relu_ai = 0.125
 
     # Hardware Specs (Raw magnitudes)
-    v100_flops = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 1e12
+    v100_flops = V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * TRILLION
     v100_bw = V100_MEM_BW.to(byte/second).magnitude
 
-    a100_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 1e12
-    a100_flops_fp32 = A100_FLOPS_FP32.to(TFLOPs/second).magnitude * 1e12
+    a100_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * TRILLION
+    a100_flops_fp32 = A100_FLOPS_FP32.to(TFLOPs/second).magnitude * TRILLION
     a100_bw = A100_MEM_BW.to(byte/second).magnitude
 
-    h100_flops = H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * 1e12
+    h100_flops = H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude * TRILLION
     h100_bw = H100_MEM_BW.to(byte/second).magnitude
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
@@ -2851,10 +2853,10 @@ class RooflineGap:
     relu_gap = h100_ridge / relu_ai
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if not (h100_ridge > a100_ridge > v100_ridge):
-        raise ValueError(f"Narrative broken: Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
-    if relu_gap < 1000:
-        raise ValueError(f"Narrative broken: ReLU gap ({relu_gap:.0f}x) is too small.")
+    # Ridge points must climb: H100 > A100 > V100
+    check(h100_ridge > a100_ridge > v100_ridge,
+          f"Ridge points must climb. H100({h100_ridge:.0f}) > A100({a100_ridge:.0f}) > V100({v100_ridge:.0f}).")
+    check(relu_gap >= 1000, f"ReLU gap ({relu_gap:.0f}x) is too small.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     v100_ridge_str = f"{v100_ridge:.0f}"
@@ -3042,7 +3044,7 @@ conv_cout = 256; conv_k = 3; conv_fp_bytes = BYTES_FP16.magnitude
 # --- Computation ---
 # Output elements
 conv_out_elements = conv_batch * conv_cout * conv_h * conv_w
-conv_out_m = conv_out_elements / 1e6
+conv_out_m = conv_out_elements / MILLION
 
 # FLOPs per output element (multiply-add = 2 ops)
 conv_flops_per_out = conv_cin * conv_k * conv_k * 2
@@ -3128,9 +3130,9 @@ dense_batch = 32; dense_in = 2048; dense_out = 2048
 dense_total_mflops = (2 * dense_batch * dense_in * dense_out * flop).to(MFLOPs).magnitude
 
 # Memory traffic (FP16)
-dense_input_kb = dense_batch * dense_in * 2 / 1024
+dense_input_kb = dense_batch * dense_in * 2 / KIB_TO_BYTES
 dense_weights_mb = (dense_in * dense_out * 2 * byte).to(MB).magnitude
-dense_output_kb = dense_batch * dense_out * 2 / 1024
+dense_output_kb = dense_batch * dense_out * 2 / KIB_TO_BYTES
 dense_total_mb = (dense_input_kb * KiB + dense_weights_mb * MB + dense_output_kb * KiB).to(MB).magnitude
 
 # Arithmetic intensity
@@ -3211,7 +3213,7 @@ ln_batch = 32; ln_seq = 512; ln_hidden = 768
 # --- Computation ---
 # Elements
 ln_elements = ln_batch * ln_seq * ln_hidden
-ln_elements_m = ln_elements / 1e6
+ln_elements_m = ln_elements / MILLION
 
 # FLOPs (6 per element)
 ln_flops_per = 6
@@ -3219,9 +3221,9 @@ ln_total_mflops = ln_elements_m * ln_flops_per
 
 # Memory traffic
 ln_input_mb = (ln_elements * 2 * byte).to(MB).magnitude
-ln_params_kb = ln_hidden * 2 * 2 / 1024
+ln_params_kb = ln_hidden * 2 * 2 / KIB_TO_BYTES
 ln_output_mb = (ln_elements * 2 * byte).to(MB).magnitude
-ln_total_mb = ln_input_mb + ln_output_mb + ln_params_kb / 1024
+ln_total_mb = ln_input_mb + ln_output_mb + ln_params_kb / KIB_TO_BYTES
 
 # Arithmetic intensity
 ln_ai = ln_total_mflops / ln_total_mb
@@ -3881,7 +3883,7 @@ total_tensors = 4                        # X, X', X'', Y stored in naive executi
 
 # --- Outputs (formatted strings for prose) ---
 tensor_bytes = tensor_dim * tensor_dim * bytes_per_float
-tensor_mb = tensor_bytes / (1024 * 1024)
+tensor_mb = tensor_bytes / MIB_TO_BYTES
 total_mb = tensor_mb * total_tensors
 
 tensor_mb_str = fmt(tensor_mb, precision=0, commas=False)   # e.g. "4" MB per tensor
@@ -3929,7 +3931,7 @@ from mlsys.constants import BYTES_FP32
 # --- Re-derive tensor sizes (self-contained, no namespace leak) ---
 tensor_dim = 1024
 bytes_per_float = BYTES_FP32.magnitude
-tensor_mb = tensor_dim * tensor_dim * bytes_per_float / (1024 * 1024)
+tensor_mb = tensor_dim * tensor_dim * bytes_per_float / MIB_TO_BYTES
 total_mb = tensor_mb * 4
 
 # --- Outputs (formatted strings for prose) ---

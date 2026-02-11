@@ -377,21 +377,21 @@ The choice between static and dynamic serving has direct economic implications. 
 #| label: cost-latency-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ COST OF LATENCY
+# │ COST OF LATENCY CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Cost of Latency"
+# │ Context: Callout "The Cost of Latency" (Serving Paradigm section)
 # │
-# │ Why: Quantifies the economic tradeoff between latency and cost. Batch size 1
-# │      achieves 5ms latency but costs 4x more per million queries than batch
-# │      size 8 at 10ms latency. This forces engineers to justify whether the
-# │      latency improvement generates sufficient business value.
+# │ Goal: Quantify the economic tradeoff between response time and hardware bill.
+# │ Show: That reducing latency by 50% can increase costs by 4x.
+# │ How: Calculate cost per million queries across different batch sizes.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.constants, mlsys.formatting
 # │ Exports: gpu_cost_per_hour_str, latency_a_ms_str, throughput_a_rps_str,
 # │          latency_b_ms_str, throughput_b_rps_str, cost_a_str, cost_b_str,
 # │          cost_increase_str, cost_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.constants import SEC_PER_HOUR, MILLION
+from mlsys.formatting import fmt, check
 
 # --- Inputs (GPU rental and batching scenarios) ---
 gpu_cost_per_hour_value = 4.0         # GPU rental cost ($/hour)
@@ -401,23 +401,23 @@ latency_b_ms_value = 10               # Scenario B: higher latency (ms)
 throughput_b_rps_value = 800          # Scenario B: throughput (req/s)
 
 # --- Process (cost per million queries) ---
-queries_per_hour_a_value = throughput_a_rps_value * 3600
-cost_per_million_a_value = gpu_cost_per_hour_value / (queries_per_hour_a_value / 1_000_000)
-queries_per_hour_b_value = throughput_b_rps_value * 3600
-cost_per_million_b_value = gpu_cost_per_hour_value / (queries_per_hour_b_value / 1_000_000)
+queries_per_hour_a_value = throughput_a_rps_value * SEC_PER_HOUR
+cost_per_million_a_value = gpu_cost_per_hour_value / (queries_per_hour_a_value / MILLION)
+queries_per_hour_b_value = throughput_b_rps_value * SEC_PER_HOUR
+cost_per_million_b_value = gpu_cost_per_hour_value / (queries_per_hour_b_value / MILLION)
 cost_increase_pct_value = (cost_per_million_a_value / cost_per_million_b_value - 1) * 100
 cost_ratio_value = cost_per_million_a_value / cost_per_million_b_value
 
 # --- Outputs (formatted strings for prose) ---
-gpu_cost_per_hour_str = fmt(gpu_cost_per_hour_value, precision=0, commas=False)  # e.g. "4" $/hour
-latency_a_ms_str = f"{latency_a_ms_value}"                                       # e.g. "5" ms
-throughput_a_rps_str = f"{throughput_a_rps_value}"                               # e.g. "200" req/s
-latency_b_ms_str = f"{latency_b_ms_value}"                                       # e.g. "10" ms
-throughput_b_rps_str = f"{throughput_b_rps_value}"                               # e.g. "800" req/s
-cost_a_str = fmt(cost_per_million_a_value, precision=2, commas=False)            # e.g. "5.56" $/M queries
-cost_b_str = fmt(cost_per_million_b_value, precision=2, commas=False)            # e.g. "1.39" $/M queries
-cost_increase_str = fmt(cost_increase_pct_value, precision=0, commas=False)      # e.g. "300" %
-cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False)                # e.g. "4" x
+gpu_cost_per_hour_str = fmt(gpu_cost_per_hour_value, precision=0, commas=False)
+latency_a_ms_str = f"{latency_a_ms_value}"
+throughput_a_rps_str = f"{throughput_a_rps_value}"
+latency_b_ms_str = f"{latency_b_ms_value}"
+throughput_b_rps_str = f"{throughput_b_rps_value}"
+cost_a_str = fmt(cost_per_million_a_value, precision=2, commas=False)
+cost_b_str = fmt(cost_per_million_b_value, precision=2, commas=False)
+cost_increase_str = fmt(cost_increase_pct_value, precision=0, commas=False)
+cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False)
 ```
 
 ::: {.callout-notebook #notebook-cost-latency title="The Cost of Latency"}
@@ -502,17 +502,16 @@ To make these architectural differences concrete, consider *how* a single model 
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Callout "ResNet-50 Across the Serving Spectrum"
 # │
-# │ Why: Demonstrates that the "same model" requires fundamentally different
-# │      serving strategies across Cloud/Mobile/TinyML. Key insight: TinyML
-# │      cannot even fit ResNet-50 (98MB); it must use MobileNetV2 (1.4MB).
-# │      This grounds the serving spectrum table in concrete numbers.
+# │ Goal: Contrast serving requirements across Cloud, Mobile, and TinyML.
+# │ Show: That the same model requires different formats and architectures.
+# │ How: Calculate model sizes and compare NPU vs. CPU efficiency.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys, mlsys.constants, mlsys.formatting
 # │ Exports: cloud_*, mobile_*, tiny_* formatted strings
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Models, Tiers
 from mlsys.constants import BYTES_FP16, BYTES_INT8
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class ResNetServingSpectrum:
@@ -557,11 +556,10 @@ class ResNetServingSpectrum:
     tiny_feasibility = tiny_original_mb < tiny_limit_mb
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if tiny_feasibility:
-        # ResNet-50 (INT8) is ~25MB, and typical MCU Flash is 2MB-4MB
-        raise ValueError(f"Narrative broken: ResNet-50 ({tiny_original_mb:.1f}MB) should NOT fit on TinyML (<{tiny_limit_mb:.1f}MB).")
-    if mobile_energy_cpu_mj < mobile_energy_npu_mj * 3:
-        raise ValueError("Narrative broken: NPU should be significantly more energy efficient than CPU.")
+    check(not tiny_feasibility,
+          f"ResNet-50 ({tiny_original_mb:.1f}MB) should NOT fit on TinyML (<{tiny_limit_mb:.1f}MB).")
+    check(mobile_energy_cpu_mj >= mobile_energy_npu_mj * 3,
+          "NPU should be significantly more energy efficient than CPU.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     cloud_model_mb_str = fmt(cloud_size_mb, precision=0)
@@ -787,8 +785,7 @@ class SerializationEfficiency:
     efficiency_gain = json_parse_us / proto_parse_us
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if efficiency_gain < 5:
-        raise ValueError(f"Narrative broken: Protobuf gain ({efficiency_gain:.1f}x) is too small to justify switching.")
+    check(efficiency_gain >= 5, f"Protobuf gain ({efficiency_gain:.1f}x) is too small to justify switching.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     serial_floats_str = f"{floats_count:,}"
@@ -1416,19 +1413,19 @@ This relationship holds regardless of arrival distribution, service time distrib
 #| label: littles-law-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ LITTLE'S LAW
+# │ LITTLE'S LAW CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Little's Law"
+# │ Context: Callout "Little's Law" (Capacity Planning section)
 # │
-# │ Why: The most fundamental queuing result. L = λW means that to serve 1000
-# │      QPS at 50ms latency, you need memory for 50 concurrent requests. If
-# │      GPU memory limits you to batch-32, you cannot hit 1000 QPS at 50ms.
-# │      This connects observable metrics to capacity requirements.
+# │ Goal: Connect observable request rates to hardware capacity requirements.
+# │ Show: The required concurrency (memory) to sustain a 1000 QPS target.
+# │ How: Apply Little's Law (L = λW) using throughput and latency SLO.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.constants, mlsys.formatting
 # │ Exports: littles_lambda_str, littles_w_ms_str, littles_w_str, littles_l_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
+from mlsys.constants import MS_PER_SEC
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class CapacityPlanning:
@@ -1446,15 +1443,11 @@ class CapacityPlanning:
     concurrency = lambda_qps * latency_slo_s
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if concurrency != 50:
-        raise ValueError(f"Math broken: 1000 * 0.05 should be 50, got {concurrency}")
-    if concurrency > 32:
-        # Implies we need either massive VRAM or multiple GPUs if model is large
-        pass
+    check(concurrency == 50, f"Math broken: 1000 * 0.05 should be 50, got {concurrency}")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     littles_lambda_str = f"{lambda_qps:,.0f}"
-    littles_w_ms_str = f"{int(latency_slo_s * 1000)}"
+    littles_w_ms_str = f"{int(latency_slo_s * MS_PER_SEC)}"
     littles_w_str = fmt(latency_slo_s, precision=2, commas=False)
     littles_l_str = fmt(concurrency, precision=0, commas=False)
 
@@ -2314,10 +2307,8 @@ class BatchingOptimization:
     latency_increase = s2_wait - s1_wait
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if tput_gain > 25:
-        raise ValueError(f"Narrative broken: Aggressive batching gained too much throughput ({tput_gain:.1f}%). Diminishing returns not shown.")
-    if latency_increase < 5:
-        raise ValueError("Narrative broken: Latency penalty is too small to be a concern.")
+    check(tput_gain <= 25, f"Aggressive batching gained too much throughput ({tput_gain:.1f}%). Diminishing returns not shown.")
+    check(latency_increase >= 5, "Latency penalty is too small to be a concern.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     s1_window_ms_str = f"{int(s1_window)}"
@@ -3332,9 +3323,9 @@ ca_v100_cost_value = 3.06
 ca_v100_throughput_value = 1200
 
 # --- Process (cost per million images) ---
-ca_cpu_cpm_value = ca_cpu_cost_value / (ca_cpu_throughput_value * 3600 / 1e6)
-ca_t4_cpm_value = ca_t4_cost_value / (ca_t4_throughput_value * 3600 / 1e6)
-ca_v100_cpm_value = ca_v100_cost_value / (ca_v100_throughput_value * 3600 / 1e6)
+ca_cpu_cpm_value = ca_cpu_cost_value / (ca_cpu_throughput_value * SEC_PER_HOUR / MILLION)
+ca_t4_cpm_value = ca_t4_cost_value / (ca_t4_throughput_value * SEC_PER_HOUR / MILLION)
+ca_v100_cpm_value = ca_v100_cost_value / (ca_v100_throughput_value * SEC_PER_HOUR / MILLION)
 
 ca_v100_price_increase_value = ca_v100_cost_value / ca_t4_cost_value
 
@@ -3520,8 +3511,8 @@ kv_capacity_tokens_value = int(kv_cache_gb_value * 1000 / kv_per_token_mb_value)
 concurrent_batch_value = int(kv_capacity_tokens_value / tokens_per_req_value)
 
 req_time_s_value = ttft_s_value + decode_tokens_value * realized_tpot_ms_value / 1000
-tokens_per_hour_value = concurrent_batch_value * (3600 / req_time_s_value) * tokens_per_req_value
-cost_per_m_tokens_value = hourly_cost_value / (tokens_per_hour_value / 1e6)
+tokens_per_hour_value = concurrent_batch_value * (SEC_PER_HOUR / req_time_s_value) * tokens_per_req_value
+cost_per_m_tokens_value = hourly_cost_value / (tokens_per_hour_value / MILLION)
 
 remaining_vram_gb_value = int(80 - model_weight_gb_value)
 
@@ -3541,7 +3532,7 @@ concurrent_batch_str = f"{concurrent_batch_value}"
 
 req_time_s_str = fmt(req_time_s_value, precision=2, commas=False)
 hourly_cost_str = fmt(hourly_cost_value, precision=2, commas=False)
-tokens_per_hour_m_str = fmt(tokens_per_hour_value / 1e6, precision=0, commas=False)
+tokens_per_hour_m_str = fmt(tokens_per_hour_value / MILLION, precision=0, commas=False)
 cost_per_m_tokens_str = fmt(cost_per_m_tokens_value, precision=3, commas=False)
 remaining_vram_gb_str = f"{remaining_vram_gb_value}"
 ```
@@ -3563,7 +3554,7 @@ With 4-bit weights occupying `{python} model_weight_gb_str` GB, the remaining ~`
 
 For an H100 SXM5 instance at approximately USD `{python} hourly_cost_str` per hour (specialized cloud providers; hyperscaler rates vary from USD 2-13 per hour as of this writing):
 
-*   Total tokens per hour: `{python} concurrent_batch_str` batch × (3600 s/hr / `{python} req_time_s_str` s/req) × `{python} tokens_per_req_str` tokens/req ≈ `{python} tokens_per_hour_m_str` million tokens/hour.
+*   Total tokens per hour: `{python} concurrent_batch_str` batch × (SEC_PER_HOUR s/hr / `{python} req_time_s_str` s/req) × `{python} tokens_per_req_str` tokens/req ≈ `{python} tokens_per_hour_m_str` million tokens/hour.
 *   **Cost per million tokens**: USD `{python} hourly_cost_str` / `{python} tokens_per_hour_m_str` ≈ **USD `{python} cost_per_m_tokens_str`**.
 
 This analysis highlights that for LLMs, **memory capacity**\index{Memory Capacity!LLM throughput}\index{KV Cache!memory capacity} (the size of the KV cache) is the primary determinant of throughput and cost, while **memory bandwidth**\index{Memory Bandwidth!LLM latency}\index{HBM!memory bandwidth} is the primary determinant of latency.
