@@ -9,7 +9,7 @@ This guide covers the development workflow, automated cleanup system, and best p
 ./binder build      # Build HTML book
 ./binder doctor     # Health check & diagnostics
 ./binder preview    # Live preview with hot reload
-./binder pdf        # Build PDF
+./binder build pdf  # Build PDF
 ```
 
 ## 🚀 Quick Start
@@ -79,14 +79,14 @@ git commit --no-verify -m "Emergency commit"
 
 ```bash
 # Using binder (recommended)
-./binder build - html          # Build HTML version
-./binder build - pdf           # Build PDF version
+./binder build html            # Build HTML version
+./binder build pdf             # Build PDF version
 ./binder publish               # Build and publish
 
 # Using binder (recommended)
 ./binder build                 # HTML version
-./binder pdf                   # PDF version
-./binder epub                  # EPUB version
+./binder build pdf             # PDF version
+./binder build epub            # EPUB version
 ```
 
 ### Development Workflow
@@ -96,7 +96,7 @@ git commit --no-verify -m "Emergency commit"
 ./binder preview intro
 
 # Build complete book
-./binder build - html
+./binder build html
 
 # Publish to the world
 ./binder publish
@@ -176,8 +176,8 @@ git checkout main
 git merge dev
 
 # 2. Build both formats
-./binder build - html
-./binder build - pdf
+./binder build html
+./binder build pdf
 
 # 3. Copy PDF to assets
 cp build/pdf/Machine-Learning-Systems.pdf assets/
@@ -352,8 +352,8 @@ git commit -m "Your message"
 ```bash
 ./binder doctor     # Comprehensive validation
 ./binder build      # Build HTML
-./binder pdf        # Build PDF
-./binder epub       # Build EPUB
+./binder build pdf  # Build PDF
+./binder build epub # Build EPUB
 ```
 
 ## ⚙️ Configuration Files

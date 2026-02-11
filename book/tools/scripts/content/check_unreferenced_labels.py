@@ -15,6 +15,11 @@ import sys
 from pathlib import Path
 from collections import defaultdict
 
+DEPRECATION_MSG = (
+    "DEPRECATION: use Binder instead of direct script invocation:\n"
+    "  ./book/binder validate unreferenced-labels [--path <file-or-dir>]"
+)
+
 ALL_LABEL_TYPES = {
     "Figure":   r'(?:\{#|#\|\s*label:\s*|%%\|\s*label:\s*)(fig-[\w-]+)',
     "Table":    r'\{#(tbl-[\w-]+)',
@@ -127,6 +132,8 @@ def report_unresolved_references(referenced, defined):
         return True
 
 def main():
+    print(DEPRECATION_MSG, file=sys.stderr)
+
     args = parse_args()
 
     if not (args.figures or args.tables or args.sections or args.equations or args.listings):

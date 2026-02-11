@@ -24,6 +24,7 @@ try:
     from cli.commands.clean import CleanCommand
     from cli.commands.maintenance import MaintenanceCommand
     from cli.commands.debug import DebugCommand
+    from cli.commands.validate import ValidateCommand
 except ImportError:
     # When run as local script
     from core.config import ConfigManager
@@ -34,6 +35,7 @@ except ImportError:
     from commands.clean import CleanCommand
     from commands.maintenance import MaintenanceCommand
     from commands.debug import DebugCommand
+    from commands.validate import ValidateCommand
 
 console = Console()
 
@@ -63,6 +65,7 @@ class MLSysBookCLI:
         self.clean_command = CleanCommand(self.config_manager, self.chapter_discovery)
         self.maintenance_command = MaintenanceCommand(self.config_manager, self.chapter_discovery)
         self.debug_command = DebugCommand(self.config_manager, self.chapter_discovery, verbose=verbose)
+        self.validate_command = ValidateCommand(self.config_manager, self.chapter_discovery)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -83,11 +86,8 @@ class MLSysBookCLI:
         fast_table.add_column("Description", style="white", width=30)
         fast_table.add_column("Example", style="dim", width=30)
 
-        fast_table.add_row("build [chapter[,ch2,...]]", "Build static files to disk (HTML)", "./binder build intro,ops")
-        fast_table.add_row("html [chapter[,ch2,...]]", "Build HTML using quarto-html.yml", "./binder html intro")
+        fast_table.add_row("build [fmt] [chapter[,ch2,...]]", "Build HTML/PDF/EPUB by format", "./binder build pdf intro")
         fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder preview intro")
-        fast_table.add_row("pdf [chapter[,ch2,...]]", "Build PDF (specified chapters)", "./binder pdf intro")
-        fast_table.add_row("epub [chapter[,ch2,...]]", "Build EPUB (specified chapters)", "./binder epub intro")
 
         # Volume Commands
         vol_table = Table(show_header=True, header_style="bold magenta", box=None)
@@ -95,12 +95,12 @@ class MLSysBookCLI:
         vol_table.add_column("Description", style="white", width=30)
         vol_table.add_column("Example", style="dim", width=30)
 
-        vol_table.add_row("html --vol1", "Build Volume I website", "./binder html --vol1")
-        vol_table.add_row("html --vol2", "Build Volume II website", "./binder html --vol2")
-        vol_table.add_row("pdf --vol1", "Build Volume I as PDF", "./binder pdf --vol1")
-        vol_table.add_row("pdf --vol2", "Build Volume II as PDF", "./binder pdf --vol2")
-        vol_table.add_row("epub --vol1", "Build Volume I as EPUB", "./binder epub --vol1")
-        vol_table.add_row("epub --vol2", "Build Volume II as EPUB", "./binder epub --vol2")
+        vol_table.add_row("build html --vol1", "Build Volume I website", "./binder build html --vol1")
+        vol_table.add_row("build html --vol2", "Build Volume II website", "./binder build html --vol2")
+        vol_table.add_row("build pdf --vol1", "Build Volume I as PDF", "./binder build pdf --vol1")
+        vol_table.add_row("build pdf --vol2", "Build Volume II as PDF", "./binder build pdf --vol2")
+        vol_table.add_row("build epub --vol1", "Build Volume I as EPUB", "./binder build epub --vol1")
+        vol_table.add_row("build epub --vol2", "Build Volume II as EPUB", "./binder build epub --vol2")
         vol_table.add_row("list --vol1", "List Volume I chapters", "./binder list --vol1")
         vol_table.add_row("list --vol2", "List Volume II chapters", "./binder list --vol2")
 
@@ -111,10 +111,10 @@ class MLSysBookCLI:
         full_table.add_column("Example", style="dim", width=30)
 
         full_table.add_row("build", "Build entire book as static HTML", "./binder build")
-        full_table.add_row("html --all", "Build ALL chapters using quarto-html.yml", "./binder html --all")
+        full_table.add_row("build html --all", "Build ALL chapters using HTML config", "./binder build html --all")
         full_table.add_row("preview", "Start live dev server for entire book", "./binder preview")
-        full_table.add_row("pdf --all", "Build full book (both volumes)", "./binder pdf --all")
-        full_table.add_row("epub --all", "Build full book (both volumes)", "./binder epub --all")
+        full_table.add_row("build pdf --all", "Build full book (both volumes)", "./binder build pdf --all")
+        full_table.add_row("build epub --all", "Build full book (both volumes)", "./binder build epub --all")
 
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -124,6 +124,8 @@ class MLSysBookCLI:
 
         mgmt_table.add_row("debug <fmt> --vol1|--vol2", "Find failing chapter + section", "./binder debug pdf --vol1")
         mgmt_table.add_row("debug <fmt> --chapter <ch>", "Section-level debug (skip scan)", "./binder debug pdf --vol1 --chapter intro")
+        mgmt_table.add_row("maintain <topic> ...", "Run maintenance namespace commands", "./binder maintain repo-health")
+        mgmt_table.add_row("validate <subcommand>", "Run native validation checks", "./binder validate inline-refs")
         mgmt_table.add_row("clean", "Clean build artifacts", "./binder clean")
         mgmt_table.add_row("switch <format>", "Switch active config", "./binder switch pdf")
         mgmt_table.add_row("list", "List available chapters", "./binder list")
@@ -143,13 +145,13 @@ class MLSysBookCLI:
         # Pro Tips
         examples = Text()
         examples.append("🎯 Modular CLI Examples:\n", style="bold magenta")
-        examples.append("  ./binder pdf --vol1 ", style="cyan")
+        examples.append("  ./binder build pdf --vol1 ", style="cyan")
         examples.append("# Build Volume I as PDF\n", style="dim")
-        examples.append("  ./binder pdf --vol2 ", style="cyan")
+        examples.append("  ./binder build pdf --vol2 ", style="cyan")
         examples.append("# Build Volume II as PDF\n", style="dim")
-        examples.append("  ./binder pdf vol1/intro ", style="cyan")
+        examples.append("  ./binder build pdf vol1/intro ", style="cyan")
         examples.append("# Build specific chapter (disambiguate with vol prefix)\n", style="dim")
-        examples.append("  ./binder pdf --all ", style="cyan")
+        examples.append("  ./binder build pdf --all ", style="cyan")
         examples.append("# Build entire book as PDF (both volumes)\n", style="dim")
         examples.append("  ./binder list --vol1 ", style="cyan")
         examples.append("# List only Volume I chapters\n", style="dim")
@@ -176,159 +178,89 @@ class MLSysBookCLI:
         options_text.append("  -o, --open     ", style="yellow")
         options_text.append("Open output after successful build\n", style="dim")
         options_text.append("  Example: ", style="dim")
-        options_text.append("./binder pdf --vol1 -v -o", style="cyan")
+        options_text.append("./binder build pdf --vol1 -v -o", style="cyan")
 
         console.print(Panel(options_text, title="⚙️ Options", border_style="yellow"))
 
+    def _parse_build_args(self, args):
+        """Parse `binder build` arguments into format, scope, and targets."""
+        format_type = None
+        volume = None
+        build_all = False
+        remaining = []
+
+        for arg in args:
+            lower = arg.lower()
+            if lower == "--vol1":
+                volume = "vol1"
+            elif lower == "--vol2":
+                volume = "vol2"
+            elif lower == "--all":
+                build_all = True
+            elif format_type is None and lower in ("html", "pdf", "epub"):
+                format_type = lower
+            else:
+                remaining.append(arg)
+
+        if format_type is None:
+            format_type = "html"
+
+        chapters_arg = remaining[0] if remaining else None
+        return format_type, volume, build_all, chapters_arg
+
     def handle_build_command(self, args):
-        """Handle build command (HTML format)."""
-        self.config_manager.show_symlink_status()
+        """Handle unified build command.
 
-        if len(args) < 1:
-            # No target specified - build entire book
-            console.print("[green]🏗️ Building entire book (HTML)...[/green]")
+        Usage:
+            ./binder build
+            ./binder build pdf
+            ./binder build epub --vol2
+            ./binder build html intro,frameworks
+        """
+        if "-h" in args or "--help" in args:
+            console.print("Usage: ./binder build [html|pdf|epub] [chapters] [--vol1|--vol2|--all]", markup=False)
+            console.print("[dim]Examples:[/dim]")
+            console.print("[dim]  ./binder build[/dim]")
+            console.print("[dim]  ./binder build pdf[/dim]")
+            console.print("[dim]  ./binder build pdf intro,training --vol1[/dim]")
+            console.print("[dim]  ./binder build html --all[/dim]")
+            return True
+
+        self.config_manager.show_symlink_status()
+        format_type, volume, build_all, chapters_arg = self._parse_build_args(args)
+
+        if build_all and chapters_arg:
+            console.print("[red]❌ Cannot combine explicit chapters with --all[/red]")
+            return False
+
+        if build_all:
+            if format_type == "html":
+                console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
+                return self.build_command.build_html_only()
+            console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+            return self.build_command.build_full(format_type)
+
+        if volume and not chapters_arg:
+            volume_name = "Volume I" if volume == "vol1" else "Volume II"
+            console.print(f"[magenta]🏗️ Building {volume_name} ({format_type.upper()})...[/magenta]")
+            return self.build_command.build_volume(volume, format_type)
+
+        if volume and chapters_arg:
+            chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
+            console.print(f"[green]🏗️ Building {format_type.upper()} chapters in {volume}: {chapters_arg}[/green]")
+            return self.build_command.build_chapters_with_volume(chapter_list, format_type, volume)
+
+        if chapters_arg:
+            chapter_list = [ch.strip() for ch in chapters_arg.split(",")]
+            console.print(f"[green]🏗️ Building {format_type.upper()} chapter(s): {chapters_arg}[/green]")
+            if format_type == "html":
+                return self.build_command.build_html_only(chapter_list)
+            return self.build_command.build_chapters(chapter_list, format_type)
+
+        console.print(f"[green]🏗️ Building entire book ({format_type.upper()})...[/green]")
+        if format_type == "html":
             return self.build_command.build_full("html")
-        else:
-            # Chapters specified
-            chapters = args[0]
-            console.print(f"[green]🏗️ Building chapter(s): {chapters}[/green]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_chapters(chapter_list, "html")
-
-    def handle_html_command(self, args):
-        """Handle HTML build command."""
-        self.config_manager.show_symlink_status()
-
-        # Extract volume flag from args (can be anywhere)
-        volume = None
-        chapter_args = []
-        for arg in args:
-            if arg == "--vol1":
-                volume = "vol1"
-            elif arg == "--vol2":
-                volume = "vol2"
-            elif arg == "--all":
-                chapter_args.append(arg)
-            else:
-                chapter_args.append(arg)
-
-        if len(chapter_args) < 1 and not volume:
-            # No target specified - show error
-            console.print("[red]❌ Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
-            console.print("[yellow]💡 Usage: ./binder html <chapter> | --vol1 | --vol2 | --all[/yellow]")
-            return False
-        elif len(chapter_args) > 0 and chapter_args[0] == "--all":
-            # Build all chapters using HTML config
-            console.print("[green]🌐 Building HTML with ALL chapters...[/green]")
-            return self.build_command.build_html_only()
-        elif volume and len(chapter_args) == 0:
-            # Build entire volume
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
-            console.print(f"[magenta]🌐 Building {volume_name} (HTML)...[/magenta]")
-            return self.build_command.build_volume(volume, "html")
-        elif volume and len(chapter_args) > 0:
-            # Build specific chapters with volume config
-            chapters = chapter_args[0]
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
-            console.print(f"[green]🌐 Building HTML chapters with {volume_name} config: {chapters}[/green]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_chapters_with_volume(chapter_list, "html", volume)
-        else:
-            # Chapters specified without volume flag - use default config
-            chapters = chapter_args[0]
-            console.print(f"[green]🌐 Building HTML with chapters: {chapters}[/green]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_html_only(chapter_list)
-
-    def handle_pdf_command(self, args):
-        """Handle PDF build command."""
-        self.config_manager.show_symlink_status()
-
-        # Extract volume flag from args (can be anywhere)
-        volume = None
-        chapter_args = []
-        for arg in args:
-            if arg == "--vol1":
-                volume = "vol1"
-            elif arg == "--vol2":
-                volume = "vol2"
-            elif arg == "--all":
-                chapter_args.append(arg)
-            else:
-                chapter_args.append(arg)
-
-        if len(chapter_args) < 1 and not volume:
-            # No target specified - show error
-            console.print("[red]Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
-            console.print("[yellow]Usage: ./binder pdf <chapter> | --vol1 | --vol2 | --all[/yellow]")
-            return False
-        elif len(chapter_args) > 0 and chapter_args[0] == "--all":
-            # Build entire book (both volumes)
-            console.print("[red]📄 Building entire book (PDF)...[/red]")
-            return self.build_command.build_full("pdf")
-        elif volume and len(chapter_args) == 0:
-            # Build entire volume
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
-            console.print(f"[magenta]📄 Building {volume_name} (PDF)...[/magenta]")
-            return self.build_command.build_volume(volume, "pdf")
-        elif volume and len(chapter_args) > 0:
-            # Build specific chapters with volume config
-            chapters = chapter_args[0]
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
-            console.print(f"[red]📄 Building PDF chapters with {volume_name} config: {chapters}[/red]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_chapters_with_volume(chapter_list, "pdf", volume)
-        else:
-            # Chapters specified without volume flag - use default config
-            chapters = chapter_args[0]
-            console.print(f"[red]📄 Building chapter(s) as PDF: {chapters}[/red]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_chapters(chapter_list, "pdf")
-
-    def handle_epub_command(self, args):
-        """Handle EPUB build command."""
-        self.config_manager.show_symlink_status()
-
-        # Extract volume flag from args (can be anywhere)
-        volume = None
-        chapter_args = []
-        for arg in args:
-            if arg == "--vol1":
-                volume = "vol1"
-            elif arg == "--vol2":
-                volume = "vol2"
-            elif arg == "--all":
-                chapter_args.append(arg)
-            else:
-                chapter_args.append(arg)
-
-        if len(chapter_args) < 1 and not volume:
-            # No target specified - show error
-            console.print("[red]Error: Please specify chapters, --vol1, --vol2, or --all[/red]")
-            console.print("[yellow]Usage: ./binder epub <chapter> | --vol1 | --vol2 | --all[/yellow]")
-            return False
-        elif len(chapter_args) > 0 and chapter_args[0] == "--all":
-            # Build entire book (both volumes)
-            console.print("[purple]📚 Building entire book (EPUB)...[/purple]")
-            return self.build_command.build_full("epub")
-        elif volume and len(chapter_args) == 0:
-            # Build entire volume
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
-            console.print(f"[magenta]📚 Building {volume_name} (EPUB)...[/magenta]")
-            return self.build_command.build_volume(volume, "epub")
-        elif volume and len(chapter_args) > 0:
-            # Build specific chapters with volume config
-            chapters = chapter_args[0]
-            volume_name = "Volume I" if volume == "vol1" else "Volume II"
-            console.print(f"[purple]📚 Building EPUB chapters with {volume_name} config: {chapters}[/purple]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_chapters_with_volume(chapter_list, "epub", volume)
-        else:
-            # Chapters specified without volume flag - use default config
-            chapters = chapter_args[0]
-            console.print(f"[purple]📚 Building chapter(s) as EPUB: {chapters}[/purple]")
-            chapter_list = [ch.strip() for ch in chapters.split(',')]
-            return self.build_command.build_chapters(chapter_list, "epub")
+        return self.build_command.build_full(format_type)
 
     def handle_preview_command(self, args):
         """Handle preview command."""
@@ -390,6 +322,10 @@ class MLSysBookCLI:
         """Handle about command."""
         return self.maintenance_command.show_about()
 
+    def handle_maintain_command(self, args):
+        """Handle maintenance namespace command."""
+        return self.maintenance_command.run_namespace(args)
+
 
     def handle_debug_command(self, args):
         """Handle debug command.
@@ -445,6 +381,10 @@ class MLSysBookCLI:
         self.chapter_discovery.show_chapters(volume=volume)
         return True
 
+    def handle_validate_command(self, args):
+        """Handle validate command group."""
+        return self.validate_command.run(args)
+
     def handle_status_command(self, args):
         """Handle status command."""
         console.print("[bold blue]📊 MLSysBook CLI Status[/bold blue]")
@@ -472,16 +412,15 @@ class MLSysBookCLI:
         # Command mapping
         commands = {
             "build": self.handle_build_command,
-            "html": self.handle_html_command,
             "preview": self.handle_preview_command,
-            "pdf": self.handle_pdf_command,
-            "epub": self.handle_epub_command,
             "clean": self.handle_clean_command,
             "debug": self.handle_debug_command,
             "switch": self.handle_switch_command,
             "list": self.handle_list_command,
             "status": self.handle_status_command,
             "doctor": self.handle_doctor_command,
+            "maintain": self.handle_maintain_command,
+            "validate": self.handle_validate_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
             "about": self.handle_about_command,
@@ -493,8 +432,6 @@ class MLSysBookCLI:
         aliases = {
             "b": "build",
             "p": "preview",
-            "pdf": "pdf",  # Keep pdf as explicit command
-            "epub": "epub",  # Keep epub as explicit command
             "l": "list",
             "s": "status",
             "d": "doctor",
@@ -504,6 +441,11 @@ class MLSysBookCLI:
         # Resolve aliases
         if command in aliases:
             command = aliases[command]
+
+        if command in ("html", "pdf", "epub"):
+            console.print(f"[red]❌ Top-level '{command}' command was removed.[/red]")
+            console.print(f"[yellow]💡 Use: ./binder build {command} ...[/yellow]")
+            return False
 
         if command in commands:
             try:
@@ -516,7 +458,7 @@ class MLSysBookCLI:
                 return False
         else:
             console.print(f"[red]❌ Unknown command: {command}[/red]")
-            console.print("[yellow]💡 Use './binder2 help' to see available commands[/yellow]")
+            console.print("[yellow]💡 Use './binder help' to see available commands[/yellow]")
             return False
 
 

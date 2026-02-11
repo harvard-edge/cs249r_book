@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PRECOMMIT_HOOKS } from '../constants';
+import { PRECOMMIT_HOOKS, VALIDATE_ACTIONS } from '../constants';
 import { ActionTreeItem } from '../models/treeItems';
 
 export class PrecommitTreeProvider implements vscode.TreeDataProvider<ActionTreeItem> {
@@ -22,6 +22,10 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<ActionTree
       new ActionTreeItem(h.label, 'mlsysbook.precommitRunHook', [h.command], 'play')
     );
 
-    return [runAll, ...hookItems];
+    const validateItems = VALIDATE_ACTIONS.map(action =>
+      new ActionTreeItem(action.label, 'mlsysbook.validateRunAction', [action.command], action.icon)
+    );
+
+    return [runAll, ...hookItems, ...validateItems];
   }
 }

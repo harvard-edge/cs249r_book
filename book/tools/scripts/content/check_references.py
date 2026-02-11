@@ -34,6 +34,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Dict, Set, Optional, Type
 
+DEPRECATION_MSG = (
+    "DEPRECATION: use Binder instead of direct script invocation:\n"
+    "  ./book/binder validate refs [--path <file-or-dir>]"
+)
+
 
 # =============================================================================
 # Data Classes
@@ -300,6 +305,8 @@ def print_results(results: List[CheckResult], root: Path, verbose: bool = False)
 
 def main(argv: List[str] = None) -> int:
     """Main entry point."""
+    print(DEPRECATION_MSG, file=sys.stderr)
+
     parser = argparse.ArgumentParser(
         description="Check for reference and citation issues in Quarto documents.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

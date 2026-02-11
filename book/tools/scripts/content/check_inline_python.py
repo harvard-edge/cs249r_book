@@ -28,6 +28,11 @@ import sys
 from pathlib import Path
 from dataclasses import dataclass
 
+DEPRECATION_MSG = (
+    "DEPRECATION: use Binder instead of direct script invocation:\n"
+    "  ./book/binder validate inline-python [--path <file-or-dir>]"
+)
+
 
 @dataclass
 class Issue:
@@ -189,6 +194,8 @@ def check_file(filepath: Path) -> list[Issue]:
 
 def main():
     import argparse
+
+    print(DEPRECATION_MSG, file=sys.stderr)
 
     parser = argparse.ArgumentParser(
         description='Validate inline Python references in QMD files',

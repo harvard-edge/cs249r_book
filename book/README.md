@@ -108,12 +108,14 @@ cd book
 ./binder preview intro      # Preview chapter with live reload
 
 # Build all formats
-./binder pdf                # Build PDF
-./binder epub               # Build EPUB
+./binder build pdf          # Build PDF
+./binder build epub         # Build EPUB
 
 # Utilities
 ./binder help               # Show all commands
 ./binder list               # List chapters
+./binder validate all       # Run Binder-native validation checks
+./binder maintain repo-health # Run Binder-native repo diagnostics
 ```
 
 ---
@@ -146,6 +148,9 @@ book/
 | **Readers** | [Online Book](https://mlsysbook.ai/book/) ・ [Volume I](https://mlsysbook.ai/vol1/) ・ [Volume II](https://mlsysbook.ai/vol2/) ・ [PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf) |
 | **Contributors** | [CONTRIBUTING.md](docs/CONTRIBUTING.md) ・ [BUILD.md](docs/BUILD.md) |
 | **Developers** | [DEVELOPMENT.md](docs/DEVELOPMENT.md) ・ [BINDER.md](docs/BINDER.md) |
+
+Binder is the public automation API for book build/validate/maintenance workflows.
+Use Binder subcommands in editor integrations and CI where possible.
 
 ---
 

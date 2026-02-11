@@ -26,6 +26,11 @@ import json
 from pathlib import Path
 from collections import defaultdict
 
+DEPRECATION_MSG = (
+    "DEPRECATION: use Binder instead of direct script invocation:\n"
+    "  ./book/binder validate duplicate-labels [--path <file-or-dir>]"
+)
+
 # Label patterns for DEFINITIONS only (not references)
 LABEL_PATTERNS = {
     "Figure":   [
@@ -434,6 +439,8 @@ Duplicate Label Issues Fixed:
     return parser.parse_args()
 
 def main():
+    print(DEPRECATION_MSG, file=sys.stderr)
+
     args = parse_args()
 
     # Handle special cases

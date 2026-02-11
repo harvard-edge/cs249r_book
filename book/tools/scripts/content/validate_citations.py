@@ -22,6 +22,11 @@ from pathlib import Path
 from typing import Set, Dict, List, Tuple, Optional
 from collections import defaultdict
 
+DEPRECATION_MSG = (
+    "DEPRECATION: use Binder instead of direct script invocation:\n"
+    "  ./book/binder validate citations [--path <file-or-dir>]"
+)
+
 
 def extract_bibliography_file(qmd_file: Path) -> Optional[str]:
     """Extract the bibliography file name from a .qmd file's YAML frontmatter."""
@@ -133,6 +138,8 @@ def find_qmd_files(directory: Path) -> List[Path]:
 
 
 def main():
+    print(DEPRECATION_MSG, file=sys.stderr)
+
     parser = argparse.ArgumentParser(
         description="Validate that all citations in .qmd files have corresponding .bib entries",
         formatter_class=argparse.RawDescriptionHelpFormatter,

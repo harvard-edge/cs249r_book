@@ -21,6 +21,11 @@ import re
 import sys
 from pathlib import Path
 
+DEPRECATION_MSG = (
+    "DEPRECATION: use Binder instead of direct script invocation:\n"
+    "  ./book/binder validate inline-refs [--path <file-or-dir>] [--check-patterns]"
+)
+
 BOOK_ROOT = Path(__file__).resolve().parent.parent  # book/quarto/
 CONTENTS = BOOK_ROOT / "contents"
 
@@ -187,6 +192,8 @@ def validate_file(qmd_path, verbose=False, check_patterns=False):
 
 
 def main():
+    print(DEPRECATION_MSG, file=sys.stderr)
+
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     check_patterns = "--check-patterns" in sys.argv or "-p" in sys.argv
 

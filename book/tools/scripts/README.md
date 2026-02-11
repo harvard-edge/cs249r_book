@@ -2,6 +2,15 @@
 
 Automation scripts and tools for the Machine Learning Systems textbook.
 
+## Deprecation Note
+
+For workflows now exposed by Binder, prefer `./book/binder ...` commands over direct script execution.
+
+- Validation checks: use `./book/binder validate ...`
+- Maintenance utilities: use `./book/binder maintain ...`
+
+Scripts remain available as internal utilities, but direct invocation is soft-deprecated for Binder-covered tasks.
+
 ## Directory Structure
 
 ```

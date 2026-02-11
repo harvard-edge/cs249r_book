@@ -18,5 +18,11 @@ export function registerPrecommitCommands(context: vscode.ExtensionContext): voi
         label: 'Pre-commit (selected hook)',
       });
     }),
+
+    vscode.commands.registerCommand('mlsysbook.validateRunAction', (command: string) => {
+      void runBookCommand(command, root, {
+        label: 'Binder validate (selected action)',
+      });
+    }),
   );
 }

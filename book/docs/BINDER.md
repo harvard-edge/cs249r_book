@@ -2,6 +2,15 @@
 
 The **Book Binder** is a self-contained, lightning-fast development CLI for the MLSysBook project. It provides streamlined commands for building, previewing, and managing the book in both HTML and PDF formats.
 
+## Public API Policy
+
+Binder is the public automation interface for this repository.
+
+- Use `./binder ...` commands in local workflows, CI, and editor integrations.
+- Scripts under `book/tools/scripts/` are internal implementation details.
+- Direct script invocation is soft-deprecated for workflows now covered by Binder.
+- The VS Code extension should call Binder subcommands, not scripts directly.
+
 ## Quick Start
 
 ```bash
@@ -24,10 +33,10 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 ./binder build
 
 # Build the complete book (PDF)
-./binder pdf
+./binder build pdf
 
 # Build a single chapter (PDF) - SELECTIVE BUILD
-./binder pdf intro
+./binder build pdf intro
 # ↳ Automatically comments out all chapters except index.qmd and introduction.qmd
 
 # Publish the book
@@ -35,6 +44,12 @@ The **Book Binder** is a self-contained, lightning-fast development CLI for the 
 
 # Get help
 ./binder help
+
+# Run native validation suite
+./binder validate all
+
+# Run maintenance namespace
+./binder maintain repo-health
 ```
 
 ## Installation
@@ -57,7 +72,7 @@ Intuitive commands that work on both individual chapters and the entire book.
 |---------|-------------|---------|
 | `build [chapter[,ch2,...]]` | Build book or chapter(s) in HTML | `./binder build intro,ml_systems` |
 | `preview [chapter[,ch2,...]]` | Preview book or chapter(s) | `./binder preview ops` |
-| `pdf [chapter[,ch2,...]]` | Build book or chapter(s) in PDF | `./binder pdf intro` |
+| `build pdf [chapter[,ch2,...]]` | Build book or chapter(s) in PDF | `./binder build pdf intro` |
 
 **Smart defaults**: No target = entire book, with target = specific chapter(s)
 
@@ -67,13 +82,15 @@ Intuitive commands that work on both individual chapters and the entire book.
 |---------|-------------|---------|
 | `build` | Build complete book (HTML) | `./binder build` |
 | `preview` | Preview complete book | `./binder preview` |
-| `pdf` | Build complete book (PDF) | `./binder pdf` |
+| `build pdf` | Build complete book (PDF) | `./binder build pdf` |
 | `publish` | Build and publish book | `./binder publish` |
 
 ### 🔧 Management Commands
 
 | Command | Description | Example |
 |---------|-------------|---------|
+| `validate <subcommand>` | Run Binder-native validation checks | `./binder validate inline-refs` |
+| `maintain <topic> ...` | Run Binder-native maintenance utilities | `./binder maintain glossary build` |
 | `setup` | Configure environment | `./binder setup` |
 | `clean` | Clean configs & artifacts | `./binder clean` |
 | `switch <format>` | Switch active config | `./binder switch pdf` |
@@ -83,6 +100,35 @@ Intuitive commands that work on both individual chapters and the entire book.
 | `about` | Show project information | `./binder about` |
 | `help` | Show help information | `./binder help` |
 
+### ✅ Validation Namespace
+
+Use Binder-native checks instead of direct script calls:
+
+- `./binder validate inline-python`
+- `./binder validate refs`
+- `./binder validate citations`
+- `./binder validate duplicate-labels`
+- `./binder validate unreferenced-labels`
+- `./binder validate inline-refs`
+- `./binder validate all`
+
+Machine-readable output is available for editor/CI integration:
+
+```bash
+./binder validate all --json
+```
+
+Exit semantics:
+
+- `0` success (no issues)
+- `1` validation failures or command failure
+
+### 🧰 Maintenance Namespace
+
+- `./binder maintain glossary build [--vol1|--vol2]`
+- `./binder maintain images compress [-f <file> ... | --all] [--smart-compression] [--apply]`
+- `./binder maintain repo-health [--json] [--min-size-mb N]`
+
 ### 🚀 Shortcuts
 
 All commands have convenient shortcuts:
@@ -91,8 +137,8 @@ All commands have convenient shortcuts:
 |----------|---------|
 | `b` | `build` |
 | `p` | `preview` |
-| `pdf` | `pdf` |
-| `epub` | `epub` |
+| `pdf` | `build pdf` |
+| `epub` | `build epub` |
 | `l` | `list` |
 | `s` | `status` |
 | `d` | `doctor` |
@@ -175,7 +221,7 @@ When called with arguments, `publish` triggers the GitHub Actions workflow direc
 # Development workflow
 ./binder preview intro          # Preview a chapter
 ./binder build                  # Build complete HTML
-./binder pdf                    # Build complete PDF
+./binder build pdf              # Build complete PDF
 ./binder publish                # Publish to the world
 ```
 
@@ -202,7 +248,7 @@ The binder supports building multiple chapters together in a single Quarto rende
 ./binder build intro,ml_systems
 
 # Build multiple chapters together (PDF)
-./binder pdf intro,ml_systems
+./binder build pdf intro,ml_systems
 
 # Preview multiple chapters together
 ./binder preview intro,ml_systems
@@ -238,7 +284,7 @@ chapters:
 
 #### Selective PDF Chapter Building
 
-When you run `./binder pdf intro`, the system automatically:
+When you run `./binder build pdf intro`, the system automatically:
 
 1. **Creates a backup** of the original PDF configuration
 2. **Comments out all chapters** except the target chapter and essential files
@@ -251,7 +297,7 @@ When you run `./binder pdf intro`, the system automatically:
 
 **Example output:**
 ```bash
-./binder pdf intro
+./binder build pdf intro
 
 📄 Building chapter(s) as PDF: intro
 🚀 Building 1 chapters (pdf)
@@ -271,10 +317,10 @@ The selective PDF build system works seamlessly in cloud environments like [mybi
 **For cloud Binder users:**
 ```bash
 # In a Jupyter terminal or notebook cell
-!./binder pdf intro
+!./binder build pdf intro
 
 # Or using the Python CLI directly
-!python binder pdf intro
+!python binder build pdf intro
 ```
 
 **Key benefits for cloud environments:**
@@ -331,7 +377,7 @@ Use `./binder switch <format>` to change the active configuration symlink.
 
 # Build full book to ensure everything works
 ./binder build
-./binder pdf
+./binder build pdf
 ```
 
 ## Troubleshooting
