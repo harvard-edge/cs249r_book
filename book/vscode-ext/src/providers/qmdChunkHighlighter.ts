@@ -555,10 +555,18 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           }
           break;
         }
-        footnoteRanges.push(new vscode.Range(
-          new vscode.Position(line, 0),
-          new vscode.Position(end, document.lineAt(end).text.length),
-        ));
+        // Highlight only non-empty lines in a footnote block. This avoids
+        // tinting separator blank lines and prevents perceived spillover.
+        for (let footnoteLine = line; footnoteLine <= end; footnoteLine++) {
+          const footnoteText = document.lineAt(footnoteLine).text;
+          if (footnoteText.trim().length === 0) {
+            continue;
+          }
+          footnoteRanges.push(new vscode.Range(
+            new vscode.Position(footnoteLine, 0),
+            new vscode.Position(footnoteLine, footnoteText.length),
+          ));
+        }
       }
 
       if (highlightFootnotes && !inFence) {

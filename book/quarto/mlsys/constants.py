@@ -13,6 +13,7 @@ TRILLION = 1e12
 BILLION = 1e9
 MILLION = 1e6
 THOUSAND = 1e3
+HUNDRED = 100
 
 # --- Units ---
 byte = ureg.byte
