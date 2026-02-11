@@ -7,6 +7,13 @@ import pint
 ureg = pint.UnitRegistry()
 Q_ = ureg.Quantity
 
+# --- Dimensionless Scalars (Helpers) ---
+QUADRILLION = 1e15
+TRILLION = 1e12
+BILLION = 1e9
+MILLION = 1e6
+THOUSAND = 1e3
+
 # --- Units ---
 byte = ureg.byte
 second = ureg.second
@@ -63,10 +70,21 @@ NS = ureg.NS
 # Common time conversions (unitless scalars)
 SECONDS_PER_MINUTE = 60
 MINUTES_PER_HOUR = 60
+SEC_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR
 HOURS_PER_DAY = 24
+SEC_PER_DAY = SEC_PER_HOUR * HOURS_PER_DAY
 DAYS_PER_MONTH = 30
 DAYS_PER_YEAR = 365
 HOURS_PER_YEAR = 8760
+
+# Data size scalars
+BITS_PER_BYTE = 8
+KIB_TO_BYTES = 1024
+MIB_TO_BYTES = 1024 * 1024
+GIB_TO_BYTES = 1024 * 1024 * 1024
+
+# Time scalars
+MS_PER_SEC = 1000
 
 # --- Hardware Specifications (The Silicon Contract) ---
 
@@ -157,8 +175,14 @@ MOBILE_NPU_MEM_BW = 100 * GB / second
 
 # --- Datasets ---
 IMAGENET_IMAGES = 1_281_167 * count
+IMAGENET_TEST_IMAGES = 50_000 * count
 CIFAR10_IMAGES = 50_000 * count
 CIFAR10_TEST_IMAGES = 10_000 * count
+
+# Standard dimensions
+IMAGE_DIM_RESNET = 224
+IMAGE_CHANNELS_RGB = 3
+COLOR_DEPTH_8BIT = 256
 
 
 # --- Network & Interconnect ---

@@ -4,8 +4,11 @@ import { BuildTreeProvider } from './providers/buildTreeProvider';
 import { DebugTreeProvider } from './providers/debugTreeProvider';
 import { PrecommitTreeProvider } from './providers/precommitTreeProvider';
 import { PublishTreeProvider } from './providers/publishTreeProvider';
+import { ConfigTreeProvider } from './providers/configTreeProvider';
 import { ChapterNavigatorProvider } from './providers/chapterNavigatorProvider';
 import { RunHistoryProvider } from './providers/runHistoryProvider';
+import { QmdFoldingProvider } from './providers/qmdFoldingProvider';
+import { QmdAutoFoldManager } from './providers/qmdAutoFoldManager';
 import { QmdDiagnosticsManager } from './validation/qmdDiagnostics';
 import { QmdChunkHighlighter } from './providers/qmdChunkHighlighter';
 import { renameLabelAcrossWorkspace } from './utils/labelRename';
@@ -21,6 +24,7 @@ import {
   showLastFailureDetails,
   setExecutionModeInteractively,
 } from './utils/terminal';
+import { ChapterOrderSource } from './types';
 
 type NavigatorPresetId = 'all' | 'writing' | 'reference' | 'structure';
 
@@ -31,10 +35,10 @@ interface NavigatorPreset {
 }
 
 const NAVIGATOR_PRESETS: NavigatorPreset[] = [
-  { label: 'Show All', id: 'all', kinds: ['figures', 'tables', 'listings', 'divs', 'citations'] },
+  { label: 'Show All', id: 'all', kinds: ['figures', 'tables', 'listings', 'equations'] },
   { label: 'Writing Focus', id: 'writing', kinds: ['figures', 'tables', 'listings'] },
-  { label: 'Reference Focus', id: 'reference', kinds: ['figures', 'tables', 'citations'] },
-  { label: 'Structure Focus', id: 'structure', kinds: ['divs', 'listings'] },
+  { label: 'Reference Focus', id: 'reference', kinds: ['figures', 'tables', 'equations'] },
+  { label: 'Structure Focus', id: 'structure', kinds: ['listings', 'equations'] },
 ];
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -50,8 +54,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const debugProvider = new DebugTreeProvider();
   const precommitProvider = new PrecommitTreeProvider();
   const publishProvider = new PublishTreeProvider();
+  const configProvider = new ConfigTreeProvider();
   const navigatorProvider = new ChapterNavigatorProvider();
   const runHistoryProvider = new RunHistoryProvider();
+  const qmdFoldingProvider = new QmdFoldingProvider();
+  const qmdAutoFoldManager = new QmdAutoFoldManager();
   const diagnosticsManager = new QmdDiagnosticsManager();
   const chunkHighlighter = new QmdChunkHighlighter();
   const config = vscode.workspace.getConfiguration('mlsysbook');
@@ -61,6 +68,7 @@ export function activate(context: vscode.ExtensionContext): void {
   navigatorProvider.refreshFromEditor(vscode.window.activeTextEditor);
   diagnosticsManager.start();
   chunkHighlighter.start();
+  qmdAutoFoldManager.start();
 
   context.subscriptions.push(
     vscode.window.createTreeView('mlsysbook.build', { treeDataProvider: buildProvider }),
@@ -68,7 +76,13 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.createTreeView('mlsysbook.runs', { treeDataProvider: runHistoryProvider }),
     vscode.window.createTreeView('mlsysbook.precommit', { treeDataProvider: precommitProvider }),
     vscode.window.createTreeView('mlsysbook.publish', { treeDataProvider: publishProvider }),
+    vscode.window.createTreeView('mlsysbook.config', { treeDataProvider: configProvider }),
+    vscode.languages.registerFoldingRangeProvider(
+      { pattern: '**/*.qmd' },
+      qmdFoldingProvider,
+    ),
     runHistoryProvider,
+    qmdAutoFoldManager,
     diagnosticsManager,
     chunkHighlighter,
   );
@@ -80,6 +94,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.refreshBuildTree', () => buildProvider.refresh()),
     vscode.commands.registerCommand('mlsysbook.refreshNavigator', () => {
       navigatorProvider.refreshFromEditor(vscode.window.activeTextEditor);
+    }),
+    vscode.commands.registerCommand('mlsysbook.navigatorExpandAll', () => {
+      navigatorProvider.expandAll();
+    }),
+    vscode.commands.registerCommand('mlsysbook.navigatorCollapseAll', () => {
+      navigatorProvider.collapseAll();
     }),
     vscode.commands.registerCommand('mlsysbook.setNavigatorFilterPreset', async () => {
       const currentPreset = vscode.workspace
@@ -126,6 +146,41 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.revealTerminal', () => revealRunTerminal(root)),
     vscode.commands.registerCommand('mlsysbook.openLastFailureDetails', () => showLastFailureDetails()),
     vscode.commands.registerCommand('mlsysbook.setExecutionMode', () => void setExecutionModeInteractively()),
+    vscode.commands.registerCommand('mlsysbook.setChapterOrderSource', async () => {
+      const current = config.get<ChapterOrderSource>('chapterOrderSource', 'auto');
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: 'Auto (PDF -> EPUB -> HTML)', id: 'auto' as ChapterOrderSource },
+          { label: 'PDF', id: 'pdf' as ChapterOrderSource },
+          { label: 'EPUB', id: 'epub' as ChapterOrderSource },
+          { label: 'HTML', id: 'html' as ChapterOrderSource },
+          { label: 'PDF Copyedit', id: 'pdfCopyedit' as ChapterOrderSource },
+        ].map(item => ({
+          ...item,
+          description: item.id === current ? 'current default' : '',
+        })),
+        { placeHolder: 'Select chapter order source for build/debug chapter lists' },
+      );
+      if (!pick) { return; }
+      await config.update('chapterOrderSource', pick.id, vscode.ConfigurationTarget.Workspace);
+      buildProvider.refresh();
+      vscode.window.showInformationMessage(`MLSysBook chapter order source set to: ${pick.id}`);
+    }),
+    vscode.commands.registerCommand('mlsysbook.setQmdVisualPreset', async () => {
+      const pick = await vscode.window.showQuickPick(
+        [
+          { label: 'Subtle', id: 'subtle' },
+          { label: 'Balanced', id: 'balanced' },
+          { label: 'High Contrast', id: 'highContrast' },
+        ],
+        { placeHolder: 'Select QMD visual preset' },
+      );
+      if (!pick) { return; }
+      await config.update('qmdVisualPreset', pick.id, vscode.ConfigurationTarget.Workspace);
+    }),
+    vscode.commands.registerCommand('mlsysbook.openSettings', async () => {
+      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:mlsysbook.mlsysbook-workbench');
+    }),
     vscode.commands.registerCommand('mlsysbook.renameLabelReferences', () => void renameLabelAcrossWorkspace()),
   );
 
@@ -140,6 +195,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.onDidChangeActiveTextEditor(editor => navigatorProvider.refreshFromEditor(editor)),
     vscode.workspace.onDidSaveTextDocument(document => navigatorProvider.refreshFromDocument(document)),
     vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('mlsysbook.chapterOrderSource')) {
+        buildProvider.refresh();
+      }
       if (event.affectsConfiguration('mlsysbook.navigatorVisibleEntryKinds')) {
         navigatorProvider.refreshView();
       }

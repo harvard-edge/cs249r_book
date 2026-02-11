@@ -61,20 +61,19 @@ The defining insight of ML systems engineering is that constraints drive archite
 # │ Context: Used across entire chapter — deployment tables, paradigm sections,
 # │          physical constraints narrative, and Lighthouse Model summaries.
 # │
-# │ Why: Foundational chapter setup providing deployment paradigm parameters
-# │      (latency ranges, power budgets, memory specs) that appear in multiple
-# │      sections. Centralized here to ensure consistency across the chapter.
+# │ Goal: Provide foundational parameters for the deployment spectrum.
+# │ Show: Quantitative trade-offs across Cloud, Edge, Mobile, and TinyML.
+# │ How: Centralize latency, power, and memory specs from mlsys.constants.
 # │
-# │ Imports: mlsys.constants (MOBILE_TDP_W, MOBILE_NPU_TOPS_INT8, PHONE_BATTERY_WH,
-# │          KWS_DSCNN_PARAMS, DLRM_MODEL_SIZE_FP32), mlsys.formatting (fmt)
+# │ Imports: mlsys.constants, mlsys.formatting
 # │ Exports: *_range_str (latency/RAM/storage), *_str (paradigm specs), gpt3_*_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Tiers, Hardware, Models
 from mlsys.constants import (
     MOBILE_TDP_W, PHONE_BATTERY_WH, DLRM_MODEL_SIZE_FP32,
-    TFLOPs, Kparam, second, watt, hour, GB
+    TFLOPs, PFLOPs, Kparam, second, watt, hour, GB, SEC_PER_DAY
 )
-from mlsys.formatting import fmt
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class MLSystemsSetup:
@@ -120,12 +119,11 @@ class MLSystemsSetup:
     phone_battery_wh = 15
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    # GPT-3 Petaflop-days: 3.14e23 FLOPs / (1e15 * 86400)
-    gpt3_petaflop_days = (m_gpt3.training_ops / (1e15 * 86400)).magnitude
+    # GPT-3 Petaflop-days calculation using standardized units
+    gpt3_petaflop_days = (m_gpt3.training_ops / (PFLOPs * SEC_PER_DAY)).magnitude
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if gpt3_petaflop_days < 3000:
-        raise ValueError(f"GPT-3 training should be >3000 PF-days, got {gpt3_petaflop_days:.0f}")
+    check(gpt3_petaflop_days >= 3000, f"GPT-3 training should be >=3000 PF-days, got {gpt3_petaflop_days:.0f}")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     mobile_ram_range_str = mobile_ram_range
@@ -1328,6 +1326,7 @@ from mlsys import Hardware
 from mlsys.constants import (
     DAYS_PER_YEAR, HOURS_PER_YEAR, CLOUD_EGRESS_PER_GB,
     CLOUD_ELECTRICITY_PER_KWH, USD, GB, watt, ureg,
+    MILLION,
 )
 from mlsys.formatting import fmt
 
@@ -1389,7 +1388,7 @@ class CloudEdgeTCO:
         raise ValueError(f"Narrative broken: Edge should be cheaper at 1M volume. Cloud=${c_total:.0f}, Edge=${e_total:.0f}")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    requests_str = f"{requests_per_day/1e6:.0f}M"
+    requests_str = f"{requests_per_day/MILLION:.0f}M"
     inference_str = f"{inference_ms}ms"
     response_str = f"{response_kb}KB"
     gpu_instances_str = f"{gpu_instances}"
@@ -1511,59 +1510,94 @@ Economics drive this architecture as much as latency. Attempting to process voic
 # │      Part 2: 1B devices streaming audio = 32 TB/s, exceeding global internet
 # │      backbone; even query-only needs 20+ data centers at peak (infra wall).
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.formatting (fmt), mlsys.constants (BILLION, MILLION)
 # │ Exports: ww_*_str (economics), vi_*_str (infrastructure)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
+from mlsys.constants import BILLION, MILLION
 
-# === Part 1: Economics ===
-ww_devices_b_value = 1                                   # billion devices worldwide
-ww_cloud_cost_per_device_value = 0.50                    # $ per device/year (conservative)
-ww_edge_power_min_mw_value = 0.1                         # mW power (sleep)
-ww_edge_power_max_mw_value = 1                           # mW power (active)
-ww_edge_cost_per_year_value = 0.01                       # $ battery cost/year
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class VoiceAssistantWall:
+    """
+    Namespace for Voice Assistant Scaling logic.
+    Scenario: 1 Billion devices, economics vs infrastructure limits.
+    """
 
-ww_total_cloud_cost_value = ww_devices_b_value * 1e9 * ww_cloud_cost_per_device_value
+    # ┌── 1. PARAMETERS ────────────────────────────────────────────────────────
+    # Economics
+    ww_devices_b = 1
+    ww_cloud_cost_per_device = 0.50
+    ww_edge_power_min_mw = 0.1
+    ww_edge_power_max_mw = 1
+    ww_edge_cost_per_year = 0.01
 
-ww_devices_b_str = fmt(ww_devices_b_value, precision=0, commas=False)   # "1" billion
-ww_cloud_cost_str = fmt(ww_cloud_cost_per_device_value, precision=2, commas=False)  # "0.50"
-ww_total_cost_str = fmt(ww_total_cloud_cost_value, precision=0, commas=True)        # "500,000,000"
-ww_edge_power_range_str = f"{ww_edge_power_min_mw_value}--{ww_edge_power_max_mw_value}"  # "0.1--1" mW
-ww_edge_cost_str = fmt(ww_edge_cost_per_year_value, precision=2, commas=False)          # "0.01"
+    # Infrastructure
+    vi_devices_b = 1
+    vi_queries_per_day = 20
+    vi_gpu_ms_per_query = 200
+    vi_gpus_per_datacenter = 10_000
+    vi_audio_sample_rate = 16_000
+    vi_audio_bits = 16
+    vi_waking_hours = 16
+    vi_peak_multiplier = 3
 
-# === Part 2: Infrastructure ===
-vi_devices_b_value = 1                                   # billion devices
-vi_queries_per_day_value = 20                            # average queries per device per day
-vi_gpu_ms_per_query_value = 200                          # ms of GPU time per voice query
-vi_gpus_per_datacenter_value = 10_000                    # GPUs in a large data center
-vi_audio_sample_rate_value = 16_000                      # Hz
-vi_audio_bits_value = 16                                 # bits per sample
-vi_waking_hours_value = 16                               # hours users are awake
-vi_peak_multiplier_value = 3                             # peak-to-average ratio
+    # ┌── 2. CALCULATION ───────────────────────────────────────────────────────
+    # Economics
+    ww_total_cloud_cost = ww_devices_b * BILLION * ww_cloud_cost_per_device
 
-vi_total_queries_day_value = vi_devices_b_value * 1e9 * vi_queries_per_day_value
-vi_gpu_seconds_day_value = vi_total_queries_day_value * vi_gpu_ms_per_query_value / 1000
-vi_gpu_hours_day_value = vi_gpu_seconds_day_value / 3600
-vi_datacenters_avg_value = vi_gpu_hours_day_value / (vi_gpus_per_datacenter_value * 24)
-vi_datacenters_peak_value = vi_datacenters_avg_value * vi_peak_multiplier_value * (24 / vi_waking_hours_value)
+    # Infrastructure - Compute
+    vi_total_queries_day = vi_devices_b * BILLION * vi_queries_per_day
+    vi_gpu_seconds_day = vi_total_queries_day * vi_gpu_ms_per_query / 1000
+    vi_gpu_hours_day = vi_gpu_seconds_day / 3600
+    vi_datacenters_avg = vi_gpu_hours_day / (vi_gpus_per_datacenter * 24)
+    vi_peak_ratio = vi_peak_multiplier * (24 / vi_waking_hours)
+    vi_datacenters_peak = vi_datacenters_avg * vi_peak_ratio
 
-vi_audio_bytes_per_sec_value = vi_audio_sample_rate_value * (vi_audio_bits_value / 8)
-vi_audio_kb_per_sec_value = vi_audio_bytes_per_sec_value / 1024
-vi_total_audio_tb_per_sec_value = (vi_audio_bytes_per_sec_value * vi_devices_b_value * 1e9) / 1e12
+    # Infrastructure - Bandwidth
+    vi_audio_bytes_per_sec = vi_audio_sample_rate * (vi_audio_bits / 8)
+    vi_audio_kb_per_sec = vi_audio_bytes_per_sec / 1024
+    # TB/s = (Bytes/s * Devices) / 1e12. 1e12 = 1000 * BILLION
+    vi_total_audio_tb_per_sec = (vi_audio_bytes_per_sec * vi_devices_b * BILLION) / (1000 * BILLION)
 
-vi_peak_ratio_value = vi_peak_multiplier_value * (24 / vi_waking_hours_value)
+    # ┌── 4. OUTPUTS ───────────────────────────────────────────────────────────
+    # Economics Strings
+    ww_devices_b_str = fmt(ww_devices_b, precision=0, commas=False)
+    ww_cloud_cost_str = fmt(ww_cloud_cost_per_device, precision=2, commas=False)
+    ww_total_cost_str = fmt(ww_total_cloud_cost, precision=0, commas=True)
+    ww_edge_power_range_str = f"{ww_edge_power_min_mw}--{ww_edge_power_max_mw}"
+    ww_edge_cost_str = fmt(ww_edge_cost_per_year, precision=2, commas=False)
 
-vi_devices_str = fmt(vi_devices_b_value, precision=0, commas=False)
-vi_queries_str = fmt(vi_queries_per_day_value, precision=0, commas=False)
-vi_total_queries_str = fmt(vi_total_queries_day_value / 1e9, precision=0, commas=False)
-vi_gpu_ms_str = fmt(vi_gpu_ms_per_query_value, precision=0, commas=False)
-vi_gpu_hours_str = fmt(vi_gpu_hours_day_value, precision=0, commas=True)
-vi_gpus_dc_str = fmt(vi_gpus_per_datacenter_value, precision=0, commas=True)
-vi_dc_avg_str = fmt(vi_datacenters_avg_value, precision=0, commas=False)
-vi_dc_peak_str = fmt(vi_datacenters_peak_value, precision=0, commas=False)
-vi_peak_ratio_str = fmt(vi_peak_ratio_value, precision=1, commas=False)
-vi_audio_kb_str = fmt(vi_audio_kb_per_sec_value, precision=0, commas=False)
-vi_audio_tb_str = fmt(vi_total_audio_tb_per_sec_value, precision=0, commas=False)
+    # Infrastructure Strings
+    vi_devices_str = fmt(vi_devices_b, precision=0, commas=False)
+    vi_queries_str = fmt(vi_queries_per_day, precision=0, commas=False)
+    vi_total_queries_str = fmt(vi_total_queries_day / BILLION, precision=0, commas=False)
+    vi_gpu_ms_str = fmt(vi_gpu_ms_per_query, precision=0, commas=False)
+    vi_gpu_hours_str = fmt(vi_gpu_hours_day, precision=0, commas=True)
+    vi_gpus_dc_str = fmt(vi_gpus_per_datacenter, precision=0, commas=True)
+    vi_dc_avg_str = fmt(vi_datacenters_avg, precision=0, commas=False)
+    vi_dc_peak_str = fmt(vi_datacenters_peak, precision=0, commas=False)
+    vi_peak_ratio_str = fmt(vi_peak_ratio, precision=1, commas=False)
+    vi_audio_kb_str = fmt(vi_audio_kb_per_sec, precision=0, commas=False)
+    vi_audio_tb_str = fmt(vi_total_audio_tb_per_sec, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ww_devices_b_str = VoiceAssistantWall.ww_devices_b_str
+ww_cloud_cost_str = VoiceAssistantWall.ww_cloud_cost_str
+ww_total_cost_str = VoiceAssistantWall.ww_total_cost_str
+ww_edge_power_range_str = VoiceAssistantWall.ww_edge_power_range_str
+ww_edge_cost_str = VoiceAssistantWall.ww_edge_cost_str
+
+vi_devices_str = VoiceAssistantWall.vi_devices_str
+vi_queries_str = VoiceAssistantWall.vi_queries_str
+vi_total_queries_str = VoiceAssistantWall.vi_total_queries_str
+vi_gpu_ms_str = VoiceAssistantWall.vi_gpu_ms_str
+vi_gpu_hours_str = VoiceAssistantWall.vi_gpu_hours_str
+vi_gpus_dc_str = VoiceAssistantWall.vi_gpus_dc_str
+vi_dc_avg_str = VoiceAssistantWall.vi_dc_avg_str
+vi_dc_peak_str = VoiceAssistantWall.vi_dc_peak_str
+vi_peak_ratio_str = VoiceAssistantWall.vi_peak_ratio_str
+vi_audio_kb_str = VoiceAssistantWall.vi_audio_kb_str
+vi_audio_tb_str = VoiceAssistantWall.vi_audio_tb_str
 ```
 
 ::: {.callout-notebook title="The Voice Assistant Wall"}
@@ -1704,7 +1738,7 @@ from mlsys.formulas import calc_monthly_egress_cost
 from mlsys.formatting import fmt
 from mlsys.constants import (
     VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT, VIDEO_BYTES_PER_PIXEL_RGB,
-    VIDEO_FPS_STANDARD, CLOUD_EGRESS_PER_GB, MB, GB,
+    VIDEO_FPS_STANDARD, CLOUD_EGRESS_PER_GB, MB, GB, second, MILLION,
 )
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -1743,7 +1777,7 @@ class BandwidthBottleneck:
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     cam_rate_mbs_str = fmt(bytes_per_sec_single.to(MB/second).magnitude, precision=0, commas=False)
     total_rate_gbs_str = fmt(total_bytes_per_sec.to(GB/second).magnitude, precision=1, commas=False)
-    monthly_cost_m_str = fmt(monthly_cost / 1e6, precision=1, commas=False)
+    monthly_cost_m_str = fmt(monthly_cost / MILLION, precision=1, commas=False)
     net_cap_gbs_str = fmt(network.bandwidth.to(GB/second).magnitude, precision=2, commas=False)
     bw_short_x_str = fmt(shortfall_ratio, precision=0, commas=False)
 
@@ -2306,41 +2340,65 @@ TinyML's milliwatt-scale power consumption represents a six-order-of-magnitude r
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     BATTERY_CAPACITY_MAH, BATTERY_VOLTAGE_V, BATTERY_ENERGY_J,
-    ENERGY_MOBILENET_INF_MJ, ureg
+    ENERGY_MOBILENET_INF_MJ, ureg, BILLION
 )
 from mlsys.formatting import fmt
 
-# --- Energy per inference (full-system, not just accelerator) ---
-e_gpt4_j = 1000 * ureg.joule                                                     # ~1 kJ cloud LLM query
-e_resnet_cloud_j = 10 * ureg.joule                                               # ~10 J cloud ResNet-50
-e_resnet_edge_j = 0.5 * ureg.joule                                               # ~500 mJ edge ResNet-50
-e_mobilenet_j = 0.05 * ureg.joule                                                # ~50 mJ mobile MobileNet
-e_kws_j = 0.00001 * ureg.joule                                                   # ~10 µJ TinyML keyword spotting
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class EnergyInference:
+    """
+    Namespace for Energy Per Inference comparison.
+    Scenario: Battery life across Cloud vs. Edge vs. TinyML paradigms.
+    """
 
-batt_energy_j = BATTERY_ENERGY_J                                                 # Phone battery in joules
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    batt_energy_j = BATTERY_ENERGY_J
 
-# --- Queries per full battery charge ---
-q_gpt4 = batt_energy_j / e_gpt4_j                                                # ~54 queries
-q_resnet_cloud = batt_energy_j / e_resnet_cloud_j                                # ~5,400 queries
-q_resnet_edge = batt_energy_j / e_resnet_edge_j                                  # ~108,000 queries
-q_mobilenet = batt_energy_j / e_mobilenet_j                                      # ~1,080,000 queries
-q_kws = batt_energy_j / e_kws_j                                                  # ~5.4 billion queries
+    # Energy per inference (full-system estimates)
+    e_gpt4_j = 1000 * ureg.joule        # ~1 kJ cloud LLM query
+    e_resnet_cloud_j = 10 * ureg.joule  # ~10 J cloud ResNet-50
+    e_resnet_edge_j = 0.5 * ureg.joule  # ~500 mJ edge ResNet-50
+    e_mobilenet_j = 0.05 * ureg.joule   # ~50 mJ mobile MobileNet
+    e_kws_j = 0.00001 * ureg.joule      # ~10 µJ TinyML keyword spotting
 
-# --- Output strings (formatted for table) ---
-e_gpt4_str = "~1 kJ"                                                             # display string
-e_resnet_cloud_str = "~10 J"
-e_resnet_edge_str = "~500 mJ"
-e_mobilenet_str = "~50 mJ"
-e_kws_str = "~10 µJ"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Queries per full battery charge
+    q_gpt4 = batt_energy_j / e_gpt4_j
+    q_resnet_cloud = batt_energy_j / e_resnet_cloud_j
+    q_resnet_edge = batt_energy_j / e_resnet_edge_j
+    q_mobilenet = batt_energy_j / e_mobilenet_j
+    q_kws = batt_energy_j / e_kws_j
 
-q_gpt4_str = fmt(q_gpt4.magnitude, precision=0, commas=True)                     # e.g. "54"
-q_resnet_cloud_str = fmt(q_resnet_cloud.magnitude, precision=0, commas=True)     # e.g. "5,400"
-q_resnet_edge_str = fmt(q_resnet_edge.magnitude, precision=0, commas=True)       # e.g. "108,000"
-q_mobilenet_str = fmt(q_mobilenet.magnitude, precision=0, commas=True)           # e.g. "1,080,000"
-q_kws_str = fmt(q_kws.magnitude / 1e9, precision=0, commas=False) + " billion"   # e.g. "5 billion"
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    e_gpt4_str = "~1 kJ"
+    e_resnet_cloud_str = "~10 J"
+    e_resnet_edge_str = "~500 mJ"
+    e_mobilenet_str = "~50 mJ"
+    e_kws_str = "~10 µJ"
 
-batt_cap_mah_str = f"{BATTERY_CAPACITY_MAH.magnitude:.0f}"                       # e.g. "4000" mAh
-batt_volt_str = f"{BATTERY_VOLTAGE_V.magnitude}"                                 # e.g. "3.7" V
+    q_gpt4_str = fmt(q_gpt4.magnitude, precision=0, commas=True)
+    q_resnet_cloud_str = fmt(q_resnet_cloud.magnitude, precision=0, commas=True)
+    q_resnet_edge_str = fmt(q_resnet_edge.magnitude, precision=0, commas=True)
+    q_mobilenet_str = fmt(q_mobilenet.magnitude, precision=0, commas=True)
+    # Use BILLION constant
+    q_kws_str = fmt(q_kws.magnitude / BILLION, precision=0, commas=False) + " billion"
+
+    batt_cap_mah_str = f"{BATTERY_CAPACITY_MAH.magnitude:.0f}"
+    batt_volt_str = f"{BATTERY_VOLTAGE_V.magnitude}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+e_gpt4_str = EnergyInference.e_gpt4_str
+e_resnet_cloud_str = EnergyInference.e_resnet_cloud_str
+e_resnet_edge_str = EnergyInference.e_resnet_edge_str
+e_mobilenet_str = EnergyInference.e_mobilenet_str
+e_kws_str = EnergyInference.e_kws_str
+q_gpt4_str = EnergyInference.q_gpt4_str
+q_resnet_cloud_str = EnergyInference.q_resnet_cloud_str
+q_resnet_edge_str = EnergyInference.q_resnet_edge_str
+q_mobilenet_str = EnergyInference.q_mobilenet_str
+q_kws_str = EnergyInference.q_kws_str
+batt_cap_mah_str = EnergyInference.batt_cap_mah_str
+batt_volt_str = EnergyInference.batt_volt_str
 ```
 
 ::: {.callout-notebook title="Energy Per Inference"}

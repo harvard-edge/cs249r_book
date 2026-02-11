@@ -10,6 +10,15 @@ This extension treats `./book/binder` as the operational backend.
 - Validation actions execute `binder validate ...`.
 - Maintenance actions execute `binder maintain ...`.
 
+## Work vs Configuration
+
+The extension separates daily work from configuration:
+
+- Work views: Build, Debug, Recent Runs, Navigator, Validate, Publish/Maintenance
+- Configuration view: execution mode, navigator preset, visual preset, and extension settings
+
+This keeps daily actions focused while preserving easy access to tuning controls.
+
 ## Why This Matters
 
 - One public CLI contract for terminal, extension, and CI.

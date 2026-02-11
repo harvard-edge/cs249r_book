@@ -2467,40 +2467,66 @@ Tensors answer the first question---*what is the data?*---by encoding shape, lay
 # │          hbm_4mb_ms_str, pcie4_1gb_ms_str, pcie4_1gb_equiv_ops_str, a100_mem_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (PCIE_GEN4_BW, NVLINK_A100_BW, A100_MEM_BW, A100_MEM_CAPACITY,
-                             A100_FLOPS_FP16_TENSOR, GB, TB, GiB, TFLOPs, flop, byte, second)
+                             A100_FLOPS_FP16_TENSOR, GB, TB, GiB, TFLOPs, flop, byte, second,
+                             BILLION, MILLION, THOUSAND)
 from mlsys.formatting import fmt
 
-# --- Inputs (from hardware specs) ---
-pcie4_gbs_value = PCIE_GEN4_BW.to(GB/second).magnitude                         # 32 GB/s unidirectional
-nvlink_a100_gbs_value = NVLINK_A100_BW.to(GB/second).magnitude                 # 600 GB/s bidirectional
-a100_bw_gbs_value = A100_MEM_BW.to(GB/second).magnitude                        # ~2039 GB/s
-a100_bw_tbs_value = A100_MEM_BW.to(TB/second).magnitude                        # ~2 TB/s
-a100_mem_value = A100_MEM_CAPACITY.to(GiB).magnitude                           # 80 GB
-a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude    # 312 TFLOPS
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DeviceBandwidthHierarchy:
+    """
+    Namespace for Device Bandwidth Hierarchy.
+    Scenario: Comparing PCIe vs NVLink vs HBM speeds.
+    """
 
-# --- Process: transfer times for 4 MB tensor ---
-tensor_4mb = 4e6                                                                # bytes
-pcie4_4mb_ms_value = (tensor_4mb / (PCIE_GEN4_BW.to(byte/second).magnitude)) * 1e3
-nvlink_4mb_ms_value = (tensor_4mb / (NVLINK_A100_BW.to(byte/second).magnitude)) * 1e3
-hbm_4mb_ms_value = (tensor_4mb / (A100_MEM_BW.to(byte/second).magnitude)) * 1e3
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    tensor_4mb = 4 * MILLION
 
-# --- Process: 1 GB transfer cost analysis ---
-pcie4_1gb_ms_value = (1e9 / (PCIE_GEN4_BW.to(byte/second).magnitude)) * 1e3
-pcie4_1gb_equiv_ops_value = (pcie4_1gb_ms_value / 1e3) * A100_FLOPS_FP16_TENSOR.to(flop/second).magnitude
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    pcie4_gbs = PCIE_GEN4_BW.to(GB/second).magnitude
+    nvlink_a100_gbs = NVLINK_A100_BW.to(GB/second).magnitude
+    a100_bw_gbs = A100_MEM_BW.to(GB/second).magnitude
+    a100_bw_tbs = A100_MEM_BW.to(TB/second).magnitude
+    a100_mem = A100_MEM_CAPACITY.to(GiB).magnitude
+    a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
 
-# --- Outputs (formatted strings for prose) ---
-pcie4_gbs_str = fmt(pcie4_gbs_value, precision=0, commas=False)                # e.g. "32"
-pcie4_bidir_gbs_str = fmt(pcie4_gbs_value * 2, precision=0, commas=False)      # e.g. "64"
-nvlink_a100_gbs_str = fmt(nvlink_a100_gbs_value, precision=0, commas=False)    # e.g. "600"
-a100_bw_gbs_str = fmt(a100_bw_gbs_value, precision=0, commas=False)            # e.g. "2039"
-a100_bw_tbs_str = fmt(a100_bw_tbs_value, precision=1, commas=False)            # e.g. "2.0"
-a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)  # e.g. "312"  # Note: also defined in a100-specs-blas, a100-memory-wall; produces same value
-a100_mem_str = fmt(a100_mem_value, precision=0, commas=False)                  # e.g. "80"  # Note: also defined in model-7b-memory; produces same value
-pcie4_4mb_ms_str = fmt(pcie4_4mb_ms_value, precision=3, commas=False)          # e.g. "0.125"
-nvlink_4mb_ms_str = fmt(nvlink_4mb_ms_value, precision=3, commas=False)        # e.g. "0.007"
-hbm_4mb_ms_str = fmt(hbm_4mb_ms_value, precision=3, commas=False)              # e.g. "0.002"
-pcie4_1gb_ms_str = fmt(pcie4_1gb_ms_value, precision=0, commas=False)          # e.g. "31"
-pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops_value * flop).to(TFLOPs).magnitude, precision=1, commas=False)  # e.g. "9.8"
+    # Transfer times for 4 MB tensor
+    pcie4_4mb_ms = (tensor_4mb / (PCIE_GEN4_BW.to(byte/second).magnitude)) * THOUSAND
+    nvlink_4mb_ms = (tensor_4mb / (NVLINK_A100_BW.to(byte/second).magnitude)) * THOUSAND
+    hbm_4mb_ms = (tensor_4mb / (A100_MEM_BW.to(byte/second).magnitude)) * THOUSAND
+
+    # 1 GB transfer cost analysis
+    # 1 GB / BW (B/s) * 1000 ms
+    pcie4_1gb_ms = (BILLION / (PCIE_GEN4_BW.to(byte/second).magnitude)) * THOUSAND
+    # Equiv Ops: (ms / 1000) * FLOPS
+    pcie4_1gb_equiv_ops = (pcie4_1gb_ms / THOUSAND) * A100_FLOPS_FP16_TENSOR.to(flop/second).magnitude
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    pcie4_gbs_str = fmt(pcie4_gbs, precision=0, commas=False)
+    pcie4_bidir_gbs_str = fmt(pcie4_gbs * 2, precision=0, commas=False)
+    nvlink_a100_gbs_str = fmt(nvlink_a100_gbs, precision=0, commas=False)
+    a100_bw_gbs_str = fmt(a100_bw_gbs, precision=0, commas=False)
+    a100_bw_tbs_str = fmt(a100_bw_tbs, precision=1, commas=False)
+    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
+    a100_mem_str = fmt(a100_mem, precision=0, commas=False)
+    pcie4_4mb_ms_str = fmt(pcie4_4mb_ms, precision=3, commas=False)
+    nvlink_4mb_ms_str = fmt(nvlink_4mb_ms, precision=3, commas=False)
+    hbm_4mb_ms_str = fmt(hbm_4mb_ms, precision=3, commas=False)
+    pcie4_1gb_ms_str = fmt(pcie4_1gb_ms, precision=0, commas=False)
+    pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops * flop).to(TFLOPs).magnitude, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+pcie4_gbs_str = DeviceBandwidthHierarchy.pcie4_gbs_str
+pcie4_bidir_gbs_str = DeviceBandwidthHierarchy.pcie4_bidir_gbs_str
+nvlink_a100_gbs_str = DeviceBandwidthHierarchy.nvlink_a100_gbs_str
+a100_bw_gbs_str = DeviceBandwidthHierarchy.a100_bw_gbs_str
+a100_bw_tbs_str = DeviceBandwidthHierarchy.a100_bw_tbs_str
+a100_tflops_fp16_str = DeviceBandwidthHierarchy.a100_tflops_fp16_str
+pcie4_4mb_ms_str = DeviceBandwidthHierarchy.pcie4_4mb_ms_str
+nvlink_4mb_ms_str = DeviceBandwidthHierarchy.nvlink_4mb_ms_str
+hbm_4mb_ms_str = DeviceBandwidthHierarchy.hbm_4mb_ms_str
+pcie4_1gb_ms_str = DeviceBandwidthHierarchy.pcie4_1gb_ms_str
+pcie4_1gb_equiv_ops_str = DeviceBandwidthHierarchy.pcie4_1gb_equiv_ops_str
+a100_mem_str = DeviceBandwidthHierarchy.a100_mem_str
 ```
 
 \index{Device Management!CPU-GPU transfers}

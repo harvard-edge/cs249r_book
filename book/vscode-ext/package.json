@@ -4,12 +4,20 @@
   "description": "Build, debug, validate, and publish the ML Systems textbook",
   "version": "0.1.0",
   "publisher": "mlsysbook",
+  "icon": "resources/icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": ["Other"],
   "activationEvents": [
-    "workspaceContains:book/binder"
+    "workspaceContains:book/binder",
+    "onView:mlsysbook.build",
+    "onView:mlsysbook.debug",
+    "onView:mlsysbook.runs",
+    "onView:mlsysbook.navigator",
+    "onView:mlsysbook.precommit",
+    "onView:mlsysbook.publish",
+    "onView:mlsysbook.config"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -38,8 +46,9 @@
         { "id": "mlsysbook.debug", "name": "Debug" },
         { "id": "mlsysbook.runs", "name": "Recent Runs" },
         { "id": "mlsysbook.navigator", "name": "Chapter Navigator" },
-        { "id": "mlsysbook.precommit", "name": "Pre-commit / Validate" },
-        { "id": "mlsysbook.publish", "name": "Publish / Maintenance" }
+        { "id": "mlsysbook.precommit", "name": "Pre-commit / Validate / Cleanup" },
+        { "id": "mlsysbook.publish", "name": "Publish / Maintenance" },
+        { "id": "mlsysbook.config", "name": "Configuration" }
       ]
     },
     "snippets": [
@@ -74,6 +83,7 @@
       { "command": "mlsysbook.historyOpenFailureLocation", "title": "MLSysBook: Open Failure Location" },
       { "command": "mlsysbook.precommitRunAll", "title": "MLSysBook: Run All Pre-commit Hooks" },
       { "command": "mlsysbook.precommitRunHook", "title": "MLSysBook: Run Pre-commit Hook" },
+      { "command": "mlsysbook.precommitRunFixersCurrentFile", "title": "MLSysBook: Run QMD Fixers (Current File)" },
       { "command": "mlsysbook.runAction", "title": "MLSysBook: Run Action" },
       { "command": "mlsysbook.cleanArtifacts", "title": "MLSysBook: Clean Build Artifacts" },
       { "command": "mlsysbook.doctor", "title": "MLSysBook: Doctor (Health Check)" },
@@ -87,13 +97,18 @@
       { "command": "mlsysbook.contextDebugSections", "title": "MLSysBook: Debug Sections" },
       { "command": "mlsysbook.openNavigatorLocation", "title": "MLSysBook: Open Navigator Location" },
       { "command": "mlsysbook.refreshNavigator", "title": "MLSysBook: Refresh Chapter Navigator", "icon": "$(refresh)" },
+      { "command": "mlsysbook.navigatorExpandAll", "title": "MLSysBook: Navigator Expand All", "icon": "$(add)" },
+      { "command": "mlsysbook.navigatorCollapseAll", "title": "MLSysBook: Navigator Collapse All", "icon": "$(remove)" },
       { "command": "mlsysbook.refreshRunHistory", "title": "MLSysBook: Refresh Run History", "icon": "$(refresh)" },
       { "command": "mlsysbook.refreshBuildTree", "title": "Refresh", "icon": "$(refresh)" },
       { "command": "mlsysbook.rerunLastCommand", "title": "MLSysBook: Rerun Last Command" },
       { "command": "mlsysbook.rerunLastCommandRaw", "title": "MLSysBook: Rerun Last Command (Raw Terminal)" },
       { "command": "mlsysbook.revealTerminal", "title": "MLSysBook: Reveal Build Terminal" },
       { "command": "mlsysbook.openLastFailureDetails", "title": "MLSysBook: Open Last Failure Details" },
-      { "command": "mlsysbook.setExecutionMode", "title": "MLSysBook: Set Execution Mode" }
+      { "command": "mlsysbook.setExecutionMode", "title": "MLSysBook: Set Execution Mode" },
+      { "command": "mlsysbook.setChapterOrderSource", "title": "MLSysBook: Set Chapter Order Source" },
+      { "command": "mlsysbook.setQmdVisualPreset", "title": "MLSysBook: Set QMD Visual Preset" },
+      { "command": "mlsysbook.openSettings", "title": "MLSysBook: Open Extension Settings" }
     ],
     "configuration": {
       "title": "MLSysBook Workbench",
@@ -103,6 +118,12 @@
           "enum": ["focused", "raw"],
           "default": "focused",
           "description": "Default execution mode for MLSysBook commands. Focused captures output in the MLSysBook Build channel; raw always runs in the integrated terminal."
+        },
+        "mlsysbook.chapterOrderSource": {
+          "type": "string",
+          "enum": ["auto", "pdf", "epub", "html", "pdfCopyedit"],
+          "default": "auto",
+          "description": "Source file preference for chapter ordering in Build/Debug lists. Auto tries PDF first, then EPUB, then HTML, then PDF copyedit."
         },
         "mlsysbook.revealTerminalOnFailure": {
           "type": "boolean",
@@ -131,6 +152,11 @@
           "default": true,
           "description": "Apply subtle editor background highlighting for QMD chunks (callouts, divs, fenced code, and labeled figure/table/listing lines)."
         },
+        "mlsysbook.enableQmdDiagnostics": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable MLSysBook inline QMD diagnostics (cross-reference and inline-python checks). Disable to avoid diagnostic squiggles while writing."
+        },
         "mlsysbook.qmdVisualPreset": {
           "type": "string",
           "enum": ["subtle", "balanced", "highContrast"],
@@ -152,19 +178,53 @@
           "default": true,
           "description": "Highlight Quarto div fence marker lines (::: and ::::)."
         },
+        "mlsysbook.highlightSectionHeaders": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight section headers (## to ######) with depth-based background intensity."
+        },
+        "mlsysbook.highlightTables": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight markdown pipe table regions (including nearby table caption line when present)."
+        },
+        "mlsysbook.highlightFootnotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Highlight footnote references and definition blocks (e.g. [^fn-...] and [^fn-...]:) with subtle styling."
+        },
+        "mlsysbook.autoFoldOnOpen": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically fold configured QMD block kinds when opening a chapter file."
+        },
+        "mlsysbook.autoFoldKinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["tikz", "fencedCode", "divs"]
+          },
+          "default": ["tikz"],
+          "description": "Controls which block kinds are auto-folded on open. Default folds TikZ regions only."
+        },
         "mlsysbook.navigatorVisibleEntryKinds": {
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["figures", "tables", "listings", "divs", "citations"]
+            "enum": ["figures", "tables", "listings", "equations"]
           },
-          "default": ["figures", "tables", "listings", "divs", "citations"],
+          "default": ["figures", "tables", "listings", "equations"],
           "description": "Controls which entry types are shown in Chapter Navigator sections."
         },
         "mlsysbook.navigatorFollowCursor": {
           "type": "boolean",
           "default": true,
           "description": "Automatically reveal the current section in Chapter Navigator as cursor moves through a QMD file."
+        },
+        "mlsysbook.navigatorClickToOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open editor location when clicking a navigator item. Keep disabled to avoid accidental jumps while browsing."
         },
         "mlsysbook.defaultNavigatorPreset": {
           "type": "string",
@@ -186,10 +246,15 @@
         { "command": "mlsysbook.refreshBuildTree", "when": "view == mlsysbook.build", "group": "navigation@1" },
         { "command": "mlsysbook.rerunLastCommand", "when": "view == mlsysbook.build", "group": "navigation@2" },
         { "command": "mlsysbook.revealTerminal", "when": "view == mlsysbook.build", "group": "navigation@3" },
-        { "command": "mlsysbook.setExecutionMode", "when": "view == mlsysbook.build", "group": "navigation@4" },
         { "command": "mlsysbook.refreshNavigator", "when": "view == mlsysbook.navigator", "group": "navigation@1" },
-        { "command": "mlsysbook.setNavigatorFilterPreset", "when": "view == mlsysbook.navigator", "group": "navigation@2" },
-        { "command": "mlsysbook.refreshRunHistory", "when": "view == mlsysbook.runs", "group": "navigation" }
+        { "command": "mlsysbook.navigatorExpandAll", "when": "view == mlsysbook.navigator", "group": "navigation@2" },
+        { "command": "mlsysbook.navigatorCollapseAll", "when": "view == mlsysbook.navigator", "group": "navigation@3" },
+        { "command": "mlsysbook.refreshRunHistory", "when": "view == mlsysbook.runs", "group": "navigation" },
+        { "command": "mlsysbook.setExecutionMode", "when": "view == mlsysbook.config", "group": "navigation@1" },
+        { "command": "mlsysbook.setChapterOrderSource", "when": "view == mlsysbook.config", "group": "navigation@2" },
+        { "command": "mlsysbook.setNavigatorFilterPreset", "when": "view == mlsysbook.config", "group": "navigation@3" },
+        { "command": "mlsysbook.setQmdVisualPreset", "when": "view == mlsysbook.config", "group": "navigation@4" },
+        { "command": "mlsysbook.openSettings", "when": "view == mlsysbook.config", "group": "navigation@5" }
       ],
       "editor/context": [
         { "command": "mlsysbook.renameLabelReferences", "when": "resourceExtname == .qmd", "group": "mlsysbook@1" }

@@ -13,7 +13,7 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      void runBookCommand(`./book/binder ${format} ${ctx.chapter} --${ctx.volume} -v`, root, {
+      void runBookCommand(`./book/binder build ${format} ${ctx.chapter} --${ctx.volume} -v`, root, {
         label: `Build ${format.toUpperCase()} (${ctx.volume}/${ctx.chapter})`,
       });
     };

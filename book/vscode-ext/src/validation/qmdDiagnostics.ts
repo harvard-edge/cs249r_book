@@ -129,6 +129,11 @@ export class QmdDiagnosticsManager implements vscode.Disposable {
       vscode.window.onDidChangeActiveTextEditor(() => this.refreshActiveEditorDiagnostics()),
       vscode.workspace.onDidSaveTextDocument(document => this.refreshDocumentDiagnostics(document)),
       vscode.workspace.onDidChangeTextDocument(event => this.debouncedRefresh(event.document)),
+      vscode.workspace.onDidChangeConfiguration(event => {
+        if (event.affectsConfiguration('mlsysbook.enableQmdDiagnostics')) {
+          this.refreshActiveEditorDiagnostics();
+        }
+      }),
     );
   }
 
@@ -139,12 +144,18 @@ export class QmdDiagnosticsManager implements vscode.Disposable {
   }
 
   refreshDocumentDiagnostics(document: vscode.TextDocument): void {
-    if (!isQmdDocument(document)) {
+    if (!isQmdDocument(document) || !this.isEnabled()) {
       this.collection.delete(document.uri);
       return;
     }
     const diagnostics = buildDiagnostics(document);
     this.collection.set(document.uri, diagnostics);
+  }
+
+  private isEnabled(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('enableQmdDiagnostics', false);
   }
 
   private debouncedRefresh(document: vscode.TextDocument): void {

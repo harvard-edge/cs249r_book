@@ -12,7 +12,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildChapter${fmt}`, (vol: VolumeId, chapter: string) => {
-        void runBookCommand(`./book/binder ${fmtLower} ${chapter} --${vol} -v`, root, {
+        void runBookCommand(`./book/binder build ${fmtLower} ${chapter} --${vol} -v`, root, {
           label: `Build Chapter ${fmt.toUpperCase()} (${vol}/${chapter})`,
         });
       })
@@ -33,7 +33,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildVolume${fmt}`, (vol: VolumeId) => {
-        void runBookCommand(`./book/binder ${fmtLower} --${vol} -v`, root, {
+        void runBookCommand(`./book/binder build ${fmtLower} --${vol} -v`, root, {
           label: `Build Volume ${fmt.toUpperCase()} (${vol})`,
         });
       })

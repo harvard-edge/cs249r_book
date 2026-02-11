@@ -28,17 +28,17 @@ export function registerPublishCommands(context: vscode.ExtensionContext): void 
       });
     }),
     vscode.commands.registerCommand('mlsysbook.buildGlossary', () => {
-      void runBookCommand('python3 book/tools/scripts/glossary/build_global_glossary.py', root, {
+      void runBookCommand('./book/binder maintain glossary build', root, {
         label: 'Build global glossary',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.compressImages', () => {
-      void runBookCommand('python3 book/tools/scripts/images/compress_images.py', root, {
+      void runBookCommand('./book/binder maintain images compress --all --smart-compression', root, {
         label: 'Compress images',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.repoHealth', () => {
-      void runBookCommand('python3 book/tools/scripts/maintenance/repo_health_check.py --health-check', root, {
+      void runBookCommand('./book/binder maintain repo-health', root, {
         label: 'Repo health check',
       });
     }),

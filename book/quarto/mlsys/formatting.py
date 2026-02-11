@@ -157,6 +157,15 @@ def md_sci(val, precision=2):
     return Markdown(f"${sci_latex(val, precision=precision)}$")
 
 
+def check(condition, message):
+    """
+    Invariant guard for narrative logic.
+    Ensures that the calculated values support the textbook's claims.
+    """
+    if not condition:
+        raise ValueError(f"Narrative broken: {message}")
+
+
 def md_math(expression):
     """
     Wrap a LaTeX math expression in Markdown().

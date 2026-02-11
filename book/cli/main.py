@@ -158,18 +158,6 @@ class MLSysBookCLI:
 
         console.print(Panel(examples, title="💡 Pro Tips", border_style="magenta"))
 
-        # Command Aliases
-        aliases_text = Text()
-        aliases_text.append("🔗 Command Aliases:\n", style="bold cyan")
-        aliases_text.append("  b → build    ", style="green")
-        aliases_text.append("  p → preview\n", style="green")
-        aliases_text.append("  l → list     ", style="green")
-        aliases_text.append("  s → status     ", style="green")
-        aliases_text.append("  d → doctor     ", style="green")
-        aliases_text.append("  h → help\n", style="green")
-
-        console.print(Panel(aliases_text, title="⚡ Shortcuts", border_style="cyan"))
-
         # Global Options
         options_text = Text()
         options_text.append("🔧 Global Options:\n", style="bold yellow")
@@ -428,8 +416,8 @@ class MLSysBookCLI:
             "help": lambda args: self.show_help() or True,
         }
 
-        # Command aliases
-        aliases = {
+        # Deprecated short aliases (hard-cut cleanup).
+        deprecated_aliases = {
             "b": "build",
             "p": "preview",
             "l": "list",
@@ -437,10 +425,11 @@ class MLSysBookCLI:
             "d": "doctor",
             "h": "help",
         }
-
-        # Resolve aliases
-        if command in aliases:
-            command = aliases[command]
+        if command in deprecated_aliases:
+            full = deprecated_aliases[command]
+            console.print(f"[red]❌ Alias '{command}' was removed.[/red]")
+            console.print(f"[yellow]💡 Use: ./binder {full} ...[/yellow]")
+            return False
 
         if command in ("html", "pdf", "epub"):
             console.print(f"[red]❌ Top-level '{command}' command was removed.[/red]")

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 
-type NavigatorEntryKind = 'figure' | 'table' | 'citation' | 'div' | 'listing';
-type NavigatorVisibleEntryKind = 'figures' | 'tables' | 'citations' | 'divs' | 'listings';
+type NavigatorEntryKind = 'figure' | 'table' | 'listing' | 'equation';
+type NavigatorVisibleEntryKind = 'figures' | 'tables' | 'listings' | 'equations';
 
 interface NavigatorEntry {
   kind: NavigatorEntryKind;
@@ -21,9 +21,9 @@ interface NavigatorSection {
 }
 
 class NavigatorSectionItem extends vscode.TreeItem {
-  constructor(section: NavigatorSection) {
+  constructor(section: NavigatorSection, collapsibleState: vscode.TreeItemCollapsibleState) {
     const entryCount = section.entries.length;
-    super(section.title, vscode.TreeItemCollapsibleState.Collapsed);
+    super(section.title, collapsibleState);
     this.sectionId = section.id;
     this.id = section.id;
     const depthLabel = section.level === 0 ? 'preamble' : `h${section.level}`;
@@ -44,7 +44,7 @@ class NavigatorSectionItem extends vscode.TreeItem {
 }
 
 class NavigatorEntryItem extends vscode.TreeItem {
-  constructor(uri: vscode.Uri, entry: NavigatorEntry) {
+  constructor(uri: vscode.Uri, entry: NavigatorEntry, clickToOpen: boolean) {
     super(`${entry.id}  ·  L${entry.line + 1}`, vscode.TreeItemCollapsibleState.None);
     this.description = entry.preview;
     this.tooltip = `${entry.id}\n${entry.preview}`;
@@ -52,17 +52,17 @@ class NavigatorEntryItem extends vscode.TreeItem {
       ? 'symbol-field'
       : entry.kind === 'table'
         ? 'table'
-        : entry.kind === 'div'
-          ? 'bracket'
-          : entry.kind === 'listing'
-            ? 'code'
-            : 'quote';
+        : entry.kind === 'listing'
+          ? 'code'
+          : 'symbol-operator';
     this.iconPath = new vscode.ThemeIcon(icon);
-    this.command = {
-      command: 'mlsysbook.openNavigatorLocation',
-      title: 'Open Location',
-      arguments: [uri, entry.line],
-    };
+    if (clickToOpen) {
+      this.command = {
+        command: 'mlsysbook.openNavigatorLocation',
+        title: 'Open Location',
+        arguments: [uri, entry.line],
+      };
+    }
     this.contextValue = `navigator-entry-${entry.kind}`;
   }
 }
@@ -77,6 +77,11 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
   private sections = new Map<string, NavigatorSection>();
   private topLevelSectionIds: string[] = [];
   private sectionItems = new Map<string, NavigatorSectionItem>();
+  private forceExpanded = false;
+
+  private isQmdDocument(document: vscode.TextDocument): boolean {
+    return document.uri.fsPath.endsWith('.qmd');
+  }
 
   getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;
@@ -87,7 +92,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       .getConfiguration('mlsysbook')
       .get<NavigatorVisibleEntryKind[]>(
         'navigatorVisibleEntryKinds',
-        ['figures', 'tables', 'listings', 'divs', 'citations'],
+        ['figures', 'tables', 'listings', 'equations'],
       );
     return new Set(kinds);
   }
@@ -97,8 +102,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       figure: 'figures',
       table: 'tables',
       listing: 'listings',
-      div: 'divs',
-      citation: 'citations',
+      equation: 'equations',
     };
     return this.getVisibleEntryKinds().has(map[kind]);
   }
@@ -108,9 +112,18 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
     if (cached) {
       return cached;
     }
-    const created = new NavigatorSectionItem(section);
+    const state = this.forceExpanded
+      ? vscode.TreeItemCollapsibleState.Expanded
+      : vscode.TreeItemCollapsibleState.Collapsed;
+    const created = new NavigatorSectionItem(section, state);
     this.sectionItems.set(section.id, created);
     return created;
+  }
+
+  private shouldClickToOpen(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('navigatorClickToOpen', false);
   }
 
   getChildren(element?: TreeNode): TreeNode[] {
@@ -151,7 +164,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       return children.map(child =>
         child.type === 'section'
           ? this.getSectionItem(child.section)
-          : new NavigatorEntryItem(this.sourceUri!, child.entry)
+          : new NavigatorEntryItem(this.sourceUri!, child.entry, this.shouldClickToOpen())
       );
     }
 
@@ -159,7 +172,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
   }
 
   refreshFromEditor(editor: vscode.TextEditor | undefined): void {
-    if (!editor || editor.document.languageId !== 'markdown' || !editor.document.uri.fsPath.endsWith('.qmd')) {
+    if (!editor || !this.isQmdDocument(editor.document)) {
       this.sourceUri = undefined;
       this.sections.clear();
       this.topLevelSectionIds = [];
@@ -174,6 +187,18 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
   }
 
   refreshView(): void {
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  expandAll(): void {
+    this.forceExpanded = true;
+    this.sectionItems.clear();
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  collapseAll(): void {
+    this.forceExpanded = false;
+    this.sectionItems.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -201,19 +226,17 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
     const sectionStack: NavigatorSection[] = [rootSection];
     const figureIds = new Set<string>();
     const tableIds = new Set<string>();
-    const citationIds = new Set<string>();
-    let divCounter = 0;
+    const equationIds = new Set<string>();
 
-    const headerRegex = /^(#{1,6})\s+(.+?)\s*$/;
+    const headerRegex = /^(#{2,6})\s+(.+?)\s*$/;
     const figureRegex = /#(fig-[A-Za-z0-9_-]+)/g;
     const tableRegex = /#(tbl-[A-Za-z0-9_-]+)/g;
     const listingRegex = /#(lst-[A-Za-z0-9_-]+)/g;
-    const citationRegex = /@([A-Za-z0-9:_-]+)/g;
-    const divRegex = /^\s*:::\s*(\{[^}]+\})?\s*$/;
+    const equationRegex = /#(eq-[A-Za-z0-9_-]+)/g;
+    const listingYamlRegex = /#\|\s*(?:label|lst-label):\s*(lst-[A-Za-z0-9_:-]+)/g;
+    const equationYamlRegex = /#\|\s*label:\s*(eq-[A-Za-z0-9_:-]+)/g;
     const fenceRegex = /^\s*(```|~~~)\s*(.*)$/;
-    const ignoredCitePrefixes = ['fig-', 'tbl-', 'sec-', 'eq-', 'ch-'];
     const listingIds = new Set<string>();
-    let listingCounter = 0;
     let inFence = false;
     let currentFenceMarker = '';
 
@@ -225,11 +248,27 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
     for (let line = 0; line < document.lineCount; line++) {
       const text = document.lineAt(line).text;
       const preview = text.trim().slice(0, 90);
+
+      const fenceMatch = text.match(fenceRegex);
+      if (fenceMatch) {
+        const marker = fenceMatch[1];
+        if (!inFence) {
+          inFence = true;
+          currentFenceMarker = marker;
+        } else if (marker === currentFenceMarker) {
+          inFence = false;
+          currentFenceMarker = '';
+        }
+      }
+      if (inFence) {
+        continue;
+      }
+
       const headerMatch = text.match(headerRegex);
       if (headerMatch) {
         const level = headerMatch[1].length;
         const title = headerMatch[2].replace(/\s*\{[^}]+\}\s*$/, '').trim();
-        while (sectionStack.length > level) {
+        while ((sectionStack[sectionStack.length - 1]?.level ?? 0) >= level) {
           sectionStack.pop();
         }
         const parent = sectionStack[sectionStack.length - 1] ?? rootSection;
@@ -275,60 +314,32 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       }
       listingRegex.lastIndex = 0;
 
-      while ((match = citationRegex.exec(text)) !== null) {
+      while ((match = listingYamlRegex.exec(text)) !== null) {
         const id = match[1];
-        if (ignoredCitePrefixes.some(prefix => id.startsWith(prefix))) {
-          continue;
-        }
-        if (!citationIds.has(id)) {
-          citationIds.add(id);
-          addEntry({ kind: 'citation', id: `@${id}`, line, preview });
+        if (!listingIds.has(id)) {
+          listingIds.add(id);
+          addEntry({ kind: 'listing', id, line, preview });
         }
       }
-      citationRegex.lastIndex = 0;
+      listingYamlRegex.lastIndex = 0;
 
-      const divMatch = text.match(divRegex);
-      if (divMatch) {
-        const details = divMatch[1] ? divMatch[1].replace(/[{}]/g, '').trim() : '';
-        if (details.length > 0) {
-          const isCodeListing =
-            details.includes('.callout-code')
-            || details.includes('.callout-resource-slides')
-            || details.includes('code-listing');
-          divCounter += 1;
-          addEntry({
-            kind: isCodeListing ? 'listing' : 'div',
-            id: isCodeListing
-              ? `listing-div-${divCounter}: ${details}`
-              : `div-${divCounter}: ${details}`,
-            line,
-            preview,
-          });
+      while ((match = equationRegex.exec(text)) !== null) {
+        const id = match[1];
+        if (!equationIds.has(id)) {
+          equationIds.add(id);
+          addEntry({ kind: 'equation', id, line, preview });
         }
       }
+      equationRegex.lastIndex = 0;
 
-      const fenceMatch = text.match(fenceRegex);
-      if (fenceMatch) {
-        const marker = fenceMatch[1];
-        const fenceMeta = fenceMatch[2]?.trim() ?? '';
-        if (!inFence) {
-          inFence = true;
-          currentFenceMarker = marker;
-          listingCounter += 1;
-          const inferredId = fenceMeta.length > 0
-            ? `code-${listingCounter}: ${fenceMeta.slice(0, 40)}`
-            : `code-${listingCounter}`;
-          addEntry({
-            kind: 'listing',
-            id: inferredId,
-            line,
-            preview: fenceMeta.length > 0 ? fenceMeta : preview,
-          });
-        } else if (marker === currentFenceMarker) {
-          inFence = false;
-          currentFenceMarker = '';
+      while ((match = equationYamlRegex.exec(text)) !== null) {
+        const id = match[1];
+        if (!equationIds.has(id)) {
+          equationIds.add(id);
+          addEntry({ kind: 'equation', id, line, preview });
         }
       }
+      equationYamlRegex.lastIndex = 0;
     }
 
     if (rootSection.childSectionIds.length === 0 && rootSection.entries.length > 0) {

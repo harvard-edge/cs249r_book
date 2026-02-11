@@ -114,7 +114,7 @@ class ChapterDiscovery:
 
         return 0
 
-    def find_chapter_file(self, chapter_spec: str) -> Optional[Path]:
+    def find_chapter_file(self, chapter_spec: str, allow_fuzzy: bool = False) -> Optional[Path]:
         """Find a chapter file by name, using best-match scoring.
 
         Supports volume-prefixed names (e.g., 'vol1/intro') for disambiguation.
@@ -128,6 +128,7 @@ class ChapterDiscovery:
 
         Args:
             chapter_spec: Chapter name to search for, optionally with volume prefix
+            allow_fuzzy: If True, allow fuzzy fallback for non-exact matches.
 
         Returns:
             Path to the chapter file if found, None otherwise
@@ -161,7 +162,7 @@ class ChapterDiscovery:
             if vol or volume_filter:
                 chapter_matches.append(match)
 
-        if not chapter_matches:
+        if not chapter_matches and allow_fuzzy:
             # No exact match — score all .qmd files and pick the best
             all_qmd_files = list(search_dir.rglob("*.qmd"))
 
@@ -178,6 +179,9 @@ class ChapterDiscovery:
                 # Sort by score descending
                 scored.sort(key=lambda x: x[0], reverse=True)
                 best_score = scored[0][0]
+                # Reject weak fuzzy matches to avoid incorrect chapter resolution.
+                if best_score < 2000:
+                    return None
                 # Collect all matches with the same best score
                 chapter_matches = [m for s, m in scored if s == best_score]
 
@@ -197,9 +201,15 @@ class ChapterDiscovery:
                         volumes_found[vol] = match
 
             if len(volumes_found) > 1:
-                # Ambiguous - same chapter name in multiple volumes
-                locations = [f"{vol}/{chapter_name}" for vol in sorted(volumes_found.keys())]
-                raise AmbiguousChapterError(chapter_name, locations)
+                # Ambiguous only when the matched chapter stem is actually the same
+                # in multiple volumes (e.g., vol1/introduction and vol2/introduction).
+                stems = {m.stem for m in volumes_found.values()}
+                if len(stems) == 1:
+                    stem = next(iter(stems))
+                    locations = [f"{vol}/{stem}" for vol in sorted(volumes_found.keys())]
+                    raise AmbiguousChapterError(stem, locations)
+                # Tied fuzzy matches with different stems are not reliable.
+                return None
 
         # Return the first match
         return chapter_matches[0]

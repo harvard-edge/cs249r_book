@@ -11,12 +11,23 @@ interface BlockRange {
 
 type VisualPreset = 'subtle' | 'balanced' | 'highContrast';
 
+function colorValue(value: string): vscode.ThemeColor | string {
+  return value.startsWith('rgba(') || value.startsWith('#')
+    ? value
+    : new vscode.ThemeColor(value);
+}
+
 export class QmdChunkHighlighter implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private calloutDecoration: vscode.TextEditorDecorationType | undefined;
   private divDecoration: vscode.TextEditorDecorationType | undefined;
   private codeFenceDecoration: vscode.TextEditorDecorationType | undefined;
+  private tableDecoration: vscode.TextEditorDecorationType | undefined;
+  private footnoteDecoration: vscode.TextEditorDecorationType | undefined;
   private figureTableLineDecoration: vscode.TextEditorDecorationType | undefined;
+  private sectionHeaderDecorations = new Map<number, vscode.TextEditorDecorationType>();
+  private footnoteReferenceDecoration: vscode.TextEditorDecorationType | undefined;
+  private footnoteDefinitionMarkerDecoration: vscode.TextEditorDecorationType | undefined;
   private inlineReferenceDecoration: vscode.TextEditorDecorationType | undefined;
   private structuralReferenceDecoration: vscode.TextEditorDecorationType | undefined;
   private labelDefinitionDecoration: vscode.TextEditorDecorationType | undefined;
@@ -43,6 +54,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.highlightInlineReferences')
           || event.affectsConfiguration('mlsysbook.highlightLabelDefinitions')
           || event.affectsConfiguration('mlsysbook.highlightDivFenceMarkers')
+          || event.affectsConfiguration('mlsysbook.highlightSectionHeaders')
+          || event.affectsConfiguration('mlsysbook.highlightTables')
+          || event.affectsConfiguration('mlsysbook.highlightFootnotes')
         ) {
           this.recreateDecorations();
           this.applyToEditor(vscode.window.activeTextEditor);
@@ -79,11 +93,35 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       .get<boolean>('highlightDivFenceMarkers', true);
   }
 
+  private getHighlightSectionHeaders(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('highlightSectionHeaders', true);
+  }
+
+  private getHighlightTables(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('highlightTables', true);
+  }
+
+  private getHighlightFootnotes(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('highlightFootnotes', true);
+  }
+
   private recreateDecorations(): void {
     this.calloutDecoration?.dispose();
     this.divDecoration?.dispose();
     this.codeFenceDecoration?.dispose();
+    this.tableDecoration?.dispose();
+    this.footnoteDecoration?.dispose();
     this.figureTableLineDecoration?.dispose();
+    this.sectionHeaderDecorations.forEach(decoration => decoration.dispose());
+    this.sectionHeaderDecorations.clear();
+    this.footnoteReferenceDecoration?.dispose();
+    this.footnoteDefinitionMarkerDecoration?.dispose();
     this.inlineReferenceDecoration?.dispose();
     this.structuralReferenceDecoration?.dispose();
     this.labelDefinitionDecoration?.dispose();
@@ -96,44 +134,82 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       divBg: string;
       codeBg: string;
       labelBg: string;
+      tableBg: string;
+      footnoteBg: string;
+      footnoteRefColor: string;
+      footnoteDefColor: string;
       inlineRefColor: string;
       structuralRefColor: string;
       labelDefColor: string;
       divFenceColor: string;
       fontWeight: 'normal' | '500' | '600';
+      sectionHeaderBgByLevel: [string, string, string, string, string];
     }> = {
       subtle: {
         calloutBg: 'editor.wordHighlightBackground',
         divBg: 'editor.selectionHighlightBackground',
         codeBg: 'editor.selectionHighlightBackground',
-        labelBg: 'editor.findMatchHighlightBackground',
-        inlineRefColor: 'descriptionForeground',
+        labelBg: 'rgba(116, 162, 255, 0.12)',
+        tableBg: 'rgba(88, 166, 255, 0.10)',
+        footnoteBg: 'rgba(167, 139, 250, 0.11)',
+        footnoteRefColor: 'editorInfo.foreground',
+        footnoteDefColor: 'editorInfo.foreground',
+        inlineRefColor: 'editorInfo.foreground',
         structuralRefColor: 'textLink.foreground',
         labelDefColor: 'editorInfo.foreground',
-        divFenceColor: 'descriptionForeground',
+        divFenceColor: 'editorInfo.foreground',
         fontWeight: 'normal',
+        sectionHeaderBgByLevel: [
+          'rgba(88, 166, 255, 0.13)',
+          'rgba(88, 166, 255, 0.10)',
+          'rgba(88, 166, 255, 0.08)',
+          'rgba(88, 166, 255, 0.06)',
+          'rgba(88, 166, 255, 0.04)',
+        ],
       },
       balanced: {
         calloutBg: 'editor.wordHighlightStrongBackground',
         divBg: 'editor.wordHighlightBackground',
         codeBg: 'editor.selectionHighlightBackground',
-        labelBg: 'editor.findMatchHighlightBackground',
+        labelBg: 'rgba(116, 162, 255, 0.18)',
+        tableBg: 'rgba(82, 197, 214, 0.14)',
+        footnoteBg: 'rgba(167, 139, 250, 0.16)',
+        footnoteRefColor: 'textLink.foreground',
+        footnoteDefColor: 'editorInfo.foreground',
         inlineRefColor: 'textLink.foreground',
         structuralRefColor: 'editorInfo.foreground',
-        labelDefColor: 'editorWarning.foreground',
+        labelDefColor: 'editorInfo.foreground',
         divFenceColor: 'editorInfo.foreground',
         fontWeight: '500',
+        sectionHeaderBgByLevel: [
+          'rgba(88, 166, 255, 0.21)',
+          'rgba(88, 166, 255, 0.17)',
+          'rgba(88, 166, 255, 0.13)',
+          'rgba(88, 166, 255, 0.10)',
+          'rgba(88, 166, 255, 0.07)',
+        ],
       },
       highContrast: {
         calloutBg: 'editor.wordHighlightStrongBackground',
         divBg: 'editor.wordHighlightStrongBackground',
         codeBg: 'editor.findMatchHighlightBackground',
-        labelBg: 'editor.findMatchHighlightBackground',
-        inlineRefColor: 'editorWarning.foreground',
-        structuralRefColor: 'editorError.foreground',
-        labelDefColor: 'editorError.foreground',
-        divFenceColor: 'editorWarning.foreground',
+        labelBg: 'rgba(116, 162, 255, 0.24)',
+        tableBg: 'rgba(82, 197, 214, 0.22)',
+        footnoteBg: 'rgba(167, 139, 250, 0.23)',
+        footnoteRefColor: 'textLink.foreground',
+        footnoteDefColor: 'editorInfo.foreground',
+        inlineRefColor: 'textLink.foreground',
+        structuralRefColor: 'editorInfo.foreground',
+        labelDefColor: 'editorInfo.foreground',
+        divFenceColor: 'textLink.foreground',
         fontWeight: '600',
+        sectionHeaderBgByLevel: [
+          'rgba(88, 166, 255, 0.31)',
+          'rgba(88, 166, 255, 0.26)',
+          'rgba(88, 166, 255, 0.21)',
+          'rgba(88, 166, 255, 0.16)',
+          'rgba(88, 166, 255, 0.12)',
+        ],
       },
     };
 
@@ -141,36 +217,66 @@ export class QmdChunkHighlighter implements vscode.Disposable {
 
     this.calloutDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
-      backgroundColor: new vscode.ThemeColor(style.calloutBg),
+      backgroundColor: colorValue(style.calloutBg),
     });
     this.divDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
-      backgroundColor: new vscode.ThemeColor(style.divBg),
+      backgroundColor: colorValue(style.divBg),
     });
     this.codeFenceDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
-      backgroundColor: new vscode.ThemeColor(style.codeBg),
+      backgroundColor: colorValue(style.codeBg),
+    });
+    this.tableDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: style.tableBg,
+    });
+    this.footnoteDecoration = vscode.window.createTextEditorDecorationType({
+      isWholeLine: true,
+      backgroundColor: style.footnoteBg,
+    });
+    this.footnoteReferenceDecoration = vscode.window.createTextEditorDecorationType({
+      color: colorValue(style.footnoteRefColor),
+      fontWeight: style.fontWeight,
+      textDecoration: 'none',
+    });
+    this.footnoteDefinitionMarkerDecoration = vscode.window.createTextEditorDecorationType({
+      color: colorValue(style.footnoteDefColor),
+      fontWeight: style.fontWeight,
+      textDecoration: 'none',
     });
     this.figureTableLineDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: false,
-      backgroundColor: new vscode.ThemeColor(style.labelBg),
+      backgroundColor: colorValue(style.labelBg),
     });
+    for (let level = 2; level <= 6; level++) {
+      this.sectionHeaderDecorations.set(
+        level,
+        vscode.window.createTextEditorDecorationType({
+          isWholeLine: true,
+          backgroundColor: style.sectionHeaderBgByLevel[level - 2],
+        }),
+      );
+    }
     this.inlineReferenceDecoration = vscode.window.createTextEditorDecorationType({
-      color: new vscode.ThemeColor(style.inlineRefColor),
+      color: colorValue(style.inlineRefColor),
       fontWeight: style.fontWeight,
+      textDecoration: 'none',
     });
     this.structuralReferenceDecoration = vscode.window.createTextEditorDecorationType({
-      color: new vscode.ThemeColor(style.structuralRefColor),
+      color: colorValue(style.structuralRefColor),
       fontWeight: style.fontWeight,
-      textDecoration: 'underline',
+      textDecoration: 'none',
     });
     this.labelDefinitionDecoration = vscode.window.createTextEditorDecorationType({
-      color: new vscode.ThemeColor(style.labelDefColor),
+      color: colorValue(style.labelDefColor),
       fontWeight: style.fontWeight,
+      textDecoration: 'none',
     });
     this.divFenceMarkerDecoration = vscode.window.createTextEditorDecorationType({
-      color: new vscode.ThemeColor(style.divFenceColor),
+      color: colorValue(style.divFenceColor),
       fontWeight: style.fontWeight,
+      textDecoration: 'none',
     });
   }
 
@@ -193,7 +299,18 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const calloutRanges: vscode.Range[] = [];
     const divRanges: vscode.Range[] = [];
     const codeRanges: vscode.Range[] = [];
+    const tableRanges: vscode.Range[] = [];
+    const footnoteRanges: vscode.Range[] = [];
+    const footnoteRefRanges: vscode.Range[] = [];
+    const footnoteDefinitionMarkerRanges: vscode.Range[] = [];
     const lineHighlightRanges: vscode.Range[] = [];
+    const sectionHeaderRanges = new Map<number, vscode.Range[]>([
+      [2, []],
+      [3, []],
+      [4, []],
+      [5, []],
+      [6, []],
+    ]);
     const inlineRefRanges: vscode.Range[] = [];
     const structuralRefRanges: vscode.Range[] = [];
     const labelDefinitionRanges: vscode.Range[] = [];
@@ -212,6 +329,15 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const highlightInlineRefs = this.getHighlightInlineReferences();
     const highlightLabelDefs = this.getHighlightLabelDefinitions();
     const highlightDivFenceMarkers = this.getHighlightDivFenceMarkers();
+    const highlightSectionHeaders = this.getHighlightSectionHeaders();
+    const highlightTables = this.getHighlightTables();
+    const highlightFootnotes = this.getHighlightFootnotes();
+    const sectionHeaderRegex = /^(#{2,6})\s+\S+/;
+    const tableRowRegex = /^\s*\|.*\|\s*$/;
+    const tableAlignRegex = /^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*\|?\s*$/;
+    const footnoteStartRegex = /^\[\^[-\w:]+\]:/;
+    const footnoteRefRegex = /\[\^[-\w:]+\]/g;
+    const footnoteDefinitionMarkerRegex = /^\s*(\[\^[-\w:]+\]:)/;
 
     for (let line = 0; line < document.lineCount; line++) {
       const text = document.lineAt(line).text;
@@ -252,6 +378,84 @@ export class QmdChunkHighlighter implements vscode.Disposable {
             inFence = false;
           }
         }
+      }
+
+      if (highlightSectionHeaders && !inFence) {
+        const headerMatch = text.match(sectionHeaderRegex);
+        if (headerMatch) {
+          const level = headerMatch[1].length;
+          const ranges = sectionHeaderRanges.get(level);
+          if (ranges) {
+            ranges.push(new vscode.Range(
+              new vscode.Position(line, 0),
+              new vscode.Position(line, text.length),
+            ));
+          }
+        }
+      }
+
+      if (highlightTables && !inFence && tableRowRegex.test(text)) {
+        let end = line;
+        while (end + 1 < document.lineCount && tableRowRegex.test(document.lineAt(end + 1).text)) {
+          end += 1;
+        }
+        const hasHeaderAndAlign =
+          end > line
+          && tableAlignRegex.test(document.lineAt(line + 1).text);
+        if (hasHeaderAndAlign) {
+          let blockEnd = end;
+          if (
+            blockEnd + 1 < document.lineCount
+            && /^\s*:\s+.*\{#tbl-[^}]+\}\s*$/.test(document.lineAt(blockEnd + 1).text)
+          ) {
+            blockEnd += 1;
+          }
+          tableRanges.push(new vscode.Range(
+            new vscode.Position(line, 0),
+            new vscode.Position(blockEnd, document.lineAt(blockEnd).text.length),
+          ));
+          line = blockEnd;
+          continue;
+        }
+      }
+
+      if (highlightFootnotes && !inFence && footnoteStartRegex.test(text.trim())) {
+        const markerMatch = text.match(footnoteDefinitionMarkerRegex);
+        if (markerMatch) {
+          const markerStart = (markerMatch.index ?? 0) + markerMatch[0].indexOf(markerMatch[1]);
+          footnoteDefinitionMarkerRanges.push(new vscode.Range(
+            new vscode.Position(line, markerStart),
+            new vscode.Position(line, markerStart + markerMatch[1].length),
+          ));
+        }
+        let end = line;
+        while (end + 1 < document.lineCount) {
+          const next = document.lineAt(end + 1).text;
+          if (next.trim().length === 0) {
+            end += 1;
+            continue;
+          }
+          if (/^\s+/.test(next)) {
+            end += 1;
+            continue;
+          }
+          break;
+        }
+        footnoteRanges.push(new vscode.Range(
+          new vscode.Position(line, 0),
+          new vscode.Position(end, document.lineAt(end).text.length),
+        ));
+      }
+
+      if (highlightFootnotes && !inFence) {
+        let footnoteMatch: RegExpExecArray | null;
+        while ((footnoteMatch = footnoteRefRegex.exec(text)) !== null) {
+          footnoteRefRanges.push(new vscode.Range(
+            new vscode.Position(line, footnoteMatch.index),
+            new vscode.Position(line, footnoteMatch.index + footnoteMatch[0].length),
+          ));
+        }
+        footnoteRefRegex.lastIndex = 0;
       }
 
       if (/#(fig-|tbl-|lst-)/.test(text)) {
@@ -321,8 +525,26 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.codeFenceDecoration) {
       editor.setDecorations(this.codeFenceDecoration, codeRanges);
     }
+    if (this.tableDecoration) {
+      editor.setDecorations(this.tableDecoration, tableRanges);
+    }
+    if (this.footnoteDecoration) {
+      editor.setDecorations(this.footnoteDecoration, footnoteRanges);
+    }
+    if (this.footnoteReferenceDecoration) {
+      editor.setDecorations(this.footnoteReferenceDecoration, footnoteRefRanges);
+    }
+    if (this.footnoteDefinitionMarkerDecoration) {
+      editor.setDecorations(this.footnoteDefinitionMarkerDecoration, footnoteDefinitionMarkerRanges);
+    }
     if (this.figureTableLineDecoration) {
       editor.setDecorations(this.figureTableLineDecoration, lineHighlightRanges);
+    }
+    for (let level = 2; level <= 6; level++) {
+      const decoration = this.sectionHeaderDecorations.get(level);
+      if (decoration) {
+        editor.setDecorations(decoration, sectionHeaderRanges.get(level) ?? []);
+      }
     }
     if (this.inlineReferenceDecoration) {
       editor.setDecorations(this.inlineReferenceDecoration, inlineRefRanges);
@@ -348,9 +570,24 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.codeFenceDecoration) {
       editor.setDecorations(this.codeFenceDecoration, []);
     }
+    if (this.tableDecoration) {
+      editor.setDecorations(this.tableDecoration, []);
+    }
+    if (this.footnoteDecoration) {
+      editor.setDecorations(this.footnoteDecoration, []);
+    }
+    if (this.footnoteReferenceDecoration) {
+      editor.setDecorations(this.footnoteReferenceDecoration, []);
+    }
+    if (this.footnoteDefinitionMarkerDecoration) {
+      editor.setDecorations(this.footnoteDefinitionMarkerDecoration, []);
+    }
     if (this.figureTableLineDecoration) {
       editor.setDecorations(this.figureTableLineDecoration, []);
     }
+    this.sectionHeaderDecorations.forEach(decoration => {
+      editor.setDecorations(decoration, []);
+    });
     if (this.inlineReferenceDecoration) {
       editor.setDecorations(this.inlineReferenceDecoration, []);
     }

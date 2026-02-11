@@ -1,16 +1,26 @@
 import * as vscode from 'vscode';
-import { PRECOMMIT_HOOKS, VALIDATE_ACTIONS } from '../constants';
+import { PRECOMMIT_CHECK_HOOKS, PRECOMMIT_FIXER_HOOKS, VALIDATE_ACTIONS } from '../constants';
 import { ActionTreeItem } from '../models/treeItems';
 
-export class PrecommitTreeProvider implements vscode.TreeDataProvider<ActionTreeItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<ActionTreeItem | undefined>();
+type TreeNode = ActionTreeItem | SeparatorItem;
+
+class SeparatorItem extends vscode.TreeItem {
+  constructor(label: string) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.description = '';
+    this.contextValue = 'separator';
+  }
+}
+
+export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> {
+  private _onDidChangeTreeData = new vscode.EventEmitter<TreeNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
-  getTreeItem(element: ActionTreeItem): vscode.TreeItem {
+  getTreeItem(element: TreeNode): vscode.TreeItem {
     return element;
   }
 
-  getChildren(): ActionTreeItem[] {
+  getChildren(): TreeNode[] {
     const runAll = new ActionTreeItem(
       'Run ALL Hooks',
       'mlsysbook.precommitRunAll',
@@ -18,14 +28,34 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<ActionTree
       'checklist',
     );
 
-    const hookItems = PRECOMMIT_HOOKS.map(h =>
+    const checkItems = PRECOMMIT_CHECK_HOOKS.map(h =>
       new ActionTreeItem(h.label, 'mlsysbook.precommitRunHook', [h.command], 'play')
+    );
+
+    const fixerItems = PRECOMMIT_FIXER_HOOKS.map(h =>
+      new ActionTreeItem(h.label, 'mlsysbook.precommitRunHook', [h.command], 'wrench')
+    );
+
+    const currentFileFixers = new ActionTreeItem(
+      'Run QMD Fixers (Current File)',
+      'mlsysbook.precommitRunFixersCurrentFile',
+      [],
+      'wand'
     );
 
     const validateItems = VALIDATE_ACTIONS.map(action =>
       new ActionTreeItem(action.label, 'mlsysbook.validateRunAction', [action.command], action.icon)
     );
 
-    return [runAll, ...hookItems, ...validateItems];
+    return [
+      runAll,
+      new SeparatorItem('--- Pre-commit Checks ---'),
+      ...checkItems,
+      new SeparatorItem('--- Fixers / Cleanup (Manual) ---'),
+      currentFileFixers,
+      ...fixerItems,
+      new SeparatorItem('--- Binder Validate (Fast, Focused) ---'),
+      ...validateItems,
+    ];
   }
 }
