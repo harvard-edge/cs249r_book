@@ -2,6 +2,32 @@
 engine: jupyter
 ---
 
+```{python}
+#| echo: false
+#| label: chapter-start
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHAPTER START
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter initialization and global imports
+# │
+# │ Why: Registers this chapter with the mlsys registry and provides shared
+# │      imports for all subsequent calculation cells.
+# │
+# │ Imports: mlsys.registry, mlsys.constants, mlsys.formatting
+# │ Exports: (none)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.registry import start_chapter
+from mlsys.constants import (
+    A100_MEM_CAPACITY, H100_MEM_CAPACITY,
+    NVLINK_A100_BW, NVLINK_H100_BW,
+    GPT3_PARAMS, GiB, GB, second, Mparam, THOUSAND,
+    SEC_PER_HOUR, SEC_PER_DAY, MILLION, TRILLION, BITS_PER_BYTE
+)
+from mlsys.formatting import fmt, sci, check
+
+start_chapter("vol2:distributed_training")
+```
+
 # Distributed Training Systems {#sec-distributed-training-systems-systems}
 
 ::: {layout-narrow}
@@ -39,20 +65,57 @@ Distributed training appears simple: split the work across machines and combine 
 ```{python}
 #| label: dist-train-setup
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DISTRIBUTED TRAINING SYSTEM CONSTANTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter-wide setup for Distributed Training.
+# │
+# │ Goal: Provide foundational specs for multi-node scaling analysis.
+# │ Show: GPU memory limits and interconnect bandwidth for distributed clusters.
+# │ How: Centralize A100/H100 specs and GPT-3 parameter counts.
+# │
+# │ Imports: mlsys.constants, mlsys.formatting
+# │ Exports: a100_mem, h100_mem, nvlink_*, gpt3_params_b
+# └─────────────────────────────────────────────────────────────────────────────
 
-from mlsys.constants import *
-from mlsys.formatting import fmt, sci
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DistTrainSetup:
+    """
+    Namespace for Distributed Training reference specs.
+    Scenario: GPU and interconnect parameters for large-scale clusters.
+    """
 
-# GPU specs
-a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
-h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Memory
+    a100_cap = A100_MEM_CAPACITY
+    h100_cap = H100_MEM_CAPACITY
 
-# Interconnects
-nvlink_a100 = f"{NVLINK_A100_BW.to(GB/second).magnitude:.0f}"
-nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
+    # Interconnect
+    nvlink_a100_raw = NVLINK_A100_BW
+    nvlink_h100_raw = NVLINK_H100_BW
 
-# Models
-gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+    # Models
+    gpt3_params_raw = GPT3_PARAMS
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    gpt3_params_b_val = gpt3_params_raw.to(Mparam).magnitude / THOUSAND
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(gpt3_params_b_val == 175, f"GPT-3 should be 175B params, got {gpt3_params_b_val}")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    a100_mem = f"{a100_cap.to(GiB).magnitude:.0f}"
+    h100_mem = f"{h100_cap.to(GiB).magnitude:.0f}"
+    nvlink_a100 = f"{nvlink_a100_raw.to(GB/second).magnitude:.0f}"
+    nvlink_h100 = f"{nvlink_h100_raw.to(GB/second).magnitude:.0f}"
+    gpt3_params_b = f"{gpt3_params_b_val:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_mem = DistTrainSetup.a100_mem
+h100_mem = DistTrainSetup.h100_mem
+nvlink_a100 = DistTrainSetup.nvlink_a100
+nvlink_h100 = DistTrainSetup.nvlink_h100
+gpt3_params_b = DistTrainSetup.gpt3_params_b
 ```
 
 ## Multi-Machine Scaling Fundamentals {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
@@ -775,9 +838,9 @@ The 64-GPU BSP configuration achieves 40$\times$ speedup despite only 91% sample
 
 **Cost Analysis** (assuming \$3/GPU-hour):
 
-- 8 GPU: 12.8K iters $\times$ 0.4s/iter $\times$ 8 GPUs / 3600 $\times$ \$3 = \$34
-- 64 GPU BSP: 1.72K iters $\times$ 0.58s/iter $\times$ 64 GPUs / 3600 $\times$ \$3 = \$53
-- 64 GPU SSP: 2.1K iters $\times$ 0.50s/iter $\times$ 64 GPUs / 3600 $\times$ \$3 = \$56
+- 8 GPU: 12.8K iters $\times$ 0.4s/iter $\times$ 8 GPUs / SEC_PER_HOUR $\times$ \$3 = \$34
+- 64 GPU BSP: 1.72K iters $\times$ 0.58s/iter $\times$ 64 GPUs / SEC_PER_HOUR $\times$ \$3 = \$53
+- 64 GPU SSP: 2.1K iters $\times$ 0.50s/iter $\times$ 64 GPUs / SEC_PER_HOUR $\times$ \$3 = \$56
 
 Despite higher parallelism, 64-GPU training costs more per run due to communication overhead and reduced sample efficiency. The 8-GPU configuration is more cost-efficient but takes 6$\times$ longer wall-clock time. The choice depends on whether minimizing cost or minimizing time-to-result is the priority.
 
@@ -2177,7 +2240,139 @@ Engineers use gradient accumulation to simulate larger batch sizes, reducing syn
 
 **Pitfall:** ***Using fixed checkpoint intervals regardless of system characteristics.***
 
-Engineers checkpoint distributed training "every hour" or "every 1000 steps" based on intuition rather than analysis. In production, optimal checkpoint frequency depends on the mathematical relationship between checkpoint cost and failure rate. The Young-Daly formula establishes the optimal checkpoint interval as $T_{opt} = \sqrt{2 \times C \times MTBF}$, where $C$ is checkpoint time and MTBF is mean time between failures. For a 512-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is $T_{opt} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49$ minutes. Checkpointing every 15 minutes "to be safe" wastes 5.4% of compute time on unnecessary checkpoint overhead, while checkpointing every 2 hours risks losing 1.8 hours of work on failure (2 hours minus 49 minutes since last checkpoint). For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, optimal interval becomes 85 minutes, not the "more frequent is better" assumption that drives some teams to checkpoint every 30 minutes and waste 33% more time on checkpointing than necessary. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster at $2/GPU-hour loses $3400 per day to excessive checkpointing when using 30-minute intervals instead of optimal 85-minute intervals.
+Engineers checkpoint distributed training "every hour" or "every 1000 steps" based on intuition rather than analysis. In production, optimal checkpoint frequency depends on the mathematical relationship between checkpoint cost and failure rate.
+
+```{python}
+
+#| label: young-daly-calc
+
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+
+# │ YOUNG-DALY OPTIMAL CHECKPOINT CALCULATION
+
+# ├─────────────────────────────────────────────────────────────────────────────
+
+# │ Context: "Optimal Checkpointing" section
+
+# │
+
+# │ Goal: Quantify the optimal tradeoff between checkpoint overhead and rework.
+
+# │ Show: That frequent checkpointing wastes compute while rare ones risk work.
+
+# │ How: Apply Young-Daly formula (sqrt(2*C*MTBF)) for a 1024-GPU cluster.
+
+# │
+
+# │ Imports: mlsys.constants, mlsys.formatting
+
+# │ Exports: t_opt_min_str, total_loss_pct_str
+
+# └─────────────────────────────────────────────────────────────────────────────
+
+import math
+
+
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+
+class YoungDaly:
+
+    """
+
+    Namespace for Young-Daly Checkpoint Optimization.
+
+    Scenario: 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time.
+
+    """
+
+
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+
+    t_save_min = 5.0
+
+    cluster_mtbf_hr = 4.0
+
+    num_gpus = 1024
+
+    gpu_cost_hr = 2.0
+
+
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+
+    # T_opt = sqrt(2 * C * MTBF)
+
+    # Convert all to minutes
+
+    c_min = t_save_min
+
+    mtbf_min = cluster_mtbf_hr * 60
+
+
+
+    t_opt_min = math.sqrt(2 * c_min * mtbf_min)
+
+
+
+    # Overhead: (C / T_opt) + (T_opt / 2 * MTBF)
+
+    # (Simplified Young-Daly first-order approximation)
+
+    ckpt_overhead = c_min / t_opt_min
+
+    rework_overhead = (t_opt_min / 2) / mtbf_min
+
+    total_overhead = ckpt_overhead + rework_overhead
+
+
+
+    # Daily dollar loss due to suboptimal (30 min) vs optimal
+
+    # (Context for the text argument)
+
+    daily_cost = num_gpus * gpu_cost_hr * 24
+
+    loss_30min = ((c_min / 30) + (30 / (2 * 60 * cluster_mtbf_hr))) * daily_cost
+
+    loss_opt = total_overhead * daily_cost
+
+    diff_daily = loss_30min - loss_opt
+
+
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+
+    check(40 <= t_opt_min <= 60, f"Optimal interval ({t_opt_min:.1f}m) out of expected range.")
+
+
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+
+    t_opt_min_str = fmt(t_opt_min, precision=0)
+
+    loss_pct_str = fmt(total_overhead * 100, precision=1)
+
+    daily_savings_str = fmt(diff_daily, precision=0, commas=True)
+
+
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+
+t_opt_min_str = YoungDaly.t_opt_min_str
+
+total_loss_pct_str = YoungDaly.loss_pct_str
+
+daily_savings_str = YoungDaly.daily_savings_str
+
+```
+
+The Young-Daly formula establishes the optimal checkpoint interval as $T_{opt} = \sqrt{2 \times C \times MTBF}$, where $C$ is checkpoint time and MTBF is mean time between failures. For a 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is approximately **`{python} t_opt_min_str` minutes**.
+
+ Checkpointing every 15 minutes "to be safe" wastes `{python} total_loss_pct_str` % of compute time on unnecessary checkpoint overhead, while checkpointing every 2 hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} daily_savings_str` per day** to excessive checkpointing when using arbitrary intervals instead of the Young-Daly optimal.
 
 ## Summary {#sec-distributed-training-systems-systems-summary-6140}
 
