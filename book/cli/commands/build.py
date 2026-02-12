@@ -1387,3 +1387,68 @@ class BuildCommand:
                 console.print(f"[red]❌ Error restoring config: {e}[/red]")
         else:
             console.print("[yellow]⚠️ No backup file found - config may already be restored[/yellow]")
+
+    def reset_build_config(self, format_type: str, volume: Optional[str] = None) -> bool:
+        """Reset build config by uncommenting all chapter entries.
+
+        For PDF/EPUB this restores commented chapter lists.
+        For HTML this also removes temporary `render:` sections used for fast builds.
+
+        Args:
+            format_type: Format to reset ('html', 'pdf', 'epub')
+            volume: Optional specific volume ('vol1' or 'vol2'). If omitted, reset both volumes.
+
+        Returns:
+            True if at least one config was reset successfully.
+        """
+        format_type = format_type.lower()
+        if format_type not in {"html", "pdf", "epub"}:
+            console.print(f"[red]❌ Unsupported format for reset: {format_type}[/red]")
+            return False
+
+        def _candidate_configs() -> List[Path]:
+            if volume:
+                return [self.config_manager.get_config_file(format_type, volume)]
+
+            # Reset all known volume configs for the selected format.
+            if format_type == "html":
+                return [self.config_manager.html_vol1_config, self.config_manager.html_vol2_config]
+            if format_type == "pdf":
+                return [self.config_manager.pdf_vol1_config, self.config_manager.pdf_vol2_config]
+            return [self.config_manager.epub_vol1_config, self.config_manager.epub_vol2_config]
+
+        targets = _candidate_configs()
+        reset_count = 0
+
+        for cfg in targets:
+            if not cfg.exists():
+                console.print(f"[yellow]⚠️ Skipping missing config: {cfg.name}[/yellow]")
+                continue
+
+            try:
+                original_content = cfg.read_text(encoding="utf-8")
+                reset_content = self._reset_config_comments(original_content)
+
+                if format_type == "html":
+                    # HTML fast builds can leave temporary render sections in place.
+                    cfg.write_text(reset_content, encoding="utf-8")
+                    self._remove_render_section(cfg)
+                else:
+                    cfg.write_text(reset_content, encoding="utf-8")
+
+                backup_file = cfg.with_suffix(".backup")
+                if backup_file.exists():
+                    backup_file.unlink()
+
+                reset_count += 1
+                console.print(f"[green]✓[/green] Reset config: {cfg.name}")
+            except Exception as e:
+                console.print(f"[red]❌ Failed to reset {cfg.name}: {e}[/red]")
+
+        if reset_count == 0:
+            console.print("[red]❌ No configs were reset.[/red]")
+            return False
+
+        scope = volume if volume else "all volumes"
+        console.print(f"[green]✅ Reset {format_type.upper()} build config for {scope}[/green]")
+        return True

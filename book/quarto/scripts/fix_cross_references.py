@@ -405,22 +405,31 @@ def main():
     if len(sys.argv) == 1:
         # MODE 1: Running as Quarto post-render hook
         # Detect if this is HTML or EPUB build
-        html_dir = Path("_build/html")
-        epub_dir = Path("_build/epub")
+        build_root = Path("_build")
+        html_candidates = sorted(
+            [p for p in build_root.glob("html*") if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        epub_candidates = sorted(
+            [p for p in build_root.glob("epub*") if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
 
         # Determine build type
         epub_mapping = None
-        if html_dir.exists() and (html_dir / "index.html").exists():
-            build_dir = html_dir
+        if html_candidates:
+            build_dir = html_candidates[0]
             file_pattern = "*.html"
             file_type = "HTML"
-        elif epub_dir.exists() and list(epub_dir.glob("*.xhtml")):
-            build_dir = epub_dir
+        elif epub_candidates and list(epub_candidates[0].glob("*.xhtml")):
+            build_dir = epub_candidates[0]
             file_pattern = "*.xhtml"
             file_type = "XHTML (EPUB)"
             # Build EPUB section mapping for dynamic chapter references
             print("📚 Building EPUB section mapping...")
-            epub_mapping = build_epub_section_mapping(epub_dir)
+            epub_mapping = build_epub_section_mapping(build_dir)
             print(f"   Found {len(epub_mapping)} section IDs across chapters")
         # Check for extracted EPUB structure (EPUB/ directory at current level)
         elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):

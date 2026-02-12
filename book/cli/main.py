@@ -88,6 +88,7 @@ class MLSysBookCLI:
 
         fast_table.add_row("build [fmt] [chapter[,ch2,...]]", "Build HTML/PDF/EPUB by format", "./binder build pdf intro")
         fast_table.add_row("preview [chapter[,ch2,...]]", "Start live dev server with hot reload", "./binder preview intro")
+        fast_table.add_row("pdf|epub|html reset [--vol1|--vol2]", "Reset commented files in config", "./binder pdf reset --vol1")
 
         # Volume Commands
         vol_table = Table(show_header=True, header_style="bold magenta", box=None)
@@ -249,6 +250,26 @@ class MLSysBookCLI:
         if format_type == "html":
             return self.build_command.build_full("html")
         return self.build_command.build_full(format_type)
+
+    def handle_format_reset_command(self, format_type: str, args) -> bool:
+        """Handle shorthand reset command, e.g. ./binder pdf reset --vol1."""
+        if not args:
+            console.print(f"[red]❌ Usage: ./binder {format_type} reset [--vol1|--vol2][/red]")
+            return False
+
+        action = args[0].lower()
+        if action != "reset":
+            console.print(f"[red]❌ Unknown {format_type} subcommand: {action}[/red]")
+            console.print(f"[yellow]💡 Supported: ./binder {format_type} reset [--vol1|--vol2][/yellow]")
+            return False
+
+        volume = None
+        if "--vol1" in args[1:]:
+            volume = "vol1"
+        elif "--vol2" in args[1:]:
+            volume = "vol2"
+
+        return self.build_command.reset_build_config(format_type, volume)
 
     def handle_preview_command(self, args):
         """Handle preview command."""
@@ -432,9 +453,7 @@ class MLSysBookCLI:
             return False
 
         if command in ("html", "pdf", "epub"):
-            console.print(f"[red]❌ Top-level '{command}' command was removed.[/red]")
-            console.print(f"[yellow]💡 Use: ./binder build {command} ...[/yellow]")
-            return False
+            return self.handle_format_reset_command(command, command_args)
 
         if command in commands:
             try:

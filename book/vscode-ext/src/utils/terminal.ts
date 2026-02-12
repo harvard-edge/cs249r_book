@@ -45,9 +45,8 @@ function ensureContext(): vscode.ExtensionContext | undefined {
 }
 
 function getExecutionMode(): ExecutionMode {
-  return vscode.workspace
-    .getConfiguration('mlsysbook')
-    .get<ExecutionMode>('executionMode', 'focused');
+  // MLSysBook runs in raw mode by design to guarantee immediate terminal feedback.
+  return 'raw';
 }
 
 function shouldRevealOnFailure(): boolean {
@@ -124,7 +123,7 @@ export async function runBookCommand(command: string, cwd: string, options: RunO
 
   if (mode === 'raw') {
     const terminal = getOrCreateTerminal(cwd);
-    terminal.show(true);
+    terminal.show(false);
     terminal.sendText(command);
     getOutputChannel().appendLine(`[run ${runId}] RAW started: ${label}`);
     getOutputChannel().appendLine(`Command: ${command}`);
@@ -195,7 +194,7 @@ export async function runBookCommand(command: string, cwd: string, options: RunO
 
   if (selected === 'Reveal Terminal') {
     const terminal = getOrCreateTerminal(cwd);
-    terminal.show(true);
+    terminal.show(false);
     terminal.sendText(`# Last failed command:\n${command}`);
     return;
   }
@@ -212,6 +211,20 @@ export function runInTerminal(command: string, cwd: string): void {
   void runBookCommand(command, cwd, { mode: 'raw' });
 }
 
+export function runInVisibleTerminal(command: string, cwd: string, label = 'MLSysBook command'): void {
+  const terminal = getOrCreateTerminal(cwd);
+  terminal.show(false);
+  terminal.sendText(command);
+  storeLastCommand({
+    command,
+    cwd,
+    label,
+    timestamp: new Date().toISOString(),
+  });
+  getOutputChannel().appendLine(`[direct] ${label}`);
+  getOutputChannel().appendLine(`Command: ${command}`);
+}
+
 export function revealRunTerminal(cwd?: string): void {
   const fallbackCwd = cwd ?? getLastCommand()?.cwd ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   if (!fallbackCwd) {
@@ -219,7 +232,7 @@ export function revealRunTerminal(cwd?: string): void {
     return;
   }
   const terminal = getOrCreateTerminal(fallbackCwd);
-  terminal.show(true);
+  terminal.show(false);
 }
 
 export async function rerunLastCommand(forceRaw: boolean): Promise<void> {
@@ -254,18 +267,8 @@ export function showLastFailureDetails(): void {
 }
 
 export async function setExecutionModeInteractively(): Promise<void> {
-  const current = getExecutionMode();
-  const pick = await vscode.window.showQuickPick(
-    [
-      { label: 'Focused (summary + concise notifications)', id: 'focused' as ExecutionMode },
-      { label: 'Raw (always show integrated terminal logs)', id: 'raw' as ExecutionMode },
-    ],
-    { placeHolder: `Current mode: ${current}` },
-  );
-  if (!pick) { return; }
-
   await vscode.workspace
     .getConfiguration('mlsysbook')
-    .update('executionMode', pick.id, vscode.ConfigurationTarget.Workspace);
-  vscode.window.showInformationMessage(`MLSysBook execution mode set to: ${pick.id}`);
+    .update('executionMode', 'raw', vscode.ConfigurationTarget.Workspace);
+  vscode.window.showInformationMessage('MLSysBook execution mode is fixed to: raw');
 }
