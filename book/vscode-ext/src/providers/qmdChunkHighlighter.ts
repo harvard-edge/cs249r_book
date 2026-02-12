@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { resolveHighlightStyle, type QmdColorOverrides, type VisualPreset } from './qmdHighlightPalette';
 
 function isQmdEditor(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
   return Boolean(editor && editor.document.uri.fsPath.endsWith('.qmd'));
@@ -9,41 +10,10 @@ interface BlockRange {
   end: number;
 }
 
-type VisualPreset = 'subtle' | 'balanced' | 'highContrast';
-
 function colorValue(value: string): vscode.ThemeColor | string {
   return value.startsWith('rgba(') || value.startsWith('#')
     ? value
     : new vscode.ThemeColor(value);
-}
-
-interface QmdColorOverrides {
-  sectionH2Bg?: string;
-  sectionH3Bg?: string;
-  sectionH4Bg?: string;
-  sectionH5Bg?: string;
-  sectionH6Bg?: string;
-  figureLineBg?: string;
-  tableLineBg?: string;
-  listingLineBg?: string;
-  tableBg?: string;
-  footnoteBg?: string;
-  inlineRefColor?: string;
-  structuralRefColor?: string;
-  sectionRefColor?: string;
-  figureRefColor?: string;
-  tableRefColor?: string;
-  listingRefColor?: string;
-  equationRefColor?: string;
-  sectionLabelDefColor?: string;
-  figureLabelDefColor?: string;
-  tableLabelDefColor?: string;
-  listingLabelDefColor?: string;
-  equationLabelDefColor?: string;
-  labelDefColor?: string;
-  divFenceColor?: string;
-  footnoteRefColor?: string;
-  footnoteDefColor?: string;
 }
 
 export class QmdChunkHighlighter implements vscode.Disposable {
@@ -255,176 +225,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     this.divFenceMarkerDecoration?.dispose();
 
     const preset = this.getVisualPreset();
-
-    const styleByPreset: Record<VisualPreset, {
-      calloutBg: string;
-      divBg: string;
-      codeBg: string;
-      labelBg: string;
-      figureLineBg: string;
-      tableLineBg: string;
-      listingLineBg: string;
-      tableBg: string;
-      footnoteBg: string;
-      footnoteRefColor: string;
-      footnoteDefColor: string;
-      inlineRefColor: string;
-      structuralRefColor: string;
-      sectionRefColor: string;
-      figureRefColor: string;
-      tableRefColor: string;
-      listingRefColor: string;
-      equationRefColor: string;
-      sectionLabelDefColor: string;
-      figureLabelDefColor: string;
-      tableLabelDefColor: string;
-      listingLabelDefColor: string;
-      equationLabelDefColor: string;
-      labelDefColor: string;
-      divFenceColor: string;
-      fontWeight: 'normal' | '500' | '600';
-      sectionHeaderBgByLevel: [string, string, string, string, string];
-    }> = {
-      subtle: {
-        calloutBg: 'rgba(56, 139, 253, 0.06)',
-        divBg: 'rgba(148, 163, 184, 0.04)',
-        codeBg: 'rgba(99, 102, 241, 0.04)',
-        labelBg: 'rgba(116, 162, 255, 0.10)',
-        figureLineBg: 'rgba(56, 189, 248, 0.20)',
-        tableLineBg: 'rgba(34, 197, 94, 0.19)',
-        listingLineBg: 'rgba(249, 115, 22, 0.17)',
-        tableBg: 'rgba(16, 185, 129, 0.08)',
-        footnoteBg: 'rgba(167, 139, 250, 0.09)',
-        footnoteRefColor: 'editorWarning.foreground',
-        footnoteDefColor: 'editorWarning.foreground',
-        inlineRefColor: 'editorInfo.foreground',
-        structuralRefColor: 'textLink.foreground',
-        sectionRefColor: '#7aa2f7',
-        figureRefColor: '#22d3ee',
-        tableRefColor: '#34d399',
-        listingRefColor: '#fb923c',
-        equationRefColor: '#c084fc',
-        sectionLabelDefColor: '#7aa2f7',
-        figureLabelDefColor: '#22d3ee',
-        tableLabelDefColor: '#34d399',
-        listingLabelDefColor: '#fb923c',
-        equationLabelDefColor: '#c084fc',
-        labelDefColor: 'editorInfo.foreground',
-        divFenceColor: 'editorInfo.foreground',
-        fontWeight: 'normal',
-        sectionHeaderBgByLevel: [
-          'rgba(88, 166, 255, 0.12)',
-          'rgba(88, 166, 255, 0.09)',
-          'rgba(88, 166, 255, 0.07)',
-          'rgba(88, 166, 255, 0.05)',
-          'rgba(88, 166, 255, 0.03)',
-        ],
-      },
-      balanced: {
-        calloutBg: 'rgba(56, 139, 253, 0.09)',
-        divBg: 'rgba(148, 163, 184, 0.06)',
-        codeBg: 'rgba(99, 102, 241, 0.06)',
-        labelBg: 'rgba(116, 162, 255, 0.14)',
-        figureLineBg: 'rgba(56, 189, 248, 0.26)',
-        tableLineBg: 'rgba(34, 197, 94, 0.24)',
-        listingLineBg: 'rgba(249, 115, 22, 0.22)',
-        tableBg: 'rgba(16, 185, 129, 0.12)',
-        footnoteBg: 'rgba(167, 139, 250, 0.16)',
-        footnoteRefColor: 'editorWarning.foreground',
-        footnoteDefColor: 'editorWarning.foreground',
-        inlineRefColor: 'textLink.foreground',
-        structuralRefColor: 'editorInfo.foreground',
-        sectionRefColor: '#9ab5ff',
-        figureRefColor: '#67e8f9',
-        tableRefColor: '#6ee7b7',
-        listingRefColor: '#fdba74',
-        equationRefColor: '#d8b4fe',
-        sectionLabelDefColor: '#9ab5ff',
-        figureLabelDefColor: '#67e8f9',
-        tableLabelDefColor: '#6ee7b7',
-        listingLabelDefColor: '#fdba74',
-        equationLabelDefColor: '#d8b4fe',
-        labelDefColor: 'editorInfo.foreground',
-        divFenceColor: 'editorInfo.foreground',
-        fontWeight: '500',
-        sectionHeaderBgByLevel: [
-          'rgba(88, 166, 255, 0.16)',
-          'rgba(88, 166, 255, 0.12)',
-          'rgba(88, 166, 255, 0.09)',
-          'rgba(88, 166, 255, 0.07)',
-          'rgba(88, 166, 255, 0.05)',
-        ],
-      },
-      highContrast: {
-        calloutBg: 'rgba(56, 139, 253, 0.13)',
-        divBg: 'rgba(148, 163, 184, 0.10)',
-        codeBg: 'rgba(99, 102, 241, 0.10)',
-        labelBg: 'rgba(116, 162, 255, 0.20)',
-        figureLineBg: 'rgba(56, 189, 248, 0.32)',
-        tableLineBg: 'rgba(34, 197, 94, 0.30)',
-        listingLineBg: 'rgba(249, 115, 22, 0.28)',
-        tableBg: 'rgba(16, 185, 129, 0.18)',
-        footnoteBg: 'rgba(167, 139, 250, 0.24)',
-        footnoteRefColor: 'editorWarning.foreground',
-        footnoteDefColor: 'editorWarning.foreground',
-        inlineRefColor: 'textLink.foreground',
-        structuralRefColor: 'editorInfo.foreground',
-        sectionRefColor: '#b7c9ff',
-        figureRefColor: '#a5f3fc',
-        tableRefColor: '#86efac',
-        listingRefColor: '#fdc58a',
-        equationRefColor: '#e9d5ff',
-        sectionLabelDefColor: '#b7c9ff',
-        figureLabelDefColor: '#a5f3fc',
-        tableLabelDefColor: '#86efac',
-        listingLabelDefColor: '#fdc58a',
-        equationLabelDefColor: '#e9d5ff',
-        labelDefColor: 'editorInfo.foreground',
-        divFenceColor: 'textLink.foreground',
-        fontWeight: '600',
-        sectionHeaderBgByLevel: [
-          'rgba(88, 166, 255, 0.24)',
-          'rgba(88, 166, 255, 0.18)',
-          'rgba(88, 166, 255, 0.14)',
-          'rgba(88, 166, 255, 0.10)',
-          'rgba(88, 166, 255, 0.07)',
-        ],
-      },
-    };
-
-    const baseStyle = styleByPreset[preset];
-    const override = this.getColorOverrides();
-    const style = {
-      ...baseStyle,
-      figureLineBg: override.figureLineBg ?? baseStyle.figureLineBg,
-      tableLineBg: override.tableLineBg ?? baseStyle.tableLineBg,
-      listingLineBg: override.listingLineBg ?? baseStyle.listingLineBg,
-      tableBg: override.tableBg ?? baseStyle.tableBg,
-      footnoteBg: override.footnoteBg ?? baseStyle.footnoteBg,
-      inlineRefColor: override.inlineRefColor ?? baseStyle.inlineRefColor,
-      structuralRefColor: override.structuralRefColor ?? baseStyle.structuralRefColor,
-      sectionRefColor: override.sectionRefColor ?? baseStyle.sectionRefColor,
-      figureRefColor: override.figureRefColor ?? baseStyle.figureRefColor,
-      tableRefColor: override.tableRefColor ?? baseStyle.tableRefColor,
-      listingRefColor: override.listingRefColor ?? baseStyle.listingRefColor,
-      equationRefColor: override.equationRefColor ?? baseStyle.equationRefColor,
-      sectionLabelDefColor: override.sectionLabelDefColor ?? baseStyle.sectionLabelDefColor,
-      figureLabelDefColor: override.figureLabelDefColor ?? baseStyle.figureLabelDefColor,
-      tableLabelDefColor: override.tableLabelDefColor ?? baseStyle.tableLabelDefColor,
-      listingLabelDefColor: override.listingLabelDefColor ?? baseStyle.listingLabelDefColor,
-      equationLabelDefColor: override.equationLabelDefColor ?? baseStyle.equationLabelDefColor,
-      labelDefColor: override.labelDefColor ?? baseStyle.labelDefColor,
-      divFenceColor: override.divFenceColor ?? baseStyle.divFenceColor,
-      footnoteRefColor: override.footnoteRefColor ?? baseStyle.footnoteRefColor,
-      footnoteDefColor: override.footnoteDefColor ?? baseStyle.footnoteDefColor,
-      sectionHeaderBgByLevel: [
-        override.sectionH2Bg ?? baseStyle.sectionHeaderBgByLevel[0],
-        override.sectionH3Bg ?? baseStyle.sectionHeaderBgByLevel[1],
-        override.sectionH4Bg ?? baseStyle.sectionHeaderBgByLevel[2],
-        override.sectionH5Bg ?? baseStyle.sectionHeaderBgByLevel[3],
-        override.sectionH6Bg ?? baseStyle.sectionHeaderBgByLevel[4],
-      ] as [string, string, string, string, string],
-    };
+    const style = resolveHighlightStyle(preset, this.getColorOverrides());
 
     this.calloutDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
@@ -635,6 +436,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const footnoteStartRegex = /^\[\^[-\w:]+\]:/;
     const footnoteRefRegex = /\[\^[-\w:]+\]/g;
     const footnoteDefinitionMarkerRegex = /^\s*(\[\^[-\w:]+\]:)/;
+    const figureLabelLineRegex = /^\s*(?::\s+.*\{#fig-[^}]+\}.*|\{#fig-[^}]+\}\s*$|#\|\s*(?:label|fig-label):\s*fig-[A-Za-z0-9_:-]+\s*)$/;
+    const tableLabelLineRegex = /^\s*(?::\s+.*\{#tbl-[^}]+\}.*|\{#tbl-[^}]+\}\s*$|#\|\s*(?:label|tbl-label):\s*tbl-[A-Za-z0-9_:-]+\s*)$/;
+    const listingLabelLineRegex = /^\s*(?::\s+.*\{#lst-[^}]+\}.*|\{#lst-[^}]+\}\s*$|#\|\s*(?:label|lst-label):\s*lst-[A-Za-z0-9_:-]+\s*)$/;
 
     for (let line = 0; line < document.lineCount; line++) {
       const text = document.lineAt(line).text;
@@ -765,7 +569,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         footnoteRefRegex.lastIndex = 0;
       }
 
-      if (/#fig-/.test(text)) {
+      // Blob emphasis only for dedicated label-definition lines, not prose lines
+      // that happen to embed labels inline.
+      if (figureLabelLineRegex.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),
@@ -773,7 +579,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         figureLineRanges.push(range);
       }
 
-      if (/#tbl-/.test(text)) {
+      if (tableLabelLineRegex.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),
@@ -781,7 +587,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         tableLineRanges.push(range);
       }
 
-      if (/#lst-/.test(text)) {
+      if (listingLabelLineRegex.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),

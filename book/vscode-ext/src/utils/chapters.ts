@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ChapterInfo, ChapterOrderSource, VolumeId, VolumeInfo } from '../types';
 
-const EXCLUDED_DIRS = new Set(['frontmatter', 'backmatter', 'parts', 'glossary']);
+const EXCLUDED_CHAPTER_DIRS = new Set(['frontmatter', 'backmatter', 'parts', 'glossary']);
+const APPENDIX_FILE_REGEX = /^appendix[_-].+\.qmd$/i;
 
 function toDisplayName(dirName: string): string {
   return dirName
@@ -35,9 +36,9 @@ function getConfigCandidates(vol: VolumeId, source: ChapterOrderSource): string[
 
 function readChapterOrderFromConfig(repoRoot: string, vol: VolumeId, source: ChapterOrderSource): string[] {
   const configDir = path.join(repoRoot, 'book', 'quarto', 'config');
-  const chapterDirNames: string[] = [];
+  const chapterOrderKeys: string[] = [];
   const seen = new Set<string>();
-  const chapterRegex = new RegExp(`contents/${vol}/([^/]+)/[^\\s]+\\.qmd`, 'g');
+  const chapterPathRegex = new RegExp(`contents/${vol}/([^\\s]+\\.qmd)`, 'g');
 
   for (const fileName of getConfigCandidates(vol, source)) {
     const configPath = path.join(configDir, fileName);
@@ -47,21 +48,43 @@ function readChapterOrderFromConfig(repoRoot: string, vol: VolumeId, source: Cha
 
     const text = fs.readFileSync(configPath, 'utf8');
     let match: RegExpExecArray | null;
-    while ((match = chapterRegex.exec(text)) !== null) {
-      const dirName = match[1];
-      if (EXCLUDED_DIRS.has(dirName) || seen.has(dirName)) {
+    while ((match = chapterPathRegex.exec(text)) !== null) {
+      const chapterPath = match[1];
+      const segments = chapterPath.split('/');
+      if (segments.length < 2) {
+        continue;
+      }
+
+      // Backmatter appendix files: contents/volX/backmatter/appendix_foo.qmd
+      if (segments[0] === 'backmatter' && segments.length === 2) {
+        const fileNameOnly = segments[1];
+        if (!APPENDIX_FILE_REGEX.test(fileNameOnly)) {
+          continue;
+        }
+        const appendixStem = fileNameOnly.replace(/\.qmd$/i, '');
+        if (seen.has(appendixStem)) {
+          continue;
+        }
+        seen.add(appendixStem);
+        chapterOrderKeys.push(appendixStem);
+        continue;
+      }
+
+      // Regular chapter directories: contents/volX/<chapter-dir>/<file>.qmd
+      const dirName = segments[0];
+      if (EXCLUDED_CHAPTER_DIRS.has(dirName) || seen.has(dirName)) {
         continue;
       }
       seen.add(dirName);
-      chapterDirNames.push(dirName);
+      chapterOrderKeys.push(dirName);
     }
 
-    if (chapterDirNames.length > 0) {
-      return chapterDirNames;
+    if (chapterOrderKeys.length > 0) {
+      return chapterOrderKeys;
     }
   }
 
-  return chapterDirNames;
+  return chapterOrderKeys;
 }
 
 export function discoverChapters(repoRoot: string): VolumeInfo[] {
@@ -78,8 +101,8 @@ export function discoverChapters(repoRoot: string): VolumeInfo[] {
     const chapterOrder = readChapterOrderFromConfig(repoRoot, vol, chapterOrderSource);
     const orderByName = new Map<string, number>(chapterOrder.map((name, index) => [name, index]));
 
-    const chapters: ChapterInfo[] = entries
-      .filter(e => e.isDirectory() && !EXCLUDED_DIRS.has(e.name))
+    const regularChapters: ChapterInfo[] = entries
+      .filter(e => e.isDirectory() && !EXCLUDED_CHAPTER_DIRS.has(e.name))
       .filter(e => {
         // Must contain a .qmd file to count as a chapter
         const dirPath = path.join(contentsDir, e.name);
@@ -90,7 +113,24 @@ export function discoverChapters(repoRoot: string): VolumeInfo[] {
         volume: vol,
         dirPath: path.join(contentsDir, e.name),
         displayName: toDisplayName(e.name),
-      }))
+      }));
+
+    const appendixDir = path.join(contentsDir, 'backmatter');
+    const appendixChapters: ChapterInfo[] = fs.existsSync(appendixDir)
+      ? fs.readdirSync(appendixDir, { withFileTypes: true })
+        .filter(entry => entry.isFile() && APPENDIX_FILE_REGEX.test(entry.name))
+        .map(entry => {
+          const appendixStem = entry.name.replace(/\.qmd$/i, '');
+          return {
+            name: appendixStem,
+            volume: vol,
+            dirPath: appendixDir,
+            displayName: toDisplayName(appendixStem),
+          };
+        })
+      : [];
+
+    const chapters: ChapterInfo[] = [...regularChapters, ...appendixChapters]
       .sort((a, b) => {
         const aOrder = orderByName.get(a.name);
         const bOrder = orderByName.get(b.name);

@@ -30,7 +30,7 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      void runBookCommand(`./book/binder preview ${ctx.chapter}`, root, {
+      void runBookCommand(`./book/binder preview ${ctx.volume}/${ctx.chapter}`, root, {
         label: `Preview (${ctx.volume}/${ctx.chapter})`,
       });
     }),

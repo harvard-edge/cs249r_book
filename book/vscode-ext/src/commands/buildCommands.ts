@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { VolumeId, BuildFormat } from '../types';
 import { getRepoRoot } from '../utils/workspace';
-import { runBookCommand } from '../utils/terminal';
+import { runInVisibleTerminal } from '../utils/terminal';
 
 export function registerBuildCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -12,9 +12,11 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildChapter${fmt}`, (vol: VolumeId, chapter: string) => {
-        void runBookCommand(`./book/binder build ${fmtLower} ${chapter} --${vol} -v`, root, {
-          label: `Build Chapter ${fmt.toUpperCase()} (${vol}/${chapter})`,
-        });
+        runInVisibleTerminal(
+          `./book/binder build ${fmtLower} ${chapter} --${vol} -v`,
+          root,
+          `Build Chapter ${fmt.toUpperCase()} (${vol}/${chapter})`,
+        );
       })
     );
   }
@@ -22,9 +24,11 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
   // Preview
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.previewChapter', (vol: VolumeId, chapter: string) => {
-      void runBookCommand(`./book/binder preview ${chapter}`, root, {
-        label: `Preview Chapter (${vol}/${chapter})`,
-      });
+      runInVisibleTerminal(
+        `./book/binder preview ${vol}/${chapter}`,
+        root,
+        `Preview Chapter (${vol}/${chapter})`,
+      );
     })
   );
 
@@ -33,9 +37,11 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
     const fmtLower = fmt.toLowerCase() as BuildFormat;
     context.subscriptions.push(
       vscode.commands.registerCommand(`mlsysbook.buildVolume${fmt}`, (vol: VolumeId) => {
-        void runBookCommand(`./book/binder build ${fmtLower} --${vol} -v`, root, {
-          label: `Build Volume ${fmt.toUpperCase()} (${vol})`,
-        });
+        runInVisibleTerminal(
+          `./book/binder build ${fmtLower} --${vol} -v`,
+          root,
+          `Build Volume ${fmt.toUpperCase()} (${vol})`,
+        );
       })
     );
   }

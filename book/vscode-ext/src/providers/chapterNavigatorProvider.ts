@@ -25,20 +25,24 @@ class NavigatorSectionItem extends vscode.TreeItem {
     uri: vscode.Uri,
     section: NavigatorSection,
     collapsibleState: vscode.TreeItemCollapsibleState,
+    visibleEntries: NavigatorEntry[],
   ) {
-    const entryCount = section.entries.length;
-    super(section.title, collapsibleState);
+    const entryCount = visibleEntries.length;
+    const effectiveState = entryCount === 0
+      ? vscode.TreeItemCollapsibleState.None
+      : collapsibleState;
+    super(section.title, effectiveState);
     this.sectionId = section.id;
     this.id = section.id;
     const depthLabel = section.level === 0 ? 'preamble' : `h${section.level}`;
-    const listingCount = section.entries.filter(entry => entry.kind === 'listing').length;
-    const figureCount = section.entries.filter(entry => entry.kind === 'figure').length;
-    const tableCount = section.entries.filter(entry => entry.kind === 'table').length;
+    const listingCount = visibleEntries.filter(entry => entry.kind === 'listing').length;
+    const figureCount = visibleEntries.filter(entry => entry.kind === 'figure').length;
+    const tableCount = visibleEntries.filter(entry => entry.kind === 'table').length;
     const counts: string[] = [];
     if (figureCount > 0) { counts.push(`${figureCount} fig`); }
     if (tableCount > 0) { counts.push(`${tableCount} tbl`); }
     if (listingCount > 0) { counts.push(`${listingCount} code`); }
-    const calloutCount = section.entries.filter(entry => entry.kind === 'callout').length;
+    const calloutCount = visibleEntries.filter(entry => entry.kind === 'callout').length;
     if (calloutCount > 0) { counts.push(`${calloutCount} callout`); }
     const countsText = counts.length > 0 ? ` · ${counts.join(' · ')}` : '';
     this.description = `${depthLabel} · L${section.line + 1} · ${entryCount} items${countsText}`;
@@ -55,7 +59,7 @@ class NavigatorSectionItem extends vscode.TreeItem {
 }
 
 class NavigatorEntryItem extends vscode.TreeItem {
-  constructor(uri: vscode.Uri, entry: NavigatorEntry, clickToOpen: boolean) {
+  constructor(uri: vscode.Uri, entry: NavigatorEntry) {
     super(`${entry.id}  ·  L${entry.line + 1}`, vscode.TreeItemCollapsibleState.None);
     this.description = entry.preview;
     this.tooltip = `${entry.id}\n${entry.preview}`;
@@ -69,13 +73,11 @@ class NavigatorEntryItem extends vscode.TreeItem {
             ? 'symbol-operator'
             : 'comment-discussion';
     this.iconPath = new vscode.ThemeIcon(icon);
-    if (clickToOpen) {
-      this.command = {
-        command: 'mlsysbook.openNavigatorLocation',
-        title: 'Open Location',
-        arguments: [uri, entry.line],
-      };
-    }
+    this.command = {
+      command: 'mlsysbook.openNavigatorLocation',
+      title: 'Open Location',
+      arguments: [uri, entry.line],
+    };
     this.contextValue = `navigator-entry-${entry.kind}`;
   }
 }
@@ -126,18 +128,33 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
     if (cached) {
       return cached;
     }
-    const state = this.forceExpanded
-      ? vscode.TreeItemCollapsibleState.Expanded
-      : vscode.TreeItemCollapsibleState.Collapsed;
-    const created = new NavigatorSectionItem(this.sourceUri!, section, state);
+    const visibleEntries = section.entries.filter(entry => this.isEntryVisible(entry.kind));
+    const hasChildSections = section.childSectionIds.some(childId => {
+      const child = this.sections.get(childId);
+      return child ? this.sectionHasVisibleContent(child) : false;
+    });
+    const hasVisibleChildren = hasChildSections || visibleEntries.length > 0;
+    const state = hasVisibleChildren
+      ? (this.forceExpanded
+        ? vscode.TreeItemCollapsibleState.Expanded
+        : vscode.TreeItemCollapsibleState.Collapsed)
+      : vscode.TreeItemCollapsibleState.None;
+    const created = new NavigatorSectionItem(this.sourceUri!, section, state, visibleEntries);
     this.sectionItems.set(section.id, created);
     return created;
   }
 
-  private shouldClickToOpen(): boolean {
-    return vscode.workspace
-      .getConfiguration('mlsysbook')
-      .get<boolean>('navigatorClickToOpen', false);
+  private sectionHasVisibleContent(section: NavigatorSection): boolean {
+    if (section.entries.some(entry => this.isEntryVisible(entry.kind))) {
+      return true;
+    }
+    for (const childId of section.childSectionIds) {
+      const child = this.sections.get(childId);
+      if (child && this.sectionHasVisibleContent(child)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   getChildren(element?: TreeNode): TreeNode[] {
@@ -149,6 +166,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       return this.topLevelSectionIds
         .map(id => this.sections.get(id))
         .filter((section): section is NavigatorSection => Boolean(section))
+        .filter(section => this.sectionHasVisibleContent(section))
         .map(section => this.getSectionItem(section));
     }
 
@@ -163,7 +181,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       const children: ChildRef[] = [];
       for (const childId of section.childSectionIds) {
         const child = this.sections.get(childId);
-        if (child) {
+        if (child && this.sectionHasVisibleContent(child)) {
           children.push({ type: 'section', line: child.line, section: child });
         }
       }
@@ -178,7 +196,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
       return children.map(child =>
         child.type === 'section'
           ? this.getSectionItem(child.section)
-          : new NavigatorEntryItem(this.sourceUri!, child.entry, this.shouldClickToOpen())
+          : new NavigatorEntryItem(this.sourceUri!, child.entry)
       );
     }
 
@@ -201,6 +219,7 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
   }
 
   refreshView(): void {
+    this.sectionItems.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 

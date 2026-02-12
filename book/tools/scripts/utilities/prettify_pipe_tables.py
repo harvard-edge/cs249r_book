@@ -157,11 +157,12 @@ def prettify_table(table_lines: list[str]) -> list[str]:
     for i, line in enumerate(table_lines):
         if i == separator_idx:
             # Build separator row
-            sep_cells = [make_separator_cell(alignments[j], col_widths[j]) 
+            # Data rows are rendered with one space on each side of cell
+            # content, so size separator cells to the same visual width.
+            sep_cells = [make_separator_cell(alignments[j], col_widths[j] + 2)
                         for j in range(num_cols)]
-            # Keep separator visually consistent with data rows by adding
-            # single-space padding around each separator cell.
-            result.append('| ' + ' | '.join(sep_cells) + ' |')
+            # Keep separator compact to avoid unnecessary spacing churn.
+            result.append('|' + '|'.join(sep_cells) + '|')
         else:
             # Build data row with padding
             if row_idx < len(rows):

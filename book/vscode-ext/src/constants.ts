@@ -38,7 +38,7 @@ export const PRECOMMIT_FIXER_HOOKS: PrecommitHook[] = [
   { id: 'book-collapse-blank-lines', label: 'Book: Collapse Extra Blank Lines', command: 'pre-commit run book-collapse-blank-lines --all-files' },
   { id: 'book-check-list-formatting', label: 'Book: Fix List Formatting', command: 'pre-commit run book-check-list-formatting --all-files' },
   { id: 'book-fix-bullet-spacing', label: 'Book: Fix Bullet Spacing', command: 'pre-commit run book-fix-bullet-spacing --all-files' },
-  { id: 'book-prettify-pipe-tables', label: 'Book: Prettify Pipe Tables', command: 'pre-commit run book-prettify-pipe-tables --all-files' },
+  { id: 'book-prettify-pipe-tables', label: 'Book: Prettify Pipe Tables (All Files)', command: 'pre-commit run book-prettify-pipe-tables --all-files' },
   { id: 'book-cleanup-artifacts', label: 'Book: Cleanup Build Artifacts', command: 'pre-commit run book-cleanup-artifacts --all-files' },
 ];
 

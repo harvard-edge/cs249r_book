@@ -42,6 +42,12 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> 
       [],
       'wand'
     );
+    const currentFileTableFixer = new ActionTreeItem(
+      'Prettify Pipe Tables (Current File)',
+      'mlsysbook.precommitRunHookCurrentFile',
+      ['book-prettify-pipe-tables', 'Current-file fixer: Prettify Pipe Tables'],
+      'table',
+    );
 
     const validateItems = VALIDATE_ACTIONS.map(action =>
       new ActionTreeItem(action.label, 'mlsysbook.validateRunAction', [action.command], action.icon)
@@ -53,6 +59,7 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> 
       ...checkItems,
       new SeparatorItem('--- Fixers / Cleanup (Manual) ---'),
       currentFileFixers,
+      currentFileTableFixer,
       ...fixerItems,
       new SeparatorItem('--- Binder Validate (Fast, Focused) ---'),
       ...validateItems,

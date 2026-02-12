@@ -88,6 +88,27 @@ export function activate(context: vscode.ExtensionContext): void {
   );
   const navigatorTreeView = vscode.window.createTreeView('mlsysbook.navigator', { treeDataProvider: navigatorProvider });
   context.subscriptions.push(navigatorTreeView);
+  context.subscriptions.push(
+    navigatorTreeView.onDidChangeSelection(event => {
+      const selected = event.selection[0] as vscode.TreeItem | undefined;
+      if (!selected || selected.contextValue !== 'navigator-section') {
+        return;
+      }
+      const command = selected.command;
+      if (
+        !command
+        || command.command !== 'mlsysbook.openNavigatorLocation'
+        || !Array.isArray(command.arguments)
+      ) {
+        return;
+      }
+      const [uri, line] = command.arguments;
+      if (!(uri instanceof vscode.Uri) || typeof line !== 'number') {
+        return;
+      }
+      void vscode.commands.executeCommand('mlsysbook.openNavigatorLocation', uri, line);
+    }),
+  );
 
   // Refresh command for build tree
   context.subscriptions.push(
