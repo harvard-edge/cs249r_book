@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getRepoRoot, parseQmdFile } from '../utils/workspace';
 import { runBookCommand } from '../utils/terminal';
+import { runIsolatedDebugCommand } from '../utils/parallelDebug';
 
 export function registerContextMenuCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -41,7 +42,9 @@ export function registerContextMenuCommands(context: vscode.ExtensionContext): v
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      void runBookCommand(`./book/binder debug pdf --${ctx.volume} --chapter ${ctx.chapter}`, root, {
+      void runIsolatedDebugCommand({
+        repoRoot: root,
+        command: `./book/binder debug pdf --${ctx.volume} --chapter ${ctx.chapter}`,
         label: `Debug Sections (${ctx.volume}/${ctx.chapter})`,
       });
     }),

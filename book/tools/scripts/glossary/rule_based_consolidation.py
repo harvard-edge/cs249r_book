@@ -194,11 +194,11 @@ def merge_term_definitions(term_entries: List[Dict], canonical_term: str) -> Dic
     """Merge multiple term entries into a single canonical entry."""
     # Sort by chapter appearance order (introduction first, etc.)
     chapter_priority = {
-        'introduction': 0, 'ml_systems': 1, 'dl_primer': 2, 'dnn_architectures': 3,
+        'introduction': 0, 'ml_systems': 1, 'nn_computation': 2, 'nn_architectures': 3,
         'frameworks': 4, 'training': 5, 'benchmarking': 6, 'data_engineering': 7,
         'hw_acceleration': 8, 'efficient_ai': 9, 'optimizations': 10, 'ops': 11,
-        'ondevice_learning': 12, 'robust_ai': 13, 'privacy_security': 14,
-        'responsible_ai': 15, 'sustainable_ai': 16, 'ai_for_good': 17,
+        'ondevice_learning': 12, 'robust_ai': 13, 'security_privacy': 14,
+        'responsible_ai': 15, 'sustainable_ai': 16, 'ai_good': 17,
         'workflow': 18, 'conclusion': 19, 'frontiers': 20, 'generative_ai': 21
     }
 

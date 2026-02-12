@@ -4,6 +4,7 @@ import { BuildTreeProvider } from './providers/buildTreeProvider';
 import { DebugTreeProvider } from './providers/debugTreeProvider';
 import { PrecommitTreeProvider } from './providers/precommitTreeProvider';
 import { PublishTreeProvider } from './providers/publishTreeProvider';
+import { MaintenanceTreeProvider } from './providers/maintenanceTreeProvider';
 import { ConfigTreeProvider } from './providers/configTreeProvider';
 import { ChapterNavigatorProvider } from './providers/chapterNavigatorProvider';
 import { RunHistoryProvider } from './providers/runHistoryProvider';
@@ -20,6 +21,7 @@ import { registerContextMenuCommands } from './commands/contextMenuCommands';
 import {
   initializeRunManager,
   rerunLastCommand,
+  rerunSavedCommand,
   revealRunTerminal,
   showLastFailureDetails,
   setExecutionModeInteractively,
@@ -53,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const buildProvider = new BuildTreeProvider(root);
   const debugProvider = new DebugTreeProvider();
   const precommitProvider = new PrecommitTreeProvider();
+  const maintenanceProvider = new MaintenanceTreeProvider();
   const publishProvider = new PublishTreeProvider();
   const configProvider = new ConfigTreeProvider();
   const navigatorProvider = new ChapterNavigatorProvider();
@@ -75,6 +78,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.createTreeView('mlsysbook.debug', { treeDataProvider: debugProvider }),
     vscode.window.createTreeView('mlsysbook.runs', { treeDataProvider: runHistoryProvider }),
     vscode.window.createTreeView('mlsysbook.precommit', { treeDataProvider: precommitProvider }),
+    vscode.window.createTreeView('mlsysbook.maintenance', { treeDataProvider: maintenanceProvider }),
     vscode.window.createTreeView('mlsysbook.publish', { treeDataProvider: publishProvider }),
     vscode.window.createTreeView('mlsysbook.config', { treeDataProvider: configProvider }),
     vscode.languages.registerFoldingRangeProvider(
@@ -151,6 +155,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('mlsysbook.refreshRunHistory', () => {
       runHistoryProvider.refresh();
+    }),
+    vscode.commands.registerCommand('mlsysbook.historyRerunCommand', (record) => {
+      void rerunSavedCommand(record);
     }),
     vscode.commands.registerCommand('mlsysbook.refreshQmdDiagnostics', () => {
       diagnosticsManager.refreshActiveEditorDiagnostics();

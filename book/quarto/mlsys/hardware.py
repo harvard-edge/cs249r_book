@@ -5,11 +5,11 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 from .constants import (
     ureg, Q_,
-    V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP,
-    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP,
-    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP,
-    B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP,
-    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP,
+    V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, V100_FLOPS_FP32,
+    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP, A100_FLOPS_FP32, A100_FLOPS_TF32, A100_FLOPS_INT8,
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8,
+    B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR,
+    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8,
     TPUV4_MEM_BW, TPUV4_FLOPS_BF16,
     MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8,
     ESP32_RAM, ESP32_FLASH, ESP32_POWER_MAX,
@@ -22,10 +22,16 @@ class HardwareSpec:
     name: str
     release_year: int
     memory_bw: Q_
-    peak_flops: Q_
+    peak_flops: Q_ # Usually FP16 Tensor for AI accelerators
     memory_capacity: Q_
     tdp: Optional[Q_] = None
     battery_capacity: Optional[Q_] = None
+    
+    # Precision-specific FLOPS
+    peak_flops_fp32: Optional[Q_] = None
+    tf32_flops: Optional[Q_] = None
+    fp8_flops: Optional[Q_] = None
+    int8_flops: Optional[Q_] = None
     
     def __post_init__(self):
         """Validate hardware specs."""
@@ -56,11 +62,16 @@ class Networks:
 
 class Cloud:
     """Datacenter-scale Accelerators."""
-    V100 = HardwareSpec("NVIDIA V100", 2017, V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP)
-    A100 = HardwareSpec("NVIDIA A100", 2020, A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP)
-    H100 = HardwareSpec("NVIDIA H100", 2022, H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP)
-    B200 = HardwareSpec("NVIDIA B200", 2024, B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP)
-    T4   = HardwareSpec("NVIDIA T4",   2018, T4_MEM_BW,   T4_FLOPS_FP16_TENSOR,   16 * ureg.GiB,     T4_TDP)
+    V100 = HardwareSpec("NVIDIA V100", 2017, V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, 
+                        peak_flops_fp32=V100_FLOPS_FP32)
+    A100 = HardwareSpec("NVIDIA A100", 2020, A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP,
+                        peak_flops_fp32=A100_FLOPS_FP32, tf32_flops=A100_FLOPS_TF32, int8_flops=A100_FLOPS_INT8)
+    H100 = HardwareSpec("NVIDIA H100", 2022, H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP,
+                        tf32_flops=H100_FLOPS_TF32, fp8_flops=H100_FLOPS_FP8_TENSOR, int8_flops=H100_FLOPS_INT8)
+    B200 = HardwareSpec("NVIDIA B200", 2024, B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP,
+                        fp8_flops=B200_FLOPS_FP8_TENSOR)
+    T4   = HardwareSpec("NVIDIA T4",   2018, T4_MEM_BW,   T4_FLOPS_FP16_TENSOR,   16 * ureg.GiB,     T4_TDP,
+                        int8_flops=T4_FLOPS_INT8)
     
     TPUv4 = HardwareSpec("Google TPU v4", 2021, TPUV4_MEM_BW, TPUV4_FLOPS_BF16, 32 * ureg.GiB)
 

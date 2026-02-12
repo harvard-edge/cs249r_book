@@ -10,6 +10,7 @@ import {
   revealParallelDebugOutput,
   rerunDebugSession,
   runBisectChapterDebug,
+  runIsolatedDebugCommand,
   runParallelChapterDebug,
 } from '../utils/parallelDebug';
 
@@ -101,7 +102,9 @@ export function registerDebugCommands(context: vscode.ExtensionContext): void {
   // Debug full volume
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.debugVolumePdf', (vol: VolumeId) => {
-      void runBookCommand(`./book/binder debug pdf --${vol}`, root, {
+      void runIsolatedDebugCommand({
+        repoRoot: root,
+        command: `./book/binder debug pdf --${vol}`,
         label: `Debug Volume PDF (${vol})`,
       });
     })
@@ -135,7 +138,9 @@ export function registerDebugCommands(context: vscode.ExtensionContext): void {
       );
       const fmt = fmtPick ?? 'pdf';
 
-      void runBookCommand(`./book/binder debug ${fmt} --${volPick.id} --chapter ${chapterPick.id}`, root, {
+      void runIsolatedDebugCommand({
+        repoRoot: root,
+        command: `./book/binder debug ${fmt} --${volPick.id} --chapter ${chapterPick.id}`,
         label: `Debug Chapter ${fmt.toUpperCase()} (${volPick.id}/${chapterPick.id})`,
       });
     })

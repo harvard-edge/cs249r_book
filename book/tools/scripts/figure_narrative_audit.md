@@ -378,7 +378,7 @@
 
 ----------------------------------------
 
-## dl_primer/dl_primer.qmd
+## nn_computation/nn_computation.qmd
 
 ### `@fig-ai-ml-dl` (Line 88)
 
@@ -508,7 +508,7 @@
 
 ----------------------------------------
 
-## dnn_architectures/dnn_architectures.qmd
+## nn_architectures/nn_architectures.qmd
 
 ### `@fig-efficiency-frontier` (Line 97)
 

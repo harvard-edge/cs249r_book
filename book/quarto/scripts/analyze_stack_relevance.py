@@ -38,8 +38,8 @@ CHAPTERS = [
     ("ml_systems",         "ml_systems.qmd"),
     ("workflow",           "workflow.qmd"),
     ("data_engineering",   "data_engineering.qmd"),
-    ("dl_primer",          "dl_primer.qmd"),
-    ("dnn_architectures",  "dnn_architectures.qmd"),
+    ("nn_computation",          "nn_computation.qmd"),
+    ("nn_architectures",  "nn_architectures.qmd"),
     ("frameworks",         "frameworks.qmd"),
     ("training",           "training.qmd"),
     ("data_selection",     "data_selection.qmd"),
@@ -615,7 +615,7 @@ if __name__ == "__main__":
 
     if detail:
         # Show keyword hits for a specific chapter
-        chapter = sys.argv[sys.argv.index("--detail") + 1] if "--detail" in sys.argv else "dnn_architectures"
+        chapter = sys.argv[sys.argv.index("--detail") + 1] if "--detail" in sys.argv else "nn_architectures"
         for ch_dir, ch_file in CHAPTERS:
             if ch_dir == chapter:
                 keyword_detail_report(ch_dir, ch_file)

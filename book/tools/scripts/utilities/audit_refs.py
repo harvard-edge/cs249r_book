@@ -5,18 +5,18 @@ import os
 CHAPTERS = [
     "book/quarto/contents/vol1/introduction/introduction.qmd",
     "book/quarto/contents/vol1/ml_systems/ml_systems.qmd",
-    "book/quarto/contents/vol1/workflow/workflow.qmd",
+    "book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd",
     "book/quarto/contents/vol1/data_engineering/data_engineering.qmd",
-    "book/quarto/contents/vol1/dl_primer/dl_primer.qmd",
-    "book/quarto/contents/vol1/dnn_architectures/dnn_architectures.qmd",
+    "book/quarto/contents/vol1/nn_computation/nn_computation.qmd",
+    "book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd",
     "book/quarto/contents/vol1/frameworks/frameworks.qmd",
     "book/quarto/contents/vol1/training/training.qmd",
     "book/quarto/contents/vol1/optimizations/model_compression.qmd",
     "book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd",
     "book/quarto/contents/vol1/data_efficiency/data_efficiency.qmd",
     "book/quarto/contents/vol1/benchmarking/benchmarking.qmd",
-    "book/quarto/contents/vol1/serving/serving.qmd",
-    "book/quarto/contents/vol1/ops/ops.qmd",
+    "book/quarto/contents/vol1/model_serving/model_serving.qmd",
+    "book/quarto/contents/vol1/ml_ops/ml_ops.qmd",
     "book/quarto/contents/vol1/responsible_engr/responsible_engr.qmd",
     "book/quarto/contents/vol1/conclusion/conclusion.qmd"
 ]

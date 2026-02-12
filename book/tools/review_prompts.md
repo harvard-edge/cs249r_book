@@ -156,7 +156,7 @@ SPECIAL ATTENTION:
 #### 3. Workflow
 
 ```
-CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/workflow/workflow.qmd
+CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd
 
 ADDITIONAL CONTEXT:
 - Covers the ML development lifecycle / workflow.
@@ -187,7 +187,7 @@ SPECIAL ATTENTION:
 #### 5. Deep Learning Primer
 
 ```
-CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/dl_primer/dl_primer.qmd
+CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/nn_computation/nn_computation.qmd
 
 ADDITIONAL CONTEXT:
 - Mathematical foundations: loss functions, backpropagation, optimization.
@@ -205,7 +205,7 @@ SPECIAL ATTENTION:
 #### 6. DNN Architectures
 
 ```
-CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/dnn_architectures/dnn_architectures.qmd
+CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd
 
 ADDITIONAL CONTEXT:
 - Covers CNNs, RNNs, Transformers, and other architectures.
@@ -332,7 +332,7 @@ SPECIAL ATTENTION:
 #### 13. Serving / Inference
 
 ```
-CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/serving/serving.qmd
+CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/model_serving/model_serving.qmd
 
 ADDITIONAL CONTEXT:
 - Covers model serving, inference optimization, deployment patterns.
@@ -349,7 +349,7 @@ SPECIAL ATTENTION:
 #### 14. ML Operations
 
 ```
-CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ops/ops.qmd
+CHAPTER: /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ml_ops/ml_ops.qmd
 
 ADDITIONAL CONTEXT:
 - Covers MLOps, CI/CD for ML, monitoring, model versioning.
@@ -535,7 +535,7 @@ CHAPTERS TO READ (in order):
 1. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/parts/foundations_principles.qmd
 2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/introduction/introduction.qmd
 3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ml_systems/ml_systems.qmd
-4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/workflow/workflow.qmd
+4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ml_workflow/ml_workflow.qmd
 5. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/data_engineering/data_engineering.qmd
 
 SPECIAL ATTENTION:
@@ -554,8 +554,8 @@ PART: II — Development and Training
 
 CHAPTERS TO READ (in order):
 1. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/parts/build_principles.qmd
-2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/dl_primer/dl_primer.qmd
-3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/dnn_architectures/dnn_architectures.qmd
+2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/nn_computation/nn_computation.qmd
+3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/nn_architectures/nn_architectures.qmd
 4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/frameworks/frameworks.qmd
 5. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/training/training.qmd
 
@@ -604,8 +604,8 @@ PART: IV — Deployment and Operations
 
 CHAPTERS TO READ (in order):
 1. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/parts/deploy_principles.qmd
-2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/serving/serving.qmd
-3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ops/ops.qmd
+2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/model_serving/model_serving.qmd
+3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/ml_ops/ml_ops.qmd
 4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/responsible_engr/responsible_engr.qmd
 5. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/conclusion/conclusion.qmd
 

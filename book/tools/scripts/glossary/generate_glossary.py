@@ -16,8 +16,8 @@ from datetime import datetime
 VOL1_CHAPTER_MAPPING = {
     "introduction": "@sec-introduction",
     "ml_systems": "@sec-ml-system-architecture",
-    "dl_primer": "@sec-deep-learning-systems-foundations",
-    "dnn_architectures": "@sec-dnn-architectures",
+    "nn_computation": "@sec-deep-learning-systems-foundations",
+    "nn_architectures": "@sec-dnn-architectures",
     "frameworks": "@sec-ai-frameworks",
     "training": "@sec-ai-training",
     "benchmarking": "@sec-benchmarking-ai",
@@ -43,10 +43,10 @@ VOL2_CHAPTER_MAPPING = {
     "fault_tolerance": "@sec-fault-tolerance",
     "edge_intelligence": "@sec-edge-intelligence",
     "robust_ai": "@sec-robust-ai",
-    "privacy_security": "@sec-privacy-security",
+    "security_privacy": "@sec-privacy-security",
     "responsible_ai": "@sec-responsible-ai",
     "sustainable_ai": "@sec-sustainable-ai",
-    "ai_for_good": "@sec-ai-for-good",
+    "ai_good": "@sec-ai-for-good",
     "frontiers": "@sec-frontiers",
     "conclusion": "@sec-conclusion-vol2",
 }

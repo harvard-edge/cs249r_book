@@ -5,6 +5,39 @@ import {
   getRecentDebugSessions,
   onDebugSessionsChanged,
 } from '../utils/parallelDebug';
+import {
+  CommandRunRecord,
+  getRecentCommandRuns,
+  onCommandRunsChanged,
+} from '../utils/terminal';
+
+type GroupKind = 'commands' | 'debug';
+
+class GroupTreeItem extends vscode.TreeItem {
+  constructor(public readonly kind: GroupKind, label: string) {
+    super(label, vscode.TreeItemCollapsibleState.Expanded);
+    this.contextValue = `run-group-${kind}`;
+    this.iconPath = new vscode.ThemeIcon(kind === 'commands' ? 'history' : 'debug');
+  }
+}
+
+class CommandRunTreeItem extends vscode.TreeItem {
+  constructor(public readonly record: CommandRunRecord) {
+    super(record.label, vscode.TreeItemCollapsibleState.None);
+    this.description = `${record.status} · ${record.mode}`;
+    this.tooltip = `${record.command}\n${record.timestamp}`;
+    this.iconPath = new vscode.ThemeIcon(
+      record.status === 'failed' ? 'error' :
+        record.status === 'succeeded' ? 'check' : 'clock'
+    );
+    this.command = {
+      command: 'mlsysbook.historyRerunCommand',
+      title: 'Rerun Command',
+      arguments: [record],
+    };
+    this.contextValue = 'run-command';
+  }
+}
 
 class SessionTreeItem extends vscode.TreeItem {
   constructor(public readonly session: DebugRunSession) {
@@ -44,7 +77,21 @@ class FailureLocationItem extends vscode.TreeItem {
   }
 }
 
-type HistoryNode = SessionTreeItem | SessionActionItem | FailureLocationItem;
+class EmptyTreeItem extends vscode.TreeItem {
+  constructor(label: string) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.contextValue = 'run-empty';
+    this.iconPath = new vscode.ThemeIcon('circle-slash');
+  }
+}
+
+type HistoryNode =
+  GroupTreeItem
+  | CommandRunTreeItem
+  | SessionTreeItem
+  | SessionActionItem
+  | FailureLocationItem
+  | EmptyTreeItem;
 
 export class RunHistoryProvider implements vscode.TreeDataProvider<HistoryNode>, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<HistoryNode | undefined>();
@@ -53,6 +100,7 @@ export class RunHistoryProvider implements vscode.TreeDataProvider<HistoryNode>,
 
   constructor() {
     this.subscriptions.push(onDebugSessionsChanged(() => this.refresh()));
+    this.subscriptions.push(onCommandRunsChanged(() => this.refresh()));
   }
 
   dispose(): void {
@@ -70,7 +118,19 @@ export class RunHistoryProvider implements vscode.TreeDataProvider<HistoryNode>,
 
   getChildren(element?: HistoryNode): HistoryNode[] {
     if (!element) {
-      return getRecentDebugSessions().slice(0, 15).map(session => new SessionTreeItem(session));
+      return [
+        new GroupTreeItem('commands', 'Recent Commands'),
+        new GroupTreeItem('debug', 'Parallel Debug Sessions'),
+      ];
+    }
+
+    if (element instanceof GroupTreeItem) {
+      if (element.kind === 'commands') {
+        const records = getRecentCommandRuns(25).map(record => new CommandRunTreeItem(record));
+        return records.length > 0 ? records : [new EmptyTreeItem('No commands yet')];
+      }
+      const sessions = getRecentDebugSessions().slice(0, 15).map(session => new SessionTreeItem(session));
+      return sessions.length > 0 ? sessions : [new EmptyTreeItem('No debug sessions yet')];
     }
 
     if (element instanceof SessionTreeItem) {

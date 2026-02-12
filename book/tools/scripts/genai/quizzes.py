@@ -1961,11 +1961,11 @@ def extract_all_chapter_concepts(base_path="quarto/contents/vol1", verbose=False
     # Fallback to default order if quarto config parsing failed
     if not chapter_order:
         chapter_order = [
-            'introduction', 'ml_systems', 'dl_primer', 'dnn_architectures',
+            'introduction', 'ml_systems', 'nn_computation', 'nn_architectures',
             'data_engineering', 'frameworks', 'training', 'optimizations',
             'hw_acceleration', 'benchmarking', 'ops', 'workflow',
-            'ondevice_learning', 'robust_ai', 'privacy_security',
-            'responsible_ai', 'sustainable_ai', 'ai_for_good',
+            'ondevice_learning', 'robust_ai', 'security_privacy',
+            'responsible_ai', 'sustainable_ai', 'ai_good',
             'frontiers', 'conclusion'
         ]
         if verbose:
@@ -5595,11 +5595,11 @@ def evaluate_existing_quiz_file(quiz_file_path, args):
 
     # Map chapter names to numbers (for difficulty progression)
     chapter_order = [
-        'introduction', 'ai_ml_basics', 'ml_systems', 'dl_primer',
-        'dnn_architectures', 'data_engineering', 'training', 'optimizations',
+        'introduction', 'ai_ml_basics', 'ml_systems', 'nn_computation',
+        'nn_architectures', 'data_engineering', 'training', 'optimizations',
         'hw_acceleration', 'benchmarking', 'ops', 'ondevice_learning',
-        'robust_ai', 'privacy_security', 'responsible_ai', 'sustainable_ai',
-        'ai_for_good', 'emerging_topics', 'frontiers', 'conclusion'
+        'robust_ai', 'security_privacy', 'responsible_ai', 'sustainable_ai',
+        'ai_good', 'emerging_topics', 'frontiers', 'conclusion'
     ]
 
     try:

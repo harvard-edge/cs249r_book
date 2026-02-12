@@ -13,7 +13,7 @@ Examples:
     python ../tools/scripts/testing/render_figures.py \
         contents/vol1/training/training.qmd \
         contents/vol1/data_selection/data_selection.qmd \
-        contents/vol1/ops/ops.qmd
+        contents/vol1/ml_ops/ml_ops.qmd
 
     # Render ALL vol1 figures:
     python ../tools/scripts/testing/render_figures.py contents/vol1/*/*.qmd

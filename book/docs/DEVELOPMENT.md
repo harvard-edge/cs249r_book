@@ -270,7 +270,7 @@ chapters:
   - index.qmd
   - contents/core/introduction/introduction.qmd
   # - contents/core/ml_systems/ml_systems.qmd    # Commented out
-  # - contents/core/dl_primer/dl_primer.qmd      # Commented out
+  # - contents/core/nn_computation/nn_computation.qmd      # Commented out
 ```
 
 ### Restoring Full Configuration

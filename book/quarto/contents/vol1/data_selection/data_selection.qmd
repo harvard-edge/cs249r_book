@@ -222,7 +222,7 @@ class ComputeDataGap:
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
     h100_count = 10000
     months = 3
-    model_params = 70e9 # Llama-70B
+    model = Models.Language.Llama2_70B
 
     tokens_available = 5e12 # 5T tokens (RedPajama/RefinedWeb scale)
     tokens_capacity = 10e12 # Capacity of the cluster
@@ -234,7 +234,7 @@ class ComputeDataGap:
     check(gap_ratio >= 1.0, f"Compute ({tokens_capacity:.1e}) is less than Data ({tokens_available:.1e}). No Data Wall.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    llama_params_str = fmt(model_params / BILLION, precision=0, commas=False) + "B"
+    llama_params_str = fmt(model.parameters.to(Bparam).magnitude, precision=0, commas=False) + "B"
     h100_count_str = fmt(h100_count, precision=0, commas=True)
     tokens_capacity_str = fmt(tokens_capacity / TRILLION, precision=0, commas=False) + "T"
     tokens_available_str = fmt(tokens_available / TRILLION, precision=0, commas=False) + "T"
@@ -511,14 +511,19 @@ from mlsys.constants import RESNET50_FLOPs, GFLOPs, IMAGENET_IMAGES
 from mlsys.formatting import fmt, check
 
 # --- Inputs (ImageNet/ResNet-50 benchmark scenario) ---
-imagenet_size_value = IMAGENET_IMAGES.magnitude                 # ~1.28M images
+imagenet_size_value = Models.Vision.ResNet50.parameters.magnitude # Using parameters as proxy for N if not in Twin
+# Better: check constants for IMAGENET_IMAGES
+from mlsys.constants import IMAGENET_IMAGES
+imagenet_size_value = IMAGENET_IMAGES.magnitude
+
 acc_gain_random_value = 5.0                                     # % accuracy per epoch
 acc_gain_coreset_value = 4.5                                    # % with 50% coreset
 coreset_fraction_value = 0.5                                    # keep 50% of data
 
-# --- Process (compute ICR for both strategies) ---
-resnet50_fwd_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
-resnet50_fwdbwd_gflops_value = (RESNET50_FLOPs * 2).to(GFLOPs).magnitude
+# --- Process (compute ICR for both strategies using Models Twin) ---
+m_resnet = Models.ResNet50
+resnet50_fwd_gflops_value = m_resnet.inference_flops.to(GFLOPs).magnitude
+resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 2).to(GFLOPs).magnitude
 full_epoch_flops_value = imagenet_size_value * resnet50_fwdbwd_gflops_value * BILLION
 
 icr_random_value = acc_gain_random_value / full_epoch_flops_value
@@ -530,8 +535,8 @@ icr_ratio_value = icr_coreset_value / icr_random_value
 acc_diff_value = acc_gain_random_value - acc_gain_coreset_value
 
 # --- Outputs (formatted strings for prose) ---
-resnet50_fwd_gflops_str = fmt(RESNET50_FLOPs.to(GFLOPs), precision=1)           # e.g. "8.2"
-resnet50_fwdbwd_gflops_str = fmt((RESNET50_FLOPs * 2).to(GFLOPs), precision=1)  # e.g. "16.4"
+resnet50_fwd_gflops_str = fmt(m_resnet.inference_flops.to(GFLOPs), precision=1)           # e.g. "8.2"
+resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 2).to(GFLOPs), precision=1)  # e.g. "16.4"
 full_epoch_flops_str = f"{full_epoch_flops_value:.2e}"          # e.g. "2.10e+19"
 icr_random_str = f"{icr_random_value:.1e}"                      # e.g. "2.4e-19"
 imagenet_size_str = fmt(imagenet_size_value / MILLION, precision=2) + "M"           # e.g. "1.28M"

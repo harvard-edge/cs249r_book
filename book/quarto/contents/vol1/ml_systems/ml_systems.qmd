@@ -94,10 +94,13 @@ class MLSystemsSetup:
     m_gpt3 = Models.GPT3
     m_kws = Models.Tiny.DS_CNN
 
+    # Hardware
+    h_phone = Hardware.Edge.Generic_Phone
+
     # Assumptions (ranges)
     mobile_ram_range = "8-16"
     mobile_storage_range = "128 GB-1 TB"
-    mobile_bw_range = "25-50"
+    mobile_bw_range = f"{int(h_phone.memory_bw.to('GB/s').magnitude/2)}-{int(h_phone.memory_bw.to('GB/s').magnitude)}"
 
     # Latency ranges (ms)
     cloud_latency_range = "100-500"
@@ -115,9 +118,9 @@ class MLSystemsSetup:
     gpt3_v100_count = 10000
 
     # Mobile Specifics
-    mobile_tdp_w = 3 # Typical
-    mobile_npu_tops = 35 # Typical (Apple/Qualcomm)
-    phone_battery_wh = 15
+    mobile_tdp_w = h_phone.tdp.to(watt).magnitude if h_phone.tdp else 3
+    mobile_npu_tops = h_phone.peak_flops.to(TFLOPs/second).magnitude
+    phone_battery_wh = h_phone.battery_capacity.to('Wh').magnitude if h_phone.battery_capacity else 15
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # GPT-3 Petaflop-days calculation using standardized units
@@ -154,8 +157,8 @@ class MLSystemsSetup:
     kws_params_str = fmt(m_kws.parameters.to(Kparam).magnitude, precision=0, commas=True)
     kws_size_kb_str = "100" # Approximate
 
-    # DLRM Embedding (using legacy constant for now as DLRM isn't fully in Models yet)
-    dlrm_embedding_str = fmt(DLRM_MODEL_SIZE_FP32.to(GB).magnitude, precision=0)
+    # DLRM Embedding (using Models Twin)
+    dlrm_embedding_str = fmt(Models.DLRM.model_size.to(GB).magnitude, precision=0)
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 mobile_ram_range_str = MLSystemsSetup.mobile_ram_range_str
@@ -698,7 +701,11 @@ class LighthouseModels:
     m_dlrm = Models.DLRM
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    resnet_flops_g = m_resnet.parameters.magnitude * 160 # Approx multiplier if ops not in twin, or use constant
+    # Wait, resnet50_flops is in constants.
+    from mlsys.constants import RESNET50_FLOPs
     resnet_flops_g = RESNET50_FLOPs.to(GFLOPs).magnitude
+
     resnet_params_m = m_resnet.parameters.to(Mparam).magnitude
     # ResNet50 FP32 size
     resnet_fp32_mb = m_resnet.size_in_bytes(4 * byte).to(MB).magnitude
@@ -917,15 +924,16 @@ from mlsys.constants import (
 from mlsys.formulas import calc_bottleneck
 from mlsys.formatting import sci, fmt, sci_latex, md_frac
 
-# --- Process (bottleneck analysis) ---
+# --- Process (bottleneck analysis using Hardware Twin) ---
+h_a100 = Hardware.A100
 cloud_stats = calc_bottleneck(
     ops=RESNET50_FLOPs,
     model_bytes=resnet_fp16_bytes_value,                 # from resnet-setup cell
-    device_flops=A100_FLOPS_FP16_TENSOR,
-    device_bw=A100_MEM_BW,
+    device_flops=h_a100.peak_flops,
+    device_bw=h_a100.memory_bw,
 )
-a100_tflops_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
-a100_bw_tbs_value = A100_MEM_BW.to(TB / second).magnitude
+a100_tflops_value = h_a100.peak_flops.to(TFLOPs / second).magnitude
+a100_bw_tbs_value = h_a100.memory_bw.to(TB / second).magnitude
 cloud_compute_ms_value = cloud_stats["compute_ms"]
 cloud_memory_ms_value = cloud_stats["memory_ms"]
 cloud_ratio_x_value = cloud_stats["ratio"]
@@ -934,9 +942,9 @@ cloud_bottleneck_value = cloud_stats["bottleneck"]
 
 # --- LaTeX fraction components (for nice rendering) ---
 resnet_flops_latex = sci_latex(RESNET50_FLOPs.to(flop))
-a100_flops_latex = sci_latex(A100_FLOPS_FP16_TENSOR.to(flop / second))
+a100_flops_latex = sci_latex(h_a100.peak_flops.to(flop / second))
 resnet_fp16_bytes_latex = sci_latex(resnet_fp16_bytes_value.to(byte))
-a100_bw_latex = sci_latex(A100_MEM_BW.to(byte / second))
+a100_bw_latex = sci_latex(h_a100.memory_bw.to(byte / second))
 cloud_compute_frac = md_frac(resnet_flops_latex, a100_flops_latex, f"{cloud_compute_ms_value:.3f}", "ms")
 cloud_memory_frac = md_frac(resnet_fp16_bytes_latex, a100_bw_latex, f"{cloud_memory_ms_value:.3f}", "ms")
 cloud_ai_frac = md_frac(resnet_flops_latex, resnet_fp16_bytes_latex, f"{cloud_ai_value:.0f}", "FLOPs/byte")
@@ -972,28 +980,32 @@ from mlsys.constants import (
 from mlsys.formulas import calc_bottleneck
 from mlsys.formatting import sci_latex, md_frac, fmt
 
-# --- Process (bottleneck analysis) ---
+# --- Process (bottleneck analysis using Hardware/Models Twins) ---
+h_phone = Hardware.Edge.Generic_Phone
+m_resnet = Models.ResNet50
+h_a100 = Hardware.A100
+
 mobile_stats = calc_bottleneck(
-    ops=RESNET50_FLOPs,
+    ops=m_resnet.inference_flops,
     model_bytes=resnet_int8_bytes_value,                 # from resnet-setup cell
-    device_flops=MOBILE_NPU_TOPS_INT8,
-    device_bw=MOBILE_NPU_MEM_BW,
+    device_flops=h_phone.peak_flops,
+    device_bw=h_phone.memory_bw,
 )
-mobile_tops_value = MOBILE_NPU_TOPS_INT8.to(TFLOPs / second).magnitude
-mobile_bw_gbs_value = MOBILE_NPU_MEM_BW.to(GB / second).magnitude
+mobile_tops_value = h_phone.peak_flops.to(TFLOPs / second).magnitude
+mobile_bw_gbs_value = h_phone.memory_bw.to(GB / second).magnitude
 mobile_compute_ms_value = mobile_stats["compute_ms"]
 mobile_memory_ms_value = mobile_stats["memory_ms"]
 mobile_ratio_x_value = mobile_stats["ratio"]
 mobile_bottleneck_value = mobile_stats["bottleneck"]
 
 # --- Cross-platform comparison ---
-bw_advantage_x_value = A100_MEM_BW / MOBILE_NPU_MEM_BW
+bw_advantage_x_value = h_a100.memory_bw / h_phone.memory_bw
 inference_speed_x_value = mobile_memory_ms_value / cloud_stats["memory_ms"]  # uses cloud_stats
 
 # --- LaTeX fraction components (for nice rendering) ---
-mobile_npu_flops_latex = sci_latex(MOBILE_NPU_TOPS_INT8.to(flop / second))
+mobile_npu_flops_latex = sci_latex(h_phone.peak_flops.to(flop / second))
 resnet_int8_bytes_latex = sci_latex(resnet_int8_bytes_value.to(byte))
-mobile_npu_bw_latex = sci_latex(MOBILE_NPU_MEM_BW.to(byte / second))
+mobile_npu_bw_latex = sci_latex(h_phone.memory_bw.to(byte / second))
 mobile_compute_frac = md_frac(resnet_flops_latex, mobile_npu_flops_latex, f"{mobile_compute_ms_value:.2f}", "ms")
 mobile_memory_frac = md_frac(resnet_int8_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_value:.2f}", "ms")
 
@@ -1891,10 +1903,8 @@ class EdgeSizing:
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Throughput
     inf_per_sec = cameras_per_store * fps
-    # YOLOv8 Nano FLOPs (stored in training_ops for now, treated as inference FLOPs in this context or use constant)
-    # Actually models.py defines training_ops. I should have added inference_flops.
-    # For now, I'll access the value I put in training_ops which was 8.7 GFLOPs
-    yolo_flops = model.training_ops
+    # YOLOv8 Nano Inference FLOPs from Models Twin
+    yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
 
     sustained_gflops = (inf_per_sec * yolo_flops).to(GFLOPs).magnitude
     required_tflops = (sustained_gflops * headroom * GFLOPs).to(TFLOPs).magnitude

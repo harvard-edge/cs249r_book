@@ -5,6 +5,8 @@ const TERMINAL_NAME = 'MLSysBook';
 const OUTPUT_CHANNEL_NAME = 'MLSysBook Build';
 const STATE_LAST_COMMAND_KEY = 'mlsysbook.lastCommand';
 const STATE_LAST_FAILURE_KEY = 'mlsysbook.lastFailure';
+const STATE_COMMAND_HISTORY_KEY = 'mlsysbook.commandHistory';
+const MAX_COMMAND_HISTORY = 50;
 
 export type ExecutionMode = 'focused' | 'raw';
 
@@ -21,6 +23,18 @@ interface LastFailureState extends LastCommandState {
   logTail: string;
 }
 
+export type CommandRunStatus = 'started' | 'succeeded' | 'failed';
+
+export interface CommandRunRecord {
+  id: string;
+  label: string;
+  command: string;
+  cwd: string;
+  timestamp: string;
+  status: CommandRunStatus;
+  mode: 'raw' | 'focused';
+}
+
 interface RunOptions {
   mode?: ExecutionMode;
   label?: string;
@@ -29,6 +43,9 @@ interface RunOptions {
 let extensionContext: vscode.ExtensionContext | undefined;
 let outputChannel: vscode.OutputChannel | undefined;
 let runCounter = 0;
+const commandRuns: CommandRunRecord[] = [];
+const commandRunsEmitter = new vscode.EventEmitter<void>();
+export const onCommandRunsChanged = commandRunsEmitter.event;
 
 function getOutputChannel(): vscode.OutputChannel {
   if (!outputChannel) {
@@ -91,6 +108,39 @@ function storeLastFailure(state: LastFailureState): void {
   void context.workspaceState.update(STATE_LAST_FAILURE_KEY, state);
 }
 
+function persistCommandRuns(): void {
+  const context = ensureContext();
+  if (!context) { return; }
+  void context.workspaceState.update(STATE_COMMAND_HISTORY_KEY, commandRuns);
+}
+
+function recordCommandStart(command: string, cwd: string, label: string, mode: 'raw' | 'focused'): CommandRunRecord {
+  const record: CommandRunRecord = {
+    id: `cmd-${Date.now()}-${++runCounter}`,
+    label,
+    command,
+    cwd,
+    timestamp: new Date().toISOString(),
+    status: 'started',
+    mode,
+  };
+  commandRuns.unshift(record);
+  if (commandRuns.length > MAX_COMMAND_HISTORY) {
+    commandRuns.length = MAX_COMMAND_HISTORY;
+  }
+  persistCommandRuns();
+  commandRunsEmitter.fire();
+  return record;
+}
+
+function updateCommandStatus(id: string, status: CommandRunStatus): void {
+  const target = commandRuns.find(item => item.id === id);
+  if (!target) { return; }
+  target.status = status;
+  persistCommandRuns();
+  commandRunsEmitter.fire();
+}
+
 function getLastCommand(): LastCommandState | undefined {
   const context = ensureContext();
   if (!context) { return undefined; }
@@ -105,14 +155,20 @@ function getLastFailure(): LastFailureState | undefined {
 
 export function initializeRunManager(context: vscode.ExtensionContext): void {
   extensionContext = context;
+  const savedRuns = context.workspaceState.get<CommandRunRecord[]>(STATE_COMMAND_HISTORY_KEY, []);
+  if (Array.isArray(savedRuns) && savedRuns.length > 0) {
+    commandRuns.splice(0, commandRuns.length, ...savedRuns.slice(0, MAX_COMMAND_HISTORY));
+  }
   context.subscriptions.push(getOutputChannel());
+  context.subscriptions.push(commandRunsEmitter);
 }
 
 export async function runBookCommand(command: string, cwd: string, options: RunOptions = {}): Promise<void> {
   const mode = options.mode ?? getExecutionMode();
   const label = options.label ?? 'MLSysBook command';
-  const runId = ++runCounter;
+  const runId = Date.now();
   const start = Date.now();
+  const runRecord = recordCommandStart(command, cwd, label, mode === 'raw' ? 'raw' : 'focused');
 
   storeLastCommand({
     command,
@@ -161,6 +217,7 @@ export async function runBookCommand(command: string, cwd: string, options: RunO
 
   const elapsedMs = Date.now() - start;
   const success = exitCode === 0;
+  updateCommandStatus(runRecord.id, success ? 'succeeded' : 'failed');
   channel.appendLine('');
   channel.appendLine(makeSummary(runId, label, success, elapsedMs, command));
   channel.appendLine('');
@@ -215,6 +272,7 @@ export function runInVisibleTerminal(command: string, cwd: string, label = 'MLSy
   const terminal = getOrCreateTerminal(cwd);
   terminal.show(false);
   terminal.sendText(command);
+  recordCommandStart(command, cwd, label, 'raw');
   storeLastCommand({
     command,
     cwd,
@@ -223,6 +281,30 @@ export function runInVisibleTerminal(command: string, cwd: string, label = 'MLSy
   });
   getOutputChannel().appendLine(`[direct] ${label}`);
   getOutputChannel().appendLine(`Command: ${command}`);
+}
+
+export function getRecentCommandRuns(limit = 20): CommandRunRecord[] {
+  return commandRuns.slice(0, limit);
+}
+
+export function recordExternalCommandStart(
+  command: string,
+  cwd: string,
+  label: string,
+  mode: 'raw' | 'focused' = 'raw',
+): string {
+  return recordCommandStart(command, cwd, label, mode).id;
+}
+
+export function recordExternalCommandFinish(runId: string, success: boolean): void {
+  updateCommandStatus(runId, success ? 'succeeded' : 'failed');
+}
+
+export async function rerunSavedCommand(record: CommandRunRecord): Promise<void> {
+  await runBookCommand(record.command, record.cwd, {
+    mode: 'raw',
+    label: `${record.label} (rerun)`,
+  });
 }
 
 export function revealRunTerminal(cwd?: string): void {

@@ -159,7 +159,7 @@ def main():
     # Chapter order for Vol 1
     chapter_order = [
         'introduction', 'ml_systems', 'workflow', 'data_engineering',
-        'dl_primer', 'dnn_architectures', 'frameworks', 'training',
+        'nn_computation', 'nn_architectures', 'frameworks', 'training',
         'data_selection', 'optimizations', 'hw_acceleration', 'benchmarking',
         'serving', 'ops', 'responsible_engr', 'conclusion',
     ]

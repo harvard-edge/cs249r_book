@@ -20,7 +20,7 @@
 ---
 
 ## Part II: Build {#sec-volume-1-audit-comprehensive-review-notes-part-ii-build-1cab}
-**Files:** `dl_primer.qmd`, `dnn_architectures.qmd`, `frameworks.qmd`, `training.qmd`
+**Files:** `nn_computation.qmd`, `nn_architectures.qmd`, `frameworks.qmd`, `training.qmd`
 
 ### Chapter 5: DL Primer {#sec-volume-1-audit-comprehensive-review-notes-chapter-5-dl-primer-a24e}
 *   **Quantitative Rigor:**

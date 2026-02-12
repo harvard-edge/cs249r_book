@@ -82,7 +82,7 @@ class ChapterDiscovery:
 
         Args:
             query: The search term (e.g., 'dnn_')
-            candidate: The chapter file stem (e.g., 'dnn_architectures')
+            candidate: The chapter file stem (e.g., 'nn_architectures')
 
         Returns:
             Match score (higher is better), 0 if no match
@@ -122,7 +122,7 @@ class ChapterDiscovery:
         without a volume prefix.
 
         Matching strategy (in order of priority):
-        1. Exact stem match (e.g., 'dl_primer' → dl_primer.qmd)
+        1. Exact stem match (e.g., 'nn_computation' → nn_computation.qmd)
         2. Best fuzzy match scored by: starts-with > contains > partial overlap,
            with higher coverage (query length / candidate length) preferred.
 

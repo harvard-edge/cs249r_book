@@ -7,10 +7,10 @@ builds with more sections included until the build breaks. This pinpoints exactl
 which section introduces the error.
 
 Usage:
-    python3 debug_section_builds.py --chapter dl_primer --vol1
-    python3 debug_section_builds.py --chapter dl_primer --vol1 --binary-search
-    python3 debug_section_builds.py --chapter dl_primer --vol1 --format html
-    python3 debug_section_builds.py --chapter dl_primer --vol1 -v
+    python3 debug_section_builds.py --chapter nn_computation --vol1
+    python3 debug_section_builds.py --chapter nn_computation --vol1 --binary-search
+    python3 debug_section_builds.py --chapter nn_computation --vol1 --format html
+    python3 debug_section_builds.py --chapter nn_computation --vol1 -v
 
 Log files are written to: book/tools/scripts/testing/logs/<volume>/<chapter>/section_debug/
 """
@@ -264,7 +264,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Build a chapter section-by-section to isolate build failures"
     )
-    parser.add_argument("--chapter", required=True, help="Chapter name (e.g., dl_primer)")
+    parser.add_argument("--chapter", required=True, help="Chapter name (e.g., nn_computation)")
     parser.add_argument("--vol1", action="store_true", help="Volume 1")
     parser.add_argument("--vol2", action="store_true", help="Volume 2")
     parser.add_argument("--format", default="pdf", choices=["pdf", "html", "epub"],

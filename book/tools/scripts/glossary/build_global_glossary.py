@@ -67,11 +67,11 @@ def find_best_definition(definitions_with_chapters):
         return definitions_with_chapters[0]['definition']
 
     # Prefer definitions that are:
-    # 1. From primary/core chapters (training, dl_primer, etc.)
+    # 1. From primary/core chapters (training, nn_computation, etc.)
     # 2. Longer and more comprehensive
     # 3. Don't have "Alternative definition:" artifacts
 
-    priority_chapters = ['dl_primer', 'training', 'ml_systems', 'dnn_architectures']
+    priority_chapters = ['nn_computation', 'training', 'ml_systems', 'nn_architectures']
 
     # First try priority chapters
     for chapter in priority_chapters:

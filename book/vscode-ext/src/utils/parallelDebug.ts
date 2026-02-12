@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ChildProcess, spawn } from 'child_process';
 import { VolumeId } from '../types';
 import { getRepoRoot } from './workspace';
+import { recordExternalCommandFinish, recordExternalCommandStart } from './terminal';
 
 interface ParallelDebugJob {
   chapter: string;
@@ -654,4 +655,58 @@ export async function rerunDebugSession(sessionId: string, failedOnly: boolean):
 
 export function revealParallelDebugOutput(): void {
   getParallelDebugChannel().show(true);
+}
+
+interface IsolatedDebugRunOptions {
+  repoRoot: string;
+  command: string;
+  label: string;
+  keepFailedWorktree?: boolean;
+}
+
+export async function runIsolatedDebugCommand(options: IsolatedDebugRunOptions): Promise<boolean> {
+  const { repoRoot, command, label } = options;
+  const keepFailedWorktree = options.keepFailedWorktree ?? keepFailedWorktrees();
+  const runId = recordExternalCommandStart(command, repoRoot, label, 'raw');
+  const channel = getParallelDebugChannel();
+  channel.show(true);
+
+  const sessionId = `isolated-debug-${nowStamp()}`;
+  const sessionDir = path.join(getWorktreeBaseDir(repoRoot), sessionId);
+  const worktreePath = path.join(sessionDir, 'workspace');
+  await fs.promises.mkdir(sessionDir, { recursive: true });
+
+  channel.appendLine(`[isolated] ${label}`);
+  channel.appendLine(`[isolated] create worktree: ${worktreePath}`);
+  const addCode = await runShellCommand(
+    `git worktree add --detach "${worktreePath}" HEAD`,
+    repoRoot,
+    channel,
+    'isolated',
+  );
+  if (addCode !== 0) {
+    channel.appendLine(`[isolated] failed to create worktree (exit ${addCode})`);
+    recordExternalCommandFinish(runId, false);
+    void vscode.window.showErrorMessage(`${label} failed: could not create isolated worktree.`);
+    return false;
+  }
+
+  channel.appendLine(`[isolated] run: ${command}`);
+  const exitCode = await runShellCommand(command, worktreePath, channel, 'isolated');
+  const success = exitCode === 0;
+  if (success || !keepFailedWorktree) {
+    await cleanupWorktree(repoRoot, worktreePath, true, channel);
+  } else {
+    channel.appendLine(`[isolated] keeping failed worktree: ${worktreePath}`);
+  }
+  await runShellCommand('git worktree prune', repoRoot, channel, 'isolated');
+
+  if (success) {
+    recordExternalCommandFinish(runId, true);
+    void vscode.window.showInformationMessage(`${label} succeeded (isolated worktree).`);
+  } else {
+    recordExternalCommandFinish(runId, false);
+    void vscode.window.showErrorMessage(`${label} failed (isolated worktree).`);
+  }
+  return success;
 }

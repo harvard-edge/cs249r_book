@@ -150,11 +150,11 @@ def main():
     else:
         # Get chapters in order
         chapter_order = [
-            'introduction', 'ml_systems', 'dl_primer', 'dnn_architectures',
+            'introduction', 'ml_systems', 'nn_computation', 'nn_architectures',
             'workflow', 'data_engineering', 'frameworks', 'training',
             'efficient_ai', 'optimizations', 'hw_acceleration', 'benchmarking',
-            'ops', 'ondevice_learning', 'robust_ai', 'privacy_security',
-            'responsible_ai', 'sustainable_ai', 'ai_for_good', 'conclusion'
+            'ops', 'ondevice_learning', 'robust_ai', 'security_privacy',
+            'responsible_ai', 'sustainable_ai', 'ai_good', 'conclusion'
         ]
 
         files = []

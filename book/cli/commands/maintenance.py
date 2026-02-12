@@ -260,7 +260,7 @@ class MaintenanceCommand:
             if len(definitions_with_chapters) == 1:
                 return definitions_with_chapters[0]["definition"]
 
-            priority_chapters = ["dl_primer", "training", "ml_systems", "dnn_architectures"]
+            priority_chapters = ["nn_computation", "training", "ml_systems", "nn_architectures"]
             for chapter_name in priority_chapters:
                 for item in definitions_with_chapters:
                     if item["chapter"] == chapter_name and not item["definition"].startswith("Alternative definition:"):
