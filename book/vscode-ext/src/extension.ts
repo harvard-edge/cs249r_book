@@ -251,15 +251,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('mlsysbook.renameLabelReferences', () => void renameLabelAcrossWorkspace()),
 
-    // Section ID management
+    // Section ID management (uses binder CLI)
     vscode.commands.registerCommand('mlsysbook.addSectionIds', () => {
       if (!root) { return; }
       const editor = vscode.window.activeTextEditor;
       const target = editor?.document.uri.fsPath.endsWith('.qmd')
-        ? `-f ${editor.document.uri.fsPath}`
-        : '-d book/quarto/contents/vol1/';
+        ? `--path ${editor.document.uri.fsPath}`
+        : '--vol1';
       runInVisibleTerminal(
-        `python3 book/tools/scripts/content/manage_section_ids.py ${target} --force`,
+        `./book/binder maintain section-ids add ${target} --force`,
         root,
         'Add Section IDs',
       );
@@ -267,7 +267,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.verifySectionIds', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        'python3 book/tools/scripts/content/manage_section_ids.py -d book/quarto/contents/vol1/ --verify --force',
+        './book/binder validate section-ids --vol1',
         root,
         'Verify Section IDs',
       );
@@ -275,7 +275,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.validateCrossReferences', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        'python3 book/tools/scripts/content/check_unreferenced_labels.py ./book/quarto/contents/vol1/',
+        './book/binder validate unreferenced-labels --vol1 --all-types',
         root,
         'Validate Cross-References',
       );

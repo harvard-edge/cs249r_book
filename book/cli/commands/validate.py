@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import time
-from dataclasses import dataclass
+from collections import defaultdict
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -112,6 +114,16 @@ class ValidateCommand:
                 "duplicate-labels",
                 "unreferenced-labels",
                 "inline-refs",
+                "section-ids",
+                "forbidden-footnotes",
+                "footnotes",
+                "figure-completeness",
+                "figure-placement",
+                "index-placement",
+                "render-patterns",
+                "dropcap",
+                "part-keys",
+                "image-refs",
                 "all",
             ],
             help="Validation command to run",
@@ -155,6 +167,16 @@ class ValidateCommand:
             runs.append(self._run_duplicate_labels(root_path, label_types))
             runs.append(self._run_unreferenced_labels(root_path, label_types))
             runs.append(self._run_inline_refs(root_path, check_patterns=ns.check_patterns))
+            runs.append(self._run_section_ids(root_path))
+            runs.append(self._run_forbidden_footnotes(root_path))
+            runs.append(self._run_footnotes(root_path))
+            runs.append(self._run_figure_completeness(root_path))
+            runs.append(self._run_figure_placement(root_path))
+            runs.append(self._run_index_placement(root_path))
+            runs.append(self._run_render_patterns(root_path))
+            runs.append(self._run_dropcap(root_path))
+            runs.append(self._run_part_keys(root_path))
+            runs.append(self._run_image_refs(root_path))
         elif ns.subcommand == "inline-python":
             runs.append(self._run_inline_python(root_path))
         elif ns.subcommand == "refs":
@@ -169,6 +191,26 @@ class ValidateCommand:
             runs.append(self._run_unreferenced_labels(root_path, self._selected_label_types(ns)))
         elif ns.subcommand == "inline-refs":
             runs.append(self._run_inline_refs(root_path, check_patterns=ns.check_patterns))
+        elif ns.subcommand == "section-ids":
+            runs.append(self._run_section_ids(root_path))
+        elif ns.subcommand == "forbidden-footnotes":
+            runs.append(self._run_forbidden_footnotes(root_path))
+        elif ns.subcommand == "footnotes":
+            runs.append(self._run_footnotes(root_path))
+        elif ns.subcommand == "figure-completeness":
+            runs.append(self._run_figure_completeness(root_path))
+        elif ns.subcommand == "figure-placement":
+            runs.append(self._run_figure_placement(root_path))
+        elif ns.subcommand == "index-placement":
+            runs.append(self._run_index_placement(root_path))
+        elif ns.subcommand == "render-patterns":
+            runs.append(self._run_render_patterns(root_path))
+        elif ns.subcommand == "dropcap":
+            runs.append(self._run_dropcap(root_path))
+        elif ns.subcommand == "part-keys":
+            runs.append(self._run_part_keys(root_path))
+        elif ns.subcommand == "image-refs":
+            runs.append(self._run_image_refs(root_path))
 
         any_failed = any(not run.passed for run in runs)
         summary = {
@@ -638,6 +680,945 @@ class ValidateCommand:
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
+
+    # ------------------------------------------------------------------
+    # Section IDs  (ported from manage_section_ids.py --verify)
+    # ------------------------------------------------------------------
+
+    def _run_section_ids(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        header_pat = re.compile(r"^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$")
+        div_start_pat = re.compile(r"^:::\s*\{\.")
+        div_end_pat = re.compile(r"^:::\s*$")
+        code_block_pat = re.compile(r"^```[^`]*$")
+        sec_id_pat = re.compile(r"\{#sec-[^}]+\}")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_div = False
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if code_block_pat.match(stripped):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if div_start_pat.match(stripped):
+                    in_div = True
+                    continue
+                if div_end_pat.match(stripped):
+                    in_div = False
+                    continue
+                if in_div:
+                    continue
+
+                match = header_pat.match(line)
+                if not match:
+                    continue
+
+                # Extract existing attributes
+                existing_attrs = ""
+                if "{" in line:
+                    attrs_start = line.find("{")
+                    attrs_end = line.rfind("}")
+                    if attrs_end > attrs_start:
+                        existing_attrs = line[attrs_start : attrs_end + 1]
+
+                if ".unnumbered" in existing_attrs:
+                    continue
+
+                if not sec_id_pat.search(line):
+                    title = match.group(2).strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="missing_section_id",
+                            message=f"Header missing section ID: {title}",
+                            severity="error",
+                            context=line.strip()[:160],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="section-ids",
+            description="Verify all section headers have {#sec-...} IDs",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Forbidden Footnotes  (ported from check_forbidden_footnotes.py)
+    # ------------------------------------------------------------------
+
+    def _run_forbidden_footnotes(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        fn_pat = re.compile(r"\[\^fn-[\w-]+\]")
+        inline_fn_pat = re.compile(r"\^\[[^\]]+\]")
+        table_sep_pat = re.compile(r"^\|[\s\-:+]+\|")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            div_depth = 0
+            div_start_line = 0
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                # Track div nesting
+                if re.match(r"^:{3,4}\s*\{", stripped) or re.match(r"^:{3,4}\s+\w", stripped):
+                    div_depth += 1
+                    if div_depth == 1:
+                        div_start_line = idx
+                elif re.match(r"^:{3,4}\s*$", stripped):
+                    if div_depth > 0:
+                        div_depth -= 1
+                        if div_depth == 0:
+                            div_start_line = 0
+
+                # Check inline footnotes (always forbidden)
+                for m in inline_fn_pat.finditer(line):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="inline_footnote",
+                            message=f"Inline footnote syntax; use [^fn-name] reference format",
+                            severity="error",
+                            context=m.group(0)[:80],
+                        )
+                    )
+
+                footnotes = fn_pat.findall(line)
+                if not footnotes:
+                    continue
+
+                # Table cell check
+                if stripped.startswith("|") and stripped.count("|") >= 2 and not table_sep_pat.match(stripped):
+                    for fn in footnotes:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_in_table",
+                                message=f"Footnote {fn} in table cell",
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
+
+                # YAML caption check
+                if re.match(r"^\s*(fig-cap|tbl-cap):", line):
+                    cap_type = "figure" if "fig-cap" in line else "table"
+                    for fn in footnotes:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code=f"footnote_in_{cap_type}_caption",
+                                message=f"Footnote {fn} in {cap_type} caption",
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
+
+                # Markdown caption check
+                if re.match(r"^:\s*\*\*[^*]+\*\*:", line):
+                    for fn in footnotes:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_in_markdown_caption",
+                                message=f"Footnote {fn} in markdown caption",
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
+
+                # Callout title check
+                if re.match(r"^:{3,4}\s*\{.*title=", stripped):
+                    title_match = re.search(r'title="([^"]*)"', line)
+                    if title_match and fn_pat.search(title_match.group(1)):
+                        for fn in fn_pat.findall(title_match.group(1)):
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=idx,
+                                    code="footnote_in_callout_title",
+                                    message=f"Footnote {fn} in callout title (breaks LaTeX)",
+                                    severity="error",
+                                    context=stripped[:80],
+                                )
+                            )
+
+                # Div block check
+                if div_depth > 0 and div_start_line != idx:
+                    for fn in footnotes:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_in_div",
+                                message=f"Footnote {fn} inside div block (started line {div_start_line})",
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="forbidden-footnotes",
+            description="Check footnotes in forbidden locations",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Footnote validation  (ported from footnote_cleanup.py --validate)
+    # ------------------------------------------------------------------
+
+    def _run_footnotes(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        ref_pat = re.compile(r"\[\^([^]]+)\]")
+        def_pat = re.compile(r"^\[\^([^]]+)\]:\s*(.+)$", re.MULTILINE)
+
+        for file in files:
+            content = self._read_text(file)
+            lines = content.split("\n")
+
+            # Collect definitions
+            fn_defs: Dict[str, str] = {}
+            for m in def_pat.finditer(content):
+                fn_defs[m.group(1)] = m.group(2)
+
+            # Collect references (excluding definition lines themselves)
+            fn_refs: Dict[str, List[int]] = defaultdict(list)
+            for line_num, line in enumerate(lines, 1):
+                for m in ref_pat.finditer(line):
+                    fn_id = m.group(1)
+                    dm = def_pat.match(line)
+                    if dm and dm.group(1) == fn_id:
+                        continue  # definition line, not a reference
+                    fn_refs[fn_id].append(line_num)
+
+            # Undefined references
+            for fn_id in sorted(set(fn_refs.keys()) - set(fn_defs.keys())):
+                first_line = fn_refs[fn_id][0]
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=first_line,
+                        code="undefined_footnote_ref",
+                        message=f"Undefined footnote reference: [^{fn_id}]",
+                        severity="error",
+                        context=f"[^{fn_id}]",
+                    )
+                )
+
+            # Unused definitions
+            for fn_id in sorted(set(fn_defs.keys()) - set(fn_refs.keys())):
+                def_line = self._line_for_token(content, f"[^{fn_id}]:")
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=def_line,
+                        code="unused_footnote_def",
+                        message=f"Unused footnote definition: [^{fn_id}]",
+                        severity="warning",
+                        context=f"[^{fn_id}]:",
+                    )
+                )
+
+            # Duplicate definitions
+            def_counts: Dict[str, int] = defaultdict(int)
+            for line in lines:
+                dm = re.match(r"^\[\^([^]]+)\]:", line)
+                if dm:
+                    def_counts[dm.group(1)] += 1
+            for fn_id, count in def_counts.items():
+                if count > 1:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=self._line_for_token(content, f"[^{fn_id}]:"),
+                            code="duplicate_footnote_def",
+                            message=f"Duplicate footnote definition ({count}x): [^{fn_id}]",
+                            severity="error",
+                            context=f"[^{fn_id}]:",
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="footnotes",
+            description="Validate footnote references and definitions",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Figure completeness  (ported from check_figure_completeness.py)
+    # ------------------------------------------------------------------
+
+    def _run_figure_completeness(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        fig_id_pat = re.compile(r"\{#(fig-[a-zA-Z0-9_-]+)[\s}]")
+        md_cap_pat = re.compile(r"!\[(.+?)\]\(")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            seen_ids: Set[str] = set()
+
+            # Pass 1: attribute-based figures
+            for idx, line in enumerate(lines, 1):
+                m = fig_id_pat.search(line)
+                if not m:
+                    continue
+                fig_id = m.group(1)
+                has_cap = bool(re.search(r'fig-cap="[^"]+', line))
+                has_alt = bool(re.search(r'fig-alt="[^"]+', line))
+
+                if "![" in line:
+                    md_m = md_cap_pat.search(line)
+                    if md_m and md_m.group(1).strip():
+                        has_cap = True
+
+                seen_ids.add(fig_id)
+                missing = []
+                if not has_cap:
+                    missing.append("caption")
+                if not has_alt:
+                    missing.append("alt-text")
+                if missing:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="incomplete_figure",
+                            message=f"Figure {fig_id} missing: {', '.join(missing)}",
+                            severity="error",
+                            context=line.strip()[:120],
+                        )
+                    )
+
+            # Pass 2: code-cell figures
+            in_code = False
+            code_start = 0
+            cell_opts: Dict[str, str] = {}
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+                if not in_code and re.match(r"^```\{(?:python|r|julia|ojs)", stripped):
+                    in_code = True
+                    code_start = idx
+                    cell_opts = {}
+                    continue
+                if in_code and stripped == "```":
+                    label = cell_opts.get("label", "")
+                    if label.startswith("fig-") and label not in seen_ids:
+                        cap_val = cell_opts.get("fig-cap", "")
+                        alt_val = cell_opts.get("fig-alt", "")
+                        missing = []
+                        if not cap_val:
+                            missing.append("caption")
+                        if not alt_val:
+                            missing.append("alt-text")
+                        if missing:
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=code_start,
+                                    code="incomplete_figure",
+                                    message=f"Figure {label} missing: {', '.join(missing)}",
+                                    severity="error",
+                                    context=f"code-cell figure {label}",
+                                )
+                            )
+                        seen_ids.add(label)
+                    in_code = False
+                    cell_opts = {}
+                    continue
+                if in_code:
+                    opt_m = re.match(r"^#\|\s*([\w-]+):\s*(.+)$", stripped)
+                    if opt_m:
+                        val = opt_m.group(2).strip().strip("\"'")
+                        cell_opts[opt_m.group(1)] = val
+
+        return ValidationRunResult(
+            name="figure-completeness",
+            description="Check figures have captions and alt-text",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Figure/table placement  (ported from figure_table_flow_audit.py)
+    # ------------------------------------------------------------------
+
+    def _run_figure_placement(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        div_def_pat = re.compile(r":::\s*\{[^}]*#((?:fig|tbl)-[\w-]+)")
+        img_def_pat = re.compile(r"!\[.*?\]\(.*?\)\s*\{[^}]*#((?:fig|tbl)-[\w-]+)")
+        tbl_cap_pat = re.compile(r"^:\s+.*\{[^}]*#((?:fig|tbl)-[\w-]+)")
+        ref_pat = re.compile(r"@((?:fig|tbl)-[\w-]+)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            defs: Dict[str, int] = {}
+            refs: Dict[str, List[int]] = defaultdict(list)
+            in_code = False
+            in_float = False
+            float_label: Optional[str] = None
+            code_spans: List[Tuple[int, int]] = []
+            code_start = 0
+            cell_opts: Dict[str, str] = {}
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.rstrip()
+
+                # Code block tracking
+                if not in_code and re.match(r"^```\{", stripped):
+                    in_code = True
+                    code_start = idx
+                    cell_opts = {}
+                    continue
+                if in_code and stripped == "```":
+                    code_spans.append((code_start, idx))
+                    label = cell_opts.get("label", "")
+                    if label.startswith(("fig-", "tbl-")) and label not in defs:
+                        defs[label] = code_start
+                    in_code = False
+                    cell_opts = {}
+                    continue
+                if in_code:
+                    opt_m = re.match(r"^#\|\s*([\w-]+):\s*(.+)$", stripped)
+                    if opt_m:
+                        cell_opts[opt_m.group(1)] = opt_m.group(2).strip().strip("\"'")
+                    continue
+
+                # Attribute-based definitions
+                for pat in [div_def_pat, img_def_pat, tbl_cap_pat]:
+                    m = pat.search(line)
+                    if m:
+                        label = m.group(1)
+                        if label not in defs:
+                            defs[label] = idx
+                        if pat == div_def_pat:
+                            in_float = True
+                            float_label = label
+
+                # Track float block end
+                if in_float:
+                    ls = line.strip()
+                    if ls.startswith(":::") and not ls.startswith("::: {"):
+                        in_float = False
+                        float_label = None
+
+                # References
+                if "fig-cap=" in line or "fig-alt=" in line:
+                    continue
+                for m in ref_pat.finditer(line):
+                    label = m.group(1)
+                    if in_float and label == float_label:
+                        continue
+                    refs[label].append(idx)
+
+            # Evaluate status
+            all_labels = set(defs.keys()) | set(refs.keys())
+            for label in sorted(all_labels):
+                def_line = defs.get(label)
+                ref_lines = refs.get(label, [])
+                first_ref = min(ref_lines) if ref_lines else None
+
+                if not def_line:
+                    continue  # XREF — informational, skip
+                if not first_ref:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=def_line,
+                            code="orphan_float",
+                            message=f"{'Figure' if label.startswith('fig-') else 'Table'} {label} defined but never referenced",
+                            severity="warning",
+                            context=label,
+                        )
+                    )
+                    continue
+
+                # Compute prose gap
+                gap = def_line - first_ref
+                code_lines = 0
+                if gap > 0:
+                    for cs, ce in code_spans:
+                        os_ = max(first_ref, cs)
+                        oe_ = min(def_line, ce)
+                        if os_ <= oe_:
+                            code_lines += oe_ - os_ + 1
+                prose_gap = gap - code_lines
+
+                if prose_gap > 30:
+                    # Check closest reference
+                    closest = min(ref_lines, key=lambda r: abs(def_line - r))
+                    closest_gap = def_line - closest
+                    if -5 <= closest_gap <= 30:
+                        continue  # OK
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=def_line,
+                            code="late_float",
+                            message=f"{label} defined at L{def_line}, first referenced at L{first_ref} (too far after mention)",
+                            severity="warning",
+                            context=label,
+                        )
+                    )
+                elif prose_gap < -5:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=def_line,
+                            code="early_float",
+                            message=f"{label} defined at L{def_line}, first referenced at L{first_ref} (appears before mention)",
+                            severity="warning",
+                            context=label,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="figure-placement",
+            description="Audit figure/table placement relative to first reference",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Index placement  (ported from check_index_placement.py)
+    # ------------------------------------------------------------------
+
+    def _run_index_placement(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        checks = [
+            ("index_on_heading", re.compile(r"^#{1,6}\s+.*\\index\{"), "\\index{} on same line as heading"),
+            ("index_before_div", re.compile(r"\\index\{[^}]*\}:::"), "\\index{} directly before ::: (div/callout)"),
+            ("index_after_div", re.compile(r"^::+\s+\{[^}]*\}\s*\\index\{"), "\\index{} on same line as div/callout"),
+            ("index_before_footnote", re.compile(r"^\\index\{[^}]*\}.*\[\^[^\]]+\]:"), "\\index{} before footnote definition"),
+        ]
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                if line.strip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                for code, pattern, message in checks:
+                    # Skip fig-cap lines for index_after_div
+                    if code == "index_after_div" and "fig-cap=" in line:
+                        continue
+                    if pattern.search(line):
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code=code,
+                                message=message,
+                                severity="error",
+                                context=line.strip()[:120],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="index-placement",
+            description="Check LaTeX \\index{} placement",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Render patterns  (ported from check_render_patterns.py)
+    # ------------------------------------------------------------------
+
+    def _run_render_patterns(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        regex_checks = [
+            ("missing_opening_backtick", re.compile(r"(?<!`)(\{python\}\s+\w+`)"), "Missing opening backtick on inline Python", "error"),
+            ("dollar_before_python", re.compile(r"\$\{python\}\s+\w+`"), "Dollar sign instead of backtick before {python}", "error"),
+            ("quad_asterisks", re.compile(r"\*{4,}"), "Quad asterisks — likely malformed bold/italic", "warning"),
+            ("footnote_in_table", re.compile(r"^\|.*\[\^fn-[^\]]+\].*\|"), "Footnote in table cell — may break PDF", "warning"),
+            ("double_dollar_python", re.compile(r"\$\$[^$]*`\{python\}"), "Inline Python in display math", "error"),
+        ]
+
+        grid_sep_pat = re.compile(r"^\+[-:=+]+\+$")
+        math_span_pat = re.compile(r"(?<!\\)\$(?!\$)(?!`)(.+?)(?<!\\)\$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_grid = False
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                # Grid table tracking
+                if grid_sep_pat.match(stripped):
+                    in_grid = True
+                elif in_grid and not stripped.startswith("|") and not grid_sep_pat.match(stripped) and stripped:
+                    in_grid = False
+
+                if in_grid and "`{python}" in line:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="grid_table_python",
+                            message="Grid table with inline Python — convert to pipe table",
+                            severity="error",
+                            context=stripped[:120],
+                        )
+                    )
+
+                # Python inside $...$ math
+                for m in math_span_pat.finditer(line):
+                    inner = m.group(1)
+                    if "{python}" not in inner:
+                        continue
+                    inner_clean = re.sub(r"\^\{[^}]*`\{python\}[^`]*`[^}]*\}", "", inner)
+                    if "{python}" in inner_clean:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="python_in_dollar_math",
+                                message="Inline Python inside $...$ math block",
+                                severity="error",
+                                context=m.group(0)[:120],
+                            )
+                        )
+
+                # Standard regex checks
+                for code, pattern, message, severity in regex_checks:
+                    for rm in pattern.finditer(line):
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code=code,
+                                message=message,
+                                severity=severity,
+                                context=rm.group(0)[:120],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="render-patterns",
+            description="Check for problematic rendering patterns",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Drop cap compatibility  (ported from validate_dropcap_compat.py)
+    # ------------------------------------------------------------------
+
+    def _run_dropcap(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        chapter_hdr = re.compile(r"^#\s+[^#].*\{#sec-")
+        numbered_h2 = re.compile(r"^##\s+[^#]")
+        unnumbered_h2 = re.compile(r"^##\s+.*\{.*\.unnumbered.*\}")
+        starts_xref = re.compile(r"^\s*@(sec|fig|tbl|lst|eq)-")
+        starts_link = re.compile(r"^\s*\[")
+        starts_inline = re.compile(r"^\s*`")
+        yaml_fence = re.compile(r"^---\s*$")
+        code_fence = re.compile(r"^```")
+        div_fence = re.compile(r"^:::")
+        blank = re.compile(r"^\s*$")
+        html_comment = re.compile(r"^\s*<!--")
+        raw_latex = re.compile(r"^\s*\\")
+        list_item = re.compile(r"^\s*[-*+]|\s*\d+\.")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_fm = False
+            in_code = False
+            in_div = 0
+            found_chapter = False
+            found_h2 = False
+
+            for idx, line in enumerate(lines, 1):
+                if idx == 1 and yaml_fence.match(line):
+                    in_fm = True
+                    continue
+                if in_fm:
+                    if yaml_fence.match(line):
+                        in_fm = False
+                    continue
+                if code_fence.match(line):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if div_fence.match(line):
+                    stripped = line.strip()
+                    if stripped == ":::":
+                        in_div = max(0, in_div - 1)
+                    elif stripped.startswith(":::"):
+                        in_div += 1
+                    continue
+                if in_div > 0:
+                    continue
+
+                if chapter_hdr.match(line):
+                    found_chapter = True
+                    found_h2 = False
+                    continue
+                if not found_chapter:
+                    continue
+                if numbered_h2.match(line) and not unnumbered_h2.match(line):
+                    if not found_h2:
+                        found_h2 = True
+                    continue
+                if not found_h2:
+                    continue
+                if blank.match(line) or html_comment.match(line) or raw_latex.match(line) or list_item.match(line):
+                    continue
+                if line.strip().startswith("#"):
+                    continue
+
+                # First paragraph line
+                if starts_xref.match(line):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="dropcap_crossref",
+                            message="Drop cap paragraph starts with cross-reference",
+                            severity="error",
+                            context=line.strip()[:120],
+                        )
+                    )
+                elif starts_link.match(line):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="dropcap_link",
+                            message="Drop cap paragraph starts with markdown link",
+                            severity="error",
+                            context=line.strip()[:120],
+                        )
+                    )
+                elif starts_inline.match(line):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="dropcap_inline",
+                            message="Drop cap paragraph starts with inline code",
+                            severity="error",
+                            context=line.strip()[:120],
+                        )
+                    )
+                # Only check first paragraph per file
+                break
+
+        return ValidationRunResult(
+            name="dropcap",
+            description="Validate drop cap compatibility",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Part keys  (ported from validate_part_keys.py)
+    # ------------------------------------------------------------------
+
+    def _run_part_keys(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        part_key_pat = re.compile(r"\\part\{key:([^}]+)\}")
+
+        # Load summaries
+        summaries_keys: Set[str] = set()
+        possible_paths = [
+            self.config_manager.book_dir / "contents" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "contents" / "vol1" / "parts" / "summaries.yml",
+            self.config_manager.book_dir / "contents" / "vol2" / "parts" / "summaries.yml",
+        ]
+
+        try:
+            import yaml
+        except ImportError:
+            return ValidationRunResult(
+                name="part-keys",
+                description="Validate part keys (skipped — pyyaml not installed)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        for yml_path in possible_paths:
+            if yml_path.exists():
+                try:
+                    data = yaml.safe_load(yml_path.read_text(encoding="utf-8"))
+                    for part in data.get("parts", []):
+                        if "key" in part:
+                            summaries_keys.add(part["key"].lower().replace("_", "").replace("-", ""))
+                except Exception:
+                    pass
+
+        if not summaries_keys:
+            # No summaries found — skip gracefully
+            return ValidationRunResult(
+                name="part-keys",
+                description="Validate part keys (skipped — no summaries.yml found)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        for file in files:
+            content = self._read_text(file)
+            for m in part_key_pat.finditer(content):
+                key = m.group(1)
+                norm = key.lower().replace("_", "").replace("-", "")
+                if norm not in summaries_keys:
+                    line_no = content[: m.start()].count("\n") + 1
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=line_no,
+                            code="invalid_part_key",
+                            message=f"Part key '{key}' not found in summaries.yml",
+                            severity="error",
+                            context=m.group(0),
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="part-keys",
+            description="Validate \\part{{key:...}} against summaries.yml",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Image references  (ported from validate_image_references.py)
+    # ------------------------------------------------------------------
+
+    def _run_image_refs(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        img_pat = re.compile(r"!\[(?:[^\]]|\[[^\]]*\])*\]\(([^)]+)\)(?:\{[^}]*\})?")
+        valid_exts = {".png", ".jpg", ".jpeg", ".gif", ".svg"}
+
+        for file in files:
+            content = self._read_text(file)
+            for m in img_pat.finditer(content):
+                img_path = m.group(1).strip()
+                if img_path.startswith(("http://", "https://")):
+                    continue
+                ext = Path(img_path).suffix.lower()
+                if ext not in valid_exts:
+                    continue
+
+                resolved = (file.parent / img_path).resolve()
+                line_no = content[: m.start()].count("\n") + 1
+
+                if not resolved.exists():
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=line_no,
+                            code="missing_image",
+                            message=f"Image not found: {img_path}",
+                            severity="error",
+                            context=img_path,
+                        )
+                    )
+                else:
+                    # Case check
+                    try:
+                        actual = self._realcase(str(resolved))
+                        if str(resolved) != actual:
+                            issues.append(
+                                ValidationIssue(
+                                    file=self._relative_file(file),
+                                    line=line_no,
+                                    code="image_case_mismatch",
+                                    message=f"Image case mismatch: ref='{Path(str(resolved)).name}' disk='{Path(actual).name}'",
+                                    severity="error",
+                                    context=img_path,
+                                )
+                            )
+                    except (FileNotFoundError, OSError):
+                        pass
+
+        return ValidationRunResult(
+            name="image-refs",
+            description="Validate image references exist on disk",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    @staticmethod
+    def _realcase(path: str) -> str:
+        """Resolve actual case of a path on disk."""
+        dirname, basename = os.path.split(path)
+        if dirname == path:
+            return dirname
+        dirname = ValidateCommand._realcase(dirname)
+        norm_base = os.path.normcase(basename)
+        try:
+            for child in os.listdir(dirname):
+                if os.path.normcase(child) == norm_base:
+                    return os.path.join(dirname, child)
+        except OSError:
+            pass
+        return path
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
 
     def _line_for_token(self, content: str, token: str) -> int:
         index = content.find(token)

@@ -5,11 +5,13 @@ Handles setup, switch, hello, about, and other maintenance operations.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import subprocess
 import shutil
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -194,10 +196,11 @@ class MaintenanceCommand:
             description="Maintenance namespace for non-build workflows",
             add_help=True,
         )
-        parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health"])
+        parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health", "section-ids", "footnotes"])
         parser.add_argument("action", nargs="?")
-        parser.add_argument("--vol1", action="store_true", help="Scope glossary build to vol1")
-        parser.add_argument("--vol2", action="store_true", help="Scope glossary build to vol2")
+        parser.add_argument("--vol1", action="store_true", help="Scope to vol1")
+        parser.add_argument("--vol2", action="store_true", help="Scope to vol2")
+        parser.add_argument("--path", default=None, help="File or directory path")
         parser.add_argument("-f", "--file", action="append", default=[], help="Image file to process (repeatable)")
         parser.add_argument("--all", action="store_true", help="Process all matching images")
         parser.add_argument("--apply", action="store_true", help="Apply changes in-place")
@@ -206,6 +209,9 @@ class MaintenanceCommand:
         parser.add_argument("--smart-compression", action="store_true", help="Try quality first, resize only if still too large")
         parser.add_argument("--min-size-mb", type=int, default=1, help="Minimum size for --all image scan")
         parser.add_argument("--json", action="store_true", help="Emit JSON output for repo-health")
+        parser.add_argument("--force", action="store_true", help="Skip interactive confirmations")
+        parser.add_argument("--dry-run", action="store_true", help="Preview changes without modifying files")
+        parser.add_argument("--backup", action="store_true", help="Create backup files before changes")
 
         try:
             ns = parser.parse_args(args)
@@ -245,7 +251,456 @@ class MaintenanceCommand:
                 return False
             return self._maintain_repo_health(min_size_mb=ns.min_size_mb, json_output=ns.json)
 
+        if ns.topic == "section-ids":
+            valid_actions = ("add", "repair", "list", "remove")
+            if ns.action not in valid_actions:
+                console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")
+                return False
+            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2)
+            return self._maintain_section_ids(
+                root=root,
+                action=ns.action,
+                force=ns.force,
+                dry_run=ns.dry_run,
+                backup=ns.backup,
+            )
+
+        if ns.topic == "footnotes":
+            valid_actions = ("cleanup", "reorganize", "remove")
+            if ns.action not in valid_actions:
+                console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")
+                return False
+            root = self._resolve_content_path(ns.path, ns.vol1, ns.vol2)
+            return self._maintain_footnotes(
+                root=root,
+                action=ns.action,
+                dry_run=ns.dry_run,
+                backup=ns.backup,
+            )
+
         return False
+
+    def _resolve_content_path(self, path_arg, vol1: bool, vol2: bool) -> Path:
+        """Resolve content path from args."""
+        if path_arg:
+            p = Path(path_arg)
+            return p if p.is_absolute() else (Path.cwd() / p).resolve()
+        base = self.config_manager.book_dir / "contents"
+        if vol1 and not vol2:
+            return base / "vol1"
+        if vol2 and not vol1:
+            return base / "vol2"
+        return base
+
+    # ------------------------------------------------------------------
+    # Section ID management  (ported from manage_section_ids.py)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _simple_slugify(text: str) -> str:
+        """Convert header text to a slug, removing stopwords."""
+        try:
+            from nltk.corpus import stopwords
+            stop_words = set(stopwords.words("english"))
+        except Exception:
+            stop_words = {
+                "a", "an", "the", "and", "or", "but", "in", "on", "at", "to",
+                "for", "of", "with", "by", "from", "is", "it", "as", "be",
+                "was", "are", "were", "been", "being", "have", "has", "had",
+                "do", "does", "did", "will", "would", "could", "should",
+                "may", "might", "shall", "can", "not", "no", "so", "if",
+                "than", "that", "this", "these", "those", "then", "there",
+                "what", "which", "who", "whom", "how", "when", "where", "why",
+                "all", "each", "every", "both", "few", "more", "most", "other",
+                "some", "such", "only", "own", "same", "too", "very",
+            }
+        words = text.lower().split()
+        filtered = []
+        for word in words:
+            word = re.sub(r"[^\w\s]", "", word)
+            if word and word not in stop_words:
+                filtered.append(word)
+        return "-".join(filtered)
+
+    @staticmethod
+    def _generate_section_id(title, file_path, chapter_title, parent_sections=None, is_chapter=False):
+        """Generate a unique section ID."""
+        clean_title = MaintenanceCommand._simple_slugify(title)
+        if is_chapter:
+            return f"sec-{clean_title}"
+        clean_chapter = MaintenanceCommand._simple_slugify(chapter_title)
+        hierarchy = ""
+        if parent_sections:
+            hierarchy = "|".join(MaintenanceCommand._simple_slugify(p) for p in parent_sections)
+        hash_input = f"{file_path}|{chapter_title}|{title}|{hierarchy}".encode("utf-8")
+        hash_suffix = hashlib.sha1(hash_input).hexdigest()[:4]
+        return f"sec-{clean_chapter}-{clean_title}-{hash_suffix}"
+
+    def _maintain_section_ids(self, root: Path, action: str, force: bool, dry_run: bool, backup: bool) -> bool:
+        """Manage section IDs: add, repair, list, remove."""
+        header_pat = re.compile(r"^(#{1,6})\s+(.+?)(?:\s*\{[^}]*\})?$")
+        div_start = re.compile(r"^:::\s*\{\.")
+        div_end = re.compile(r"^:::\s*$")
+        code_pat = re.compile(r"^```[^`]*$")
+        sec_id_pat = re.compile(r"\{#(sec-[^}]+)\}")
+
+        files = sorted(root.rglob("*.qmd")) if root.is_dir() else ([root] if root.suffix == ".qmd" else [])
+        if not files:
+            console.print("[yellow]No .qmd files found.[/yellow]")
+            return False
+
+        total_added = 0
+        total_updated = 0
+        total_removed = 0
+        total_listed = 0
+        id_replacements: dict[str, str] = {}
+
+        for file in files:
+            lines = file.read_text(encoding="utf-8").splitlines(keepends=True)
+            in_code = False
+            in_div = False
+            modified = False
+            chapter_title = None
+            section_hierarchy: list[str] = []
+
+            # Find chapter title first
+            tmp_code = False
+            tmp_div = False
+            for line in lines:
+                s = line.strip()
+                if code_pat.match(s):
+                    tmp_code = not tmp_code
+                    continue
+                if tmp_code:
+                    continue
+                if div_start.match(s):
+                    tmp_div = True
+                    continue
+                if div_end.match(s):
+                    tmp_div = False
+                    continue
+                if tmp_div:
+                    continue
+                m = header_pat.match(line)
+                if m and len(m.group(1)) == 1:
+                    chapter_title = m.group(2).strip()
+                    break
+
+            if not chapter_title and action in ("add", "repair"):
+                console.print(f"[yellow]⚠️ No chapter title in {file}, skipping[/yellow]")
+                continue
+
+            if action == "list":
+                console.print(f"\n[cyan]📋 {file}[/cyan]")
+                count = 0
+                for i, line in enumerate(lines, 1):
+                    s = line.strip()
+                    if code_pat.match(s):
+                        in_code = not in_code
+                        continue
+                    if in_code:
+                        continue
+                    if div_start.match(s):
+                        in_div = True
+                        continue
+                    if div_end.match(s):
+                        in_div = False
+                        continue
+                    if in_div:
+                        continue
+                    m = header_pat.match(line)
+                    if not m:
+                        continue
+                    attrs = ""
+                    if "{" in line:
+                        a_s = line.find("{")
+                        a_e = line.rfind("}")
+                        if a_e > a_s:
+                            attrs = line[a_s:a_e + 1]
+                    if ".unnumbered" in attrs:
+                        continue
+                    count += 1
+                    sid = sec_id_pat.search(line)
+                    if sid:
+                        console.print(f"  {count:3d}. {m.group(2).strip()}  →  #{sid.group(1)}")
+                    else:
+                        console.print(f"  {count:3d}. {m.group(2).strip()}  [red](NO ID)[/red]")
+                total_listed += count
+                continue
+
+            if backup and not dry_run:
+                bak = f"{file}.backup.{int(time.time())}"
+                shutil.copy2(file, bak)
+                console.print(f"[dim]💾 Backup: {bak}[/dim]")
+
+            for i, line in enumerate(lines):
+                s = line.strip()
+                if code_pat.match(s):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if div_start.match(s):
+                    in_div = True
+                    continue
+                if div_end.match(s):
+                    in_div = False
+                    continue
+                if in_div:
+                    continue
+
+                m = header_pat.match(line)
+                if not m:
+                    continue
+
+                hashes, title = m.groups()
+                level = len(hashes)
+
+                while len(section_hierarchy) >= level:
+                    section_hierarchy.pop()
+                section_hierarchy.append(title.strip())
+                parent_sections = section_hierarchy[:-1] if len(section_hierarchy) > 1 else []
+
+                attrs = ""
+                if "{" in line:
+                    a_s = line.find("{")
+                    a_e = line.rfind("}")
+                    if a_e > a_s:
+                        attrs = line[a_s:a_e + 1]
+                if ".unnumbered" in attrs:
+                    continue
+
+                existing = sec_id_pat.search(line)
+
+                if action == "remove":
+                    if existing:
+                        new_attrs = re.sub(r"#sec-[^}\s]+", "", attrs)
+                        new_attrs = re.sub(r"\s+", " ", new_attrs).strip()
+                        if new_attrs in ("{}", "{ }", ""):
+                            lines[i] = f"{hashes} {title}\n"
+                        else:
+                            lines[i] = f"{hashes} {title} {new_attrs}\n"
+                        modified = True
+                        total_removed += 1
+                        console.print(f"  🗑️  Removed: {title.strip()}")
+
+                elif action == "add":
+                    if not existing:
+                        is_ch = (level == 1)
+                        new_id = self._generate_section_id(title, str(file), chapter_title, parent_sections, is_ch)
+                        if attrs:
+                            lines[i] = f"{hashes} {title} {attrs} {{#{new_id}}}\n"
+                        else:
+                            lines[i] = f"{hashes} {title} {{#{new_id}}}\n"
+                        modified = True
+                        total_added += 1
+                        console.print(f"  ➕ Added: {title.strip()} → #{new_id}")
+
+                elif action == "repair":
+                    is_ch = (level == 1)
+                    new_id = self._generate_section_id(title, str(file), chapter_title, parent_sections, is_ch)
+                    if existing:
+                        old_id = existing.group(1)
+                        if old_id != new_id:
+                            id_replacements[old_id] = new_id
+                            new_attrs = re.sub(r"#sec-[^}\s]+", f"#{new_id}", attrs)
+                            lines[i] = f"{hashes} {title} {new_attrs}\n"
+                            modified = True
+                            total_updated += 1
+                            console.print(f"  🔄 {title.strip()}: {old_id} → {new_id}")
+                    else:
+                        if attrs:
+                            lines[i] = f"{hashes} {title} {attrs} {{#{new_id}}}\n"
+                        else:
+                            lines[i] = f"{hashes} {title} {{#{new_id}}}\n"
+                        modified = True
+                        total_added += 1
+                        console.print(f"  ➕ Added: {title.strip()} → #{new_id}")
+
+            if modified and not dry_run:
+                file.write_text("".join(lines), encoding="utf-8")
+                console.print(f"[green]✅ Saved: {file}[/green]")
+
+        # Summary
+        console.print(f"\n[bold]Summary:[/bold]")
+        if action == "list":
+            console.print(f"  Total sections: {total_listed}")
+        else:
+            console.print(f"  Added: {total_added}  Updated: {total_updated}  Removed: {total_removed}")
+            if dry_run:
+                console.print("[dim]  (dry-run — no files modified)[/dim]")
+            if id_replacements and action == "repair":
+                console.print(f"  [yellow]{len(id_replacements)} ID replacement(s) collected[/yellow]")
+                console.print("  [dim]Run cross-reference update separately if needed.[/dim]")
+
+        return True
+
+    # ------------------------------------------------------------------
+    # Footnote maintenance  (ported from footnote_cleanup.py)
+    # ------------------------------------------------------------------
+
+    def _maintain_footnotes(self, root: Path, action: str, dry_run: bool, backup: bool) -> bool:
+        """Manage footnotes: cleanup, reorganize, remove."""
+        ref_pat = re.compile(r"\[\^([^]]+)\]")
+        def_pat = re.compile(r"^\[\^([^]]+)\]:\s*(.+)$", re.MULTILINE)
+
+        files = sorted(root.rglob("*.qmd")) if root.is_dir() else ([root] if root.suffix == ".qmd" else [])
+        if not files:
+            console.print("[yellow]No .qmd files found.[/yellow]")
+            return False
+
+        total_modified = 0
+        total_issues_fixed = 0
+
+        for file in files:
+            content = file.read_text(encoding="utf-8")
+            original = content
+
+            if action == "cleanup":
+                # Remove undefined refs and unused defs
+                fn_defs = {m.group(1): m.group(2) for m in def_pat.finditer(content)}
+                fn_refs: set[str] = set()
+                lines = content.split("\n")
+                for line in lines:
+                    for m in ref_pat.finditer(line):
+                        fn_id = m.group(1)
+                        dm = def_pat.match(line)
+                        if dm and dm.group(1) == fn_id:
+                            continue
+                        fn_refs.add(fn_id)
+
+                undefined = fn_refs - set(fn_defs.keys())
+                unused = set(fn_defs.keys()) - fn_refs
+                if not undefined and not unused:
+                    continue
+
+                # Remove undefined refs
+                for ref_id in undefined:
+                    content = re.sub(rf"\[\^{re.escape(ref_id)}\]", "", content)
+                    total_issues_fixed += 1
+
+                # Remove unused defs
+                new_lines = []
+                skip = False
+                for line in content.split("\n"):
+                    dm = re.match(r"^\[\^([^]]+)\]:", line)
+                    if dm and dm.group(1) in unused:
+                        skip = True
+                        total_issues_fixed += 1
+                        continue
+                    if skip:
+                        if line and (line[0] in (" ", "\t")):
+                            continue
+                        elif not line.strip():
+                            skip = False
+                            continue
+                        else:
+                            skip = False
+                    new_lines.append(line)
+                content = "\n".join(new_lines)
+
+            elif action == "remove":
+                # Remove all footnote refs and defs
+                fn_defs = {m.group(1) for m in def_pat.finditer(content)}
+                fn_refs_set: set[str] = set()
+                for m in ref_pat.finditer(content):
+                    fn_refs_set.add(m.group(1))
+
+                for ref_id in fn_refs_set:
+                    content = re.sub(rf"\[\^{re.escape(ref_id)}\]", "", content)
+
+                new_lines = []
+                skip = False
+                for line in content.split("\n"):
+                    if re.match(r"^\[\^[^\]]+\]:", line):
+                        skip = True
+                        continue
+                    if skip:
+                        if line and (line[0] in (" ", "\t")):
+                            continue
+                        elif not line.strip():
+                            skip = False
+                            continue
+                        else:
+                            skip = False
+                    new_lines.append(line)
+                content = "\n".join(new_lines)
+
+            elif action == "reorganize":
+                # Move definitions to after their first reference paragraph
+                fn_defs_map = {}
+                for m in def_pat.finditer(content):
+                    fn_defs_map[m.group(1)] = m.group(2)
+                fn_refs_map: dict[str, list[int]] = defaultdict(list)
+                lines = content.split("\n")
+                for line_num, line in enumerate(lines):
+                    for m in ref_pat.finditer(line):
+                        fn_id = m.group(1)
+                        dm = def_pat.match(line)
+                        if dm and dm.group(1) == fn_id:
+                            continue
+                        fn_refs_map[fn_id].append(line_num)
+
+                if not fn_defs_map:
+                    continue
+
+                # Remove existing defs
+                skip_lines: set[int] = set()
+                for i, line in enumerate(lines):
+                    if def_pat.match(line):
+                        skip_lines.add(i)
+
+                new_lines = []
+                processed: set[str] = set()
+                for i, line in enumerate(lines):
+                    if i in skip_lines:
+                        continue
+                    new_lines.append(line)
+
+                    # Check for refs in this line
+                    line_refs = []
+                    for m in ref_pat.finditer(line):
+                        fn_id = m.group(1)
+                        if fn_id in fn_defs_map and fn_id not in processed:
+                            line_refs.append(fn_id)
+
+                    if line_refs:
+                        # Find paragraph end
+                        para_end = i
+                        for j in range(i + 1, len(lines)):
+                            if j in skip_lines:
+                                continue
+                            next_line = lines[j].strip()
+                            if not next_line or next_line.startswith("#") or next_line.startswith(":::") or next_line.startswith("```") or next_line.startswith("|") or def_pat.match(lines[j]):
+                                break
+                            para_end = j
+
+                        if i == para_end:
+                            new_lines.append("")
+                            for fn_id in line_refs:
+                                if fn_id in fn_defs_map:
+                                    new_lines.append(f"[^{fn_id}]: {fn_defs_map[fn_id]}")
+                                    processed.add(fn_id)
+
+                content = "\n".join(new_lines)
+
+            if content != original:
+                total_modified += 1
+                if backup and not dry_run:
+                    bak = file.with_suffix(file.suffix + ".bak")
+                    shutil.copy2(file, bak)
+                if not dry_run:
+                    file.write_text(content, encoding="utf-8")
+                console.print(f"[green]✅ {action}: {file}[/green]")
+            else:
+                console.print(f"[dim]⏭️  No changes: {file}[/dim]")
+
+        console.print(f"\n[bold]Summary:[/bold] {total_modified} file(s) modified")
+        if action == "cleanup":
+            console.print(f"  Issues fixed: {total_issues_fixed}")
+        if dry_run:
+            console.print("[dim]  (dry-run — no files modified)[/dim]")
+        return True
 
     def _maintain_glossary_build(self, volume: str = None) -> bool:
         """Build deduplicated volume glossary JSON files from chapter glossaries."""
