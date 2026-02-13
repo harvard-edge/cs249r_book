@@ -34,18 +34,20 @@ Later files override earlier files.
 
 - `base/crossref-video.yml`
 - `base/custom-numbered-blocks.yml`
+- `base/diagram.yml`
 - `html/announcement.yml`
-- `html/diagram.yml`
 - `html/filters.yml`
 - `html/filter-metadata.yml`
-- `epub/diagram.yml`
 - `epub/filters.yml`
 - `epub/filter-metadata.yml`
-- `pdf/diagram.yml`
 - `pdf/filters.yml`
 - `pdf/filter-metadata.yml`
 - `pdf/custom-numbered-blocks-overrides.yml`
 - `pdf/titlepage-theme-common.yml`
+- `pdf/titlepage-pdf-common.yml`
+- `pdf/titlepage-pdf-copyedit-common.yml`
+- `pdf/build-production-common.yml`
+- `pdf/build-copyedit-common.yml`
 - `pdf/copyedit-watermark.yml`
 - `vol1/filter-metadata-paths.yml`
 - `vol2/filter-metadata-paths.yml`
