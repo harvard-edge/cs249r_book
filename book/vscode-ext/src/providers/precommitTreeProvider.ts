@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PRECOMMIT_CHECK_HOOKS, PRECOMMIT_FIXER_HOOKS, VALIDATE_ACTIONS } from '../constants';
+import { PRECOMMIT_CHECK_HOOKS, PRECOMMIT_FIXER_HOOKS, CHECK_ACTIONS } from '../constants';
 import { ActionTreeItem } from '../models/treeItems';
 
 type TreeNode = ActionTreeItem | SeparatorItem;
@@ -49,7 +49,7 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> 
       'table',
     );
 
-    const validateItems = VALIDATE_ACTIONS.map(action =>
+    const binderCheckItems = CHECK_ACTIONS.map(action =>
       new ActionTreeItem(action.label, 'mlsysbook.validateRunAction', [action.command], action.icon)
     );
 
@@ -61,8 +61,8 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> 
       currentFileFixers,
       currentFileTableFixer,
       ...fixerItems,
-      new SeparatorItem('--- Binder Validate (Fast, Focused) ---'),
-      ...validateItems,
+      new SeparatorItem('--- Binder Check (Fast, Focused) ---'),
+      ...binderCheckItems,
     ];
   }
 }

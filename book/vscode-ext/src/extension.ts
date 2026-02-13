@@ -259,7 +259,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ? `--path ${editor.document.uri.fsPath}`
         : '--vol1';
       runInVisibleTerminal(
-        `./book/binder maintain headers add ${target} --force`,
+        `./book/binder fix headers add ${target} --force`,
         root,
         'Add Section IDs',
       );
@@ -267,7 +267,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.verifySectionIds', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        './book/binder validate headers --vol1',
+        './book/binder check headers --vol1',
         root,
         'Verify Section IDs',
       );
@@ -275,7 +275,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.validateCrossReferences', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        './book/binder validate unreferenced-labels --vol1 --all-types',
+        './book/binder check labels --scope orphans --vol1 --all-types',
         root,
         'Validate Cross-References',
       );

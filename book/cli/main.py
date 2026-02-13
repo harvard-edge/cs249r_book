@@ -25,6 +25,7 @@ try:
     from cli.commands.maintenance import MaintenanceCommand
     from cli.commands.debug import DebugCommand
     from cli.commands.validate import ValidateCommand
+    from cli.commands.formatting import FormatCommand
 except ImportError:
     # When run as local script
     from core.config import ConfigManager
@@ -36,6 +37,7 @@ except ImportError:
     from commands.maintenance import MaintenanceCommand
     from commands.debug import DebugCommand
     from commands.validate import ValidateCommand
+    from commands.formatting import FormatCommand
 
 console = Console()
 
@@ -66,6 +68,7 @@ class MLSysBookCLI:
         self.maintenance_command = MaintenanceCommand(self.config_manager, self.chapter_discovery)
         self.debug_command = DebugCommand(self.config_manager, self.chapter_discovery, verbose=verbose)
         self.validate_command = ValidateCommand(self.config_manager, self.chapter_discovery)
+        self.format_command = FormatCommand(self.config_manager, self.chapter_discovery)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -117,31 +120,38 @@ class MLSysBookCLI:
         full_table.add_row("build pdf --all", "Build full book (both volumes)", "./binder build pdf --all")
         full_table.add_row("build epub --all", "Build full book (both volumes)", "./binder build epub --all")
 
+        # Quality Commands
+        quality_table = Table(show_header=True, header_style="bold yellow", box=None)
+        quality_table.add_column("Command", style="yellow", width=38)
+        quality_table.add_column("Description", style="white", width=30)
+        quality_table.add_column("Example", style="dim", width=28)
+
+        quality_table.add_row("check <group> [--scope ...]", "Run validation checks", "./binder check refs")
+        quality_table.add_row("check all", "Run all validation checks", "./binder check all --vol1")
+        quality_table.add_row("fix <topic> <action>", "Fix/manage content", "./binder fix headers add")
+        quality_table.add_row("format <target>", "Auto-format content", "./binder format tables")
+
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
-        mgmt_table.add_column("Command", style="green", width=35)
+        mgmt_table.add_column("Command", style="green", width=38)
         mgmt_table.add_column("Description", style="white", width=30)
-        mgmt_table.add_column("Example", style="dim", width=30)
+        mgmt_table.add_column("Example", style="dim", width=28)
 
         mgmt_table.add_row("debug <fmt> --vol1|--vol2", "Find failing chapter + section", "./binder debug pdf --vol1")
-        mgmt_table.add_row("debug <fmt> --chapter <ch>", "Section-level debug (skip scan)", "./binder debug pdf --vol1 --chapter intro")
-        mgmt_table.add_row("maintain <topic> ...", "Run maintenance namespace commands", "./binder maintain repo-health")
-        mgmt_table.add_row("validate <subcommand>", "Run native validation checks", "./binder validate inline-refs")
         mgmt_table.add_row("clean", "Clean build artifacts", "./binder clean")
         mgmt_table.add_row("switch <format>", "Switch active config", "./binder switch pdf")
         mgmt_table.add_row("list", "List available chapters", "./binder list")
         mgmt_table.add_row("status", "Show current config status", "./binder status")
         mgmt_table.add_row("doctor", "Run comprehensive health check", "./binder doctor")
         mgmt_table.add_row("setup", "Setup development environment", "./binder setup")
-        mgmt_table.add_row("hello", "Show welcome message", "./binder hello")
-        mgmt_table.add_row("about", "Show project information", "./binder about")
         mgmt_table.add_row("help", "Show this help", "./binder help")
 
         # Display tables
         console.print(Panel(fast_table, title="⚡ Fast Chapter Commands", border_style="green"))
         console.print(Panel(vol_table, title="📖 Volume Commands", border_style="magenta"))
         console.print(Panel(full_table, title="📚 Full Book Commands", border_style="blue"))
-        console.print(Panel(mgmt_table, title="🔧 Management", border_style="yellow"))
+        console.print(Panel(quality_table, title="✅ Quality & Formatting", border_style="yellow"))
+        console.print(Panel(mgmt_table, title="🔧 Management", border_style="cyan"))
 
         # Pro Tips
         examples = Text()
@@ -331,9 +341,17 @@ class MLSysBookCLI:
         """Handle about command."""
         return self.maintenance_command.show_about()
 
-    def handle_maintain_command(self, args):
-        """Handle maintenance namespace command."""
+    def handle_check_command(self, args):
+        """Handle check (validation) command group."""
+        return self.validate_command.run(args)
+
+    def handle_fix_command(self, args):
+        """Handle fix (maintenance) namespace command."""
         return self.maintenance_command.run_namespace(args)
+
+    def handle_format_command(self, args):
+        """Handle format command group."""
+        return self.format_command.run(args)
 
 
     def handle_debug_command(self, args):
@@ -390,10 +408,6 @@ class MLSysBookCLI:
         self.chapter_discovery.show_chapters(volume=volume)
         return True
 
-    def handle_validate_command(self, args):
-        """Handle validate command group."""
-        return self.validate_command.run(args)
-
     def handle_status_command(self, args):
         """Handle status command."""
         console.print("[bold blue]📊 MLSysBook CLI Status[/bold blue]")
@@ -428,11 +442,15 @@ class MLSysBookCLI:
             "list": self.handle_list_command,
             "status": self.handle_status_command,
             "doctor": self.handle_doctor_command,
-            "maintain": self.handle_maintain_command,
-            "validate": self.handle_validate_command,
+            "check": self.handle_check_command,
+            "fix": self.handle_fix_command,
+            "format": self.handle_format_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
             "about": self.handle_about_command,
+            # Aliases (backward compat)
+            "validate": self.handle_check_command,
+            "maintain": self.handle_fix_command,
 
             "help": lambda args: self.show_help() or True,
         }

@@ -61,17 +61,17 @@ export const PUBLISH_ACTIONS: ActionDef[] = [
 export const MAINTENANCE_ACTIONS: ActionDef[] = [
   { id: 'clean', label: 'Clean Build Artifacts', command: './book/binder clean', icon: 'trash' },
   { id: 'doctor', label: 'Doctor (Health Check)', command: './book/binder doctor', icon: 'heart' },
-  { id: 'glossary', label: 'Build Global Glossary', command: './book/binder maintain glossary build', icon: 'book' },
-  { id: 'compress-images', label: 'Compress Images (Dry Run, All)', command: './book/binder maintain images compress --all --smart-compression', icon: 'file-media' },
-  { id: 'repo-health', label: 'Repo Health Check', command: './book/binder maintain repo-health', icon: 'pulse' },
+  { id: 'glossary', label: 'Build Global Glossary', command: './book/binder fix glossary build', icon: 'book' },
+  { id: 'compress-images', label: 'Compress Images (Dry Run, All)', command: './book/binder fix images compress --all --smart-compression', icon: 'file-media' },
+  { id: 'repo-health', label: 'Repo Health Check', command: './book/binder fix repo-health', icon: 'pulse' },
 ];
 
-export const VALIDATE_ACTIONS: ActionDef[] = [
-  { id: 'validate-all', label: 'Validate: All (Binder Native)', command: './book/binder validate all', icon: 'shield' },
-  { id: 'validate-inline-python', label: 'Validate: Inline Python', command: './book/binder validate inline-python', icon: 'code' },
-  { id: 'validate-refs', label: 'Validate: References in Raw/Code', command: './book/binder validate refs', icon: 'link' },
-  { id: 'validate-citations', label: 'Validate: Citation Keys', command: './book/binder validate citations', icon: 'book' },
-  { id: 'validate-duplicate-labels', label: 'Validate: Duplicate Labels', command: './book/binder validate duplicate-labels', icon: 'warning' },
-  { id: 'validate-unreferenced-labels', label: 'Validate: Unreferenced Labels', command: './book/binder validate unreferenced-labels', icon: 'search' },
-  { id: 'validate-inline-refs', label: 'Validate: Inline Refs', command: './book/binder validate inline-refs --check-patterns', icon: 'symbol-variable' },
+export const CHECK_ACTIONS: ActionDef[] = [
+  { id: 'check-all', label: 'Check: All', command: './book/binder check all', icon: 'shield' },
+  { id: 'check-refs', label: 'Check: References', command: './book/binder check refs', icon: 'link' },
+  { id: 'check-labels', label: 'Check: Labels', command: './book/binder check labels', icon: 'search' },
+  { id: 'check-headers', label: 'Check: Headers', command: './book/binder check headers', icon: 'symbol-structure' },
+  { id: 'check-footnotes', label: 'Check: Footnotes', command: './book/binder check footnotes', icon: 'note' },
+  { id: 'check-figures', label: 'Check: Figures', command: './book/binder check figures', icon: 'file-media' },
+  { id: 'check-rendering', label: 'Check: Rendering', command: './book/binder check rendering', icon: 'warning' },
 ];

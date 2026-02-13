@@ -92,56 +92,83 @@ EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-")
 
 
 class ValidateCommand:
-    """Native `binder validate` command group."""
+    """Native `binder check` command group (also available as `binder validate`).
+
+    Groups:
+        refs        — inline-python, cross-refs, citations, inline patterns
+        labels      — duplicate labels, orphaned/unreferenced labels
+        headers     — section header IDs
+        footnotes   — placement rules, reference integrity
+        figures     — captions/alt-text, float flow, image files
+        rendering   — render patterns, indexes, dropcaps, parts
+        all         — run every check
+    """
+
+    # Maps group name → list of (scope_name, runner_method_name) pairs.
+    # This is the single source of truth for the hierarchy.
+    GROUPS: Dict[str, List[tuple]] = {
+        "refs": [
+            ("inline-python", "_run_inline_python"),
+            ("cross-refs", "_run_refs"),
+            ("citations", "_run_citations"),
+            ("inline", "_run_inline_refs"),
+        ],
+        "labels": [
+            ("duplicates", "_run_duplicate_labels"),
+            ("orphans", "_run_unreferenced_labels"),
+        ],
+        "headers": [
+            ("ids", "_run_headers"),
+        ],
+        "footnotes": [
+            ("placement", "_run_footnote_placement"),
+            ("integrity", "_run_footnote_refs"),
+        ],
+        "figures": [
+            ("captions", "_run_figures"),
+            ("flow", "_run_float_flow"),
+            ("files", "_run_images"),
+        ],
+        "rendering": [
+            ("patterns", "_run_rendering"),
+            ("indexes", "_run_indexes"),
+            ("dropcaps", "_run_dropcaps"),
+            ("parts", "_run_parts"),
+        ],
+    }
 
     def __init__(self, config_manager, chapter_discovery):
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
 
     def run(self, args: List[str]) -> bool:
+        all_group_names = list(self.GROUPS.keys()) + ["all"]
         parser = argparse.ArgumentParser(
-            prog="binder validate",
-            description="Run Binder-native validation checks",
+            prog="binder check",
+            description="Run quality checks on book content",
             add_help=True,
         )
         parser.add_argument(
             "subcommand",
             nargs="?",
-            choices=[
-                "inline-python",
-                "refs",
-                "citations",
-                "duplicate-labels",
-                "unreferenced-labels",
-                "inline-refs",
-                "headers",
-                "footnote-placement",
-                "footnote-refs",
-                "figures",
-                "float-flow",
-                "indexes",
-                "rendering",
-                "dropcaps",
-                "parts",
-                "images",
-                "all",
-            ],
-            help="Validation command to run",
+            choices=all_group_names,
+            help="Check group to run (refs, labels, headers, footnotes, figures, rendering, all)",
         )
-        parser.add_argument("--path", default=None, help="File or directory path to validate")
-        parser.add_argument("--vol1", action="store_true", help="Scope validation to Volume I")
-        parser.add_argument("--vol2", action="store_true", help="Scope validation to Volume II")
+        parser.add_argument("--scope", default=None, help="Narrow to a specific check within a group")
+        parser.add_argument("--path", default=None, help="File or directory path to check")
+        parser.add_argument("--vol1", action="store_true", help="Scope to Volume I")
+        parser.add_argument("--vol2", action="store_true", help="Scope to Volume II")
         parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output")
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--citations-in-code", action="store_true", help="refs: check citations in code fences")
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
-        parser.add_argument("--check-patterns", action="store_true", help="inline-refs: include pattern hazard checks")
-        parser.add_argument("--figures", action="store_true", help="duplicate/unreferenced labels: figures")
-        parser.add_argument("--tables", action="store_true", help="duplicate/unreferenced labels: tables")
-        parser.add_argument("--sections", action="store_true", help="duplicate/unreferenced labels: sections")
-        parser.add_argument("--equations", action="store_true", help="duplicate/unreferenced labels: equations")
-        parser.add_argument("--listings", action="store_true", help="duplicate/unreferenced labels: listings")
-        parser.add_argument("--all-types", action="store_true", help="duplicate/unreferenced labels: all types")
+        parser.add_argument("--check-patterns", action="store_true", help="refs --scope inline: include pattern hazard checks")
+        parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
+        parser.add_argument("--tables", action="store_true", help="labels: filter to tables")
+        parser.add_argument("--sections", action="store_true", help="labels: filter to sections")
+        parser.add_argument("--equations", action="store_true", help="labels: filter to equations")
+        parser.add_argument("--listings", action="store_true", help="labels: filter to listings")
+        parser.add_argument("--all-types", action="store_true", help="labels: all label types")
 
         try:
             ns = parser.parse_args(args)
@@ -150,7 +177,7 @@ class ValidateCommand:
             return ("-h" in args) or ("--help" in args)
 
         if not ns.subcommand:
-            parser.print_help()
+            self._print_check_help()
             return False
 
         root_path = self._resolve_path(ns.path, ns.vol1, ns.vol2)
@@ -159,58 +186,19 @@ class ValidateCommand:
             return False
 
         runs: List[ValidationRunResult] = []
+
         if ns.subcommand == "all":
-            runs.append(self._run_inline_python(root_path))
-            runs.append(self._run_refs(root_path, citations_in_code=True, citations_in_raw=True))
-            runs.append(self._run_citations(root_path))
-            label_types = self._selected_label_types(ns)
-            runs.append(self._run_duplicate_labels(root_path, label_types))
-            runs.append(self._run_unreferenced_labels(root_path, label_types))
-            runs.append(self._run_inline_refs(root_path, check_patterns=ns.check_patterns))
-            runs.append(self._run_headers(root_path))
-            runs.append(self._run_footnote_placement(root_path))
-            runs.append(self._run_footnote_refs(root_path))
-            runs.append(self._run_figures(root_path))
-            runs.append(self._run_float_flow(root_path))
-            runs.append(self._run_indexes(root_path))
-            runs.append(self._run_rendering(root_path))
-            runs.append(self._run_dropcaps(root_path))
-            runs.append(self._run_parts(root_path))
-            runs.append(self._run_images(root_path))
-        elif ns.subcommand == "inline-python":
-            runs.append(self._run_inline_python(root_path))
-        elif ns.subcommand == "refs":
-            checks_code = ns.citations_in_code or (not ns.citations_in_code and not ns.citations_in_raw)
-            checks_raw = ns.citations_in_raw or (not ns.citations_in_code and not ns.citations_in_raw)
-            runs.append(self._run_refs(root_path, citations_in_code=checks_code, citations_in_raw=checks_raw))
-        elif ns.subcommand == "citations":
-            runs.append(self._run_citations(root_path))
-        elif ns.subcommand == "duplicate-labels":
-            runs.append(self._run_duplicate_labels(root_path, self._selected_label_types(ns)))
-        elif ns.subcommand == "unreferenced-labels":
-            runs.append(self._run_unreferenced_labels(root_path, self._selected_label_types(ns)))
-        elif ns.subcommand == "inline-refs":
-            runs.append(self._run_inline_refs(root_path, check_patterns=ns.check_patterns))
-        elif ns.subcommand == "headers":
-            runs.append(self._run_headers(root_path))
-        elif ns.subcommand == "footnote-placement":
-            runs.append(self._run_footnote_placement(root_path))
-        elif ns.subcommand == "footnote-refs":
-            runs.append(self._run_footnote_refs(root_path))
-        elif ns.subcommand == "figures":
-            runs.append(self._run_figures(root_path))
-        elif ns.subcommand == "float-flow":
-            runs.append(self._run_float_flow(root_path))
-        elif ns.subcommand == "indexes":
-            runs.append(self._run_indexes(root_path))
-        elif ns.subcommand == "rendering":
-            runs.append(self._run_rendering(root_path))
-        elif ns.subcommand == "dropcaps":
-            runs.append(self._run_dropcaps(root_path))
-        elif ns.subcommand == "parts":
-            runs.append(self._run_parts(root_path))
-        elif ns.subcommand == "images":
-            runs.append(self._run_images(root_path))
+            for group_name in self.GROUPS:
+                runs.extend(self._run_group(group_name, None, root_path, ns))
+        else:
+            group_name = ns.subcommand
+            scope = ns.scope
+            if scope and not any(s == scope for s, _ in self.GROUPS.get(group_name, [])):
+                valid = [s for s, _ in self.GROUPS[group_name]]
+                console.print(f"[red]Unknown scope '{scope}' for group '{group_name}'.[/red]")
+                console.print(f"[yellow]Valid scopes: {', '.join(valid)}[/yellow]")
+                return False
+            runs.extend(self._run_group(group_name, scope, root_path, ns))
 
         any_failed = any(not run.passed for run in runs)
         summary = {
@@ -227,6 +215,67 @@ class ValidateCommand:
             self._print_human_summary(summary, verbose=ns.verbose)
 
         return not any_failed
+
+    # ------------------------------------------------------------------
+    # Group dispatch
+    # ------------------------------------------------------------------
+
+    def _run_group(
+        self,
+        group: str,
+        scope: Optional[str],
+        root: Path,
+        ns: argparse.Namespace,
+    ) -> List[ValidationRunResult]:
+        """Run all checks in *group*, or just the one matching *scope*."""
+        results: List[ValidationRunResult] = []
+        for scope_name, method_name in self.GROUPS[group]:
+            if scope and scope != scope_name:
+                continue
+            method = getattr(self, method_name)
+            # Some runners need extra kwargs
+            if method_name == "_run_refs":
+                checks_code = ns.citations_in_code or (not ns.citations_in_code and not ns.citations_in_raw)
+                checks_raw = ns.citations_in_raw or (not ns.citations_in_code and not ns.citations_in_raw)
+                results.append(method(root, citations_in_code=checks_code, citations_in_raw=checks_raw))
+            elif method_name == "_run_inline_refs":
+                results.append(method(root, check_patterns=ns.check_patterns))
+            elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
+                results.append(method(root, self._selected_label_types(ns)))
+            else:
+                results.append(method(root))
+        return results
+
+    def _print_check_help(self) -> None:
+        """Print a nicely formatted help for the check command."""
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Group", style="cyan", width=14)
+        table.add_column("Scopes", style="yellow", width=38)
+        table.add_column("Description", style="white", width=32)
+
+        descriptions = {
+            "refs": "References, citations, inline Python",
+            "labels": "Duplicate and orphaned labels",
+            "headers": "Section header IDs ({#sec-...})",
+            "footnotes": "Footnote placement and integrity",
+            "figures": "Captions, float flow, image files",
+            "rendering": "Render patterns, indexes, dropcaps, parts",
+        }
+        for group_name, checks in self.GROUPS.items():
+            scopes = ", ".join(s for s, _ in checks)
+            desc = descriptions.get(group_name, "")
+            table.add_row(group_name, scopes, desc)
+        table.add_row("all", "(everything)", "Run all checks")
+
+        console.print(Panel(table, title="binder check <group> [--scope <name>]", border_style="cyan"))
+        console.print("[dim]Examples:[/dim]")
+        console.print("  [cyan]./binder check refs[/cyan]              [dim]# all reference checks[/dim]")
+        console.print("  [cyan]./binder check refs --scope citations[/cyan]  [dim]# only citation check[/dim]")
+        console.print("  [cyan]./binder check figures --vol1[/cyan]    [dim]# all figure checks, Vol I[/dim]")
+        console.print("  [cyan]./binder check all[/cyan]               [dim]# everything[/dim]")
+        console.print()
+
+    # ------------------------------------------------------------------
 
     def _resolve_path(self, path_arg: Optional[str], vol1: bool, vol2: bool) -> Path:
         if path_arg:
@@ -747,7 +796,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="headers",
-            description="Verify all section headers have {#sec-...} IDs",
+            description="Verify section headers have {#sec-...} IDs",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -1645,7 +1694,7 @@ class ValidateCommand:
                 f'{run["elapsed_ms"]}ms',
                 "PASS" if run["passed"] else "FAIL",
             )
-        console.print(Panel(table, title="Binder Validate Summary", border_style="cyan"))
+        console.print(Panel(table, title="Binder Check Summary", border_style="cyan"))
 
         if total == 0:
             console.print("[green]✅ All validation checks passed.[/green]")
