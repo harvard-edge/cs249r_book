@@ -196,7 +196,7 @@ class MaintenanceCommand:
             description="Maintenance namespace for non-build workflows",
             add_help=True,
         )
-        parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health", "section-ids", "footnotes"])
+        parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health", "headers", "footnotes"])
         parser.add_argument("action", nargs="?")
         parser.add_argument("--vol1", action="store_true", help="Scope to vol1")
         parser.add_argument("--vol2", action="store_true", help="Scope to vol2")
@@ -251,7 +251,7 @@ class MaintenanceCommand:
                 return False
             return self._maintain_repo_health(min_size_mb=ns.min_size_mb, json_output=ns.json)
 
-        if ns.topic == "section-ids":
+        if ns.topic == "headers":
             valid_actions = ("add", "repair", "list", "remove")
             if ns.action not in valid_actions:
                 console.print(f"[red]❌ Supported actions: {', '.join(valid_actions)}[/red]")

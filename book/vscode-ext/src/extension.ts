@@ -259,7 +259,7 @@ export function activate(context: vscode.ExtensionContext): void {
         ? `--path ${editor.document.uri.fsPath}`
         : '--vol1';
       runInVisibleTerminal(
-        `./book/binder maintain section-ids add ${target} --force`,
+        `./book/binder maintain headers add ${target} --force`,
         root,
         'Add Section IDs',
       );
@@ -267,7 +267,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.verifySectionIds', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        './book/binder validate section-ids --vol1',
+        './book/binder validate headers --vol1',
         root,
         'Verify Section IDs',
       );

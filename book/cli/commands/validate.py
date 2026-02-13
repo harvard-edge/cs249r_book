@@ -114,16 +114,16 @@ class ValidateCommand:
                 "duplicate-labels",
                 "unreferenced-labels",
                 "inline-refs",
-                "section-ids",
-                "forbidden-footnotes",
-                "footnotes",
-                "figure-completeness",
-                "figure-placement",
-                "index-placement",
-                "render-patterns",
-                "dropcap",
-                "part-keys",
-                "image-refs",
+                "headers",
+                "footnote-placement",
+                "footnote-refs",
+                "figures",
+                "float-flow",
+                "indexes",
+                "rendering",
+                "dropcaps",
+                "parts",
+                "images",
                 "all",
             ],
             help="Validation command to run",
@@ -167,16 +167,16 @@ class ValidateCommand:
             runs.append(self._run_duplicate_labels(root_path, label_types))
             runs.append(self._run_unreferenced_labels(root_path, label_types))
             runs.append(self._run_inline_refs(root_path, check_patterns=ns.check_patterns))
-            runs.append(self._run_section_ids(root_path))
-            runs.append(self._run_forbidden_footnotes(root_path))
-            runs.append(self._run_footnotes(root_path))
-            runs.append(self._run_figure_completeness(root_path))
-            runs.append(self._run_figure_placement(root_path))
-            runs.append(self._run_index_placement(root_path))
-            runs.append(self._run_render_patterns(root_path))
-            runs.append(self._run_dropcap(root_path))
-            runs.append(self._run_part_keys(root_path))
-            runs.append(self._run_image_refs(root_path))
+            runs.append(self._run_headers(root_path))
+            runs.append(self._run_footnote_placement(root_path))
+            runs.append(self._run_footnote_refs(root_path))
+            runs.append(self._run_figures(root_path))
+            runs.append(self._run_float_flow(root_path))
+            runs.append(self._run_indexes(root_path))
+            runs.append(self._run_rendering(root_path))
+            runs.append(self._run_dropcaps(root_path))
+            runs.append(self._run_parts(root_path))
+            runs.append(self._run_images(root_path))
         elif ns.subcommand == "inline-python":
             runs.append(self._run_inline_python(root_path))
         elif ns.subcommand == "refs":
@@ -191,26 +191,26 @@ class ValidateCommand:
             runs.append(self._run_unreferenced_labels(root_path, self._selected_label_types(ns)))
         elif ns.subcommand == "inline-refs":
             runs.append(self._run_inline_refs(root_path, check_patterns=ns.check_patterns))
-        elif ns.subcommand == "section-ids":
-            runs.append(self._run_section_ids(root_path))
-        elif ns.subcommand == "forbidden-footnotes":
-            runs.append(self._run_forbidden_footnotes(root_path))
-        elif ns.subcommand == "footnotes":
-            runs.append(self._run_footnotes(root_path))
-        elif ns.subcommand == "figure-completeness":
-            runs.append(self._run_figure_completeness(root_path))
-        elif ns.subcommand == "figure-placement":
-            runs.append(self._run_figure_placement(root_path))
-        elif ns.subcommand == "index-placement":
-            runs.append(self._run_index_placement(root_path))
-        elif ns.subcommand == "render-patterns":
-            runs.append(self._run_render_patterns(root_path))
-        elif ns.subcommand == "dropcap":
-            runs.append(self._run_dropcap(root_path))
-        elif ns.subcommand == "part-keys":
-            runs.append(self._run_part_keys(root_path))
-        elif ns.subcommand == "image-refs":
-            runs.append(self._run_image_refs(root_path))
+        elif ns.subcommand == "headers":
+            runs.append(self._run_headers(root_path))
+        elif ns.subcommand == "footnote-placement":
+            runs.append(self._run_footnote_placement(root_path))
+        elif ns.subcommand == "footnote-refs":
+            runs.append(self._run_footnote_refs(root_path))
+        elif ns.subcommand == "figures":
+            runs.append(self._run_figures(root_path))
+        elif ns.subcommand == "float-flow":
+            runs.append(self._run_float_flow(root_path))
+        elif ns.subcommand == "indexes":
+            runs.append(self._run_indexes(root_path))
+        elif ns.subcommand == "rendering":
+            runs.append(self._run_rendering(root_path))
+        elif ns.subcommand == "dropcaps":
+            runs.append(self._run_dropcaps(root_path))
+        elif ns.subcommand == "parts":
+            runs.append(self._run_parts(root_path))
+        elif ns.subcommand == "images":
+            runs.append(self._run_images(root_path))
 
         any_failed = any(not run.passed for run in runs)
         summary = {
@@ -682,10 +682,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Section IDs  (ported from manage_section_ids.py --verify)
+    # Headers  (ported from manage_section_ids.py --verify)
     # ------------------------------------------------------------------
 
-    def _run_section_ids(self, root: Path) -> ValidationRunResult:
+    def _run_headers(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -746,7 +746,7 @@ class ValidateCommand:
                     )
 
         return ValidationRunResult(
-            name="section-ids",
+            name="headers",
             description="Verify all section headers have {#sec-...} IDs",
             files_checked=len(files),
             issues=issues,
@@ -754,10 +754,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Forbidden Footnotes  (ported from check_forbidden_footnotes.py)
+    # Footnote Placement  (ported from check_forbidden_footnotes.py)
     # ------------------------------------------------------------------
 
-    def _run_forbidden_footnotes(self, root: Path) -> ValidationRunResult:
+    def _run_footnote_placement(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -876,7 +876,7 @@ class ValidateCommand:
                         )
 
         return ValidationRunResult(
-            name="forbidden-footnotes",
+            name="footnote-placement",
             description="Check footnotes in forbidden locations",
             files_checked=len(files),
             issues=issues,
@@ -884,10 +884,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Footnote validation  (ported from footnote_cleanup.py --validate)
+    # Footnote Refs  (ported from footnote_cleanup.py --validate)
     # ------------------------------------------------------------------
 
-    def _run_footnotes(self, root: Path) -> ValidationRunResult:
+    def _run_footnote_refs(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -962,7 +962,7 @@ class ValidateCommand:
                     )
 
         return ValidationRunResult(
-            name="footnotes",
+            name="footnote-refs",
             description="Validate footnote references and definitions",
             files_checked=len(files),
             issues=issues,
@@ -970,10 +970,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Figure completeness  (ported from check_figure_completeness.py)
+    # Figures  (ported from check_figure_completeness.py)
     # ------------------------------------------------------------------
 
-    def _run_figure_completeness(self, root: Path) -> ValidationRunResult:
+    def _run_figures(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1060,7 +1060,7 @@ class ValidateCommand:
                         cell_opts[opt_m.group(1)] = val
 
         return ValidationRunResult(
-            name="figure-completeness",
+            name="figures",
             description="Check figures have captions and alt-text",
             files_checked=len(files),
             issues=issues,
@@ -1068,10 +1068,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Figure/table placement  (ported from figure_table_flow_audit.py)
+    # Float Flow  (ported from figure_table_flow_audit.py)
     # ------------------------------------------------------------------
 
-    def _run_figure_placement(self, root: Path) -> ValidationRunResult:
+    def _run_float_flow(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1204,7 +1204,7 @@ class ValidateCommand:
                     )
 
         return ValidationRunResult(
-            name="figure-placement",
+            name="float-flow",
             description="Audit figure/table placement relative to first reference",
             files_checked=len(files),
             issues=issues,
@@ -1212,10 +1212,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Index placement  (ported from check_index_placement.py)
+    # Indexes  (ported from check_index_placement.py)
     # ------------------------------------------------------------------
 
-    def _run_index_placement(self, root: Path) -> ValidationRunResult:
+    def _run_indexes(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1254,7 +1254,7 @@ class ValidateCommand:
                         )
 
         return ValidationRunResult(
-            name="index-placement",
+            name="indexes",
             description="Check LaTeX \\index{} placement",
             files_checked=len(files),
             issues=issues,
@@ -1262,10 +1262,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Render patterns  (ported from check_render_patterns.py)
+    # Rendering  (ported from check_render_patterns.py)
     # ------------------------------------------------------------------
 
-    def _run_render_patterns(self, root: Path) -> ValidationRunResult:
+    def _run_rendering(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1339,7 +1339,7 @@ class ValidateCommand:
                         )
 
         return ValidationRunResult(
-            name="render-patterns",
+            name="rendering",
             description="Check for problematic rendering patterns",
             files_checked=len(files),
             issues=issues,
@@ -1347,10 +1347,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Drop cap compatibility  (ported from validate_dropcap_compat.py)
+    # Dropcaps  (ported from validate_dropcap_compat.py)
     # ------------------------------------------------------------------
 
-    def _run_dropcap(self, root: Path) -> ValidationRunResult:
+    def _run_dropcaps(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1455,7 +1455,7 @@ class ValidateCommand:
                 break
 
         return ValidationRunResult(
-            name="dropcap",
+            name="dropcaps",
             description="Validate drop cap compatibility",
             files_checked=len(files),
             issues=issues,
@@ -1463,10 +1463,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Part keys  (ported from validate_part_keys.py)
+    # Parts  (ported from validate_part_keys.py)
     # ------------------------------------------------------------------
 
-    def _run_part_keys(self, root: Path) -> ValidationRunResult:
+    def _run_parts(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1485,7 +1485,7 @@ class ValidateCommand:
             import yaml
         except ImportError:
             return ValidationRunResult(
-                name="part-keys",
+                name="parts",
                 description="Validate part keys (skipped — pyyaml not installed)",
                 files_checked=0,
                 issues=[],
@@ -1505,7 +1505,7 @@ class ValidateCommand:
         if not summaries_keys:
             # No summaries found — skip gracefully
             return ValidationRunResult(
-                name="part-keys",
+                name="parts",
                 description="Validate part keys (skipped — no summaries.yml found)",
                 files_checked=0,
                 issues=[],
@@ -1531,7 +1531,7 @@ class ValidateCommand:
                     )
 
         return ValidationRunResult(
-            name="part-keys",
+            name="parts",
             description="Validate \\part{{key:...}} against summaries.yml",
             files_checked=len(files),
             issues=issues,
@@ -1539,10 +1539,10 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Image references  (ported from validate_image_references.py)
+    # Images  (ported from validate_image_references.py)
     # ------------------------------------------------------------------
 
-    def _run_image_refs(self, root: Path) -> ValidationRunResult:
+    def _run_images(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -1593,7 +1593,7 @@ class ValidateCommand:
                         pass
 
         return ValidationRunResult(
-            name="image-refs",
+            name="images",
             description="Validate image references exist on disk",
             files_checked=len(files),
             issues=issues,
