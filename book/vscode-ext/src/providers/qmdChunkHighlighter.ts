@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { resolveHighlightStyle, type QmdColorOverrides, type VisualPreset, type ThemeMode } from './qmdHighlightPalette';
-import type { WorkspaceLabelIndex } from '../validation/qmdDiagnostics';
 
 function isQmdEditor(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
   return Boolean(editor && editor.document.uri.fsPath.endsWith('.qmd'));
@@ -43,29 +42,12 @@ export class QmdChunkHighlighter implements vscode.Disposable {
   private tableLabelDefinitionDecoration: vscode.TextEditorDecorationType | undefined;
   private listingLabelDefinitionDecoration: vscode.TextEditorDecorationType | undefined;
   private equationLabelDefinitionDecoration: vscode.TextEditorDecorationType | undefined;
-  private divFenceMarkerDecoration: vscode.TextEditorDecorationType | undefined;
   private inlinePythonKeywordDecoration: vscode.TextEditorDecorationType | undefined;
   private inlinePythonVarDecoration: vscode.TextEditorDecorationType | undefined;
-  private brokenReferenceDecoration: vscode.TextEditorDecorationType | undefined;
   private refreshTimer: NodeJS.Timeout | undefined;
-  private workspaceIndex: WorkspaceLabelIndex | undefined;
 
   constructor() {
     this.recreateDecorations();
-  }
-
-  /** Inject the workspace label index for broken-reference highlighting. */
-  setWorkspaceIndex(index: WorkspaceLabelIndex): void {
-    this.workspaceIndex = index;
-    // Re-apply decorations when the index updates
-    this.disposables.push(
-      index.onDidUpdate(() => {
-        const editor = vscode.window.activeTextEditor;
-        if (isQmdEditor(editor)) {
-          this.debouncedApply(editor);
-        }
-      }),
-    );
   }
 
   start(): void {
@@ -87,7 +69,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.qmdVisualPreset')
           || event.affectsConfiguration('mlsysbook.highlightInlineReferences')
           || event.affectsConfiguration('mlsysbook.highlightLabelDefinitions')
-          || event.affectsConfiguration('mlsysbook.highlightDivFenceMarkers')
           || event.affectsConfiguration('mlsysbook.highlightCalloutBackground')
           || event.affectsConfiguration('mlsysbook.highlightSectionHeaders')
           || event.affectsConfiguration('mlsysbook.highlightTables')
@@ -116,7 +97,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.colorListingLabelDefinition')
           || event.affectsConfiguration('mlsysbook.colorEquationLabelDefinition')
           || event.affectsConfiguration('mlsysbook.colorLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorDivFenceMarker')
           || event.affectsConfiguration('mlsysbook.colorFootnoteReference')
           || event.affectsConfiguration('mlsysbook.colorFootnoteDefinitionMarker')
           || event.affectsConfiguration('mlsysbook.highlightInlinePython')
@@ -160,12 +140,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     return vscode.workspace
       .getConfiguration('mlsysbook')
       .get<boolean>('highlightLabelDefinitions', true);
-  }
-
-  private getHighlightDivFenceMarkers(): boolean {
-    return vscode.workspace
-      .getConfiguration('mlsysbook')
-      .get<boolean>('highlightDivFenceMarkers', true);
   }
 
   private getHighlightSectionHeaders(): boolean {
@@ -239,7 +213,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       listingLabelDefColor: this.readOptionalColor(config, 'colorListingLabelDefinition'),
       equationLabelDefColor: this.readOptionalColor(config, 'colorEquationLabelDefinition'),
       labelDefColor: this.readOptionalColor(config, 'colorLabelDefinition'),
-      divFenceColor: this.readOptionalColor(config, 'colorDivFenceMarker'),
       inlinePythonColor: this.readOptionalColor(config, 'colorInlinePython'),
       inlinePythonBg: this.readOptionalColor(config, 'colorInlinePythonBg'),
       footnoteRefColor: this.readOptionalColor(config, 'colorFootnoteReference'),
@@ -273,10 +246,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     this.tableLabelDefinitionDecoration?.dispose();
     this.listingLabelDefinitionDecoration?.dispose();
     this.equationLabelDefinitionDecoration?.dispose();
-    this.divFenceMarkerDecoration?.dispose();
     this.inlinePythonKeywordDecoration?.dispose();
     this.inlinePythonVarDecoration?.dispose();
-    this.brokenReferenceDecoration?.dispose();
 
     const preset = this.getVisualPreset();
     const theme = this.getThemeMode();
@@ -398,11 +369,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       fontWeight: style.fontWeight,
       textDecoration: 'none',
     });
-    this.divFenceMarkerDecoration = vscode.window.createTextEditorDecorationType({
-      color: colorValue(style.divFenceColor),
-      fontWeight: style.fontWeight,
-      textDecoration: 'none',
-    });
     this.inlinePythonKeywordDecoration = vscode.window.createTextEditorDecorationType({
       color: colorValue(style.inlinePythonKeywordColor),
       backgroundColor: colorValue(style.inlinePythonBg),
@@ -414,11 +380,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       backgroundColor: colorValue(style.inlinePythonBg),
       fontWeight: style.fontWeight === 'normal' ? '500' : '600',
       borderRadius: '0 3px 3px 0',
-    });
-    this.brokenReferenceDecoration = vscode.window.createTextEditorDecorationType({
-      color: 'rgba(239, 68, 68, 0.9)',
-      textDecoration: 'underline wavy rgba(239, 68, 68, 0.6)',
-      fontWeight: style.fontWeight,
     });
   }
 
@@ -462,28 +423,12 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const tableRefRanges: vscode.Range[] = [];
     const listingRefRanges: vscode.Range[] = [];
     const equationRefRanges: vscode.Range[] = [];
-    const brokenRefRanges: vscode.Range[] = [];
-
-    // Collect local label definitions for broken-ref checking
-    const localLabels = new Set<string>();
-    const fullText = document.getText();
-    const labelCollectRegex = /\{#((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)\}/g;
-    const yamlLabelCollectRegex = /#\|\s*(?:label|fig-label|tbl-label|lst-label):\s*((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)/g;
-    let labelMatch: RegExpExecArray | null;
-    while ((labelMatch = labelCollectRegex.exec(fullText)) !== null) {
-      localLabels.add(labelMatch[1]);
-    }
-    while ((labelMatch = yamlLabelCollectRegex.exec(fullText)) !== null) {
-      localLabels.add(labelMatch[1]);
-    }
-    const hasIndex = this.workspaceIndex?.isReady() ?? false;
     const labelDefinitionRanges: vscode.Range[] = [];
     const sectionLabelDefinitionRanges: vscode.Range[] = [];
     const figureLabelDefinitionRanges: vscode.Range[] = [];
     const tableLabelDefinitionRanges: vscode.Range[] = [];
     const listingLabelDefinitionRanges: vscode.Range[] = [];
     const equationLabelDefinitionRanges: vscode.Range[] = [];
-    const divFenceMarkerRanges: vscode.Range[] = [];
     const inlinePythonKeywordRanges: vscode.Range[] = [];
     const inlinePythonVarRanges: vscode.Range[] = [];
 
@@ -514,7 +459,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const equationLabelYamlRegex = /#\|\s*label:\s*eq-[A-Za-z0-9_:-]+/g;
     const highlightInlineRefs = this.getHighlightInlineReferences();
     const highlightLabelDefs = this.getHighlightLabelDefinitions();
-    const highlightDivFenceMarkers = this.getHighlightDivFenceMarkers();
     const highlightCalloutBackground = this.getHighlightCalloutBackground();
     const highlightSectionHeaders = this.getHighlightSectionHeaders();
     const highlightTables = this.getHighlightTables();
@@ -537,12 +481,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       const text = document.lineAt(line).text;
 
       if (/^\s*:{3,}\s*/.test(text)) {
-        if (highlightDivFenceMarkers) {
-          divFenceMarkerRanges.push(new vscode.Range(
-            new vscode.Position(line, 0),
-            new vscode.Position(line, text.length),
-          ));
-        }
         if (divStack.length === 0 || /:{3,}\s*\{/.test(text)) {
           divStack.push({ start: line, isCallout: text.includes('.callout-') });
         } else {
@@ -663,8 +601,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       }
 
       // Blob emphasis only for dedicated label-definition lines, not prose lines
-      // that happen to embed labels inline.
-      if (figureLabelLineRegex.test(text)) {
+      // that happen to embed labels inline. Skip fenced code blocks entirely.
+      if (!inFence && figureLabelLineRegex.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),
@@ -672,7 +610,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         figureLineRanges.push(range);
       }
 
-      if (tableLabelLineRegex.test(text)) {
+      if (!inFence && tableLabelLineRegex.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),
@@ -680,7 +618,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         tableLineRanges.push(range);
       }
 
-      if (listingLabelLineRegex.test(text)) {
+      if (!inFence && listingLabelLineRegex.test(text)) {
         const range = new vscode.Range(
           new vscode.Position(line, 0),
           new vscode.Position(line, text.length),
@@ -688,7 +626,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         listingLineRanges.push(range);
       }
 
-      if (highlightLabelDefs) {
+      if (highlightLabelDefs && !inFence) {
         let labelMatch: RegExpExecArray | null;
         while ((labelMatch = labelInlineRegex.exec(text)) !== null) {
           labelDefinitionRanges.push(new vscode.Range(
@@ -797,14 +735,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         }
         structuralRefRegex.lastIndex = 0;
 
-        // Helper: check if a reference label is valid (exists locally or in workspace)
-        const isRefValid = (label: string): boolean => {
-          if (localLabels.has(label)) { return true; }
-          if (hasIndex && this.workspaceIndex!.hasLabel(label)) { return true; }
-          return false;
-        };
-
-        // For each typed reference, check validity and route to broken or typed range
         const typedRefConfigs: Array<{ regex: RegExp; ranges: vscode.Range[] }> = [
           { regex: sectionRefRegex, ranges: sectionRefRanges },
           { regex: figureRefRegex, ranges: figureRefRanges },
@@ -815,17 +745,10 @@ export class QmdChunkHighlighter implements vscode.Disposable {
 
         for (const { regex, ranges } of typedRefConfigs) {
           while ((match = regex.exec(text)) !== null) {
-            const range = new vscode.Range(
+            ranges.push(new vscode.Range(
               new vscode.Position(line, match.index),
               new vscode.Position(line, match.index + match[0].length),
-            );
-            // Extract the label (strip leading @)
-            const label = match[0].startsWith('@') ? match[0].slice(1) : match[0];
-            if (hasIndex && !isRefValid(label)) {
-              brokenRefRanges.push(range);
-            } else {
-              ranges.push(range);
-            }
+            ));
           }
           regex.lastIndex = 0;
         }
@@ -862,7 +785,11 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       calloutRanges.push(...toRanges(calloutBlocks));
       divRanges.push(...toRanges(divBlocks));
     }
-    codeRanges.push(...toRanges(codeBlocks));
+    // NOTE: Code fence background is intentionally NOT applied here.
+    // The Quarto extension already provides code cell background coloring
+    // (quarto.cells.background), and layering a second background decoration
+    // on top causes visual artifacts (phantom underlines / squiggles).
+    // codeRanges.push(...toRanges(codeBlocks));
 
     if (this.calloutDecoration) {
       editor.setDecorations(this.calloutDecoration, calloutRanges);
@@ -921,9 +848,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.equationReferenceDecoration) {
       editor.setDecorations(this.equationReferenceDecoration, equationRefRanges);
     }
-    if (this.brokenReferenceDecoration) {
-      editor.setDecorations(this.brokenReferenceDecoration, brokenRefRanges);
-    }
     if (this.labelDefinitionDecoration) {
       editor.setDecorations(this.labelDefinitionDecoration, labelDefinitionRanges);
     }
@@ -941,9 +865,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     }
     if (this.equationLabelDefinitionDecoration) {
       editor.setDecorations(this.equationLabelDefinitionDecoration, equationLabelDefinitionRanges);
-    }
-    if (this.divFenceMarkerDecoration) {
-      editor.setDecorations(this.divFenceMarkerDecoration, divFenceMarkerRanges);
     }
     if (this.inlinePythonKeywordDecoration) {
       editor.setDecorations(this.inlinePythonKeywordDecoration, inlinePythonKeywordRanges);
@@ -1026,17 +947,11 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.equationLabelDefinitionDecoration) {
       editor.setDecorations(this.equationLabelDefinitionDecoration, []);
     }
-    if (this.divFenceMarkerDecoration) {
-      editor.setDecorations(this.divFenceMarkerDecoration, []);
-    }
     if (this.inlinePythonKeywordDecoration) {
       editor.setDecorations(this.inlinePythonKeywordDecoration, []);
     }
     if (this.inlinePythonVarDecoration) {
       editor.setDecorations(this.inlinePythonVarDecoration, []);
-    }
-    if (this.brokenReferenceDecoration) {
-      editor.setDecorations(this.brokenReferenceDecoration, []);
     }
   }
 

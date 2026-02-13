@@ -11,7 +11,6 @@ import { ChapterNavigatorProvider } from './providers/chapterNavigatorProvider';
 import { RunHistoryProvider } from './providers/runHistoryProvider';
 import { QmdFoldingProvider } from './providers/qmdFoldingProvider';
 import { QmdAutoFoldManager } from './providers/qmdAutoFoldManager';
-import { QmdDiagnosticsManager, WorkspaceLabelIndex } from './validation/qmdDiagnostics';
 import { QmdChunkHighlighter } from './providers/qmdChunkHighlighter';
 import { QmdPythonValueResolver } from './providers/qmdPythonValueResolver';
 import { QmdPythonHoverProvider, QmdPythonGhostText, QmdPythonCodeLensProvider } from './providers/qmdInlinePythonProviders';
@@ -51,11 +50,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const runHistoryProvider = new RunHistoryProvider();
   const qmdFoldingProvider = new QmdFoldingProvider();
   const qmdAutoFoldManager = new QmdAutoFoldManager();
-  const workspaceLabelIndex = new WorkspaceLabelIndex();
-  const diagnosticsManager = new QmdDiagnosticsManager();
-  diagnosticsManager.setWorkspaceIndex(workspaceLabelIndex);
   const chunkHighlighter = new QmdChunkHighlighter();
-  chunkHighlighter.setWorkspaceIndex(workspaceLabelIndex);
 
   // Inline Python value resolution (hover, ghost text, CodeLens)
   let pythonResolver: QmdPythonValueResolver | undefined;
@@ -73,8 +68,6 @@ export function activate(context: vscode.ExtensionContext): void {
   }
   const config = vscode.workspace.getConfiguration('mlsysbook');
   navigatorProvider.refreshFromEditor(vscode.window.activeTextEditor);
-  workspaceLabelIndex.start();
-  diagnosticsManager.start();
   chunkHighlighter.start();
   pythonGhostText?.start();
   pythonCodeLensProvider?.start();
@@ -95,8 +88,6 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     runHistoryProvider,
     qmdAutoFoldManager,
-    workspaceLabelIndex,
-    diagnosticsManager,
     chunkHighlighter,
   );
   if (pythonResolver && pythonHoverProvider && pythonGhostText && pythonCodeLensProvider) {
@@ -155,9 +146,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('mlsysbook.historyRerunCommand', (record) => {
       void rerunSavedCommand(record);
-    }),
-    vscode.commands.registerCommand('mlsysbook.refreshQmdDiagnostics', () => {
-      diagnosticsManager.refreshActiveEditorDiagnostics();
     }),
     vscode.commands.registerCommand('mlsysbook.openNavigatorLocation', async (uri: vscode.Uri, line: number) => {
       const document = await vscode.workspace.openTextDocument(uri);
