@@ -275,7 +275,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.validateCrossReferences', () => {
       if (!root) { return; }
       runInVisibleTerminal(
-        './book/binder check labels --scope orphans --vol1 --all-types',
+        './book/binder check labels --scope orphans --vol1',
         root,
         'Validate Cross-References',
       );

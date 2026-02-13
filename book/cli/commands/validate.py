@@ -162,7 +162,8 @@ class ValidateCommand:
         parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
         parser.add_argument("--citations-in-code", action="store_true", help="refs: check citations in code fences")
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
-        parser.add_argument("--check-patterns", action="store_true", help="refs --scope inline: include pattern hazard checks")
+        parser.add_argument("--check-patterns", action="store_true", default=True, help="refs --scope inline: include pattern hazard checks (default: on)")
+        parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
         parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
         parser.add_argument("--tables", action="store_true", help="labels: filter to tables")
         parser.add_argument("--sections", action="store_true", help="labels: filter to sections")
@@ -307,13 +308,8 @@ class ValidateCommand:
             if ns.listings:
                 selected["Listing"] = LABEL_DEF_PATTERNS["Listing"]
             return selected
-        # default common types
-        return {
-            "Figure": LABEL_DEF_PATTERNS["Figure"],
-            "Table": LABEL_DEF_PATTERNS["Table"],
-            "Section": LABEL_DEF_PATTERNS["Section"],
-            "Listing": LABEL_DEF_PATTERNS["Listing"],
-        }
+        # default: all label types
+        return LABEL_DEF_PATTERNS
 
     def _qmd_files(self, root: Path) -> List[Path]:
         if root.is_file():
