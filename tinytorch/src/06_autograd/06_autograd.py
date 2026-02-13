@@ -431,7 +431,7 @@ class MulBackward(Function):
     **Key Insight:** Each input's gradient equals the gradient output
     multiplied by the OTHER input's value (product rule).
 
-    **Applications:** Used in weight scaling, attention mechanisms,
+    **Applications:** Used in weight scaling, dropout masking,
     and anywhere element-wise multiplication occurs.
     """
 
@@ -673,8 +673,8 @@ class MatmulBackward(Function):
     **Key Insight:** Matrix multiplication gradients involve transposing
     one input and multiplying with the gradient output.
 
-    **Applications:** Core operation in neural networks for weight updates
-    in linear layers, attention mechanisms, and transformers.
+    **Applications:** Core operation in neural networks for computing outputs
+    in linear layers and combining feature representations.
     """
 
     def apply(self, grad_output):
@@ -758,7 +758,7 @@ class TransposeBackward(Function):
     **Key Insight:** The gradient of transpose is just transpose the gradient!
     This is because transpose is a linear operation that just rearranges elements.
 
-    **Applications:** Used in attention (K.T for scores), weight gradients (W.T),
+    **Applications:** Used in weight gradient computation (W.T), data reshaping,
     and any operation that needs to swap matrix dimensions.
     """
 
@@ -848,7 +848,7 @@ class PermuteBackward(Function):
     **Key Insight:** To reverse a permutation, we need to know where each axis went.
     If axis i went to position axes[i], then in the inverse, position axes[i] should go to i.
 
-    **Applications:** Multi-head attention uses (0, 2, 1, 3) to rearrange heads.
+    **Applications:** Rearranging tensor dimensions for different computation patterns (e.g., swapping batch and feature dimensions).
     """
 
     def __init__(self, tensor, axes):
@@ -915,8 +915,8 @@ class EmbeddingBackward(Function):
     **Key Insight:** Embedding lookup is a gather operation. The backward
     is a scatter operation that accumulates gradients to the embedding weights.
 
-    **Applications:** Word embeddings, positional embeddings, token embeddings
-    in transformers.
+    **Applications:** Index-based lookup operations where gradients must accumulate
+    for repeated indices.
     """
 
     def __init__(self, weight, indices):
@@ -1000,8 +1000,8 @@ class SliceBackward(Function):
     places gradients back into the original tensor positions, with
     zeros everywhere else.
 
-    **Applications:** Positional encodings, sequence slicing, batch selection,
-    attention masking in transformers.
+    **Applications:** Sequence slicing, batch selection, and selecting subsets
+    of tensor data for computation.
 
     **Examples:**
     >>> x = Tensor([1, 2, 3, 4, 5], requires_grad=True)
@@ -2644,7 +2644,7 @@ Before we wrap up, reflect on these systems-level questions. Use only knowledge 
 ---
 
 ### Question 2: Gradient Accumulation
-**Scenario**: An embedding layer is shared between two paths in a network (like encoder-decoder attention).
+**Scenario**: A weight matrix is shared between two computation paths in a network (like a tied-weights architecture).
 
 **Question**: Why does gradient accumulation (`grad = grad + new_grad`) save memory during training? What's the trade-off?
 

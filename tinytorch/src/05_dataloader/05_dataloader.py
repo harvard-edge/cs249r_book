@@ -112,13 +112,13 @@ Before we implement anything, let's understand what happens when neural networks
 Imagine you have 50,000 images of cats and dogs, and you want to train a neural network to classify them:
 
 ```
-Raw Data Storage          Dataset Interface         DataLoader Batching         Training Loop
+Raw Data Storage          Dataset Interface         DataLoader Batching         Model Input
 ┌─────────────────┐      ┌──────────────────┐      ┌────────────────────┐      ┌─────────────┐
 │ cat_001.jpg     │      │ dataset[0]       │      │ Batch 1:           │      │ model(batch)│
-│ dog_023.jpg     │ ───> │ dataset[1]       │ ───> │ [cat, dog, cat]    │ ───> │ optimizer   │
+│ dog_023.jpg     │ ───> │ dataset[1]       │ ───> │ [cat, dog, cat]    │ ───> │ compute     │
 │ cat_045.jpg     │      │ dataset[2]       │      │ Batch 2:           │      │ loss        │
-│ ...             │      │ ...              │      │ [dog, cat, dog]    │      │ backward    │
-│ (50,000 files)  │      │ dataset[49999]   │      │ ...                │      │ step        │
+│ ...             │      │ ...              │      │ [dog, cat, dog]    │      │ repeat      │
+│ (50,000 files)  │      │ dataset[49999]   │      │ ...                │      │             │
 └─────────────────┘      └──────────────────┘      └────────────────────┘      └─────────────┘
 ```
 
@@ -1381,17 +1381,17 @@ Now let's understand data pipeline performance like production ML engineers. Und
 In a typical training step, time is split between data loading and computation:
 
 ```
-Training Step Breakdown:
+Processing Step Breakdown:
 ┌─────────────────────────────────────────────────────────────┐
-│ Data Loading        │ Forward Pass     │ Backward Pass      │
-│ ████████████        │ ███████          │ ████████           │
-│ 40ms                │ 25ms             │ 35ms               │
+│ Data Loading             │ Computation                      │
+│ ████████████████         │ ██████████████████████           │
+│ 40ms                     │ 60ms                             │
 └─────────────────────────────────────────────────────────────┘
               100ms total per step
 
 Bottleneck Analysis:
-- If data loading > forward+backward: "Data starved" (CPU bottleneck)
-- If forward+backward > data loading: "Compute bound" (GPU bottleneck)
+- If data loading > computation: "Data starved" (CPU bottleneck)
+- If computation > data loading: "Compute bound" (GPU bottleneck)
 - Ideal: Data loading ≈ computation time (balanced pipeline)
 ```
 
@@ -1692,19 +1692,11 @@ Repeat until you find the sweet spot (usually 32-256)
 - **Testing:** Never shuffle (`shuffle=False`)
 - **Reason:** Validation/test need reproducible metrics
 
-**4. Memory-Constrained Training**
-```python
-# Technique: Gradient Accumulation (effective larger batch)
-effective_batch_size = 128
-actual_batch_size = 32
-accumulation_steps = effective_batch_size // actual_batch_size  # = 4
+**4. Memory-Constrained Scenarios**
 
-loader = DataLoader(dataset, batch_size=32)  # Fits in memory
-# In training loop: accumulate 4 batches before optimizer step
-# Result: Same as batch_size=128 but uses less memory!
-```
+With larger batch sizes, you process more data per step, but large batches may not fit in memory. When that happens, techniques exist to simulate larger batches using smaller ones that fit -- you'll learn these in later modules. For now, just choose a batch size that fits comfortably in your available memory.
 
-These patterns will save you hours of debugging and help you build robust training pipelines!
+These patterns will save you hours of debugging and help you build robust data pipelines!
 """
 
 # %% [markdown]
@@ -1870,26 +1862,20 @@ def test_module():
 
 Answer these to deepen your understanding of data loading and its systems implications:
 
-### 1. The Batch Size Dilemma
-**Question**: You're training a ResNet-50 on ImageNet. Your GPU has 16GB memory. Consider these batch size choices:
+### 1. The Batch Memory Budget
+**Question**: You're loading a large image dataset. Each image is a tensor of shape (3, 224, 224) stored as float32 (4 bytes per value). Your batch size is 256.
 
-**Option A: batch_size=256**
-- Peak memory: 14GB (near limit)
-- Training time: 12 hours
-- Final accuracy: 76.2%
+- How much memory does one image require? _____
+- How much memory does one batch of 256 images require? _____
+- If your machine has 16GB of RAM and you need room for the model and other data, what's a reasonable maximum batch size? _____
+- If your disk reads at 500 MB/s, how long does it take to load one batch from disk (assuming raw uncompressed data)? _____
 
-**Option B: batch_size=32**
-- Peak memory: 4GB (plenty of headroom)
-- Training time: 18 hours
-- Final accuracy: 75.1%
+**Work it out:**
+- One image: 3 x 224 x 224 x 4 bytes = _____ bytes (~_____ KB)
+- One batch: 256 x _____ KB = _____ MB
+- Disk load time: _____ MB / 500 MB/s = _____ seconds
 
-**Which would you choose and why?** Consider:
-- What happens if Option A occasionally spikes to 17GB during certain layers?
-- How does batch size affect gradient noise and convergence?
-- What's the real cost difference between 12 and 18 hours?
-- Could you use gradient accumulation to get benefits of both?
-
-**Systems insight**: Batch size creates a three-way trade-off between memory usage, training speed, and model convergence. The "right" answer depends on whether you're memory-constrained, time-constrained, or accuracy-constrained.
+**Systems insight**: Batch size directly determines your memory footprint and data loading time. Choosing the right batch size is fundamentally a memory budgeting problem -- how much of your available RAM can you dedicate to data?
 
 ---
 
@@ -1921,13 +1907,11 @@ Epoch 2 batches: [Patient A, Patient A, Patient A, Patient B...]
 ---
 
 ### 3. Data Loading Bottlenecks
-**Question**: Your training loop reports these timings per batch:
+**Question**: Your program reports these timings per batch:
 
 ```
 Data loading:    45ms
-Forward pass:    30ms
-Backward pass:   35ms
-Optimizer step:  10ms
+Computation:     75ms
 Total:          120ms
 ```
 
@@ -1943,7 +1927,7 @@ Total:          120ms
 
 **Option 1: Prefetch next batch during computation**
 ```python
-# While GPU computes current batch, CPU loads next batch
+# While the current batch is being processed, load the next batch
 DataLoader(..., num_workers=4)  # PyTorch feature
 ```
 Result: Data loading and compute overlap, ~30% speedup
@@ -1961,7 +1945,7 @@ Result: Eliminate repeated decode overhead
 
 **In your implementation:** You used TensorDataset with pre-loaded tensors, avoiding I/O entirely! This is why research code often loads MNIST/CIFAR-10 fully into memory.
 
-**Systems insight**: Data loading is often the hidden bottleneck in training. Profile first, optimize second.
+**Systems insight**: Data loading is often the hidden bottleneck. Profile first, optimize second.
 
 ---
 

@@ -132,8 +132,8 @@ In production ML systems, profiling isn't optional - it's survival. A model that
 ```
 Model → Profiler → Measurements → Analysis → Optimization Decision
   ↓        ↓           ↓           ↓            ↓
- GPT   Parameter   125M params   Memory      Use quantization
-       Counter     2.5B FLOPs    bound       Reduce precision
+ GPT   Parameter   125M params   Memory      Apply targeted
+       Counter     2.5B FLOPs    bound       optimization
 ```
 """
 
@@ -142,7 +142,7 @@ Model → Profiler → Measurements → Analysis → Optimization Decision
 ### From Implementation to Optimization: The Profiling Foundation
 
 **In this module (14)**, you'll build the measurement tools to discover optimization opportunities.
-**In later modules (15+)**, you'll use these profiling insights to implement optimizations like KV caching.
+**In later modules (15+)**, you'll use these profiling insights to implement targeted performance improvements.
 
 **The Real ML Engineering Workflow**:
 
@@ -821,10 +821,10 @@ def quick_profile(model, input_tensor, profiler=None):
 #| export
 def analyze_weight_distribution(model, percentiles=[10, 25, 50, 75, 90]):
     """
-    Analyze weight distribution for compression insights.
+    Analyze weight distribution across layers.
 
-    Helps understand which weights are small and might be prunable.
-    Used by Module 17 (Compression) to motivate pruning.
+    Helps understand how weights are distributed across layers.
+    Useful for identifying patterns in parameter magnitudes.
 
     Args:
         model: Model to analyze

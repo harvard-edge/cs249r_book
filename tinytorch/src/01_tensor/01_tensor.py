@@ -108,26 +108,26 @@ Tensor Dimensions:
 └─────────────┘
 ```
 
-In machine learning, tensors flow through operations like water through pipes:
+In computation, tensors flow through operations like water through pipes:
 
 ```
-Neural Network Data Flow:
-Input Tensor → Layer 1 → Activation → Layer 2 → ... → Output Tensor
-   [batch,     [batch,     [batch,     [batch,          [batch,
-    features]   hidden]     hidden]     hidden2]         classes]
+Data Processing Flow:
+Input Data → Transform 1 → Transform 2 → ... → Result
+  [rows,       [rows,        [rows,              [rows,
+   columns]     new_cols]     new_cols2]           final_cols]
 ```
 
-Every neural network, from simple linear regression to modern transformers, processes tensors. Understanding tensors means understanding the foundation of all ML computations.
+From simple statistics to large-scale scientific computing, tensors are the universal data container. Understanding tensors means understanding the foundation of numerical computation.
 
 ### Why Tensors Matter in ML Systems
 
-In production ML systems, tensors carry more than just data - they carry the computational graph, memory layout information, and execution context:
+In production ML systems, tensors carry more than just data - they carry operation history, memory layout information, and execution context:
 
 ```
 Real ML Pipeline:
-Raw Data → Preprocessing → Tensor Creation → Model Forward Pass → Loss Computation
-   ↓           ↓              ↓               ↓                    ↓
- Files     NumPy Arrays    Tensors        GPU Tensors         Scalar Loss
+Raw Data → Preprocessing → Tensor Creation → Computation → Result
+   ↓           ↓              ↓               ↓              ↓
+ Files     NumPy Arrays    Tensors        GPU Tensors     Output Tensor
 ```
 
 **Key Insight**: Tensors bridge the gap between mathematical concepts and efficient computation on modern hardware.
@@ -779,11 +779,11 @@ Element-wise operations are the workhorses of neural network computation. They a
 
 ### Why Element-wise Operations Matter
 
-In neural networks, element-wise operations appear everywhere:
-- **Activation functions**: Apply ReLU, sigmoid to every element
-- **Batch normalization**: Subtract mean, divide by std per element
-- **Loss computation**: Compare predictions vs. targets element-wise
-- **Gradient updates**: Add scaled gradients to parameters element-wise
+Element-wise operations are fundamental to numerical computing:
+- **Scaling**: Multiply every element by a constant (e.g., unit conversion)
+- **Thresholding**: Set values below zero to zero (clamp negatives)
+- **Normalization**: Subtract the mean from every element to center data
+- **Comparison**: Compute difference between two arrays element-by-element
 
 ### Element-wise Addition: The Foundation
 
@@ -913,20 +913,20 @@ if __name__ == "__main__":
 
 Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that gives neural networks their power to transform and combine information across features.
 
-### Why Matrix Multiplication is Central to ML
+### Why Matrix Multiplication is Central to Computation
 
-Every neural network layer essentially performs matrix multiplication:
+Many scientific and data-processing tasks rely on matrix multiplication:
 
 ```
-Linear Layer (the building block of neural networks):
-Input Features × Weight Matrix = Output Features
-    (N, D_in)   ×    (D_in, D_out)  =    (N, D_out)
+Linear Transformation:
+Input Data × Transform Matrix = Transformed Data
+  (N, D_in)  ×    (D_in, D_out)  =    (N, D_out)
 
-Real Example - Image Classification:
-Flattened Image × Hidden Weights = Hidden Features
-  (32, 784)     ×    (784, 256)   =   (32, 256)
-     ↑                   ↑              ↑
-  32 images         784→256 transform  32 feature vectors
+Real Example - Dimensionality Reduction:
+Data Samples × Projection Matrix = Projected Data
+  (32, 784)   ×    (784, 256)    =   (32, 256)
+     ↑                  ↑                ↑
+  32 samples      784→256 projection   32 reduced vectors
 ```
 
 ### Matrix Multiplication Visualization
@@ -977,28 +977,28 @@ This is why optimized libraries like OpenBLAS, Intel MKL use:
 - Parallelization (multiple cores)
 ```
 
-### Neural Network Context
+### Chained Matrix Multiplications
 
 ```
-Multi-layer Neural Network:
-Input (batch=32, features=784)
-  ↓ W1: (784, 256)
-Hidden1 (batch=32, features=256)
-  ↓ W2: (256, 128)
-Hidden2 (batch=32, features=128)
-  ↓ W3: (128, 10)
-Output (batch=32, classes=10)
+Chained Transformations:
+Data (32 samples, 784 features)
+  ↓ A: (784, 256)
+Result1 (32, 256)
+  ↓ B: (256, 128)
+Result2 (32, 128)
+  ↓ C: (128, 10)
+Final (32, 10)
 
-Each arrow represents a matrix multiplication:
-- Forward pass: 3 matrix multiplications
-- Backward pass: 3 more matrix multiplications (with transposes)
-- Total: 6 matrix mults per forward+backward pass
+Each arrow represents a matrix multiplication.
+Three chained matmuls progressively reduce dimensionality:
+  784 → 256 → 128 → 10
 
-For training batch: 32 × (784×256 + 256×128 + 128×10) FLOPs
-= 32 × (200,704 + 32,768 + 1,280) = 32 × 234,752 = 7.5M FLOPs per batch
+FLOPs for all three multiplications (32 samples):
+  32 × (2×784×256 + 2×256×128 + 2×128×10) FLOPs
+= 32 × (401,408 + 65,536 + 2,560) = 32 × 469,504 ≈ 15M FLOPs
 ```
 
-This is why GPU acceleration matters - modern GPUs can perform thousands of these operations in parallel!
+This is why hardware acceleration matters - modern processors can perform thousands of these operations in parallel!
 """
 
 
@@ -1065,21 +1065,19 @@ Neural networks constantly change tensor shapes to match layer requirements. Und
 
 ### Why Shape Manipulation Matters
 
-Real neural networks require constant shape changes:
+Many computations require constant shape changes:
 
 ```
-CNN Data Flow Example:
-Input Image: (32, 3, 224, 224)     # batch, channels, height, width
-     ↓ Convolutional layers
-Feature Maps: (32, 512, 7, 7)      # batch, features, spatial
-     ↓ Global Average Pool
-Pooled: (32, 512, 1, 1)            # batch, features, 1, 1
-     ↓ Flatten for classifier
-Flattened: (32, 512)               # batch, features
-     ↓ Linear classifier
-Output: (32, 1000)                 # batch, classes
+Multi-dimensional Data Processing Example:
+Batch of RGB Images: (32, 3, 224, 224)   # 32 images, 3 color channels, 224x224 pixels
+     ↓ Spatial processing
+Processed: (32, 512, 7, 7)              # 32 images, 512 features, 7x7 spatial
+     ↓ Average across spatial dims
+Reduced: (32, 512)                      # 32 images, 512 features (spatial collapsed)
+     ↓ Matrix multiply to reduce dimensions
+Final: (32, 10)                         # 32 images, 10 output values
 
-Each ↓ involves reshape or view operations!
+Each ↓ involves reshape or similar operations!
 ```
 
 ### Reshape: Changing Interpretation of the Same Data
@@ -1124,12 +1122,13 @@ After:  [1][4][2][5][3][6]  ← Data actually moves in memory
 
 Key Insight: Transpose involves data movement - more expensive than reshape.
 
-Neural Network Usage:
+Common Linear Algebra Usage:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
-│ Weight Matrices     │ Attention Mechanism │ Gradient Computation│
+│ Covariance Matrix   │ Solving Least       │ Data Reshaping      │
+│                     │ Squares             │                     │
 ├─────────────────────┼─────────────────────┼─────────────────────┤
-│ Forward: X @ W      │ Q @ K^T attention   │ ∂L/∂W = X^T @ ∂L/∂Y │
-│ Backward: X @ W^T   │ scores              │                     │
+│ X^T @ X computes    │ A^T @ b projects    │ Swap rows/columns   │
+│ feature correlations│ onto column space   │ for different views  │
 └─────────────────────┴─────────────────────┴─────────────────────┘
 ```
 

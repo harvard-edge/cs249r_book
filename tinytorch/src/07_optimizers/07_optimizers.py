@@ -672,12 +672,12 @@ Adam solves a fundamental problem with SGD: different parameters often need diff
 
 ### The Parameter Scaling Problem
 
-Consider a neural network with both embedding weights and output weights:
+Consider a neural network with both first layer weights and output weights:
 
 ```
 Parameter Sensitivity Landscape:
 
-  output_weight                 embedding_weight
+  output_weight                 first_layer_weight
        ↑                              ↑
        |                              |
     😱 |  steep cliff                 |  🐌 gentle slope
@@ -686,8 +686,8 @@ Parameter Sensitivity Landscape:
     ━━━●━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━●━━━→
 
 Same learning rate = disaster!
-• Small LR: output weights learn fast, embeddings crawl
-• Large LR: embeddings learn well, output weights explode
+• Small LR: output weights learn fast, first layer crawls
+• Large LR: first layer learns well, output weights explode
 ```
 
 ### Adam's Adaptive Solution
@@ -1101,7 +1101,7 @@ class AdamW(Optimizer):
 This test validates our AdamW implementation with decoupled weight decay.
 
 **What we're testing**: AdamW updates with proper weight decay decoupling
-**Why it matters**: State-of-the-art optimizer for transformer models
+**Why it matters**: State-of-the-art optimizer for modern neural networks
 **Expected**: Correct separation of gradient updates and weight decay
 """
 
@@ -1516,7 +1516,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 - When might SGD's uniform learning rate actually be an advantage?
 - How does momentum in SGD relate to Adam's first moment estimation?
 
-**Real-world context**: Large language models often have embedding layers with very different gradient magnitudes than attention layers. Adam's adaptive rates help balance these naturally.
+**Real-world context**: Deep neural networks often have early layers with very different gradient magnitudes than later layers. Adam's adaptive rates help balance these naturally.
 
 ---
 
@@ -1570,7 +1570,7 @@ Answer these to deepen your understanding of optimizer operations and their syst
 
 ### Bonus Challenge: Optimization Analysis
 
-**Scenario**: You're training a transformer model and observing the following:
+**Scenario**: You're training a deep neural network and observing the following:
 - Loss decreases rapidly for first 1000 steps
 - Loss plateaus between steps 1000-5000
 - Loss suddenly increases at step 5000

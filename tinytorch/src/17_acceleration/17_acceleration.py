@@ -1519,5 +1519,5 @@ The performance analysis skills transfer directly to production optimization wor
 
 Export with: `tito module complete 17`
 
-**Next**: Module 18 will build on these acceleration techniques for advanced graph optimization!
+**Next**: Module 18 will add memoization techniques including KV caching for efficient transformer inference!
 """

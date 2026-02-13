@@ -209,7 +209,9 @@ get_python_cmd() {
     platform=$(get_platform)
 
     # Check specific versions first, prioritizing newer versions
-    # FIX: windows to fix microsoft store alis stuf
+    # On Windows, prefer 'python' to avoid Microsoft Store alias that
+    # resolves 'python3' to a stub and creates Unix-style venv paths.
+    # Contributed by @adil-mubashir-ch (PR #1169)
     if [ "$platform" = "windows" ]; then
         local candidates=("python")
     else
