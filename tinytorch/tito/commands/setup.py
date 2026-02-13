@@ -128,10 +128,6 @@ class SetupCommand(BaseCommand):
 
     def install_packages(self) -> bool:
         """Install required packages for Tiny🔥Torch development."""
-        
-        # FIX: Windows Specific flags
-        is_windows = platform.system() == "Windows"
-
         # Essential packages for TinyTorch
         packages = [
             ("numpy", "numpy>=1.21.0"),
@@ -200,7 +196,10 @@ class SetupCommand(BaseCommand):
                         return False
 
         # Install Tiny🔥Torch in development mode
-        # FIX: Skip installation on windows
+        # On Windows, 'pip install -e .' fails with WinError 32 (file lock) when
+        # tito.exe is already running. Skip reinstall if already installed.
+        # Contributed by @adil-mubashir-ch (PR #1169)
+        is_windows = platform.system() == "Windows"
         if is_windows and self._check_package_installed("tinytorch"):
             self.console.print(
                 "[green]✅ Tiny🔥Torch already installed (skipping reinstall on Windows)[/green]"
