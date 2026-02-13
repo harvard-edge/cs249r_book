@@ -1526,12 +1526,12 @@ Answer these to deepen your understanding of optimizer operations and their syst
 **Consider**:
 - What happens to these buffers when you checkpoint during training?
 - If you resume training with different hyperparameters, should you restore the old buffers?
-- How does optimizer state affect distributed training across multiple GPUs?
+- How does optimizer state affect training when you restart from a checkpoint?
 
 **Think about**:
 - Checkpoint size: Adam stores 2 additional tensors per parameter
 - Resume behavior: Warm vs cold restart implications
-- Distributed sync: How do you aggregate optimizer state across workers?
+- Resume behavior: What happens to momentum buffers if you change learning rate mid-training?
 
 ---
 
@@ -1558,12 +1558,9 @@ Answer these to deepen your understanding of optimizer operations and their syst
 **With Adam optimizer (3x memory)**:
 - Total: ___________GB
 
-**With gradient checkpointing and mixed precision**:
-- How does this change the equation?
-
 **Real-world implications**:
 - Why do we need multiple GPUs for training large models?
-- What is ZeRO optimization and how does it help?
+- Why is understanding optimizer memory crucial for choosing hardware?
 - When would you choose SGD over Adam despite slower convergence?
 
 ---

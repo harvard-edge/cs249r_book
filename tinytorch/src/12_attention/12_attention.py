@@ -891,7 +891,7 @@ def analyze_attention_timing():
         prev_time = avg_time
 
     print(f"\n💡 KEY INSIGHT: Attention time scales roughly as O(n^2) with sequence length")
-    print(f"🚀 This is why efficient attention (FlashAttention) is crucial for long sequences")
+    print(f"🚀 This is why attention efficiency techniques are an active area of research")
 
 # Run the analysis
 if __name__ == "__main__":
@@ -963,10 +963,7 @@ Attention Memory = 120 x 4GB = 480GB - Impossible on single GPU!
 ```
 
 **Why This Matters:**
-- **FlashAttention**: Reformulates computation to reduce memory without changing results
-- **Sparse Attention**: Only compute attention for specific patterns (local, strided)
-- **Linear Attention**: Approximate attention with linear complexity
-- **State Space Models**: Alternative architectures that avoid attention entirely
+This quadratic wall motivates active research into more efficient attention mechanisms. You'll explore optimization techniques in later modules.
 
 The quadratic wall is why long-context AI is an active research frontier, not a solved problem.
 """
@@ -1143,7 +1140,7 @@ Answer these to deepen your understanding of attention operations and their syst
 - Scaling factor when doubling sequence length: _____x
 - Why this limits transformer context lengths in production
 
-**Real-world context**: GPT-3's 2048 token context was chosen partly due to this memory constraint. Longer contexts require techniques like FlashAttention or sparse attention.
+**Real-world context**: GPT-3's 2048 token context was chosen partly due to this memory constraint. Longer contexts require specialized efficiency techniques (explored in later modules).
 
 ---
 
@@ -1197,19 +1194,18 @@ Answer these to deepen your understanding of attention operations and their syst
 
 ---
 
-### 5. Flash Attention Conceptually
-**Question**: Modern systems use "flash attention" to reduce attention's memory from O(n^2) to O(n). How might this work conceptually?
+### 5. The Quadratic Memory Challenge
+**Question**: Your implementation computes the full (seq_len x seq_len) attention matrix. Why is this the primary memory bottleneck?
 
-**Consider**:
-- Your implementation computes full attention matrix (batch, seq_len, seq_len), then applies it to values
-- FlashAttention reformulates this to never materialize the full matrix
-- Your implementation: stores (seq_len x seq_len) attention weights
-- FlashAttention idea: Compute attention in _____? (blocks, tiles, chunks)
+**Calculate**:
+- For a 4096-token sequence with 32 heads at float32: attention memory = _____ GB
+- For a 512-token sequence with 8 heads: attention memory = _____ MB
+- How does doubling sequence length affect attention memory?
 
 **Think about**:
-- Recomputation trade-off: Save memory by _____ during backward pass
-- Why does this enable longer context windows?
-- Is this an algorithm change or just implementation optimization?
+- Why is the attention matrix the dominant memory cost (vs. Q, K, V projections)?
+- What property of the softmax operation makes it hard to avoid materializing the full matrix?
+- You'll explore techniques to address this in later modules.
 
 ---
 
@@ -1286,7 +1282,7 @@ Congratulations! You've built the attention mechanism that revolutionized deep l
 - **Quadratic scaling**: Attention memory grows as n^2, limiting context lengths
 - **Memory bottlenecks**: Attention matrices dominate memory in transformers (1.5GB+ for GPT-3)
 - **Multi-head parallelism**: Different heads can specialize in different relationship types
-- **Production challenges**: Understanding why FlashAttention research is crucial
+- **Production challenges**: Understanding why attention efficiency research is crucial
 
 ### Ready for Next Steps
 Your attention implementation is the core mechanism that enables modern language models!

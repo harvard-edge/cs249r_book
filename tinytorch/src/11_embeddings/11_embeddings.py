@@ -67,7 +67,7 @@ from typing import List, Optional, Tuple
 from tinytorch.core.tensor import Tensor
 
 # Enable autograd for gradient tracking (required for learnable embeddings)
-from tinytorch.core.autograd import enable_autograd
+from tinytorch.core.autograd import Function, enable_autograd
 enable_autograd()
 
 # Constants for memory calculations
@@ -259,6 +259,114 @@ The combination enables transformers to understand both meaning and order!
 Let's implement embedding systems from basic token lookup to sophisticated position-aware representations. We'll start with the core embedding layer and work up to complete systems.
 """
 
+# %% [markdown]
+"""
+### Gradient Computation for Embedding Lookups
+
+Now that you understand how embedding lookups work (index → row of the weight matrix),
+let's think about how gradients flow backward through this operation.
+
+The forward pass is a **gather** — we select rows from the weight matrix by index.
+The backward pass is a **scatter** — we distribute gradients back to the rows that were selected.
+
+```
+Forward (gather):                    Backward (scatter):
+Weight Table:                        Gradient Table:
+  Row 0: [0.1, 0.2]  ← selected       Row 0: [2, 2]  ← accumulated (selected twice!)
+  Row 1: [0.3, 0.4]                    Row 1: [0, 0]  ← not selected
+  Row 2: [0.5, 0.6]  ← selected       Row 2: [1, 1]  ← selected once
+
+Indices: [0, 2, 0]                   grad_output: [[1,1], [1,1], [1,1]]
+Output:  [[0.1, 0.2],               Row 0 gets grad[0] + grad[2] = [2, 2]
+          [0.5, 0.6],               Row 2 gets grad[1] = [1, 1]
+          [0.1, 0.2]]
+```
+
+**Key insight**: When the same token appears multiple times in a sequence (like word "the"),
+its embedding row accumulates gradients from every position. This is why `np.add.at` is
+essential — standard indexing would overwrite instead of accumulating.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "embedding-backward", "solution": true}
+#| export
+class EmbeddingBackward(Function):
+    """
+    Gradient computation for embedding lookup operation.
+
+    **Mathematical Rule:** If Y = Embedding[indices], then:
+    - ∂Loss/∂Embedding[i] = sum of all gradients where index==i
+
+    Embedding lookup is a gather operation. The backward
+    is a scatter operation that accumulates gradients to the embedding weights.
+    """
+
+    def __init__(self, weight, indices):
+        """
+        Args:
+            weight: Embedding weight matrix
+            indices: Indices used for lookup
+        """
+        super().__init__(weight)
+        self.indices = indices
+
+    def apply(self, grad_output):
+        """
+        Compute gradient for embedding lookup.
+
+        Args:
+            grad_output: Gradient flowing backward from output
+
+        Returns:
+            Tuple with single gradient for weight tensor
+
+        **Mathematical Foundation:**
+        - ∂(Embedding[indices])/∂Embedding = scatter gradients to selected rows
+        - Multiple indices can point to same embedding → gradients accumulate
+
+        TODO: Implement gradient computation for embedding lookup.
+
+        APPROACH:
+        1. Extract weight tensor from self.saved_tensors
+        2. Initialize grad_weight to None
+        3. If weight requires gradients:
+           - Create zeros array: grad_weight = np.zeros_like(weight.data)
+           - Flatten indices: indices_flat = self.indices.data.astype(int).flatten()
+           - Reshape grad_output: match flattened indices with embedding dimension
+           - Use np.add.at to accumulate gradients: np.add.at(grad_weight, indices_flat, grad_output_reshaped)
+        4. Return tuple (grad_weight,)
+
+        EXAMPLE:
+        >>> vocab = Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], requires_grad=True)  # 3 words, 2D
+        >>> indices = Tensor([0, 2, 0])  # Select words 0, 2, 0
+        >>> output = vocab[indices]  # [[0.1, 0.2], [0.5, 0.6], [0.1, 0.2]]
+        >>> # During backward: grad_output = [[1, 1], [1, 1], [1, 1]]
+        >>> # grad_vocab[0] accumulates twice: [1, 1] + [1, 1] = [2, 2]
+        >>> # grad_vocab[2] once: [1, 1]
+
+        HINTS:
+        - Embedding lookup is a gather operation; backward is scatter
+        - np.add.at accumulates gradients for repeated indices
+        - Reshape grad_output to match: (num_indices, embedding_dim)
+        - Return as single-element tuple: (grad_weight,)
+        """
+        ### BEGIN SOLUTION
+        weight, = self.saved_tensors
+        grad_weight = None
+
+        if isinstance(weight, Tensor) and weight.requires_grad:
+            # Initialize gradient with zeros
+            grad_weight = np.zeros_like(weight.data)
+
+            # Scatter gradients back to embedding weights
+            # np.add.at accumulates gradients for repeated indices
+            indices_flat = self.indices.data.astype(int).flatten()
+            grad_output_reshaped = grad_output.reshape(-1, grad_output.shape[-1])
+
+            np.add.at(grad_weight, indices_flat, grad_output_reshaped)
+
+        return (grad_weight,)
+        ### END SOLUTION
+
 # %% nbgrader={"grade": false, "grade_id": "embedding-class", "solution": true}
 #| export
 class Embedding:
@@ -336,9 +444,8 @@ class Embedding:
         result = Tensor(embedded)
 
         # Attach gradient function for backpropagation
-        # EmbeddingBackward handles sparse gradient accumulation
+        # EmbeddingBackward (defined above) handles sparse gradient accumulation
         if self.weight.requires_grad:
-            from tinytorch.core.autograd import EmbeddingBackward
             result.requires_grad = True
             result._grad_fn = EmbeddingBackward(self.weight, indices)
 
@@ -679,7 +786,7 @@ Mathematical position encoding that creates unique signatures for each position 
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
-**Why transformers use this**: The mathematical structure allows the model to learn relative positions (how far apart tokens are) through simple vector operations, which is crucial for attention mechanisms!
+**Why this matters**: The mathematical structure creates unique positional signatures and enables smooth interpolation to longer sequences. You'll see how attention mechanisms leverage these properties in Module 12.
 """
 
 # %% [markdown]
@@ -813,7 +920,7 @@ if __name__ == "__main__":
 """
 ## 🔧 Integration: Bringing It Together
 
-Now let's build the complete embedding system that combines token and positional embeddings into a production-ready component used in modern transformers and language models.
+Now let's build the complete embedding system that combines token and positional embeddings into a production-ready component. This is the same pattern used in modern language models.
 
 ```
 Complete Embedding Pipeline:
@@ -832,7 +939,7 @@ The production embedding layer that powers modern transformers combines multiple
 
 ```
 ┌───────────────────────────────────────────────────────────────────────────┐
-│ COMPLETE EMBEDDING SYSTEM: Token + Position → Attention-Ready             │
+│ COMPLETE EMBEDDING SYSTEM: Token + Position → Position-Aware Representations│
 ├───────────────────────────────────────────────────────────────────────────┤
 │                                                                           │
 │ INPUT: Token IDs [1, 42, 7, 99]                                           │

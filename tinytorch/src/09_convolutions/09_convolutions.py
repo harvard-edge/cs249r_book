@@ -1782,7 +1782,7 @@ def analyze_convolution_complexity():
     print("🔸 FLOPs scale as O(H×W×C_in×C_out×K²) - quadratic in spatial and kernel size")
     print("🔸 Memory scales linearly with spatial dimensions and channels")
     print("🔸 Large kernels dramatically increase computational cost")
-    print("🚀 This motivates depthwise separable convolutions and attention mechanisms")
+    print("🚀 This motivates more efficient convolution variants that reduce computational cost")
 
 # Run the systems analysis
 if __name__ == "__main__":

@@ -418,7 +418,7 @@ Base class for all differentiable operations. Every operation (addition, multipl
 | `ReshapeBackward` | Shape manipulation | ∂(X.reshape(...))/∂X = grad.reshape(X.shape) |
 | `TransposeBackward` | Transpose gradients | ∂(X.T)/∂X = grad.T |
 
-**Additional Backward Classes:** The implementation includes backward functions for activations (`ReLUBackward`, `SigmoidBackward`, `SoftmaxBackward`, `GELUBackward`), losses (`MSEBackward`, `BCEBackward`, `CrossEntropyBackward`), and other operations (`PermuteBackward`, `EmbeddingBackward`, `SliceBackward`). These follow the same pattern as the core classes above.
+**Additional Backward Classes:** The implementation includes backward functions for activations (`ReLUBackward`, `SigmoidBackward`, `SoftmaxBackward`, `GELUBackward`), losses (`MSEBackward`, `BCEBackward`, `CrossEntropyBackward`), and other operations (`PermuteBackward`, `SliceBackward`). These follow the same pattern as the core classes above.
 
 ### Enhanced Tensor Methods
 

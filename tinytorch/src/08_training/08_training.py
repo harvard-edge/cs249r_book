@@ -168,9 +168,8 @@ For effective batch size B_eff = accumulation_steps * B_actual:
 
 ### Train vs Eval Modes
 
-Many layers behave differently during training vs inference:
-- **Dropout**: Active during training, disabled during evaluation
-- **BatchNorm**: Updates statistics during training, uses fixed statistics during evaluation
+Some layers behave differently during training vs inference:
+- Some layers may behave differently (you'll encounter examples like batch normalization in Module 09)
 - **Gradient computation**: Enabled during training, disabled during evaluation for efficiency
 
 This mode switching is crucial for proper model behavior and performance.
@@ -1348,7 +1347,7 @@ Answer these to deepen your understanding of training systems and their implicat
 **Question**: Why is it crucial to set model.training = False during evaluation?
 
 **Consider**:
-- What layers behave differently in training vs eval? (Dropout, BatchNorm)
+- What layers might behave differently in training vs eval? (You'll see specific examples in Module 09)
 - What would happen if you forgot to zero gradients between training steps?
 - How does gradient accumulation intentionally exploit not zeroing?
 

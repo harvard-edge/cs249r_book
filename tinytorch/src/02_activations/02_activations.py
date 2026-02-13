@@ -116,7 +116,7 @@ Input → Linear Transform → Output
 
 **With Activations (Nonlinear):**
 ```
-Input → Linear → Activation → Linear → Activation → Output
+Input → Transform → Activation → Transform → Activation → Output
 [1, 2] → [3, 4] → [3, 4] → [7] → [7] → Complex Pattern!
 ```
 
@@ -143,15 +143,15 @@ This is how nonlinearity turns simple math into powerful function approximation.
 """
 ## 📐 Mathematical Foundations
 
-Each activation function serves a different purpose in neural networks:
+Each activation function serves a different purpose in computation:
 
 ### The Five Essential Activations
 
 1. **Sigmoid**: Maps to (0, 1) - perfect for probabilities
 2. **ReLU**: Removes negatives - creates sparsity and efficiency
 3. **Tanh**: Maps to (-1, 1) - zero-centered for better training
-4. **GELU**: Smooth ReLU - modern choice for transformers
-5. **Softmax**: Creates probability distributions - essential for classification
+4. **GELU**: Smooth ReLU - modern choice for advanced architectures
+5. **Softmax**: Creates probability distributions - converts values to probabilities
 
 Let's implement each one with clear explanations and immediate testing!
 """
@@ -507,7 +507,7 @@ class Tanh:
 This test validates tanh activation behavior.
 
 **What we're testing**: Tanh maps inputs to (-1, 1) range, zero-centered
-**Why it matters**: Zero-centered activations can help with gradient flow
+**Why it matters**: Zero-centered activations have desirable mathematical properties
 **Expected**: All outputs in (-1, 1), tanh(0) = 0, symmetric behavior
 """
 
@@ -590,7 +590,7 @@ GELU Function:
 -2  0  2
 ```
 
-**Why GELU matters**: Used in GPT, BERT, and other transformers. The smoothness helps with optimization compared to ReLU's sharp corner.
+**Why GELU matters**: Used in GPT, BERT, and other modern architectures (you'll build these in Module 13). The smoothness helps with optimization compared to ReLU's sharp corner.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-impl", "solution": true}
@@ -599,7 +599,7 @@ class GELU:
     """
     GELU activation: f(x) = x * Φ(x) ≈ x * Sigmoid(1.702 * x)
 
-    Smooth approximation to ReLU, used in modern transformers.
+    Smooth approximation to ReLU, used in modern architectures.
     Where Φ(x) is the cumulative distribution function of standard normal.
     """
 
@@ -849,11 +849,11 @@ From the demonstration above, notice how each activation serves a different purp
 
 **Sigmoid**: Squashes everything to (0, 1) - good for probabilities
 **ReLU**: Zeros negatives, keeps positives - creates sparsity
-**Tanh**: Like sigmoid but centered at zero (-1, 1) - better gradient flow
-**GELU**: Smooth ReLU-like behavior - modern choice for transformers
+**Tanh**: Like sigmoid but centered at zero (-1, 1) - better mathematical properties for composing transformations
+**GELU**: Smooth ReLU-like behavior - modern choice for advanced architectures
 **Softmax**: Converts to probability distribution - sum equals 1
 
-These different behaviors make each activation suitable for different parts of neural networks.
+These different behaviors make each activation suitable for different computational tasks.
 """
 
 # %% [markdown]
@@ -975,7 +975,7 @@ Answer these to deepen your understanding of activation functions and their syst
 ---
 
 ### 3. Sparsity and Efficiency
-**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for neural networks?
+**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for computation?
 
 **Consider**:
 - Memory: Do zeros need to be stored differently than non-zeros?
@@ -985,7 +985,7 @@ Answer these to deepen your understanding of activation functions and their syst
 **Think about**:
 - Sparse matrix representations and their memory benefits
 - How GPUs handle sparse operations
-- Whether sparsity helps or hurts different types of neural networks
+- Whether sparsity helps or hurts different types of computations
 
 ---
 
@@ -1014,7 +1014,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 **Solutions used in practice**:
 - LeakyReLU: f(x) = max(0.01*x, x) - allows a small signal even for negative inputs
-- PReLU: Learnable slope for negative values
+- PReLU: Adjustable slope for negative values (details in later modules)
 - GELU: Smooth approximation that never fully zeroes out
 
 ---

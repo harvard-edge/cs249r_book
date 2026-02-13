@@ -244,7 +244,7 @@ NumPy allocates: [1][2][3][4][5][6] in contiguous memory
 Tensor wraps with: shape=(2,3), size=6, dtype=int64
 ```
 
-**Key Design Principle**: Our Tensor is a wrapper around NumPy arrays that adds ML-specific functionality. We leverage NumPy's battle-tested memory management and computation kernels while adding the gradient tracking and operation chaining needed for deep learning.
+**Key Design Principle**: Our Tensor is a wrapper around NumPy arrays that adds ML-specific functionality. We leverage NumPy's battle-tested memory management and computation kernels while adding the operation chaining needed for machine learning.
 
 **Why This Approach?**
 - **Performance**: NumPy's C implementations are highly optimized
@@ -818,19 +818,19 @@ Broadcasting Rules:
 """
 ### Subtraction, Multiplication, and Division
 
-These operations follow the same pattern as addition, working element-wise with broadcasting support. Each serves specific purposes in neural networks:
+These operations follow the same pattern as addition, working element-wise with broadcasting support. Each serves specific purposes in data processing:
 
 ```
-Element-wise Operations in Neural Networks:
+Element-wise Operations:
 
 ┌─────────────────┬─────────────────┬─────────────────┬─────────────────┐
 │ Subtraction     │ Multiplication  │ Division        │ Use Cases       │
 ├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
-│ [6,8] - [1,2]   │ [2,3] * [4,5]   │ [8,9] / [2,3]   │ • Gradient      │
-│ = [5,6]         │ = [8,15]        │ = [4.0, 3.0]    │   computation   │
-│                 │                 │                 │ • Normalization │
-│ Center data:    │ Gate values:    │ Scale features: │ • Loss functions│
-│ x - mean        │ x * mask        │ x / std         │ • Attention     │
+│ [6,8] - [1,2]   │ [2,3] * [4,5]   │ [8,9] / [2,3]   │ • Data centering│
+│ = [5,6]         │ = [8,15]        │ = [4.0, 3.0]    │   (x - mean)   │
+│                 │                 │                 │ • Feature       │
+│ Center data:    │ Gate values:    │ Scale features: │   scaling       │
+│ x - mean        │ x * mask        │ x / std         │ • Statistics    │
 └─────────────────┴─────────────────┴─────────────────┴─────────────────┘
 
 Broadcasting with Scalars (very common in ML):
@@ -838,7 +838,7 @@ Broadcasting with Scalars (very common in ML):
 [1, 2, 3] - 1     = [0, 1, 2]      (shift all values)
 [2, 4, 6] / 2     = [1, 2, 3]      (normalize all values)
 
-Real ML Example - Batch Normalization:
+Real Data Example - Feature Standardization:
 batch_data = [[1, 2], [3, 4], [5, 6]]  # Shape: (3, 2)
 mean = [3, 4]                           # Shape: (2,)
 std = [2, 2]                            # Shape: (2,)
@@ -859,7 +859,7 @@ normalized = (batch_data - mean) / std
 This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior.
 
 **What we're testing**: Addition, subtraction, multiplication, division with broadcasting
-**Why it matters**: Foundation for neural network forward passes, batch processing, normalization
+**Why it matters**: Foundation for batch processing, data normalization, and feature scaling
 **Expected**: Operations work with both tensors and scalars, proper broadcasting alignment
 """
 
@@ -909,11 +909,11 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Matrix Multiplication: The Heart of Neural Networks
+## 🏗️ Matrix Multiplication: The Core Computational Operation
 
-Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that gives neural networks their power to transform and combine information across features.
+Matrix multiplication is fundamentally different from element-wise multiplication. It's the operation that powers linear transformations — combining information across features to produce new representations.
 
-### Why Matrix Multiplication is Central to Computation
+### Why Matrix Multiplication Matters
 
 Many scientific and data-processing tasks rely on matrix multiplication:
 
@@ -981,21 +981,19 @@ This is why optimized libraries like OpenBLAS, Intel MKL use:
 
 ```
 Chained Transformations:
-Data (32 samples, 784 features)
-  ↓ A: (784, 256)
-Result1 (32, 256)
-  ↓ B: (256, 128)
-Result2 (32, 128)
-  ↓ C: (128, 10)
-Final (32, 10)
+Data (100 samples, 50 features)
+  ↓ A: (50, 20)
+Result1 (100, 20)
+  ↓ B: (20, 5)
+Final (100, 5)
 
 Each arrow represents a matrix multiplication.
-Three chained matmuls progressively reduce dimensionality:
-  784 → 256 → 128 → 10
+Two chained matmuls progressively reduce dimensionality:
+  50 → 20 → 5
 
-FLOPs for all three multiplications (32 samples):
-  32 × (2×784×256 + 2×256×128 + 2×128×10) FLOPs
-= 32 × (401,408 + 65,536 + 2,560) = 32 × 469,504 ≈ 15M FLOPs
+FLOPs for both multiplications (100 samples):
+  100 × (2×50×20 + 2×20×5) FLOPs
+= 100 × (2,000 + 200) = 100 × 2,200 = 220K FLOPs
 ```
 
 This is why hardware acceleration matters - modern processors can perform thousands of these operations in parallel!
@@ -1009,7 +1007,7 @@ This is why hardware acceleration matters - modern processors can perform thousa
 This test validates matrix multiplication works correctly with proper shape checking and error handling.
 
 **What we're testing**: Matrix multiplication with shape validation and edge cases
-**Why it matters**: Core operation in neural networks (linear layers, attention mechanisms)
+**Why it matters**: Core operation in linear algebra and data transformations
 **Expected**: Correct results for valid shapes, clear error messages for invalid shapes
 """
 
@@ -1026,15 +1024,15 @@ def test_unit_matrix_multiplication():
     expected = np.array([[19, 22], [43, 50]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
-    # Test rectangular matrices (common in neural networks)
-    c = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3 (like batch_size=2, features=3)
+    # Test rectangular matrices (common in data transformations)
+    c = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3 (like samples=2, features=3)
     d = Tensor([[7, 8], [9, 10], [11, 12]])  # 3×2 (like features=3, outputs=2)
     result = c.matmul(d)
     # Expected: [[1×7+2×9+3×11, 1×8+2×10+3×12], [4×7+5×9+6×11, 4×8+5×10+6×12]]
     expected = np.array([[58, 64], [139, 154]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
-    # Test matrix-vector multiplication (common in forward pass)
+    # Test matrix-vector multiplication (common in linear transforms)
     matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
     vector = Tensor([1, 2, 3])  # 3×1 (conceptually)
     result = matrix.matmul(vector)
@@ -1061,7 +1059,7 @@ if __name__ == "__main__":
 """
 ## 🏗️ Shape Manipulation: Reshape and Transpose
 
-Neural networks constantly change tensor shapes to match layer requirements. Understanding these operations is crucial for data flow through networks.
+Data processing pipelines constantly change tensor shapes to match computation requirements. Understanding these operations is crucial for efficient data flow.
 
 ### Why Shape Manipulation Matters
 
@@ -1098,10 +1096,10 @@ Just changes how we interpret the memory layout.
 
 Common ML Reshapes:
 ┌─────────────────────┬─────────────────────┬─────────────────────┐
-│ Flatten for MLP     │ Unflatten for CNN   │ Batch Dimension     │
+│ Flatten 2D → 1D     │ Unflatten 1D → 2D   │ Batch Dimension     │
 ├─────────────────────┼─────────────────────┼─────────────────────┤
 │ (N,H,W,C) → (N,H×W×C) │ (N,D) → (N,H,W,C)   │ (H,W) → (1,H,W)   │
-│ Images to vectors   │ Vectors to images   │ Add batch dimension │
+│ Matrix to vector    │ Vector to matrix    │ Add batch dimension │
 └─────────────────────┴─────────────────────┴─────────────────────┘
 ```
 
@@ -1161,7 +1159,7 @@ This is why frameworks like PyTorch often use "lazy" transpose operations that d
 This test validates reshape and transpose operations work correctly with validation and edge cases.
 
 **What we're testing**: Reshape and transpose operations with proper error handling
-**Why it matters**: Essential for data flow in neural networks, CNN/RNN architectures
+**Why it matters**: Essential for data manipulation and multi-dimensional array processing
 **Expected**: Correct shape changes, proper error handling for invalid operations
 """
 
@@ -1212,7 +1210,7 @@ def test_unit_shape_manipulation():
     swapped = tensor_3d.transpose(0, 2)  # Swap first and last dimensions
     assert swapped.shape == (2, 2, 2)  # Same shape but data rearranged
 
-    # Test neural network reshape pattern (flatten for MLP)
+    # Test common reshape pattern (flatten multi-dimensional data)
     batch_images = Tensor(np.random.rand(2, 3, 4))  # (batch=2, height=3, width=4)
     flattened = batch_images.reshape(2, -1)  # (batch=2, features=12)
     assert flattened.shape == (2, 12)
@@ -1226,29 +1224,29 @@ if __name__ == "__main__":
 """
 ## 🏗️ Reduction Operations: Aggregating Information
 
-Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics, losses, and preparing data for different layers.
+Reduction operations collapse dimensions by aggregating data, which is essential for computing statistics, statistics, and preparing data for further processing.
 
 ### Why Reductions are Crucial in ML
 
 Reduction operations appear throughout neural networks:
 
 ```
-Common ML Reduction Patterns:
+Common Data Reduction Patterns:
 
 ┌─────────────────────┬─────────────────────┬───────────────────────┐
-│ Loss Computation    │ Batch Normalization │ Global Pooling        │
+│ Column Statistics    │ Row Aggregation     │ Spatial Averaging     │
 ├─────────────────────┼─────────────────────┼───────────────────────┤
-│ Per-sample losses → │ Batch statistics →  │ Feature maps →        │
-│ Single batch loss   │ Normalization       │ Single features       │
+│ Per-column stats →  │ Per-row stats →     │ 2D data →             │
+│ Summary per feature │ Summary per sample  │ Single value per item │
 │                     │                     │                       │
-│ losses.mean()       │ batch.mean(axis=0)  │ fmaps.mean(axis=(2,3))│
-│ (N,) → scalar       │ (N,D) → (D,)        │ (N,C,H,W) → (N,C)     │
+│ data.mean(axis=0)   │ data.mean(axis=1)   │ img.mean(axis=(1,2))  │
+│ (N,D) → (D,)        │ (N,D) → (N,)        │ (N,H,W) → (N,)        │
 └─────────────────────┴─────────────────────┴───────────────────────┘
 
 Real Examples:
-• Cross-entropy loss: -log(predictions).mean()  [average over batch]
-• Batch norm: (x - x.mean()) / x.std()          [normalize each feature]
-• Global avg pool: features.mean(dim=(2,3))     [spatial → scalar per channel]
+• Average grade per subject: grades.mean(axis=0)     [average down columns]
+• Average grade per student: grades.mean(axis=1)     [average across rows]
+• Average pixel intensity: images.mean(axis=(1,2))   [spatial → scalar per image]
 ```
 
 ### Understanding Axis Operations
@@ -1351,12 +1349,12 @@ def test_unit_reduction_operations():
     assert np.isclose(avg.data, 3.5)  # 21/6
     assert avg.shape == ()
 
-    # Test mean along axis (batch normalization pattern)
+    # Test mean along axis (per-column statistics)
     col_mean = matrix.mean(axis=0)
     expected_mean = np.array([2.5, 3.5, 4.5], dtype=np.float32)  # [5/2, 7/2, 9/2]
     assert np.allclose(col_mean.data, expected_mean)
 
-    # Test max (finding best predictions)
+    # Test max (finding largest value)
     maximum = matrix.max()
     assert maximum.data == 6.0
     assert maximum.shape == ()
@@ -1372,7 +1370,7 @@ def test_unit_reduction_operations():
     expected_keepdims = np.array([[6], [15]], dtype=np.float32)
     assert np.array_equal(sum_keepdims.data, expected_keepdims)
 
-    # Test 3D reduction (simulating global average pooling)
+    # Test 3D reduction (averaging across spatial dimensions)
     tensor_3d = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])  # (2, 2, 2)
     spatial_mean = tensor_3d.mean(axis=(1, 2))  # Average across spatial dimensions
     assert spatial_mean.shape == (2,)  # One value per batch item
@@ -1445,10 +1443,10 @@ def analyze_memory_layout():
     print(f"   4. This is O(n) algorithm but {slowdown:.1f}× different wall-clock time!")
 
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
-    print("   • CNNs use NCHW format (channels sequential) for cache efficiency")
+    print("   • Image processing libraries use specific memory formats for cache efficiency")
     print("   • Matrix multiplication optimized with blocking (tile into cache-sized chunks)")
     print(f"   • Transpose is expensive ({slowdown:.1f}×) because it changes memory layout")
-    print("   • This is why GPU frameworks obsess over memory coalescing")
+    print("   • Hardware-optimized libraries leverage memory layout for better performance")
 
     print("\n" + "=" * 60)
 
@@ -1461,16 +1459,16 @@ if __name__ == "__main__":
 """
 ## 🔧 Integration: Bringing It Together
 
-Let's test how our Tensor operations work together in realistic scenarios that mirror neural network computations. This integration demonstrates that our individual operations combine correctly for complex ML workflows.
+Let's test how our Tensor operations work together in realistic scenarios. This integration demonstrates that our individual operations combine correctly for complex workflows.
 
-### Neural Network Layer Simulation
+### Linear Transformation Simulation
 
-The fundamental building block of neural networks is the linear transformation: **y = xW + b**
+A common pattern in scientific computing is the affine transformation: **y = xW + b**
 
 ```
-Linear Layer Forward Pass: y = xW + b
+Affine Transformation: y = xW + b
 
-Input Features → Weight Matrix → Matrix Multiply → Add Bias → Output Features
+Input Data    → Weight Matrix → Matrix Multiply → Add Offset  → Output Data
   (batch, in)   (in, out)        (batch, out)     (batch, out)   (batch, out)
 
 Step-by-Step Breakdown:
@@ -1497,19 +1495,19 @@ Step 2: Add Bias (Broadcasting)
 [[2.2, 2.8]] + [0.1, 0.2] = [[2.3, 3.0],
  [4.9, 6.4]]                 [5.0, 6.6]]
 
-This is the foundation of every neural network layer!
+This affine transformation pattern is the building block of many computational systems!
 ```
 
 ### Why This Integration Matters
 
-This simulation shows how our basic operations combine to create the computational building blocks of neural networks:
+This simulation shows how our basic operations combine to create powerful computational building blocks:
 
-- **Matrix Multiplication**: Transforms input features into new feature space
-- **Broadcasting Addition**: Applies learned biases efficiently across batches
-- **Shape Handling**: Ensures data flows correctly through layers
+- **Matrix Multiplication**: Transforms input features into a new feature space
+- **Broadcasting Addition**: Applies offsets efficiently across batches of data
+- **Shape Handling**: Ensures data flows correctly through transformation stages
 - **Memory Management**: Creates new tensors without corrupting inputs
 
-Every layer in a neural network - from simple MLPs to complex transformers - uses this same pattern.
+You'll see this affine transformation pattern used extensively as we build more complex systems in later modules.
 """
 
 
@@ -1544,13 +1542,13 @@ def test_module():
 
     print("\nRunning integration scenarios...")
 
-    # Test realistic neural network computation
-    print("🧪 Integration Test: Two-Layer Neural Network...")
+    # Test realistic multi-stage computation
+    print("🧪 Integration Test: Two-Stage Linear Transformation...")
 
     # Create input data (2 samples, 3 features)
     x = Tensor([[1, 2, 3], [4, 5, 6]])
 
-    # First layer: 3 inputs → 4 hidden units
+    # First stage: 3 inputs → 4 intermediate values
     W1 = Tensor([[0.1, 0.2, 0.3, 0.4],
                  [0.5, 0.6, 0.7, 0.8],
                  [0.9, 1.0, 1.1, 1.2]])
@@ -1560,11 +1558,11 @@ def test_module():
     hidden = x.matmul(W1) + b1
     assert hidden.shape == (2, 4), f"Expected (2, 4), got {hidden.shape}"
 
-    # Second layer: 4 hidden → 2 outputs
+    # Second stage: 4 intermediate → 2 outputs
     W2 = Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]])
     b2 = Tensor([0.1, 0.2])
 
-    # Output layer: output = hiddenW2 + b2
+    # Output stage: output = hiddenW2 + b2
     output = hidden.matmul(W2) + b2
     assert output.shape == (2, 2), f"Expected (2, 2), got {output.shape}"
 
@@ -1572,7 +1570,7 @@ def test_module():
     assert not np.isnan(output.data).any(), "Output contains NaN values"
     assert np.isfinite(output.data).all(), "Output contains infinite values"
 
-    print("✅ Two-layer neural network computation works!")
+    print("✅ Two-stage linear transformation works!")
 
     # Test complex shape manipulations
     print("🧪 Integration Test: Complex Shape Operations...")
@@ -1582,11 +1580,11 @@ def test_module():
     tensor_3d = data.reshape(2, 2, 3)  # (batch=2, height=2, width=3)
     assert tensor_3d.shape == (2, 2, 3)
 
-    # Global average pooling simulation
+    # Spatial averaging (collapse height and width)
     pooled = tensor_3d.mean(axis=(1, 2))  # Average across spatial dimensions
     assert pooled.shape == (2,), f"Expected (2,), got {pooled.shape}"
 
-    # Flatten for MLP
+    # Flatten to 2D
     flattened = tensor_3d.reshape(2, -1)  # (batch, features)
     assert flattened.shape == (2, 6)
 
@@ -1639,19 +1637,19 @@ How does row-major vs column-major storage affect cache performance in tensor op
 **Consider**:
 - What happens when you access matrix elements sequentially vs. with large strides?
 - Why did our analysis show column-wise access being slower than row-wise?
-- How would this affect the design of a convolutional neural network's memory layout?
+- How would this affect the design of an image processing pipeline's memory layout?
 
-**Key Insight**: PyTorch uses NCHW (batch, channels, height, width) format specifically because
-accessing channels sequentially has better cache locality than NHWC format.
+**Key Insight**: Libraries choose specific memory formats because accessing certain dimensions
+sequentially has better cache locality. You'll see this principle applied throughout later modules.
 
 ### Question 2: Batch Processing and Scaling
 
-If you double the batch size in a neural network, what happens to memory usage? What about
+If you double the number of samples in a batch, what happens to memory usage? What about
 computation time?
 
 **Consider**:
-- A linear layer with input (batch, features): y = xW + b
-- Memory for: input tensor, weight matrix, output tensor, intermediate results
+- An affine transformation with input (batch, features): y = xW + b
+- Memory for: input tensor, weight matrix, output tensor
 - If (32, 784) @ (784, 256) takes 10ms, how long does (64, 784) @ (784, 256) take?
 
 **Key Insight**: Input/output memory scales linearly with batch size, but weight memory stays constant.
@@ -1671,28 +1669,26 @@ trading precision for capacity. GPU memory limits (8-16GB) make this critical.
 
 ### Question 4: Production Scale Memory
 
-A GPT-3-scale model has 175 billion parameters. How much RAM is needed just to store the weights?
+A large-scale model has 175 billion parameters. How much RAM is needed just to store the weights?
 
 **Calculate**:
 - Parameters: 175 x 10^9
 - Bytes per float32: 4
 - Weight memory: 700 GB
 
-With Adam optimizer (stores parameters, gradients, momentum, velocity): 4x = 2,800 GB
-
-**Key Insight**: This is why training large models requires distributed systems across many GPUs.
-Mixed-precision training (float16/bfloat16) and gradient checkpointing help manage memory.
+**Key Insight**: This is why large-scale systems require significant hardware resources.
+You'll explore what "additional training state" means in later modules.
 
 ### Question 5: Hardware Awareness
 
-Why do GPUs strongly prefer operations on large tensors over many small ones?
+Why do parallel processors strongly prefer operations on large tensors over many small ones?
 
 **Compare**:
 - Scenario A: 1000 separate (10, 10) matrix multiplications
 - Scenario B: 1 batched (1000, 10, 10) matrix multiplication
 
-**Key Insight**: GPU kernel launch overhead (~5-10 microseconds per launch) dominates for small operations.
-Batching amortizes this overhead and maximizes parallelism across GPU cores.
+**Key Insight**: Computation launch overhead (~5-10 microseconds per launch) dominates for small operations.
+Batching amortizes this overhead and maximizes parallelism across processing units.
 """
 
 # %% [markdown]
@@ -1701,12 +1697,12 @@ Batching amortizes this overhead and maximizes parallelism across GPU cores.
 
 **What you built:** A complete Tensor class with arithmetic operations and matrix multiplication.
 
-**Why it matters:** Your Tensor is the foundation of everything to come. Every neural network
-operation—from simple addition to complex attention mechanisms—will use this class. The fact
+**Why it matters:** Your Tensor is the foundation of everything to come. Every ML
+operation — from simple addition to complex multi-step computations — will use this class. The fact
 that it works exactly like NumPy means you've built something production-ready.
 
 Your Tensor is ready for machine learning operations.
-Every operation you just implemented will be called millions of times during training!
+Every operation you just implemented will be used extensively as we build the full framework!
 """
 
 # %%
@@ -1752,18 +1748,18 @@ Congratulations! You've built the foundational Tensor class that powers all mach
 ### Key Accomplishments
 - Built a complete Tensor class with arithmetic operations, matrix multiplication, and shape manipulation
 - Implemented broadcasting semantics that match NumPy for automatic shape alignment
-- Created reduction operations (sum, mean, max) for loss computation and pooling
+- Created reduction operations (sum, mean, max) for aggregating data across dimensions
 - Discovered cache performance implications through memory layout analysis
 - All tests pass (validated by `test_module()`)
 
 ### Systems Insights Discovered
 - Memory layout matters: Row-wise access is faster than column-wise due to cache locality
 - Broadcasting efficiency: NumPy handles shape alignment without explicit data copying
-- Matrix multiplication is the computational foundation of neural networks
+- Matrix multiplication is the computational foundation of linear transformations
 - Shape validation provides clear error messages at minimal performance cost
 
 ### Ready for Next Steps
-Your Tensor implementation enables all future neural network operations.
+Your Tensor implementation enables all future ML operations.
 Export with: `tito module complete 01_tensor`
 
 **Next**: Module 02 will add Activations that introduce nonlinearity to your tensors!

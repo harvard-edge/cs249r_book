@@ -1651,7 +1651,7 @@ def analyze_attention_memory():
 
     print()
     print("💡 Attention memory grows quadratically with sequence length")
-    print("🚀 This is why techniques like FlashAttention are crucial for long sequences")
+    print("🚀 This is why attention efficiency techniques are crucial for long sequences")
 
 if __name__ == "__main__":
     analyze_attention_memory()
@@ -1745,7 +1745,7 @@ You implemented multi-head attention that computes attention matrices of size (b
 - If each element is 4 bytes (float32), how much memory per layer?
 - Why does doubling sequence length quadruple attention memory?
 
-**Key Insight**: Attention memory scales quadratically with sequence length, which is why long-context models require techniques like FlashAttention, sliding window attention, or sparse attention.
+**Key Insight**: Attention memory scales quadratically with sequence length, which is why long-context models require specialized attention efficiency techniques (explored in later modules).
 
 ### Question 2: Residual Connection Benefits
 
@@ -1775,9 +1775,10 @@ Your generate() method processes the full sequence for each new token.
 
 **Consider**:
 - Why is this inefficient for long sequences?
-- What optimization might avoid recomputing certain values during sequential generation? (You'll build this in Module 18!)
+- How does computation scale as you generate more tokens?
+- Can you spot the redundant work?
 
-**Key Insight**: There is significant redundant computation when generating tokens one at a time, since previously computed values are recalculated for every new token. Module 18 will show you how to eliminate this waste.
+**Key Insight**: Generation involves significant redundant work that grows with sequence length. You'll discover an optimization for this in Module 18!
 """
 
 # %% [markdown]

@@ -431,7 +431,7 @@ class MulBackward(Function):
     **Key Insight:** Each input's gradient equals the gradient output
     multiplied by the OTHER input's value (product rule).
 
-    **Applications:** Used in weight scaling, dropout masking,
+    **Applications:** Used in weight scaling, binary masking,
     and anywhere element-wise multiplication occurs.
     """
 
@@ -504,7 +504,7 @@ If z = a - b, then:
 ```
 
 **Key Insight:** Gradient flows forward to the first operand, but **negated** to the second.
-This is crucial for operations like `x - mean` in LayerNorm.
+This is crucial for operations like centering data (`x - mean`).
 """
 
 # %% nbgrader={"grade": false, "grade_id": "sub-backward", "solution": true}
@@ -901,89 +901,6 @@ class PermuteBackward(Function):
             grad_x = np.transpose(grad_output, self.inverse_axes)
 
         return (grad_x,)
-        ### END SOLUTION
-
-# %% nbgrader={"grade": false, "grade_id": "embedding-backward", "solution": true}
-#| export
-class EmbeddingBackward(Function):
-    """
-    Gradient computation for embedding lookup operation.
-
-    **Mathematical Rule:** If Y = Embedding[indices], then:
-    - ∂Loss/∂Embedding[i] = sum of all gradients where index==i
-
-    **Key Insight:** Embedding lookup is a gather operation. The backward
-    is a scatter operation that accumulates gradients to the embedding weights.
-
-    **Applications:** Index-based lookup operations where gradients must accumulate
-    for repeated indices.
-    """
-
-    def __init__(self, weight, indices):
-        """
-        Args:
-            weight: Embedding weight matrix
-            indices: Indices used for lookup
-        """
-        super().__init__(weight)
-        self.indices = indices
-
-    def apply(self, grad_output):
-        """
-        Compute gradient for embedding lookup.
-
-        Args:
-            grad_output: Gradient flowing backward from output
-
-        Returns:
-            Tuple with single gradient for weight tensor
-
-        **Mathematical Foundation:**
-        - ∂(Embedding[indices])/∂Embedding = scatter gradients to selected rows
-        - Multiple indices can point to same embedding → gradients accumulate
-
-        TODO: Implement gradient computation for embedding lookup.
-
-        APPROACH:
-        1. Extract weight tensor from self.saved_tensors
-        2. Initialize grad_weight to None
-        3. If weight requires gradients:
-           - Create zeros array: grad_weight = np.zeros_like(weight.data)
-           - Flatten indices: indices_flat = self.indices.data.astype(int).flatten()
-           - Reshape grad_output: match flattened indices with embedding dimension
-           - Use np.add.at to accumulate gradients: np.add.at(grad_weight, indices_flat, grad_output_reshaped)
-        4. Return tuple (grad_weight,)
-
-        EXAMPLE:
-        >>> vocab = Tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]], requires_grad=True)  # 3 words, 2D
-        >>> indices = Tensor([0, 2, 0])  # Select words 0, 2, 0
-        >>> output = vocab[indices]  # [[0.1, 0.2], [0.5, 0.6], [0.1, 0.2]]
-        >>> # During backward: grad_output = [[1, 1], [1, 1], [1, 1]]
-        >>> # grad_vocab[0] accumulates twice: [1, 1] + [1, 1] = [2, 2]
-        >>> # grad_vocab[2] once: [1, 1]
-
-        HINTS:
-        - Embedding lookup is a gather operation; backward is scatter
-        - np.add.at accumulates gradients for repeated indices
-        - Reshape grad_output to match: (num_indices, embedding_dim)
-        - Return as single-element tuple: (grad_weight,)
-        """
-        ### BEGIN SOLUTION
-        weight, = self.saved_tensors
-        grad_weight = None
-
-        if isinstance(weight, Tensor) and weight.requires_grad:
-            # Initialize gradient with zeros
-            grad_weight = np.zeros_like(weight.data)
-
-            # Scatter gradients back to embedding weights
-            # np.add.at accumulates gradients for repeated indices
-            indices_flat = self.indices.data.astype(int).flatten()
-            grad_output_reshaped = grad_output.reshape(-1, grad_output.shape[-1])
-
-            np.add.at(grad_weight, indices_flat, grad_output_reshaped)
-
-        return (grad_weight,)
         ### END SOLUTION
 
 #| export
@@ -2504,8 +2421,6 @@ def analyze_computation_graph_memory():
 
     print("\n🚀 REAL-WORLD IMPLICATIONS:")
     print("   - Training uses ~2-3x memory of inference")
-    print("   - Gradient checkpointing trades compute for memory")
-    print("   - Mixed precision (float16) halves gradient memory")
     print("   - torch.no_grad() context saves memory during evaluation")
 
     print("\n" + "=" * 60)

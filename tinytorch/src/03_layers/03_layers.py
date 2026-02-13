@@ -137,13 +137,14 @@ Input x (batch_size, in_features)  @  Weight W (in_features, out_features)  +  B
 
 ### Weight Initialization
 Random initialization is crucial for breaking symmetry:
-- **LeCun**: Scale by sqrt(1/fan_in) for stable gradients (simple, effective)
+- **LeCun**: Scale by sqrt(1/fan_in) for stable outputs (simple, effective)
 - **Xavier/Glorot**: Scale by sqrt(2/(fan_in+fan_out)) considers both dimensions
 - **He**: Scale by sqrt(2/fan_in) optimized for ReLU activation
-- **Too small**: Gradients vanish, learning is slow
-- **Too large**: Gradients explode, training unstable
+- **Too small**: Outputs shrink toward zero through many layers
+- **Too large**: Outputs grow unbounded through many layers
 
 We use LeCun-style initialization for simplicity—it works well in practice.
+(The mathematical justification involves gradients, which you'll learn in Module 06)
 
 ### Parameter Counting
 ```
@@ -853,7 +854,7 @@ MNIST Classification Network (3-Layer MLP):
 │                 │    │   + Dropout     │    │   + Dropout     │    │                 │
 └─────────────────┘    └─────────────────┘    └─────────────────┘    └─────────────────┘
         ↓                       ↓                       ↓                       ↓
-   "Raw pixels"          "Edge detectors"        "Shape detectors"        "Digit classifier"
+   "Raw pixels"          "First hidden features"        "Second hidden features"        "Output predictions"
 
 Data Flow:
 [32, 784] → Linear(784,256) → ReLU → Dropout(0.5) → Linear(256,128) → ReLU → Dropout(0.3) → Linear(128,10) → [32, 10]
@@ -1167,7 +1168,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 **Trade-offs to consider**:
 - Why do we want smaller initial weights for layers with more inputs?
 - What would happen if we initialized all weights to 0? To 1?
-- How does initialization affect gradient flow in deep networks?
+- How does initialization affect signal propagation in deep networks? (You'll quantify this in Module 06)
 
 ---
 
@@ -1175,14 +1176,13 @@ Answer these to deepen your understanding of layer operations and their systems 
 **Question**: In a typical layer block, we compose: Linear -> Activation -> Dropout. What happens if you change the order to: Linear -> Dropout -> Activation?
 
 **Consider**:
-- Does this affect what gets zeroed out?
-- When would each ordering make sense?
-- How does dropout before vs after activation affect gradients?
+- Does dropout before activation zero out different values than dropout after activation?
+- What practical difference does the ordering make for what information survives?
+- When might each ordering make sense?
 
 **Real-world implications**:
-- Most frameworks use Linear -> BatchNorm -> Activation -> Dropout
-- The order matters for training dynamics and final accuracy
-- ResNets famously debated pre-activation vs post-activation ordering
+- The order of operations matters for what information flows through the network
+- Different orderings can affect training dynamics and final accuracy
 
 ---
 

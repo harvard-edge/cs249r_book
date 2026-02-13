@@ -14,28 +14,28 @@
 
 # %% [markdown]
 """
-# Module 19: Benchmarking - TorchPerf Olympics Preparation
+# Module 19: Benchmarking - Performance Measurement Infrastructure
 
-Welcome to Module 19! You'll build the benchmarking infrastructure that powers **TorchPerf Olympics** - the capstone competition framework.
+Welcome to Module 19! You'll build the benchmarking infrastructure for systematic ML performance evaluation.
 
 **Note on hasattr() Usage:** This module uses hasattr() throughout for duck-typing and polymorphic benchmarking. This is legitimate because benchmarking frameworks must work with ANY model type (PyTorch, TinyTorch, custom) with different method names.
 
 ## 🔗 Prerequisites & Progress
 **You've Built**: Complete ML framework with profiling, acceleration, quantization, and compression
-**You'll Build**: TorchPerf benchmarking system for fair model comparison and capstone submission
+**You'll Build**: TorchPerf benchmarking system for fair model comparison and performance evaluation
 **You'll Enable**: Systematic optimization combination and competitive performance evaluation
 
 **Connection Map**:
 ```
-Individual Optimizations (M14-18) → Benchmarking (M19) → TorchPerf Olympics (Capstone)
-(techniques)                        (evaluation)         (competition)
+Individual Optimizations (M14-18) → Benchmarking (M19) → Module 20 (Capstone)
+(techniques)                        (evaluation)         (application)
 ```
 
 ## 🎯 Learning Objectives
 By the end of this module, you will:
 1. Implement professional benchmarking infrastructure with statistical rigor
 2. Learn to combine optimization techniques strategically (order matters!)
-3. Build the TorchPerf class - your standardized capstone submission framework
+3. Build the TorchPerf class - a standardized performance evaluation framework
 4. Understand ablation studies and systematic performance evaluation
 
 Let's get started!
@@ -91,25 +91,18 @@ DEFAULT_MEASUREMENT_RUNS = 10  # Default measurement runs for statistical signif
 ```
 Profiling (M14) → Benchmarking (M19)
        ↓
-Capstone Competition Framework
+→ Module 20 (Capstone)
 ```
 
-Students completing this module will have built the final
-benchmarking infrastructure for the TorchPerf Olympics capstone.
+Students completing this module will have built professional
+benchmarking infrastructure for systematic performance evaluation.
 """
 
 # %% [markdown]
 """
-## 🏅 TorchPerf Olympics: The Capstone Framework
+## 🏅 Looking Ahead
 
-The TorchPerf Olympics is your capstone competition! Choose your event:
-- **Latency Sprint**: Minimize inference time (fastest model wins)
-- **Memory Challenge**: Minimize model size (smallest footprint wins)
-- **Accuracy Contest**: Maximize accuracy within constraints
-- **All-Around**: Best balanced performance across all metrics
-- **Extreme Push**: Most aggressive optimization while staying viable
-
-Carry the torch. Optimize the model. Win the gold!
+The benchmarking tools you build here will be used in Module 20's capstone project, where you'll apply optimization techniques competitively. For now, focus on building reliable, fair measurement infrastructure.
 """
 
 # %% [markdown]
@@ -259,10 +252,10 @@ from enum import Enum
 #| export
 class OlympicEvent(Enum):
     """
-    TorchPerf Olympics event categories.
+    Performance evaluation event categories for systematic optimization benchmarking.
 
-    Each event optimizes for different objectives with specific constraints.
-    Students choose their event and compete for medals!
+    Each event optimizes for different objectives with specific constraints,
+    enabling structured comparison of optimization strategies.
     """
     LATENCY_SPRINT = "latency_sprint"      # Minimize latency (accuracy >= 85%)
     MEMORY_CHALLENGE = "memory_challenge"   # Minimize memory (accuracy >= 85%)
@@ -2212,9 +2205,9 @@ The capstone project follows TinyMLPerf-style principles!
 
 # %% [markdown]
 """
-## 📊 Combination Strategies - Preparing for TorchPerf Olympics
+## 📊 Combination Strategies
 
-Strategic optimization combines multiple techniques for different competition objectives. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
+Strategic optimization combines multiple techniques for different performance goals. The order matters: quantize-then-prune may preserve accuracy better, while prune-then-quantize may be faster.
 
 ### Ablation Studies
 
@@ -2227,15 +2220,7 @@ Baseline:           Accuracy: 89%, Latency: 45ms, Memory: 12MB
 + Kernel Fusion:    Accuracy: 87%, Latency: 18ms, Memory: 2MB   (Δ: 0%, -18%, 0%)
 ```
 
-### Olympic Event Quick Guide
-
-- **Latency Sprint**: Fusion > Caching > Quantization > Pruning
-- **Memory Challenge**: Quantization > Pruning > Compression
-- **Accuracy Contest**: High-bit quantization (8-bit), light pruning (30-50%)
-- **All-Around**: Balanced INT8 + 60% pruning + selective fusion
-- **Extreme Push**: 4-bit quantization + 90% pruning (verify accuracy threshold)
-
-**Key strategy:** Start with one technique, measure impact, add next, repeat!
+You'll apply these strategies with specific optimization targets in Module 20's capstone project.
 """
 
 # %% [markdown]
@@ -2518,7 +2503,7 @@ Congratulations! You've built a professional benchmarking system that rivals ind
 - **Production Integration**: Automated reporting transforms measurements into engineering decisions
 
 ### Ready for Systems Capstone
-Your benchmarking implementation enables the final milestone: a comprehensive systems evaluation comparing CNN vs TinyGPT with quantization, pruning, and performance analysis. This is where all 19 modules come together!
+Your benchmarking implementation enables comprehensive systems evaluation, demonstrating your complete optimization toolkit. This is where all 19 modules come together!
 
 Export with: `tito module complete 19`
 

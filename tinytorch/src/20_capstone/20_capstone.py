@@ -1767,11 +1767,11 @@ Modern ML systems aren't just individual components working in isolation—they'
 **The Complete Pipeline You Built:**
 
 ```
-Data → Tensor (M01) → Layers (M03) → Model → Training (M07)
+Data → Tensor (M01) → Layers (M03) → Model → Training (M08)
                 ↓                      ↓           ↓
-          Activations (M02)      Autograd (M05)  DataLoader (M08)
-                ↓                      ↓           ↓
-          Losses (M04)           Optimizers (M06) Spatial Ops (M09)
+          Activations (M02)      DataLoader (M05) Spatial Ops (M09)
+                ↓                      ↓
+          Losses (M04)           Autograd (M06) → Optimizers (M07)
                                        ↓
                               Advanced Architectures
                          (Tokenization, Embeddings, Attention,
@@ -2111,7 +2111,7 @@ def demo_capstone():
     print()
     print("  Modules 01-08: Foundation")
     print("    Tensor -> Activations -> Layers -> Losses")
-    print("    -> Autograd -> Optimizers -> Training -> DataLoader")
+    print("    -> DataLoader -> Autograd -> Optimizers -> Training")
     print()
     print("  Modules 09-13: Neural Architectures")
     print("    Conv2d -> Tokenization -> Embeddings")
@@ -2119,7 +2119,7 @@ def demo_capstone():
     print()
     print("  Modules 14-19: Production Optimization")
     print("    Profiling -> Quantization -> Compression")
-    print("    -> KV Caching -> Acceleration -> Benchmarking")
+    print("    -> Acceleration -> KV Caching -> Benchmarking")
     print()
     print("  Module 20: Capstone")
     print("    Complete benchmarking and submission system")

@@ -1275,9 +1275,9 @@ Common Production Optimizations:
    use soft targets [0.1, 0.1, 0.7, 0.1].
    Improves generalization.
 
-4. Mixed Precision:
-   Use FP16 for forward pass, FP32 for loss.
-   2× memory reduction, same accuracy.
+4. Lower Precision:
+   Using smaller data types can reduce memory
+   (explored in later modules).
 ```
 """
 
@@ -1438,7 +1438,7 @@ Strategies to reduce memory:
 1. **Sampled softmax**: Only compute softmax over subset of vocabulary (1000 samples)
 2. **Hierarchical softmax**: Use tree structure, O(log V) instead of O(V)
 3. **Mixed precision**: Use FP16 for forward pass (2 bytes instead of 4)
-4. **Gradient checkpointing**: Recompute intermediate activations instead of storing
+4. **Recomputation**: Recompute intermediate results instead of storing them (covered in later modules)
 </details>
 
 ---
@@ -1611,7 +1611,7 @@ Will memory usage be 32GB (4× increase)? Why or why not?
 What happens to:
 - Loss computation time?
 - Loss value (the actual number)?
-- Gradient quality?
+- Quality of the error signal?
 
 <details>
 <summary>💡 Hint</summary>
@@ -1620,7 +1620,7 @@ What happens to:
 
 **Why linear scaling?**
 ```
-Memory = Model_Params + Batch_Size × (Activations + Gradients + Optimizer_State)
+Memory = Model_Params + Batch_Size × (Intermediate_Results)
          ↑              ↑
       Fixed (1GB)     Scales linearly (7GB → 28GB)
 ```
@@ -1636,23 +1636,16 @@ batch_32_loss = np.mean(losses[:32])   # Mean of 32 samples
 batch_128_loss = np.mean(losses[:128]) # Mean of 128 samples
 ```
 
-**Gradient quality**: **BETTER** - larger batch = more stable gradient estimate
-- Batch 32: High variance, noisy gradients
-- Batch 128: Lower variance, smoother convergence
+**Error signal quality**: **BETTER** - larger batch = more stable estimate of the true loss
+- Batch 32: High variance, noisy estimate
+- Batch 128: Lower variance, smoother estimate
 
 **The Trade-off**:
-- Larger batch = better gradients but more memory
-- Smaller batch = less memory but noisier training
+- Larger batch = more accurate loss estimate but more memory
+- Smaller batch = less memory but noisier estimate
 - Sweet spot: Usually 64-256 depending on GPU memory
 
-**Production Solution**: Gradient accumulation
-```python
-# Simulate batch_size=128 with only batch_size=32 memory:
-for micro_batch in range(4):  # 4 × 32 = 128
-    loss = compute_loss(micro_batch)
-    loss.backward()  # Accumulate gradients
-optimizer.step()  # Update once with accumulated gradients
-```
+**Production Solution**: Process smaller batches sequentially and combine their results before updating the model. You'll learn this technique (gradient accumulation) in Module 08 (Training).
 </details>
 
 ---
@@ -1670,7 +1663,7 @@ optimizer.step()  # Update once with accumulated gradients
 that tells the network whether its predictions are good or bad. Lower loss = better
 predictions. Every training step aims to reduce this number.
 
-In the next module, you'll add autograd which computes gradients of this loss—the
+In Module 06, you'll add autograd which computes gradients of this loss—the
 direction to adjust weights to make predictions better!
 """
 

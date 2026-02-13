@@ -1680,17 +1680,18 @@ if __name__ == "__main__":
 
 Answer these to deepen your understanding of tokenization and its systems implications:
 
-### 1. Vocabulary Size vs Memory
-**Question**: You implemented tokenizers with different vocabulary sizes. If you have a BPE tokenizer with vocab_size=50,000 and embed_dim=512:
+### 1. Vocabulary Size and Storage
+**Question**: You implemented tokenizers with different vocabulary sizes.
 
 **Calculate**:
-- Parameters in embedding table: vocab_size x embed_dim = _____ million
-- Memory usage (float32, 4 bytes per param): _____ MB
+- A character tokenizer with vocab ~100 needs to store ~100 token-to-ID mappings
+- A BPE tokenizer with vocab_size=50,000 needs to store ~50,000 token-to-ID mappings
+- How much memory does each vocabulary lookup dictionary require? (Hint: each entry stores a string key and an integer value)
 
 **Consider**:
-- How does this compare to character tokenization (vocab ~100)?
-- What happens to memory when you increase embed_dim to 4096 (like GPT-3)?
-- Why do production models use float16 or int8 for embeddings?
+- How does vocabulary storage scale with vocab size?
+- BPE tokens are variable-length strings — how does this affect dictionary memory?
+- What's the trade-off between vocabulary size and sequence length for downstream processing?
 
 ---
 

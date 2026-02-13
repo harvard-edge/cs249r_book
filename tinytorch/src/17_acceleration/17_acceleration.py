@@ -1163,7 +1163,7 @@ if __name__ == "__main__":
 """
 ## 🔧 Integration: Measuring Acceleration Gains with Profiler
 
-Now let's use the **Profiler** tool you built in Module 15 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M15), apply optimizations (M16), measure gains (M15+M16).
+Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
 
 This is how professional ML engineers work: profile → optimize → measure → repeat.
 """
