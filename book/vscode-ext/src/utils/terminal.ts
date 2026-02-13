@@ -348,9 +348,3 @@ export function showLastFailureDetails(): void {
   channel.show(true);
 }
 
-export async function setExecutionModeInteractively(): Promise<void> {
-  await vscode.workspace
-    .getConfiguration('mlsysbook')
-    .update('executionMode', 'raw', vscode.ConfigurationTarget.Workspace);
-  vscode.window.showInformationMessage('MLSysBook execution mode is fixed to: raw');
-}

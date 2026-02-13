@@ -26,6 +26,8 @@ try:
     from cli.commands.debug import DebugCommand
     from cli.commands.validate import ValidateCommand
     from cli.commands.formatting import FormatCommand
+    from cli.commands.info import InfoCommand
+    from cli.commands.bib import BibCommand
 except ImportError:
     # When run as local script
     from core.config import ConfigManager
@@ -38,6 +40,8 @@ except ImportError:
     from commands.debug import DebugCommand
     from commands.validate import ValidateCommand
     from commands.formatting import FormatCommand
+    from commands.info import InfoCommand
+    from commands.bib import BibCommand
 
 console = Console()
 
@@ -69,6 +73,8 @@ class MLSysBookCLI:
         self.debug_command = DebugCommand(self.config_manager, self.chapter_discovery, verbose=verbose)
         self.validate_command = ValidateCommand(self.config_manager, self.chapter_discovery)
         self.format_command = FormatCommand(self.config_manager, self.chapter_discovery)
+        self.info_command = InfoCommand(self.config_manager, self.chapter_discovery)
+        self.bib_command = BibCommand(self.config_manager, self.chapter_discovery)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -128,8 +134,14 @@ class MLSysBookCLI:
 
         quality_table.add_row("check <group> [--scope ...]", "Run validation checks", "./binder check refs")
         quality_table.add_row("check all", "Run all validation checks", "./binder check all --vol1")
+        quality_table.add_row("check spelling", "Spell check prose and TikZ", "./binder check spelling")
+        quality_table.add_row("check sources", "Validate source citations", "./binder check sources")
         quality_table.add_row("fix <topic> <action>", "Fix/manage content", "./binder fix headers add")
         quality_table.add_row("format <target>", "Auto-format content", "./binder format tables")
+        quality_table.add_row("info stats [--by-chapter]", "Book statistics (words, figs, ...)", "./binder info stats --vol1")
+        quality_table.add_row("info figures [--format csv]", "Extract figure list", "./binder info figures --vol1")
+        quality_table.add_row("info concepts|headers|acronyms", "Extract concepts, headers, acronyms", "./binder info concepts --vol1")
+        quality_table.add_row("bib list|clean|update|sync", "Bibliography management", "./binder bib sync --vol1")
 
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -307,13 +319,14 @@ class MLSysBookCLI:
     def handle_clean_command(self, args):
         """Handle clean command."""
         if len(args) > 0:
-            # Clean specific format
-            format_type = args[0].lower()
-            if format_type in ["html", "pdf", "epub"]:
-                return self.clean_command.clean_format(format_type)
+            target = args[0].lower()
+            if target in ["html", "pdf", "epub"]:
+                return self.clean_command.clean_format(target)
+            elif target == "artifacts":
+                return self.clean_command.clean_artifacts()
             else:
-                console.print(f"[red]❌ Unknown format: {format_type}[/red]")
-                console.print("[yellow]💡 Available formats: html, pdf, epub[/yellow]")
+                console.print(f"[red]❌ Unknown clean target: {target}[/red]")
+                console.print("[yellow]💡 Available: html, pdf, epub, artifacts[/yellow]")
                 return False
         else:
             # Clean all
@@ -352,6 +365,14 @@ class MLSysBookCLI:
     def handle_format_command(self, args):
         """Handle format command group."""
         return self.format_command.run(args)
+
+    def handle_info_command(self, args):
+        """Handle info command group (stats, figures)."""
+        return self.info_command.run(args)
+
+    def handle_bib_command(self, args):
+        """Handle bib command group (list, clean, update, sync)."""
+        return self.bib_command.run(args)
 
 
     def handle_debug_command(self, args):
@@ -445,6 +466,8 @@ class MLSysBookCLI:
             "check": self.handle_check_command,
             "fix": self.handle_fix_command,
             "format": self.handle_format_command,
+            "info": self.handle_info_command,
+            "bib": self.handle_bib_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
             "about": self.handle_about_command,

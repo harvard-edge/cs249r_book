@@ -5,6 +5,7 @@ import { DebugTreeProvider } from './providers/debugTreeProvider';
 import { PrecommitTreeProvider } from './providers/precommitTreeProvider';
 import { PublishTreeProvider } from './providers/publishTreeProvider';
 import { MaintenanceTreeProvider } from './providers/maintenanceTreeProvider';
+import { InfoTreeProvider } from './providers/infoTreeProvider';
 import { ConfigTreeProvider } from './providers/configTreeProvider';
 import { ChapterNavigatorProvider } from './providers/chapterNavigatorProvider';
 import { RunHistoryProvider } from './providers/runHistoryProvider';
@@ -26,25 +27,9 @@ import {
   rerunSavedCommand,
   revealRunTerminal,
   showLastFailureDetails,
-  setExecutionModeInteractively,
   runInVisibleTerminal,
 } from './utils/terminal';
 import { ChapterOrderSource } from './types';
-
-type NavigatorPresetId = 'all' | 'writing' | 'reference' | 'structure';
-
-interface NavigatorPreset {
-  label: string;
-  id: NavigatorPresetId;
-  kinds: string[];
-}
-
-const NAVIGATOR_PRESETS: NavigatorPreset[] = [
-  { label: 'Show All', id: 'all', kinds: ['figures', 'tables', 'listings', 'equations', 'callouts'] },
-  { label: 'Writing Focus', id: 'writing', kinds: ['figures', 'tables', 'listings', 'callouts'] },
-  { label: 'Reference Focus', id: 'reference', kinds: ['figures', 'tables', 'equations'] },
-  { label: 'Structure Focus', id: 'structure', kinds: ['listings', 'equations', 'callouts'] },
-];
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -59,6 +44,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const debugProvider = new DebugTreeProvider();
   const precommitProvider = new PrecommitTreeProvider();
   const maintenanceProvider = new MaintenanceTreeProvider();
+  const infoProvider = new InfoTreeProvider();
   const publishProvider = new PublishTreeProvider();
   const configProvider = new ConfigTreeProvider();
   const navigatorProvider = new ChapterNavigatorProvider();
@@ -86,9 +72,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.showWarningMessage(`MLSysBook: Python value resolver failed to initialize: ${msg}`);
   }
   const config = vscode.workspace.getConfiguration('mlsysbook');
-  const defaultPreset = config.get<NavigatorPresetId>('defaultNavigatorPreset', 'all');
-  const preset = NAVIGATOR_PRESETS.find(p => p.id === defaultPreset) ?? NAVIGATOR_PRESETS[0];
-  void config.update('navigatorVisibleEntryKinds', preset.kinds, vscode.ConfigurationTarget.Workspace);
   navigatorProvider.refreshFromEditor(vscode.window.activeTextEditor);
   workspaceLabelIndex.start();
   diagnosticsManager.start();
@@ -103,6 +86,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.createTreeView('mlsysbook.runs', { treeDataProvider: runHistoryProvider }),
     vscode.window.createTreeView('mlsysbook.precommit', { treeDataProvider: precommitProvider }),
     vscode.window.createTreeView('mlsysbook.maintenance', { treeDataProvider: maintenanceProvider }),
+    vscode.window.createTreeView('mlsysbook.info', { treeDataProvider: infoProvider }),
     vscode.window.createTreeView('mlsysbook.publish', { treeDataProvider: publishProvider }),
     vscode.window.createTreeView('mlsysbook.config', { treeDataProvider: configProvider }),
     vscode.languages.registerFoldingRangeProvider(
@@ -166,33 +150,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.navigatorCollapseAll', () => {
       navigatorProvider.collapseAll();
     }),
-    vscode.commands.registerCommand('mlsysbook.setNavigatorFilterPreset', async () => {
-      const currentPreset = vscode.workspace
-        .getConfiguration('mlsysbook')
-        .get<NavigatorPresetId>('defaultNavigatorPreset', 'all');
-      const pick = await vscode.window.showQuickPick(
-        NAVIGATOR_PRESETS.map(p => ({
-          ...p,
-          description: p.id === currentPreset ? 'current default' : '',
-        })),
-        { placeHolder: 'Select navigator filter preset' },
-      );
-      if (!pick) { return; }
-      const shouldSetDefault = await vscode.window.showQuickPick(
-        [
-          { label: 'Apply now only', id: 'apply' },
-          { label: 'Apply and set as workspace default', id: 'default' },
-        ],
-        { placeHolder: 'Apply this preset temporarily or pin it as default?' },
-      );
-      if (!shouldSetDefault) { return; }
-
-      await config.update('navigatorVisibleEntryKinds', pick.kinds, vscode.ConfigurationTarget.Workspace);
-      if (shouldSetDefault.id === 'default') {
-        await config.update('defaultNavigatorPreset', pick.id, vscode.ConfigurationTarget.Workspace);
-      }
-      navigatorProvider.refreshView();
-    }),
     vscode.commands.registerCommand('mlsysbook.refreshRunHistory', () => {
       runHistoryProvider.refresh();
     }),
@@ -213,7 +170,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('mlsysbook.rerunLastCommandRaw', () => rerunLastCommand(true)),
     vscode.commands.registerCommand('mlsysbook.revealTerminal', () => revealRunTerminal(root)),
     vscode.commands.registerCommand('mlsysbook.openLastFailureDetails', () => showLastFailureDetails()),
-    vscode.commands.registerCommand('mlsysbook.setExecutionMode', () => void setExecutionModeInteractively()),
     vscode.commands.registerCommand('mlsysbook.setChapterOrderSource', async () => {
       const current = config.get<ChapterOrderSource>('chapterOrderSource', 'auto');
       const pick = await vscode.window.showQuickPick(
@@ -295,9 +251,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('mlsysbook.chapterOrderSource')) {
         buildProvider.refresh();
-      }
-      if (event.affectsConfiguration('mlsysbook.navigatorVisibleEntryKinds')) {
-        navigatorProvider.refreshView();
       }
     }),
     vscode.window.onDidChangeTextEditorSelection(event => {

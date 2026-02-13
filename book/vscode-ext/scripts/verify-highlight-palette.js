@@ -30,24 +30,43 @@ function assertDistinctTypeRefs(style, preset) {
 
 function run() {
   const presets = ['subtle', 'balanced', 'highContrast'];
-  for (const preset of presets) {
-    const base = resolveHighlightStyle(preset, {});
-    assertDistinctTypeRefs(base, preset);
+  const themes = ['dark', 'light'];
 
-    const withStructuralOverride = resolveHighlightStyle(preset, {
-      structuralRefColor: '#ffffff',
-    });
+  for (const theme of themes) {
+    for (const preset of presets) {
+      const label = `${theme}/${preset}`;
+      const base = resolveHighlightStyle(preset, {}, theme);
+      assertDistinctTypeRefs(base, label);
+
+      const withStructuralOverride = resolveHighlightStyle(preset, {
+        structuralRefColor: '#ffffff',
+      }, theme);
+      assert(
+        withStructuralOverride.figureRefColor === base.figureRefColor,
+        `${label}: figureRefColor should not inherit structuralRefColor`,
+      );
+      assert(
+        withStructuralOverride.tableRefColor === base.tableRefColor,
+        `${label}: tableRefColor should not inherit structuralRefColor`,
+      );
+      assert(
+        withStructuralOverride.listingRefColor === base.listingRefColor,
+        `${label}: listingRefColor should not inherit structuralRefColor`,
+      );
+    }
+  }
+
+  // Verify dark and light palettes are actually different
+  for (const preset of presets) {
+    const dark = resolveHighlightStyle(preset, {}, 'dark');
+    const light = resolveHighlightStyle(preset, {}, 'light');
     assert(
-      withStructuralOverride.figureRefColor === base.figureRefColor,
-      `${preset}: figureRefColor should not inherit structuralRefColor`,
+      dark.figureRefColor !== light.figureRefColor,
+      `${preset}: dark and light figureRefColor should differ`,
     );
     assert(
-      withStructuralOverride.tableRefColor === base.tableRefColor,
-      `${preset}: tableRefColor should not inherit structuralRefColor`,
-    );
-    assert(
-      withStructuralOverride.listingRefColor === base.listingRefColor,
-      `${preset}: listingRefColor should not inherit structuralRefColor`,
+      dark.sectionRefColor !== light.sectionRefColor,
+      `${preset}: dark and light sectionRefColor should differ`,
     );
   }
 

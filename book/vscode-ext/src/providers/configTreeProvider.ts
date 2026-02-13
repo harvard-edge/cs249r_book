@@ -11,9 +11,7 @@ export class ConfigTreeProvider implements vscode.TreeDataProvider<ActionTreeIte
 
   getChildren(): ActionTreeItem[] {
     return [
-      new ActionTreeItem('Set Execution Mode', 'mlsysbook.setExecutionMode', [], 'terminal'),
       new ActionTreeItem('Set Chapter Order Source', 'mlsysbook.setChapterOrderSource', [], 'list-ordered'),
-      new ActionTreeItem('Set Navigator Filter Preset', 'mlsysbook.setNavigatorFilterPreset', [], 'list-filter'),
       new ActionTreeItem('Set QMD Visual Preset', 'mlsysbook.setQmdVisualPreset', [], 'symbol-color'),
       new ActionTreeItem('Open MLSysBook Settings', 'mlsysbook.openSettings', [], 'settings-gear'),
     ];

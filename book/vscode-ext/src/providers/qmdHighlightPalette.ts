@@ -1,4 +1,5 @@
 export type VisualPreset = 'subtle' | 'balanced' | 'highContrast';
+export type ThemeMode = 'dark' | 'light';
 
 export interface QmdColorOverrides {
   sectionH2Bg?: string;
@@ -64,7 +65,11 @@ export interface HighlightStyle {
   sectionHeaderBgByLevel: [string, string, string, string, string];
 }
 
-const STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
+// =============================================================================
+// Dark theme palettes (original — pastel/light colors on dark backgrounds)
+// =============================================================================
+
+const DARK_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
   subtle: {
     calloutBg: 'rgba(56, 139, 253, 0.06)',
     divBg: 'rgba(148, 163, 184, 0.04)',
@@ -181,12 +186,138 @@ const STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
   },
 };
 
-export function getBaseHighlightStyle(preset: VisualPreset): HighlightStyle {
-  return STYLE_BY_PRESET[preset];
+// =============================================================================
+// Light theme palettes (deeper, more saturated colors for white/light backgrounds)
+// =============================================================================
+
+const LIGHT_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
+  subtle: {
+    calloutBg: 'rgba(37, 99, 235, 0.06)',
+    divBg: 'rgba(100, 116, 139, 0.05)',
+    codeBg: 'rgba(79, 70, 229, 0.05)',
+    labelBg: 'rgba(59, 130, 246, 0.10)',
+    figureLineBg: 'rgba(6, 182, 212, 0.14)',
+    tableLineBg: 'rgba(16, 185, 129, 0.13)',
+    listingLineBg: 'rgba(234, 88, 12, 0.14)',
+    tableBg: 'rgba(5, 150, 105, 0.07)',
+    footnoteBg: 'rgba(217, 119, 6, 0.08)',
+    footnoteRefColor: '#b45309',
+    footnoteDefColor: '#b45309',
+    inlineRefColor: 'editorInfo.foreground',
+    structuralRefColor: 'textLink.foreground',
+    sectionRefColor: '#2563eb',
+    figureRefColor: '#0891b2',
+    tableRefColor: '#059669',
+    listingRefColor: '#c2410c',
+    equationRefColor: '#7c3aed',
+    sectionLabelDefColor: '#2563eb',
+    figureLabelDefColor: '#0891b2',
+    tableLabelDefColor: '#059669',
+    listingLabelDefColor: '#c2410c',
+    equationLabelDefColor: '#7c3aed',
+    labelDefColor: 'editorInfo.foreground',
+    divFenceColor: 'editorInfo.foreground',
+    inlinePythonColor: '#be185d',
+    inlinePythonBg: 'rgba(219, 39, 119, 0.07)',
+    inlinePythonKeywordColor: 'rgba(190, 24, 93, 0.40)',
+    fontWeight: 'normal',
+    sectionHeaderBgByLevel: [
+      'rgba(37, 99, 235, 0.10)',
+      'rgba(37, 99, 235, 0.08)',
+      'rgba(37, 99, 235, 0.06)',
+      'rgba(37, 99, 235, 0.04)',
+      'rgba(37, 99, 235, 0.03)',
+    ],
+  },
+  balanced: {
+    calloutBg: 'rgba(37, 99, 235, 0.08)',
+    divBg: 'rgba(100, 116, 139, 0.06)',
+    codeBg: 'rgba(79, 70, 229, 0.06)',
+    labelBg: 'rgba(59, 130, 246, 0.14)',
+    figureLineBg: 'rgba(6, 182, 212, 0.18)',
+    tableLineBg: 'rgba(16, 185, 129, 0.17)',
+    listingLineBg: 'rgba(234, 88, 12, 0.18)',
+    tableBg: 'rgba(5, 150, 105, 0.10)',
+    footnoteBg: 'rgba(217, 119, 6, 0.12)',
+    footnoteRefColor: '#92400e',
+    footnoteDefColor: '#92400e',
+    inlineRefColor: 'textLink.foreground',
+    structuralRefColor: 'editorInfo.foreground',
+    sectionRefColor: '#1d4ed8',
+    figureRefColor: '#0e7490',
+    tableRefColor: '#047857',
+    listingRefColor: '#9a3412',
+    equationRefColor: '#6d28d9',
+    sectionLabelDefColor: '#1d4ed8',
+    figureLabelDefColor: '#0e7490',
+    tableLabelDefColor: '#047857',
+    listingLabelDefColor: '#9a3412',
+    equationLabelDefColor: '#6d28d9',
+    labelDefColor: 'editorInfo.foreground',
+    divFenceColor: 'editorInfo.foreground',
+    inlinePythonColor: '#9d174d',
+    inlinePythonBg: 'rgba(219, 39, 119, 0.10)',
+    inlinePythonKeywordColor: 'rgba(157, 23, 77, 0.40)',
+    fontWeight: '500',
+    sectionHeaderBgByLevel: [
+      'rgba(37, 99, 235, 0.14)',
+      'rgba(37, 99, 235, 0.11)',
+      'rgba(37, 99, 235, 0.08)',
+      'rgba(37, 99, 235, 0.06)',
+      'rgba(37, 99, 235, 0.04)',
+    ],
+  },
+  highContrast: {
+    calloutBg: 'rgba(37, 99, 235, 0.12)',
+    divBg: 'rgba(100, 116, 139, 0.09)',
+    codeBg: 'rgba(79, 70, 229, 0.09)',
+    labelBg: 'rgba(59, 130, 246, 0.20)',
+    figureLineBg: 'rgba(6, 182, 212, 0.24)',
+    tableLineBg: 'rgba(16, 185, 129, 0.22)',
+    listingLineBg: 'rgba(234, 88, 12, 0.24)',
+    tableBg: 'rgba(5, 150, 105, 0.14)',
+    footnoteBg: 'rgba(217, 119, 6, 0.18)',
+    footnoteRefColor: '#78350f',
+    footnoteDefColor: '#78350f',
+    inlineRefColor: 'textLink.foreground',
+    structuralRefColor: 'editorInfo.foreground',
+    sectionRefColor: '#1e40af',
+    figureRefColor: '#155e75',
+    tableRefColor: '#065f46',
+    listingRefColor: '#7c2d12',
+    equationRefColor: '#5b21b6',
+    sectionLabelDefColor: '#1e40af',
+    figureLabelDefColor: '#155e75',
+    tableLabelDefColor: '#065f46',
+    listingLabelDefColor: '#7c2d12',
+    equationLabelDefColor: '#5b21b6',
+    labelDefColor: 'editorInfo.foreground',
+    divFenceColor: 'textLink.foreground',
+    inlinePythonColor: '#831843',
+    inlinePythonBg: 'rgba(219, 39, 119, 0.14)',
+    inlinePythonKeywordColor: 'rgba(131, 24, 67, 0.45)',
+    fontWeight: '600',
+    sectionHeaderBgByLevel: [
+      'rgba(37, 99, 235, 0.20)',
+      'rgba(37, 99, 235, 0.16)',
+      'rgba(37, 99, 235, 0.12)',
+      'rgba(37, 99, 235, 0.09)',
+      'rgba(37, 99, 235, 0.06)',
+    ],
+  },
+};
+
+// =============================================================================
+// Public API
+// =============================================================================
+
+export function getBaseHighlightStyle(preset: VisualPreset, theme: ThemeMode = 'dark'): HighlightStyle {
+  const palette = theme === 'light' ? LIGHT_STYLE_BY_PRESET : DARK_STYLE_BY_PRESET;
+  return palette[preset];
 }
 
-export function resolveHighlightStyle(preset: VisualPreset, override: QmdColorOverrides): HighlightStyle {
-  const baseStyle = getBaseHighlightStyle(preset);
+export function resolveHighlightStyle(preset: VisualPreset, override: QmdColorOverrides, theme: ThemeMode = 'dark'): HighlightStyle {
+  const baseStyle = getBaseHighlightStyle(preset, theme);
   return {
     ...baseStyle,
     figureLineBg: override.figureLineBg ?? baseStyle.figureLineBg,

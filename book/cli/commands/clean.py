@@ -5,6 +5,8 @@ Handles cleaning build artifacts and restoring configurations.
 """
 
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from rich.console import Console
 
@@ -180,3 +182,23 @@ class CleanCommand:
         except Exception as e:
             console.print(f"❌ Error cleaning {format_type.upper()}: {e}")
             return False
+
+    def clean_artifacts(self) -> bool:
+        """Clean build artifacts using the maintenance script.
+
+        This is the same cleanup that runs as a pre-commit hook.
+        """
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "maintenance" / "cleanup_build_artifacts.py"
+        )
+        if not script.exists():
+            console.print(f"[red]Script not found: {script}[/red]")
+            return False
+
+        book_dir = str(self.config_manager.book_dir)
+        result = subprocess.run(
+            [sys.executable, str(script), "--book-dir", book_dir],
+            capture_output=False,
+        )
+        return result.returncode == 0

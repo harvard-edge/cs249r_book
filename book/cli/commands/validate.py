@@ -54,7 +54,7 @@ class ValidationRunResult:
 
     @property
     def passed(self) -> bool:
-        return len(self.issues) == 0
+        return not any(i.severity == "error" for i in self.issues)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -80,13 +80,26 @@ CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
 
 LABEL_DEF_PATTERNS = {
-    "Figure": [re.compile(r"\{#(fig-[\w:-]+)")],
-    "Table": [re.compile(r"\{#(tbl-[\w:-]+)")],
-    "Section": [re.compile(r"\{#(sec-[\w:-]+)")],
-    "Equation": [re.compile(r"\{#(eq-[\w:-]+)")],
-    "Listing": [re.compile(r"\{#(lst-[\w:-]+)")],
+    "Figure": [
+        re.compile(r"\{#(fig-[\w-]+)"),              # {#fig-xyz ...}
+        re.compile(r"#\|\s*label:\s*(fig-[\w-]+)"),  # #| label: fig-xyz
+        re.compile(r"%%\|\s*label:\s*(fig-[\w-]+)"), # %%| label: fig-xyz (Jupyter)
+    ],
+    "Table": [
+        re.compile(r"\{#(tbl-[\w-]+)"),              # {#tbl-xyz}
+        re.compile(r"#\|\s*label:\s*(tbl-[\w-]+)"),  # #| label: tbl-xyz
+    ],
+    "Section": [
+        re.compile(r"\{#(sec-[\w-]+)"),              # {#sec-xyz}
+        re.compile(r"^id:\s*(sec-[\w-]+)"),          # YAML id: sec-xyz
+    ],
+    "Equation": [re.compile(r"\{#(eq-[\w-]+)")],     # {#eq-xyz}
+    "Listing": [
+        re.compile(r"\{#(lst-[\w-]+)"),              # {#lst-xyz ...}
+        re.compile(r"#\|\s*label:\s*(lst-[\w-]+)"),  # #| label: lst-xyz
+    ],
 }
-LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w:-]+)")
+LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
 
 EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-")
 
@@ -112,10 +125,12 @@ class ValidateCommand:
             ("cross-refs", "_run_refs"),
             ("citations", "_run_citations"),
             ("inline", "_run_inline_refs"),
+            ("self-ref", "_run_self_referential"),
         ],
         "labels": [
             ("duplicates", "_run_duplicate_labels"),
             ("orphans", "_run_unreferenced_labels"),
+            ("fig-labels", "_run_fig_label_underscores"),
         ],
         "headers": [
             ("ids", "_run_headers"),
@@ -123,6 +138,7 @@ class ValidateCommand:
         "footnotes": [
             ("placement", "_run_footnote_placement"),
             ("integrity", "_run_footnote_refs"),
+            ("cross-chapter", "_run_footnote_cross_chapter"),
         ],
         "figures": [
             ("captions", "_run_figures"),
@@ -134,6 +150,31 @@ class ValidateCommand:
             ("indexes", "_run_indexes"),
             ("dropcaps", "_run_dropcaps"),
             ("parts", "_run_parts"),
+            ("heading-levels", "_run_heading_levels"),
+            ("duplicate-words", "_run_duplicate_words"),
+            ("grid-tables", "_run_grid_tables"),
+            ("tables", "_run_table_content"),
+            ("ascii", "_run_ascii"),
+        ],
+        "images": [
+            ("formats", "_run_image_formats"),
+            ("external", "_run_external_images"),
+        ],
+        "json": [
+            ("syntax", "_run_json_syntax"),
+        ],
+        "units": [
+            ("physics", "_run_unit_tests"),
+        ],
+        "spelling": [
+            ("prose", "_run_spelling_prose"),
+            ("tikz", "_run_spelling_tikz"),
+        ],
+        "epub": [
+            ("structure", "_run_epub"),
+        ],
+        "sources": [
+            ("citations", "_run_sources"),
         ],
     }
 
@@ -255,12 +296,18 @@ class ValidateCommand:
         table.add_column("Description", style="white", width=32)
 
         descriptions = {
-            "refs": "References, citations, inline Python",
-            "labels": "Duplicate and orphaned labels",
+            "refs": "References, citations, inline Python, self-ref",
+            "labels": "Duplicate labels, orphans, fig-label underscores",
             "headers": "Section header IDs ({#sec-...})",
-            "footnotes": "Footnote placement and integrity",
+            "footnotes": "Placement, integrity, cross-chapter duplicates",
             "figures": "Captions, float flow, image files",
-            "rendering": "Render patterns, indexes, dropcaps, parts",
+            "rendering": "Patterns, indexes, dropcaps, headings, typos, tables, ASCII",
+            "images": "Image file formats, external URLs",
+            "json": "JSON file syntax validation",
+            "units": "Physics engine unit conversion tests",
+            "spelling": "Prose and TikZ spell checking (requires aspell)",
+            "epub": "EPUB file validation",
+            "sources": "Source citation analysis and validation",
         }
         for group_name, checks in self.GROUPS.items():
             scopes = ", ".join(s for s, _ in checks)
@@ -387,6 +434,33 @@ class ValidateCommand:
                         message="Inline Python in grid table; convert to pipe table",
                         severity="error",
                         context=line.strip()[:160],
+                    ))
+
+                # Unwrapped {python} — missing backticks entirely
+                # Match {python} NOT preceded by ` and NOT at start of #| label line
+                if "{python}" in line and not stripped.startswith("#|"):
+                    for um in re.finditer(r"(?<!`)\{python\}\s+\w+", line):
+                        # Make sure it's not inside a backtick span
+                        before = line[:um.start()]
+                        if before.count("`") % 2 == 0:  # even backticks = not inside span
+                            issues.append(ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="unwrapped_python",
+                                message="Inline Python missing backtick wrapping — will render as literal text",
+                                severity="error",
+                                context=um.group(0)[:120],
+                            ))
+
+                # Inline Python in headings — fragile for TOC/bookmarks/PDF
+                if stripped.startswith("#") and not stripped.startswith("#|") and "`{python}" in line:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="python_in_heading",
+                        message="Inline Python in heading — fragile for TOC, bookmarks, and PDF",
+                        severity="warning",
+                        context=stripped[:120],
                     ))
 
         return ValidationRunResult(
@@ -1584,6 +1658,186 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # Heading levels  (detect skipped heading levels)
+    # ------------------------------------------------------------------
+
+    def _run_heading_levels(self, root: Path) -> ValidationRunResult:
+        """Detect heading level skips outside of div contexts.
+
+        Headings inside Quarto divs (callouts, panels, columns, etc.) are
+        in a separate nesting context and are excluded from the hierarchy
+        check.  Only headings at the top-level (div depth 0) are compared
+        against each other.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        heading_pat = re.compile(r"^(#{1,6})\s+")
+        code_fence = re.compile(r"^```")
+        yaml_fence = re.compile(r"^---\s*$")
+        # Div open: ::: or :::: (with optional class/id)
+        div_open_pat = re.compile(r"^(:{3,})\s*\{")
+        # Div close: bare ::: or :::: on its own line
+        div_close_pat = re.compile(r"^(:{3,})\s*$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_yaml = False
+            prev_level = 0
+            div_depth = 0
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                # Track YAML front matter
+                if idx == 1 and yaml_fence.match(line):
+                    in_yaml = True
+                    continue
+                if in_yaml:
+                    if yaml_fence.match(line):
+                        in_yaml = False
+                    continue
+
+                # Track code blocks
+                if code_fence.match(stripped):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                # Track div nesting depth
+                if div_open_pat.match(stripped):
+                    div_depth += 1
+                    continue
+                if div_close_pat.match(stripped) and div_depth > 0:
+                    div_depth -= 1
+                    continue
+
+                # Skip headings inside divs — they're in a nested context
+                if div_depth > 0:
+                    continue
+
+                m = heading_pat.match(line)
+                if not m:
+                    continue
+
+                level = len(m.group(1))
+
+                # Only flag if we skip a level going deeper
+                # (e.g., ## -> #### skips ###)
+                if prev_level > 0 and level > prev_level + 1:
+                    skipped = ", ".join(
+                        f"H{i}" for i in range(prev_level + 1, level)
+                    )
+                    heading_text = line.lstrip("#").strip()
+                    # Truncate at { to remove attributes
+                    if "{" in heading_text:
+                        heading_text = heading_text[: heading_text.index("{")].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="heading_level_skip",
+                            message=f"Heading jumps from H{prev_level} to H{level} (skips {skipped})",
+                            severity="warning",
+                            context=heading_text[:80],
+                        )
+                    )
+
+                prev_level = level
+
+        return ValidationRunResult(
+            name="heading-levels",
+            description="Detect skipped heading levels (e.g., ## to ####)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Duplicate consecutive words  (detect "the the", "is is", etc.)
+    # ------------------------------------------------------------------
+
+    _DUPE_WORD_PAT = re.compile(
+        r"\b(\w{2,})\s+\1\b",
+        re.IGNORECASE,
+    )
+    # Known false positives: intentional repetitions
+    _DUPE_WORD_ALLOW = frozenset({
+        "had", "that", "do", "bye", "bla", "cha", "go",
+        "log",  # "log log n" is valid math
+    })
+
+    def _run_duplicate_words(self, root: Path) -> ValidationRunResult:
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        code_fence = re.compile(r"^```")
+        yaml_fence = re.compile(r"^---\s*$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_yaml = False
+
+            for idx, line in enumerate(lines, 1):
+                # Track YAML front matter
+                if idx == 1 and yaml_fence.match(line):
+                    in_yaml = True
+                    continue
+                if in_yaml:
+                    if yaml_fence.match(line):
+                        in_yaml = False
+                    continue
+
+                # Skip code blocks
+                if code_fence.match(line.strip()):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                # Skip HTML comments, raw LaTeX, div fences, HTML tags
+                stripped = line.strip()
+                if stripped.startswith("<!--") or stripped.startswith("\\") or stripped.startswith(":::"):
+                    continue
+                if stripped.startswith("<") and not stripped.startswith("<http"):
+                    continue
+                # Skip lines that are mostly attributes/metadata
+                if stripped.startswith("#|") or stripped.startswith("%%|"):
+                    continue
+
+                for m in self._DUPE_WORD_PAT.finditer(line):
+                    word = m.group(1).lower()
+                    if word in self._DUPE_WORD_ALLOW:
+                        continue
+                    # Skip if inside a LaTeX command or attribute
+                    before = line[: m.start()]
+                    if before.rstrip().endswith("\\") or "{" in line[m.start() : m.end() + 5]:
+                        continue
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="duplicate_word",
+                            message=f'Duplicate word: "{m.group(1)} {m.group(1)}"',
+                            severity="warning",
+                            context=line.strip()[:120],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="duplicate-words",
+            description="Detect duplicate consecutive words (typos)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Images  (ported from validate_image_references.py)
     # ------------------------------------------------------------------
 
@@ -1662,6 +1916,334 @@ class ValidateCommand:
         return path
 
     # ------------------------------------------------------------------
+    # Self-referential sections  (ported from check_self_referential_sections.py)
+    # ------------------------------------------------------------------
+
+    def _run_self_referential(self, root: Path) -> ValidationRunResult:
+        """Detect sections that reference themselves, their parent, or child."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        heading_pat = re.compile(r"^(#{1,6})\s+(.+?)(?:\s+\{#([^}]+)\})?$")
+        ref_pat = re.compile(r"@(sec-[a-zA-Z0-9-]+)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+
+            # Build heading hierarchy
+            headings: List[Dict] = []
+            parent_stack: Dict[int, Dict] = {}
+
+            for idx, line in enumerate(lines, 1):
+                m = heading_pat.match(line)
+                if not m:
+                    continue
+                level = len(m.group(1))
+                title = m.group(2).strip()
+                sec_id = m.group(3)
+                parent_id = None
+                for plevel in range(level - 1, 0, -1):
+                    if plevel in parent_stack:
+                        parent_id = parent_stack[plevel].get("id")
+                        break
+                hd = {"level": level, "title": title, "id": sec_id,
+                      "line": idx, "parent_id": parent_id}
+                headings.append(hd)
+                parent_stack[level] = hd
+                parent_stack = {k: v for k, v in parent_stack.items() if k <= level}
+
+            # Build section map and children map
+            section_map: Dict[str, Dict] = {}
+            children_map: Dict[str, List[str]] = defaultdict(list)
+            for hd in headings:
+                if hd["id"]:
+                    section_map[hd["id"]] = hd
+                    if hd["parent_id"]:
+                        children_map[hd["parent_id"]].append(hd["id"])
+
+            # Check references
+            for idx, line in enumerate(lines, 1):
+                for m in ref_pat.finditer(line):
+                    ref_id = m.group(1)
+                    # Find which section this line belongs to
+                    current = None
+                    for hd in headings:
+                        if hd["line"] <= idx:
+                            current = hd
+                        else:
+                            break
+                    if not current or not current["id"]:
+                        continue
+
+                    cur_id = current["id"]
+                    if ref_id == cur_id:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file), line=idx,
+                            code="self_reference",
+                            message=f"Section '{current['title']}' references itself (@{ref_id})",
+                            severity="warning",
+                            context=line.strip()[:120],
+                        ))
+                    elif current["parent_id"] == ref_id:
+                        parent = section_map.get(ref_id)
+                        ptitle = parent["title"] if parent else ref_id
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file), line=idx,
+                            code="parent_reference",
+                            message=f"Section '{current['title']}' references its parent '{ptitle}' (@{ref_id})",
+                            severity="warning",
+                            context=line.strip()[:120],
+                        ))
+                    elif ref_id in children_map.get(cur_id, []):
+                        child = section_map.get(ref_id)
+                        ctitle = child["title"] if child else ref_id
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file), line=idx,
+                            code="child_reference",
+                            message=f"Section '{current['title']}' references its child '{ctitle}' (@{ref_id})",
+                            severity="warning",
+                            context=line.strip()[:120],
+                        ))
+
+        return ValidationRunResult(
+            name="self-referential",
+            description="Detect self-referential section references",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Figure label underscores  (ported from check_fig_references.py)
+    # ------------------------------------------------------------------
+
+    def _run_fig_label_underscores(self, root: Path) -> ValidationRunResult:
+        """Find figure references containing underscores (invalid in Quarto)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        fig_ref_pat = re.compile(r"(?:\{#|@)fig-([^}\s]+)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                if line.strip().startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in fig_ref_pat.finditer(line):
+                    label_suffix = m.group(1)
+                    if "_" in label_suffix:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file), line=idx,
+                            code="fig_label_underscore",
+                            message=f"Figure label contains underscore: fig-{label_suffix} (use hyphens)",
+                            severity="error",
+                            context=line.strip()[:120],
+                        ))
+
+        return ValidationRunResult(
+            name="fig-labels",
+            description="Detect underscores in figure labels",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # ASCII check  (ported from check_ascii.py)
+    # ------------------------------------------------------------------
+
+    def _run_ascii(self, root: Path) -> ValidationRunResult:
+        """Find non-ASCII Unicode characters in QMD files."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        non_ascii_pat = re.compile(r"[^\x00-\x7F]")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                # Skip LaTeX raw blocks and HTML comments
+                if stripped.startswith("\\") or stripped.startswith("<!--"):
+                    continue
+                for m in non_ascii_pat.finditer(line):
+                    char = m.group(0)
+                    col = m.start()
+                    context = line[max(0, col - 10):min(len(line), col + 10)]
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file), line=idx,
+                        code="non_ascii",
+                        message=f"Non-ASCII character '{char}' (U+{ord(char):04X})",
+                        severity="warning",
+                        context=context.strip(),
+                    ))
+
+        return ValidationRunResult(
+            name="ascii",
+            description="Detect non-ASCII characters in QMD files",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Cross-chapter footnote duplicates  (ported from audit_footnotes_cross_chapter.py)
+    # ------------------------------------------------------------------
+
+    def _run_footnote_cross_chapter(self, root: Path) -> ValidationRunResult:
+        """Find duplicate footnote IDs across chapters."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        fn_def_pat = re.compile(r"\[\^(fn-[^\]]+)\]:\s*(.+?)(?=\n\n|\n\[\^|\Z)", re.DOTALL)
+
+        # Collect all footnotes by ID
+        footnotes_by_id: Dict[str, List[Tuple[Path, str]]] = defaultdict(list)
+
+        for file in files:
+            content = self._read_text(file)
+            for m in fn_def_pat.finditer(content):
+                fn_id = m.group(1)
+                fn_content = " ".join(m.group(2).split())[:200]
+                footnotes_by_id[fn_id].append((file, fn_content))
+
+        # Report duplicates
+        for fn_id, occurrences in footnotes_by_id.items():
+            if len(occurrences) <= 1:
+                continue
+            for file, content in occurrences:
+                line_no = self._line_for_token(self._read_text(file), f"[^{fn_id}]:")
+                issues.append(ValidationIssue(
+                    file=self._relative_file(file), line=line_no,
+                    code="cross_chapter_footnote",
+                    message=f"Footnote [^{fn_id}] also defined in {len(occurrences) - 1} other file(s)",
+                    severity="warning",
+                    context=content[:80],
+                ))
+
+        return ValidationRunResult(
+            name="cross-chapter-footnotes",
+            description="Detect duplicate footnote IDs across chapters",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Table content validation  (delegated to validate_tables.py)
+    # ------------------------------------------------------------------
+
+    def _run_table_content(self, root: Path) -> ValidationRunResult:
+        """Validate grid table content (bare pipes, fracs, HTML entities, etc.)."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "content" / "validate_tables.py"
+        )
+        args = ["-d", str(root)]
+        return self._delegate_script(script, args, "table-content")
+
+    # ------------------------------------------------------------------
+    # Spelling checks  (delegated to check_prose_spelling.py / check_tikz_spelling.py)
+    # ------------------------------------------------------------------
+
+    def _run_spelling_prose(self, root: Path) -> ValidationRunResult:
+        """Spell check prose text (requires aspell)."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "content" / "check_prose_spelling.py"
+        )
+        return self._delegate_script(script, [str(root)], "spelling-prose")
+
+    def _run_spelling_tikz(self, root: Path) -> ValidationRunResult:
+        """Spell check TikZ diagram text (requires aspell)."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "content" / "check_tikz_spelling.py"
+        )
+        # check_tikz_spelling.py auto-scans from repo root, so pass no args
+        return self._delegate_script(script, [], "spelling-tikz")
+
+    # ------------------------------------------------------------------
+    # EPUB validation  (delegated to validate_epub.py)
+    # ------------------------------------------------------------------
+
+    def _run_epub(self, root: Path) -> ValidationRunResult:
+        """Validate EPUB file structure and content."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "utilities" / "validate_epub.py"
+        )
+        # Find EPUB files in build output directories
+        book_dir = Path(__file__).resolve().parent.parent.parent
+        epub_files = list(book_dir.rglob("*.epub"))
+        if not epub_files:
+            return ValidationRunResult(
+                name="epub", description="EPUB validation (no .epub files found)",
+                files_checked=0, issues=[], elapsed_ms=0,
+            )
+        # Validate the most recent EPUB
+        epub_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return self._delegate_script(script, ["--quick", str(epub_files[0])], "epub")
+
+    # ------------------------------------------------------------------
+    # Source citation validation  (delegated to manage_sources.py)
+    # ------------------------------------------------------------------
+
+    def _run_sources(self, root: Path) -> ValidationRunResult:
+        """Validate source citations (asterisk sources, formatting, etc.)."""
+        import subprocess as _sp
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "utilities" / "manage_sources.py"
+        )
+        # manage_sources.py expects to be run from the quarto root (where contents/ lives)
+        quarto_dir = Path(__file__).resolve().parent.parent.parent / "quarto"
+        t0 = time.time()
+        cmd = ["python3", str(script), "--problems"]
+        try:
+            result = _sp.run(cmd, capture_output=True, text=True, timeout=120, cwd=str(quarto_dir))
+            elapsed = int((time.time() - t0) * 1000)
+            if result.returncode == 0:
+                return ValidationRunResult(
+                    name="sources", description="Source citation validation",
+                    files_checked=0, issues=[], elapsed_ms=elapsed,
+                )
+            output = (result.stdout + result.stderr).strip()
+            return ValidationRunResult(
+                name="sources", description="Source citation validation",
+                files_checked=0, elapsed_ms=elapsed,
+                issues=[ValidationIssue(
+                    file="(script output)", line=0, code="sources",
+                    message=output[:500] if output else f"Script exited with code {result.returncode}",
+                    severity="error",
+                )],
+            )
+        except FileNotFoundError:
+            elapsed = int((time.time() - t0) * 1000)
+            return ValidationRunResult(
+                name="sources", description="Source citation validation",
+                files_checked=0, elapsed_ms=elapsed,
+                issues=[ValidationIssue(
+                    file=str(script), line=0, code="sources",
+                    message=f"Script not found: {script}", severity="error",
+                )],
+            )
+
+    # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
 
@@ -1696,10 +2278,29 @@ class ValidateCommand:
             console.print("[green]✅ All validation checks passed.[/green]")
             return
 
+        # Count errors vs warnings across all runs
+        total_errors = 0
+        total_warnings = 0
+        for run in runs:
+            for issue in run["issues"]:
+                if issue["severity"] == "error":
+                    total_errors += 1
+                else:
+                    total_warnings += 1
+
         for run in runs:
             if run["issue_count"] == 0:
                 continue
-            console.print(f"[bold red]{run['name']}[/bold red] ({run['issue_count']} issues)")
+            run_errors = sum(1 for i in run["issues"] if i["severity"] == "error")
+            run_warnings = run["issue_count"] - run_errors
+            parts = []
+            if run_errors:
+                parts.append(f"{run_errors} error(s)")
+            if run_warnings:
+                parts.append(f"{run_warnings} warning(s)")
+            label = ", ".join(parts)
+            color = "bold red" if run_errors else "bold yellow"
+            console.print(f"[{color}]{run['name']}[/{color}] ({label})")
             for issue in run["issues"][:30]:
                 line = issue["line"]
                 file = issue["file"]
@@ -1714,7 +2315,9 @@ class ValidateCommand:
             console.print()
 
         if status == "failed":
-            console.print(f"[red]❌ Validation failed with {total} issue(s).[/red]")
+            console.print(f"[red]❌ Validation failed with {total_errors} error(s).[/red]")
+        elif total_warnings > 0:
+            console.print(f"[yellow]⚠️  Passed with {total_warnings} warning(s).[/yellow]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
         if as_json:
@@ -1724,3 +2327,125 @@ class ValidateCommand:
             console.print(f"[red]{payload.get('message', 'Operation failed')}[/red]")
         else:
             console.print(f"[green]{payload.get('message', 'Operation succeeded')}[/green]")
+
+    # ------------------------------------------------------------------
+    # Delegated checks (call existing scripts via subprocess)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _delegate_script(script_path: Path, args: List[str], run_name: str) -> ValidationRunResult:
+        """Run an external script and convert its exit code to a ValidationRunResult."""
+        import subprocess
+        t0 = time.time()
+        cmd = ["python3", str(script_path)] + args
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            elapsed = int((time.time() - t0) * 1000)
+            if result.returncode == 0:
+                return ValidationRunResult(
+                    name=run_name, description=run_name,
+                    files_checked=0, issues=[], elapsed_ms=elapsed,
+                )
+            # Script failed — report its output as a single error
+            output = (result.stdout + result.stderr).strip()
+            return ValidationRunResult(
+                name=run_name, description=run_name,
+                files_checked=0, elapsed_ms=elapsed,
+                issues=[ValidationIssue(
+                    file="(script output)", line=0, code=run_name,
+                    message=output[:500] if output else f"Script exited with code {result.returncode}",
+                    severity="error",
+                )],
+            )
+        except FileNotFoundError:
+            elapsed = int((time.time() - t0) * 1000)
+            return ValidationRunResult(
+                name=run_name, description=run_name,
+                files_checked=0, elapsed_ms=elapsed,
+                issues=[ValidationIssue(
+                    file=str(script_path), line=0, code=run_name,
+                    message=f"Script not found: {script_path}", severity="error",
+                )],
+            )
+        except subprocess.TimeoutExpired:
+            elapsed = int((time.time() - t0) * 1000)
+            return ValidationRunResult(
+                name=run_name, description=run_name,
+                files_checked=0, elapsed_ms=elapsed,
+                issues=[ValidationIssue(
+                    file=str(script_path), line=0, code=run_name,
+                    message="Script timed out after 120s", severity="error",
+                )],
+            )
+
+    def _run_grid_tables(self, root: Path) -> ValidationRunResult:
+        """Check for grid tables (should be converted to pipe tables)."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "utilities" / "convert_grid_to_pipe_tables.py"
+        )
+        qmd_files = [str(f) for f in sorted(root.rglob("*.qmd"))]
+        if not qmd_files:
+            return ValidationRunResult(name="grid-tables", issues=[])
+        return self._delegate_script(script, ["--check"] + qmd_files, "grid-tables")
+
+    def _run_image_formats(self, root: Path) -> ValidationRunResult:
+        """Validate image file formats using Pillow."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "images" / "manage_images.py"
+        )
+        image_files = []
+        for ext in ("*.png", "*.jpg", "*.jpeg", "*.gif"):
+            image_files.extend(str(f) for f in sorted(root.rglob(ext)))
+        if not image_files:
+            return ValidationRunResult(name="image-formats", issues=[])
+        return self._delegate_script(script, image_files, "image-formats")
+
+    def _run_external_images(self, root: Path) -> ValidationRunResult:
+        """Check for external image URLs in QMD files."""
+        script = (
+            Path(__file__).resolve().parent.parent.parent
+            / "tools" / "scripts" / "images" / "manage_external_images.py"
+        )
+        return self._delegate_script(
+            script, ["--validate", str(root)], "external-images"
+        )
+
+    def _run_json_syntax(self, root: Path) -> ValidationRunResult:
+        """Validate JSON file syntax."""
+        t0 = time.time()
+        json_files = sorted(root.rglob("*.json"))
+        if not json_files:
+            return ValidationRunResult(
+                name="json-syntax", description="Validate JSON file syntax",
+                files_checked=0, issues=[], elapsed_ms=0,
+            )
+        issues: List[ValidationIssue] = []
+        for fpath in json_files:
+            try:
+                with open(fpath, "r") as f:
+                    json.load(f)
+            except json.JSONDecodeError as e:
+                issues.append(ValidationIssue(
+                    file=str(fpath), line=e.lineno or 0, code="json-syntax",
+                    message=f"Invalid JSON: {e.msg}", severity="error",
+                ))
+            except Exception as e:
+                issues.append(ValidationIssue(
+                    file=str(fpath), line=0, code="json-syntax",
+                    message=f"Cannot read: {e}", severity="error",
+                ))
+        elapsed = int((time.time() - t0) * 1000)
+        return ValidationRunResult(
+            name="json-syntax", description="Validate JSON file syntax",
+            files_checked=len(json_files), issues=issues, elapsed_ms=elapsed,
+        )
+
+    def _run_unit_tests(self, root: Path) -> ValidationRunResult:
+        """Run physics engine unit conversion tests."""
+        # validate.py is at book/cli/commands/validate.py
+        # test_units.py is at book/quarto/mlsys/test_units.py
+        book_dir = Path(__file__).resolve().parent.parent.parent  # book/
+        script = book_dir / "quarto" / "mlsys" / "test_units.py"
+        return self._delegate_script(script, [], "unit-tests")

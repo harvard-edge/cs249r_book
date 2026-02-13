@@ -31,13 +31,14 @@ _SCRIPT_PATHS = {
     "python": _SCRIPTS_DIR / "content" / "format_python_in_qmd.py",
     "tables": _SCRIPTS_DIR / "content" / "format_tables.py",
     "divs": _SCRIPTS_DIR / "content" / "format_div_spacing.py",
+    "prettify": _SCRIPTS_DIR / "utilities" / "prettify_pipe_tables.py",
 }
 
 
 class FormatCommand:
     """Auto-format QMD content."""
 
-    TARGETS = ["blanks", "python", "lists", "divs", "tables", "all"]
+    TARGETS = ["blanks", "python", "lists", "divs", "tables", "prettify", "all"]
 
     def __init__(self, config_manager, chapter_discovery):
         self.config_manager = config_manager
@@ -68,6 +69,7 @@ class FormatCommand:
             "lists": self._run_lists,
             "divs": self._run_divs,
             "tables": self._run_tables,
+            "prettify": self._run_prettify,
         }
         return dispatch[target](files, check_only)
 
@@ -119,6 +121,7 @@ class FormatCommand:
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
         table.add_row("tables", "Prettify grid tables (align columns, bold headers)")
+        table.add_row("prettify", "Prettify pipe tables (align columns)")
         table.add_row("all", "Run all formatters")
 
         console.print(Panel(table, title="binder format <target> [files...] [--check]", border_style="cyan"))
@@ -134,7 +137,7 @@ class FormatCommand:
 
     def _run_all(self, files: List[str], check_only: bool) -> bool:
         results = []
-        for target in ("blanks", "lists", "divs", "python", "tables"):
+        for target in ("blanks", "lists", "divs", "python", "tables", "prettify"):
             dispatch = {
                 "blanks": self._run_blanks,
                 "python": self._run_python,
@@ -222,24 +225,26 @@ class FormatCommand:
         return "\n".join(result)
 
     # ------------------------------------------------------------------
-    # Lists  (native — ported from check_list_formatting.py)
+    # Lists  (native — ported from fix_bullet_spacing.py)
     # ------------------------------------------------------------------
 
+    _LIST_ITEM_RE = re.compile(r"^(\*   |-   |- |\d+\.\s\s)")
+
     def _run_lists(self, file_args: List[str], check_only: bool) -> bool:
-        """Ensure blank line before bullet lists after colon-ending lines."""
+        """Fix list spacing: blank line before lists, tight consecutive items."""
         qmd_files = self._resolve_files(file_args)
         modified = []
 
         for path in qmd_files:
             try:
-                lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+                content = path.read_text(encoding="utf-8")
             except Exception:
                 continue
 
-            new_lines, changed = self._fix_list_spacing(lines)
-            if changed:
+            new_content = self._fix_list_spacing(content)
+            if new_content != content:
                 if not check_only:
-                    path.write_text("".join(new_lines), encoding="utf-8")
+                    path.write_text(new_content, encoding="utf-8")
                 modified.append(path)
 
         if modified:
@@ -254,40 +259,78 @@ class FormatCommand:
             console.print("[green]lists: All files clean[/green]")
             return True
 
-    @staticmethod
-    def _fix_list_spacing(lines: List[str]) -> tuple:
-        """Insert blank line between colon-ending paragraph and bullet list.
+    @classmethod
+    def _is_list_item(cls, line: str) -> bool:
+        """Check if a line is a bullet or numbered list item."""
+        return bool(cls._LIST_ITEM_RE.match(line))
 
-        Returns (new_lines, changed).
+    @classmethod
+    def _fix_list_spacing(cls, content: str) -> str:
+        """Fix list spacing in content.
+
+        1. Add blank line before lists when preceded by paragraph text ending with ':'
+        2. Remove blank lines between consecutive list items (tight lists)
+
+        Skips code blocks.
         """
-        new_lines = []
-        changed = False
-        in_code_block = False
+        lines = content.split("\n")
+        result: List[str] = []
+        in_code = False
+        i = 0
 
-        for i, line in enumerate(lines):
-            stripped = line.rstrip()
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Track code blocks
             if stripped.startswith("```"):
-                in_code_block = not in_code_block
-
-            new_lines.append(line)
-
-            if in_code_block or i + 1 >= len(lines):
+                in_code = not in_code
+                result.append(line)
+                i += 1
                 continue
 
-            next_line = lines[i + 1].rstrip()
-            if (
-                stripped
-                and stripped.endswith(":")
-                and not stripped.startswith("```")
-                and not stripped.startswith(":::")
-                and not stripped.startswith("#")
-                and not stripped.startswith("|")
-                and next_line.startswith("- ")
-            ):
-                new_lines.append("\n")
-                changed = True
+            if in_code:
+                result.append(line)
+                i += 1
+                continue
 
-        return new_lines, changed
+            # Fix 1: Add blank line before list when missing
+            if i < len(lines) - 1:
+                next_line = lines[i + 1]
+                if (
+                    stripped.endswith(":")
+                    and not stripped.startswith("```")
+                    and not stripped.startswith("#|")
+                    and "://" not in stripped
+                    and not stripped.startswith("def ")
+                    and not stripped.startswith("class ")
+                    and not cls._is_list_item(line)
+                    and cls._is_list_item(next_line)
+                ):
+                    result.append(line)
+                    result.append("")
+                    i += 1
+                    continue
+
+            # Fix 2: Remove blank lines between consecutive list items
+            if cls._is_list_item(line):
+                result.append(line)
+                j = i + 1
+                blank_count = 0
+                while j < len(lines) and lines[j].strip() == "":
+                    blank_count += 1
+                    j += 1
+                if blank_count > 0 and j < len(lines) and cls._is_list_item(lines[j]):
+                    # Skip the blank lines — go directly to next list item
+                    i = j
+                    continue
+                i += 1
+                continue
+
+            result.append(line)
+            i += 1
+
+        return "\n".join(result)
 
     # ------------------------------------------------------------------
     # Python  (delegates to format_python_in_qmd.py)
@@ -380,6 +423,34 @@ class FormatCommand:
                 for line in result.stdout.strip().splitlines()[:10]:
                     console.print(f"  [yellow]{line}[/yellow]")
             console.print(f"[yellow]tables: Issues found (exit {result.returncode})[/yellow]")
+            return False
+
+    def _run_prettify(self, file_args: List[str], check_only: bool) -> bool:
+        """Prettify pipe tables (align columns)."""
+        script = _SCRIPT_PATHS["prettify"]
+        if not script.exists():
+            console.print(f"[red]prettify: Script not found: {script}[/red]")
+            return False
+
+        cmd = [sys.executable, str(script)]
+        if check_only:
+            cmd.append("--check")
+        if file_args:
+            cmd.extend(file_args)
+        else:
+            content_dir = self.config_manager.book_dir / "contents"
+            cmd.append(str(content_dir))
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode == 0:
+            console.print("[green]prettify: All tables aligned[/green]")
+            return True
+        else:
+            if result.stdout:
+                for line in result.stdout.strip().splitlines()[:10]:
+                    console.print(f"  [yellow]{line}[/yellow]")
+            console.print(f"[yellow]prettify: Tables reformatted (exit {result.returncode})[/yellow]")
             return False
 
     # ------------------------------------------------------------------

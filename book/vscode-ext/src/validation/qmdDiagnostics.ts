@@ -40,14 +40,52 @@ function collectDefinedLabels(text: string): Set<string> {
 }
 
 /**
+ * Build a set of character-offset ranges that fall inside fenced code blocks.
+ * Used to suppress false-positive diagnostics for cross-references that appear
+ * in Python comments (e.g. P.I.C.O. documentation headers).
+ */
+function collectFencedCodeRanges(text: string): Array<{ start: number; end: number }> {
+  const ranges: Array<{ start: number; end: number }> = [];
+  const fenceRegex = /^(\s*(?:```|~~~)).*$/gm;
+  let openStart: number | null = null;
+  let openMarker: string | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRegex.exec(text)) !== null) {
+    const marker = match[1].trim().slice(0, 3); // ``` or ~~~
+    if (openMarker === null) {
+      openStart = match.index;
+      openMarker = marker;
+    } else if (marker === openMarker) {
+      ranges.push({ start: openStart!, end: match.index + match[0].length });
+      openStart = null;
+      openMarker = null;
+    }
+  }
+  return ranges;
+}
+
+function isInsideFence(offset: number, fenceRanges: Array<{ start: number; end: number }>): boolean {
+  for (const range of fenceRanges) {
+    if (offset >= range.start && offset <= range.end) { return true; }
+    if (range.start > offset) { break; } // ranges are sorted by start
+  }
+  return false;
+}
+
+/**
  * Collect all cross-references from a document's text.
+ * Skips references that appear inside fenced code blocks (```, ~~~) to avoid
+ * false positives from cross-references mentioned in Python comments.
  */
 function collectReferences(text: string): Array<{ ref: string; index: number }> {
   const refs: Array<{ ref: string; index: number }> = [];
+  const fenceRanges = collectFencedCodeRanges(text);
   let match: RegExpExecArray | null;
   CROSSREF_REGEX.lastIndex = 0;
   while ((match = CROSSREF_REGEX.exec(text)) !== null) {
-    refs.push({ ref: match[1], index: match.index });
+    if (!isInsideFence(match.index, fenceRanges)) {
+      refs.push({ ref: match[1], index: match.index });
+    }
   }
   return refs;
 }

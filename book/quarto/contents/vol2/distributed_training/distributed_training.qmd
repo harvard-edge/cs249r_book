@@ -197,7 +197,7 @@ The systematic optimization methodology established for single-machine training 
 Choosing the right parallelism strategy is not a matter of preference; it is a constraint satisfaction problem governed by model size ($M$), batch size ($B$), and interconnect bandwidth. @tbl-parallelism-tradeoffs quantifies the communication costs for each strategy, revealing which approaches are physically feasible for a given hardware topology.
 
 | **Strategy**               | **Communication Pattern** | **Comm. Volume**              | **Hardware Constraint**         |
-|:-------------------------|:------------------------|:----------------------------|:------------------------------|
+|:---------------------------|:--------------------------|:------------------------------|:--------------------------------|
 | **Data Parallel (DP)**     | AllReduce Gradients       | $\propto M$ (Model Size)      | Requires high bisection BW      |
 | **Tensor Parallel (TP)**   | AllReduce Activations     | $\propto B \times L$ (Layers) | **Critical**: Needs NVLink      |
 | **Pipeline Parallel (PP)** | Point-to-Point (P2P)      | $\propto B \times H$ (Hidden) | Low BW (Ethernet is sufficient) |
@@ -515,12 +515,9 @@ Just as the Iron Law of Processor Performance governs single-thread execution, d
 #| fig-cap: "**The Scaling Tax.** Effective speedup vs. number of GPUs. While ideal scaling (dashed black) is linear, real-world systems pay a 'tax' for communication. Compute-bound models like ResNet (green) scale well because they have high arithmetic intensity. Bandwidth-bound models like GPT-3 (red) hit a 'Communication Wall' where adding more GPUs yields diminishing returns (efficiency < 50%)."
 #| fig-alt: "Line chart of Speedup vs GPU Count (log-log). Green line (Compute Bound) stays close to the ideal linear diagonal. Red line (Bandwidth Bound) flattens out, showing diminishing returns as GPUs are added."
 
-import sys
 import matplotlib.pyplot as plt
 import numpy as np
-# Ensure mlsys directory is in path
-sys.path.append('../../../mlsys')
-import viz
+from mlsys import viz
 
 viz.set_book_style()
 COLORS = viz.COLORS
@@ -659,7 +656,7 @@ where $\bar{\tau}$ is the average staleness. The staleness penalty now scales wi
 @tbl-convergence-comparison summarizes the convergence properties of each synchronization model.
 
 | **Model** | **Staleness**   |                    **Convergence Rate** | **Variance Reduction** | **Best For**                          |
-|:--------|:--------------|--------------------------------------:|:---------------------|:------------------------------------|
+|:----------|:----------------|----------------------------------------:|:-----------------------|:--------------------------------------|
 | **BSP**   | $\tau = 0$      |                       $O(1/\sqrt{NbM})$ | Full ($1/N$)           | Final training, reproducibility       |
 | **SSP**   | $\tau \leq s$   |        $O(1/\sqrt{NbM}) + O(s^2\eta^2)$ | Partial                | Heterogeneous clusters                |
 | **ASP**   | $\tau = \infty$ | $O(1/\sqrt{M}) + O(\bar{\tau}^2\eta^2)$ | None                   | Maximum throughput, early exploration |
@@ -824,7 +821,7 @@ To illustrate these concepts concretely, consider *scaling from 8 to 64 workers*
 **Analysis**
 
 | **Configuration**    | **Iterations** | **Comm. Overhead** | **Wall-clock Speedup** | **Sample Efficiency** |
-|:-------------------|-------------:|-----------------:|---------------------:|--------------------:|
+|:---------------------|---------------:|-------------------:|-----------------------:|----------------------:|
 | **1 GPU (baseline)** |        100,000 |                 0% |            1.0$\times$ |                  100% |
 | **8 GPU BSP**        |         12,800 |                15% |            6.8$\times$ |                   97% |
 | **64 GPU BSP**       |          1,720 |                45% |           40.1$\times$ |                   91% |
@@ -1177,7 +1174,7 @@ The key trade-offs across synchronization models are summarized here.
 
 ::: {.callout-note title="Synchronization Model Trade-offs"}
 | **Model** | **Consistency**   | **Throughput**            | **Convergence**                 | **Use Case**                         |
-|:--------|:----------------|:------------------------|:------------------------------|:-----------------------------------|
+|:----------|:------------------|:--------------------------|:--------------------------------|:-------------------------------------|
 | **BSP**   | Strong            | Bounded by slowest worker | Equivalent to single-GPU        | Final training runs, reproducibility |
 | **SSP**   | Bounded staleness | Higher than BSP           | Near-equivalent with tuning     | Hyperparameter search                |
 | **Async** | Weak              | Maximum                   | Degraded, requires compensation | Large heterogeneous clusters         |
@@ -1453,7 +1450,7 @@ ZeRO addresses this redundancy through progressive sharding:
 :::
 
 | **Stage**         | **What is Sharded**   | **Memory Reduction**     | **Communication Overhead**       |
-|:----------------|:--------------------|:-----------------------|:-------------------------------|
+|:------------------|:----------------------|:-------------------------|:---------------------------------|
 | **ZeRO-1**        | Optimizer states only | ~4x                      | None (same as DDP)               |
 | **ZeRO-2**        | + Gradients           | ~8x                      | ReduceScatter replaces AllReduce |
 | **ZeRO-3 / FSDP** | + Parameters          | ~$N$ (linear in workers) | AllGather before each layer      |
@@ -2020,7 +2017,7 @@ Hybrid parallelism is the only viable path for training frontier models (100B+ p
 @tbl-parallelism-compare contrasts data, model, pipeline, and hybrid parallelism across six dimensions: memory requirements per device, communication overhead patterns, scalability characteristics, implementation complexity, and ideal use cases. The table reveals a fundamental trade-off: data parallelism offers implementation simplicity but high memory requirements, while model parallelism reduces per-device memory at the cost of complex coordination.
 
 | **Aspect**                        | **Data Parallelism**                                             | **Model Parallelism**                                                      | **Pipeline Parallelism**                                                   | **Hybrid Parallelism**                                            |
-|:--------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------|:-------------------------------------------------------------------------|:----------------------------------------------------------------|
+|:----------------------------------|:-----------------------------------------------------------------|:---------------------------------------------------------------------------|:---------------------------------------------------------------------------|:------------------------------------------------------------------|
 | **Focus**                         | Distributes dataset across devices, each with a full model copy  | Distributes the model across devices, each handling a portion of the model | Distributes model stages in pipeline, processing microbatches concurrently | Combines multiple parallelism strategies for balanced scalability |
 | **Memory Requirement per Device** | High (entire model on each device)                               | Low (model split across devices)                                           | Low to Moderate (stages split across devices)                              | Moderate (splits model and dataset across devices)                |
 | **Communication Overhead**        | Moderate to High (gradient synchronization across devices)       | High (communication for intermediate activations and gradients)            | Moderate (activation passing between stages)                               | Very High (requires synchronization for both model and data)      |
@@ -2402,7 +2399,7 @@ Throughout this chapter, we applied these partitioning strategies to our Lightho
 The "optimal point" in the 3D Parallelism Cube shifts depending on the system's primary bottleneck:
 
 | **Archetype**            | **Primary Partitioning Strategy** | **The Logic**                                                                                 |
-|:-----------------------|:--------------------------------|:--------------------------------------------------------------------------------------------|
+|:-------------------------|:----------------------------------|:----------------------------------------------------------------------------------------------|
 | **Archetype A (GPT-4)**  | Hybrid 3D Parallelism             | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit 1TB+ of weights.       |
 | **Archetype B (RecSys)** | Embedding Sharding                | Partition massive 10TB+ tables across a Parameter Server fleet; use sparse AllToAll updates.  |
 | **Archetype C (TinyML)** | Federated Learning                | Distribute training *data* to the edge; keep model local; accept asynchronous, stale updates. |

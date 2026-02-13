@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { resolveHighlightStyle, type QmdColorOverrides, type VisualPreset } from './qmdHighlightPalette';
+import { resolveHighlightStyle, type QmdColorOverrides, type VisualPreset, type ThemeMode } from './qmdHighlightPalette';
 import type { WorkspaceLabelIndex } from '../validation/qmdDiagnostics';
 
 function isQmdEditor(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
@@ -77,6 +77,10 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         if (!active || active.document.uri.toString() !== event.document.uri.toString()) { return; }
         this.debouncedApply(active);
       }),
+      vscode.window.onDidChangeActiveColorTheme(() => {
+        this.recreateDecorations();
+        this.applyToEditor(vscode.window.activeTextEditor);
+      }),
       vscode.workspace.onDidChangeConfiguration(event => {
         if (
           event.affectsConfiguration('mlsysbook.enableQmdChunkHighlight')
@@ -136,6 +140,14 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     return vscode.workspace
       .getConfiguration('mlsysbook')
       .get<VisualPreset>('qmdVisualPreset', 'balanced');
+  }
+
+  private getThemeMode(): ThemeMode {
+    const kind = vscode.window.activeColorTheme.kind;
+    // ColorThemeKind: 1 = Light, 2 = Dark, 3 = HighContrast (dark), 4 = HighContrastLight
+    return kind === vscode.ColorThemeKind.Light || kind === vscode.ColorThemeKind.HighContrastLight
+      ? 'light'
+      : 'dark';
   }
 
   private getHighlightInlineReferences(): boolean {
@@ -267,7 +279,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     this.brokenReferenceDecoration?.dispose();
 
     const preset = this.getVisualPreset();
-    const style = resolveHighlightStyle(preset, this.getColorOverrides());
+    const theme = this.getThemeMode();
+    const style = resolveHighlightStyle(preset, this.getColorOverrides(), theme);
 
     this.calloutDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
