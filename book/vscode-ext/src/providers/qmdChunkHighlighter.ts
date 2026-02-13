@@ -43,6 +43,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
   private listingLabelDefinitionDecoration: vscode.TextEditorDecorationType | undefined;
   private equationLabelDefinitionDecoration: vscode.TextEditorDecorationType | undefined;
   private divFenceMarkerDecoration: vscode.TextEditorDecorationType | undefined;
+  private inlinePythonKeywordDecoration: vscode.TextEditorDecorationType | undefined;
+  private inlinePythonVarDecoration: vscode.TextEditorDecorationType | undefined;
   private refreshTimer: NodeJS.Timeout | undefined;
 
   constructor() {
@@ -65,6 +67,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.highlightInlineReferences')
           || event.affectsConfiguration('mlsysbook.highlightLabelDefinitions')
           || event.affectsConfiguration('mlsysbook.highlightDivFenceMarkers')
+          || event.affectsConfiguration('mlsysbook.highlightCalloutBackground')
           || event.affectsConfiguration('mlsysbook.highlightSectionHeaders')
           || event.affectsConfiguration('mlsysbook.highlightTables')
           || event.affectsConfiguration('mlsysbook.highlightFootnotes')
@@ -95,6 +98,11 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.colorDivFenceMarker')
           || event.affectsConfiguration('mlsysbook.colorFootnoteReference')
           || event.affectsConfiguration('mlsysbook.colorFootnoteDefinitionMarker')
+          || event.affectsConfiguration('mlsysbook.highlightInlinePython')
+          || event.affectsConfiguration('mlsysbook.colorInlinePython')
+          || event.affectsConfiguration('mlsysbook.colorInlinePythonBg')
+          || event.affectsConfiguration('mlsysbook.showInlinePythonValues')
+          || event.affectsConfiguration('mlsysbook.showInlinePythonCodeLens')
         ) {
           this.recreateDecorations();
           this.applyToEditor(vscode.window.activeTextEditor);
@@ -137,10 +145,16 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       .get<boolean>('highlightSectionHeaders', true);
   }
 
+  private getHighlightCalloutBackground(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('highlightCalloutBackground', false);
+  }
+
   private getHighlightTables(): boolean {
     return vscode.workspace
       .getConfiguration('mlsysbook')
-      .get<boolean>('highlightTables', true);
+      .get<boolean>('highlightTables', false);
   }
 
   private getHighlightFootnotes(): boolean {
@@ -153,6 +167,12 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     return vscode.workspace
       .getConfiguration('mlsysbook')
       .get<boolean>('highlightFootnoteBlockBackground', false);
+  }
+
+  private getHighlightInlinePython(): boolean {
+    return vscode.workspace
+      .getConfiguration('mlsysbook')
+      .get<boolean>('highlightInlinePython', true);
   }
 
   private readOptionalColor(config: vscode.WorkspaceConfiguration, key: string): string | undefined {
@@ -191,6 +211,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       equationLabelDefColor: this.readOptionalColor(config, 'colorEquationLabelDefinition'),
       labelDefColor: this.readOptionalColor(config, 'colorLabelDefinition'),
       divFenceColor: this.readOptionalColor(config, 'colorDivFenceMarker'),
+      inlinePythonColor: this.readOptionalColor(config, 'colorInlinePython'),
+      inlinePythonBg: this.readOptionalColor(config, 'colorInlinePythonBg'),
       footnoteRefColor: this.readOptionalColor(config, 'colorFootnoteReference'),
       footnoteDefColor: this.readOptionalColor(config, 'colorFootnoteDefinitionMarker'),
     };
@@ -223,6 +245,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     this.listingLabelDefinitionDecoration?.dispose();
     this.equationLabelDefinitionDecoration?.dispose();
     this.divFenceMarkerDecoration?.dispose();
+    this.inlinePythonKeywordDecoration?.dispose();
+    this.inlinePythonVarDecoration?.dispose();
 
     const preset = this.getVisualPreset();
     const style = resolveHighlightStyle(preset, this.getColorOverrides());
@@ -348,6 +372,18 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       fontWeight: style.fontWeight,
       textDecoration: 'none',
     });
+    this.inlinePythonKeywordDecoration = vscode.window.createTextEditorDecorationType({
+      color: colorValue(style.inlinePythonKeywordColor),
+      backgroundColor: colorValue(style.inlinePythonBg),
+      fontWeight: 'normal',
+      borderRadius: '3px 0 0 3px',
+    });
+    this.inlinePythonVarDecoration = vscode.window.createTextEditorDecorationType({
+      color: colorValue(style.inlinePythonColor),
+      backgroundColor: colorValue(style.inlinePythonBg),
+      fontWeight: style.fontWeight === 'normal' ? '500' : '600',
+      borderRadius: '0 3px 3px 0',
+    });
   }
 
   private debouncedApply(editor: vscode.TextEditor): void {
@@ -397,6 +433,8 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const listingLabelDefinitionRanges: vscode.Range[] = [];
     const equationLabelDefinitionRanges: vscode.Range[] = [];
     const divFenceMarkerRanges: vscode.Range[] = [];
+    const inlinePythonKeywordRanges: vscode.Range[] = [];
+    const inlinePythonVarRanges: vscode.Range[] = [];
 
     const calloutBlocks: BlockRange[] = [];
     const divBlocks: BlockRange[] = [];
@@ -426,10 +464,14 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const highlightInlineRefs = this.getHighlightInlineReferences();
     const highlightLabelDefs = this.getHighlightLabelDefinitions();
     const highlightDivFenceMarkers = this.getHighlightDivFenceMarkers();
+    const highlightCalloutBackground = this.getHighlightCalloutBackground();
     const highlightSectionHeaders = this.getHighlightSectionHeaders();
     const highlightTables = this.getHighlightTables();
     const highlightFootnotes = this.getHighlightFootnotes();
     const highlightFootnoteBlockBackground = this.getHighlightFootnoteBlockBackground();
+    const highlightInlinePython = this.getHighlightInlinePython();
+    // Captures: group 1 = `{python} ` (keyword+space), group 2 = var_name` (variable+closing backtick)
+    const inlinePythonRegex = /(`\{python\}\s+)([^`]+`)/g;
     const sectionHeaderRegex = /^(#{2,6})\s+\S+/;
     const tableRowRegex = /^\s*\|.*\|\s*$/;
     const tableAlignRegex = /^\s*\|?\s*:?-{3,}:?(?:\s*\|\s*:?-{3,}:?)*\s*\|?\s*$/;
@@ -744,6 +786,25 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         }
         equationRefRegex.lastIndex = 0;
       }
+
+      if (highlightInlinePython && !inFence) {
+        let pyMatch: RegExpExecArray | null;
+        while ((pyMatch = inlinePythonRegex.exec(text)) !== null) {
+          const keywordPart = pyMatch[1]; // `{python} 
+          const varPart = pyMatch[2];     // var_name`
+          const keywordStart = pyMatch.index;
+          const varStart = keywordStart + keywordPart.length;
+          inlinePythonKeywordRanges.push(new vscode.Range(
+            new vscode.Position(line, keywordStart),
+            new vscode.Position(line, keywordStart + keywordPart.length),
+          ));
+          inlinePythonVarRanges.push(new vscode.Range(
+            new vscode.Position(line, varStart),
+            new vscode.Position(line, varStart + varPart.length),
+          ));
+        }
+        inlinePythonRegex.lastIndex = 0;
+      }
     }
 
     const toRanges = (blocks: BlockRange[]): vscode.Range[] => {
@@ -753,8 +814,10 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       ));
     };
 
-    calloutRanges.push(...toRanges(calloutBlocks));
-    divRanges.push(...toRanges(divBlocks));
+    if (highlightCalloutBackground) {
+      calloutRanges.push(...toRanges(calloutBlocks));
+      divRanges.push(...toRanges(divBlocks));
+    }
     codeRanges.push(...toRanges(codeBlocks));
 
     if (this.calloutDecoration) {
@@ -835,6 +898,12 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     if (this.divFenceMarkerDecoration) {
       editor.setDecorations(this.divFenceMarkerDecoration, divFenceMarkerRanges);
     }
+    if (this.inlinePythonKeywordDecoration) {
+      editor.setDecorations(this.inlinePythonKeywordDecoration, inlinePythonKeywordRanges);
+    }
+    if (this.inlinePythonVarDecoration) {
+      editor.setDecorations(this.inlinePythonVarDecoration, inlinePythonVarRanges);
+    }
   }
 
   private clearDecorations(editor: vscode.TextEditor): void {
@@ -912,6 +981,12 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     }
     if (this.divFenceMarkerDecoration) {
       editor.setDecorations(this.divFenceMarkerDecoration, []);
+    }
+    if (this.inlinePythonKeywordDecoration) {
+      editor.setDecorations(this.inlinePythonKeywordDecoration, []);
+    }
+    if (this.inlinePythonVarDecoration) {
+      editor.setDecorations(this.inlinePythonVarDecoration, []);
     }
   }
 

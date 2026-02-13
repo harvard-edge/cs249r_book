@@ -12,9 +12,13 @@ function assertDistinctTypeRefs(style, preset) {
     ['figureRefColor', 'tableRefColor'],
     ['figureRefColor', 'listingRefColor'],
     ['figureRefColor', 'equationRefColor'],
+    ['figureRefColor', 'inlinePythonColor'],
     ['tableRefColor', 'listingRefColor'],
     ['tableRefColor', 'equationRefColor'],
+    ['tableRefColor', 'inlinePythonColor'],
     ['listingRefColor', 'equationRefColor'],
+    ['listingRefColor', 'inlinePythonColor'],
+    ['equationRefColor', 'inlinePythonColor'],
   ];
   for (const [left, right] of pairs) {
     assert(

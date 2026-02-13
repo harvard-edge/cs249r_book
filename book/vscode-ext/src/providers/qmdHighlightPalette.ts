@@ -27,6 +27,8 @@ export interface QmdColorOverrides {
   divFenceColor?: string;
   footnoteRefColor?: string;
   footnoteDefColor?: string;
+  inlinePythonColor?: string;
+  inlinePythonBg?: string;
 }
 
 export interface HighlightStyle {
@@ -55,6 +57,9 @@ export interface HighlightStyle {
   equationLabelDefColor: string;
   labelDefColor: string;
   divFenceColor: string;
+  inlinePythonColor: string;
+  inlinePythonBg: string;
+  inlinePythonKeywordColor: string;
   fontWeight: 'normal' | '500' | '600';
   sectionHeaderBgByLevel: [string, string, string, string, string];
 }
@@ -86,6 +91,9 @@ const STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     equationLabelDefColor: '#d8b4fe',
     labelDefColor: 'editorInfo.foreground',
     divFenceColor: 'editorInfo.foreground',
+    inlinePythonColor: '#f0abcf',
+    inlinePythonBg: 'rgba(244, 114, 182, 0.08)',
+    inlinePythonKeywordColor: 'rgba(240, 171, 207, 0.45)',
     fontWeight: 'normal',
     sectionHeaderBgByLevel: [
       'rgba(96, 165, 250, 0.13)',
@@ -121,6 +129,9 @@ const STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     equationLabelDefColor: '#e4c7ff',
     labelDefColor: 'editorInfo.foreground',
     divFenceColor: 'editorInfo.foreground',
+    inlinePythonColor: '#f9a8d4',
+    inlinePythonBg: 'rgba(244, 114, 182, 0.12)',
+    inlinePythonKeywordColor: 'rgba(249, 168, 212, 0.45)',
     fontWeight: '500',
     sectionHeaderBgByLevel: [
       'rgba(96, 165, 250, 0.18)',
@@ -156,6 +167,9 @@ const STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     equationLabelDefColor: '#eddcff',
     labelDefColor: 'editorInfo.foreground',
     divFenceColor: 'textLink.foreground',
+    inlinePythonColor: '#fbb6d9',
+    inlinePythonBg: 'rgba(244, 114, 182, 0.18)',
+    inlinePythonKeywordColor: 'rgba(251, 182, 217, 0.50)',
     fontWeight: '600',
     sectionHeaderBgByLevel: [
       'rgba(96, 165, 250, 0.25)',
@@ -194,6 +208,9 @@ export function resolveHighlightStyle(preset: VisualPreset, override: QmdColorOv
     equationLabelDefColor: override.equationLabelDefColor ?? override.equationRefColor ?? override.labelDefColor ?? baseStyle.equationLabelDefColor,
     labelDefColor: override.labelDefColor ?? baseStyle.labelDefColor,
     divFenceColor: override.divFenceColor ?? baseStyle.divFenceColor,
+    inlinePythonColor: override.inlinePythonColor ?? baseStyle.inlinePythonColor,
+    inlinePythonBg: override.inlinePythonBg ?? baseStyle.inlinePythonBg,
+    inlinePythonKeywordColor: baseStyle.inlinePythonKeywordColor,
     footnoteRefColor: override.footnoteRefColor ?? baseStyle.footnoteRefColor,
     footnoteDefColor: override.footnoteDefColor ?? baseStyle.footnoteDefColor,
     sectionHeaderBgByLevel: [

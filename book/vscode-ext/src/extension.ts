@@ -12,6 +12,8 @@ import { QmdFoldingProvider } from './providers/qmdFoldingProvider';
 import { QmdAutoFoldManager } from './providers/qmdAutoFoldManager';
 import { QmdDiagnosticsManager } from './validation/qmdDiagnostics';
 import { QmdChunkHighlighter } from './providers/qmdChunkHighlighter';
+import { QmdPythonValueResolver } from './providers/qmdPythonValueResolver';
+import { QmdPythonHoverProvider, QmdPythonGhostText, QmdPythonCodeLensProvider } from './providers/qmdInlinePythonProviders';
 import { renameLabelAcrossWorkspace } from './utils/labelRename';
 import { registerBuildCommands } from './commands/buildCommands';
 import { registerDebugCommands } from './commands/debugCommands';
@@ -64,6 +66,21 @@ export function activate(context: vscode.ExtensionContext): void {
   const qmdAutoFoldManager = new QmdAutoFoldManager();
   const diagnosticsManager = new QmdDiagnosticsManager();
   const chunkHighlighter = new QmdChunkHighlighter();
+
+  // Inline Python value resolution (hover, ghost text, CodeLens)
+  let pythonResolver: QmdPythonValueResolver | undefined;
+  let pythonHoverProvider: QmdPythonHoverProvider | undefined;
+  let pythonGhostText: QmdPythonGhostText | undefined;
+  let pythonCodeLensProvider: QmdPythonCodeLensProvider | undefined;
+  try {
+    pythonResolver = new QmdPythonValueResolver();
+    pythonHoverProvider = new QmdPythonHoverProvider(pythonResolver);
+    pythonGhostText = new QmdPythonGhostText(pythonResolver);
+    pythonCodeLensProvider = new QmdPythonCodeLensProvider(pythonResolver);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    vscode.window.showWarningMessage(`MLSysBook: Python value resolver failed to initialize: ${msg}`);
+  }
   const config = vscode.workspace.getConfiguration('mlsysbook');
   const defaultPreset = config.get<NavigatorPresetId>('defaultNavigatorPreset', 'all');
   const preset = NAVIGATOR_PRESETS.find(p => p.id === defaultPreset) ?? NAVIGATOR_PRESETS[0];
@@ -71,6 +88,8 @@ export function activate(context: vscode.ExtensionContext): void {
   navigatorProvider.refreshFromEditor(vscode.window.activeTextEditor);
   diagnosticsManager.start();
   chunkHighlighter.start();
+  pythonGhostText?.start();
+  pythonCodeLensProvider?.start();
   qmdAutoFoldManager.start();
 
   context.subscriptions.push(
@@ -90,6 +109,21 @@ export function activate(context: vscode.ExtensionContext): void {
     diagnosticsManager,
     chunkHighlighter,
   );
+  if (pythonResolver && pythonHoverProvider && pythonGhostText && pythonCodeLensProvider) {
+    context.subscriptions.push(
+      pythonResolver,
+      pythonGhostText,
+      pythonCodeLensProvider,
+      vscode.languages.registerHoverProvider(
+        { pattern: '**/*.qmd' },
+        pythonHoverProvider,
+      ),
+      vscode.languages.registerCodeLensProvider(
+        { pattern: '**/*.qmd' },
+        pythonCodeLensProvider,
+      ),
+    );
+  }
   const navigatorTreeView = vscode.window.createTreeView('mlsysbook.navigator', { treeDataProvider: navigatorProvider });
   context.subscriptions.push(navigatorTreeView);
   context.subscriptions.push(
