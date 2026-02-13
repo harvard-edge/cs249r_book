@@ -192,8 +192,8 @@ class MaintenanceCommand:
     def run_namespace(self, args) -> bool:
         """Handle `binder maintain ...` namespace commands."""
         parser = argparse.ArgumentParser(
-            prog="binder maintain",
-            description="Maintenance namespace for non-build workflows",
+            prog="binder fix",
+            description="Fix and manage book content",
             add_help=True,
         )
         parser.add_argument("topic", nargs="?", choices=["glossary", "images", "repo-health", "headers", "footnotes"])
