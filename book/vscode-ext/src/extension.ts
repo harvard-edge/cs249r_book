@@ -10,7 +10,7 @@ import { ChapterNavigatorProvider } from './providers/chapterNavigatorProvider';
 import { RunHistoryProvider } from './providers/runHistoryProvider';
 import { QmdFoldingProvider } from './providers/qmdFoldingProvider';
 import { QmdAutoFoldManager } from './providers/qmdAutoFoldManager';
-import { QmdDiagnosticsManager } from './validation/qmdDiagnostics';
+import { QmdDiagnosticsManager, WorkspaceLabelIndex } from './validation/qmdDiagnostics';
 import { QmdChunkHighlighter } from './providers/qmdChunkHighlighter';
 import { QmdPythonValueResolver } from './providers/qmdPythonValueResolver';
 import { QmdPythonHoverProvider, QmdPythonGhostText, QmdPythonCodeLensProvider } from './providers/qmdInlinePythonProviders';
@@ -27,6 +27,7 @@ import {
   revealRunTerminal,
   showLastFailureDetails,
   setExecutionModeInteractively,
+  runInVisibleTerminal,
 } from './utils/terminal';
 import { ChapterOrderSource } from './types';
 
@@ -64,8 +65,11 @@ export function activate(context: vscode.ExtensionContext): void {
   const runHistoryProvider = new RunHistoryProvider();
   const qmdFoldingProvider = new QmdFoldingProvider();
   const qmdAutoFoldManager = new QmdAutoFoldManager();
+  const workspaceLabelIndex = new WorkspaceLabelIndex();
   const diagnosticsManager = new QmdDiagnosticsManager();
+  diagnosticsManager.setWorkspaceIndex(workspaceLabelIndex);
   const chunkHighlighter = new QmdChunkHighlighter();
+  chunkHighlighter.setWorkspaceIndex(workspaceLabelIndex);
 
   // Inline Python value resolution (hover, ghost text, CodeLens)
   let pythonResolver: QmdPythonValueResolver | undefined;
@@ -86,6 +90,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const preset = NAVIGATOR_PRESETS.find(p => p.id === defaultPreset) ?? NAVIGATOR_PRESETS[0];
   void config.update('navigatorVisibleEntryKinds', preset.kinds, vscode.ConfigurationTarget.Workspace);
   navigatorProvider.refreshFromEditor(vscode.window.activeTextEditor);
+  workspaceLabelIndex.start();
   diagnosticsManager.start();
   chunkHighlighter.start();
   pythonGhostText?.start();
@@ -106,6 +111,7 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
     runHistoryProvider,
     qmdAutoFoldManager,
+    workspaceLabelIndex,
     diagnosticsManager,
     chunkHighlighter,
   );
@@ -244,6 +250,36 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:mlsysbook.mlsysbook-workbench');
     }),
     vscode.commands.registerCommand('mlsysbook.renameLabelReferences', () => void renameLabelAcrossWorkspace()),
+
+    // Section ID management
+    vscode.commands.registerCommand('mlsysbook.addSectionIds', () => {
+      if (!root) { return; }
+      const editor = vscode.window.activeTextEditor;
+      const target = editor?.document.uri.fsPath.endsWith('.qmd')
+        ? `-f ${editor.document.uri.fsPath}`
+        : '-d book/quarto/contents/vol1/';
+      runInVisibleTerminal(
+        `python3 book/tools/scripts/content/manage_section_ids.py ${target} --force`,
+        root,
+        'Add Section IDs',
+      );
+    }),
+    vscode.commands.registerCommand('mlsysbook.verifySectionIds', () => {
+      if (!root) { return; }
+      runInVisibleTerminal(
+        'python3 book/tools/scripts/content/manage_section_ids.py -d book/quarto/contents/vol1/ --verify --force',
+        root,
+        'Verify Section IDs',
+      );
+    }),
+    vscode.commands.registerCommand('mlsysbook.validateCrossReferences', () => {
+      if (!root) { return; }
+      runInVisibleTerminal(
+        'python3 book/tools/scripts/content/check_unreferenced_labels.py ./book/quarto/contents/vol1/',
+        root,
+        'Validate Cross-References',
+      );
+    }),
   );
 
   // Register all command groups

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { resolveHighlightStyle, type QmdColorOverrides, type VisualPreset } from './qmdHighlightPalette';
+import type { WorkspaceLabelIndex } from '../validation/qmdDiagnostics';
 
 function isQmdEditor(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
   return Boolean(editor && editor.document.uri.fsPath.endsWith('.qmd'));
@@ -45,10 +46,26 @@ export class QmdChunkHighlighter implements vscode.Disposable {
   private divFenceMarkerDecoration: vscode.TextEditorDecorationType | undefined;
   private inlinePythonKeywordDecoration: vscode.TextEditorDecorationType | undefined;
   private inlinePythonVarDecoration: vscode.TextEditorDecorationType | undefined;
+  private brokenReferenceDecoration: vscode.TextEditorDecorationType | undefined;
   private refreshTimer: NodeJS.Timeout | undefined;
+  private workspaceIndex: WorkspaceLabelIndex | undefined;
 
   constructor() {
     this.recreateDecorations();
+  }
+
+  /** Inject the workspace label index for broken-reference highlighting. */
+  setWorkspaceIndex(index: WorkspaceLabelIndex): void {
+    this.workspaceIndex = index;
+    // Re-apply decorations when the index updates
+    this.disposables.push(
+      index.onDidUpdate(() => {
+        const editor = vscode.window.activeTextEditor;
+        if (isQmdEditor(editor)) {
+          this.debouncedApply(editor);
+        }
+      }),
+    );
   }
 
   start(): void {
@@ -247,6 +264,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     this.divFenceMarkerDecoration?.dispose();
     this.inlinePythonKeywordDecoration?.dispose();
     this.inlinePythonVarDecoration?.dispose();
+    this.brokenReferenceDecoration?.dispose();
 
     const preset = this.getVisualPreset();
     const style = resolveHighlightStyle(preset, this.getColorOverrides());
@@ -384,6 +402,11 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       fontWeight: style.fontWeight === 'normal' ? '500' : '600',
       borderRadius: '0 3px 3px 0',
     });
+    this.brokenReferenceDecoration = vscode.window.createTextEditorDecorationType({
+      color: 'rgba(239, 68, 68, 0.9)',
+      textDecoration: 'underline wavy rgba(239, 68, 68, 0.6)',
+      fontWeight: style.fontWeight,
+    });
   }
 
   private debouncedApply(editor: vscode.TextEditor): void {
@@ -426,6 +449,21 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const tableRefRanges: vscode.Range[] = [];
     const listingRefRanges: vscode.Range[] = [];
     const equationRefRanges: vscode.Range[] = [];
+    const brokenRefRanges: vscode.Range[] = [];
+
+    // Collect local label definitions for broken-ref checking
+    const localLabels = new Set<string>();
+    const fullText = document.getText();
+    const labelCollectRegex = /\{#((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)\}/g;
+    const yamlLabelCollectRegex = /#\|\s*(?:label|fig-label|tbl-label|lst-label):\s*((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)/g;
+    let labelMatch: RegExpExecArray | null;
+    while ((labelMatch = labelCollectRegex.exec(fullText)) !== null) {
+      localLabels.add(labelMatch[1]);
+    }
+    while ((labelMatch = yamlLabelCollectRegex.exec(fullText)) !== null) {
+      localLabels.add(labelMatch[1]);
+    }
+    const hasIndex = this.workspaceIndex?.isReady() ?? false;
     const labelDefinitionRanges: vscode.Range[] = [];
     const sectionLabelDefinitionRanges: vscode.Range[] = [];
     const figureLabelDefinitionRanges: vscode.Range[] = [];
@@ -746,45 +784,38 @@ export class QmdChunkHighlighter implements vscode.Disposable {
         }
         structuralRefRegex.lastIndex = 0;
 
-        while ((match = sectionRefRegex.exec(text)) !== null) {
-          sectionRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
-        }
-        sectionRefRegex.lastIndex = 0;
+        // Helper: check if a reference label is valid (exists locally or in workspace)
+        const isRefValid = (label: string): boolean => {
+          if (localLabels.has(label)) { return true; }
+          if (hasIndex && this.workspaceIndex!.hasLabel(label)) { return true; }
+          return false;
+        };
 
-        while ((match = figureRefRegex.exec(text)) !== null) {
-          figureRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
-        }
-        figureRefRegex.lastIndex = 0;
+        // For each typed reference, check validity and route to broken or typed range
+        const typedRefConfigs: Array<{ regex: RegExp; ranges: vscode.Range[] }> = [
+          { regex: sectionRefRegex, ranges: sectionRefRanges },
+          { regex: figureRefRegex, ranges: figureRefRanges },
+          { regex: tableRefRegex, ranges: tableRefRanges },
+          { regex: listingRefRegex, ranges: listingRefRanges },
+          { regex: equationRefRegex, ranges: equationRefRanges },
+        ];
 
-        while ((match = tableRefRegex.exec(text)) !== null) {
-          tableRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
+        for (const { regex, ranges } of typedRefConfigs) {
+          while ((match = regex.exec(text)) !== null) {
+            const range = new vscode.Range(
+              new vscode.Position(line, match.index),
+              new vscode.Position(line, match.index + match[0].length),
+            );
+            // Extract the label (strip leading @)
+            const label = match[0].startsWith('@') ? match[0].slice(1) : match[0];
+            if (hasIndex && !isRefValid(label)) {
+              brokenRefRanges.push(range);
+            } else {
+              ranges.push(range);
+            }
+          }
+          regex.lastIndex = 0;
         }
-        tableRefRegex.lastIndex = 0;
-
-        while ((match = listingRefRegex.exec(text)) !== null) {
-          listingRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
-        }
-        listingRefRegex.lastIndex = 0;
-
-        while ((match = equationRefRegex.exec(text)) !== null) {
-          equationRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
-        }
-        equationRefRegex.lastIndex = 0;
       }
 
       if (highlightInlinePython && !inFence) {
@@ -876,6 +907,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     }
     if (this.equationReferenceDecoration) {
       editor.setDecorations(this.equationReferenceDecoration, equationRefRanges);
+    }
+    if (this.brokenReferenceDecoration) {
+      editor.setDecorations(this.brokenReferenceDecoration, brokenRefRanges);
     }
     if (this.labelDefinitionDecoration) {
       editor.setDecorations(this.labelDefinitionDecoration, labelDefinitionRanges);
@@ -987,6 +1021,9 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     }
     if (this.inlinePythonVarDecoration) {
       editor.setDecorations(this.inlinePythonVarDecoration, []);
+    }
+    if (this.brokenReferenceDecoration) {
+      editor.setDecorations(this.brokenReferenceDecoration, []);
     }
   }
 

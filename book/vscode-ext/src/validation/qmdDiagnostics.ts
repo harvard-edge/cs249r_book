@@ -6,14 +6,50 @@ function isQmdDocument(document: vscode.TextDocument): boolean {
   return document.uri.fsPath.endsWith('.qmd');
 }
 
+// ─── Label collection patterns ──────────────────────────────────────────────
+
+/** Inline label definitions: {#sec-foo}, {#fig-bar}, etc. */
+const INLINE_LABEL_REGEX = /\{#((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)\}/g;
+
+/** YAML-style label definitions: #| label: fig-foo, #| fig-label: fig-foo, etc. */
+const YAML_LABEL_REGEX = /#\|\s*(?:label|fig-label|tbl-label|lst-label):\s*((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)/g;
+
+/** Cross-reference pattern: @sec-foo, @fig-bar, etc. */
+const CROSSREF_REGEX = /@((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)/g;
+
+/**
+ * Collect all label definitions from a document's text.
+ * Handles both inline {#label} and YAML #| label: formats.
+ */
 function collectDefinedLabels(text: string): Set<string> {
   const labels = new Set<string>();
-  const labelRegex = /\{#((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)\}/g;
+
   let match: RegExpExecArray | null;
-  while ((match = labelRegex.exec(text)) !== null) {
+
+  INLINE_LABEL_REGEX.lastIndex = 0;
+  while ((match = INLINE_LABEL_REGEX.exec(text)) !== null) {
     labels.add(match[1]);
   }
+
+  YAML_LABEL_REGEX.lastIndex = 0;
+  while ((match = YAML_LABEL_REGEX.exec(text)) !== null) {
+    labels.add(match[1]);
+  }
+
   return labels;
+}
+
+/**
+ * Collect all cross-references from a document's text.
+ */
+function collectReferences(text: string): Array<{ ref: string; index: number }> {
+  const refs: Array<{ ref: string; index: number }> = [];
+  let match: RegExpExecArray | null;
+  CROSSREF_REGEX.lastIndex = 0;
+  while ((match = CROSSREF_REGEX.exec(text)) !== null) {
+    refs.push({ ref: match[1], index: match.index });
+  }
+  return refs;
 }
 
 function collectDefinedPythonVariables(text: string): Set<string> {
@@ -37,27 +73,162 @@ function makeRangeForMatch(document: vscode.TextDocument, offset: number, length
   return new vscode.Range(start, end);
 }
 
-function buildDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
-  const diagnostics: vscode.Diagnostic[] = [];
-  const text = document.getText();
-  const definedLabels = collectDefinedLabels(text);
-  const definedPythonVars = collectDefinedPythonVariables(text);
+// ─── Workspace Label Index ──────────────────────────────────────────────────
 
-  const crossrefRegex = /@((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9:_-]+)/g;
-  let crossrefMatch: RegExpExecArray | null;
-  while ((crossrefMatch = crossrefRegex.exec(text)) !== null) {
-    const ref = crossrefMatch[1];
-    if (!definedLabels.has(ref)) {
-      diagnostics.push(
-        new vscode.Diagnostic(
-          makeRangeForMatch(document, crossrefMatch.index + 1, ref.length),
-          `Unresolved cross-reference: @${ref}`,
-          vscode.DiagnosticSeverity.Warning,
-        ),
-      );
+/**
+ * Maintains a workspace-wide index of all label definitions across .qmd files.
+ * Updated incrementally when individual files are saved.
+ */
+export class WorkspaceLabelIndex implements vscode.Disposable {
+  /** Map from label string to the set of URIs where it's defined. */
+  private readonly labelToUris = new Map<string, Set<string>>();
+  /** Map from file URI string to the set of labels defined in that file. */
+  private readonly uriToLabels = new Map<string, Set<string>>();
+  private readonly disposables: vscode.Disposable[] = [];
+  private initialized = false;
+
+  private readonly onDidUpdateEmitter = new vscode.EventEmitter<void>();
+  /** Fires when the index has been updated (for triggering re-validation). */
+  readonly onDidUpdate = this.onDidUpdateEmitter.event;
+
+  start(): void {
+    // Build initial index
+    this.buildFullIndex().then(() => {
+      this.initialized = true;
+      this.onDidUpdateEmitter.fire();
+    });
+
+    // Update index when .qmd files are saved
+    this.disposables.push(
+      vscode.workspace.onDidSaveTextDocument(document => {
+        if (isQmdDocument(document)) {
+          this.updateFileLabels(document.uri.toString(), document.getText());
+          this.onDidUpdateEmitter.fire();
+        }
+      }),
+      // Handle file deletions
+      vscode.workspace.onDidDeleteFiles(event => {
+        let changed = false;
+        for (const uri of event.files) {
+          if (uri.fsPath.endsWith('.qmd')) {
+            this.removeFile(uri.toString());
+            changed = true;
+          }
+        }
+        if (changed) { this.onDidUpdateEmitter.fire(); }
+      }),
+    );
+  }
+
+  /** Check if a label exists anywhere in the workspace. */
+  hasLabel(label: string): boolean {
+    const uris = this.labelToUris.get(label);
+    return !!uris && uris.size > 0;
+  }
+
+  /** Check if the index has been built at least once. */
+  isReady(): boolean {
+    return this.initialized;
+  }
+
+  /** Get the total number of indexed labels. */
+  get size(): number {
+    return this.labelToUris.size;
+  }
+
+  /** Get all known labels (for completions, etc.). */
+  allLabels(): string[] {
+    return Array.from(this.labelToUris.keys());
+  }
+
+  private async buildFullIndex(): Promise<void> {
+    const files = await vscode.workspace.findFiles('**/*.qmd', '**/node_modules/**');
+    for (const uri of files) {
+      try {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        this.updateFileLabels(uri.toString(), doc.getText());
+      } catch {
+        // File may have been deleted between findFiles and openTextDocument
+      }
     }
   }
 
+  private updateFileLabels(uriStr: string, text: string): void {
+    // Remove old labels for this file
+    this.removeFile(uriStr);
+
+    // Collect new labels
+    const labels = collectDefinedLabels(text);
+    this.uriToLabels.set(uriStr, labels);
+
+    for (const label of labels) {
+      let uris = this.labelToUris.get(label);
+      if (!uris) {
+        uris = new Set();
+        this.labelToUris.set(label, uris);
+      }
+      uris.add(uriStr);
+    }
+  }
+
+  private removeFile(uriStr: string): void {
+    const oldLabels = this.uriToLabels.get(uriStr);
+    if (oldLabels) {
+      for (const label of oldLabels) {
+        const uris = this.labelToUris.get(label);
+        if (uris) {
+          uris.delete(uriStr);
+          if (uris.size === 0) {
+            this.labelToUris.delete(label);
+          }
+        }
+      }
+      this.uriToLabels.delete(uriStr);
+    }
+  }
+
+  dispose(): void {
+    this.onDidUpdateEmitter.dispose();
+    this.disposables.forEach(d => d.dispose());
+    this.labelToUris.clear();
+    this.uriToLabels.clear();
+  }
+}
+
+// ─── Diagnostics Builder ────────────────────────────────────────────────────
+
+function buildDiagnostics(
+  document: vscode.TextDocument,
+  workspaceIndex?: WorkspaceLabelIndex,
+): vscode.Diagnostic[] {
+  const diagnostics: vscode.Diagnostic[] = [];
+  const text = document.getText();
+  const localLabels = collectDefinedLabels(text);
+  const definedPythonVars = collectDefinedPythonVariables(text);
+
+  // Cross-reference validation
+  const refs = collectReferences(text);
+  for (const { ref, index } of refs) {
+    // Check local labels first (fast path), then workspace index
+    const isLocal = localLabels.has(ref);
+    const isWorkspace = workspaceIndex?.hasLabel(ref) ?? false;
+
+    if (!isLocal && !isWorkspace) {
+      const diagnostic = new vscode.Diagnostic(
+        makeRangeForMatch(document, index + 1, ref.length),
+        workspaceIndex?.isReady()
+          ? `Unresolved cross-reference: @${ref} (not found in any .qmd file)`
+          : `Unresolved cross-reference: @${ref} (workspace index loading...)`,
+        workspaceIndex?.isReady()
+          ? vscode.DiagnosticSeverity.Warning
+          : vscode.DiagnosticSeverity.Information,
+      );
+      diagnostic.source = DIAGNOSTIC_SOURCE;
+      diagnostics.push(diagnostic);
+    }
+  }
+
+  // Inline Python validation
   const inlinePythonRegex = /`\{python\}\s+([^`]+)`/g;
   let inlineMatch: RegExpExecArray | null;
   while ((inlineMatch = inlinePythonRegex.exec(text)) !== null) {
@@ -113,28 +284,56 @@ function buildDiagnostics(document: vscode.TextDocument): vscode.Diagnostic[] {
   return diagnostics;
 }
 
+// ─── Diagnostics Manager ────────────────────────────────────────────────────
+
 export class QmdDiagnosticsManager implements vscode.Disposable {
   private readonly collection: vscode.DiagnosticCollection;
   private readonly disposables: vscode.Disposable[] = [];
   private refreshTimer: NodeJS.Timeout | undefined;
+  private workspaceIndex: WorkspaceLabelIndex | undefined;
 
   constructor() {
     this.collection = vscode.languages.createDiagnosticCollection(DIAGNOSTIC_SOURCE);
     this.disposables.push(this.collection);
   }
 
+  /**
+   * Inject the workspace label index for cross-file reference validation.
+   * Must be called before start().
+   */
+  setWorkspaceIndex(index: WorkspaceLabelIndex): void {
+    this.workspaceIndex = index;
+  }
+
   start(): void {
-    this.refreshActiveEditorDiagnostics();
+    // Only validate on save and editor switch — NOT on every keystroke
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.refreshActiveEditorDiagnostics()),
       vscode.workspace.onDidSaveTextDocument(document => this.refreshDocumentDiagnostics(document)),
-      vscode.workspace.onDidChangeTextDocument(event => this.debouncedRefresh(event.document)),
       vscode.workspace.onDidChangeConfiguration(event => {
         if (event.affectsConfiguration('mlsysbook.enableQmdDiagnostics')) {
-          this.refreshActiveEditorDiagnostics();
+          if (this.isEnabled()) {
+            this.refreshActiveEditorDiagnostics();
+          } else {
+            this.collection.clear();
+          }
         }
       }),
     );
+
+    // Re-validate active editor when workspace index updates
+    if (this.workspaceIndex) {
+      this.disposables.push(
+        this.workspaceIndex.onDidUpdate(() => {
+          if (this.isEnabled()) {
+            this.refreshActiveEditorDiagnostics();
+          }
+        }),
+      );
+    }
+
+    // Initial validation
+    this.refreshActiveEditorDiagnostics();
   }
 
   refreshActiveEditorDiagnostics(): void {
@@ -148,24 +347,14 @@ export class QmdDiagnosticsManager implements vscode.Disposable {
       this.collection.delete(document.uri);
       return;
     }
-    const diagnostics = buildDiagnostics(document);
+    const diagnostics = buildDiagnostics(document, this.workspaceIndex);
     this.collection.set(document.uri, diagnostics);
   }
 
   private isEnabled(): boolean {
     return vscode.workspace
       .getConfiguration('mlsysbook')
-      .get<boolean>('enableQmdDiagnostics', false);
-  }
-
-  private debouncedRefresh(document: vscode.TextDocument): void {
-    if (!isQmdDocument(document)) { return; }
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-    }
-    this.refreshTimer = setTimeout(() => {
-      this.refreshDocumentDiagnostics(document);
-    }, 300);
+      .get<boolean>('enableQmdDiagnostics', true);
   }
 
   dispose(): void {
