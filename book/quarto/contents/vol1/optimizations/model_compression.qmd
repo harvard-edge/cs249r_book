@@ -166,23 +166,23 @@ gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp_value}}}
 
 ## Optimization Framework {#sec-model-compression-optimization-framework-9e21}
 
-A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving-systems) is not a minor inconvenience but a defining challenge of model compression.
+A `{python} llm_7b_str`-billion parameter language model requires `{python} llm_7b_mem_str` GB just to store its weights in FP16. Your deployment target is a smartphone with `{python} smartphone_ram_str` GB of RAM shared across the operating system, applications, and your model. *The math does not work.* No amount of clever engineering changes this arithmetic: `{python} llm_7b_mem_str` GB cannot fit in `{python} smartphone_ram_str` GB. Yet users expect the model to run: responsively, offline, without draining their battery in an hour. The gap between what training produces and what deployment permits (the **Latency Budget**, the maximum allowable end-to-end inference time, defined formally in @sec-model-serving) is not a minor inconvenience but a defining challenge of model compression.
 
-Recall the **Silicon Contract** (@sec-silicon-contract), the implicit agreement every model makes with its hardware about which resource it will saturate. The three candidates are compute throughput, memory bandwidth, and memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-ai-training, we used Mixed Precision (FP16) to speed up these training cycles while maintaining the ability to learn. Here, we go further—to INT8 and beyond—for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context, reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
+Recall the **Silicon Contract** (@sec-introduction-iron-law-ml-systems-c32a), the implicit agreement every model makes with its hardware about which resource it will saturate. The three candidates are compute throughput, memory bandwidth, and memory capacity. During training, this contract is negotiated upward. Researchers select larger architectures, higher numerical precision, and deeper layers because the training environment, typically a GPU cluster with hundreds of gigabytes of memory, can afford those demands. In @sec-model-training, we used Mixed Precision (FP16) to speed up these training cycles while maintaining the ability to learn. Here, we go further—to INT8 and beyond—for inference, where we trade the ability to update weights for massive gains in execution efficiency. Deployment reverses these priorities. The production environment is smaller, power-constrained, and latency-sensitive, yet the model was designed for an environment with none of those limitations. Model compression is the systematic process of renegotiating that contract for its new execution context, reducing memory footprint, computational cost, and energy consumption while preserving the model's ability to perform its task.
 
 The scale of this renegotiation makes model optimization an engineering discipline, not a collection of ad hoc tricks. A `{python} llm_175b_str` billion parameter model consumes over `{python} llm_175b_mem_str` GB in FP16 representation alone, yet a smartphone provides `{python} smartphone_ram_str` GB of RAM and a microcontroller offers `{python} mcu_ram_str` KB. Bridging six orders of magnitude requires systematic methods with predictable trade-offs, not trial and error. Every optimization technique removes something from the model (redundant parameters, numerical precision, or architectural complexity), and the engineer must understand exactly what is lost, what is preserved, and how these losses compose when techniques are combined.
 
 \index{Overparameterization!systematic removal}
 \index{Operator Fusion!framework introduction}
-This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers (exploiting **Tensor Cores** discussed in @sec-ai-acceleration-tensor-cores-771f), which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50% of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
+This chapter organizes these techniques along three complementary dimensions. *Structural optimization* removes redundancy from the model itself: pruning eliminates parameters that contribute little to output quality, knowledge distillation transfers a large model's learned behavior into a smaller architecture, and neural architecture search discovers designs that are inherently efficient. *Precision optimization* reduces the numerical bit-width of weights and activations, for example converting 32-bit floating point values to 8-bit integers (exploiting **Tensor Cores** discussed in @sec-hardware-acceleration-tensor-cores-771f), which shrinks memory footprint and accelerates arithmetic on hardware that supports lower-precision operations. *Hardware-level optimization* ensures that the resulting model executes efficiently on the target processor by fusing operations to reduce memory traffic and exploiting sparsity patterns that the hardware can accelerate. These dimensions are not alternatives but layers in an optimization stack. A practitioner deploying ResNet-50 to a mobile device might prune 50% of its filters, quantize the remaining weights to INT8, and fuse batch normalization into convolution, with each technique compounding the gains of the others.
 
-Throughout this chapter, we ground each technique in concrete systems: ResNet-50 and MobileNetV2 (our **Lighthouse Models** from @sec-dnn-architectures) for vision workloads, transformer-based language models for sequence tasks, and the DS-CNN keyword spotter for TinyML deployment. These recurring models let us compare techniques under consistent conditions, making the trade-offs between accuracy, latency, memory, and energy tangible rather than abstract.
+Throughout this chapter, we ground each technique in concrete systems: ResNet-50 and MobileNetV2 (our **Lighthouse Models** from @sec-network-architectures) for vision workloads, transformer-based language models for sequence tasks, and the DS-CNN keyword spotter for TinyML deployment. These recurring models let us compare techniques under consistent conditions, making the trade-offs between accuracy, latency, memory, and energy tangible rather than abstract.
 
 ::: {.callout-definition title="Model Compression"}
 ***Model Compression***\index{Model Compression!definition} is the systematic renegotiation of the **Silicon Contract**. It transforms a research artifact, optimized for **Information Density**, into a deployment artifact, optimized for **Execution Efficiency**, by trading **Redundancy** and **Precision** for **Latency**, **Memory**, and **Energy** savings.
 :::
 
-The chapter follows the optimization stack from software to hardware. We begin with the *optimization framework* and *deployment context* that determine which techniques matter for a given target. We then examine each dimension in turn: @sec-model-compression-structural-model-optimization-methods-8ed4 (pruning, distillation, architecture search), @sec-model-compression-quantization-precision-optimization-31d3 (FP32 to INT8 and below), and @sec-model-compression-architectural-efficiency-techniques-daa6 (operator fusion, sparsity exploitation, graph-level transformations). The chapter closes with practical guidance on selecting and composing these techniques for specific deployment constraints.
+The chapter follows the optimization stack from software to hardware. We begin with the *optimization framework* and *deployment context* that determine which techniques matter for a given target. We then examine each dimension in turn: @sec-model-compression-structural-optimization-ee93 (pruning, distillation, architecture search), @sec-model-compression-quantization-precision-cd46 (FP32 to INT8 and below), and @sec-model-compression-architectural-efficiency-8dd3 (operator fusion, sparsity exploitation, graph-level transformations). The chapter closes with practical guidance on selecting and composing these techniques for specific deployment constraints.
 
 Model optimization is not a single technique but a *framework* with three complementary dimensions, each addressing different bottlenecks. These dimensions form a natural hierarchy: we first decide *what* computations the model should perform (representation), then *how precisely* to perform them (numerics), and finally *how efficiently* to execute them on physical hardware (implementation). As you trace the stack in @fig-3-sections from top to bottom, notice how each layer moves from pure software concerns toward hardware-level execution.
 
@@ -212,20 +212,20 @@ Model optimization is not a single technique but a *framework* with three comple
 
 The top layer, *efficient model representation*, focuses on eliminating redundancy in the model structure. Techniques like pruning, knowledge distillation, and Neural Architecture Search[^fn-nas] (NAS) reduce the number of parameters or operations required, addressing memory footprint and computational complexity at the algorithmic level.
 
-[^fn-nas]: **Neural Architecture Search (NAS)**\index{NAS!etymology}: Pioneered by Barret Zoph and Quoc V. Le at Google Brain [@zoph2017neural], who used reinforcement learning to *learn* the architecture itself. The initial cost was staggering: 800 GPUs for 28 days. This expense catalyzed efficient NAS: weight-sharing approaches (ENAS, 2018) reduced search cost by 1000×, while hardware-aware NAS [@tan2019mnasnet] incorporated latency targets directly into the search objective. The resulting architectures---EfficientNet, MobileNetV3, NASNet---consistently outperform hand-designed models, demonstrating that architectural inductive biases (see @sec-dnn-architectures) can themselves be learned.
+[^fn-nas]: **Neural Architecture Search (NAS)**\index{NAS!etymology}: Pioneered by Barret Zoph and Quoc V. Le at Google Brain [@zoph2017neural], who used reinforcement learning to *learn* the architecture itself. The initial cost was staggering: 800 GPUs for 28 days. This expense catalyzed efficient NAS: weight-sharing approaches (ENAS, 2018) reduced search cost by 1000×, while hardware-aware NAS [@tan2019mnasnet] incorporated latency targets directly into the search objective. The resulting architectures---EfficientNet, MobileNetV3, NASNet---consistently outperform hand-designed models, demonstrating that architectural inductive biases (see @sec-network-architectures) can themselves be learned.
 
 The middle layer, *efficient numerics representation*, optimizes how numerical values are stored and processed. Quantization and mixed-precision\index{Mixed-Precision Training} training reduce the bit-width of weights and activations (e.g., from 32-bit floating point to 8-bit integers), enabling faster execution and lower memory usage on specialized hardware.
 
 The bottom layer, *efficient hardware implementation*, ensures operations run efficiently on target processors. Techniques like operator fusion, sparsity exploitation, and hardware-aware scheduling align computational patterns with hardware capabilities (memory hierarchy, vector units) to maximize utilization and throughput.
 
-These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-decision-framework-1896 provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
+These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-decision-framework-0d69 provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
 
 To understand *why* numerics matter so deeply, consider the *physics of quantization* at the silicon level.
 
 \index{Iron Law!quantization impact}
 
 ::: {.callout-notebook title="The Physics of Quantization"}
-The **Energy-Movement Invariant** ($E_{move} \gg E_{compute}$) means that in the physics of silicon, **bits represent energy** (see @sec-system-foundations-numerical-representations-7b2f for a detailed comparison of FP32 vs. INT8 energy costs).
+The **Energy-Movement Invariant** ($E_{move} \gg E_{compute}$) means that in the physics of silicon, **bits represent energy** (see @sec-machine-foundations-numerical-representations-c889 for a detailed comparison of FP32 vs. INT8 energy costs).
 
 According to the **Iron Law** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a quadratic effect on efficiency:
 
@@ -242,7 +242,7 @@ According to the **Iron Law** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot
 
  This is the difference between a battery lasting 1 hour or 20 hours.
 
-These same physics apply at datacenter scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-ai-training. For a deeper treatment of how silicon architectures exploit these energy differences, see @sec-ai-acceleration.
+These same physics apply at datacenter scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-model-training. For a deeper treatment of how silicon architectures exploit these energy differences, see @sec-hardware-acceleration.
 :::
 
 These energy savings explain why neural networks tolerate aggressive quantization: the energy cost of higher precision exceeds the accuracy benefit for most applications. The question then becomes how much precision we can sacrifice before accuracy collapses. Look closely at @fig-quantization-free-lunch and identify the two regimes: a "Free Lunch" zone where reducing precision has minimal impact on accuracy, and a "Cliff" where the model fails catastrophically.
@@ -445,7 +445,7 @@ TinyML\index{TinyML!model compression}[^fn-microcontroller-constraints] makes op
 
 [^fn-microcontroller-constraints]: **Microcontroller Constraints**: Microcontrollers operate under severe constraints relative to servers and modern accelerators, often with *kilobytes to low megabytes* of RAM and limited persistent storage. A practical mental model is that you may have \(10^3\) to \(10^6\) bytes of memory available for the entire pipeline, which is why "model optimization" is often a prerequisite rather than an optional improvement in embedded deployments.
 
-The deployment gap table below quantifies this mismatch using the Lighthouse models from @sec-ml-system-architecture. The gap between model requirements and device capabilities explains *why* compression is not optional for resource-constrained deployment: without it, the models simply cannot run.
+The deployment gap table below quantifies this mismatch using the Lighthouse models from @sec-ml-systems. The gap between model requirements and device capabilities explains *why* compression is not optional for resource-constrained deployment: without it, the models simply cannot run.
 
 ```{python}
 #| label: model-device-comparison
@@ -589,7 +589,7 @@ Optimization is about trading one resource for another.
 
 With the deployment context established and the trade-off landscape mapped, we now examine each optimization dimension in depth. We begin with structural methods that modify *what* computations occur, then turn to precision techniques that reduce numerical fidelity, and finally address architectural approaches that improve execution efficiency on physical hardware.
 
-## Structural Optimization {#sec-model-compression-structural-model-optimization-methods-8ed4}
+## Structural Optimization {#sec-model-compression-structural-optimization-ee93}
 \index{Model Compression!structural optimization}
 
 Structural optimization addresses the first dimension of our framework, **Efficient Model Representation**, by modifying *what* the model computes. Modern neural networks are heavily overparameterized[^fn-gradient-checkpointing]: they carry far more parameters than any single task requires. This surplus is not a design flaw but a training necessity, since over-capacity helps optimization navigate complex loss landscapes. At deployment, however, every excess parameter translates directly into wasted memory, computation, and energy.
@@ -603,7 +603,7 @@ The challenge is removing that surplus without removing what matters, a direct m
 
 These three techniques address the challenge through complementary approaches. Pruning eliminates low-impact parameters from an existing model. Knowledge distillation transfers a large model's learned capabilities to a smaller architecture. NAS automates architecture design from the ground up, building optimized structures for specific constraints. In practice, these techniques are often combined: a NAS-designed architecture, distilled from a large teacher, then pruned for final deployment.
 
-### Pruning {#sec-model-compression-pruning-2b06}
+### Pruning {#sec-model-compression-pruning-d1cb}
 
 \index{Pruning!etymology}
 \index{Optimal Brain Damage!LeCun 1989}
@@ -612,7 +612,7 @@ These three techniques address the challenge through complementary approaches. P
 \index{Han, Song!modern pruning revival}
 Consider a MobileNet trained for image classification on a wearable health monitor. The trained model occupies 14 MB, but the target microcontroller offers only 2 MB of flash memory. Retraining a smaller architecture from scratch would require weeks of data collection and validation — time the product schedule does not allow. Fortunately, analysis reveals that 85% of the model's weights hover near zero, contributing almost nothing to its predictions. Removing those weights and fine-tuning the remainder for a few epochs produces a model that fits in 2 MB with less than 1% accuracy loss. This is pruning in practice.
 
-Pruning[^fn-pruning-etymology] directly addresses memory efficiency constraints by eliminating redundant parameters. Because neural networks carry far more weights than any single task demands (as established above), we can remove a significant fraction without substantial performance degradation. The central questions are *what* to prune (individual weights versus entire structures), *how* to decide what is expendable (magnitude, gradients, or activations), and *when* to prune (after training, during training, or even at initialization). As we will explore in @sec-ai-acceleration, specialized hardware can further exploit the resulting sparse structures.
+Pruning[^fn-pruning-etymology] directly addresses memory efficiency constraints by eliminating redundant parameters. Because neural networks carry far more weights than any single task demands (as established above), we can remove a significant fraction without substantial performance degradation. The central questions are *what* to prune (individual weights versus entire structures), *how* to decide what is expendable (magnitude, gradients, or activations), and *when* to prune (after training, during training, or even at initialization). As we will explore in @sec-hardware-acceleration, specialized hardware can further exploit the resulting sparse structures.
 
 [^fn-pruning-etymology]: **Pruning**: Borrowed from horticulture, where gardeners prune branches to improve plant health and growth. The ML metaphor fits precisely: just as removing unproductive branches redirects resources to productive growth, removing low-magnitude weights redirects computational resources to parameters that matter. The technique dates to Yann LeCun's "Optimal Brain Damage" (Bell Labs, 1989) [@lecun1990optimal], which formalized the gardener's intuition with second-derivative analysis. Babak Hassibi and colleagues at Stanford extended this with "Optimal Brain Surgeon" (1993), using full Hessian information for more precise cuts. The field then lay largely dormant for two decades until Song Han (Stanford, later MIT) revived it for deep learning in 2015 [@han2015deep], demonstrating that modern networks could be pruned by 90% without accuracy loss—a finding that launched the modern model compression era.
 
@@ -803,7 +803,7 @@ Notice how the sparse matrix on the right retains only the high-magnitude values
 
 To make pruning computationally feasible, practical methods often replace the hard L0 constraint with soft regularization\index{Pruning!L1 regularization} like L1-norm ($\lambda \| W \|_1$), which encourages small values that can later be thresholded to zero. Practitioners typically use **iterative pruning**, where parameters are removed in successive steps interleaved with fine-tuning\index{Fine-tuning!after pruning} to recover lost accuracy [@gale2019state; @blalock2020state].
 
-#### Target Structures {#sec-model-compression-target-structures-c474}
+#### Target Structures {#sec-model-compression-target-structures-1230}
 
 Pruning methods differ by what they remove. The primary targets are neurons, channels, and layers, each with distinct implications for architecture and performance.
 
@@ -1080,7 +1080,7 @@ architecture to adjust \\ to the changes};
 ```
 :::
 
-#### Unstructured Pruning {#sec-model-compression-unstructured-pruning-280e}
+#### Unstructured Pruning {#sec-model-compression-unstructured-pruning-1c47}
 
 Unstructured pruning\index{Pruning!unstructured} removes individual weights while preserving the overall network architecture. Some connections become redundant during training, contributing little to the final output. Pruning these weak connections reduces memory requirements while preserving most of the model's accuracy.
 
@@ -1102,7 +1102,7 @@ The primary advantage of unstructured pruning is memory efficiency. By reducing 
 
 Unstructured pruning does not necessarily improve computational efficiency on modern hardware, however. Standard GPUs and TPUs are optimized for dense matrix multiplications, and a sparse weight matrix often cannot fully utilize hardware acceleration unless specialized sparse computation kernels are available. Unstructured pruning therefore primarily benefits model storage rather than inference acceleration.
 
-#### Structured Pruning {#sec-model-compression-structured-pruning-b651}
+#### Structured Pruning {#sec-model-compression-structured-pruning-9692}
 
 \index{Pruning!structured}
 Where unstructured pruning removes individual weights, structured pruning [@li2017pruning][^fn-structured-pruning] eliminates entire computational units: neurons, filters, channels, or layers. This approach produces smaller dense models that map directly to modern machine learning accelerators. Because the resulting architecture remains fully dense, structured pruning leads to more efficient inference on general-purpose hardware than unstructured pruning, which requires specialized execution kernels to exploit its sparse weight matrices.
@@ -1112,7 +1112,7 @@ Where unstructured pruning removes individual weights, structured pruning [@li20
 Neurons, filters, and layers vary dramatically in their contribution to a model's predictions. Some units primarily carry redundant or low-impact information, and removing them does not significantly degrade model performance. Identifying which structures can be pruned while preserving accuracy remains the core challenge.
 
 \index{Pruning!regularity-compression trade-off}
-Hardware-aware pruning\index{Pruning!hardware-aware} strategies, such as N:M structured sparsity\index{Sparsity!N:M structured}, enforce specific patterns (e.g., ensuring 2 out of every 4 weights are zero) to align with specialized accelerator capabilities. The hardware implementation details of these patterns, including how they leverage sparse tensor cores, are covered in @sec-ai-acceleration.
+Hardware-aware pruning\index{Pruning!hardware-aware} strategies, such as N:M structured sparsity\index{Sparsity!N:M structured}, enforce specific patterns (e.g., ensuring 2 out of every 4 weights are zero) to align with specialized accelerator capabilities. The hardware implementation details of these patterns, including how they leverage sparse tensor cores, are covered in @sec-hardware-acceleration.
 
 To ground these distinctions, examine @fig-structured-unstructured from left to right. On the left, unstructured pruning removes individual weights (depicted as dashed connections), creating a sparse weight matrix. This can disrupt the original network structure, as shown in the fully connected network where certain connections have been randomly pruned. While this reduces the number of active parameters, the resulting sparsity requires specialized execution kernels to fully utilize computational benefits.
 
@@ -1256,21 +1256,21 @@ Gradient-based pruning\index{Pruning!gradient-based} uses information from the t
 
 These three methods form a progression from static to dynamic assessment of parameter importance, and each presents distinct trade-offs. Magnitude-based pruning is computationally inexpensive and straightforward to implement, making it the default starting point, but it does not account for how neurons behave across different data distributions. Activation-based pruning captures more of this dynamic behavior by evaluating neurons over representative inputs, though it requires additional computation to estimate neuron importance. Gradient-based pruning leverages training dynamics most directly but may introduce prohibitive complexity for large-scale models. In practice, the choice depends on the specific constraints of the target deployment environment: magnitude-based methods suffice for most production scenarios, while gradient-based approaches justify their overhead only when accuracy preservation is paramount.
 
-#### Dynamic Pruning {#sec-model-compression-dynamic-pruning-adee}
+#### Dynamic Pruning {#sec-model-compression-dynamic-pruning-b794}
 
 Traditional pruning methods, whether unstructured or structured, involve static pruning\index{Pruning!static}: parameters are permanently removed after training or at fixed intervals during training, assuming that parameter importance is fixed. Dynamic pruning\index{Pruning!dynamic} relaxes this assumption by adapting pruning decisions based on input data or training dynamics, allowing the model to adjust its structure in real time.
 
 Dynamic pruning can be implemented using runtime sparsity techniques, where the model actively determines which parameters to utilize based on input characteristics. Activation-conditioned pruning exemplifies this approach by selectively deactivating neurons or channels that exhibit low activation values for specific inputs [@dynamicpruning2023]. This method introduces input-dependent sparsity patterns, effectively reducing the computational workload during inference without permanently modifying the model architecture.
 
-For instance, consider a convolutional neural network processing images with varying complexity. During inference of a simple image containing mostly uniform regions, many convolutional filters may produce negligible activations. Dynamic pruning identifies these low-impact filters and temporarily excludes them from computation, improving efficiency while maintaining accuracy for the current input. This adaptive behavior is particularly advantageous in latency-sensitive applications, where computational resources must be allocated judiciously based on input complexity. @sec-benchmarking-ai presents measurement strategies for evaluating such efficiency gains.
+For instance, consider a convolutional neural network processing images with varying complexity. During inference of a simple image containing mostly uniform regions, many convolutional filters may produce negligible activations. Dynamic pruning identifies these low-impact filters and temporarily excludes them from computation, improving efficiency while maintaining accuracy for the current input. This adaptive behavior is particularly advantageous in latency-sensitive applications, where computational resources must be allocated judiciously based on input complexity. @sec-benchmarking presents measurement strategies for evaluating such efficiency gains.
 
 Another class of dynamic pruning operates during training, gradually introducing and adjusting sparsity throughout the optimization process. Methods such as gradual magnitude pruning start with a dense network and progressively increase the fraction of pruned parameters as training progresses. Instead of permanently removing parameters, these approaches allow the network to recover from pruning-induced capacity loss by regrowing connections that prove to be important in later stages of training.
 
-Dynamic pruning offers several advantages over its static counterpart. By allowing models to adapt to different workloads, it improves efficiency while maintaining accuracy across a wider range of inputs. Where static pruning risks over-pruning and permanently degrading performance, dynamic pruning can selectively reactivate parameters when they prove necessary for a particular input. The cost of this flexibility is additional computational overhead, as pruning decisions must be made in real time during training or inference, making dynamic pruning harder to integrate into standard machine learning pipelines. The kind of sophisticated production deployment strategies and monitoring frameworks required are covered in @sec-machine-learning-operations-mlops.
+Dynamic pruning offers several advantages over its static counterpart. By allowing models to adapt to different workloads, it improves efficiency while maintaining accuracy across a wider range of inputs. Where static pruning risks over-pruning and permanently degrading performance, dynamic pruning can selectively reactivate parameters when they prove necessary for a particular input. The cost of this flexibility is additional computational overhead, as pruning decisions must be made in real time during training or inference, making dynamic pruning harder to integrate into standard machine learning pipelines. The kind of sophisticated production deployment strategies and monitoring frameworks required are covered in @sec-ml-operations.
 
 Despite these challenges, dynamic pruning excels in edge computing and efficient AI contexts discussed in @sec-introduction, where resource constraints and real-time efficiency requirements vary across inputs.
 
-#### Pruning Trade-offs {#sec-model-compression-pruning-tradeoffs-c139}
+#### Pruning Trade-offs {#sec-model-compression-pruning-tradeoffs-fada}
 
 The three pruning approaches represent distinct positions on the regularity-versus-compression trade-off. Unstructured pruning achieves the highest compression ratios because it can remove any individual weight, but the resulting irregular sparsity patterns are difficult for hardware to exploit: accelerators optimized for dense matrix operations[^fn-flops] cannot skip individual zero values without specialized sparse execution kernels. Structured pruning sacrifices some compression potential by removing entire channels, filters, or layers; the resulting dense sub-network runs efficiently on commodity hardware without sparse computation support. Dynamic pruning adapts pruning decisions to each input at runtime, offering the most flexibility at the cost of implementation complexity and computational overhead. @tbl-pruning formalizes these comparisons across the dimensions that matter most for deployment.
 
@@ -1288,11 +1288,11 @@ The three pruning approaches represent distinct positions on the regularity-vers
 
 : **Pruning Strategies**: Unstructured, structured, and dynamic pruning each modify model weights differently, impacting both model size and computational efficiency. Unstructured pruning offers the greatest compression but requires specialized hardware, while dynamic pruning adapts to input data for a balance between accuracy and resource usage. {#tbl-pruning}
 
-#### Pruning Strategies {#sec-model-compression-pruning-strategies-d1ce}
+#### Pruning Strategies {#sec-model-compression-pruning-strategies-03f7}
 
 Beyond the broad categories of unstructured, structured, and dynamic pruning, different pruning workflows can impact model efficiency and accuracy retention. Two widely used pruning strategies are iterative pruning and one-shot pruning, each with distinct benefits and trade-offs.
 
-##### Iterative Pruning {#sec-model-compression-iterative-pruning-6c58}
+##### Iterative Pruning {#sec-model-compression-iterative-pruning-ee12}
 
 Iterative pruning\index{Pruning!iterative} removes structure gradually through multiple cycles of pruning followed by fine-tuning. During each cycle, the algorithm removes a small subset of structures based on predefined importance metrics. The model then undergoes fine-tuning to adapt to these structural modifications before proceeding to the next pruning iteration. This gradual approach helps prevent sudden drops in accuracy while allowing the network to progressively adjust to reduced complexity.
 
@@ -1503,7 +1503,7 @@ minimum width=27mm,minimum height=29mm,
 ```
 :::
 
-##### One-shot Pruning {#sec-model-compression-oneshot-pruning-bad9}
+##### One-shot Pruning {#sec-model-compression-oneshot-pruning-12a1}
 
 One-shot pruning\index{Pruning!one-shot} removes multiple architectural components in a single step, followed by an extensive fine-tuning phase to recover model accuracy. This aggressive approach compresses the model quickly but risks greater accuracy degradation, as the network must adapt to significant structural changes simultaneously.
 
@@ -1704,7 +1704,7 @@ minimum width=27mm,minimum height=29mm,
 
 The choice between strategies depends on three interrelated factors. First, the sparsity target: higher reduction targets often necessitate iterative approaches to maintain accuracy, while moderate goals may be achievable with one-shot methods. Second, available resources: iterative pruning demands significant compute for multiple fine-tuning cycles, whereas one-shot approaches trade accuracy for speed. Third, the deployment timeline and target platform: one-shot methods enable faster deployment, but certain hardware architectures better support specific sparsity patterns, making iterative approaches more advantageous when time permits.
 
-#### Lottery Ticket Hypothesis {#sec-model-compression-lottery-ticket-hypothesis-a5bd}
+#### Lottery Ticket Hypothesis {#sec-model-compression-lottery-ticket-hypothesis-1b3d}
 
 \index{Lottery Ticket Hypothesis!etymology}
 \index{Frankle, Jonathan!lottery ticket hypothesis}
@@ -1965,7 +1965,7 @@ Despite its promise, applying LTH in practice remains computationally expensive 
 
 While LTH presents a compelling theoretical perspective on pruning, practical implementations rely on established framework-level tools to integrate structured and unstructured pruning techniques.
 
-#### Pruning in Practice {#sec-model-compression-pruning-practice-bb32}
+#### Pruning in Practice {#sec-model-compression-pruning-practice-8059}
 
 Modern machine learning frameworks provide dedicated APIs to automate the pruning and fine-tuning workflow. In PyTorch\index{Framework Toolkits!pruning support}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. Users can apply unstructured pruning (e.g., `l1_unstructured`) or structured pruning (e.g., `ln_structured`) with just a few lines of code. PyTorch uses "masks" to handle pruning: the original parameters are preserved, but a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
 
@@ -1982,7 +1982,7 @@ Pruning is powerful but has an inherent limitation: it starts with an existing a
 
 This limitation motivates **knowledge distillation**, a categorically different approach. Rather than modifying an existing model's weights, distillation trains a new, compact "student" model to mimic the behavior of a larger "teacher" model. The student inherits the teacher's learned knowledge without inheriting its computational overhead.
 
-### Knowledge Distillation {#sec-model-compression-knowledge-distillation-e02e}
+### Knowledge Distillation {#sec-model-compression-knowledge-distillation-1842}
 
 \index{Knowledge Distillation!etymology}
 \index{Hinton, Geoffrey!knowledge distillation}
@@ -2135,7 +2135,7 @@ anchor=north]{Teacher model};
 
 [^fn-kl-divergence]: **Kullback-Leibler Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it at the National Security Agency in 1951 for cryptanalysis. Measures how one probability distribution differs from a reference distribution. In information theory, KL(P||Q) quantifies the extra bits needed to encode samples from P using a code optimized for Q. Zero when distributions match; always non-negative.
 
-##### Distillation Mathematics {#sec-model-compression-distillation-mathematics-0c2b}
+##### Distillation Mathematics {#sec-model-compression-distillation-mathematics-4af6}
 
 \index{Knowledge Distillation!loss function}
 \index{Softmax!temperature scaling}
@@ -2157,7 +2157,7 @@ $$
 
 The factor $T^2$ ensures that gradient scales remain consistent when $T$ is changed. This hybrid approach enables compact models (like DistilBERT) to achieve up to 97% of their teacher's performance with a fraction of the memory and compute.
 
-##### Efficiency Gains and Trade-offs {#sec-model-compression-efficiency-gains-3a1d}
+##### Efficiency Gains and Trade-offs {#sec-model-compression-efficiency-gains-tradeoffs-fb5b}
 
 Distillation's primary advantage over pruning is that it produces a *dense* model, not a sparse one. A distilled student runs efficiently on commodity hardware — GPUs, TPUs, edge AI chips — without requiring specialized sparse execution kernels. Models such as DistilBERT\index{DistilBERT}\index{Knowledge Distillation!DistilBERT}[^fn-distilbert-metrics] retain up to 97% of the teacher's accuracy with 40% fewer parameters and 60% faster inference, a compression level difficult to achieve through pruning alone [@sanh2019distilbert]. MobileNet distillation variants [@howard2017mobilenets] demonstrate similar results in computer vision. The student also inherits the teacher's generalization properties\index{Knowledge Distillation!memory efficiency}: large models trained on extensive datasets are less sensitive to noise and data shifts, and well-trained students inherit this robustness — particularly valuable in low-data regimes where training a small model from scratch leads to poor generalization.
 
@@ -2166,7 +2166,7 @@ Distillation's primary advantage over pruning is that it produces a *dense* mode
 Distillation also enables *multi-task deployment*: a single large teacher can guide multiple specialized students for different tasks (e.g., language-specific NLP models, task-specific vision models), amortizing the teacher's training cost across many deployment targets. The resulting students can be further optimized with pruning and quantization for hardware-specific acceleration [@gordon2020compressing].
 
 \index{Knowledge Distillation!limitations}
-The limitations are real, however. Distillation requires training a new model, which means higher upfront computational cost than pruning (which modifies an existing model in place). The effectiveness depends on teacher quality — a poorly trained teacher transfers incorrect biases. And designing an appropriate student architecture requires care: overly small students lack the capacity to absorb the teacher's knowledge, while overly large students defeat the purpose of compression. @sec-benchmarking-ai provides structured evaluation approaches for measuring these efficiency gains.
+The limitations are real, however. Distillation requires training a new model, which means higher upfront computational cost than pruning (which modifies an existing model in place). The effectiveness depends on teacher quality — a poorly trained teacher transfers incorrect biases. And designing an appropriate student architecture requires care: overly small students lack the capacity to absorb the teacher's knowledge, while overly large students defeat the purpose of compression. @sec-benchmarking provides structured evaluation approaches for measuring these efficiency gains.
 
 Compared to pruning, knowledge distillation preserves accuracy better but demands higher training complexity: it requires training a new model rather than modifying an existing one. Pruning, conversely, provides more direct computational efficiency gains, especially in its structured form. In practice, combining the two often yields the best trade-off, as DistilBERT and MobileBERT demonstrate: pruning first reduces unnecessary parameters, then distillation optimizes a final student model. @tbl-kd-pruning contrasts the key trade-offs between knowledge distillation and pruning across accuracy retention, training cost, inference speed, hardware compatibility, and implementation complexity.
 
@@ -2184,7 +2184,7 @@ Knowledge distillation is frequently used alongside pruning and quantization for
 
 Pruning and distillation both reduce the number of parameters a model carries, but they take the parameter count as given and decide which parameters to keep or how to transfer their knowledge. Neither technique questions whether the model's internal representations are efficiently organized. A 4096 $\times$ 4096 weight matrix in a transformer layer may have an effective rank of only 128 — meaning 97% of its information content can be captured by a much smaller pair of matrices. Structured approximation methods exploit exactly this mathematical redundancy.
 
-### Structured Approximations {#sec-model-compression-structured-approximations-1139}
+### Structured Approximations {#sec-model-compression-structured-approximations-4798}
 
 Rather than eliminating parameters through pruning or transferring knowledge through distillation, structured approximation methods decompose large weight matrices and tensors into lower-dimensional components. These techniques exploit the mathematical structure of neural network parameters, leveraging the observation that high-dimensional representations often admit compact, low-rank approximations. The following subsections examine low-rank factorization and tensor decomposition as complementary strategies for achieving this compression.
 
@@ -2247,7 +2247,7 @@ mat_dim_str = LowRankFactorization.mat_dim_str
 rank_k_str = LowRankFactorization.rank_k_str
 ```
 
-#### Low-Rank Factorization {#sec-model-compression-lowrank-factorization-2ef5}
+#### Low-Rank Factorization {#sec-model-compression-lowrank-factorization-955e}
 
 \index{Eckart-Young Theorem!SVD optimality}
 Low-Rank Matrix Factorization (LRMF)\index{Low-Rank Factorization!definition}\index{Model Compression!low-rank factorization} approximates weight matrices with lower-rank representations. Given a matrix $A \in \mathbb{R}^{m \times n}$, LRMF finds matrices $U \in \mathbb{R}^{m \times k}$ and $V \in \mathbb{R}^{k \times n}$ such that:
@@ -2268,7 +2268,7 @@ If we factorize it with rank k = `{python} rank_k_str`, we store two matrices (`
 
 This bandwidth-compute trade-off reflects the broader memory wall[^fn-memory-wall-preview] phenomenon where memory access becomes the dominant bottleneck.
 
-[^fn-memory-wall-preview]: **Memory Wall**: The growing disparity between processor speed and memory access speed, where memory bandwidth becomes the dominant bottleneck. We explore this constraint in depth in @sec-ai-acceleration.
+[^fn-memory-wall-preview]: **Memory Wall**: The growing disparity between processor speed and memory access speed, where memory bandwidth becomes the dominant bottleneck. We explore this constraint in depth in @sec-hardware-acceleration.
 
 To see why this matters, study @fig-matrix-factorization: the matrix $M$ can be approximated by the product of matrices $L_k$ and $R_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $M$, which requires $m \times n$ parameters to be loaded during computation. However, by decomposing and approximating it as the product of two lower-rank matrices, we only need to store $m \times k + k \times n$ parameters in terms of storage while incurring an additional compute cost of the matrix multiplication. So long as $k < n/2$, this factorization has fewer total parameters to store while adding a computation of runtime $O(mkn)$ [@gu2023deep].
 
@@ -2301,12 +2301,12 @@ To see why this matters, study @fig-matrix-factorization: the matrix $M$ can be 
 
 LRMF applies to fully connected layers (large weight matrices) and convolutional layers (via depthwise-separable convolutions). The key trade-off: storage reduces from $O(mn)$ to $O(mk + kn)$, but inference requires an additional matrix multiplication. Choosing rank $k$ balances compression against information loss.
 
-#### Tensor Decomposition {#sec-model-compression-tensor-decomposition-89ef}
+#### Tensor Decomposition {#sec-model-compression-tensor-decomposition-5e9e}
 
 \index{Tensor Decomposition!etymology}
 Tensor decomposition\index{Tensor Decomposition!definition}\index{Model Compression!tensor decomposition}[^fn-tensor-etymology-decomposition] extends factorization to multi-dimensional tensors common in convolutional layers and attention mechanisms.
 
-[^fn-tensor-etymology-decomposition]: **Tensor**: An n-dimensional array---scalars (0D), vectors (1D), matrices (2D), and higher---as introduced in @sec-deep-learning-systems-foundations. Tensor decomposition exploits the fact that high-dimensional tensors can often be approximated as products of smaller factor matrices, reducing both storage and computation.
+[^fn-tensor-etymology-decomposition]: **Tensor**: An n-dimensional array---scalars (0D), vectors (1D), matrices (2D), and higher---as introduced in @sec-neural-computation. Tensor decomposition exploits the fact that high-dimensional tensors can often be approximated as products of smaller factor matrices, reducing both storage and computation.
 
 @fig-tensor-decomposition breaks down a 3D tensor into its factor matrices—pay attention to how each rank-one component contributes to the reconstruction. Common decomposition methods include:
 
@@ -2572,7 +2572,7 @@ In practice, LRMF and tensor decomposition can be combined: fully connected laye
 
 The techniques explored so far (pruning, distillation, and factorization) all optimize *existing* architectures. Neural Architecture Search takes a different approach: discovering architectures that are efficient *by construction*.
 
-### Neural Architecture Search {#sec-model-compression-neural-architecture-search-f1e9}
+### Neural Architecture Search {#sec-model-compression-neural-architecture-search-cf12}
 
 \index{Neural Architecture Search (NAS)!bi-level optimization}
 Pruning, knowledge distillation, and other techniques explored in previous sections rely on human expertise to determine optimal model configurations.\index{Neural Architecture Search (NAS)!definition} Selecting optimal architectures requires extensive experimentation, and even experienced practitioners may overlook more efficient designs [@elsken2019neural]. Neural Architecture Search (NAS) automates this process by systematically exploring large spaces of possible architectures to identify those that best balance accuracy, computational cost, memory efficiency, and inference latency [@zoph2017neural].
@@ -2622,7 +2622,7 @@ The effectiveness of NAS depends on three design decisions: what architectures t
 
 [^fn-nas-evaluation-metrics]: **NAS Evaluation Metrics**: Multi-objective optimization balancing accuracy, latency, memory, and energy creates Pareto frontiers of non-dominated architectures. Practitioners select architectures based on deployment constraints: edge devices prioritize latency/energy; servers prioritize throughput. Scalarization weights or evolutionary multi-objective methods explore these tradeoffs systematically.
 
-#### The NAS Optimization Problem {#sec-model-compression-nas-optimization-problem-376d}
+#### The NAS Optimization Problem {#sec-model-compression-nas-optimization-problem-7f8e}
 
 NAS faces a chicken-and-egg problem: we cannot know how good an architecture is until we train it, but training is expensive. This creates two nested decisions—choosing which operations to include (the architecture) and finding the best parameters for those operations (the weights). The architecture defines *what* to optimize; the weights define *how well* that architecture can perform.
 
@@ -2640,19 +2640,19 @@ $$
 
 The core challenge is the cost of the inner loop: evaluating each candidate requires expensive training. A search space with just 10 choices across 20 layers yields $10^{20}$ architectures, making exhaustive search impossible. Efficient NAS methods address this by restricting the search space, using faster search strategies, or accelerating evaluation.
 
-#### Search Space Design {#sec-model-compression-search-space-design-451c}
+#### Search Space Design {#sec-model-compression-search-space-design-62db}
 
 The search space defines what architectures NAS can discover. Well-designed search spaces incorporate domain knowledge to focus search on promising regions while remaining flexible enough to discover novel patterns.
 
-##### Cell-Based Search Spaces {#sec-model-compression-cell-based-search-spaces-a3f1}
+##### Cell-Based Search Spaces {#sec-model-compression-cellbased-search-spaces-9eb7}
 
 Rather than searching entire network architectures, cell-based NAS searches for reusable computational blocks (cells) that can be stacked to form complete networks. For example, a convolutional cell might choose from operations like 3×3 convolution, 5×5 convolution, depthwise separable convolution, max pooling, or identity connections. A simplified cell with 4 nodes and 2 operations per edge yields roughly 10,000 possible cell designs, far more tractable than searching full architectures. EfficientNet uses this approach to discover scalable cell designs that generalize across different model sizes.
 
-##### Hardware-Aware Search Spaces {#sec-model-compression-hardware-aware-search-spaces-b2e4}
+##### Hardware-Aware Search Spaces {#sec-model-compression-hardwareaware-search-spaces-9841}
 
 Hardware-aware NAS\index{Neural Architecture Search (NAS)!hardware-aware}\index{Hardware-Aware Optimization!neural architecture search} extends search spaces to include deployment constraints as first-class objectives. Rather than optimizing solely for accuracy and FLOPs, the search explicitly minimizes actual latency on target hardware (mobile CPUs, GPUs, edge accelerators). MobileNetV3's search space includes a latency prediction model that estimates inference time for each candidate architecture on Pixel phones without actually deploying them. This hardware-in-the-loop approach ensures discovered architectures run efficiently on real devices rather than just achieving low theoretical FLOP counts.
 
-#### Search Strategies {#sec-model-compression-search-strategies-34c5}
+#### Search Strategies {#sec-model-compression-search-strategies-84ad}
 
 Search strategies determine how to explore the architecture space efficiently without exhaustive enumeration. @tbl-nas-strategies compares the trade-offs between search cost, architectural diversity, and optimality guarantees for each approach.
 
@@ -2685,7 +2685,7 @@ $$
 
 where $L(\alpha)$ is measured latency, $L_{\text{target}}$ is the latency constraint, and $\beta$ controls the accuracy-latency trade-off. This formulation penalizes architectures that exceed latency targets while rewarding those that achieve high accuracy within the budget. MnasNet discovered that inverted residuals with varying expansion ratios achieve better accuracy-latency trade-offs than uniform expansion, a design insight that manual exploration likely would have missed.
 
-#### When to Use NAS {#sec-model-compression-use-nas-2d7e}
+#### When to Use NAS {#sec-model-compression-use-nas-2b47}
 
 Neural Architecture Search is a powerful tool, but its significant computational cost demands careful consideration of when the investment is justified.
 
@@ -2695,7 +2695,7 @@ Conversely, avoid NAS when working with standard deployment constraints (e.g., R
 
 For most practitioners, starting with existing NAS-discovered architectures (EfficientNet, MobileNetV3, MnasNet) provides better ROI than running NAS from scratch. These architectures are highly tuned and generalize well across tasks. Reserve custom NAS for scenarios with truly novel constraints or deployment scales that justify the investment.
 
-#### Architecture Examples {#sec-model-compression-architecture-examples-b5b5}
+#### Architecture Examples {#sec-model-compression-architecture-examples-b1ce}
 
 NAS-discovered architectures consistently demonstrate design insights that manual exploration would likely miss. EfficientNet\index{EfficientNet}\index{Neural Architecture Search (NAS)!EfficientNet}\index{Compound Scaling} discovered that depth, width, and resolution should scale with fixed compound coefficients rather than independently — a principle that achieves higher accuracy with fewer parameters across the entire model family from mobile to cloud deployment. MobileNetV3\index{MobileNetV3}\index{Neural Architecture Search (NAS)!MobileNetV3}\index{Hardware-Aware Optimization!mobile deployment} optimized specifically for mobile hardware, discovering that inverted residual blocks with squeeze-and-excitation layers and the h-swish activation function achieve better accuracy-latency trade-offs than any prior MobileNet variant. FBNet extended this to real-time inference on mobile CPUs by incorporating device-specific latency constraints directly into the search objective [@radosavovic2020designing].
 
@@ -2716,7 +2716,7 @@ Test your understanding of the structural optimization techniques covered so far
 - [ ] Can you identify when to choose Neural Architecture Search over manual architecture design? Consider the trade-offs in computational cost, design space coverage, and hardware-specific optimization.
 :::
 
-## Quantization and Precision {#sec-model-compression-quantization-precision-optimization-31d3}
+## Quantization and Precision {#sec-model-compression-quantization-precision-cd46}
 \index{Model Compression!precision optimization}
 
 *Quantization*, the process of reducing numerical precision, offers one of the most impactful optimizations for deployment: trading bits for speed and efficiency with minimal accuracy loss.
@@ -2737,12 +2737,12 @@ This choice directly impacts three system properties. Memory shrinks because an 
 
 The accuracy cost of reduced precision varies by model and technique. CNNs typically tolerate INT8 quantization with <1% accuracy loss; transformers may require more care. This section covers three approaches in increasing complexity: **post-training quantization**\index{Quantization!post-training (PTQ)} (PTQ) for rapid deployment, **quantization-aware training**\index{Quantization!aware training (QAT)} (QAT) for production systems requiring minimal accuracy loss, and **extreme quantization**\index{Quantization!extreme (INT4, binary)} (INT4, binary) for the most constrained environments.
 
-### Precision and Energy {#sec-model-compression-precision-energy-7eea}
+### Precision and Energy {#sec-model-compression-precision-energy-cc8e}
 
 \index{Energy Efficiency!numerical precision impact}
 Efficient numerical representations reduce storage requirements, computation latency, and power usage, benefiting mobile AI, embedded systems, and cloud inference alike. Precision levels can be tuned to specific hardware capabilities, maximizing throughput on AI accelerators such as GPUs, TPUs, NPUs, and edge AI chips.
 
-#### Energy Costs {#sec-model-compression-energy-costs-fb60}
+#### Energy Costs {#sec-model-compression-energy-costs-d1d5}
 
 \index{DRAM!energy cost of access}
 Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately `{python} energy_add_fp32_str` pJ, whereas a 16-bit floating-point addition requires only `{python} energy_add_fp16_str` pJ. Similarly, a 32-bit integer addition costs `{python} energy_add_int32_str` pJ, while an 8-bit integer addition is just `{python} energy_add_int8_str` pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
@@ -2846,7 +2846,7 @@ Beyond computational and memory benefits, the energy costs associated with diffe
 These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint. *DLRM embedding quantization* illustrates this distinction.
 
 ::: {.callout-lighthouse title="DLRM and Embedding Quantization"}
-**The Memory Capacity Constraint**: Our **DLRM Lighthouse** (@sec-dnn-architectures) presents a unique compression challenge. Unlike ResNet or GPT, which are constrained by compute or bandwidth, DLRM is constrained by **Memory Capacity**. Its embedding tables can reach terabytes in size, far exceeding GPU memory.
+**The Memory Capacity Constraint**: Our **DLRM Lighthouse** (@sec-network-architectures) presents a unique compression challenge. Unlike ResNet or GPT, which are constrained by compute or bandwidth, DLRM is constrained by **Memory Capacity**. Its embedding tables can reach terabytes in size, far exceeding GPU memory.
 
 For DLRM, quantization is not about faster math; it's about **storage density**. Quantizing embedding tables from FP32 to INT8 (or INT4) reduces memory footprint by 4-8$\times$, allowing larger tables to fit on fewer GPUs. This is a pure **Information Density** optimization: we compress the lookup table so the **Machine** (Physics) can hold the **Algorithm** (Logic).
 :::
@@ -2866,7 +2866,7 @@ Beyond direct compute savings, reducing numerical precision has a significant im
 
 Reducing numerical precision thus improves efficiency on two fronts: faster computation and less data movement. This dual benefit is especially valuable for hardware accelerators and edge devices, where memory bandwidth and power efficiency are binding constraints.
 
-#### Performance Gains {#sec-model-compression-performance-gains-53a1}
+#### Performance Gains {#sec-model-compression-performance-gains-0656}
 
 The practical payoff of quantization becomes concrete in @fig-quantization_impact. Compare the left bars (inference time) and right bars (model size) in each category to see the gains when moving from FP32 to INT8. Quantized models achieve up to $4\times$ faster inference while reducing storage requirements by the same factor, making them well suited for deployment in resource-constrained environments.
 
@@ -3126,7 +3126,7 @@ To appreciate how precision loss manifests in practice, examine the representati
 **The Systems Insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high arithmetic intensity) see ~`{python} a100_int8_speedup_str`× from faster INT8 units. The bandwidth-bound case (demonstrated in the Optimization Framework's napkin math) achieves up to `{python} bandwidth_bound_speedup_str`× because memory traffic dominates, so halving data size nearly doubles effective throughput for both bandwidth and compute.
 :::
 
-### Numerical Format Comparison {#sec-model-compression-numerical-format-comparison-3866}
+### Numerical Format Comparison {#sec-model-compression-numerical-format-comparison-8fa2}
 
 @tbl-numerics compares commonly used numerical precision formats in machine learning, each exhibiting distinct trade-offs in storage efficiency, computational speed, and energy consumption. Emerging formats like FP8\index{FP8} and TF32\index{TF32 (TensorFloat-32)} have been introduced to further optimize performance, especially on AI accelerators.
 
@@ -3226,12 +3226,12 @@ INT8\index{INT8!efficiency gains}\index{Quantization!INT8 (8-bit integer)} preci
 Binary and ternary networks\index{Quantization!binary networks}\index{Quantization!ternary networks} represent the extreme end of quantization, where weights and activations are constrained to 1-bit (binary) or 2-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used. Our *keyword spotting* lighthouse lives precisely in this regime, necessitating strategies for *keyword spotting and extreme compression*.
 
 ::: {.callout-lighthouse title="Keyword Spotting and Extreme Compression"}
-**The Extreme Constraint**: Our **Keyword Spotting (KWS) Lighthouse** (@sec-dnn-architectures) lives here. Running on a microcontroller with 256KB of SRAM means "standard" compression is not enough.
+**The Extreme Constraint**: Our **Keyword Spotting (KWS) Lighthouse** (@sec-network-architectures) lives here. Running on a microcontroller with 256KB of SRAM means "standard" compression is not enough.
 
 For KWS, INT8 quantization is often just the *starting point*. To fit complex acoustic models into embedded sensors, engineers push toward **INT4** or even **Binary** weights. In this regime, the **Information** (Data) is noisy audio, the **Logic** (Algorithm) is highly simplified, and the **Physics** (Machine) has a power budget measured in microwatts.
 :::
 
-### Energy Efficiency and Sustainability {#sec-model-compression-energy-efficiency-sustainability-8f3a}
+### Energy Efficiency and Sustainability {#sec-model-compression-energy-efficiency-sustainability-7150}
 \index{Energy Efficiency!quantization benefits}
 \index{Model Compression!energy efficiency}
 
@@ -3239,7 +3239,7 @@ Quantization reduces energy consumption through two complementary mechanisms: sm
 
 These gains depend on hardware support. AI accelerators with dedicated low-precision units (Tensor Cores for FP16/INT8, or the newer FP8 units on H100-class hardware) realize the full energy benefit, while general-purpose CPUs lacking such units see limited improvement. The practical implication is that energy efficiency from quantization is not a software-only optimization; it requires matching the chosen precision format to the target hardware's arithmetic capabilities.
 
-### Precision Reduction Strategies {#sec-model-compression-precision-reduction-strategies-9cbc}
+### Precision Reduction Strategies {#sec-model-compression-precision-reduction-strategies-db83}
 
 The preceding sections established *why* reduced precision matters: fewer bits means less energy, less memory traffic, and faster arithmetic. The question now is *how* to reduce precision without destroying model accuracy. Naive quantization introduces errors that degrade predictions, so practitioners need structured strategies that control *where* and *how* precision is reduced.
 
@@ -3436,14 +3436,14 @@ Binary/Ternary Networks Extreme Quantization};
 ```
 :::
 
-#### Post-Training Quantization {#sec-model-compression-posttraining-quantization-924a}
+#### Post-Training Quantization {#sec-model-compression-posttraining-quantization-bb5b}
 
 Post-training quantization\index{Post-Training Quantization (PTQ)!definition} (PTQ) reduces numerical precision after training, converting weights and activations from high-precision formats (FP32) to lower-precision representations (INT8\index{INT8!inference} or FP16\index{FP16!inference}) without retraining [@jacob2018quantization]. This achieves smaller model sizes, faster computation, and reduced energy consumption, making it practical for resource-constrained environments such as mobile devices, edge AI systems, and cloud inference platforms [@wu2020integer].
 
 \index{Framework Toolkits!quantization support}
 PTQ's key advantage is low computational cost: it requires no retraining or access to training data. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks (TensorFlow Lite, ONNX Runtime, PyTorch) provide built-in PTQ support.
 
-##### PTQ Functionality {#sec-model-compression-ptq-functionality-3aaf}
+##### PTQ Functionality {#sec-model-compression-ptq-functionality-bd56}
 
 \index{Quantization!scaling factor}
 The core mechanism of PTQ is uniform quantization\index{Quantization!uniform}, which maps floating-point values to discrete integer levels using a consistent scaling factor. Because the interval between each quantized value is constant, uniform quantization simplifies implementation and enables efficient hardware execution. The quantized value $q$ is computed as:
@@ -3495,7 +3495,7 @@ An alternative, non-uniform quantization\index{Quantization!non-uniform}, assign
 
 PTQ works well for computer vision models, where CNNs often tolerate quantization without significant accuracy loss. Models that rely on small numerical differences, such as NLP transformers or speech recognition systems, may require quantization-aware training or non-uniform strategies to retain performance.
 
-##### Calibration {#sec-model-compression-calibration-fe14}
+##### Calibration {#sec-model-compression-calibration-c650}
 
 An important aspect of PTQ is the calibration\index{Quantization!calibration} step, which selects the clipping range [$\alpha$, $\beta$] for quantizing model weights and activations. The effectiveness of precision reduction depends heavily on this chosen range: without proper calibration, quantization may cause significant accuracy degradation. Calibration ensures that the chosen range minimizes information loss and preserves model performance.
 
@@ -3540,7 +3540,7 @@ Common calibration methods include **Max**\index{Quantization!calibration!max me
 
 Calibration ranges can be **symmetric**\index{Quantization!symmetric} (equal positive and negative scaling) or **asymmetric**\index{Quantization!asymmetric} (different scaling factors for each side, useful when distributions are skewed). The choice of method and range significantly affects quantized model accuracy.
 
-##### Tuning Quantization Ranges {#sec-model-compression-calibration-ranges-cd54}
+##### Tuning Quantization Ranges {#sec-model-compression-tuning-quantization-ranges-439d}
 
 A key challenge in post-training quantization is selecting the appropriate calibration range $[\alpha, \beta]$ to map floating-point values into a lower-precision representation. The choice of this range directly affects the quantization error and, consequently, the accuracy of the quantized model. @fig-calibration-ranges contrasts the two primary calibration strategies: symmetric calibration and asymmetric calibration.
 
@@ -3708,7 +3708,7 @@ Suppose your activations range from $\alpha$ = `{python} alpha_str` to $\beta$ =
 So, the real value $0.0$ is represented by the integer `{python} zero_point_str`. This ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift" where padding introduces non-zero noise.
 :::
 
-##### Granularity {#sec-model-compression-quantization-granularity-7f3a}
+##### Granularity {#sec-model-compression-granularity-93b3}
 
 After determining the clipping range, the next optimization step is adjusting the granularity of that range to retain as much accuracy as possible. In CNNs, the input activations of a layer undergo convolution with multiple filters, each of which may have a unique range of values. The quantization process must account for these differences to preserve model performance.
 
@@ -3944,7 +3944,7 @@ Channelwise quantization has become the dominant approach, providing significant
 
 With granularity determined, the next consideration is what to quantize. Neural networks contain two primary numerical components: the static weights learned during training and the dynamic activations computed during inference. Each presents distinct quantization challenges.
 
-##### Weights vs. Activations {#sec-model-compression-weights-vs-activations-101f}
+##### Weights vs. Activations {#sec-model-compression-weights-vs-activations-5efb}
 
 \index{Quantization!weight vs activation}
 Weight Quantization\index{Quantization!weight} involves converting the continuous, high-precision weights of a model into lower-precision values, such as converting 32-bit floating-point (Float32) weights to 8-bit integer (INT8) weights. In @fig-weight-activations-quantization, focus on the second step (red squares) to see where weight quantization enters the multiply-accumulate pipeline. This process significantly reduces the model size, decreasing both the memory required to store the model and the computational resources needed for inference. For example, a weight matrix in a neural network layer with Float32 weights like $[0.215, -1.432, 0.902,\ldots]$ might be mapped to INT8 values such as $[27, -183, 115, \ldots]$, leading to a significant reduction in memory usage.
@@ -4012,7 +4012,7 @@ Recent advancements have explored **Activation-aware Weight Quantization (AWQ)**
 
 [^fn-awq]: **Activation-aware Weight Quantization (AWQ)**: Observes that only approximately 1% of weights disproportionately affect accuracy based on activation patterns. By protecting these salient weights while aggressively quantizing others, AWQ achieves INT4 quantization of LLaMA-7B with <1% perplexity degradation. Delivers 3.2× speedup on A100 GPUs by reducing memory bandwidth requirements from 14GB to 3.5GB per inference.
 
-##### Static vs. Dynamic Quantization {#sec-model-compression-static-vs-dynamic-quantization-ca12}
+##### Static vs. Dynamic Quantization {#sec-model-compression-static-vs-dynamic-quantization-4791}
 
 After determining the type and granularity of the clipping range, practitioners must decide *when* the clipping ranges are calculated. Two primary approaches exist for quantizing activations: static quantization\index{Quantization!static} and dynamic quantization\index{Quantization!dynamic}.
 
@@ -4055,13 +4055,13 @@ Precision reduction is the most impactful deployment optimization.
 - [ ] **Latency vs. Throughput**: Why does INT8 improve throughput on GPUs but only latency on CPUs? (Hint: Parallelism vs. Instruction Efficiency).
 :::
 
-##### PTQ in Practice {#sec-model-compression-ptq-in-practice-c3d6}
+##### PTQ in Practice {#sec-model-compression-ptq-practice-2800}
 
 The preceding subsections reveal PTQ's core trade-off: simplicity versus accuracy control. PTQ requires no retraining and can be applied to any pre-trained model in minutes, making it the default starting point for deployment optimization. For rapid deployment scenarios with production deadlines under two weeks and acceptable accuracy loss of 1–2%, PTQ with appropriate calibration often provides a complete solution.
 
 The limitation is that PTQ offers no mechanism to recover from accuracy loss. If the quantized model's accuracy drops below the production threshold — a common outcome for transformer-based architectures where attention mechanisms amplify small numerical differences — the only recourse is to choose a less aggressive precision format, which sacrifices the efficiency gains that motivated quantization in the first place. This ceiling on PTQ's accuracy preservation motivates a more powerful approach: rather than applying quantization as a post-hoc transformation, we can integrate precision constraints directly into the training process itself.
 
-#### Quantization-Aware Training {#sec-model-compression-quantizationaware-training-108e}
+#### Quantization-Aware Training {#sec-model-compression-quantizationaware-training-4032}
 
 QAT\index{Quantization-Aware Training (QAT)!definition} integrates quantization constraints directly into the training process, simulating low-precision arithmetic during forward passes to allow the model to adapt to quantization effects [@jacob2018quantization]. Production systems requiring less than 1% accuracy loss benefit most from this approach, which recovers accuracy through fine-tuning with quantization simulation at the cost of 20–50% additional training time. This approach is particularly important for models requiring fine-grained numerical precision, such as transformers used in NLP and speech recognition systems [@nagel2021white]. The QAT pipeline, outlined in @fig-qat, applies quantization to a pre-trained model and then fine-tunes it so the weights learn to compensate for low-precision constraints.
 
@@ -4155,7 +4155,7 @@ anchor=north,fill=BackColor]{QAT};
 ```
 :::
 
-##### Training Mathematics {#sec-model-compression-training-mathematics-4a6c}
+##### Training Mathematics {#sec-model-compression-training-mathematics-699e}
 
 During forward propagation, weights and activations are quantized and dequantized to mimic reduced precision. Let $x$ be a full-precision value, $s$ the scaling factor that maps floating-point values into a lower-precision range, and $q$ the simulated quantized value. This process is typically represented as:
 $$
@@ -4171,7 +4171,7 @@ Although the forward pass utilizes quantized values, gradient calculations durin
 
 Integrating quantization effects during training enables the model to learn weight and activation distributions that minimize numerical precision loss. The resulting model, when deployed using true low-precision arithmetic (e.g., INT8 inference), maintains significantly higher accuracy than one that is quantized post hoc [@krishnamoorthi2018quantizing].
 
-##### Fake Quantization Nodes and Implementation {#sec-model-compression-fake-quantization-nodes-implementation-b63e}
+##### Fake Quantization Nodes and Implementation {#sec-model-compression-fake-quantization-nodes-implementation-e822}
 
 QAT implementation relies on fake quantization\index{Quantization-Aware Training (QAT)!fake quantization} operations that simulate quantization during forward propagation while maintaining full precision for gradient computation. These operations insert quantize-dequantize pairs into the computational graph, creating a training-time simulation of inference-time behavior.
 
@@ -4235,7 +4235,7 @@ During backpropagation, the full-precision gradient $\frac{\partial L}{\partial 
 
 In practice, frameworks like PyTorch and TensorFlow implement fake quantization as custom autograd operators whose forward pass performs the quantize-dequantize round trip while the backward pass applies the STE mask directly. Two implementation details deserve attention. First, scale factors should not remain static throughout training — as weight distributions evolve, scales must track these changes via exponential moving averages to prevent scale mismatch between training and deployment. Second, batch normalization layers require special handling\index{Batch Normalization!QAT interaction}: their running statistics must be computed on fake-quantized activations rather than full-precision values, ensuring that inference with true INT8 operations uses parameters calibrated for quantized distributions.
 
-##### QAT Trade-offs {#sec-model-compression-qat-tradeoffs-f52c}
+##### QAT Trade-offs {#sec-model-compression-qat-tradeoffs-e8ef}
 
 QAT's[^fn-qat-performance] primary advantage is accuracy preservation under low-precision inference. By incorporating quantization noise during training, the model learns weight distributions that tolerate reduced precision, and AI processors with dedicated integer units (TPUs, NPUs, edge accelerators) can then exploit INT8 arithmetic for faster, lower-energy inference without significant accuracy degradation [@wu2020integer; @gholami2021survey]. QAT particularly benefits quantization-sensitive architectures: transformers for NLP, speech recognition encoders, and high-resolution vision models where attention mechanisms amplify small numerical differences.
 
@@ -4247,14 +4247,14 @@ In practice, the choice between PTQ and QAT follows a simple decision rule: star
 
 Both PTQ and QAT typically target 8-bit or 4-bit precision while maintaining near-original accuracy. Some deployment scenarios, however, demand even more aggressive compression, pushing precision to the absolute limits of what neural networks can tolerate.
 
-### Extreme Quantization {#sec-model-compression-extreme-quantization-030c}
+### Extreme Quantization {#sec-model-compression-extreme-quantization-aba4}
 
 Beyond INT8 and INT4\index{INT4!extreme quantization}\index{Quantization!INT4 (4-bit integer)} quantization, extreme quantization techniques use 1-bit (binarization)\index{Quantization!binarization} or 2-bit (ternarization)\index{Quantization!ternarization} representations to achieve dramatic reductions in memory usage and computational requirements [@Courbariaux2016]. Binarization\index{Binary Neural Networks} constrains weights and activations to two values (typically -1 and +1, or 0 and 1), drastically reducing model size and accelerating inference on specialized hardware like binary neural networks [@Rastegari2016]. However, this constraint severely limits model expressiveness, often degrading accuracy on tasks requiring high precision such as image recognition or natural language processing [@Hubara2018].
 
 \index{Ternary Networks!definition}
 Ternarization extends binarization by allowing three values (-1, 0, +1), providing additional flexibility that slightly improves accuracy over pure binarization [@Zhu2017]. The zero value enables greater sparsity while maintaining more representational power. Both techniques require gradient approximation methods like Straight-Through Estimator (STE) to handle non-differentiable quantization operations during training [@bengio2013estimating], with QAT integration helping mitigate accuracy loss [@Choi2019].
 
-#### Challenges and Limitations {#sec-model-compression-challenges-limitations-b212}
+#### Challenges and Limitations {#sec-model-compression-challenges-limitations-a99c}
 
 Despite enabling ultra-low-power machine learning for embedded systems and mobile devices, binarization and ternarization face significant challenges. Performance maintenance is difficult with such drastic quantization, requiring specialized hardware capable of efficiently handling binary or ternary operations [@Umuroglu2017]. Traditional processors lack optimization for these computations, necessitating custom hardware accelerators.
 
@@ -4277,17 +4277,17 @@ Yet practitioners often discover a frustrating gap between theory and practice: 
 
 The gap arises from several sources. Sparse matrices stored in dense format waste memory bandwidth loading zeros—the hardware cannot skip what it does not know is zero. Operations that could run in parallel execute sequentially due to data dependencies the compiler cannot resolve. Simple inputs receive the same computational budget as complex ones because the model has no mechanism to exit early. Closing the gap between "optimized on paper" and "optimized in practice" is the domain of our third optimization dimension: **architectural efficiency**. This dimension ensures that structural and precision optimizations translate into real-world speedups by aligning computation patterns with hardware capabilities.
 
-## Architectural Efficiency {#sec-model-compression-architectural-efficiency-techniques-daa6}
+## Architectural Efficiency {#sec-model-compression-architectural-efficiency-8dd3}
 
 Architectural efficiency optimization ensures that computations execute efficiently on target hardware by aligning model operations with processor capabilities and memory hierarchies. Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute, architectural efficiency addresses *how* operations are scheduled, memory is accessed, and workloads adapt to input characteristics. This third dimension closes the gap between theoretical compression ratios and real-world speedups.
 
 Four complementary approaches to architectural efficiency are examined: hardware-aware design principles that proactively integrate deployment constraints during model development, sparsity exploitation techniques that accelerate computation on pruned models, dynamic computation strategies that adapt workload to input complexity, and operator fusion methods that reduce memory traffic by combining operations. These techniques transform algorithmic optimizations into realized performance gains.
 
-### Hardware-Aware Design {#sec-model-compression-hardwareaware-design-7b7c}
+### Hardware-Aware Design {#sec-model-compression-hardwareaware-design-c561}
 
 Closing the gap between theoretical complexity reduction and real-world performance requires incorporating hardware constraints directly into the model design process.\index{Hardware-Aware Design!principles}\index{Hardware-Aware Optimization!design principles} Hardware-aware design addresses this by ensuring that architectural decisions account for memory bandwidth, parallelism capabilities, and energy budgets from the outset, rather than treating hardware compatibility as an afterthought.
 
-#### Efficient Design Principles {#sec-model-compression-efficient-design-principles-0b50}
+#### Efficient Design Principles {#sec-model-compression-efficient-design-principles-b015}
 
 Designing for hardware efficiency requires structuring architectures to account for computational cost, memory usage, inference latency, and power consumption while maintaining strong predictive performance. A key aspect involves leveraging the strengths of specific hardware platforms (GPUs, TPUs, mobile or edge devices) to maximize parallelism, optimize memory hierarchies, and minimize latency through hardware-optimized operations. @tbl-hardware-efficient-design categorizes these design principles, each addressing a core aspect of computational and system constraints.
 
@@ -4306,7 +4306,7 @@ The principles in @tbl-hardware-efficient-design work synergistically: scaling o
 
 The following subsections examine each principle in detail, beginning with how to scale model dimensions effectively.
 
-#### Scaling Optimization {#sec-model-compression-scaling-optimization-2e3a}
+#### Scaling Optimization {#sec-model-compression-scaling-optimization-6ad9}
 
 Scaling a model's architecture involves balancing accuracy with computational cost and aligning it with the capabilities of the target hardware. The question is not simply "how big should the model be?" but rather "how should size be distributed across different dimensions?" Each component of a model—whether its depth, width, or input resolution—impacts resource consumption differently. In hardware-aware design, these dimensions should not only be optimized for accuracy but also for efficiency in memory usage, processing power, and energy consumption, especially when the model is deployed on specific hardware like GPUs, TPUs, or edge devices.
 
@@ -4325,11 +4325,11 @@ $$
 Here, $\phi$ is a scaling coefficient, and $\alpha$, $\beta$, and $\gamma$ are scaling factors determined based on hardware constraints and empirical data. This approach ensures that models grow in a way that optimizes hardware resource usage, keeping them efficient while improving accuracy.
 
 \index{EfficientNet!compound scaling validation}
-For example, the NAS-discovered **EfficientNet** (@sec-model-compression-neural-architecture-search-f1e9) empirically validated this principle. Its search algorithm found that carefully balancing depth, width, and resolution via **compound scaling** yielded models that were both computationally efficient and high-performing, outperforming architectures that scaled dimensions arbitrarily. Compound scaling reduces computational cost while preserving accuracy, making it a key consideration for hardware-aware model design. This approach is particularly beneficial when deploying models on GPUs or TPUs, where parallelism can be fully leveraged, but memory and power usage need to be carefully managed. @sec-benchmarking-ai examines performance evaluation methods for measuring these efficiency gains.
+For example, the NAS-discovered **EfficientNet** (@sec-model-compression-neural-architecture-search-cf12) empirically validated this principle. Its search algorithm found that carefully balancing depth, width, and resolution via **compound scaling** yielded models that were both computationally efficient and high-performing, outperforming architectures that scaled dimensions arbitrarily. Compound scaling reduces computational cost while preserving accuracy, making it a key consideration for hardware-aware model design. This approach is particularly beneficial when deploying models on GPUs or TPUs, where parallelism can be fully leveraged, but memory and power usage need to be carefully managed. @sec-benchmarking examines performance evaluation methods for measuring these efficiency gains.
 
 This principle extends beyond convolutional models to other architectures like transformers. Adjusting the number of layers, attention heads, or embedding dimensions impacts computational efficiency similarly. Hardware-aware scaling has become central to optimizing model performance across various computational constraints, especially when working with large models or resource-constrained devices.
 
-#### Computation Reduction {#sec-model-compression-computation-reduction-3222}
+#### Computation Reduction {#sec-model-compression-computation-reduction-13de}
 
 Modern architectures leverage factorized computations to decompose complex operations into simpler components, reducing computational overhead while maintaining representational power. Standard convolutions apply filters uniformly across all spatial locations and channels, creating computational bottlenecks on resource-constrained hardware. Factorization techniques address this inefficiency by restructuring operations to minimize redundant computation.
 
@@ -4350,7 +4350,7 @@ Complementary factorization techniques extend these benefits. Grouped convolutio
 
 While reducing computation is essential, memory constraints often prove more limiting than compute capacity on resource-constrained devices. The next section addresses these memory bottlenecks directly.
 
-#### Memory Optimization {#sec-model-compression-memory-optimization-e6ac}
+#### Memory Optimization {#sec-model-compression-memory-optimization-8c43}
 
 Memory optimization[^fn-memory-optimization] addresses performance bottlenecks arising when memory demands for activations, feature maps, and parameters exceed hardware capacity on resource-constrained devices. Modern architectures employ memory-efficient strategies to reduce storage requirements while maintaining performance, ensuring computational tractability and energy efficiency on GPUs, TPUs, and edge AI platforms.
 
@@ -4366,7 +4366,7 @@ In contrast, DenseNet reuses feature maps from earlier layers, reducing the numb
 
 Another technique is activation checkpointing\index{Activation Checkpointing}\index{Memory Optimization!activation checkpointing}[^fn-activation-checkpointing-compression], especially beneficial during training. Standard backpropagation requires storing all forward activations for the backward pass, which creates significant memory overhead for large models. Activation checkpointing reduces memory consumption by storing only a subset of activations and recomputing the remainder when needed.
 
-[^fn-activation-checkpointing-compression]: **Activation Checkpointing**: Also called gradient checkpointing. Reduces memory usage by 20--50% in large transformers with only 15--20% training time overhead by recomputing activations instead of storing them. See @sec-ai-training for the full etymology and systems analysis.
+[^fn-activation-checkpointing-compression]: **Activation Checkpointing**: Also called gradient checkpointing. Reduces memory usage by 20--50% in large transformers with only 15--20% training time overhead by recomputing activations instead of storing them. See @sec-model-training for the full etymology and systems analysis.
 
 If an architecture requires storing $A_{\text{total}}$ activations, the standard backpropagation method requires the full storage:
 $$
@@ -4487,7 +4487,7 @@ fused_time_us_str = fmt(fused_time_us_value, precision=1, commas=False)
 fusion_speedup_str = fmt(fusion_speedup_value, precision=2, commas=False)
 ```
 
-#### Operator Fusion {#sec-model-compression-operator-fusion-c1b4}
+#### Operator Fusion {#sec-model-compression-operator-fusion-ac1d}
 
 \index{Operator Fusion!GEMM fusion}
 Operator fusion\index{Operator Fusion!definition}\index{Architectural Efficiency!operator fusion} combines multiple computational operations into single fused kernels, reducing intermediate memory traffic and kernel launch overhead. To understand why this matters, consider a typical neural network layer: convolution followed by batch normalization followed by ReLU. Without fusion, each operation writes its output to GPU global memory, then the next operation reads that output back. This results in three memory round-trips for what could be computed entirely in fast on-chip registers. This graph-level optimization technique addresses a pervasive inefficiency in deep learning execution: sequential operations that write intermediate results to memory only to immediately read them back for the next operation. By fusing operations, inference engines eliminate these redundant memory transactions, improving both throughput and latency on memory-bound workloads.
@@ -4662,9 +4662,9 @@ output = linear(attn_output)
 ```
 :::
 
-This fusion pattern[^fn-flashattention-compression] achieves 2–4× speedup on long sequences by dramatically reducing memory bandwidth requirements—a technique central to enabling long-context transformers, as detailed in @sec-ai-training-flash-attention-ioaware-attention-optimization-3da0.
+This fusion pattern[^fn-flashattention-compression] achieves 2–4× speedup on long sequences by dramatically reducing memory bandwidth requirements—a technique central to enabling long-context transformers, as detailed in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
-[^fn-flashattention-compression]: FlashAttention\index{FlashAttention} (introduced in @sec-dnn-architectures) demonstrates fusion's power for memory-bound attention: tiling to SRAM yields 2–4× speedup and enables 64K context windows by reducing memory traffic from O(n^2) to O(n). This exemplifies how operator fusion can transform memory-bound bottlenecks into compute-bound operations.
+[^fn-flashattention-compression]: FlashAttention\index{FlashAttention} (introduced in @sec-network-architectures) demonstrates fusion's power for memory-bound attention: tiling to SRAM yields 2–4× speedup and enables 64K context windows by reducing memory traffic from O(n^2) to O(n). This exemplifies how operator fusion can transform memory-bound bottlenecks into compute-bound operations.
 
 Memory bandwidth analysis quantifies these fusion benefits concretely. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (`{python} feat_map_kb_str` KB). Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} feat_map_kb_str` KB) plus weights (`{python} weights_mb_str` MB) and writes output (`{python} feat_map_kb_str` KB), totaling `{python} unfused_conv_mb_str` MB. BN then reads that output, adds its parameters (`{python} bn_params_kb_str` KB), and writes again, for `{python} unfused_bn_mb_str` MB. ReLU repeats the pattern for another `{python} unfused_relu_mb_str` MB. The total unfused memory traffic is `{python} total_unfused_mb_str` MB. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} total_fused_mb_str` MB — a `{python} bandwidth_reduction_pct_str`% bandwidth reduction.
 
@@ -4716,16 +4716,16 @@ Fusion trade-offs include increased compilation time, reduced flexibility for dy
 
 Operator fusion optimizes how operations execute by reducing memory traffic between fixed computational steps. A complementary approach asks a different question: must we execute all computational steps at all? This leads to adaptive computation methods that vary the amount of work performed based on input characteristics.
 
-### Adaptive Computation Methods {#sec-model-compression-adaptive-computation-methods-3494}
+### Adaptive Computation Methods {#sec-model-compression-adaptive-computation-methods-d164}
 
 \index{Adaptive Inference!definition}
 The preceding techniques (hardware-aware design and operator fusion) optimize models uniformly: every input receives the same computational treatment regardless of its complexity. Consider image classification: a photo of a cat against a plain white background requires less analysis than a cat partially hidden in a cluttered room. Adaptive computation methods challenge the uniform-computation assumption by allowing models to vary the amount of work performed on a per-input basis. This flexibility enables significant efficiency gains in practice, as many real-world inputs are simple enough to classify correctly with only a fraction of the full network. The following subsections examine dynamic schemes that adjust computation at inference time and conditional execution strategies that selectively activate model components.
 
-#### Dynamic Schemes {#sec-model-compression-dynamic-schemes-6b78}
+#### Dynamic Schemes {#sec-model-compression-dynamic-schemes-e9ff}
 
 If some inputs are simpler than others, why should all inputs receive the same computational budget? Dynamic schemes answer this question by modifying the computation graph at inference time, enabling models to allocate resources proportionally to input difficulty. These approaches range from early exit architectures that terminate processing when confidence is sufficient to mixture-of-experts models that activate only relevant subnetworks. Each strategy offers a distinct mechanism for reducing average-case computation while preserving worst-case accuracy.
 
-##### Early Exit Architectures {#sec-model-compression-early-exit-architectures-9b61}
+##### Early Exit Architectures {#sec-model-compression-early-exit-architectures-eeb9}
 
 While operator fusion optimizes memory access patterns for fixed computation graphs, adaptive computation\index{Adaptive Computation!early exit} methods address a different inefficiency: conventional models apply uniform processing to all inputs regardless of complexity, wasting resources on simple cases. Dynamic computation allows models to skip layers or operations for simple inputs while engaging deeper networks for complex cases, optimizing efficiency, energy consumption, and latency while preserving predictive performance. This capability is essential for resource-constrained hardware in mobile devices, embedded systems, and autonomous vehicles where real-time processing is critical.
 
@@ -4807,7 +4807,7 @@ Box/.style={inner xsep=2pt,
 ```
 :::
 
-##### Conditional Computation {#sec-model-compression-conditional-computation-a653}
+##### Conditional Computation {#sec-model-compression-conditional-computation-3087}
 
 Conditional computation\index{Conditional Computation!definition}\index{Adaptive Computation!conditional} refers to the ability of a neural network to decide which parts of the model to activate based on the input, thereby reducing unnecessary computation. This approach can be highly beneficial in resource-constrained environments, such as mobile devices or real-time systems, where reducing the number of operations directly translates to lower computational cost, power consumption, and inference latency [@bengio2015conditional].
 
@@ -4820,7 +4820,7 @@ Another example is Dynamic Routing Networks, such as in the Capsule Networks (Ca
 
 These strategies offer significant advantages in real-world applications with limited computational resources. In autonomous driving, for example, the system must process inputs of varying complexity: straightforward lane markings can follow a simpler path, while detecting obstacles or performing detailed scene understanding requires the full model capacity. Conditional computation adapts to input complexity in real time, improving both speed and efficiency [@seo2023neuroflow].
 
-##### Gate-Based Computation {#sec-model-compression-gatebased-computation-778c}
+##### Gate-Based Computation {#sec-model-compression-gatebased-computation-cf6b}
 
 Gate-based conditional computation introduces learned gating mechanisms that dynamically control which parts of a neural network are activated based on input complexity. Unlike static architectures that process all inputs with the same computational effort, this approach enables dynamic activation of sub-networks or layers by learning decision boundaries during training [@shazeer2017outrageously].
 
@@ -5148,7 +5148,7 @@ Gate-based conditional computation is effective for multi-task and transfer lear
 
 However, these benefits come at the cost of increased architectural complexity. The routing and gating operations themselves introduce additional overhead, both in terms of latency and memory access. Efficient deployment on hardware accelerators such as GPUs, TPUs, or edge devices requires careful attention to the scheduling and batching of expert activations [@lepikhin2020gshard].
 
-##### Adaptive Inference {#sec-model-compression-adaptive-inference-7392}
+##### Adaptive Inference {#sec-model-compression-adaptive-inference-9f20}
 
 Early exit and conditional computation represent discrete choices: exit or continue, activate this expert or that one. Adaptive inference pushes this flexibility further by *continuously* modulating computational depth and resource allocation based on real-time confidence and task complexity [@yang2020resolution]. Rather than predefined exit points or discrete layer skipping, adaptive inference treats computation as a dial that can be turned up or down based on intermediate assessments of the input.
 
@@ -5156,7 +5156,7 @@ Fast Neural Networks (FNNs) exemplify this approach, adjusting the number of act
 
 Adaptive inference excels in latency-sensitive applications where resource constraints fluctuate dynamically. In autonomous systems, for example, lane detection may require minimal computation while multi-object tracking in dense environments demands additional processing power. On hardware accelerators such as GPUs and TPUs, adaptive inference leverages parallel processing capabilities by distributing workloads dynamically, maximizing throughput while minimizing energy expenditure.
 
-#### Implementation Challenges {#sec-model-compression-implementation-challenges-8254}
+#### Implementation Challenges {#sec-model-compression-implementation-challenges-1184}
 
 The efficiency gains from dynamic computation come at a price. Techniques like early exit and mixture of experts introduce architectural complexity that can undermine the very speedups they promise if not carefully managed. Dynamic computation introduces several practical challenges:
 
@@ -5165,7 +5165,7 @@ Training complexity poses the first obstacle: discrete gating decisions cannot b
 Overhead and latency variability present the second concern. Gating decisions add computational overhead that can offset savings from skipped computations. Variable inference times are problematic for real-time applications with strict latency requirements.
 
 \index{Hardware Utilization!dynamic computation impact}
-Hardware inefficiency compounds these issues. Dynamic computation patterns reduce hardware utilization because modern accelerators are optimized for regular, predictable operations. When inputs follow different paths, some hardware resources remain idle. See @sec-ai-acceleration for hardware-aware strategies.
+Hardware inefficiency compounds these issues. Dynamic computation patterns reduce hardware utilization because modern accelerators are optimized for regular, predictable operations. When inputs follow different paths, some hardware resources remain idle. See @sec-hardware-acceleration for hardware-aware strategies.
 
 Generalization risks emerge when models learn to allocate insufficient computation to rare but important inputs, creating biased predictions. Dynamic models also introduce new adversarial attack vectors where attackers manipulate gating mechanisms.
 
@@ -5173,10 +5173,10 @@ Evaluation difficulty rounds out the challenge set. Standard benchmarks assume f
 
 Despite these challenges, dynamic computation remains promising for efficiency optimization. Addressing these limitations requires robust training techniques, hardware-aware execution strategies, and evaluation frameworks that account for adaptive scaling.
 
-### Sparsity Exploitation {#sec-model-compression-sparsity-exploitation-5abb}
+### Sparsity Exploitation {#sec-model-compression-sparsity-exploitation-48a6}
 
 \index{Sparsity!etymology}
-Dynamic computation decides *whether* to perform certain operations, but many computations still involve multiplying by zero—a waste that sparsity exploitation\index{Sparsity!exploitation} directly addresses. Recall that pruning (from @sec-model-compression-pruning-2b06) introduces zeros into weight matrices. Sparsity exploitation asks how to *accelerate* computation when those zeros are present. The distinction matters: pruning reduces what we store, while sparsity exploitation reduces what we compute. Sparsity\index{Sparsity!definition}[^fn-sparsity-etymology] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
+Dynamic computation decides *whether* to perform certain operations, but many computations still involve multiplying by zero—a waste that sparsity exploitation\index{Sparsity!exploitation} directly addresses. Recall that pruning (from @sec-model-compression-pruning-d1cb) introduces zeros into weight matrices. Sparsity exploitation asks how to *accelerate* computation when those zeros are present. The distinction matters: pruning reduces what we store, while sparsity exploitation reduces what we compute. Sparsity\index{Sparsity!definition}[^fn-sparsity-etymology] in machine learning refers to the condition where a significant portion of the elements within a tensor, such as weight matrices or activation tensors, are zero or nearly zero.
 
 [^fn-sparsity-etymology]: **Sparsity**: From Latin "sparsus" (scattered, spread out), past participle of "spargere" (to scatter). The mathematical sense dates to the 1950s-1960s when researchers studying linear systems noticed that many real-world matrices had mostly zero entries. In ML, sparsity became central with the development of L1 regularization (LASSO, 1996), which induces exact zeros in weights rather than just small values.
 
@@ -5195,7 +5195,7 @@ where $\epsilon$ is a small threshold value.
 \index{L1 Regularization!sparsity induction}
 Sparsity can emerge naturally during training, often as a result of regularization techniques, or be deliberately introduced through methods like pruning, where elements below a specific threshold are forced to zero. Effectively exploiting sparsity leads to significant computational efficiency, memory savings, and reduced power consumption, which prove valuable when deploying models on devices with limited resources, such as mobile phones, embedded systems, and edge devices.
 
-#### Sparsity Types {#sec-model-compression-sparsity-types-6196}
+#### Sparsity Types {#sec-model-compression-sparsity-types-793d}
 
 Sparsity in neural networks falls into two broad categories: unstructured sparsity and structured sparsity.
 
@@ -5205,7 +5205,7 @@ Unstructured sparsity occurs when individual weights are set to zero without any
 \index{Sparsity!structured}
 Structured sparsity involves removing entire components of the network, such as filters, neurons, or channels. Because these removals produce predictable memory access patterns, structured sparsity is more efficient on hardware accelerators like GPUs or TPUs. It is the preferred approach when deployment requires predictable computational resource usage.
 
-#### Sparsity Utilization Methods {#sec-model-compression-sparsity-utilization-methods-9958}
+#### Sparsity Utilization Methods {#sec-model-compression-sparsity-utilization-methods-04c3}
 
 With the distinction between unstructured and structured sparsity patterns established, the critical question becomes: how do we translate theoretical zeros into actual speedup? The challenge lies in the gap between theoretical parameter reduction and realized performance: a sparse model with 90% of weights zeroed may still run at nearly full computational cost on hardware not designed for irregular memory access. The processor cannot skip a multiplication unless it *knows* the operand is zero—and discovering that requires loading the operand from memory in the first place. Bridging this gap requires specialized utilization methods and hardware support that can efficiently skip zero-valued computations [@hoefler2021sparsity]. Structured sparsity proves more hardware-efficient, enabling accelerators like GPUs and TPUs to fully exploit regular patterns [@Han2015].
 
@@ -5228,11 +5228,11 @@ Low-rank approximations, such as Singular Value Decomposition, are commonly used
 
 Sparsity-aware training complements these methods by helping models learn sparse representations during the training process itself. Sparse gradient descent, which updates only non-zero elements, reduces the number of active parameters throughout training rather than applying compression after the fact [@Bellec2018].
 
-#### Sparsity Hardware Support {#sec-model-compression-sparsity-hardware-support-ea16}
+#### Sparsity Hardware Support {#sec-model-compression-sparsity-hardware-support-588b}
 
-Achieving actual speedups from sparsity requires hardware that can efficiently skip zero-valued computations. The hardware acceleration principles in @sec-ai-acceleration examine how different processor architectures handle sparse patterns with varying effectiveness. Software libraries can help bridge this gap by reformulating sparse computations into patterns that current hardware handles efficiently. For example, MegaBlocks [@gale2022megablocksefficientsparsetraining] reformulates sparse Mixture of Experts training into block-sparse operations, developing specialized kernels that maintain high accelerator utilization despite irregular sparsity patterns.
+Achieving actual speedups from sparsity requires hardware that can efficiently skip zero-valued computations. The hardware acceleration principles in @sec-hardware-acceleration examine how different processor architectures handle sparse patterns with varying effectiveness. Software libraries can help bridge this gap by reformulating sparse computations into patterns that current hardware handles efficiently. For example, MegaBlocks [@gale2022megablocksefficientsparsetraining] reformulates sparse Mixture of Experts training into block-sparse operations, developing specialized kernels that maintain high accelerator utilization despite irregular sparsity patterns.
 
-#### Structured Patterns {#sec-model-compression-structured-patterns-b9bb}
+#### Structured Patterns {#sec-model-compression-structured-patterns-c3f4}
 
 \index{cuSPARSE!block sparse operations}
 Various sparsity formats have been developed, each with unique structural characteristics and implications. Two of the most prominent are block sparse matrices\index{Sparsity!block sparse} and N:M sparsity patterns. Block sparse matrices generally have isolated blocks of zero and non-zero dense submatrices such that a matrix operation on the large sparse matrix can be easily re-expressed as a smaller (overall arithmetic-wise) number of dense operations on submatrices. This sparsity allows more efficient storage of the dense submatricies while maintaining shape compatibility for operations like matrix or vector products. For example, @fig-block-sparse-gemm shows how NVIDIA's cuSPARSE [@nvidia_cusparse_block] library supports sparse block matrix operations and storage. Several other works, such as Monarch matrices [@dao2022monarchexpressivestructuredmatrices], have extended on this block-sparsity to strike an improved balance between matrix expressivity and compute/memory efficiency.
@@ -6309,7 +6309,7 @@ yshift=0mm,fill=none,fit=(cell-1-1DM3),line width=3.5pt](BB3){};
 ```
 :::
 
-Modern hardware accelerators provide specialized support for sparse operations, though the degree of acceleration depends on sparsity structure and hardware capabilities. @sec-ai-acceleration examines these accelerators in depth; here we summarize their sparsity-specific features.
+Modern hardware accelerators provide specialized support for sparse operations, though the degree of acceleration depends on sparsity structure and hardware capabilities. @sec-hardware-acceleration examines these accelerators in depth; here we summarize their sparsity-specific features.
 
 \index{Sparse Tensor Cores}
 GPUs\index{Tensor Cores!sparse acceleration}\index{Hardware-Aware Optimization!sparse tensor cores} with Sparse Tensor Cores (NVIDIA Ampere and later) accelerate structured sparsity patterns like 2:4, achieving up to 2× speedup by skipping zero multiplications [@NVIDIA2020]. However, this acceleration requires the sparsity pattern to match hardware expectations, and unstructured sparsity typically sees limited benefit [@hoefler2021sparsity]. TPUs\index{TPU!sparse matrix support} provide support for sparse weight matrices, though this capability has evolved across generations. The original TPU was designed primarily for dense operations; later versions and research adaptations (such as Sparse-TPU) have added sparse matrix support. The systolic array architecture can process non-zero elements efficiently when sparsity patterns are predictable, making this particularly beneficial for transformer models where large matrix multiplications dominate [@jouppi2021ten]. FPGAs\index{FPGA!custom sparsity patterns} offer the most flexibility: unlike GPUs and TPUs, they can be programmed to handle arbitrary sparse formats, making them suitable for unstructured pruning or application-specific patterns where general-purpose accelerators underperform.
@@ -6318,7 +6318,7 @@ Across all platforms, sparse operations reduce memory bandwidth requirements and
 
 [^fn-sparse-energy-savings]: **Sparse Energy Savings**: Sparse operations significantly reduce energy consumption by accessing fewer elements. For example, structured 2:4 sparsity patterns enable GPU acceleration while maintaining model accuracy. Energy savings vary by hardware platform and sparsity pattern.
 
-#### Challenges and Limitations {#sec-model-compression-challenges-limitations-17c7}
+#### Challenges and Limitations {#sec-model-compression-challenges-limitations-975f}
 
 While sparsity offers significant efficiency advantages, several challenges limit its practical effectiveness. @tbl-sparsity-optimization summarizes these challenges.
 
@@ -6334,7 +6334,7 @@ While sparsity offers significant efficiency advantages, several challenges limi
 : **Sparsity Optimization Challenges**: Unstructured sparsity, while reducing model size, hinders hardware acceleration due to irregular memory access patterns, limiting potential computational savings and requiring specialized hardware or software to realize efficiency gains. {#tbl-sparsity-optimization}
 
 \index{Compressed Sparse Row!storage format}
-The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats (such as Compressed Sparse Row; see @sec-system-foundations-sparse-matrix-formats-7920) add indexing overhead that can offset computational savings—a rule of thumb is that sparsity typically must exceed 90–95% to be worthwhile for performance.
+The central challenge is the gap between theoretical and practical speedups. Unstructured pruning removes individual weights based on importance, creating irregular patterns that hardware accelerators struggle to exploit. Most GPUs and TPUs optimize for structured data; without regular patterns, they cannot skip zero elements efficiently. Pruning algorithms themselves introduce overhead, as determining which weights to prune requires sophisticated importance estimation that can be computationally expensive for large models. Even when sparsity is achieved, sparse matrix storage formats (such as Compressed Sparse Row; see @sec-algorithm-foundations-sparse-matrix-formats-0bd0) add indexing overhead that can offset computational savings—a rule of thumb is that sparsity typically must exceed 90–95% to be worthwhile for performance.
 
 The accuracy-efficiency trade-off requires careful calibration. Aggressive sparsity can degrade accuracy beyond acceptable thresholds, and the relationship is often non-linear, as models may tolerate 70% sparsity with minimal impact but collapse at 80%. Finding the optimal operating point requires extensive experimentation.
 
@@ -6342,7 +6342,7 @@ Energy efficiency is not guaranteed. While sparse operations reduce arithmetic o
 
 Finally, sparsity benefits vary by model type. Tasks requiring dense representations (image segmentation, some reinforcement learning) may not benefit from sparsity, and older hardware lacking sparse acceleration may see no improvement or even regression.
 
-#### Combined Optimizations {#sec-model-compression-combined-optimizations-6038}
+#### Combined Optimizations {#sec-model-compression-combined-optimizations-99fd}
 
 The techniques examined throughout this chapter (pruning, quantization, operator fusion, dynamic computation, and sparsity) do not exist in isolation. Production deployments rarely apply a single technique; instead, they compose multiple approaches to achieve compression ratios impossible with any individual method. While sparsity offers significant efficiency advantages on its own, it achieves its full potential when combined with other optimization techniques. These combinations introduce coordination challenges that require careful management [@hoefler2021sparsity].
 
@@ -6350,7 +6350,7 @@ The interaction between sparsity and pruning is the most direct: pruning creates
 
 Combining sparsity with quantization yields multiplicative compression but introduces its own complexity. GPUs and TPUs with dedicated sparse tensor cores accelerate this combination effectively, while general-purpose CPUs often struggle with the combined overhead of sparse indexing and dequantization [@nagel2021white; @zhang2021learning].
 
-The recurring theme across all combinations is hardware alignment. Efficient model designs (depthwise separable convolutions, dynamic computation) amplify sparsity benefits only when the target hardware supports the resulting operation patterns [@dettmers2019sparse]. Selecting technique combinations requires understanding target platform capabilities, as explored in @sec-ai-acceleration.
+The recurring theme across all combinations is hardware alignment. Efficient model designs (depthwise separable convolutions, dynamic computation) amplify sparsity benefits only when the target hardware supports the resulting operation patterns [@dettmers2019sparse]. Selecting technique combinations requires understanding target platform capabilities, as explored in @sec-hardware-acceleration.
 
 The coordination challenges inherent in combining sparsity with other techniques point to a broader principle: optimization techniques rarely succeed in isolation, and their effectiveness depends on sequencing decisions and hardware alignment.
 
@@ -6361,11 +6361,11 @@ Unlike software functions that compose predictably, optimization techniques inte
 
 With the three optimization dimensions now fully explored, practitioners need systematic guidance for translating this knowledge into deployment decisions.
 
-## Technique Selection {#sec-model-compression-technique-selection-guide-ac37}
+## Technique Selection {#sec-model-compression-technique-selection-ba16}
 
 Selecting among dozens of optimization techniques requires matching deployment constraints to the most relevant approaches. The following subsections provide structured guidance for this process.
 
-### Mapping Constraints to Techniques {#sec-model-compression-mapping-constraints-techniques-fdbd}
+### Mapping Constraints to Techniques {#sec-model-compression-mapping-constraints-techniques-ff2c}
 
 Understanding how system constraints map to optimization dimensions guides practitioners toward the most relevant approaches. @tbl-constraint-opt-mapping maps system constraints to specific optimization dimensions, guiding technique selection based on deployment requirements.
 
@@ -6381,7 +6381,7 @@ Understanding how system constraints map to optimization dimensions guides pract
 
 Although each system constraint primarily aligns with one or more optimization dimensions, the relationships are not strictly one-to-one. Many optimization techniques affect multiple constraints simultaneously. Structuring model optimization along these three dimensions allows practitioners to analyze trade-offs more effectively and select optimizations that best align with deployment requirements.
 
-### Decision Framework {#sec-model-compression-decision-framework-1896}
+### Decision Framework {#sec-model-compression-decision-framework-0d69}
 
 The following decision framework guides technique selection based on primary deployment constraints.
 
@@ -6422,7 +6422,7 @@ The following decision framework guides technique selection based on primary dep
 - Magnitude-based pruning with fine-tuning (days)
 - Avoid: NAS, full QAT, architecture redesign
 
-This decision framework provides starting points for individual technique selection. Validating that a chosen technique actually achieves its intended goal requires systematic profiling and measurement, which @sec-model-compression-measuring-model-efficiency-00c7 formalizes in detail. However, production deployments rarely rely on a single technique. Combining pruning with quantization, or distillation with hardware-aware design, introduces interaction effects that can either amplify benefits or create unexpected accuracy degradation. The following section addresses how to sequence and combine techniques effectively.
+This decision framework provides starting points for individual technique selection. Validating that a chosen technique actually achieves its intended goal requires systematic profiling and measurement, which @sec-model-compression-efficiency-measurement-2424 formalizes in detail. However, production deployments rarely rely on a single technique. Combining pruning with quantization, or distillation with hardware-aware design, introduces interaction effects that can either amplify benefits or create unexpected accuracy degradation. The following section addresses how to sequence and combine techniques effectively.
 
 ## Optimization Strategies {#sec-model-compression-optimization-strategies-f2f6}
 
@@ -6637,13 +6637,13 @@ This example illustrates why sequencing matters: pruning first concentrates impo
 
 With dozens of techniques across three optimization dimensions, rigorous measurement is essential for validating that optimizations achieve their intended goals. A practitioner who prunes, quantizes, and fuses without profiling the actual impact on target hardware is optimizing blindly.
 
-## Efficiency Measurement {#sec-model-compression-measuring-model-efficiency-00c7}
+## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
 
 With the compression techniques and combination strategies established, the remaining question is measurement: how do we verify that optimizations deliver on their promises? Translating theoretical compression ratios into measurable deployment improvements requires systematic profiling and evaluation.
 
 This section addresses three critical questions: Where should optimization efforts focus? How do we measure whether optimizations achieve their intended goals? How do we validate that combined techniques deliver expected benefits?
 
-### Profiling and Opportunity Analysis {#sec-model-compression-profiling-opportunity-analysis-ad25}
+### Profiling and Opportunity Analysis {#sec-model-compression-profiling-opportunity-analysis-477f}
 
 Optimization begins with profiling\index{Profiling!model compression} to identify where computational resources are being consumed and which components offer the greatest optimization potential. A critical first step is determining whether model optimization will actually improve system performance, as model computation often represents only a fraction of total system overhead in production environments.
 
@@ -6655,14 +6655,14 @@ A critical caveat applies when translating profiling metrics into optimization e
 
 ::: {.callout-warning title="FLOPs Reduction ≠ Proportional Speedup"}
 
-Reducing a model's FLOPs by 50% does not guarantee 50% latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Critically, **Amdahl's Law**\index{Amdahl's Law!model compression} (@sec-system-foundations-amdahls-law-gustafsons-law-2f5c) applies at the system level: if model inference accounts for only 20% of end-to-end latency (with the rest spent on data loading, pre-processing, and post-processing), then even perfect model optimization yields at most 1.25× overall speedup. Always profile on target hardware before estimating optimization benefits.
+Reducing a model's FLOPs by 50% does not guarantee 50% latency reduction. Memory-bound operations (common in LLM inference and normalization layers) see minimal benefit from compute reduction because they are bottlenecked by data movement, not arithmetic. Critically, **Amdahl's Law**\index{Amdahl's Law!model compression} (@sec-machine-foundations-amdahls-law-gustafsons-law-b741) applies at the system level: if model inference accounts for only 20% of end-to-end latency (with the rest spent on data loading, pre-processing, and post-processing), then even perfect model optimization yields at most 1.25× overall speedup. Always profile on target hardware before estimating optimization benefits.
 :::
 
 Consider profiling a Vision Transformer (ViT) for edge deployment. Using PyTorch Profiler reveals three key findings: attention layers consume 65% of total FLOPs (highly amenable to structured pruning), layer normalization consumes 8% of latency despite only 2% of FLOPs (a memory-bound operation), and the final classification head consumes 1% of computation but 15% of parameter memory. This profile suggests a clear priority ordering: first, apply magnitude-based pruning to attention layers for high FLOP reduction; second, quantize the classification head to INT8 for large memory savings with minimal accuracy impact; third, fuse layer normalization operations to reduce the memory bandwidth bottleneck.
 
 Beyond these baseline measurements, modern optimization requires understanding model sensitivity to different types of modifications. Not all parameters contribute equally to accuracy. Layer-wise sensitivity analysis\index{Sensitivity Analysis!layer-wise} reveals which network components are most important for maintaining accuracy, guiding decisions about where to apply aggressive pruning or quantization and where to use conservative approaches.
 
-### Measuring Optimization Effectiveness {#sec-model-compression-measuring-optimization-effectiveness-71a9}
+### Measuring Optimization Effectiveness {#sec-model-compression-measuring-optimization-effectiveness-a3b2}
 
 Optimization requires rigorous measurement frameworks that go beyond simple accuracy metrics to capture the full impact of optimization decisions. Effective measurement considers multiple objectives simultaneously: accuracy preservation, computational efficiency gains, memory reduction, latency improvement, and energy savings. Balancing these often-competing objectives requires careful trade-off analysis.
 
@@ -6670,21 +6670,21 @@ The measurement framework should establish clear baselines before applying any o
 
 When quantizing ResNet-50 from FP32 to INT8, baseline metrics show Top-1 accuracy of 76.1%, inference latency on V100 of 4.2 ms, model size of 98 MB, and energy per inference of 0.31 J. Post-quantization metrics reveal Top-1 accuracy of 75.8% (0.3% degradation), inference latency of 1.3 ms (3.2× speedup), model size of 25 MB (3.9× reduction), and energy per inference of 0.08 J (3.9× improvement). Additional analysis shows per-class accuracy degradation ranging from 0.1% to 1.2% with highest impact on fine-grained categories, calibration error increasing from 2.1% to 3.4%, and INT8 quantization providing 3.2× speedup on GPU but only 1.8× on CPU, demonstrating hardware-dependent gains.
 
-With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our three-dimensional framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @sec-benchmarking-ai provides additional structured evaluation methods for comprehensive performance assessment.
+With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our three-dimensional framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @sec-benchmarking provides additional structured evaluation methods for comprehensive performance assessment.
 
 Rigorous measurement tells practitioners *whether* their optimizations succeeded, but the measurements themselves require tooling to perform. Profiling, quantization, pruning, and deployment all depend on software frameworks that automate otherwise prohibitively complex workflows. We turn now to the implementation tools that make these techniques practical.
 
-## Implementation Tools {#sec-model-compression-implementation-tools-software-frameworks-e939}
+## Implementation Tools {#sec-model-compression-implementation-tools-4990}
 
 Understanding optimization techniques is necessary but not sufficient; practical implementation relies on robust software support. Without framework tooling, quantization would require manual modification of model definitions and careful insertion of quantization operations throughout the network, while pruning would demand direct manipulation of weight tensors. Both become prohibitively complex as models scale.
 
 Modern machine learning frameworks provide high-level APIs and automated workflows that abstract away implementation complexity, making sophisticated optimization techniques accessible to practitioners. Frameworks address key challenges: providing pre-built modules for common optimization techniques, assisting with hyperparameter tuning (pruning schedules, quantization bit-widths), managing accuracy-compression trade-offs through automated evaluation, and ensuring hardware compatibility through device-specific code generation.
 
-This software infrastructure transforms theoretical optimization techniques into practical tools readily applied in production environments. @sec-machine-learning-operations-mlops details the operational considerations for these workflows, including model versioning strategies, monitoring optimization impact on data pipelines, managing optimization artifacts across development and deployment environments, and establishing rollback procedures when optimizations fail. This accessibility bridges the gap between academic research and industrial applications, enabling widespread deployment of efficient machine learning models.
+This software infrastructure transforms theoretical optimization techniques into practical tools readily applied in production environments. @sec-ml-operations details the operational considerations for these workflows, including model versioning strategies, monitoring optimization impact on data pipelines, managing optimization artifacts across development and deployment environments, and establishing rollback procedures when optimizations fail. This accessibility bridges the gap between academic research and industrial applications, enabling widespread deployment of efficient machine learning models.
 
-### Model Optimization APIs and Tools {#sec-model-compression-model-optimization-apis-tools-9693}
+### Model Optimization APIs and Tools {#sec-model-compression-model-optimization-apis-tools-1849}
 
-Leading frameworks such as TensorFlow, PyTorch, and MXNet provide comprehensive APIs enabling practitioners to apply optimization techniques without implementing complex algorithms from scratch. @sec-ai-frameworks examines these frameworks in depth. Built-in optimizations enhance model efficiency while ensuring adherence to established best practices.
+Leading frameworks such as TensorFlow, PyTorch, and MXNet provide comprehensive APIs enabling practitioners to apply optimization techniques without implementing complex algorithms from scratch. @sec-ml-frameworks examines these frameworks in depth. Built-in optimizations enhance model efficiency while ensuring adherence to established best practices.
 
 TensorFlow's Model Optimization Toolkit\index{Framework Toolkits!optimization support} facilitates quantization, pruning, and clustering. QAT converts floating-point models to lower-precision formats (INT8) while preserving accuracy, systematically managing both weight and activation quantization across diverse architectures. Pruning algorithms introduce sparsity by removing redundant connections at varying granularity levels, from individual weights to entire layers, allowing practitioners to tailor strategies to specific requirements. Weight clustering\index{Weight Clustering}\index{Model Compression!weight clustering} groups similar weights for compression while preserving functionality, providing multiple pathways for improving model efficiency.
 
@@ -6736,19 +6736,19 @@ These tools integrate into PyTorch's training pipelines, enabling experimentatio
 
 Built-in optimization APIs provide pre-tested, production-ready tools with standardized interfaces, reducing implementation complexity while ensuring consistent, reproducible results across model architectures and teams. These frameworks also bridge the gap between research and practice: as new optimization techniques emerge, framework maintainers incorporate them into APIs, making state-of-the-art methods accessible to practitioners. The result is rapid experimentation, where developers can test strategies, compare effectiveness, and iterate toward optimal configurations.
 
-### Hardware-Specific Optimization Libraries {#sec-model-compression-hardwarespecific-optimization-libraries-2653}
+### Hardware-Specific Optimization Libraries {#sec-model-compression-hardwarespecific-optimization-libraries-3ab1}
 
 \index{Inference Runtime!optimization}
 \index{ML Compiler!hardware-specific optimization}
-The optimization techniques in this chapter produce models ready for hardware-specific acceleration. Libraries like TensorRT, XLA[^fn-xla-compiler], OpenVINO, and TVM[^fn-tvm-compiler] translate these optimized models into efficient execution on target platforms. @sec-ai-acceleration examines the hardware acceleration principles underlying how these tools exploit accelerator capabilities for pruned, quantized, and architecturally optimized models.
+The optimization techniques in this chapter produce models ready for hardware-specific acceleration. Libraries like TensorRT, XLA[^fn-xla-compiler], OpenVINO, and TVM[^fn-tvm-compiler] translate these optimized models into efficient execution on target platforms. @sec-hardware-acceleration examines the hardware acceleration principles underlying how these tools exploit accelerator capabilities for pruned, quantized, and architecturally optimized models.
 
-[^fn-xla-compiler]: **XLA (Accelerated Linear Algebra)**: Google's ML compiler that optimizes computational graphs for efficient execution on TPUs and GPUs, examined in @sec-ai-acceleration.
+[^fn-xla-compiler]: **XLA (Accelerated Linear Algebra)**: Google's ML compiler that optimizes computational graphs for efficient execution on TPUs and GPUs, examined in @sec-hardware-acceleration.
 
-[^fn-tvm-compiler]: **TVM (Tensor Virtual Machine)**: Apache's cross-platform ML compiler enabling deployment across diverse hardware from a single model definition, as discussed in @sec-ai-acceleration.
+[^fn-tvm-compiler]: **TVM (Tensor Virtual Machine)**: Apache's cross-platform ML compiler enabling deployment across diverse hardware from a single model definition, as discussed in @sec-hardware-acceleration.
 
 Framework integration enables practitioners to apply optimizations without implementing hardware-specific code directly. For model representation optimizations like pruning, these libraries provide sparsity-aware acceleration through optimized kernels. For numerical precision optimization, they offer extensive support for both PTQ and QAT, implementing INT8 and INT4 quantization during model conversion. Architectural efficiency techniques integrate through operator-level tuning, including aggressive fusion and kernel reordering.
 
-This integration of hardware optimization libraries with machine learning frameworks enables developers to effectively implement the optimization techniques covered in this chapter while ensuring optimal adaptation to target hardware. @sec-benchmarking-ai and @sec-machine-learning-operations-mlops detail deployment strategies that build on these optimization foundations.
+This integration of hardware optimization libraries with machine learning frameworks enables developers to effectively implement the optimization techniques covered in this chapter while ensuring optimal adaptation to target hardware. @sec-benchmarking and @sec-ml-operations detail deployment strategies that build on these optimization foundations.
 
 Beyond APIs and hardware-specific libraries, visualization tools help practitioners understand how pruning, quantization, and other optimizations affect model behavior.
 
@@ -6840,19 +6840,19 @@ Engineers assume optimization strategies compose additively: 50% pruning plus `{
 
 **Pitfall:** *Optimizing for theoretical metrics rather than actual deployment performance.*
 
-Teams reduce FLOPs by 60% and celebrate efficiency gains without profiling deployment hardware. A pruned model with `{python} param_removal_str`% fewer parameters shows irregular sparsity patterns that prevent vectorization, achieving only 12% latency reduction instead of the expected `{python} param_removal_str`% on ARM processors. INT8 quantization reduces a transformer from `{python} bert_fp32_mb_str` MB to `{python} bert_int8_mb_str` MB, but dequantization overhead on GPUs lacking low-precision acceleration increases latency by 15% despite the `{python} int8_size_reduction_str`x size reduction. As shown in @sec-model-compression-profiling-opportunity-analysis-ad25, memory bandwidth, cache behavior, and instruction-level parallelism determine actual performance, not operation counts. Production deployments require measuring wall-clock latency on target hardware.
+Teams reduce FLOPs by 60% and celebrate efficiency gains without profiling deployment hardware. A pruned model with `{python} param_removal_str`% fewer parameters shows irregular sparsity patterns that prevent vectorization, achieving only 12% latency reduction instead of the expected `{python} param_removal_str`% on ARM processors. INT8 quantization reduces a transformer from `{python} bert_fp32_mb_str` MB to `{python} bert_int8_mb_str` MB, but dequantization overhead on GPUs lacking low-precision acceleration increases latency by 15% despite the `{python} int8_size_reduction_str`x size reduction. As shown in @sec-model-compression-profiling-opportunity-analysis-477f, memory bandwidth, cache behavior, and instruction-level parallelism determine actual performance, not operation counts. Production deployments require measuring wall-clock latency on target hardware.
 
 **Fallacy:** *Aggressive quantization maintains model performance with minimal accuracy loss.*
 
-Engineers assume quantization scales uniformly: if INT8 loses 1%, then INT4 loses 2%. In practice, precision reduction exhibits threshold effects where models collapse catastrophically. ResNet-50 quantized to INT8 maintains `{python} resnet_int8_acc_str`% vs `{python} resnet_fp32_acc_str`% FP32 accuracy, but naive INT4 quantization drops accuracy by 5–15% depending on the method. Binary weights achieve only ~`{python} resnet_binary_acc_str`% on ImageNet. BERT with INT8 weights retains 99.1% of FP32 GLUE performance, but INT4 attention mechanisms cause numerical instability reducing scores by 8–12%. LayerNorm and Softmax require FP16 minimum precision; quantizing them to INT8 causes divergence. As @sec-model-compression-precision-reduction-strategies-9cbc demonstrates, mixed-precision approaches maintain accuracy where uniform quantization fails.
+Engineers assume quantization scales uniformly: if INT8 loses 1%, then INT4 loses 2%. In practice, precision reduction exhibits threshold effects where models collapse catastrophically. ResNet-50 quantized to INT8 maintains `{python} resnet_int8_acc_str`% vs `{python} resnet_fp32_acc_str`% FP32 accuracy, but naive INT4 quantization drops accuracy by 5–15% depending on the method. Binary weights achieve only ~`{python} resnet_binary_acc_str`% on ImageNet. BERT with INT8 weights retains 99.1% of FP32 GLUE performance, but INT4 attention mechanisms cause numerical instability reducing scores by 8–12%. LayerNorm and Softmax require FP16 minimum precision; quantizing them to INT8 causes divergence. As @sec-model-compression-precision-reduction-strategies-db83 demonstrates, mixed-precision approaches maintain accuracy where uniform quantization fails.
 
 **Pitfall:** *Using post-training optimization without considering training-aware alternatives.*
 
-Teams apply post-training quantization (PTQ) to avoid retraining and achieve 96.8% of baseline BERT performance. However, quantization-aware training (QAT) retains 99.1%, recovering the 2.3-point gap through learned quantization parameters. Post-training pruning of ResNet-50 to `{python} pruning_target_str`% parameters drops accuracy to 73.8%, while gradual magnitude pruning during training maintains 75.6% at the same sparsity. Knowledge distillation during student training achieves 97% of teacher performance versus 92–94% when distilling post-hoc. As detailed in @sec-model-compression-precision-reduction-strategies-9cbc, the 2–4% accuracy improvements from training-aware methods often determine whether models meet production thresholds.
+Teams apply post-training quantization (PTQ) to avoid retraining and achieve 96.8% of baseline BERT performance. However, quantization-aware training (QAT) retains 99.1%, recovering the 2.3-point gap through learned quantization parameters. Post-training pruning of ResNet-50 to `{python} pruning_target_str`% parameters drops accuracy to 73.8%, while gradual magnitude pruning during training maintains 75.6% at the same sparsity. Knowledge distillation during student training achieves 97% of teacher performance versus 92–94% when distilling post-hoc. As detailed in @sec-model-compression-precision-reduction-strategies-db83, the 2–4% accuracy improvements from training-aware methods often determine whether models meet production thresholds.
 
 **Pitfall:** *Assuming compression ratios translate directly into proportional deployment gains.*
 
-Teams achieve `{python} int8_size_reduction_str`x model size reduction through INT8 quantization and expect `{python} int8_size_reduction_str`x memory savings in deployment. In practice, runtime overhead erodes compression gains. Dequantization kernels add `{python} dequant_overhead_str`% latency overhead converting INT8 weights back to FP16. Pruned models with irregular sparsity achieve only 12% latency reduction despite `{python} param_removal_str`% parameter removal because hardware cannot skip zeroed weights efficiently. As @sec-model-compression-profiling-opportunity-analysis-ad25 demonstrates, a BERT model pruned to 50% sparsity and quantized to INT8 achieves `{python} actual_speedup_str`% end-to-end speedup rather than the expected `{python} expected_speedup_str`x, because unstructured sparsity creates irregular memory access. Production workflows must profile *deployed* latency on target hardware, not extrapolate from compression ratios.
+Teams achieve `{python} int8_size_reduction_str`x model size reduction through INT8 quantization and expect `{python} int8_size_reduction_str`x memory savings in deployment. In practice, runtime overhead erodes compression gains. Dequantization kernels add `{python} dequant_overhead_str`% latency overhead converting INT8 weights back to FP16. Pruned models with irregular sparsity achieve only 12% latency reduction despite `{python} param_removal_str`% parameter removal because hardware cannot skip zeroed weights efficiently. As @sec-model-compression-profiling-opportunity-analysis-477f demonstrates, a BERT model pruned to 50% sparsity and quantized to INT8 achieves `{python} actual_speedup_str`% end-to-end speedup rather than the expected `{python} expected_speedup_str`x, because unstructured sparsity creates irregular memory access. Production workflows must profile *deployed* latency on target hardware, not extrapolate from compression ratios.
 
 ## Summary {#sec-model-compression-summary-8229}
 
@@ -6876,7 +6876,7 @@ The optimization techniques explored here (pruning, quantization, distillation, 
 
 ::: {.callout-chapter-connection title="From Math to Physics"}
 
-We have compressed the model's logic, shaving off every unnecessary bit. Logic, however, must eventually run on physics. We turn next to @sec-ai-acceleration, where we explore how GPUs, TPUs, and NPUs are designed to exploit these optimizations and execute compressed models at maximum throughput.
+We have compressed the model's logic, shaving off every unnecessary bit. Logic, however, must eventually run on physics. We turn next to @sec-hardware-acceleration, where we explore how GPUs, TPUs, and NPUs are designed to exploit these optimizations and execute compressed models at maximum throughput.
 
 :::
 

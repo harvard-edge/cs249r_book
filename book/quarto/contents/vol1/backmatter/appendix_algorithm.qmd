@@ -28,10 +28,10 @@ This appendix is designed as a reference. Use it when you need to translate a pr
 
 Conventions used here follow the book-wide notation (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
 
-- **When GEMMs are slow**: Use @sec-system-foundations-general-matrix-multiply-gemm-5f92 and compare intensity to your hardware’s ridge point.
-- **When memory blows up in training**: Use @sec-system-foundations-mechanics-learning-78b6 and the training memory decomposition.
-- **When tensor code “should work” but doesn’t**: Use @sec-system-foundations-shapes-strides-bfd9 and @sec-system-foundations-broadcasting-3387.
-- **When sparsity is proposed as a fix**: Use @sec-system-foundations-sparse-matrix-formats-7920 to check density and metadata overhead.
+- **When GEMMs are slow**: Use @sec-algorithm-foundations-general-matrix-multiply-gemm-b55d and compare intensity to your hardware’s ridge point.
+- **When memory blows up in training**: Use @sec-algorithm-foundations-mechanics-learning-24f6 and the training memory decomposition.
+- **When tensor code “should work” but doesn’t**: Use @sec-algorithm-foundations-shapes-strides-1aea and @sec-algorithm-foundations-broadcasting-ec16.
+- **When sparsity is proposed as a fix**: Use @sec-algorithm-foundations-sparse-matrix-formats-0bd0 to check density and metadata overhead.
 
 ```{python}
 #| label: appendix-algorithm-setup
@@ -120,9 +120,9 @@ optimizer_overhead_str = AlgorithmFoundations.optimizer_overhead_str
 gemm_intensity_eq = AlgorithmFoundations.gemm_intensity_eq
 ```
 
-This appendix covers the mathematical and computational machinery that powers neural networks. From the linear algebra at the heart of every layer to the backpropagation algorithm that enables learning, these foundations explain *how* models compute and *why* certain implementation choices affect performance. The concepts here support the deep learning foundations in @sec-deep-learning-systems-foundations, the framework internals in @sec-ai-frameworks, and the training strategies in @sec-ai-training.
+This appendix covers the mathematical and computational machinery that powers neural networks. From the linear algebra at the heart of every layer to the backpropagation algorithm that enables learning, these foundations explain *how* models compute and *why* certain implementation choices affect performance. The concepts here support the deep learning foundations in @sec-neural-computation, the framework internals in @sec-ml-frameworks, and the training strategies in @sec-model-training.
 
-## Linear Algebra {#sec-system-foundations-linear-algebra-neural-networks-f606}
+## Linear Algebra {#sec-algorithm-foundations-linear-algebra-c937}
 
 Deep learning systems are, at their core, engines for transforming massive matrices. While frameworks like PyTorch abstract away the raw math, understanding the underlying linear algebra is essential for performance engineering. Now that we know how numbers are stored (from @sec-machine-foundations), we must understand how they are manipulated.
 
@@ -130,7 +130,7 @@ Deep learning systems are, at their core, engines for transforming massive matri
 Every neural network, regardless of architecture, spends most of its time doing matrix multiplication. A single forward pass through a transformer layer executes four large GEMMs (for the Q, K, V projections and the output projection) plus the attention score computation—all matrix multiplies. Understanding GEMM performance characteristics explains why batch size affects throughput, why certain layer dimensions are "better" than others, and how to interpret profiler output. If you can reason about matrix dimensions and arithmetic intensity, you can predict whether a workload is compute-bound or memory-bound *before* running a single profiler trace.
 :::
 
-### Tensor Operations and Notation {#sec-system-foundations-tensor-operations-notation-de17}
+### Tensor Operations and Notation {#sec-algorithm-foundations-tensor-operations-notation-2758}
 
 We use Einstein summation[^fn-einsum] notation throughout this book because it makes complex operations explicit (implemented as `torch.einsum` in PyTorch and `np.einsum` in NumPy). Matrix multiplication $C = AB$ becomes:
 
@@ -140,23 +140,23 @@ $$ C_{ij} = \sum_k A_{ik} B_{kj} $$
 
 Or in einsum notation: `ik,kj->ij`. This notation extends naturally to the multi-dimensional operations in attention mechanisms. For example, batched multi-head attention is `bhid,bhjd->bhij` (batch, head, sequence indices).
 
-### Memory Layouts and Performance {#sec-system-foundations-memory-layouts-performance-ae64}
+### Memory Layouts and Performance {#sec-algorithm-foundations-memory-layouts-performance-44d0}
 
 Data layout in memory (row-major vs. column-major) directly affects cache efficiency. When iterating over a matrix, accessing contiguous memory locations is dramatically faster than strided access. The difference can be 10× to 100× in effective bandwidth.
 
 A common optimization pattern: transpose tensors once before repeated operations to ensure contiguous access in the hot loop. The one-time transpose cost is amortized across many subsequent operations.
 
-### The Dot Product as Similarity {#sec-system-foundations-dot-product-similarity-879f}
+### The Dot Product as Similarity {#sec-algorithm-foundations-dot-product-similarity-7957}
 
 The dot product $\mathbf{a} \cdot \mathbf{b} = \sum a_i b_i$ is geometrically equivalent to $|\mathbf{a}| |\mathbf{b}| \cos \theta$, which makes it a natural measure of similarity between two vectors: a large positive result means they point in the same direction, zero means they are orthogonal (unrelated), and a negative result means they oppose each other.
 
 This geometric interpretation is why dot products appear everywhere in modern architectures. In attention mechanisms, query ($Q$) and key ($K$) vectors are dot-produced to compute a similarity score that determines how much each token attends to every other token. The resulting attention weights are then used to form a weighted combination of value ($V$) vectors—making the dot product the foundation of the transformer's ability to model long-range dependencies.
 
-### General Matrix Multiply (GEMM) {#sec-system-foundations-general-matrix-multiply-gemm-5f92}
+### General Matrix Multiply (GEMM) {#sec-algorithm-foundations-general-matrix-multiply-gemm-b55d}
 
 GEMM[^fn-gemm-blas] is the computational workhorse of deep learning. For matrices of size $M \times K$ and $K \times N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-[^fn-gemm-blas]: **General Matrix Multiply (GEMM)**: The name comes from the BLAS (Basic Linear Algebra Subprograms) library specification, first standardized in 1979. The "GE" prefix stands for "general" (as opposed to symmetric, triangular, or banded matrices). GEMM computes $C = \alpha AB + \beta C$ and is the single most performance-critical routine in deep learning. See @sec-ai-training for how GEMM shapes determine training throughput.
+[^fn-gemm-blas]: **General Matrix Multiply (GEMM)**: The name comes from the BLAS (Basic Linear Algebra Subprograms) library specification, first standardized in 1979. The "GE" prefix stands for "general" (as opposed to symmetric, triangular, or banded matrices). GEMM computes $C = \alpha AB + \beta C$ and is the single most performance-critical routine in deep learning. See @sec-model-training for how GEMM shapes determine training throughput.
 
 The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n \times n$ matrices in FP16 (`{python} bytes_fp16_str` bytes/element):
 
@@ -168,7 +168,7 @@ This explains several important phenomena:
 - **Power-of-two dimensions help**: Hardware tensor cores are optimized for specific tile sizes (typically 16×16 or 32×32). Dimensions that align with these sizes avoid padding overhead.
 - **Small matrices are inefficient**: A `{python} n_small_str`×`{python} n_small_str` GEMM has intensity `{python} n_small_str`/3 ≈ `{python} small_intensity_str` FLOP/byte, well below the ridge point (`{python} a100_ridge_str`), achieving only ~`{python} small_efficiency_pct_str`% of peak throughput.
 
-### Sparse Matrix Formats {#sec-system-foundations-sparse-matrix-formats-7920}
+### Sparse Matrix Formats {#sec-algorithm-foundations-sparse-matrix-formats-0bd0}
 
 When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely.
 
@@ -188,7 +188,7 @@ To see the tradeoff concretely, consider a vocabulary embedding matrix of size `
 
 Linear algebra tells us *what* to compute; the next question is *how* to express those computations in code. Tensor programming primitives—shapes, strides, and broadcasting—bridge the gap between mathematical notation and the array operations that actually execute on hardware.
 
-## Tensor Programming Primitives {#sec-system-foundations-tensor-programming-primitives-7baf}
+## Tensor Programming Primitives {#sec-algorithm-foundations-tensor-programming-primitives-1400}
 
 A shape mismatch crash, a silently wrong broadcast, a kernel running at 5% of peak because of a non-contiguous tensor—these common ML engineering failures all trace back to the same layer of abstraction. *Tensor programming* translates the abstract math of linear algebra into concrete array manipulations that run on hardware.
 
@@ -196,12 +196,12 @@ A shape mismatch crash, a silently wrong broadcast, a kernel running at 5% of pe
 Your logic is correct, but your code crashes with a shape mismatch error. Or worse, it runs but produces garbage because you broadcasted dimensions incorrectly. Mastering tensor shapes, strides, and broadcasting is the literacy of ML engineering.
 :::
 
-### Computational Complexity Cheat Sheet {#sec-appendix-complexity-cheat-sheet}
+### Computational Complexity Cheat Sheet {#sec-algorithm-foundations-computational-complexity-cheat-sheet-0c6c}
 
 @tbl-tensor-op-ref provides a quantitative reference for the most common building blocks. Use these formulas for napkin-math estimation of model size and compute requirements *before* you provision hardware. If you know the layer type and input shape, you can predict whether a model will fit in memory.
 
 | **Layer Type**              | **Output Shape**       |               **Parameters ($P$)** |                   **FLOPs (per Forward Pass)** |
-|:--------------------------|:---------------------|---------------------------------:|---------------------------------------------:|
+|:----------------------------|:-----------------------|-----------------------------------:|-----------------------------------------------:|
 | **Linear**                  | $(B, N_{out})$         |      $(N_{in} + 1) \times N_{out}$ |      $2 \times B \times N_{in} \times N_{out}$ |
 | **Conv2D**                  | $(B, C_{out}, H', W')$ | $K^2 \times C_{in} \times C_{out}$ |      $2 \times B \times H' \times W' \times P$ |
 | **Attention (Single Head)** | $(B, S, d_{model})$    |             $4 \times d_{model}^2$ | $B \times (4 S^2 d_{model} + 8 S d_{model}^2)$ |
@@ -209,7 +209,7 @@ Your logic is correct, but your code crashes with a shape mismatch error. Or wor
 
 : **Deep Learning Tensor Primitives**: Summary of shapes, parameters, and FLOP counts. Note: $B$ is batch size, $S$ is sequence length, $K$ is kernel size. The Attention FLOPs include QKV projections and the $S^2$ attention matrix interactions. The $S^2$ term dominates for long sequences (explaining why LLM inference slows with context length); the $d^2$ term dominates for large hidden dimensions. {#tbl-tensor-op-ref}
 
-### Shapes and Strides {#sec-system-foundations-shapes-strides-bfd9}
+### Shapes and Strides {#sec-algorithm-foundations-shapes-strides-1aea}
 
 A tensor is a view over a contiguous block of memory.
 
@@ -218,7 +218,7 @@ A tensor is a view over a contiguous block of memory.
 
 Operations like `transpose()` or `view()` often just change the *strides*, not the data in memory. This is fast ($O(1)$) but can lead to non-contiguous tensors that fail in optimized kernels. When a kernel requires contiguous data—and most optimized BLAS routines do—calling `contiguous()` forces a memory copy to realign data, which is an $O(N)$ operation that can dominate runtime if triggered repeatedly inside a loop.
 
-### Broadcasting {#sec-system-foundations-broadcasting-3387}
+### Broadcasting {#sec-algorithm-foundations-broadcasting-ec16}
 
 Broadcasting allows arithmetic operations on tensors of different shapes. The rule is: compare dimensions from the last to the first. Two dimensions are compatible if:
 
@@ -233,7 +233,7 @@ Consider a concrete case: tensor A has shape `(32, 1, 64)` and tensor B has shap
 
 Shapes, strides, and broadcasting govern how tensors flow through a model's forward pass. But training a model requires more than forward computation—it requires *learning from errors*. The next section examines the algorithm that makes learning possible: backpropagation, along with the memory costs it imposes.
 
-## Mechanics of Learning {#sec-system-foundations-mechanics-learning-78b6}
+## Mechanics of Learning {#sec-algorithm-foundations-mechanics-learning-24f6}
 
 With valid tensor programs, we can construct the training loops that power learning. Backpropagation is the algorithm that orchestrates these tensors to compute gradients, transforming a forward prediction into a backward learning signal.
 
@@ -241,7 +241,7 @@ With valid tensor programs, we can construct the training loops that power learn
 When training fails (loss goes to NaN, gradients explode, memory runs out), understanding what backpropagation actually does helps you diagnose the problem. This section gives you the mental model to reason about gradient flow and memory usage during training.
 :::
 
-### The Chain Rule and Automatic Differentiation {#sec-system-foundations-chain-rule-automatic-differentiation-e742}
+### The Chain Rule and Automatic Differentiation {#sec-algorithm-foundations-chain-rule-automatic-differentiation-e0eb}
 
 For a composed function $y = f(g(x))$, the derivative is $\frac{dy}{dx} = \frac{dy}{dg} \cdot \frac{dg}{dx}$. In a neural network, $f$ and $g$ are layers, and the composition can be many levels deep. For a three-layer network $y = f_3(f_2(f_1(x)))$, the chain rule extends to:
 
@@ -251,7 +251,7 @@ Each factor in this product is a *local* derivative—computed at one layer usin
 
 Modern frameworks use **reverse-mode automatic differentiation**, which computes gradients for all $N$ parameters in a single backward pass. The key insight is that starting from the output and working backward (reverse mode) requires one pass regardless of the number of parameters, whereas starting from each input and working forward (forward mode) would require $N$ passes—one per parameter. This is why training (one forward + one backward pass) has similar compute cost to two inference passes, rather than $N$ passes.
 
-### The Backpropagation Algorithm {#sec-system-foundations-backpropagation-algorithm-3175}
+### The Backpropagation Algorithm {#sec-algorithm-foundations-backpropagation-algorithm-93f7}
 
 Backpropagation[^fn-backprop] implements the chain rule efficiently through two passes: forward to compute outputs, backward to compute gradients. @fig-backprop-graph illustrates this process for a simple two-layer network, with the forward pass (black arrows) computing outputs and the backward pass (red dashed arrows) propagating gradients.
 
@@ -306,7 +306,7 @@ $$ \frac{\partial L}{\partial W_1} = x^T \cdot \frac{\partial L}{\partial h} $$
 
 Each step backward requires two things: the gradient flowing in from above ($\frac{\partial L}{\partial h}$) and the activation cached during the forward pass ($x$). This is why the backward pass costs roughly $2\times$ the forward pass in compute: at each layer, it performs two matrix multiplications (one for the weight gradient, one for the input gradient) versus one in the forward pass.
 
-### The True Cost of Training Memory {#sec-system-foundations-training-memory-cost}
+### The True Cost of Training Memory {#sec-algorithm-foundations-true-cost-training-memory-e54e}
 
 A common mistake is to assume that training memory equals model size. This assumption leads to immediate OOM errors because it ignores three other components that often dwarf the weights themselves. The actual memory footprint of training is:
 
@@ -342,7 +342,7 @@ $48 \times 2 \times 8 \times 1024 \times 1600 \times 2$ bytes $\approx$ 24 GB
 
 :::
 
-#### Activation Explosion
+#### Activation Explosion {#sec-algorithm-foundations-activation-explosion-1da5}
 
 While weights are fixed ($O(P)$), activations grow linearly with batch size and sequence length. For large language models, activations can be 10–50$\times$ larger than the weights themselves. This explosion is why techniques like gradient checkpointing[^fn-grad-checkpoint] [@chen2016training] and FlashAttention (tiling attention to reduce memory round-trips) are mandatory for large-scale training, not optional optimizations.
 
@@ -356,15 +356,15 @@ While weights are fixed ($O(P)$), activations grow linearly with batch size and 
 
 :::
 
-### Computational Graphs and Optimization {#sec-system-foundations-computational-graphs-optimization-b49d}
+### Computational Graphs and Optimization {#sec-algorithm-foundations-computational-graphs-optimization-ab43}
 
 ML compilers represent models as directed acyclic graphs (DAGs). This representation enables hardware-independent optimizations.
 
-#### Static Single Assignment
+#### Static Single Assignment {#sec-algorithm-foundations-static-single-assignment-9e88}
 
 Compilers transform graphs into Static Single Assignment (SSA) form, where each variable is assigned exactly once. This makes data dependencies explicit, enabling safe optimizations—most importantly, *operator fusion*.
 
-#### Operator Fusion
+#### Operator Fusion {#sec-algorithm-foundations-operator-fusion-5d73}
 
 Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` produces an intermediate tensor that is written to High Bandwidth Memory (HBM) and then read back for the next operation. For elementwise operations like `Add` and `ReLU`, the compute is trivial (one FLOP per element) but the memory traffic is not (read the tensor, write it back). The arithmetic intensity of unfused elementwise operations is therefore close to zero—deeply memory-bound.
 
@@ -374,7 +374,7 @@ FlashAttention is the most impactful fusion in modern ML: it fuses the entire at
 
 Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built. Before moving on, several common misconceptions deserve attention because they trip up even experienced practitioners.
 
-## Fallacies and Pitfalls {#sec-algorithm-foundations-fallacies-pitfalls}
+## Fallacies and Pitfalls {#sec-algorithm-foundations-fallacies-pitfalls-ae60}
 
 **Pitfall:** *Assuming sparse matrices always save memory.*
 
@@ -382,7 +382,7 @@ Sparse formats like CSR and COO add metadata overhead in the form of index array
 
 **Fallacy:** *Training memory equals model size.*
 
-As shown in @sec-system-foundations-training-memory-cost, training memory includes gradients, optimizer states, and activations in addition to weights. For a model with $P$ parameters trained with Adam in mixed precision, the non-activation overhead alone is roughly `{python} bytes_fp16_str` + `{python} bytes_fp16_str` + `{python} optimizer_overhead_str` = 12–16 bytes per parameter—far more than the `{python} bytes_fp16_str`-byte weight footprint that naive estimates assume.
+As shown in @sec-algorithm-foundations-true-cost-training-memory-e54e, training memory includes gradients, optimizer states, and activations in addition to weights. For a model with $P$ parameters trained with Adam in mixed precision, the non-activation overhead alone is roughly `{python} bytes_fp16_str` + `{python} bytes_fp16_str` + `{python} optimizer_overhead_str` = 12–16 bytes per parameter—far more than the `{python} bytes_fp16_str`-byte weight footprint that naive estimates assume.
 
 **Pitfall:** *Ignoring tensor layout when optimizing performance.*
 

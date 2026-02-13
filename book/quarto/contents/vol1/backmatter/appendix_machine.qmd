@@ -28,13 +28,13 @@ This appendix is designed as a reference. When you are stuck, use it to turn a v
 
 Conventions used here follow the book-wide notation (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
 
-- **Sanity-check feasibility**: Start with @sec-numbers-to-know for order-of-magnitude numbers.
-- **Diagnose the dominant ceiling**: Use the Roofline Model in @sec-system-foundations-roofline-model-5f7c to decide whether you are compute-bound or memory-bound.
+- **Sanity-check feasibility**: Start with @sec-machine-foundations-numbers-know-b531 for order-of-magnitude numbers.
+- **Diagnose the dominant ceiling**: Use the Roofline Model in @sec-machine-foundations-roofline-model-2529 to decide whether you are compute-bound or memory-bound.
 - **Reason about scaling limits**: Use Amdahl’s and Gustafson’s Laws to understand why adding accelerators may not reduce time-to-train.
-- **Choose the right precision**: Use @sec-system-foundations-floatingpoint-format-comparison-c861 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
-- **Cross-reference for depth**: When you want the full narrative, jump back to @sec-ai-acceleration, @sec-ai-training, and @sec-model-serving-systems.
+- **Choose the right precision**: Use @sec-machine-foundations-floatingpoint-format-comparison-1836 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
+- **Cross-reference for depth**: When you want the full narrative, jump back to @sec-hardware-acceleration, @sec-model-training, and @sec-model-serving.
 
-## Numbers to Know {#sec-numbers-to-know}
+## Numbers to Know {#sec-machine-foundations-numbers-know-b531}
 
 ```{python}
 #| label: numbers-to-know-setup
@@ -182,7 +182,7 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 [^fn-training-memory]: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-GPU memory by sharding optimizer states across GPUs, but the total memory across all GPUs remains ~16× parameters.
 
-### Latency Budgets: The Non-Negotiables {#sec-latency-budgets-ref .unnumbered}
+### Latency Budgets: The Non-Negotiables { .unnumbered}
 
 These budgets are set by physics (safety) or psychology (human perception)—not by engineering choice. Unlike hardware specs that improve each generation, these are *constraints* your system must meet (@tbl-latency-targets-ref).
 
@@ -246,7 +246,7 @@ Throughout this book, we often use "GPU" when discussing hardware acceleration. 
 
 Knowing the numbers is only the first step. The real power comes from having compact models that tell you *which* number matters for *your* specific bottleneck. The next section provides exactly these diagnostic tools—starting with the Roofline Model, which translates raw hardware specs into actionable performance ceilings.
 
-## Physics of Computing {#sec-system-foundations-physics-computing-b6a4}
+## Physics of Computing {#sec-machine-foundations-physics-computing-c77f}
 
 Raw hardware specs—TFLOP/s, TB/s, watt budgets—are necessary but insufficient for performance reasoning. Without compact analytical models, an engineer cannot distinguish a compute-bound workload from a memory-bound one, or predict whether doubling GPUs will halve training time. The models in this section provide exactly these diagnostic tools.
 
@@ -254,7 +254,7 @@ Raw hardware specs—TFLOP/s, TB/s, watt budgets—are necessary but insufficien
 You have trained a model that achieves good accuracy, but inference takes 200 ms when your SLA requires 50 ms. Where do you start? Performance analysis models give you a systematic way to diagnose whether you are limited by computation, memory bandwidth, or something else entirely. Without these tools, optimization is guesswork.
 :::
 
-### The Roofline Model {#sec-system-foundations-roofline-model-5f7c}
+### The Roofline Model {#sec-machine-foundations-roofline-model-2529}
 
 The Roofline Model [@williams2009roofline] answers a deceptively simple question: *how fast can this workload possibly run on this hardware?* The answer depends on whether you run out of compute or memory bandwidth first.
 
@@ -389,7 +389,7 @@ tpuv5_ici = tpuv5_ici_value
 tpuv5_l2_mb = tpuv5_l2_mb_value
 ```
 
-#### A Concrete Example: The A100 Analysis {#sec-system-foundations-concrete-example-a100-analysis-0bb9}
+#### A Concrete Example: The A100 Analysis {#sec-machine-foundations-concrete-example-a100-analysis-5b30}
 
 Consider an NVIDIA A100 GPU with FP16 Tensor Core performance of `{python} a100_fp16` TFLOP/s and HBM2e bandwidth of `{python} a100_bw_tb` TB/s. The ridge point is `{python} a100_fp16` / `{python} a100_bw_tb` = `{python} ridge_point` FLOP/byte (the Tera prefixes cancel, yielding FLOP/byte).
 
@@ -401,11 +401,11 @@ Now compare two common operations:
 
 This explains why modern frameworks fuse operations: combining ReLU with the preceding MatMul avoids writing intermediate results to memory, effectively increasing arithmetic intensity.
 
-### Dimensional Analysis {#sec-system-foundations-dimensional-analysis}
+### Dimensional Analysis {#sec-machine-foundations-dimensional-analysis-76b3}
 
 The Roofline Model helps diagnose *where* a bottleneck lies. But before applying any performance equation, we should verify that it is physically meaningful. Dimensional analysis provides this sanity check: any valid equation must be **dimensionally homogeneous**—every term must resolve to the same units. If they do not, the equation contains an error.
 
-Consider the Iron Law of ML Systems introduced in @sec-silicon-contract:
+Consider the Iron Law of ML Systems introduced in @sec-introduction-iron-law-ml-systems-c32a:
 
 $$ T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat} $$
 
@@ -421,11 +421,11 @@ The equation is physically consistent. Apply this technique to any systems equat
 
 With tools for diagnosing single-device bottlenecks in hand, we now turn to the fundamental limits of scaling across multiple devices.
 
-### Amdahl's Law and Gustafson's Law {#sec-system-foundations-amdahls-law-gustafsons-law-2f5c}
+### Amdahl's Law and Gustafson's Law {#sec-machine-foundations-amdahls-law-gustafsons-law-b741}
 
 Parallelization is the primary tool for scaling ML, but its limits depend on *how* you scale. These two laws frame the fundamental tension in parallel computing. **Amdahl's Law** is the pessimist's view, governing how much faster a *fixed* task can run (optimizing latency). **Gustafson's Law** is the optimist's view, governing how much *more* work we can do in the same time (optimizing throughput).
 
-#### Strong Scaling (Amdahl's Law)
+#### Strong Scaling (Amdahl's Law) {#sec-machine-foundations-strong-scaling-amdahls-law-c6c2}
 
 **Strong scaling** answers the question: *If I add more processors to a fixed-size problem, how much faster will it run?*
 
@@ -507,7 +507,7 @@ amdahl_inf_str = fmt(amdahl_inf_value, precision=0, commas=False)
 
 No matter how many accelerators you buy, you cannot make this fixed workload run faster than `{python} amdahl_inf_str`×.
 
-#### Weak Scaling (Gustafson's Law)
+#### Weak Scaling (Gustafson's Law) {#sec-machine-foundations-weak-scaling-gustafsons-law-eb7e}
 
 **Weak scaling** answers the question: *If I add more processors, how much larger of a problem can I solve in the same amount of time?*
 
@@ -634,12 +634,12 @@ class TrainingTimeRef:
     t_days_value = t_seconds_value / SEC_PER_DAY
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(t_seconds > 0, "Training time must be positive.")
+    check(t_seconds_value > 0, "Training time must be positive.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    T_seconds_str = fmt(t_seconds, precision=0, commas=False)
-    T_minutes_str = fmt(t_minutes, precision=0, commas=False)
-    T_days_str = fmt(t_days, precision=0, commas=False)
+    T_seconds_str = fmt(t_seconds_value, precision=0, commas=False)
+    T_minutes_str = fmt(t_minutes_value, precision=0, commas=False)
+    T_days_str = fmt(t_days_value, precision=0, commas=False)
     p_params_str = f"{p_params/BILLION:.0f}B"
     d_tokens_str = f"{d_tokens/BILLION:.0f}B"
     n_gpus_str = str(int(n_gpus))
@@ -696,7 +696,7 @@ The computed result: **`{python} T_seconds_str` seconds** (≈ `{python} T_minut
 
 :::
 
-### Little's Law {#sec-system-foundations-littles-law-9c4c}
+### Little's Law {#sec-machine-foundations-littles-law-21a3}
 
 For capacity planning in inference systems, **Little's Law** [@little1961proof] relates concurrency ($L$), arrival rate ($\lambda$), and latency ($W$):[^fn-little]
 
@@ -752,11 +752,11 @@ This directly determines how to size inference worker pools. If serving one requ
 
 These physics-based models—Roofline, Amdahl, Gustafson, and Little—diagnose *where* bottlenecks lie. But translating those diagnoses into actionable optimizations requires understanding the concrete hardware structures that impose them: caches, memory buses, and interconnects.
 
-## Computer Architecture Essentials {#sec-system-foundations-computer-architecture-essentials-bb18}
+## Computer Architecture Essentials {#sec-machine-foundations-computer-architecture-essentials-10c2}
 
 A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The missing 97% is not a software bug—it is the cost of moving data through a memory hierarchy that spans five orders of magnitude in latency. While physics sets theoretical performance bounds, computer architecture defines the machinery that determines how close a real workload can get. This section covers the latency, bandwidth, and energy trade-offs that shape system design.
 
-### Latencies Every Programmer Should Know
+### Latencies Every Programmer Should Know {#sec-machine-foundations-latencies-every-programmer-know-e89f}
 
 The first step in systems intuition is understanding the cost of distance. @tbl-latency-hierarchy quantifies how long the processor waits for data from different levels of the memory hierarchy. If accessing a register is like picking up a pencil from your desk, fetching from HBM is walking across the office, and fetching from disk is flying to the moon.
 
@@ -773,7 +773,7 @@ The first step in systems intuition is understanding the cost of distance. @tbl-
 
 : **The Latency Hierarchy.** Access times for modern AI hardware. Note the massive jump from SRAM (Cache) to HBM. Any kernel that misses cache pays a heavy penalty. {#tbl-latency-hierarchy}
 
-### The AI Hardware Cheat Sheet (Modern Reference)
+### The AI Hardware Cheat Sheet (Modern Reference) {#sec-machine-foundations-ai-hardware-cheat-sheet-modern-reference-4dc1}
 
 While latency tells us how long we wait for the *first* byte, bandwidth tells us how many bytes follow. @tbl-hardware-cheatsheet provides the constants for back-of-the-envelope "Roofline" calculations. These represent the "standard units of compute" for the current era of machine learning.
 
@@ -787,7 +787,7 @@ While latency tells us how long we wait for the *first* byte, bandwidth tells us
 
 : **Reference Specs.** Key constants for quantitative analysis. Always check specific datasheets, but these serve as standard units of compute. {#tbl-hardware-cheatsheet}
 
-### The Memory Hierarchy {#sec-system-foundations-memory-hierarchy-674b}
+### The Memory Hierarchy {#sec-machine-foundations-memory-hierarchy-2278}
 
 Computer systems use a hierarchy because no single technology provides both high capacity and low latency. Examine the pyramid in @fig-memory-hierarchy to see how each level balances this tradeoff: every technique that keeps data higher in the pyramid (registers/cache) directly improves performance.
 
@@ -817,7 +817,7 @@ The hierarchy's energy costs reveal why data movement dominates modern system de
 Fetching a 32-bit value from DRAM costs roughly **`{python} energy_ratio_str`× more energy** than performing a floating-point operation on it (e.g., ~`{python} dram_pj` pJ vs ~`{python} flop_pj` pJ). This "Energy Wall" means that maximizing **arithmetic intensity** (doing many ops per loaded byte) is the only way to be energy efficient.
 :::
 
-### Bandwidth vs. Latency {#sec-system-foundations-bandwidth-vs-latency-e155}
+### Bandwidth vs. Latency {#sec-machine-foundations-bandwidth-vs-latency-5320}
 
 Bandwidth (throughput) and latency (delay) are distinct constraints. Total transfer time follows:
 
@@ -903,7 +903,7 @@ eq_large_total = md_math(f"\\approx {int(ping_ms_value)}\\text{{ms}} + {int(larg
 
 Architecture determines how fast data can move, but there is another lever that directly controls *how much* data must move: the numerical precision of each value. Halving precision from FP32 to FP16 halves the bytes per parameter, which doubles effective bandwidth for free—if the model can tolerate the reduced precision. Understanding these trade-offs requires a closer look at how numbers are represented in hardware.
 
-## Numerical Representations {#sec-system-foundations-numerical-representations-7b2f}
+## Numerical Representations {#sec-machine-foundations-numerical-representations-c889}
 
 While statistics helps us understand data distributions, numerical representations determine how we store the values themselves. In ML systems, the choice of precision (FP32 vs. BF16 vs. INT8) is a direct trade-off between statistical fidelity and hardware throughput.
 
@@ -911,7 +911,7 @@ While statistics helps us understand data distributions, numerical representatio
 Your production model runs at 50 QPS in FP32 but your target is 200 QPS. Switching to INT8 could get you there, but will accuracy suffer? Understanding numerical formats lets you make this trade-off quantitatively rather than hoping for the best.
 :::
 
-### Floating-Point Format Comparison {#sec-system-foundations-floatingpoint-format-comparison-c861}
+### Floating-Point Format Comparison {#sec-machine-foundations-floatingpoint-format-comparison-1836}
 
 The IEEE 754 standard and its AI-specific derivatives define different trade-offs between dynamic range (the span of representable values) and precision (how finely you can represent values within that range). @tbl-numerical-formats summarizes the key formats and their use cases, while @fig-float-formats visualizes the bit allocations.
 
@@ -988,7 +988,7 @@ Among these formats, BF16[^fn-bf16] deserves special attention [@google_bfloat16
 
 [^fn-bf16]: **BF16** was originally introduced with the Google TPUv2 and has since been adopted by Intel, Arm, and NVIDIA (starting with Ampere architectures).
 
-### Integer Quantization {#sec-system-foundations-integer-quantization-9d02}
+### Integer Quantization {#sec-machine-foundations-integer-quantization-5442}
 
 Quantization maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers. Two approaches dominate.
 
@@ -1006,7 +1006,7 @@ The choice between symmetric and asymmetric quantization depends on your tensor'
 
 With the full toolkit assembled—reference numbers, performance models, architectural constraints, and numerical trade-offs—it is worth pausing to address the most common ways engineers misapply these concepts. The following section catalogs fallacies and pitfalls that violate the physical and architectural principles covered above.
 
-## Fallacies and Pitfalls {#sec-machine-foundations-fallacies-pitfalls}
+## Fallacies and Pitfalls {#sec-machine-foundations-fallacies-pitfalls-f9b1}
 
 Even experienced engineers fall into traps when reasoning about hardware performance. The following misconceptions violate the physical and architectural principles covered in this appendix.
 
@@ -1037,7 +1037,7 @@ With the common misconceptions addressed, use the reference numbers and models i
 
 ## Further Reading {.unnumbered}
 
-- **Hardware acceleration**: @sec-ai-acceleration
-- **Training system design**: @sec-ai-training
-- **Serving system design**: @sec-model-serving-systems
-- **Framework internals and kernels**: @sec-ai-frameworks
+- **Hardware acceleration**: @sec-hardware-acceleration
+- **Training system design**: @sec-model-training
+- **Serving system design**: @sec-model-serving
+- **Framework internals and kernels**: @sec-ml-frameworks

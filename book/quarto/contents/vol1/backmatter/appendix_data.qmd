@@ -28,11 +28,11 @@ This appendix is designed as a *reference*. Use it when you are debugging “slo
 
 Conventions used here follow the book-wide notation (for example, we reserve \(B\) for batch size and use \(\text{BW}\) for bandwidth).
 
-- **When data won’t move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-system-foundations-data-engineering-foundations-9ba2.
-- **When the GPU is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-system-foundations-row-vs-columnar-formats-1f97.
-- **When pipelines explode in cost**: Use the primitives in @sec-system-foundations-algebra-data-7b3d, especially join-induced shuffles.
-- **When “average looks fine” but users complain**: Use @sec-system-foundations-distributions-long-tail-37cc and session-level tail probability.
-- **When accuracy drifts silently**: Use @sec-system-foundations-measuring-drift-divergence-0525 to compare full distributions.
+- **When data won’t move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-data-foundations-data-engineering-foundations-0c20.
+- **When the GPU is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-data-foundations-row-vs-columnar-formats-bca2.
+- **When pipelines explode in cost**: Use the primitives in @sec-data-foundations-algebra-data-9792, especially join-induced shuffles.
+- **When “average looks fine” but users complain**: Use @sec-data-foundations-distributions-long-tail-901f and session-level tail probability.
+- **When accuracy drifts silently**: Use @sec-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
 
 ```{python}
 #| label: appendix-data-setup
@@ -137,43 +137,43 @@ psi_threshold = 0.2
 logit_val = 100
 ```
 
-This appendix covers the principles of data engineering and statistical monitoring that keep ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering-ml and the operational monitoring in @sec-machine-learning-operations-mlops.
+This appendix covers the principles of data engineering and statistical monitoring that keep ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
 
-## Data Engineering Foundations {#sec-system-foundations-data-engineering-foundations-9ba2}
+## Data Engineering Foundations {#sec-data-foundations-data-engineering-foundations-0c20}
 
 Understanding hardware constraints is only half the battle; we must also shape our data to fit them. Data engineering applies the principles of the memory hierarchy to storage formats and pipeline design, ensuring that the accelerator never starves. This process begins with recognizing that data is physical—it has volume, it takes time to move, and it requires energy to parse.
 
-### Napkin Math: The Physics of Data Gravity
+### Napkin Math: The Physics of Data Gravity {#sec-data-foundations-napkin-math-physics-data-gravity-9ae0}
 
 Data gravity[^fn-data-gravity] is not a metaphor; it is a calculation of transfer time. Unlike compute, which gets faster every year, the speed of light is fixed and network bandwidth is a finite resource. When datasets grow large enough, they effectively become stationary—moving them costs more time and energy than moving the computation to where the data already lives.
 
 [^fn-data-gravity]: **Data Gravity**: Coined by Dave McCrory in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
 
-The transfer time for moving a dataset is simply $T = \text{Data Volume} / \text{Bandwidth}$ (for the large volumes here, latency is negligible; the full equation appears in @sec-system-foundations-bandwidth-vs-latency-e155). @tbl-data-gravity illustrates the sobering reality:
+The transfer time for moving a dataset is simply $T = \text{Data Volume} / \text{Bandwidth}$ (for the large volumes here, latency is negligible; the full equation appears in @sec-machine-foundations-bandwidth-vs-latency-5320). @tbl-data-gravity illustrates the sobering reality:
 
 | **Data Volume** | **1 Gbps (Standard WAN)** | **10 Gbps (High-End WAN)** | **100 Gbps (Direct Connect)** | **Snowmobile (Truck)** |
-|:--------------|------------------------:|-------------------------:|----------------------------:|:---------------------|
+|:----------------|--------------------------:|---------------------------:|------------------------------:|:-----------------------|
 | **1 TB**        |       `{python} t_1tb_1g` |       `{python} t_1tb_10g` |         `{python} t_1tb_100g` | N/A                    |
 | **100 TB**      |     `{python} t_100tb_1g` |     `{python} t_100tb_10g` |       `{python} t_100tb_100g` | N/A                    |
 | **1 PB**        |   **`{python} t_1pb_1g`** |   **`{python} t_1pb_10g`** |         `{python} t_1pb_100g` | **2 Days**             |
 
 : **The Cost of Inertia.** Why we "ship compute to data" rather than "ship data to compute." If you have 1 PB, the network is often not a viable option. {#tbl-data-gravity}
 
-### The Cost of Serialization
+### The Cost of Serialization {#sec-data-foundations-cost-serialization-b921}
 
 Even after data arrives at the machine, we face one final hurdle: the serialization tax.[^fn-serialization] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JSON or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
 
-[^fn-serialization]: **Serialization**: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering-ml covers pipeline design strategies that minimize this overhead.
+[^fn-serialization]: **Serialization**: From Latin *serialis* (forming a series). The process of converting in-memory data structures into a byte stream for storage or transmission, and the reverse (*deserialization*). In ML pipelines, the choice of serialization format can dominate end-to-end training time; @sec-data-engineering covers pipeline design strategies that minimize this overhead.
 
 | **Format**          |             **Decoding Speed (MB/s)** |                  **CPU Cycles per Byte** | **Suitability**         |
-|:------------------|------------------------------------:|---------------------------------------:|:----------------------|
+|:--------------------|--------------------------------------:|-----------------------------------------:|:------------------------|
 | **CSV / JSON**      |         `{python} csv_speed_str` MB/s |         `{python} csv_cycles_str` cycles | Debugging only          |
 | **Protobuf**        |       `{python} proto_speed_str` MB/s |       `{python} proto_cycles_str` cycles | RPC / Messages          |
 | **Parquet / Arrow** | **`{python} parquet_speed_str` MB/s** | **`{python} parquet_cycles_str` cycles** | **High-Scale Training** |
 
 : **Serialization Overhead.** Zero-copy formats like Arrow are 10–100× faster than row-based text formats because they align directly with internal memory structures. {#tbl-serialization-cost}
 
-### Row vs. Columnar Formats {#sec-system-foundations-row-vs-columnar-formats-1f97}
+### Row vs. Columnar Formats {#sec-data-foundations-row-vs-columnar-formats-bca2}
 
 The choice of file format determines the "physics" of how your data is read.
 
@@ -226,7 +226,7 @@ The choice of file format determines whether your system is I/O bound or compute
 
 :::
 
-### The Algebra of Data {#sec-system-foundations-algebra-data-7b3d}
+### The Algebra of Data {#sec-data-foundations-algebra-data-9792}
 
 Feature engineering is built on three SQL primitives. Understanding their computational cost prevents pipeline bottlenecks.
 
@@ -244,7 +244,7 @@ Feature engineering is built on three SQL primitives. Understanding their comput
 
 Understanding data formats, serialization costs, and algebraic primitives tells us how to *move* data efficiently. But even a perfectly engineered pipeline can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
 
-## Probability and Statistics {#sec-system-foundations-probability-statistics-systems-a2cb}
+## Probability and Statistics {#sec-data-foundations-probability-statistics-3934}
 
 Once data is flowing through our pipelines, we need mathematical tools to ensure its quality and consistency. Probability and statistics provide the language for monitoring system health, detecting the silent failures of data drift, and managing uncertainty.
 
@@ -252,7 +252,7 @@ Once data is flowing through our pipelines, we need mathematical tools to ensure
 Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
 :::
 
-### Distributions and the Long Tail {#sec-system-foundations-distributions-long-tail-37cc}
+### Distributions and the Long Tail {#sec-data-foundations-distributions-long-tail-901f}
 
 In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means 1% of your users experience extreme slowness, which at scale (`{python} n_users_str` users) is `{python} n_unhappy_str` unhappy people.
 
@@ -295,7 +295,7 @@ Computed: P(Slow) = `{python} p_slow_pct_str`%.
 For a heavy user ($N$ is large), the "tail" latency becomes their *median* experience. This is why Google and Amazon optimize for P99.9 or P99.99.
 :::
 
-### Measuring Drift (Divergence) {#sec-system-foundations-measuring-drift-divergence-0525}
+### Measuring Drift (Divergence) {#sec-data-foundations-measuring-drift-divergence-a6dd}
 
 Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the *entire shape* of the distribution.
 
@@ -333,9 +333,9 @@ Because KL divergence is asymmetric ($D_{KL}(P||Q) \neq D_{KL}(Q||P)$), practiti
 
 Both KL divergence and PSI are grounded in a deeper framework—information theory—which provides the units and bounds that make these metrics principled rather than ad hoc.
 
-### Information Theory for Systems {#sec-system-foundations-information-theory-a8f2}
+### Information Theory for Systems {#sec-data-foundations-information-theory-systems-c033}
 
-In the "Information Roofline" model (@sec-appendix-dam), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
+In the "Information Roofline" model (@sec-dam-taxonomy), we treat data quality as a physical constraint similar to bandwidth. Information theory provides the units for this constraint. Three concepts are central:
 
 **Entropy ($H$)**[^fn-entropy] is the average information content (uncertainty) in a distribution, defined as $H(X) = -\sum p(x) \log p(x)$. A uniform distribution has maximum entropy (maximum uncertainty). This connects directly to KL divergence above: $D_{KL}$ measures excess bits needed when using the wrong distribution.
 
@@ -345,7 +345,7 @@ In the "Information Roofline" model (@sec-appendix-dam), we treat data quality a
 
 [^fn-entropy]: **Entropy**: From Greek *entropia* (transformation). Shannon borrowed the term from thermodynamics in 1948 to quantify information content. In systems terms, entropy tells you the theoretical minimum number of bits needed to encode a message from a source—directly relevant to compression ratios and data pipeline sizing.
 
-### Logits and Numerical Stability {#sec-system-foundations-logits-numerical-stability-9f55}
+### Logits and Numerical Stability {#sec-data-foundations-logits-numerical-stability-13e2}
 
 Neural networks output *logits*[^fn-logit] (unnormalized scores), not probabilities. We convert them using Softmax:
 
@@ -395,7 +395,7 @@ All intermediate values are in $[0, 1]$—no overflow risk, even in FP16.
 
 The tools in this section—tail-aware metrics, drift divergences, information-theoretic bounds, and numerical stability tricks—give us the vocabulary to diagnose data-related failures quantitatively rather than anecdotally. The fallacies that follow highlight the most common ways these tools are ignored.
 
-## Fallacies and Pitfalls {#sec-data-foundations-fallacies-pitfalls}
+## Fallacies and Pitfalls {#sec-data-foundations-fallacies-pitfalls-a338}
 
 **Fallacy:** *Moving a petabyte to the cloud is just a bandwidth problem.*
 
@@ -403,7 +403,7 @@ Transfer time is only the beginning. Data gravity encompasses not just transfer 
 
 **Pitfall:** *Ignoring data serialization cost.*
 
-Engineers meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. As @tbl-serialization-cost shows, text-based formats can be 10--100$\times$ slower to decode than columnar binary formats, making the CPU—not the accelerator—the bottleneck (@sec-system-foundations-data-engineering-foundations-9ba2).
+Engineers meticulously optimize accelerator kernels while leaving data loading as JSON or CSV. As @tbl-serialization-cost shows, text-based formats can be 10--100$\times$ slower to decode than columnar binary formats, making the CPU—not the accelerator—the bottleneck (@sec-data-foundations-data-engineering-foundations-0c20).
 
 **Fallacy:** *Average latency is a good summary of system performance.*
 
@@ -415,7 +415,7 @@ A model's accuracy can remain stable even as the input distribution drifts, beca
 
 These pitfalls share a common root: treating data as a solved problem rather than a continuous engineering discipline. The summary below distills the core principles that guard against each one.
 
-## Summary
+## Summary {#sec-data-foundations-summary-3c72}
 
 ::: {.callout-takeaways}
 
