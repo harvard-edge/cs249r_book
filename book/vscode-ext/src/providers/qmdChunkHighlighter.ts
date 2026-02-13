@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { resolveHighlightStyle, type QmdColorOverrides, type VisualPreset, type ThemeMode } from './qmdHighlightPalette';
+import { getBaseHighlightStyle, type VisualPreset, type ThemeMode } from './qmdHighlightPalette';
 
 function isQmdEditor(editor: vscode.TextEditor | undefined): editor is vscode.TextEditor {
   return Boolean(editor && editor.document.uri.fsPath.endsWith('.qmd'));
@@ -74,34 +74,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           || event.affectsConfiguration('mlsysbook.highlightTables')
           || event.affectsConfiguration('mlsysbook.highlightFootnotes')
           || event.affectsConfiguration('mlsysbook.highlightFootnoteBlockBackground')
-          || event.affectsConfiguration('mlsysbook.colorSectionH2Bg')
-          || event.affectsConfiguration('mlsysbook.colorSectionH3Bg')
-          || event.affectsConfiguration('mlsysbook.colorSectionH4Bg')
-          || event.affectsConfiguration('mlsysbook.colorSectionH5Bg')
-          || event.affectsConfiguration('mlsysbook.colorSectionH6Bg')
-          || event.affectsConfiguration('mlsysbook.colorFigureLabelBg')
-          || event.affectsConfiguration('mlsysbook.colorTableLabelBg')
-          || event.affectsConfiguration('mlsysbook.colorListingLabelBg')
-          || event.affectsConfiguration('mlsysbook.colorTableRegionBg')
-          || event.affectsConfiguration('mlsysbook.colorFootnoteRegionBg')
-          || event.affectsConfiguration('mlsysbook.colorInlineReference')
-          || event.affectsConfiguration('mlsysbook.colorStructuralReference')
-          || event.affectsConfiguration('mlsysbook.colorSectionReference')
-          || event.affectsConfiguration('mlsysbook.colorFigureReference')
-          || event.affectsConfiguration('mlsysbook.colorTableReference')
-          || event.affectsConfiguration('mlsysbook.colorListingReference')
-          || event.affectsConfiguration('mlsysbook.colorEquationReference')
-          || event.affectsConfiguration('mlsysbook.colorSectionLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorFigureLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorTableLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorListingLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorEquationLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorLabelDefinition')
-          || event.affectsConfiguration('mlsysbook.colorFootnoteReference')
-          || event.affectsConfiguration('mlsysbook.colorFootnoteDefinitionMarker')
           || event.affectsConfiguration('mlsysbook.highlightInlinePython')
-          || event.affectsConfiguration('mlsysbook.colorInlinePython')
-          || event.affectsConfiguration('mlsysbook.colorInlinePythonBg')
           || event.affectsConfiguration('mlsysbook.showInlinePythonValues')
           || event.affectsConfiguration('mlsysbook.showInlinePythonCodeLens')
         ) {
@@ -178,48 +151,6 @@ export class QmdChunkHighlighter implements vscode.Disposable {
       .get<boolean>('highlightInlinePython', true);
   }
 
-  private readOptionalColor(config: vscode.WorkspaceConfiguration, key: string): string | undefined {
-    const value = config.get<string>(key);
-    if (!value) {
-      return undefined;
-    }
-    const trimmed = value.trim();
-    return trimmed.length > 0 ? trimmed : undefined;
-  }
-
-  private getColorOverrides(): QmdColorOverrides {
-    const config = vscode.workspace.getConfiguration('mlsysbook');
-    return {
-      sectionH2Bg: this.readOptionalColor(config, 'colorSectionH2Bg'),
-      sectionH3Bg: this.readOptionalColor(config, 'colorSectionH3Bg'),
-      sectionH4Bg: this.readOptionalColor(config, 'colorSectionH4Bg'),
-      sectionH5Bg: this.readOptionalColor(config, 'colorSectionH5Bg'),
-      sectionH6Bg: this.readOptionalColor(config, 'colorSectionH6Bg'),
-      figureLineBg: this.readOptionalColor(config, 'colorFigureLabelBg'),
-      tableLineBg: this.readOptionalColor(config, 'colorTableLabelBg'),
-      listingLineBg: this.readOptionalColor(config, 'colorListingLabelBg'),
-      tableBg: this.readOptionalColor(config, 'colorTableRegionBg'),
-      footnoteBg: this.readOptionalColor(config, 'colorFootnoteRegionBg'),
-      inlineRefColor: this.readOptionalColor(config, 'colorInlineReference'),
-      structuralRefColor: this.readOptionalColor(config, 'colorStructuralReference'),
-      sectionRefColor: this.readOptionalColor(config, 'colorSectionReference'),
-      figureRefColor: this.readOptionalColor(config, 'colorFigureReference'),
-      tableRefColor: this.readOptionalColor(config, 'colorTableReference'),
-      listingRefColor: this.readOptionalColor(config, 'colorListingReference'),
-      equationRefColor: this.readOptionalColor(config, 'colorEquationReference'),
-      sectionLabelDefColor: this.readOptionalColor(config, 'colorSectionLabelDefinition'),
-      figureLabelDefColor: this.readOptionalColor(config, 'colorFigureLabelDefinition'),
-      tableLabelDefColor: this.readOptionalColor(config, 'colorTableLabelDefinition'),
-      listingLabelDefColor: this.readOptionalColor(config, 'colorListingLabelDefinition'),
-      equationLabelDefColor: this.readOptionalColor(config, 'colorEquationLabelDefinition'),
-      labelDefColor: this.readOptionalColor(config, 'colorLabelDefinition'),
-      inlinePythonColor: this.readOptionalColor(config, 'colorInlinePython'),
-      inlinePythonBg: this.readOptionalColor(config, 'colorInlinePythonBg'),
-      footnoteRefColor: this.readOptionalColor(config, 'colorFootnoteReference'),
-      footnoteDefColor: this.readOptionalColor(config, 'colorFootnoteDefinitionMarker'),
-    };
-  }
-
   private recreateDecorations(): void {
     this.calloutDecoration?.dispose();
     this.divDecoration?.dispose();
@@ -251,7 +182,7 @@ export class QmdChunkHighlighter implements vscode.Disposable {
 
     const preset = this.getVisualPreset();
     const theme = this.getThemeMode();
-    const style = resolveHighlightStyle(preset, this.getColorOverrides(), theme);
+    const style = getBaseHighlightStyle(preset, theme);
 
     this.calloutDecoration = vscode.window.createTextEditorDecorationType({
       isWholeLine: true,
@@ -445,12 +376,15 @@ export class QmdChunkHighlighter implements vscode.Disposable {
     const tableRefRegex = /@tbl-[A-Za-z0-9_:-]+/g;
     const listingRefRegex = /@lst-[A-Za-z0-9_:-]+/g;
     const equationRefRegex = /@eq-[A-Za-z0-9_:-]+/g;
-    const labelInlineRegex = /\{#(?:fig|tbl|sec|lst|eq)-[A-Za-z0-9_:-]+\}/g;
-    const sectionLabelInlineRegex = /\{#sec-[A-Za-z0-9_:-]+\}/g;
-    const figureLabelInlineRegex = /\{#fig-[A-Za-z0-9_:-]+\}/g;
-    const tableLabelInlineRegex = /\{#tbl-[A-Za-z0-9_:-]+\}/g;
-    const listingLabelInlineRegex = /\{#lst-[A-Za-z0-9_:-]+\}/g;
-    const equationLabelInlineRegex = /\{#eq-[A-Za-z0-9_:-]+\}/g;
+    // Label-definition regexes: match {#type-name} OR {#type-name followed by
+    // a space (when extra attributes like fig-env="..." come after the label).
+    // We highlight only the {#type-name portion, not trailing attributes.
+    const labelInlineRegex = /\{#(?:fig|tbl|sec|lst|eq)-[A-Za-z0-9_:-]+(?=[\s}])/g;
+    const sectionLabelInlineRegex = /\{#sec-[A-Za-z0-9_:-]+(?=[\s}])/g;
+    const figureLabelInlineRegex = /\{#fig-[A-Za-z0-9_:-]+(?=[\s}])/g;
+    const tableLabelInlineRegex = /\{#tbl-[A-Za-z0-9_:-]+(?=[\s}])/g;
+    const listingLabelInlineRegex = /\{#lst-[A-Za-z0-9_:-]+(?=[\s}])/g;
+    const equationLabelInlineRegex = /\{#eq-[A-Za-z0-9_:-]+(?=[\s}])/g;
     const labelYamlRegex = /#\|\s*(?:label|fig-label|tbl-label|lst-label):\s*(?:fig|tbl|lst)-[A-Za-z0-9_:-]+/g;
     const sectionLabelYamlRegex = /#\|\s*label:\s*sec-[A-Za-z0-9_:-]+/g;
     const figureLabelYamlRegex = /#\|\s*(?:label|fig-label):\s*fig-[A-Za-z0-9_:-]+/g;
@@ -628,113 +562,77 @@ export class QmdChunkHighlighter implements vscode.Disposable {
 
       if (highlightLabelDefs && !inFence) {
         let labelMatch: RegExpExecArray | null;
+
+        // Collect typed label definitions first so we can exclude them from the
+        // generic labelDefinitionRanges bucket (same overlap-prevention strategy
+        // as for references above).
+        const typedLabelStartPositions = new Set<number>();
+
+        const typedLabelInlineConfigs: Array<{ regex: RegExp; ranges: vscode.Range[] }> = [
+          { regex: sectionLabelInlineRegex, ranges: sectionLabelDefinitionRanges },
+          { regex: figureLabelInlineRegex, ranges: figureLabelDefinitionRanges },
+          { regex: tableLabelInlineRegex, ranges: tableLabelDefinitionRanges },
+          { regex: listingLabelInlineRegex, ranges: listingLabelDefinitionRanges },
+          { regex: equationLabelInlineRegex, ranges: equationLabelDefinitionRanges },
+        ];
+        for (const { regex, ranges } of typedLabelInlineConfigs) {
+          while ((labelMatch = regex.exec(text)) !== null) {
+            ranges.push(new vscode.Range(
+              new vscode.Position(line, labelMatch.index),
+              new vscode.Position(line, labelMatch.index + labelMatch[0].length),
+            ));
+            typedLabelStartPositions.add(labelMatch.index);
+          }
+          regex.lastIndex = 0;
+        }
+
+        const typedLabelYamlConfigs: Array<{ regex: RegExp; ranges: vscode.Range[] }> = [
+          { regex: sectionLabelYamlRegex, ranges: sectionLabelDefinitionRanges },
+          { regex: figureLabelYamlRegex, ranges: figureLabelDefinitionRanges },
+          { regex: tableLabelYamlRegex, ranges: tableLabelDefinitionRanges },
+          { regex: listingLabelYamlRegex, ranges: listingLabelDefinitionRanges },
+          { regex: equationLabelYamlRegex, ranges: equationLabelDefinitionRanges },
+        ];
+        for (const { regex, ranges } of typedLabelYamlConfigs) {
+          while ((labelMatch = regex.exec(text)) !== null) {
+            ranges.push(new vscode.Range(
+              new vscode.Position(line, labelMatch.index),
+              new vscode.Position(line, labelMatch.index + labelMatch[0].length),
+            ));
+            typedLabelStartPositions.add(labelMatch.index);
+          }
+          regex.lastIndex = 0;
+        }
+
+        // Generic label definitions — skip anything already captured by a typed regex
         while ((labelMatch = labelInlineRegex.exec(text)) !== null) {
-          labelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
+          if (!typedLabelStartPositions.has(labelMatch.index)) {
+            labelDefinitionRanges.push(new vscode.Range(
+              new vscode.Position(line, labelMatch.index),
+              new vscode.Position(line, labelMatch.index + labelMatch[0].length),
+            ));
+          }
         }
         labelInlineRegex.lastIndex = 0;
 
         while ((labelMatch = labelYamlRegex.exec(text)) !== null) {
-          labelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
+          if (!typedLabelStartPositions.has(labelMatch.index)) {
+            labelDefinitionRanges.push(new vscode.Range(
+              new vscode.Position(line, labelMatch.index),
+              new vscode.Position(line, labelMatch.index + labelMatch[0].length),
+            ));
+          }
         }
         labelYamlRegex.lastIndex = 0;
-
-        while ((labelMatch = sectionLabelInlineRegex.exec(text)) !== null) {
-          sectionLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        sectionLabelInlineRegex.lastIndex = 0;
-        while ((labelMatch = figureLabelInlineRegex.exec(text)) !== null) {
-          figureLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        figureLabelInlineRegex.lastIndex = 0;
-        while ((labelMatch = tableLabelInlineRegex.exec(text)) !== null) {
-          tableLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        tableLabelInlineRegex.lastIndex = 0;
-        while ((labelMatch = listingLabelInlineRegex.exec(text)) !== null) {
-          listingLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        listingLabelInlineRegex.lastIndex = 0;
-        while ((labelMatch = equationLabelInlineRegex.exec(text)) !== null) {
-          equationLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        equationLabelInlineRegex.lastIndex = 0;
-
-        while ((labelMatch = sectionLabelYamlRegex.exec(text)) !== null) {
-          sectionLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        sectionLabelYamlRegex.lastIndex = 0;
-        while ((labelMatch = figureLabelYamlRegex.exec(text)) !== null) {
-          figureLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        figureLabelYamlRegex.lastIndex = 0;
-        while ((labelMatch = tableLabelYamlRegex.exec(text)) !== null) {
-          tableLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        tableLabelYamlRegex.lastIndex = 0;
-        while ((labelMatch = listingLabelYamlRegex.exec(text)) !== null) {
-          listingLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        listingLabelYamlRegex.lastIndex = 0;
-        while ((labelMatch = equationLabelYamlRegex.exec(text)) !== null) {
-          equationLabelDefinitionRanges.push(new vscode.Range(
-            new vscode.Position(line, labelMatch.index),
-            new vscode.Position(line, labelMatch.index + labelMatch[0].length),
-          ));
-        }
-        equationLabelYamlRegex.lastIndex = 0;
       }
 
       if (highlightInlineRefs && (!inFence || text.trim().startsWith('#|'))) {
         let match: RegExpExecArray | null;
-        while ((match = inlineRefRegex.exec(text)) !== null) {
-          inlineRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
-        }
-        inlineRefRegex.lastIndex = 0;
 
-        while ((match = structuralRefRegex.exec(text)) !== null) {
-          structuralRefRanges.push(new vscode.Range(
-            new vscode.Position(line, match.index),
-            new vscode.Position(line, match.index + match[0].length),
-          ));
-        }
-        structuralRefRegex.lastIndex = 0;
-
+        // Collect typed references first so we can exclude them from generic buckets.
+        // This prevents the generic inlineRef / structuralRef decorations from
+        // overriding the typed colors (VS Code resolves overlapping decorations
+        // by creation order, not application order).
         const typedRefConfigs: Array<{ regex: RegExp; ranges: vscode.Range[] }> = [
           { regex: sectionRefRegex, ranges: sectionRefRanges },
           { regex: figureRefRegex, ranges: figureRefRanges },
@@ -743,15 +641,39 @@ export class QmdChunkHighlighter implements vscode.Disposable {
           { regex: equationRefRegex, ranges: equationRefRanges },
         ];
 
+        const typedStartPositions = new Set<number>();
         for (const { regex, ranges } of typedRefConfigs) {
           while ((match = regex.exec(text)) !== null) {
             ranges.push(new vscode.Range(
               new vscode.Position(line, match.index),
               new vscode.Position(line, match.index + match[0].length),
             ));
+            typedStartPositions.add(match.index);
           }
           regex.lastIndex = 0;
         }
+
+        // Generic inline refs — skip anything already captured by a typed regex
+        while ((match = inlineRefRegex.exec(text)) !== null) {
+          if (!typedStartPositions.has(match.index)) {
+            inlineRefRanges.push(new vscode.Range(
+              new vscode.Position(line, match.index),
+              new vscode.Position(line, match.index + match[0].length),
+            ));
+          }
+        }
+        inlineRefRegex.lastIndex = 0;
+
+        // Structural refs — skip anything already captured by a typed regex
+        while ((match = structuralRefRegex.exec(text)) !== null) {
+          if (!typedStartPositions.has(match.index)) {
+            structuralRefRanges.push(new vscode.Range(
+              new vscode.Position(line, match.index),
+              new vscode.Position(line, match.index + match[0].length),
+            ));
+          }
+        }
+        structuralRefRegex.lastIndex = 0;
       }
 
       if (highlightInlinePython && !inFence) {

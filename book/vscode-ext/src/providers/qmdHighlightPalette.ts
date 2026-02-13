@@ -1,36 +1,6 @@
 export type VisualPreset = 'subtle' | 'balanced' | 'highContrast';
 export type ThemeMode = 'dark' | 'light';
 
-export interface QmdColorOverrides {
-  sectionH2Bg?: string;
-  sectionH3Bg?: string;
-  sectionH4Bg?: string;
-  sectionH5Bg?: string;
-  sectionH6Bg?: string;
-  figureLineBg?: string;
-  tableLineBg?: string;
-  listingLineBg?: string;
-  tableBg?: string;
-  footnoteBg?: string;
-  inlineRefColor?: string;
-  structuralRefColor?: string;
-  sectionRefColor?: string;
-  figureRefColor?: string;
-  tableRefColor?: string;
-  listingRefColor?: string;
-  equationRefColor?: string;
-  sectionLabelDefColor?: string;
-  figureLabelDefColor?: string;
-  tableLabelDefColor?: string;
-  listingLabelDefColor?: string;
-  equationLabelDefColor?: string;
-  labelDefColor?: string;
-  footnoteRefColor?: string;
-  footnoteDefColor?: string;
-  inlinePythonColor?: string;
-  inlinePythonBg?: string;
-}
-
 export interface HighlightStyle {
   calloutBg: string;
   divBg: string;
@@ -77,9 +47,9 @@ const DARK_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     tableLineBg: 'rgba(52, 211, 153, 0.19)',
     listingLineBg: 'rgba(251, 146, 60, 0.20)',
     tableBg: 'rgba(16, 185, 129, 0.08)',
-    footnoteBg: 'rgba(148, 163, 184, 0.08)',
-    footnoteRefColor: '#94a3b8',
-    footnoteDefColor: '#94a3b8',
+    footnoteBg: 'rgba(244, 114, 182, 0.07)',
+    footnoteRefColor: '#ec4899',
+    footnoteDefColor: '#ec4899',
     inlineRefColor: 'editorInfo.foreground',
     structuralRefColor: 'textLink.foreground',
     sectionRefColor: '#8fb4ff',
@@ -114,9 +84,9 @@ const DARK_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     tableLineBg: 'rgba(52, 211, 153, 0.25)',
     listingLineBg: 'rgba(251, 146, 60, 0.28)',
     tableBg: 'rgba(16, 185, 129, 0.12)',
-    footnoteBg: 'rgba(148, 163, 184, 0.12)',
-    footnoteRefColor: '#a1aebe',
-    footnoteDefColor: '#a1aebe',
+    footnoteBg: 'rgba(244, 114, 182, 0.10)',
+    footnoteRefColor: '#f472b6',
+    footnoteDefColor: '#f472b6',
     inlineRefColor: 'textLink.foreground',
     structuralRefColor: 'editorInfo.foreground',
     sectionRefColor: '#a7c4ff',
@@ -151,9 +121,9 @@ const DARK_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     tableLineBg: 'rgba(52, 211, 153, 0.32)',
     listingLineBg: 'rgba(251, 146, 60, 0.34)',
     tableBg: 'rgba(16, 185, 129, 0.18)',
-    footnoteBg: 'rgba(148, 163, 184, 0.18)',
-    footnoteRefColor: '#b0bec5',
-    footnoteDefColor: '#b0bec5',
+    footnoteBg: 'rgba(244, 114, 182, 0.14)',
+    footnoteRefColor: '#f9a8d4',
+    footnoteDefColor: '#f9a8d4',
     inlineRefColor: 'textLink.foreground',
     structuralRefColor: 'editorInfo.foreground',
     sectionRefColor: '#c3d4ff',
@@ -195,9 +165,9 @@ const LIGHT_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     tableLineBg: 'rgba(16, 185, 129, 0.13)',
     listingLineBg: 'rgba(234, 88, 12, 0.14)',
     tableBg: 'rgba(5, 150, 105, 0.07)',
-    footnoteBg: 'rgba(100, 116, 139, 0.07)',
-    footnoteRefColor: '#64748b',
-    footnoteDefColor: '#64748b',
+    footnoteBg: 'rgba(219, 39, 119, 0.06)',
+    footnoteRefColor: '#db2777',
+    footnoteDefColor: '#db2777',
     inlineRefColor: 'editorInfo.foreground',
     structuralRefColor: 'textLink.foreground',
     sectionRefColor: '#2563eb',
@@ -232,9 +202,9 @@ const LIGHT_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     tableLineBg: 'rgba(16, 185, 129, 0.17)',
     listingLineBg: 'rgba(234, 88, 12, 0.18)',
     tableBg: 'rgba(5, 150, 105, 0.10)',
-    footnoteBg: 'rgba(100, 116, 139, 0.10)',
-    footnoteRefColor: '#475569',
-    footnoteDefColor: '#475569',
+    footnoteBg: 'rgba(219, 39, 119, 0.08)',
+    footnoteRefColor: '#be185d',
+    footnoteDefColor: '#be185d',
     inlineRefColor: 'textLink.foreground',
     structuralRefColor: 'editorInfo.foreground',
     sectionRefColor: '#1d4ed8',
@@ -269,9 +239,9 @@ const LIGHT_STYLE_BY_PRESET: Record<VisualPreset, HighlightStyle> = {
     tableLineBg: 'rgba(16, 185, 129, 0.22)',
     listingLineBg: 'rgba(234, 88, 12, 0.24)',
     tableBg: 'rgba(5, 150, 105, 0.14)',
-    footnoteBg: 'rgba(100, 116, 139, 0.14)',
-    footnoteRefColor: '#334155',
-    footnoteDefColor: '#334155',
+    footnoteBg: 'rgba(219, 39, 119, 0.10)',
+    footnoteRefColor: '#9d174d',
+    footnoteDefColor: '#9d174d',
     inlineRefColor: 'textLink.foreground',
     structuralRefColor: 'editorInfo.foreground',
     sectionRefColor: '#1e40af',
@@ -308,39 +278,3 @@ export function getBaseHighlightStyle(preset: VisualPreset, theme: ThemeMode = '
   return palette[preset];
 }
 
-export function resolveHighlightStyle(preset: VisualPreset, override: QmdColorOverrides, theme: ThemeMode = 'dark'): HighlightStyle {
-  const baseStyle = getBaseHighlightStyle(preset, theme);
-  return {
-    ...baseStyle,
-    figureLineBg: override.figureLineBg ?? baseStyle.figureLineBg,
-    tableLineBg: override.tableLineBg ?? baseStyle.tableLineBg,
-    listingLineBg: override.listingLineBg ?? baseStyle.listingLineBg,
-    tableBg: override.tableBg ?? baseStyle.tableBg,
-    footnoteBg: override.footnoteBg ?? baseStyle.footnoteBg,
-    inlineRefColor: override.inlineRefColor ?? baseStyle.inlineRefColor,
-    structuralRefColor: override.structuralRefColor ?? baseStyle.structuralRefColor,
-    sectionRefColor: override.sectionRefColor ?? baseStyle.sectionRefColor,
-    figureRefColor: override.figureRefColor ?? baseStyle.figureRefColor,
-    tableRefColor: override.tableRefColor ?? baseStyle.tableRefColor,
-    listingRefColor: override.listingRefColor ?? baseStyle.listingRefColor,
-    equationRefColor: override.equationRefColor ?? baseStyle.equationRefColor,
-    sectionLabelDefColor: override.sectionLabelDefColor ?? override.sectionRefColor ?? override.labelDefColor ?? baseStyle.sectionLabelDefColor,
-    figureLabelDefColor: override.figureLabelDefColor ?? override.figureRefColor ?? override.labelDefColor ?? baseStyle.figureLabelDefColor,
-    tableLabelDefColor: override.tableLabelDefColor ?? override.tableRefColor ?? override.labelDefColor ?? baseStyle.tableLabelDefColor,
-    listingLabelDefColor: override.listingLabelDefColor ?? override.listingRefColor ?? override.labelDefColor ?? baseStyle.listingLabelDefColor,
-    equationLabelDefColor: override.equationLabelDefColor ?? override.equationRefColor ?? override.labelDefColor ?? baseStyle.equationLabelDefColor,
-    labelDefColor: override.labelDefColor ?? baseStyle.labelDefColor,
-    inlinePythonColor: override.inlinePythonColor ?? baseStyle.inlinePythonColor,
-    inlinePythonBg: override.inlinePythonBg ?? baseStyle.inlinePythonBg,
-    inlinePythonKeywordColor: baseStyle.inlinePythonKeywordColor,
-    footnoteRefColor: override.footnoteRefColor ?? baseStyle.footnoteRefColor,
-    footnoteDefColor: override.footnoteDefColor ?? baseStyle.footnoteDefColor,
-    sectionHeaderBgByLevel: [
-      override.sectionH2Bg ?? baseStyle.sectionHeaderBgByLevel[0],
-      override.sectionH3Bg ?? baseStyle.sectionHeaderBgByLevel[1],
-      override.sectionH4Bg ?? baseStyle.sectionHeaderBgByLevel[2],
-      override.sectionH5Bg ?? baseStyle.sectionHeaderBgByLevel[3],
-      override.sectionH6Bg ?? baseStyle.sectionHeaderBgByLevel[4],
-    ] as [string, string, string, string, string],
-  };
-}
