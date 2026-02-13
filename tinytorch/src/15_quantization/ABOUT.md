@@ -477,7 +477,7 @@ The algorithm finds the minimum and maximum values in the tensor, then calculate
 
 The scale parameter determines how large each INT8 step is in FP32 space. A scale of 0.01 means each INT8 increment represents 0.01 in the original FP32 values. Smaller scales provide finer precision but can only represent a narrower range; larger scales cover wider ranges but sacrifice precision.
 
-The zero-point is an integer offset that shifts the quantization range. For a symmetric distribution like [-2, 2], the zero-point is 0, mapping FP32 zero to INT8 zero. For an asymmetric range like [-1, 3], the zero-point might be 64, ensuring the quantization levels are distributed optimally across the actual data range.
+The zero-point is an integer offset that shifts the quantization range. For a symmetric distribution like [-2, 2], the zero-point is 0, mapping FP32 zero to INT8 zero. For an asymmetric range like [-1, 3], the zero-point is -64, ensuring the quantization levels are distributed optimally across the actual data range.
 
 Here's how dequantization reverses the process:
 
@@ -488,7 +488,7 @@ def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
     return Tensor(dequantized_data)
 ```
 
-The formula `(quantized - zero_point) × scale` inverts the quantization mapping. If you quantized 2.5 to INT8 value 85 with scale 0.02 and zero-point 60, dequantization computes `(85 - 60) × 0.02 = 0.5`. The round-trip isn't perfect due to quantization being lossy compression, but the error is bounded by the scale value.
+The formula `(quantized - zero_point) × scale` inverts the quantization mapping. If you quantized 1.5 to INT8 value 50 with scale 0.02 and zero-point -25, dequantization computes `(50 - (-25)) × 0.02 = 1.5`. The round-trip isn't perfect due to quantization being lossy compression, but the error is bounded by the scale value.
 
 ### Post-Training Quantization
 

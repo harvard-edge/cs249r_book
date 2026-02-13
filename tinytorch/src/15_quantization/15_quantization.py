@@ -312,11 +312,11 @@ Small Scale (high precision):       Large Scale (low precision):
 Symmetric Range:                    Asymmetric Range:
  FP32: [-2.0, 2.0]                  FP32: [-1.0, 3.0]
    ↓     ↓     ↓                       ↓     ↓     ↓
- INT8: -128    0   127              INT8: -128   64   127
+ INT8: -128    0   127              INT8: -128  -64   127
         │     │     │                      │     │     │
      -2.0    0.0   2.0                  -1.0   0.0   3.0
 
- Zero Point = 0                     Zero Point = 64
+ Zero Point = 0                     Zero Point = -64
 ```
 
 ### Visual Example: Weight Quantization
@@ -324,8 +324,8 @@ Symmetric Range:                    Asymmetric Range:
 ```
 Original FP32 Weights:           Quantized INT8 Mapping:
 ┌─────────────────────────┐      ┌─────────────────────────┐
-│ -0.8  -0.3   0.0   0.5  │  →   │ -102  -38    0   64     │
-│  0.9   1.2  -0.1   0.7  │      │  115  153  -13   89     │
+│ -0.8  -0.3   0.0   0.5  │  →   │ -128  -64  -26   38     │
+│  0.9   1.2  -0.1   0.7  │      │   89  127  -39   63     │
 └─────────────────────────┘      └─────────────────────────┘
      4 bytes each                      1 byte each
    Total: 32 bytes                   Total: 8 bytes
@@ -425,10 +425,10 @@ Quantization Process Visualization:
 Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Apply Formula
 ┌─────────────────────────┐    ┌─────────────────────────┐  ┌─────────────────────────┐
 │ Input: [-1.5, 0.2, 2.8] │    │ Min: -1.5               │  │ quantized = round(      │
-│                         │    │ Max: 2.8                │  │   (value - zp*scale)    │
-│ Find min/max values     │ →  │ Range: 4.3              │ →│   / scale)              │
+│                         │    │ Max: 2.8                │  │   value / scale + zp)   │
+│ Find min/max values     │ →  │ Range: 4.3              │ →│                         │
 │                         │    │ Scale: 4.3/255 = 0.017  │  │                         │
-│                         │    │ Zero Point: 88          │  │ Result: [-128, 12, 127] │
+│                         │    │ Zero Point: -39         │  │ Result: [-128,-27, 127] │
 └─────────────────────────┘    └─────────────────────────┘  └─────────────────────────┘
 ```
 
@@ -472,7 +472,7 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     >>> tensor = Tensor([[-1.0, 0.0, 2.0], [0.5, 1.5, -0.5]])
     >>> q_tensor, scale, zero_point = quantize_int8(tensor)
     >>> print(f"Scale: {scale:.4f}, Zero point: {zero_point}")
-    Scale: 0.0118, Zero point: 42
+    Scale: 0.0118, Zero point: -43
 
     HINTS:
     - Use np.round() for quantization
@@ -566,9 +566,9 @@ Dequantization Process:
 INT8 Values + Parameters → FP32 Reconstruction
 
 ┌───────────────────────────────────┐
-│ Quantized: [-128, 12, 127]        │
+│ Quantized: [-128, -27, 127]       │
 │ Scale: 0.017                      │
-│ Zero Point: 88                    │
+│ Zero Point: -39                   │
 └───────────────────────────────────┘
                  │
                  ▼ Apply Formula
@@ -579,9 +579,9 @@ INT8 Values + Parameters → FP32 Reconstruction
                  │
                  ▼
 ┌───────────────────────────────────┐
-│ Result: [-1.496, 0.204, 2.799]    │
+│ Result: [-1.501, 0.202, 2.799]    │
 │ Original: [-1.5, 0.2, 2.8]        │
-│ Error: [0.004, 0.004, 0.001]      │
+│ Error: [0.001, 0.002, 0.001]      │
 └───────────────────────────────────┘
        ↑
   Excellent approximation!
@@ -620,11 +620,11 @@ def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
         Reconstructed FP32 tensor
 
     EXAMPLE:
-    >>> q_tensor = Tensor([[-42, 0, 85]])  # INT8 values
-    >>> scale, zero_point = 0.0314, 64
+    >>> q_tensor = Tensor([[-100, 0, 50]])  # INT8 values
+    >>> scale, zero_point = 0.02, -25
     >>> fp32_tensor = dequantize_int8(q_tensor, scale, zero_point)
     >>> print(fp32_tensor.data)
-    [[-1.31, 2.01, 2.67]]  # Approximate original values
+    [[-1.5, 0.5, 1.5]]  # Reconstructed FP32 values
 
     HINT:
     - Formula: dequantized = (quantized - zero_point) * scale
