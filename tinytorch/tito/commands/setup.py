@@ -128,6 +128,10 @@ class SetupCommand(BaseCommand):
 
     def install_packages(self) -> bool:
         """Install required packages for Tiny🔥Torch development."""
+        
+        # FIX: Windows Specific flags
+        is_windows = platform.system() == "Windows"
+
         # Essential packages for TinyTorch
         packages = [
             ("numpy", "numpy>=1.21.0"),
@@ -196,29 +200,35 @@ class SetupCommand(BaseCommand):
                         return False
 
         # Install Tiny🔥Torch in development mode
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=self.console
-        ) as progress:
-            task = progress.add_task("Installing Tiny🔥Torch in development mode...", total=None)
+        # FIX: Skip installation on windows
+        if is_windows and self._check_package_installed("tinytorch"):
+            self.console.print(
+                "[green]✅ Tiny🔥Torch already installed (skipping reinstall on Windows)[/green]"
+            )
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=self.console
+            ) as progress:
+                task = progress.add_task("Installing Tiny🔥Torch in development mode...", total=None)
 
-            try:
-                result = subprocess.run([
-                    sys.executable, "-m", "pip", "install", "-q", "-e", "."
-                ], cwd=self.config.project_root, capture_output=True, text=True, timeout=120)
+                try:
+                    result = subprocess.run([
+                        sys.executable, "-m", "pip", "install", "-q", "-e", "."
+                    ], cwd=self.config.project_root, capture_output=True, text=True, timeout=120)
 
-                if result.returncode == 0:
-                    progress.update(task, description="[green]✅ Tiny🔥Torch installed[/green]")
-                else:
-                    progress.update(task, description="[red]❌ Tiny🔥Torch install failed[/red]")
-                    self.console.print(f"[red]Failed to install Tiny🔥Torch: {result.stderr}[/red]")
+                    if result.returncode == 0:
+                        progress.update(task, description="[green]✅ Tiny🔥Torch installed[/green]")
+                    else:
+                        progress.update(task, description="[red]❌ Tiny🔥Torch install failed[/red]")
+                        self.console.print(f"[red]Failed to install Tiny🔥Torch: {result.stderr}[/red]")
+                        return False
+
+                except Exception as e:
+                    progress.update(task, description="[red]❌ Tiny🔥Torch error[/red]")
+                    self.console.print(f"[red]Error installing Tiny🔥Torch: {e}[/red]")
                     return False
-
-            except Exception as e:
-                progress.update(task, description="[red]❌ Tiny🔥Torch error[/red]")
-                self.console.print(f"[red]Error installing Tiny🔥Torch: {e}[/red]")
-                return False
 
         # Register Jupyter kernel so notebooks use this Python environment
         self.console.print()
