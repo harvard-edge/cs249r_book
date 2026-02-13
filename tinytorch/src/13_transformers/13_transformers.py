@@ -125,8 +125,8 @@ from tinytorch.core.transformers import TransformerBlock, TinyGPT, LayerNorm, ML
 - `tinytorch.core.tensor` (Module 01: Tensor foundation)
 - `tinytorch.core.activations` (Module 03: GELU activation)
 - `tinytorch.core.layers` (Module 04: Linear layers)
-- `tinytorch.core.attention` (Module 11: MultiHeadAttention)
-- `tinytorch.core.embeddings` (Module 12: Embedding layers)
+- `tinytorch.core.embeddings` (Module 11: Embedding layers)
+- `tinytorch.core.attention` (Module 12: MultiHeadAttention)
 
 **Dependency Flow**:
 ```
@@ -1775,10 +1775,9 @@ Your generate() method processes the full sequence for each new token.
 
 **Consider**:
 - Why is this inefficient for long sequences?
-- What optimization caches key-value pairs to avoid recomputation?
-- How would this change the computational complexity from O(n^2) to O(n)?
+- What optimization might avoid recomputing certain values during sequential generation? (You'll build this in Module 18!)
 
-**Key Insight**: KV-caching stores the key and value projections from previous tokens, so each new token only needs to compute attention with its own query against cached keys/values. This transforms generation from O(n^2) to O(n) in sequence length.
+**Key Insight**: There is significant redundant computation when generating tokens one at a time, since previously computed values are recalculated for every new token. Module 18 will show you how to eliminate this waste.
 """
 
 # %% [markdown]

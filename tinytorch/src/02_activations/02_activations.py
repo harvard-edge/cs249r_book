@@ -124,19 +124,19 @@ The magic happens in those activation functions. They introduce **nonlinearity**
 
 ### Why Nonlinearity Matters
 
-Without activation functions, stacking multiple linear layers is pointless:
+Without activation functions, stacking multiple linear transformations is pointless:
 ```
-Linear(Linear(x)) = Linear(x)  # Same as single layer!
-```
-
-With activation functions, each layer can learn increasingly complex patterns:
-```
-Layer 1: Simple edges and lines
-Layer 2: Curves and shapes
-Layer 3: Complex objects and concepts
+Linear(Linear(x)) = Linear(x)  # Same as a single transform!
 ```
 
-This is how deep networks build intelligence from simple mathematical operations.
+With activation functions between transformations, each stage can represent increasingly complex patterns:
+```
+Stage 1: Simple edges and lines
+Stage 2: Curves and shapes
+Stage 3: Complex objects and concepts
+```
+
+This is how nonlinearity turns simple math into powerful function approximation.
 """
 
 # %% [markdown]
@@ -429,7 +429,7 @@ if __name__ == "__main__":
 """
 ### Tanh - The Zero-Centered Alternative
 
-Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering helps with gradient flow during training.
+Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering is a desirable mathematical property.
 
 ### Mathematical Definition
 ```
@@ -454,7 +454,7 @@ Tanh Curve:
      -3  0  3
 ```
 
-**Why Tanh matters**: Unlike sigmoid, tanh outputs are centered around zero, which can help gradients flow better through deep networks.
+**Why Tanh matters**: Unlike sigmoid, tanh outputs are centered around zero, which is a desirable property for composing multiple transformations.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tanh-impl", "solution": true}
@@ -989,33 +989,33 @@ Answer these to deepen your understanding of activation functions and their syst
 
 ---
 
-### 4. Activation Selection for Different Layers
-**Question**: Why do we typically use different activations for hidden layers vs. output layers?
+### 4. Activation Selection for Different Stages
+**Question**: Why do we typically use different activations for hidden stages vs. output stages of a computation?
 
 **Consider the requirements**:
-- Hidden layers: Need to preserve gradients, be efficient, add nonlinearity
+- Hidden stages: Need to preserve information flowing through the computation, be efficient, add nonlinearity
 - Binary classification output: Need values in (0, 1) representing probability
 - Multi-class classification output: Need probability distribution (sum = 1)
 
 **Match the activation to the use case**:
-- ReLU for hidden layers (why?)
+- ReLU for hidden stages (why?)
 - Sigmoid for binary output (why?)
 - Softmax for multi-class output (why?)
 
 ---
 
 ### 5. The "Dying ReLU" Problem
-**Question**: A neuron's output is always zero if its input is always negative. What situations might cause this, and why is it a problem?
+**Question**: If ReLU outputs 0 for some inputs, those inputs get no signal passed through -- they effectively "die." What situations might cause this, and why is it a problem?
 
 **Consider**:
-- If weights are initialized poorly, could all inputs to a neuron be negative?
-- Once a ReLU neuron "dies" (always outputs 0), can it recover during training?
-- How does the gradient flow through a ReLU that outputs 0?
+- If inputs to a ReLU are always negative, its output is permanently zero
+- Once a ReLU "dies" (always outputs 0), no information flows through it -- it contributes nothing to the computation
+- A dead ReLU is wasted capacity: it takes up memory and compute but produces no useful signal
 
 **Solutions used in practice**:
-- LeakyReLU: f(x) = max(0.01*x, x) - small slope for negatives
+- LeakyReLU: f(x) = max(0.01*x, x) - allows a small signal even for negative inputs
 - PReLU: Learnable slope for negative values
-- GELU: Smooth approximation with no sharp corner
+- GELU: Smooth approximation that never fully zeroes out
 
 ---
 

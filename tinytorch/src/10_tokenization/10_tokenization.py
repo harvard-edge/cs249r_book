@@ -1575,59 +1575,15 @@ T5:          ~32K SentencePiece tokens, handles 100+ languages
 ChatGPT:     ~100K tokens with extended vocabulary
 ```
 
-**Memory implications for embedding tables**:
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ EMBEDDING TABLE MEMORY: Vocabulary Size × Embedding Dimension       │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│ CHARACTER TOKENIZER (Vocab: 100)                                    │
-│ ┌────────────────────────────┐                                      │
-│ │  100 × 512 = 51,200 params │     Memory: 204 KB                   │
-│ │  ████                      │     ↑ Tiny embedding table!          │
-│ └────────────────────────────┘                                      │
-│                                                                     │
-│ BPE-SMALL (Vocab: 1,000)                                            │
-│ ┌────────────────────────────┐                                      │
-│ │  1K × 512 = 512K params    │     Memory: 2.0 MB                   │
-│ │  ██████████                │     ↑ Still manageable               │
-│ └────────────────────────────┘                                      │
-│                                                                     │
-│ BPE-LARGE (Vocab: 50,000) ← MOST PRODUCTION MODELS                  │
-│ ┌────────────────────────────────────────────────────────┐          │
-│ │  50K × 512 = 25.6M params                              │          │
-│ │  ████████████████████████████████████████████████      │          │
-│ │                                                        │          │
-│ │  Memory: 102.4 MB (fp32)                               │          │
-│ │          51.2 MB (fp16)    ← Half precision saves 50%  │          │
-│ │          25.6 MB (int8)    ← Quantization saves 75%    │          │
-│ └────────────────────────────────────────────────────────┘          │
-│                                                                     │
-│ WORD-LEVEL (Vocab: 100,000)                                         │
-│ ┌────────────────────────────────────────────────────────┐          │
-│ │  100K × 512 = 51.2M params                             │          │
-│ │  ████████████████████████████████████████████████████  │          │
-│ │                                                        │          │
-│ │  Memory: 204.8 MB (fp32)  ← Often too large!           │          │
-│ │          102.4 MB (fp16)                               │          │
-│ └────────────────────────────────────────────────────────┘          │
-│                                                                     │
-│  Key Trade-off:                                                     │
-│    Larger vocab → Shorter sequences → Less compute                  │
-│    BUT larger vocab → More embedding memory → Harder to train       │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+**Downstream memory impact of vocabulary size**:
 
-Real-World Production Examples:
-┌─────────────┬──────────────┬───────────────┬──────────────────┐
-│   Model     │  Vocab Size  │  Embed Dim    │  Embed Memory    │
-├─────────────┼──────────────┼───────────────┼──────────────────┤
-│  GPT-2      │    50,257    │     1,600     │     321 MB       │
-│  GPT-3      │    50,257    │    12,288     │     2.4 GB       │
-│  BERT       │    30,522    │       768     │      94 MB       │
-│  T5         │    32,128    │       512     │      66 MB       │
-│  LLaMA-7B   │    32,000    │     4,096     │     524 MB       │
-└─────────────┴──────────────┴───────────────┴──────────────────┘
+Each token ID will eventually map to a vector of numbers (you'll build this in Module 11: Embeddings).
+Larger vocabularies mean more mappings to store -- a vocab_size of 50K vs 100K doubles this storage.
+
+```
+Key Trade-off:
+  Larger vocab → Shorter sequences → Less compute
+  BUT larger vocab → More mappings to store → Harder to train
 ```
 """
 
@@ -1749,9 +1705,9 @@ Answer these to deepen your understanding of tokenization and its systems implic
   - BPE model processes: _____ total tokens per batch
 
 **Think about**:
-- Which requires more compute during attention (attention is O(n^2))?
+- Which produces longer sequences that downstream processing must handle?
 - How does this affect training time for large language models?
-- Why is sequence length often the bottleneck for transformer models?
+- Why might longer sequences create computational challenges for the models that process them?
 
 ---
 
