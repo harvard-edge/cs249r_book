@@ -29,6 +29,7 @@ import {
   runInVisibleTerminal,
 } from './utils/terminal';
 import { ChapterOrderSource } from './types';
+import { HealthManager, HealthStatus } from './validation/healthManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -51,6 +52,22 @@ export function activate(context: vscode.ExtensionContext): void {
   const qmdFoldingProvider = new QmdFoldingProvider();
   const qmdAutoFoldManager = new QmdAutoFoldManager();
   const chunkHighlighter = new QmdChunkHighlighter();
+
+  // Health manager + status bar
+  const healthManager = new HealthManager();
+  precommitProvider.setHealthManager(healthManager);
+
+  const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  statusBarItem.command = 'mlsysbook.showHealthDetails';
+  updateStatusBar(statusBarItem, healthManager);
+  statusBarItem.show();
+
+  healthManager.onDidUpdateHealth(() => {
+    updateStatusBar(statusBarItem, healthManager);
+    precommitProvider.refresh();
+  });
+
+  context.subscriptions.push(healthManager, statusBarItem);
 
   // Inline Python value resolution (hover, ghost text, CodeLens)
   let pythonResolver: QmdPythonValueResolver | undefined;
@@ -194,6 +211,9 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:mlsysbook.mlsysbook-workbench');
     }),
     vscode.commands.registerCommand('mlsysbook.renameLabelReferences', () => void renameLabelAcrossWorkspace()),
+    vscode.commands.registerCommand('mlsysbook.showHealthDetails', () => {
+      void vscode.commands.executeCommand('mlsysbook.precommit.focus');
+    }),
 
     // Section ID management (uses binder CLI)
     vscode.commands.registerCommand('mlsysbook.addSectionIds', () => {
@@ -234,8 +254,20 @@ export function activate(context: vscode.ExtensionContext): void {
   registerContextMenuCommands(context);
 
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(editor => navigatorProvider.refreshFromEditor(editor)),
-    vscode.workspace.onDidSaveTextDocument(document => navigatorProvider.refreshFromDocument(document)),
+    vscode.window.onDidChangeActiveTextEditor(editor => {
+      navigatorProvider.refreshFromEditor(editor);
+      // Run health checks when switching to a QMD file
+      if (editor?.document.uri.fsPath.endsWith('.qmd')) {
+        healthManager.runFastChecks(editor.document);
+      }
+    }),
+    vscode.workspace.onDidSaveTextDocument(document => {
+      navigatorProvider.refreshFromDocument(document);
+      // Run health checks on save for QMD files
+      if (document.uri.fsPath.endsWith('.qmd')) {
+        healthManager.runFastChecks(document);
+      }
+    }),
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('mlsysbook.chapterOrderSource')) {
         buildProvider.refresh();
@@ -255,6 +287,48 @@ export function activate(context: vscode.ExtensionContext): void {
       void navigatorTreeView.reveal(sectionItem, { focus: false, select: false, expand: true });
     }),
   );
+
+  // Run health checks on the currently active file at startup
+  if (vscode.window.activeTextEditor?.document.uri.fsPath.endsWith('.qmd')) {
+    healthManager.runFastChecks(vscode.window.activeTextEditor.document);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Status bar helper
+// ---------------------------------------------------------------------------
+
+function updateStatusBar(item: vscode.StatusBarItem, manager: HealthManager): void {
+  item.text = formatStatusBarText(manager.status, manager.getSummaryText());
+  item.tooltip = manager.getTooltip();
+
+  switch (manager.status) {
+    case 'ok':
+      item.backgroundColor = undefined;
+      item.color = undefined;
+      break;
+    case 'warn':
+      item.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+      item.color = undefined;
+      break;
+    case 'error':
+      item.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+      item.color = undefined;
+      break;
+    default:
+      item.backgroundColor = undefined;
+      item.color = undefined;
+      break;
+  }
+}
+
+function formatStatusBarText(status: HealthStatus, summary: string): string {
+  switch (status) {
+    case 'ok':    return `$(pass) ${summary}`;
+    case 'warn':  return `$(warning) ${summary}`;
+    case 'error': return `$(error) ${summary}`;
+    default:      return `$(circle-outline) ${summary}`;
+  }
 }
 
 export function deactivate(): void {
