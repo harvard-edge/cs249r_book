@@ -574,6 +574,8 @@ Each module follows a consistent \textbf{Build $\rightarrow$ Use $\rightarrow$ R
 
 \textbf{Build: Implementation with Explicit Dependencies.} Students implement components in Jupyter notebooks (\texttt{*.py}) with scaffolded guidance. Each module begins with a \emph{connection map}: a visual diagram showing which prior modules students must have completed (prerequisites), what the current module teaches (focus), and what capabilities become available after completion (unlocks). For example, Module 09 (Convolutions) shows prerequisites of Modules 01--08, focus on spatial operations, and unlocks CNN architectures for image classification. These maps make dependency relationships explicit, helping students understand where each module fits in the larger framework architecture. To maintain consistency across all 20 modules, Module 05 (DataLoader) serves as the canonical reference implementation that all modules follow, reducing maintenance burden and enabling consistent community contribution.
 
+Within each module, complex operations are further decomposed following a \emph{progressive sub-problems} pattern grounded in cognitive load theory~\citep{sweller1988cognitive}. Rather than presenting scaled dot-product attention as a single 80-line exercise mixing score computation, numerical scaling, and causal masking, TinyTorch decomposes it into focused helper functions, each teaching exactly one concept with its own scaffolding and immediate unit test. Students implement \texttt{\_compute\_attention\_scores()} (matrix similarity via $QK^T$), then \texttt{\_scale\_scores()} (dividing by $\sqrt{d}$ for numerical stability), then \texttt{\_apply\_mask()} (blocking future positions), and finally compose them into the exported \texttt{scaled\_dot\_product\_attention()} function. Each helper requires students to hold only one new idea in working memory, and the composition step becomes a straightforward wiring exercise referencing sub-problems they already solved and tested (\Cref{subsec:intra-module}).
+
 \textbf{Use: Integration Testing Beyond Unit Tests.} Assessment validates both isolated correctness and cross-module integration. Unit tests verify individual component behavior (``Does \texttt{Tensor.reshape()} produce correct output?''), while integration tests validate that components compose into working systems (``Can Module 06 Autograd compute gradients through Module 03 Linear layers?''). Integration tests are critical for TinyTorch's pedagogical model because students may pass Module 03 unit tests but fail when autograd activates in Module 06: their layer implementation doesn't properly propagate \texttt{requires\_grad} through operations or construct computational graphs correctly.
 
 A common failure pattern illustrates this: students implement \texttt{Linear.forward()} that passes unit tests (correct output values), but gradients don't flow during backpropagation because they used NumPy operations directly instead of \texttt{Tensor} operations. When \texttt{x.requires\_grad=True} flows into their layer, the computational graph breaks. Students encounter errors like ``\texttt{AttributeError: 'numpy.ndarray' object has no attribute 'backward'}'' and must debug interface contracts: operations must preserve \texttt{Tensor} types to maintain gradient connectivity. This teaches \emph{interface design}: components must satisfy contracts enabling composition, not just produce correct outputs in isolation.
@@ -761,9 +763,45 @@ print(x.grad)  # [6.0] - dy/dx = 2x
 \label{fig:progressive-timeline}
 \end{figure*}
 
+\subsection{Intra-Module Scaffolding}
+\label{subsec:intra-module}
+
+The previous subsection described \emph{inter-module} progressive disclosure: \texttt{Tensor} capabilities appearing across modules as students progress through the curriculum. TinyTorch applies the same cognitive load management principle \emph{within} individual modules through systematic function decomposition. Complex operations that mix multiple independent concepts are broken into focused helper functions, each teaching exactly one concept, each immediately tested, before students compose them into the exported function.
+
+\Cref{lst:attention-decomp} illustrates this pattern for Module 12's scaled dot-product attention. Rather than a single monolithic implementation, students build three helpers (score computation, scaling, masking) and compose them. The composition function reads as a recipe referencing sub-problems students already solved: compute scores, scale them, optionally mask, apply softmax, multiply by values. This decomposition addresses a common failure mode in systems education where students confronted with a large function mixing validation, computation, and formatting abandon the exercise entirely. By isolating each concept, students build confidence incrementally and can pinpoint exactly where errors occur when tests fail.
+
+\begin{lstlisting}[caption={\textbf{Intra-Module Decomposition.} Scaled dot-product attention is decomposed into three focused helpers, each teaching one concept, with a composition function that calls them. Only the composition function is exported to the package; helpers are learning scaffolding.},label={lst:attention-decomp},float=t]
+# Helper 1: One concept (matrix similarity)
+def _compute_attention_scores(Q, K):
+    """Q @ K^T -> (batch, seq, seq) scores"""
+    return Q.matmul(K.transpose(-2, -1))
+
+# Helper 2: One concept (numerical stability)
+def _scale_scores(scores, d_model):
+    """Divide by sqrt(d) to prevent softmax saturation"""
+    return scores * (1.0 / math.sqrt(d_model))
+
+# Helper 3: One concept (causal masking)
+def _apply_mask(scores, mask):
+    """Set future positions to -inf before softmax"""
+    return scores + (1.0 - mask) * (-1e9)
+
+# Composition: exported, calls tested helpers
+#| export
+def scaled_dot_product_attention(Q, K, V, mask=None):
+    scores = _compute_attention_scores(Q, K)
+    scores = _scale_scores(scores, Q.shape[-1])
+    if mask is not None:
+        scores = _apply_mask(scores, mask)
+    weights = Softmax()(scores, dim=-1)
+    return weights.matmul(V), weights
+\end{lstlisting}
+
+This pattern applies across the curriculum wherever functions mix multiple concepts. Module 09 decomposes convolution into output shape computation, padding, and the sliding window operation. Module 08 splits the monolithic \texttt{Trainer} class into separate method-level exercises for initialization, the training loop, evaluation, and checkpointing. Module 07 factors optimizer \texttt{step()} methods into gradient extraction and moment update helpers shared across SGD, Adam, and AdamW. In each case, only the composition function receives the \texttt{\#| export} directive that adds it to the \texttt{tinytorch} package; helper functions prefixed with underscore remain as learning scaffolding that students implement and test but that do not pollute the public API.
+
 \subsection{Pedagogical Justification}
 
-Progressive disclosure is grounded in cognitive load theory~\citep{sweller1988cognitive} and threshold concept pedagogy~\citep{meyer2003threshold}. By deferring gradient infrastructure until Module 06, students focus entirely on tensor fundamentals without the cognitive overhead of unused attributes. Autograd represents a threshold concept (transformative and troublesome) introduced only when students have mastered the prerequisites (forward pass, loss computation) needed to appreciate it. The enhancement moment creates a concrete learning experience: tensors students already understand suddenly gain powerful new capabilities.
+Progressive disclosure operates at two levels in TinyTorch: across modules (inter-module capability enhancement) and within modules (intra-module function decomposition). Both are grounded in cognitive load theory~\citep{sweller1988cognitive} and threshold concept pedagogy~\citep{meyer2003threshold}. By deferring gradient infrastructure until Module 06, students focus entirely on tensor fundamentals without the cognitive overhead of unused attributes. By decomposing complex functions into focused helpers, students focus on one concept at a time without the cognitive overhead of unrelated implementation details within the same exercise. Autograd represents a threshold concept (transformative and troublesome) introduced only when students have mastered the prerequisites (forward pass, loss computation) needed to appreciate it. The enhancement moment creates a concrete learning experience: tensors students already understand suddenly gain powerful new capabilities.
 
 \textbf{Implementation Choice: Monkey-Patching vs. Inheritance.} Alternative designs include inheritance (\texttt{TensorV1}/\texttt{TensorV2}) or composition. We chose monkey-patching because it maintains a single \texttt{Tensor} class throughout the curriculum, mirrors PyTorch 0.4's Variable-Tensor merger via runtime consolidation, and creates a memorable ``activation moment'' when capabilities appear. Students implement the \texttt{enable\_autograd()} function themselves, learning Python metaprogramming (runtime class modification) as a systems concept, the same pattern used in production frameworks for backward compatibility and feature flags. The software engineering trade-off (global state modification) is explicitly discussed in Module 06's reflection questions.
 
