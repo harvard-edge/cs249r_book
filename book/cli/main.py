@@ -15,33 +15,51 @@ from rich.text import Text
 
 # Import our modular components
 try:
-    # When run as installed package
-    from cli.core.config import ConfigManager
-    from cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
-    from cli.commands.build import BuildCommand
-    from cli.commands.preview import PreviewCommand
-    from cli.commands.doctor import DoctorCommand
-    from cli.commands.clean import CleanCommand
-    from cli.commands.maintenance import MaintenanceCommand
-    from cli.commands.debug import DebugCommand
-    from cli.commands.validate import ValidateCommand
-    from cli.commands.formatting import FormatCommand
-    from cli.commands.info import InfoCommand
-    from cli.commands.bib import BibCommand
+    # When run as installed package (via `binder` entry point)
+    from book.cli.core.config import ConfigManager
+    from book.cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
+    from book.cli.commands.build import BuildCommand
+    from book.cli.commands.preview import PreviewCommand
+    from book.cli.commands.doctor import DoctorCommand
+    from book.cli.commands.clean import CleanCommand
+    from book.cli.commands.maintenance import MaintenanceCommand
+    from book.cli.commands.debug import DebugCommand
+    from book.cli.commands.validate import ValidateCommand
+    from book.cli.commands.formatting import FormatCommand
+    from book.cli.commands.info import InfoCommand
+    from book.cli.commands.bib import BibCommand
+    from book.cli.commands.render import RenderCommand
 except ImportError:
-    # When run as local script
-    from core.config import ConfigManager
-    from core.discovery import ChapterDiscovery, AmbiguousChapterError
-    from commands.build import BuildCommand
-    from commands.preview import PreviewCommand
-    from commands.doctor import DoctorCommand
-    from commands.clean import CleanCommand
-    from commands.maintenance import MaintenanceCommand
-    from commands.debug import DebugCommand
-    from commands.validate import ValidateCommand
-    from commands.formatting import FormatCommand
-    from commands.info import InfoCommand
-    from commands.bib import BibCommand
+    try:
+        # When run as `python -m cli.main` from book/ directory
+        from cli.core.config import ConfigManager
+        from cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
+        from cli.commands.build import BuildCommand
+        from cli.commands.preview import PreviewCommand
+        from cli.commands.doctor import DoctorCommand
+        from cli.commands.clean import CleanCommand
+        from cli.commands.maintenance import MaintenanceCommand
+        from cli.commands.debug import DebugCommand
+        from cli.commands.validate import ValidateCommand
+        from cli.commands.formatting import FormatCommand
+        from cli.commands.info import InfoCommand
+        from cli.commands.bib import BibCommand
+        from cli.commands.render import RenderCommand
+    except ImportError:
+        # When run as local script from cli/ directory
+        from core.config import ConfigManager
+        from core.discovery import ChapterDiscovery, AmbiguousChapterError
+        from commands.build import BuildCommand
+        from commands.preview import PreviewCommand
+        from commands.doctor import DoctorCommand
+        from commands.clean import CleanCommand
+        from commands.maintenance import MaintenanceCommand
+        from commands.debug import DebugCommand
+        from commands.validate import ValidateCommand
+        from commands.formatting import FormatCommand
+        from commands.info import InfoCommand
+        from commands.bib import BibCommand
+        from commands.render import RenderCommand
 
 console = Console()
 
@@ -75,6 +93,7 @@ class MLSysBookCLI:
         self.format_command = FormatCommand(self.config_manager, self.chapter_discovery)
         self.info_command = InfoCommand(self.config_manager, self.chapter_discovery)
         self.bib_command = BibCommand(self.config_manager, self.chapter_discovery)
+        self.render_command = RenderCommand(self.config_manager, self.chapter_discovery)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -142,6 +161,7 @@ class MLSysBookCLI:
         quality_table.add_row("info figures [--format csv]", "Extract figure list", "./binder info figures --vol1")
         quality_table.add_row("info concepts|headers|acronyms", "Extract concepts, headers, acronyms", "./binder info concepts --vol1")
         quality_table.add_row("bib list|clean|update|sync", "Bibliography management", "./binder bib sync --vol1")
+        quality_table.add_row("render plots [--vol1|chapter]", "Render matplotlib plots to PNG gallery", "./binder render plots --vol1")
 
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
@@ -374,6 +394,10 @@ class MLSysBookCLI:
         """Handle bib command group (list, clean, update, sync)."""
         return self.bib_command.run(args)
 
+    def handle_render_command(self, args):
+        """Handle render command group (plots)."""
+        return self.render_command.run(args)
+
 
     def handle_debug_command(self, args):
         """Handle debug command.
@@ -468,6 +492,7 @@ class MLSysBookCLI:
             "format": self.handle_format_command,
             "info": self.handle_info_command,
             "bib": self.handle_bib_command,
+            "render": self.handle_render_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
             "about": self.handle_about_command,
