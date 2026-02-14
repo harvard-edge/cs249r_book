@@ -590,7 +590,7 @@ GELU Function:
 -2  0  2
 ```
 
-**Why GELU matters**: Used in GPT, BERT, and other modern architectures (you'll build these in Module 13). The smoothness helps with optimization compared to ReLU's sharp corner.
+**Why GELU matters**: Used in GPT, BERT, and other modern architectures. The smoothness helps with optimization compared to ReLU's sharp corner.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-impl", "solution": true}
@@ -1014,7 +1014,7 @@ Answer these to deepen your understanding of activation functions and their syst
 
 **Solutions used in practice**:
 - LeakyReLU: f(x) = max(0.01*x, x) - allows a small signal even for negative inputs
-- PReLU: Adjustable slope for negative values (details in later modules)
+- PReLU: Adjustable slope for negative values (a learnable parameter controls the slope)
 - GELU: Smooth approximation that never fully zeroes out
 
 ---

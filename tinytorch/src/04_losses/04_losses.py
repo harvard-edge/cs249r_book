@@ -21,7 +21,7 @@ Welcome to Module 04! Today you'll implement the mathematical functions that mea
 ## 🔗 Prerequisites & Progress
 **You've Built**: Tensors (data), Activations (intelligence), Layers (architecture)
 **You'll Build**: Loss functions that measure prediction quality
-**You'll Enable**: The feedback signal needed for training (Module 06: Autograd)
+**You'll Enable**: The feedback signal needed for training
 
 **Connection Map**:
 ```
@@ -81,9 +81,9 @@ from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyL
 
 **Dependency Flow**:
 ```
-Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module 04 (Losses) → Module 05 (DataLoader) → Module 06 (Autograd)
-     ↓                      ↓                         ↓                    ↓                    ↓                      ↓
-  Foundation          Nonlinearity              Architecture        Error Measurement      Data Pipelines       Gradient Flow
+Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module 04 (Losses)
+     ↓                      ↓                         ↓                    ↓
+  Foundation          Nonlinearity              Architecture        Error Measurement
 ```
 
 **Import Strategy**:
@@ -458,7 +458,7 @@ class MSELoss:
 
     def backward(self) -> Tensor:
         """
-        Compute gradients (implemented in Module 06: Autograd).
+        Compute gradients (placeholder — gradient computation is separate).
 
         For now, this is a stub that students can ignore.
         """
@@ -650,7 +650,7 @@ class CrossEntropyLoss:
 
     def backward(self) -> Tensor:
         """
-        Compute gradients (implemented in Module 06: Autograd).
+        Compute gradients (placeholder — gradient computation is separate).
 
         For now, this is a stub that students can ignore.
         """
@@ -863,7 +863,7 @@ class BinaryCrossEntropyLoss:
 
     def backward(self) -> Tensor:
         """
-        Compute gradients (implemented in Module 06: Autograd).
+        Compute gradients (placeholder — gradient computation is separate).
 
         For now, this is a stub that students can ignore.
         """
@@ -1277,7 +1277,7 @@ Common Production Optimizations:
 
 4. Lower Precision:
    Using smaller data types can reduce memory
-   (explored in later modules).
+   (e.g., FP16 uses 2 bytes instead of 4).
 ```
 """
 
@@ -1438,7 +1438,7 @@ Strategies to reduce memory:
 1. **Sampled softmax**: Only compute softmax over subset of vocabulary (1000 samples)
 2. **Hierarchical softmax**: Use tree structure, O(log V) instead of O(V)
 3. **Mixed precision**: Use FP16 for forward pass (2 bytes instead of 4)
-4. **Recomputation**: Recompute intermediate results instead of storing them (covered in later modules)
+4. **Recomputation**: Recompute intermediate results instead of storing them (trades compute for memory)
 </details>
 
 ---
@@ -1645,7 +1645,7 @@ batch_128_loss = np.mean(losses[:128]) # Mean of 128 samples
 - Smaller batch = less memory but noisier estimate
 - Sweet spot: Usually 64-256 depending on GPU memory
 
-**Production Solution**: Process smaller batches sequentially and combine their results before updating the model. You'll learn this technique (gradient accumulation) in Module 08 (Training).
+**Production Solution**: Process smaller batches sequentially and combine their results before updating the model. This technique is called gradient accumulation.
 </details>
 
 ---
@@ -1663,8 +1663,8 @@ batch_128_loss = np.mean(losses[:128]) # Mean of 128 samples
 that tells the network whether its predictions are good or bad. Lower loss = better
 predictions. Every training step aims to reduce this number.
 
-In Module 06, you'll add autograd which computes gradients of this loss—the
-direction to adjust weights to make predictions better!
+Autograd computes gradients of this loss—the direction to adjust weights
+to make predictions better!
 """
 
 # %%
@@ -1721,5 +1721,5 @@ Congratulations! You've built the measurement system that enables all machine le
 
 Export with: `tito module complete 04`
 
-**Next**: Module 05 will add DataLoader for efficient data pipelines, then Module 06 adds automatic differentiation!
+**Next**: Module 05 will add DataLoader for efficient data pipelines!
 """

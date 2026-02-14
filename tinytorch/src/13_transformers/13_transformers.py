@@ -1279,23 +1279,51 @@ class GPT:
         return Tensor(mask)
         ### END SOLUTION
 
+    def _sample_next_token(self, logits, temperature=1.0):
+        """
+        Sample one token from vocabulary logits using temperature scaling.
+
+        TODO: Implement temperature-controlled token sampling
+
+        APPROACH:
+        1. Scale logits by temperature (higher = more random)
+        2. Apply softmax to get probabilities (subtract max for numerical stability)
+        3. Sample one token index from the probability distribution
+
+        EXAMPLE:
+        >>> logits = np.array([[1.0, 2.0, 3.0]])  # Raw model output
+        >>> token = model._sample_next_token(logits, temperature=1.0)
+        >>> assert 0 <= token < 3  # Valid token index
+
+        HINT: Use np.exp(x - max(x)) / sum(np.exp(x - max(x))) for stable softmax
+        """
+        ### BEGIN SOLUTION
+        # Apply temperature scaling
+        scaled_logits = logits / temperature
+
+        # Convert to probabilities (softmax with numerical stability)
+        exp_logits = np.exp(scaled_logits - np.max(scaled_logits, axis=-1, keepdims=True))
+        probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
+
+        # Sample next token from probability distribution
+        next_token = np.random.choice(self.vocab_size, p=probs[0])
+        return next_token
+        ### END SOLUTION
+
     def generate(self, prompt_tokens, max_new_tokens=50, temperature=1.0):
         """
-        Generate text autoregressively.
+        Generate text autoregressively by repeatedly sampling next tokens.
 
-        TODO: Implement autoregressive text generation
+        TODO: Implement the autoregressive generation loop
 
         APPROACH:
         1. Start with prompt tokens
         2. For each new position:
            - Run forward pass to get logits
-           - Sample next token from logits
+           - Extract last-position logits (next token prediction)
+           - Call _sample_next_token to pick the next token
            - Append to sequence
         3. Return generated sequence
-
-        AUTOREGRESSIVE GENERATION:
-        At each step, the model predicts the next token based on all
-        previous tokens. This is how GPT generates coherent text.
 
         EXAMPLE:
         >>> model = GPT(vocab_size=100, embed_dim=64, num_layers=2, num_heads=4)
@@ -1303,7 +1331,7 @@ class GPT:
         >>> generated = model.generate(prompt, max_new_tokens=5)
         >>> assert generated.shape[1] == 3 + 5  # original + new tokens
 
-        HINT: Use np.random.choice with temperature for sampling
+        HINT: Use self._sample_next_token(last_logits, temperature) for sampling
         """
         ### BEGIN SOLUTION
         current_tokens = Tensor(prompt_tokens.data.copy())
@@ -1315,17 +1343,11 @@ class GPT:
             # Get logits for last position (next token prediction)
             last_logits = logits.data[:, -1, :]  # (batch_size, vocab_size)
 
-            # Apply temperature scaling
-            scaled_logits = last_logits / temperature
-
-            # Convert to probabilities (softmax)
-            exp_logits = np.exp(scaled_logits - np.max(scaled_logits, axis=-1, keepdims=True))
-            probs = exp_logits / np.sum(exp_logits, axis=-1, keepdims=True)
-
-            # Sample next token
-            next_token = np.array([[np.random.choice(self.vocab_size, p=probs[0])]])
+            # Sample next token using helper
+            next_token_id = self._sample_next_token(last_logits, temperature)
 
             # Append to sequence
+            next_token = np.array([[next_token_id]])
             current_tokens = Tensor(np.concatenate([current_tokens.data, next_token], axis=1))
 
         return current_tokens
@@ -1399,6 +1421,73 @@ def test_unit_gpt():
 # Run test immediately when developing this module
 if __name__ == "__main__":
     test_unit_gpt()  # Moved after implementation
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Token Sampling
+
+This test validates the `_sample_next_token` helper that handles temperature-controlled
+token sampling, separated from the generation loop for clarity.
+
+```
+Token Sampling Pipeline:
+Raw logits: [1.0, 2.0, 3.0]
+       |
+  temperature scaling (divide by T)
+       |
+  softmax (numerical stability via max subtraction)
+       |
+  probability distribution: [0.09, 0.24, 0.67]
+       |
+  np.random.choice -> sampled token index
+```
+
+**What we're testing**: Temperature scaling, softmax probability output, valid token range
+**Why it matters**: Sampling quality controls generation coherence and creativity
+**Expected**: Valid token indices, probabilities sum to 1, temperature affects distribution
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "gpt-sample-token", "locked": true, "points": 5}
+def test_unit_sample_next_token():
+    """🧪 Test _sample_next_token implementation."""
+    print("🧪 Unit Test: Token Sampling...")
+
+    # Create a small model just to access _sample_next_token
+    model = GPT(vocab_size=5, embed_dim=32, num_layers=1, num_heads=2)
+
+    # Test 1: Output is a valid token index
+    logits = np.array([[1.0, 2.0, 3.0, 4.0, 5.0]])
+    token = model._sample_next_token(logits, temperature=1.0)
+    assert isinstance(token, (int, np.integer)), f"Expected int, got {type(token)}"
+    assert 0 <= token < 5, f"Token {token} out of range [0, 5)"
+
+    # Test 2: Very low temperature should almost always pick the highest logit
+    np.random.seed(42)
+    high_logit_idx = 4  # logits[4] = 5.0 is highest
+    low_temp_tokens = [model._sample_next_token(logits, temperature=0.01) for _ in range(20)]
+    assert all(t == high_logit_idx for t in low_temp_tokens), (
+        f"Low temperature should consistently pick token {high_logit_idx}, got {low_temp_tokens}"
+    )
+
+    # Test 3: Verify softmax math internally (temperature=1.0)
+    # With logits [0, 0, 0, 0, 10], softmax should heavily favor index 4
+    extreme_logits = np.array([[0.0, 0.0, 0.0, 0.0, 10.0]])
+    extreme_tokens = [model._sample_next_token(extreme_logits, temperature=1.0) for _ in range(20)]
+    assert all(t == 4 for t in extreme_tokens), (
+        f"Extreme logits should always pick token 4, got {extreme_tokens}"
+    )
+
+    # Test 4: High temperature produces more varied tokens
+    np.random.seed(0)
+    uniform_logits = np.array([[1.0, 1.0, 1.0, 1.0, 1.0]])
+    high_temp_tokens = set(model._sample_next_token(uniform_logits, temperature=2.0) for _ in range(50))
+    assert len(high_temp_tokens) > 1, "High temperature with uniform logits should produce varied tokens"
+
+    print("✅ Token sampling works correctly!")
+
+# Run test immediately when developing this module
+if __name__ == "__main__":
+    test_unit_sample_next_token()
 
 # %% [markdown]
 """
@@ -1683,6 +1772,7 @@ def test_module():
     test_unit_mlp()
     test_unit_transformer_block()
     test_unit_gpt()
+    test_unit_sample_next_token()
 
     print("\nRunning integration scenarios...")
 
@@ -1745,7 +1835,7 @@ You implemented multi-head attention that computes attention matrices of size (b
 - If each element is 4 bytes (float32), how much memory per layer?
 - Why does doubling sequence length quadruple attention memory?
 
-**Key Insight**: Attention memory scales quadratically with sequence length, which is why long-context models require specialized attention efficiency techniques (explored in later modules).
+**Key Insight**: Attention memory scales quadratically with sequence length, which is why long-context models require specialized attention efficiency techniques (KV caching, sparse attention).
 
 ### Question 2: Residual Connection Benefits
 
@@ -1778,7 +1868,7 @@ Your generate() method processes the full sequence for each new token.
 - How does computation scale as you generate more tokens?
 - Can you spot the redundant work?
 
-**Key Insight**: Generation involves significant redundant work that grows with sequence length. You'll discover an optimization for this in Module 18!
+**Key Insight**: Generation involves significant redundant work that grows with sequence length. KV caching eliminates this redundancy by storing previously computed key-value pairs.
 """
 
 # %% [markdown]

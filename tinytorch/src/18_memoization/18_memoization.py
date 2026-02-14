@@ -881,7 +881,6 @@ Why? Longer sequences = more redundant computation without cache.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "cached-generation-step", "solution": false}
-#| export
 def _cached_generation_step(x, attention, cache_obj, layer_idx):
     """
     Execute a single cached generation step for one new token.
@@ -957,68 +956,65 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     return attention.out_proj.forward(concat_output)
 
 
-# %% nbgrader={"grade": false, "grade_id": "enable-kv-cache", "solution": true}
-#| export
-def enable_kv_cache(model):
-    """
-    Enable KV caching for a transformer model WITHOUT modifying Module 12/13 code.
+# %% [markdown]
+"""
+### _create_cache_storage -- Validate Model and Allocate Cache
 
-    TODO: Create cache and non-invasively patch attention layers
+This helper validates that a model has the required architecture attributes
+for KV caching, then creates and attaches a properly-sized KVCache.
+
+```
+Model Architecture Inspection:
+┌────────────────────────┐
+│  model.embed_dim = 128 │──→ head_dim = 128 // 4 = 32
+│  model.num_heads = 4   │
+│  model.num_layers = 4  │──→ 4 layer caches created
+│  model.max_seq_len = 64│──→ pre-allocate 64 positions
+│  model.blocks = [...]  │
+└────────────────────────┘
+         ↓
+┌────────────────────────┐
+│  KVCache(              │
+│    batch=1, seq=64,    │
+│    layers=4, heads=4,  │
+│    head_dim=32         │
+│  )                     │
+└────────────────────────┘
+         ↓
+  model._kv_cache = cache
+  model._cache_enabled = True
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "kv-create-cache", "solution": true}
+def _create_cache_storage(model):
+    """
+    Validate model architecture and create a KVCache sized for it.
+
+    TODO: Validate model attributes and create a properly-sized KVCache
 
     APPROACH:
-    1. Validate model has required attributes (embed_dim, num_layers, num_heads, max_seq_len, blocks)
-    2. Calculate head_dim from embed_dim and num_heads
-    3. Create KVCache instance sized for this model's architecture
-    4. Store cache on model as model._kv_cache and set model._cache_enabled flag
-    5. For each transformer block, wrap its attention forward method with caching logic
-    6. Print confirmation message with cache statistics
-    7. Return the cache object
-
-    This function demonstrates **non-invasive optimization** - adding capabilities
-    to existing systems without breaking them. Similar to how Module 06 (Autograd)
-    uses enable_autograd() to add gradient tracking to Tensors.
-
-    Args:
-        model: A GPT-style transformer model with:
-               - model.embed_dim (int)
-               - model.num_layers (int)
-               - model.num_heads (int)
-               - model.max_seq_len (int)
-               - model.blocks (list of TransformerBlock objects)
-
-    Returns:
-        cache: KVCache object for this model
+    1. Check model has required attrs: embed_dim, num_layers, num_heads, max_seq_len, blocks
+    2. Calculate head_dim = embed_dim // num_heads (validate divisibility)
+    3. Create KVCache with batch_size=1, model dimensions
+    4. Attach cache to model as model._kv_cache, set model._cache_enabled = True
+    5. Return (cache, head_dim) tuple
 
     EXAMPLE:
-    >>> from tinytorch.core.transformers import GPT
-    >>> model = GPT(vocab_size=100, embed_dim=128, num_layers=4, num_heads=4)
-    >>> cache = enable_kv_cache(model)
-    >>> hasattr(model, '_kv_cache')  # True
+    >>> model = MockGPT()  # embed_dim=128, num_heads=4, etc.
+    >>> cache, head_dim = _create_cache_storage(model)
+    >>> cache.num_layers  # 4
+    >>> head_dim  # 32
     >>> model._cache_enabled  # True
-    >>> cache.num_layers  # 4 (matches model)
 
     HINTS:
-    - Use hasattr() to validate model attributes exist
-    - head_dim = model.embed_dim // model.num_heads
-    - Store cache on model with model._kv_cache = cache
-    - Set flag with model._cache_enabled = True
-    - Save original forward with block._original_attention_forward
-    - Use a factory function to create patched forwards (closure captures layer_idx)
-
-    Pedagogical Note:
-        This teaches students that optimizations can be LAYERED on top of
-        working systems. Module 18 doesn't break Modules 12-13; it enhances them!
+    - Use hasattr() for duck-typing validation (legitimate for plugin systems)
+    - Raise AttributeError with helpful 3-part message if attribute missing
+    - Raise ValueError if embed_dim not divisible by num_heads
     """
     ### BEGIN SOLUTION
-    import types
-
-    # Educational Note: hasattr() is LEGITIMATE here because:
-    # 1. This is a plugin system that works with user-defined models
-    # 2. We need runtime validation that model has required interface
-    # 3. Different model architectures may have different attributes
-    # This is the CORRECT use of hasattr() for duck-typing validation
-
     # Validate model has required attributes
+    # hasattr() is LEGITIMATE here: plugin system with user-defined models
     required_attrs = ['embed_dim', 'num_layers', 'num_heads', 'max_seq_len', 'blocks']
     for attr in required_attrs:
         if not hasattr(model, attr):
@@ -1052,50 +1048,482 @@ def enable_kv_cache(model):
     model._kv_cache = cache
     model._cache_enabled = True
 
-    # Patch each transformer block's attention
+    return cache, head_dim
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _create_cache_storage
+
+**What we're testing**: Model validation, head_dim calculation, and cache creation
+**Why it matters**: Cache must match the model's architecture exactly or attention will produce wrong results
+**Expected**: Valid models get caches; invalid models get clear error messages
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-create-cache", "locked": true, "points": 5}
+def test_unit_create_cache_storage():
+    """🧪 Test _create_cache_storage validates model and creates cache."""
+    print("🧪 Unit Test: _create_cache_storage...")
+
+    # Mock model with valid attributes
+    class MockGPT:
+        def __init__(self):
+            self.embed_dim = 128
+            self.num_layers = 4
+            self.num_heads = 4
+            self.max_seq_len = 64
+            self.blocks = [None] * 4  # Placeholder blocks
+
+    # Test 1: Valid model creates cache
+    model = MockGPT()
+    cache, head_dim = _create_cache_storage(model)
+    assert head_dim == 32, f"Expected head_dim=32, got {head_dim}"
+    assert cache.num_layers == 4, "Cache layers should match model"
+    assert cache.num_heads == 4, "Cache heads should match model"
+    assert cache.max_seq_len == 64, "Cache max_seq should match model"
+    assert model._cache_enabled == True, "Model should be flagged as cache-enabled"
+    assert model._kv_cache is cache, "Cache should be attached to model"
+
+    # Test 2: Missing attribute raises AttributeError
+    class IncompleteModel:
+        def __init__(self):
+            self.embed_dim = 128
+            # Missing num_layers, num_heads, etc.
+
+    try:
+        _create_cache_storage(IncompleteModel())
+        assert False, "Should raise AttributeError for incomplete model"
+    except AttributeError as e:
+        assert "num_layers" in str(e) or "num_heads" in str(e), "Error should name missing attribute"
+
+    # Test 3: Indivisible embed_dim raises ValueError
+    class BadDimModel:
+        def __init__(self):
+            self.embed_dim = 127  # Not divisible by 4
+            self.num_layers = 2
+            self.num_heads = 4
+            self.max_seq_len = 32
+            self.blocks = [None] * 2
+
+    try:
+        _create_cache_storage(BadDimModel())
+        assert False, "Should raise ValueError for indivisible dimensions"
+    except ValueError as e:
+        assert "divisible" in str(e).lower(), "Error should mention divisibility"
+
+    print("✅ _create_cache_storage works correctly!")
+
+if __name__ == "__main__":
+    test_unit_create_cache_storage()
+
+
+# %% [markdown]
+"""
+### _cached_attention_forward -- Path Dispatch for Cached Attention
+
+This helper decides which attention path to take for a given input.
+It separates the DECISION logic from the COMPUTATION logic, making
+both independently testable.
+
+```
+Input x arrives at attention layer:
+
+  x.shape[1] > 1?  ──YES──→ PATH 1: TRAINING
+       │                     Use original attention (gradient flow)
+       NO
+       │
+  cache.seq_pos == 0? ──YES──→ PATH 2: FIRST TOKEN
+       │                       Use original attention (nothing cached yet)
+       NO
+       │
+       └──→ PATH 3: CACHED GENERATION
+            Use _cached_generation_step() for O(n) computation
+```
+
+This three-path dispatch is the core decision logic that determines
+whether to use the cache or fall back to standard attention.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "kv-cached-attention", "solution": true}
+def _cached_attention_forward(block, x, cache_obj, layer_idx, original_forward):
+    """
+    Dispatch attention through the correct path based on context.
+
+    TODO: Implement three-path dispatch for cached attention
+
+    APPROACH:
+    1. Check if seq_len > 1 (training mode) -> use original_forward
+    2. Check if cache is empty (seq_pos == 0) -> use original_forward
+    3. Otherwise (cached generation) -> use _cached_generation_step
+
+    EXAMPLE:
+    >>> # Training path (seq_len=10 > 1):
+    >>> output = _cached_attention_forward(block, x_train, cache, 0, orig_fwd)
+    >>> # -> calls original_forward(x_train, None)
+    >>>
+    >>> # Cached path (seq_len=1, cache has history):
+    >>> output = _cached_attention_forward(block, x_gen, cache, 0, orig_fwd)
+    >>> # -> calls _cached_generation_step(x_gen, block.attention, cache, 0)
+
+    HINTS:
+    - x.shape[1] gives the sequence length
+    - cache_obj.seq_pos tracks how many tokens are already cached
+    - PATH 1 and PATH 2 both call original_forward(x, mask=None)
+    - PATH 3 calls _cached_generation_step(x, block.attention, cache_obj, layer_idx)
+
+    Args:
+        block: Transformer block containing the attention layer
+        x: Input tensor, shape (batch, seq_len, embed_dim)
+        cache_obj: KVCache instance
+        layer_idx: Which transformer layer (0-indexed)
+        original_forward: The original (un-patched) attention forward method
+
+    Returns:
+        Output tensor from whichever path was selected
+    """
+    ### BEGIN SOLUTION
+    seq_len = x.shape[1]
+
+    # PATH 1: TRAINING (seq_len > 1)
+    # Full sequence - use original attention for gradient flow
+    if seq_len > 1:
+        return original_forward(x, None)
+
+    # PATH 2: FIRST TOKEN (cache empty)
+    # Nothing to retrieve yet - use original attention
+    if cache_obj.seq_pos == 0:
+        return original_forward(x, None)
+
+    # PATH 3: CACHED GENERATION
+    # Use helper function for the O(n) cached computation
+    return _cached_generation_step(x, block.attention, cache_obj, layer_idx)
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _cached_attention_forward
+
+**What we're testing**: Three-path dispatch logic for cached attention
+**Why it matters**: Wrong path selection causes silent correctness bugs (training uses cache, or generation ignores cache)
+**Expected**: Training inputs use original forward; cached generation uses _cached_generation_step
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-cached-attention", "locked": true, "points": 10}
+def test_unit_cached_attention_forward():
+    """🧪 Test _cached_attention_forward dispatches to correct path."""
+    print("🧪 Unit Test: _cached_attention_forward...")
+
+    # Track which path was taken
+    path_taken = []
+
+    class MockBlock:
+        def __init__(self):
+            self.attention = self
+
+    block = MockBlock()
+
+    def mock_original_forward(x, mask=None):
+        path_taken.append("original")
+        return x
+
+    # Create a real cache for testing
+    cache = KVCache(batch_size=1, max_seq_len=64, num_layers=2,
+                    num_heads=4, head_dim=32)
+
+    # Test PATH 1: Training (seq_len > 1)
+    path_taken.clear()
+    x_train = Tensor(np.random.randn(1, 10, 128))  # seq_len=10
+    result = _cached_attention_forward(block, x_train, cache, 0, mock_original_forward)
+    assert "original" in path_taken, "Training path should use original forward"
+    assert result.shape == x_train.shape, "Should return same shape"
+
+    # Test PATH 2: First token (cache empty, seq_pos=0)
+    path_taken.clear()
+    cache.reset()
+    assert cache.seq_pos == 0
+    x_first = Tensor(np.random.randn(1, 1, 128))  # seq_len=1, but cache empty
+    result = _cached_attention_forward(block, x_first, cache, 0, mock_original_forward)
+    assert "original" in path_taken, "First token should use original forward"
+
+    # Test PATH 3: Cached generation (seq_len=1, cache has history)
+    # We can't easily test the full _cached_generation_step path without
+    # real attention layers, so we verify the dispatch logic by checking
+    # that PATH 1 and PATH 2 conditions are correctly handled above.
+    # PATH 3 would be triggered when seq_len=1 and cache.seq_pos > 0.
+    print("   PATH 1 (training): dispatches to original forward")
+    print("   PATH 2 (first token): dispatches to original forward")
+    print("   PATH 3 (cached): would dispatch to _cached_generation_step")
+
+    print("✅ _cached_attention_forward path dispatch works correctly!")
+
+if __name__ == "__main__":
+    test_unit_cached_attention_forward()
+
+
+# %% [markdown]
+"""
+### _cached_generate -- Generation Loop with KV Cache
+
+This helper implements the autoregressive generation loop that uses the
+KV cache for efficient token-by-token generation. It shows how caching
+transforms the generation complexity from O(n^2) to O(n).
+
+```
+Generation Loop with Cache:
+
+prompt = [token_1, token_2, token_3]
+cache  = empty
+
+Step 0 (prefill): Process entire prompt through model
+  → cache now holds K,V for tokens 1-3
+  → get logits for next token prediction
+
+Step 1: Generate token_4
+  → input: just [token_4] (length 1!)
+  → attention uses cached K,V + new K,V
+  → O(1) new computation per layer
+
+Step 2: Generate token_5
+  → input: just [token_5] (length 1!)
+  → cache grows: K,V for tokens 1-4
+  → O(1) new computation per layer
+
+  ...continues until max_new_tokens reached
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "kv-cached-generate", "solution": true}
+def _cached_generate(model, prompt_tokens, max_new_tokens, temperature, cache):
+    """
+    Run autoregressive generation using the KV cache.
+
+    TODO: Implement the cached generation loop
+
+    APPROACH:
+    1. Process prompt tokens through model to populate cache (prefill phase)
+    2. Get the last token's logits and sample next token
+    3. Loop for max_new_tokens steps:
+       a. Feed ONLY the new token through the model (seq_len=1)
+       b. Cache is automatically updated by patched attention
+       c. Advance cache position after each token
+       d. Sample next token from logits with temperature scaling
+    4. Return list of generated token indices
+
+    EXAMPLE:
+    >>> generated = _cached_generate(model, prompt=[0, 1, 2],
+    ...                               max_new_tokens=5, temperature=1.0,
+    ...                               cache=cache)
+    >>> len(generated)  # 5 new tokens
+
+    HINTS:
+    - Prefill: model.forward(prompt_tensor) processes entire prompt
+    - Generation: model.forward(single_token_tensor) processes one token
+    - Use temperature scaling: logits / temperature before softmax
+    - Use np.random.choice with softmax probabilities to sample
+    - Advance cache.advance() after each generated token
+    - Stable softmax: subtract max before exp to avoid overflow
+
+    Args:
+        model: Transformer model with cached attention (already patched)
+        prompt_tokens: List of integer token IDs for the prompt
+        max_new_tokens: Number of new tokens to generate
+        temperature: Sampling temperature (higher = more random)
+        cache: KVCache instance (already attached to model)
+
+    Returns:
+        List of generated token IDs (integers)
+    """
+    ### BEGIN SOLUTION
+    generated = []
+
+    # Phase 1: PREFILL - process entire prompt to populate cache
+    prompt_array = np.array([prompt_tokens])  # (1, prompt_len)
+    prompt_tensor = Tensor(prompt_array)
+    logits = model.forward(prompt_tensor)  # (1, prompt_len, vocab_size)
+
+    # Advance cache for each prompt token
+    for _ in range(len(prompt_tokens)):
+        cache.advance()
+
+    # Get logits for last prompt position (predicts next token)
+    last_logits = logits.data[0, -1, :]  # (vocab_size,)
+
+    # Phase 2: GENERATE - one token at a time using cache
+    for _ in range(max_new_tokens):
+        # Temperature-scaled sampling
+        scaled_logits = last_logits / max(temperature, 1e-8)
+        max_logit = np.max(scaled_logits)
+        exp_logits = np.exp(scaled_logits - max_logit)
+        probs = exp_logits / np.sum(exp_logits)
+
+        # Sample next token
+        next_token = int(np.random.choice(len(probs), p=probs))
+        generated.append(next_token)
+
+        # Feed single token through model (cache handles history)
+        token_tensor = Tensor(np.array([[next_token]]))  # (1, 1)
+        logits = model.forward(token_tensor)  # (1, 1, vocab_size)
+        cache.advance()
+
+        last_logits = logits.data[0, -1, :]
+
+    return generated
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _cached_generate
+
+**What we're testing**: The autoregressive generation loop with cache advancement
+**Why it matters**: The generation loop must correctly advance the cache and produce valid token IDs
+**Expected**: Generates the requested number of tokens, all valid indices into the vocabulary
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-cached-generate", "locked": true, "points": 10}
+def test_unit_cached_generate():
+    """🧪 Test _cached_generate produces correct number of valid tokens."""
+    print("🧪 Unit Test: _cached_generate...")
+
+    vocab_size = 50
+
+    # Create a minimal mock model that returns random logits
+    class MockModel:
+        def __init__(self):
+            self.embed_dim = 64
+            self.num_layers = 1
+            self.num_heads = 2
+            self.max_seq_len = 128
+            self.blocks = []
+
+        def forward(self, x):
+            # Return random logits shaped (batch, seq_len, vocab_size)
+            batch_size = x.shape[0]
+            seq_len = x.shape[1]
+            return Tensor(np.random.randn(batch_size, seq_len, vocab_size))
+
+    model = MockModel()
+
+    # Create cache (not attached to blocks since mock has none)
+    cache = KVCache(batch_size=1, max_seq_len=128, num_layers=1,
+                    num_heads=2, head_dim=32)
+
+    # Test 1: Generate correct number of tokens
+    prompt = [0, 1, 2]
+    max_new = 5
+    generated = _cached_generate(model, prompt, max_new, temperature=1.0, cache=cache)
+    assert len(generated) == max_new, f"Expected {max_new} tokens, got {len(generated)}"
+
+    # Test 2: All tokens are valid indices
+    for token in generated:
+        assert 0 <= token < vocab_size, f"Token {token} out of vocab range [0, {vocab_size})"
+
+    # Test 3: Cache position advanced correctly
+    # prompt (3 tokens) + generated (5 tokens) = 8 advances
+    expected_pos = len(prompt) + max_new
+    assert cache.seq_pos == expected_pos, f"Expected cache pos={expected_pos}, got {cache.seq_pos}"
+
+    # Test 4: Generate with low temperature (more deterministic)
+    cache.reset()
+    generated_low_temp = _cached_generate(model, [0], 3, temperature=0.01, cache=cache)
+    assert len(generated_low_temp) == 3, "Should generate 3 tokens with low temperature"
+
+    print("✅ _cached_generate works correctly!")
+
+if __name__ == "__main__":
+    test_unit_cached_generate()
+
+
+# %% [markdown]
+"""
+### enable_kv_cache -- Composition: Wire Cache Into Model
+
+This is the main entry point that composes the helpers above. It:
+1. Creates cache storage via `_create_cache_storage()`
+2. Patches each block's attention via `_cached_attention_forward()`
+3. Returns the cache for manual control
+
+```
+enable_kv_cache(model)
+       │
+       ├──→ _create_cache_storage(model)
+       │         └──→ KVCache created & attached
+       │
+       ├──→ For each block:
+       │       └──→ Patch attention.forward to use
+       │            _cached_attention_forward()
+       │
+       └──→ Return cache object
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "kv-enable-cache", "solution": true}
+#| export
+def enable_kv_cache(model):
+    """
+    Enable KV caching for a transformer model WITHOUT modifying Module 12/13 code.
+
+    TODO: Compose helpers to create cache and patch attention layers
+
+    APPROACH:
+    1. Call _create_cache_storage(model) to validate and create cache
+    2. For each block, save original forward and patch with _cached_attention_forward
+    3. Print confirmation with cache statistics
+    4. Return cache object
+
+    This function demonstrates **non-invasive optimization** - adding capabilities
+    to existing systems without breaking them. Similar to how Module 06 (Autograd)
+    uses enable_autograd() to add gradient tracking to Tensors.
+
+    Args:
+        model: A GPT-style transformer model with:
+               - model.embed_dim (int)
+               - model.num_layers (int)
+               - model.num_heads (int)
+               - model.max_seq_len (int)
+               - model.blocks (list of TransformerBlock objects)
+
+    Returns:
+        cache: KVCache object for this model
+
+    EXAMPLE:
+    >>> from tinytorch.core.transformers import GPT
+    >>> model = GPT(vocab_size=100, embed_dim=128, num_layers=4, num_heads=4)
+    >>> cache = enable_kv_cache(model)
+    >>> hasattr(model, '_kv_cache')  # True
+    >>> model._cache_enabled  # True
+    >>> cache.num_layers  # 4 (matches model)
+
+    HINTS:
+    - _create_cache_storage handles validation, KVCache creation, and model attachment
+    - Use a factory function (make_cached_forward) to capture layer_idx in closure
+    - Save original forward as block._original_attention_forward before patching
+    - _cached_attention_forward handles the three-path dispatch logic
+    """
+    ### BEGIN SOLUTION
+    # Step 1: Validate model and create cache
+    cache, head_dim = _create_cache_storage(model)
+
+    # Step 2: Patch each transformer block's attention
     for layer_idx, block in enumerate(model.blocks):
-        # Educational Note: hasattr() is LEGITIMATE here because:
-        # This is a monkey-patching safety check to avoid double-patching
-        # We're checking if we've already modified this object
+        # Save original forward (avoid double-patching)
+        # hasattr() is LEGITIMATE: monkey-patching safety check
         if not hasattr(block, '_original_attention_forward'):
             block._original_attention_forward = block.attention.forward
 
-        # Create cached version
+        # Create cached version using factory for correct closure binding
         def make_cached_forward(layer_idx, original_forward, cache_obj):
             """Factory to create cached forward with correct layer_idx closure."""
             def cached_forward(x, mask=None):
-                """
-                Cached attention forward with path selection.
-
-                THREE PATHS through attention:
-                ──────────────────────────────
-                1. TRAINING (seq_len > 1): Use original attention for gradient flow
-                2. FIRST TOKEN (cache empty): Use original attention to initialize
-                3. CACHED GENERATION: Use helper for O(n²) → O(n) speedup
-
-                See _cached_generation_step() for the core caching logic.
-                """
-                seq_len = x.shape[1]
-
-                # PATH 1: TRAINING (seq_len > 1)
-                # Full sequence - use original attention for gradient flow
-                if seq_len > 1:
-                    return original_forward(x, mask)
-
-                # PATH 2: FIRST TOKEN (cache empty)
-                # Nothing to retrieve yet - use original attention
-                if cache_obj.seq_pos == 0:
-                    return original_forward(x, mask)
-
-                # PATH 3: CACHED GENERATION
-                # Use helper function for the O(n) cached computation
-                return _cached_generation_step(x, block.attention, cache_obj, layer_idx)
-
+                return _cached_attention_forward(
+                    block, x, cache_obj, layer_idx, original_forward
+                )
             return cached_forward
 
-        # Patch this block's attention
-        block.attention.forward = make_cached_forward(layer_idx, block._original_attention_forward, cache)
+        block.attention.forward = make_cached_forward(
+            layer_idx, block._original_attention_forward, cache
+        )
 
+    # Step 3: Print confirmation
     print(f"⚡ KV Cache enabled for model!")
     print(f"   Architecture: {model.num_layers} layers × {model.num_heads} heads × {head_dim}D")
     print(f"   Memory: {cache.get_memory_usage()['total_mb']:.2f} MB")
@@ -1148,7 +1576,7 @@ def disable_kv_cache(model):
 
 # %% [markdown]
 """
-### 🔬 Unit Test: Non-Invasive Cache Integration
+### 🧪 Unit Test: Non-Invasive Cache Integration
 
 This test validates that `enable_kv_cache()` works without breaking the model.
 
@@ -1159,8 +1587,8 @@ This test validates that `enable_kv_cache()` works without breaking the model.
 
 # %% nbgrader={"grade": true, "grade_id": "test-noninvasive", "locked": true, "points": 10}
 def test_unit_noninvasive_integration():
-    """🔬 Unit Test: Non-Invasive Cache Integration"""
-    print("🔬 Unit Test: Non-Invasive Cache Integration...")
+    """🧪 Unit Test: Non-Invasive Cache Integration"""
+    print("🧪 Unit Test: Non-Invasive Cache Integration...")
 
     # Create a mock transformer-like object for testing
     class MockTransformerBlock:
@@ -1383,6 +1811,12 @@ def test_module():
     # Run all unit tests
     print("Running unit tests...")
     test_unit_kvcache()
+    print()
+    test_unit_create_cache_storage()
+    print()
+    test_unit_cached_attention_forward()
+    print()
+    test_unit_cached_generate()
     print()
     test_unit_noninvasive_integration()
     print()

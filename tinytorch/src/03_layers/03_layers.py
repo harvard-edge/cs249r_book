@@ -144,7 +144,7 @@ Random initialization is crucial for breaking symmetry:
 - **Too large**: Outputs grow unbounded through many layers
 
 We use LeCun-style initialization for simplicity—it works well in practice.
-(The mathematical justification involves gradients, which you'll learn in Module 06)
+(The mathematical justification involves gradient flow through deep networks.)
 
 ### Parameter Counting
 ```
@@ -173,7 +173,7 @@ Let's build our layer system step by step. We'll implement two essential layer t
 - All methods defined INSIDE classes (no monkey-patching)
 - Forward methods return new tensors, preserving immutability
 - parameters() method enables optimizer integration
-- Gradient tracking will be added in Module 06 (Autograd)
+- Gradient tracking is handled separately from layer definitions
 """
 
 # %% [markdown]
@@ -630,21 +630,90 @@ class Dropout(Layer):
         self.p = p
         ### END SOLUTION
 
+    def _should_apply_dropout(self, training):
+        """
+        Determine whether dropout should be applied.
+
+        Dropout is a training-time technique. During inference the full
+        network is used, so dropout is skipped. It is also skipped when p=0
+        (no neurons are dropped) since the result would be the identity.
+
+        TODO: Return True only when dropout should actually modify the input
+
+        APPROACH:
+        1. Check if we are in training mode
+        2. Check if dropout probability is greater than zero
+
+        EXAMPLE:
+        >>> d = Dropout(0.5)
+        >>> d._should_apply_dropout(training=True)
+        True
+        >>> d._should_apply_dropout(training=False)
+        False
+
+        HINT: Both conditions must be true for dropout to apply
+        """
+        ### BEGIN SOLUTION
+        return training and self.p > DROPOUT_MIN_PROB
+        ### END SOLUTION
+
+    def _generate_dropout_mask(self, shape):
+        """
+        Generate a random dropout mask with inverted scaling.
+
+        The mask has the same shape as the input. Each element is either
+        0 (dropped) or 1/(1-p) (kept and scaled). Scaling at training time
+        keeps the expected value of each element unchanged, so no adjustment
+        is needed at inference. This trick is called "inverted dropout."
+
+        ```
+        Example with p=0.5 (keep_prob=0.5, scale=2.0):
+        random draw:  [0.3,  0.8,  0.1,  0.6]
+                        ↓     ↓     ↓     ↓
+        keep?         [yes,  no,  yes,  no ]   (< 0.5?)
+                        ↓     ↓     ↓     ↓
+        mask:         [2.0,  0.0,  2.0,  0.0]  (kept × scale, dropped × 0)
+        ```
+
+        TODO: Build the scaled binary mask
+
+        APPROACH:
+        1. Compute keep_prob = 1 - p
+        2. Draw uniform random values and threshold at keep_prob
+        3. Convert the boolean mask to float and scale by 1/keep_prob
+
+        EXAMPLE:
+        >>> d = Dropout(0.5)
+        >>> mask = d._generate_dropout_mask((4,))
+        >>> mask.shape
+        (4,)
+
+        HINTS:
+        - np.random.random(shape) gives uniform [0, 1) values
+        - Threshold with < keep_prob to get a boolean mask
+        - Scale factor is 1.0 / keep_prob
+        """
+        ### BEGIN SOLUTION
+        keep_prob = 1.0 - self.p
+        binary_mask = (np.random.random(shape) < keep_prob).astype(np.float32)
+        scale = 1.0 / keep_prob
+        return Tensor(binary_mask * scale)
+        ### END SOLUTION
+
     def forward(self, x, training=True):
         """
         Forward pass through dropout layer.
 
-        During training: randomly zeros elements with probability p, scales survivors by 1/(1-p)
-        During inference: passes input through unchanged
-
-        This prevents overfitting by forcing the network to not rely on specific neurons.
+        Composes the two helpers: first decide whether dropout applies,
+        then generate and apply the mask if it does.
 
         TODO: Implement dropout forward pass
 
         APPROACH:
-        1. If training=False or p=0, return input unchanged
-        2. If p=1, return zeros
-        3. Otherwise: create random mask, apply it, scale by 1/(1-p)
+        1. Use _should_apply_dropout to check if dropout is needed
+        2. Handle the special case p=1 (drop everything)
+        3. Use _generate_dropout_mask to create the scaled mask
+        4. Element-wise multiply input by the mask
 
         EXAMPLE:
         >>> dropout = Dropout(0.5)
@@ -653,32 +722,19 @@ class Dropout(Layer):
         >>> y_eval = dropout.forward(x, training=False)   # All elements preserved
 
         HINTS:
-        - Use np.random.random() < keep_prob for mask
-        - Scale by 1/(1-p) to maintain expected value
-        - training=False should return input unchanged
+        - _should_apply_dropout returns False for inference or p=0
+        - When p=1.0 every element is dropped (return zeros)
+        - Multiply x by the mask tensor for the final output
         """
         ### BEGIN SOLUTION
-        if not training or self.p == DROPOUT_MIN_PROB:
-            # During inference or no dropout, pass through unchanged
+        if not self._should_apply_dropout(training):
             return x
 
         if self.p == DROPOUT_MAX_PROB:
-            # Drop everything
             return Tensor(np.zeros_like(x.data))
 
-        # During training, apply dropout
-        keep_prob = 1.0 - self.p
-
-        # Create random mask: True where we keep elements
-        mask = np.random.random(x.data.shape) < keep_prob
-
-        # Apply mask and scale
-        mask_tensor = Tensor(mask.astype(np.float32))
-        scale = Tensor(np.array(1.0 / keep_prob))
-
-        # Use Tensor operations: x * mask * scale
-        output = x * mask_tensor * scale
-        return output
+        mask = self._generate_dropout_mask(x.data.shape)
+        return x * mask
         ### END SOLUTION
 
     def __call__(self, x, training=True):
@@ -691,6 +747,121 @@ class Dropout(Layer):
 
     def __repr__(self):
         return f"Dropout(p={self.p})"
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Dropout Decision Logic
+
+Before testing the full dropout forward pass, we verify the decision logic in
+isolation. The `_should_apply_dropout` helper encapsulates a concept that often
+trips students up: dropout is *only* active during training *and* only when
+p > 0. Testing this separately makes it easy to pinpoint bugs in the
+training-vs-inference distinction without interference from randomness.
+
+**What we're testing**: Training/inference mode detection and p=0 bypass
+**Why it matters**: A single wrong boolean can silently disable regularization or corrupt inference
+**Expected**: True only when training=True AND p > 0
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-should-apply-dropout", "locked": true, "points": 3}
+def test_unit_should_apply_dropout():
+    """🧪 Test _should_apply_dropout decision logic."""
+    print("🧪 Unit Test: Dropout Decision Logic...")
+
+    # Standard dropout (p=0.5) in training mode should apply
+    d = Dropout(0.5)
+    assert d._should_apply_dropout(training=True) is True, \
+        "Dropout(0.5) should apply during training"
+
+    # Same dropout in inference mode should NOT apply
+    assert d._should_apply_dropout(training=False) is False, \
+        "Dropout should not apply during inference"
+
+    # Zero dropout (p=0) should never apply, even in training
+    d_zero = Dropout(0.0)
+    assert d_zero._should_apply_dropout(training=True) is False, \
+        "Dropout(0.0) should never apply (no neurons to drop)"
+
+    # Full dropout (p=1.0) in training mode should apply
+    d_full = Dropout(1.0)
+    assert d_full._should_apply_dropout(training=True) is True, \
+        "Dropout(1.0) should apply during training"
+
+    # Full dropout in inference mode should NOT apply
+    assert d_full._should_apply_dropout(training=False) is False, \
+        "Even Dropout(1.0) should not apply during inference"
+
+    print("✅ Dropout decision logic works correctly!")
+
+if __name__ == "__main__":
+    test_unit_should_apply_dropout()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Dropout Mask Generation
+
+The mask is the heart of dropout. Each element is drawn independently:
+kept with probability 1-p, dropped otherwise. Kept elements are scaled
+by 1/(1-p) so the expected output equals the input -- this is "inverted
+dropout." We test both the statistical properties (fraction of zeros)
+and the scaling (surviving values equal 1/(1-p)).
+
+```
+p = 0.5, keep_prob = 0.5, scale = 2.0
+
+random:   [0.3,  0.8,  0.1,  0.6 ]
+              ↓      ↓      ↓      ↓
+mask:     [2.0,  0.0,  2.0,  0.0 ]   ← kept values are 2.0, not 1.0
+```
+
+**What we're testing**: Mask shape, scaling factor, and survival statistics
+**Why it matters**: Wrong scaling silently shifts all predictions at inference time
+**Expected**: Correct shape, values in {0, 1/(1-p)}, ~50% survival for p=0.5
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-generate-dropout-mask", "locked": true, "points": 3}
+def test_unit_generate_dropout_mask():
+    """🧪 Test _generate_dropout_mask output properties."""
+    print("🧪 Unit Test: Dropout Mask Generation...")
+
+    d = Dropout(0.5)
+    np.random.seed(42)
+    mask = d._generate_dropout_mask((1000,))
+
+    # Shape must match the requested shape
+    assert mask.shape == (1000,), f"Expected shape (1000,), got {mask.shape}"
+
+    # Every element must be either 0.0 or 2.0 (= 1/(1-0.5))
+    unique_vals = set(np.unique(mask.data))
+    assert unique_vals <= {0.0, 2.0}, \
+        f"Mask values should be {{0.0, 2.0}}, got {unique_vals}"
+
+    # Statistically, about 50% should survive (3-sigma tolerance)
+    non_zero = np.count_nonzero(mask.data)
+    std_err = np.sqrt(1000 * 0.5 * 0.5)
+    assert 500 - 3 * std_err < non_zero < 500 + 3 * std_err, \
+        f"Expected ~500 survivors, got {non_zero}"
+
+    # Test with different dropout probability
+    d2 = Dropout(0.3)
+    np.random.seed(123)
+    mask2 = d2._generate_dropout_mask((2000,))
+
+    # Values should be 0.0 or 1/(1-0.3) ≈ 1.4286
+    expected_scale = 1.0 / 0.7
+    non_zero_vals = mask2.data[mask2.data != 0.0]
+    assert np.allclose(non_zero_vals, expected_scale), \
+        f"Surviving values should be {expected_scale:.4f}, got {np.unique(non_zero_vals)}"
+
+    # About 70% should survive for p=0.3
+    survival_rate = np.count_nonzero(mask2.data) / 2000
+    assert 0.60 < survival_rate < 0.80, \
+        f"Expected ~70% survival for p=0.3, got {survival_rate:.1%}"
+
+    print("✅ Dropout mask generation works correctly!")
+
+if __name__ == "__main__":
+    test_unit_generate_dropout_mask()
 
 # %% [markdown]
 """
@@ -1069,6 +1240,8 @@ def test_module():
     test_unit_linear_layer()
     test_edge_cases_linear()
     test_parameter_collection_linear()
+    test_unit_should_apply_dropout()
+    test_unit_generate_dropout_mask()
     test_unit_dropout_layer()
 
     print("\nRunning integration scenarios...")
@@ -1168,7 +1341,7 @@ Answer these to deepen your understanding of layer operations and their systems 
 **Trade-offs to consider**:
 - Why do we want smaller initial weights for layers with more inputs?
 - What would happen if we initialized all weights to 0? To 1?
-- How does initialization affect signal propagation in deep networks? (You'll quantify this in Module 06)
+- How does initialization affect signal propagation in deep networks?
 
 ---
 

@@ -169,7 +169,7 @@ For effective batch size B_eff = accumulation_steps * B_actual:
 ### Train vs Eval Modes
 
 Some layers behave differently during training vs inference:
-- Some layers may behave differently (you'll encounter examples like batch normalization in Module 09)
+- Some layers behave differently (e.g., dropout is active during training but disabled during inference)
 - **Gradient computation**: Enabled during training, disabled during evaluation for efficiency
 
 This mode switching is crucial for proper model behavior and performance.
@@ -470,53 +470,34 @@ if __name__ == "__main__":
 """
 ### 🏗️ The Trainer Class: Orchestrating Complete Training
 
-The Trainer class is like a conductor orchestrating a symphony - it coordinates all the components (model, optimizer, loss function, scheduler) to create beautiful music (successful training).
+The Trainer class coordinates all the components you've built (model, optimizer, loss
+function, scheduler) into a unified training system. You will implement each method
+one at a time, testing as you go.
 
-#### Training Loop Architecture
-
-The training loop follows a consistent pattern across all machine learning:
+#### Trainer Architecture Overview
 
 ```
-Training Loop Structure:
-
-for epoch in range(num_epochs):
-    ┌─────────────────── TRAINING PHASE ───────────────────┐
-    │                                                      │
-    │  for batch in dataloader:                            │
-    │      ┌─── Forward Pass ───────┐                      │
-    │      │ 1. input → model       │                      │
-    │      │ 2. predictions         │                      │
-    │      └────────────────────────┘                      │
-    │               ↓                                      │
-    │      ┌─── Loss Computation ───┐                      │
-    │      │ 3. loss = loss_fn()    │                      │
-    │      └────────────────────────┘                      │
-    │               ↓                                      │
-    │      ┌─── Backward Pass ──────┐                      │
-    │      │ 4. loss.backward()     │                      │
-    │      │ 5. gradients           │                      │
-    │      └────────────────────────┘                      │
-    │               ↓                                      │
-    │      ┌─── Parameter Update ───┐                      │
-    │      │ 6. optimizer.step()    │                      │
-    │      │ 7. zero gradients      │                      │
-    │      └────────────────────────┘                      │
-    └──────────────────────────────────────────────────────┘
-             ↓
-    ┌─── Learning Rate Update ───┐
-    │ 8. scheduler.step()        │
-    └────────────────────────────┘
+Trainer Components:
+┌────────────────────────────────────────────────┐
+│  Trainer                                       │
+│  ├── __init__       → Store components, state  │
+│  ├── train_epoch    → Forward/backward loop    │
+│  ├── evaluate       → Forward only, metrics    │
+│  ├── save_checkpoint → Serialize to disk       │
+│  └── load_checkpoint → Restore from disk       │
+│                                                │
+│  Private helpers (provided):                   │
+│  ├── _get_model_state / _set_model_state       │
+│  ├── _get_optimizer_state / _set_optimizer_state│
+│  └── _get_scheduler_state / _set_scheduler_state│
+└────────────────────────────────────────────────┘
 ```
 
-#### Key Features
-
-- **Train/Eval Modes**: Different behavior during training vs evaluation
-- **Gradient Accumulation**: Effective larger batch sizes with limited memory
-- **Checkpointing**: Save/resume training state for long experiments
-- **Progress Tracking**: Monitor loss, learning rate, and other metrics
+You will implement the five public methods. The private serialization helpers
+are provided because they are pickle plumbing, not training concepts.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "trainer_class", "locked": false, "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "trainer-class-def", "locked": true, "solution": false}
 #| export
 class Trainer:
     """
@@ -527,229 +508,18 @@ class Trainer:
 
     This is the central class that brings together all the components
     you've built in previous modules.
-
-    TODO: Implement complete Trainer class
-
-    APPROACH:
-    1. __init__(): Store model, optimizer, loss_fn, scheduler, and grad_clip_norm
-    2. train_epoch(): Loop through dataloader, forward → loss → backward → step
-    3. evaluate(): Similar loop but set model.training=False, no grad updates
-    4. save/load_checkpoint(): Use pickle to persist/restore all training state
-
-    EXAMPLE:
-    >>> model = SimpleModel()
-    >>> optimizer = SGD(model.parameters(), lr=0.01)
-    >>> trainer = Trainer(model, optimizer, MSELoss())
-    >>> # Training data: list of (input, target) tuples
-    >>> data = [(Tensor([[1.0]]), Tensor([[2.0]]))]
-    >>> loss = trainer.train_epoch(data)
-    >>> eval_loss, accuracy = trainer.evaluate(data)
-    >>> trainer.save_checkpoint('/tmp/checkpoint.pkl')
-
-    HINTS:
-    - In train_epoch(), set model.training = True at start
-    - For gradient accumulation, scale loss by 1/accumulation_steps
-    - Use clip_grad_norm() before optimizer.step() if grad_clip_norm is set
-    - Update scheduler after each epoch: optimizer.lr = scheduler.get_lr(epoch)
-    - In evaluate(), set model.training = False and don't update gradients
-    - Checkpoints should include: epoch, step, model state, optimizer state, scheduler state, history
     """
-    ### BEGIN SOLUTION
-    def __init__(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
-        """
-        Initialize trainer with model and training components.
 
-        Args:
-            model: Neural network to train
-            optimizer: Parameter update strategy (SGD, Adam, etc.)
-            loss_fn: Loss function (CrossEntropy, MSE, etc.)
-            scheduler: Optional learning rate scheduler
-            grad_clip_norm: Optional gradient clipping threshold
-        """
-        self.model = model
-        self.optimizer = optimizer
-        self.loss_fn = loss_fn
-        self.scheduler = scheduler
-        self.grad_clip_norm = grad_clip_norm
-
-        # Training state
-        self.epoch = 0
-        self.step = 0
-        self.training_mode = True
-
-        # History tracking
-        self.history = {
-            'train_loss': [],
-            'eval_loss': [],
-            'learning_rates': []
-        }
-
-    def train_epoch(self, dataloader, accumulation_steps=1):
-        """
-        Train for one epoch through the dataset.
-
-        Args:
-            dataloader: Iterable yielding (inputs, targets) batches
-            accumulation_steps: Number of batches to accumulate before update
-
-        Returns:
-            Average loss for the epoch
-        """
-        self.model.training = True
-        self.training_mode = True
-
-        total_loss = 0.0
-        num_batches = 0
-        accumulated_loss = 0.0
-
-        for batch_idx, (inputs, targets) in enumerate(dataloader):
-            # Forward pass
-            outputs = self.model.forward(inputs)
-            loss = self.loss_fn.forward(outputs, targets)
-
-            # Scale loss for accumulation
-            scaled_loss = loss.data / accumulation_steps
-            accumulated_loss += scaled_loss
-
-            # Backward pass with scaled gradient
-            scaled_gradient = np.ones_like(loss.data) / accumulation_steps
-            loss.backward(scaled_gradient)
-
-            # Update parameters every accumulation_steps
-            if (batch_idx + 1) % accumulation_steps == 0:
-                # Gradient clipping
-                if self.grad_clip_norm is not None:
-                    params = self.model.parameters()
-                    clip_grad_norm(params, self.grad_clip_norm)
-
-                # Optimizer step
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-
-                total_loss += accumulated_loss
-                accumulated_loss = 0.0
-                num_batches += 1
-                self.step += 1
-
-        # Handle remaining accumulated gradients
-        if accumulated_loss > 0:
-            if self.grad_clip_norm is not None:
-                params = self.model.parameters()
-                clip_grad_norm(params, self.grad_clip_norm)
-
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-            total_loss += accumulated_loss
-            num_batches += 1
-
-        avg_loss = total_loss / max(num_batches, 1)
-        self.history['train_loss'].append(avg_loss)
-
-        # Update scheduler
-        if self.scheduler is not None:
-            current_lr = self.scheduler.get_lr(self.epoch)
-            # Update optimizer learning rate (trust it has lr attribute)
-            self.optimizer.lr = current_lr
-            self.history['learning_rates'].append(current_lr)
-
-        self.epoch += 1
-        return avg_loss
-
-    def evaluate(self, dataloader):
-        """
-        Evaluate model on dataset without updating parameters.
-
-        Args:
-            dataloader: Iterable yielding (inputs, targets) batches
-
-        Returns:
-            Average loss and accuracy
-        """
-        self.model.training = False
-        self.training_mode = False
-
-        total_loss = 0.0
-        correct = 0
-        total = 0
-        num_batches = 0
-
-        for inputs, targets in dataloader:
-            # Forward pass only
-            outputs = self.model.forward(inputs)
-            loss = self.loss_fn.forward(outputs, targets)
-
-            total_loss += loss.data
-            num_batches += 1
-
-            # Calculate accuracy (for classification)
-            # Trust that Tensors have .data attribute
-            if len(outputs.data.shape) > 1:  # Multi-class
-                predictions = np.argmax(outputs.data, axis=1)
-                if len(targets.data.shape) == 1:  # Integer targets
-                    correct += np.sum(predictions == targets.data)
-                else:  # One-hot targets
-                    correct += np.sum(predictions == np.argmax(targets.data, axis=1))
-                total += len(predictions)
-
-        avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
-        accuracy = correct / total if total > 0 else 0.0
-
-        self.history['eval_loss'].append(avg_loss)
-
-        return avg_loss, accuracy
-
-    def save_checkpoint(self, path: str):
-        """
-        Save complete training state for resumption.
-
-        Args:
-            path: File path to save checkpoint
-        """
-        checkpoint = {
-            'epoch': self.epoch,
-            'step': self.step,
-            'model_state': self._get_model_state(),
-            'optimizer_state': self._get_optimizer_state(),
-            'scheduler_state': self._get_scheduler_state(),
-            'history': self.history,
-            'training_mode': self.training_mode
-        }
-
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        with open(path, 'wb') as f:
-            pickle.dump(checkpoint, f)
-
-    def load_checkpoint(self, path: str):
-        """
-        Load training state from checkpoint.
-
-        Args:
-            path: File path to load checkpoint from
-        """
-        with open(path, 'rb') as f:
-            checkpoint = pickle.load(f)
-
-        self.epoch = checkpoint['epoch']
-        self.step = checkpoint['step']
-        self.history = checkpoint['history']
-        self.training_mode = checkpoint['training_mode']
-
-        # Restore states (simplified for educational purposes)
-        if 'model_state' in checkpoint:
-            self._set_model_state(checkpoint['model_state'])
-        if 'optimizer_state' in checkpoint:
-            self._set_optimizer_state(checkpoint['optimizer_state'])
-        if 'scheduler_state' in checkpoint:
-            self._set_scheduler_state(checkpoint['scheduler_state'])
+    # ── Private serialization helpers (provided, not student-implemented) ──
+    # These are pickle plumbing for checkpoint save/load. The training
+    # concepts you'll implement are in the public methods below.
 
     def _get_model_state(self):
         """Extract model parameters for checkpointing."""
-        # Trust model has parameters() method
         return {i: param.data.copy() for i, param in enumerate(self.model.parameters())}
 
     def _set_model_state(self, state):
         """Restore model parameters from checkpoint."""
-        # Trust model has parameters() method
         for i, param in enumerate(self.model.parameters()):
             if i in state:
                 param.data = state[i].copy()
@@ -757,10 +527,7 @@ class Trainer:
     def _get_optimizer_state(self):
         """Extract optimizer state for checkpointing."""
         state = {}
-        # Trust optimizer has lr attribute (from Modules 06)
         state['lr'] = self.optimizer.lr
-        # Use explicit API for momentum state (Module 07)
-        # All optimizers with momentum support have get_momentum_state() method
         if hasattr(self.optimizer, 'has_momentum') and self.optimizer.has_momentum():
             momentum_state = self.optimizer.get_momentum_state()
             if momentum_state is not None:
@@ -770,10 +537,7 @@ class Trainer:
     def _set_optimizer_state(self, state):
         """Restore optimizer state from checkpoint."""
         if 'lr' in state:
-            # Trust optimizer has lr attribute (from Modules 06)
             self.optimizer.lr = state['lr']
-        # Use explicit API for momentum state (Module 07)
-        # All optimizers with momentum support have set_momentum_state() method
         if 'momentum_buffers' in state:
             if hasattr(self.optimizer, 'has_momentum') and self.optimizer.has_momentum():
                 self.optimizer.set_momentum_state(state['momentum_buffers'])
@@ -792,94 +556,748 @@ class Trainer:
         """Restore scheduler state from checkpoint."""
         if state is None or self.scheduler is None:
             return
-        # Educational Note: hasattr() is legitimate here because:
-        # 1. Schedulers are user-extensible with custom attributes
-        # 2. State dict may have keys from different scheduler types
-        # 3. We safely skip attributes that don't exist on current scheduler
-        # This is duck-typing for polymorphic checkpoint restoration
         for key, value in state.items():
             if hasattr(self.scheduler, key):
                 setattr(self.scheduler, key, value)
-    ### END SOLUTION
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Trainer Class
+### 🏗️ Trainer.__init__ - Setting Up the Training System
 
-This test validates our complete training system.
+The constructor stores all training components and initializes tracking state.
+Think of it as assembling the instruments before the orchestra plays.
 
-**What we're testing**: Trainer orchestrates training loop correctly
-**Why it matters**: This is the backbone that enables all neural network training
-**Expected**: Training reduces loss, evaluation works, checkpointing preserves state
+```
+Trainer State After __init__:
+┌─────────────────────────────────────┐
+│  Components:                        │
+│    model       → Neural network     │
+│    optimizer   → Parameter updater  │
+│    loss_fn     → Error measure      │
+│    scheduler   → LR adjuster (opt)  │
+│    grad_clip_norm → Stability (opt) │
+│                                     │
+│  State:                             │
+│    epoch = 0                        │
+│    step = 0                         │
+│    training_mode = True             │
+│                                     │
+│  History:                           │
+│    train_loss = []                  │
+│    eval_loss = []                   │
+│    learning_rates = []              │
+└─────────────────────────────────────┘
+```
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test_trainer", "locked": true, "points": 15}
-def test_unit_trainer():
-    """🧪 Test Trainer implementation."""
-    print("🧪 Unit Test: Trainer...")
+# %% nbgrader={"grade": false, "grade_id": "trainer-init", "locked": false, "solution": true}
+def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
+    """
+    Initialize trainer with model and training components.
 
-    # Use REAL components from previous modules (already imported at module level)
+    Args:
+        model: Neural network to train (must have .forward() and .parameters())
+        optimizer: Parameter update strategy (SGD, Adam, etc.)
+        loss_fn: Loss function (CrossEntropy, MSE, etc.)
+        scheduler: Optional learning rate scheduler (e.g., CosineSchedule)
+        grad_clip_norm: Optional max gradient norm for clipping (float)
 
-    # Create a simple model using REAL Linear layer
-    class SimpleModel:
+    TODO: Store all components and initialize training state
+
+    APPROACH:
+    1. Store model, optimizer, loss_fn, scheduler, and grad_clip_norm as attributes
+    2. Initialize epoch=0, step=0, training_mode=True
+    3. Create history dict with keys: 'train_loss', 'eval_loss', 'learning_rates'
+       (each mapping to an empty list)
+
+    EXAMPLE:
+    >>> trainer = Trainer(model, optimizer, MSELoss())
+    >>> print(trainer.epoch)     # 0
+    >>> print(trainer.step)      # 0
+    >>> print(trainer.history)   # {'train_loss': [], 'eval_loss': [], 'learning_rates': []}
+
+    HINT: This is straightforward assignment. The key insight is WHAT state
+    a training system needs to track across epochs.
+    """
+    ### BEGIN SOLUTION
+    self.model = model
+    self.optimizer = optimizer
+    self.loss_fn = loss_fn
+    self.scheduler = scheduler
+    self.grad_clip_norm = grad_clip_norm
+
+    # Training state
+    self.epoch = 0
+    self.step = 0
+    self.training_mode = True
+
+    # History tracking
+    self.history = {
+        'train_loss': [],
+        'eval_loss': [],
+        'learning_rates': []
+    }
+    ### END SOLUTION
+
+Trainer.__init__ = trainer_init
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer.__init__
+
+**What we're testing**: Trainer stores all components and initializes state correctly
+**Why it matters**: Every training run depends on proper initialization
+**Expected**: All attributes set, counters at zero, empty history
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-init", "locked": true, "points": 5}
+def test_unit_trainer_init():
+    """🧪 Test Trainer.__init__ implementation."""
+    print("🧪 Unit Test: Trainer.__init__...")
+
+    class DummyModel:
         def __init__(self):
-            self.layer = Linear(2, 1)  # Real Linear from Module 03
             self.training = True
-
         def forward(self, x):
-            return self.layer.forward(x)
-
+            return x
         def parameters(self):
-            return self.layer.parameters()
+            return []
 
-    # Create trainer with REAL components
-    model = SimpleModel()
-    optimizer = SGD(model.parameters(), lr=0.01)  # Real SGD from Module 07
-    loss_fn = MSELoss()  # Real MSELoss from Module 04
+    model = DummyModel()
+    optimizer = SGD([], lr=0.01)
+    loss_fn = MSELoss()
     scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=10)
 
     trainer = Trainer(model, optimizer, loss_fn, scheduler, grad_clip_norm=1.0)
 
-    # Test training
-    print("Testing training epoch...")
-    # Use real Tensors for data
+    # Verify components stored
+    assert trainer.model is model, "Model not stored"
+    assert trainer.optimizer is optimizer, "Optimizer not stored"
+    assert trainer.loss_fn is loss_fn, "Loss function not stored"
+    assert trainer.scheduler is scheduler, "Scheduler not stored"
+    assert trainer.grad_clip_norm == 1.0, "Grad clip norm not stored"
+
+    # Verify state initialization
+    assert trainer.epoch == 0, f"Expected epoch=0, got {trainer.epoch}"
+    assert trainer.step == 0, f"Expected step=0, got {trainer.step}"
+    assert trainer.training_mode is True, "Expected training_mode=True"
+
+    # Verify history
+    assert 'train_loss' in trainer.history, "Missing train_loss in history"
+    assert 'eval_loss' in trainer.history, "Missing eval_loss in history"
+    assert 'learning_rates' in trainer.history, "Missing learning_rates in history"
+    assert len(trainer.history['train_loss']) == 0, "train_loss should be empty"
+
+    # Test without optional args
+    trainer2 = Trainer(model, optimizer, loss_fn)
+    assert trainer2.scheduler is None, "Scheduler should default to None"
+    assert trainer2.grad_clip_norm is None, "Grad clip should default to None"
+
+    print("✅ Trainer.__init__ works correctly!")
+
+if __name__ == "__main__":
+    test_unit_trainer_init()
+
+# %% [markdown]
+"""
+### 🏗️ Trainer.train_epoch - The Core Learning Loop
+
+This is the heart of training. Each epoch iterates through the dataset, performing
+the forward-backward-update cycle that drives learning.
+
+```
+Training Loop Flow:
+┌─────────────────────────────────────────────┐
+│  for each batch in dataloader:              │
+│    outputs = model.forward(inputs)     →    │
+│    loss = loss_fn(outputs, targets)    →    │
+│    loss.backward(grad)                →    │
+│    optimizer.step()                   →    │
+│    optimizer.zero_grad()                    │
+│  scheduler.get_lr(epoch)                    │
+└─────────────────────────────────────────────┘
+```
+
+With gradient accumulation, the update step happens every N batches instead
+of every batch, enabling larger effective batch sizes without more memory.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "locked": false, "solution": true}
+def trainer_train_epoch(self, dataloader, accumulation_steps=1):
+    """
+    Train for one epoch through the dataset.
+
+    Args:
+        dataloader: Iterable yielding (inputs, targets) batches
+        accumulation_steps: Number of batches to accumulate before update
+
+    Returns:
+        Average loss for the epoch (float)
+
+    TODO: Implement the core training loop with gradient accumulation
+
+    APPROACH:
+    1. Set model.training = True and self.training_mode = True
+    2. For each batch: forward pass, compute loss, backward pass
+    3. Scale loss by 1/accumulation_steps for gradient accumulation
+    4. Every accumulation_steps batches: clip gradients (if enabled),
+       call optimizer.step(), then optimizer.zero_grad()
+    5. Handle remaining accumulated gradients after the loop
+    6. Record average loss in self.history['train_loss']
+    7. Update scheduler and learning rate if scheduler exists
+    8. Increment self.epoch and return average loss
+
+    EXAMPLE:
+    >>> data = [(Tensor([[1.0]]), Tensor([[2.0]]))]
+    >>> loss = trainer.train_epoch(data)
+    >>> print(f"Epoch {trainer.epoch}, loss: {loss:.4f}")
+
+    HINTS:
+    - Use loss.backward(scaled_gradient) where scaled_gradient = np.ones_like(loss.data) / accumulation_steps
+    - Check (batch_idx + 1) % accumulation_steps == 0 for update timing
+    - After the loop, check if accumulated_loss > 0 for remaining batches
+    - Update lr via: self.optimizer.lr = self.scheduler.get_lr(self.epoch)
+    """
+    ### BEGIN SOLUTION
+    self.model.training = True
+    self.training_mode = True
+
+    total_loss = 0.0
+    num_batches = 0
+    accumulated_loss = 0.0
+
+    for batch_idx, (inputs, targets) in enumerate(dataloader):
+        # Forward pass
+        outputs = self.model.forward(inputs)
+        loss = self.loss_fn.forward(outputs, targets)
+
+        # Scale loss for accumulation
+        scaled_loss = loss.data / accumulation_steps
+        accumulated_loss += scaled_loss
+
+        # Backward pass with scaled gradient
+        scaled_gradient = np.ones_like(loss.data) / accumulation_steps
+        loss.backward(scaled_gradient)
+
+        # Update parameters every accumulation_steps
+        if (batch_idx + 1) % accumulation_steps == 0:
+            # Gradient clipping
+            if self.grad_clip_norm is not None:
+                params = self.model.parameters()
+                clip_grad_norm(params, self.grad_clip_norm)
+
+            # Optimizer step
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+            total_loss += accumulated_loss
+            accumulated_loss = 0.0
+            num_batches += 1
+            self.step += 1
+
+    # Handle remaining accumulated gradients
+    if accumulated_loss > 0:
+        if self.grad_clip_norm is not None:
+            params = self.model.parameters()
+            clip_grad_norm(params, self.grad_clip_norm)
+
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        total_loss += accumulated_loss
+        num_batches += 1
+
+    avg_loss = total_loss / max(num_batches, 1)
+    self.history['train_loss'].append(avg_loss)
+
+    # Update scheduler
+    if self.scheduler is not None:
+        current_lr = self.scheduler.get_lr(self.epoch)
+        self.optimizer.lr = current_lr
+        self.history['learning_rates'].append(current_lr)
+
+    self.epoch += 1
+    return avg_loss
+    ### END SOLUTION
+
+Trainer.train_epoch = trainer_train_epoch
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer.train_epoch
+
+**What we're testing**: The core training loop processes batches and updates parameters
+**Why it matters**: This is the single most important function in any ML system
+**Expected**: Loss is computed, epoch increments, history records loss
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-train-epoch", "locked": true, "points": 15}
+def test_unit_trainer_train_epoch():
+    """🧪 Test Trainer.train_epoch implementation."""
+    print("🧪 Unit Test: Trainer.train_epoch...")
+
+    class SimpleModel:
+        def __init__(self):
+            self.layer = Linear(2, 1)
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    model = SimpleModel()
+    optimizer = SGD(model.parameters(), lr=0.01)
+    loss_fn = MSELoss()
+
+    trainer = Trainer(model, optimizer, loss_fn)
+
     dataloader = [
         (Tensor([[1.0, 0.5]]), Tensor([[2.0]])),
         (Tensor([[0.5, 1.0]]), Tensor([[1.5]]))
     ]
 
+    # Train one epoch
     loss = trainer.train_epoch(dataloader)
-    assert isinstance(loss, (float, np.floating)), f"Expected float loss, got {type(loss)}"
-    assert trainer.epoch == 1, f"Expected epoch 1, got {trainer.epoch}"
 
-    # Test evaluation
-    print("Testing evaluation...")
+    # Verify return type
+    assert isinstance(loss, (float, np.floating)), f"Expected float loss, got {type(loss)}"
+
+    # Verify epoch incremented
+    assert trainer.epoch == 1, f"Expected epoch=1, got {trainer.epoch}"
+
+    # Verify history recorded
+    assert len(trainer.history['train_loss']) == 1, "Should have 1 loss recorded"
+
+    # Verify model was in training mode
+    assert trainer.training_mode is True, "Should be in training mode"
+
+    # Train another epoch - loss should still be a valid number
+    loss2 = trainer.train_epoch(dataloader)
+    assert isinstance(loss2, (float, np.floating)), f"Second epoch loss should be float"
+    assert trainer.epoch == 2, f"Expected epoch=2, got {trainer.epoch}"
+    assert len(trainer.history['train_loss']) == 2, "Should have 2 losses recorded"
+
+    # Test with scheduler
+    model2 = SimpleModel()
+    optimizer2 = SGD(model2.parameters(), lr=0.1)
+    scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=10)
+    trainer2 = Trainer(model2, optimizer2, loss_fn, scheduler=scheduler)
+
+    trainer2.train_epoch(dataloader)
+    assert len(trainer2.history['learning_rates']) == 1, "Should record LR with scheduler"
+
+    # Test with gradient clipping
+    model3 = SimpleModel()
+    optimizer3 = SGD(model3.parameters(), lr=0.01)
+    trainer3 = Trainer(model3, optimizer3, loss_fn, grad_clip_norm=0.5)
+
+    loss3 = trainer3.train_epoch(dataloader)
+    assert isinstance(loss3, (float, np.floating)), "Training with grad clip should work"
+
+    print(f"  Epoch 1 loss: {loss:.4f}")
+    print(f"  Epoch 2 loss: {loss2:.4f}")
+    print("✅ Trainer.train_epoch works correctly!")
+
+if __name__ == "__main__":
+    test_unit_trainer_train_epoch()
+
+# %% [markdown]
+"""
+### 🏗️ Trainer.evaluate - Measuring Model Performance
+
+Evaluation runs the model in inference mode: forward pass only, no gradient
+updates. This tells you how well the model generalizes to data it hasn't
+trained on.
+
+```
+Evaluation Flow:
+┌──────────────────────────────────────┐
+│  model.training = False              │
+│                                      │
+│  for each batch in dataloader:       │
+│    outputs = model.forward(inputs)   │
+│    loss = loss_fn(outputs, targets)  │
+│    accumulate loss + accuracy        │
+│                                      │
+│  return avg_loss, accuracy           │
+└──────────────────────────────────────┘
+```
+
+Key difference from training: no backward pass, no optimizer step,
+no gradient clipping.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "trainer-evaluate", "locked": false, "solution": true}
+def trainer_evaluate(self, dataloader):
+    """
+    Evaluate model on dataset without updating parameters.
+
+    Args:
+        dataloader: Iterable yielding (inputs, targets) batches
+
+    Returns:
+        Tuple of (average_loss, accuracy)
+
+    TODO: Implement evaluation loop (forward pass only, no gradient updates)
+
+    APPROACH:
+    1. Set model.training = False and self.training_mode = False
+    2. For each batch: forward pass only, accumulate loss
+    3. For classification: compute accuracy from argmax predictions
+    4. Record average loss in self.history['eval_loss']
+    5. Return (avg_loss, accuracy)
+
+    EXAMPLE:
+    >>> eval_loss, accuracy = trainer.evaluate(test_data)
+    >>> print(f"Eval loss: {eval_loss:.4f}, Accuracy: {accuracy:.2%}")
+
+    HINTS:
+    - For multi-class: predictions = np.argmax(outputs.data, axis=1)
+    - Handle both integer targets and one-hot targets
+    - accuracy = correct / total if total > 0 else 0.0
+    """
+    ### BEGIN SOLUTION
+    self.model.training = False
+    self.training_mode = False
+
+    total_loss = 0.0
+    correct = 0
+    total = 0
+    num_batches = 0
+
+    for inputs, targets in dataloader:
+        # Forward pass only
+        outputs = self.model.forward(inputs)
+        loss = self.loss_fn.forward(outputs, targets)
+
+        total_loss += loss.data
+        num_batches += 1
+
+        # Calculate accuracy (for classification)
+        if len(outputs.data.shape) > 1:  # Multi-class
+            predictions = np.argmax(outputs.data, axis=1)
+            if len(targets.data.shape) == 1:  # Integer targets
+                correct += np.sum(predictions == targets.data)
+            else:  # One-hot targets
+                correct += np.sum(predictions == np.argmax(targets.data, axis=1))
+            total += len(predictions)
+
+    avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
+    accuracy = correct / total if total > 0 else 0.0
+
+    self.history['eval_loss'].append(avg_loss)
+
+    return avg_loss, accuracy
+    ### END SOLUTION
+
+Trainer.evaluate = trainer_evaluate
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer.evaluate
+
+**What we're testing**: Evaluation computes loss and accuracy without modifying the model
+**Why it matters**: Proper evaluation prevents overfitting and validates generalization
+**Expected**: Returns valid loss and accuracy, model set to eval mode
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-evaluate", "locked": true, "points": 10}
+def test_unit_trainer_evaluate():
+    """🧪 Test Trainer.evaluate implementation."""
+    print("🧪 Unit Test: Trainer.evaluate...")
+
+    class SimpleModel:
+        def __init__(self):
+            self.layer = Linear(2, 1)
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    model = SimpleModel()
+    optimizer = SGD(model.parameters(), lr=0.01)
+    loss_fn = MSELoss()
+
+    trainer = Trainer(model, optimizer, loss_fn)
+
+    dataloader = [
+        (Tensor([[1.0, 0.5]]), Tensor([[2.0]])),
+        (Tensor([[0.5, 1.0]]), Tensor([[1.5]]))
+    ]
+
     eval_loss, accuracy = trainer.evaluate(dataloader)
+
+    # Verify return types
     assert isinstance(eval_loss, (float, np.floating)), f"Expected float eval_loss, got {type(eval_loss)}"
     assert isinstance(accuracy, (float, np.floating)), f"Expected float accuracy, got {type(accuracy)}"
 
-    # Test checkpointing
-    print("Testing checkpointing...")
-    checkpoint_path = "/tmp/test_checkpoint.pkl"
-    trainer.save_checkpoint(checkpoint_path)
+    # Verify model was set to eval mode
+    assert trainer.training_mode is False, "Should be in eval mode after evaluate()"
+    assert model.training is False, "Model should be in eval mode"
 
-    # Modify trainer state
-    original_epoch = trainer.epoch
-    trainer.epoch = 999
+    # Verify history recorded
+    assert len(trainer.history['eval_loss']) == 1, "Should have 1 eval loss recorded"
 
-    # Load checkpoint
-    trainer.load_checkpoint(checkpoint_path)
-    assert trainer.epoch == original_epoch, f"Checkpoint didn't restore epoch correctly"
+    # Verify loss is a reasonable number (not NaN or inf)
+    assert np.isfinite(eval_loss), f"Eval loss should be finite, got {eval_loss}"
 
-    # Clean up
-    import os
-    if os.path.exists(checkpoint_path):
-        os.remove(checkpoint_path)
-
-    print(f"✅ Trainer works correctly! Final loss: {loss:.4f}")
+    print(f"  Eval loss: {eval_loss:.4f}, Accuracy: {accuracy:.4f}")
+    print("✅ Trainer.evaluate works correctly!")
 
 if __name__ == "__main__":
-    test_unit_trainer()
+    test_unit_trainer_evaluate()
+
+# %% [markdown]
+"""
+### 🏗️ Trainer.save_checkpoint - Persisting Training State
+
+Checkpointing saves everything needed to resume training later: model weights,
+optimizer state, scheduler state, epoch count, and training history. This is
+essential for long training runs that may be interrupted.
+
+```
+Checkpoint Contents:
+┌───────────────────────────────────┐
+│  checkpoint.pkl                   │
+│  ├── epoch: 42                    │
+│  ├── step: 1680                   │
+│  ├── model_state: {weights...}    │
+│  ├── optimizer_state: {lr, mom..} │
+│  ├── scheduler_state: {lr range}  │
+│  ├── history: {losses, lrs...}    │
+│  └── training_mode: True          │
+└───────────────────────────────────┘
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "trainer-save-checkpoint", "locked": false, "solution": true}
+def trainer_save_checkpoint(self, path: str):
+    """
+    Save complete training state for resumption.
+
+    Args:
+        path: File path to save checkpoint (.pkl)
+
+    TODO: Serialize all training state to disk using pickle
+
+    APPROACH:
+    1. Build a checkpoint dict with keys: epoch, step, model_state,
+       optimizer_state, scheduler_state, history, training_mode
+    2. Use self._get_model_state(), self._get_optimizer_state(),
+       self._get_scheduler_state() to extract component states
+    3. Create parent directory if needed: Path(path).parent.mkdir(parents=True, exist_ok=True)
+    4. Write with pickle.dump()
+
+    EXAMPLE:
+    >>> trainer.save_checkpoint('/tmp/checkpoint.pkl')
+    >>> # Later: trainer.load_checkpoint('/tmp/checkpoint.pkl')
+
+    HINT: The private _get_*_state() helpers are already provided.
+    """
+    ### BEGIN SOLUTION
+    checkpoint = {
+        'epoch': self.epoch,
+        'step': self.step,
+        'model_state': self._get_model_state(),
+        'optimizer_state': self._get_optimizer_state(),
+        'scheduler_state': self._get_scheduler_state(),
+        'history': self.history,
+        'training_mode': self.training_mode
+    }
+
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'wb') as f:
+        pickle.dump(checkpoint, f)
+    ### END SOLUTION
+
+Trainer.save_checkpoint = trainer_save_checkpoint
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer.save_checkpoint
+
+**What we're testing**: Checkpoint file is created and contains all required state
+**Why it matters**: Lost training progress on a long run is costly
+**Expected**: File created on disk with correct contents
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-save-checkpoint", "locked": true, "points": 5}
+def test_unit_trainer_save_checkpoint():
+    """🧪 Test Trainer.save_checkpoint implementation."""
+    print("🧪 Unit Test: Trainer.save_checkpoint...")
+
+    class DummyModel:
+        def __init__(self):
+            self.layer = Linear(2, 1)
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    model = DummyModel()
+    optimizer = SGD(model.parameters(), lr=0.05)
+    trainer = Trainer(model, optimizer, MSELoss())
+
+    # Set some state to verify it persists
+    trainer.epoch = 5
+    trainer.step = 100
+    trainer.history['train_loss'].append(0.5)
+
+    checkpoint_path = "/tmp/test_save_checkpoint.pkl"
+    trainer.save_checkpoint(checkpoint_path)
+
+    # Verify file exists
+    assert os.path.exists(checkpoint_path), "Checkpoint file should exist"
+
+    # Verify contents
+    with open(checkpoint_path, 'rb') as f:
+        checkpoint = pickle.load(f)
+
+    assert checkpoint['epoch'] == 5, f"Expected epoch=5, got {checkpoint['epoch']}"
+    assert checkpoint['step'] == 100, f"Expected step=100, got {checkpoint['step']}"
+    assert 'model_state' in checkpoint, "Missing model_state"
+    assert 'optimizer_state' in checkpoint, "Missing optimizer_state"
+    assert 'history' in checkpoint, "Missing history"
+    assert len(checkpoint['history']['train_loss']) == 1, "History should have 1 entry"
+
+    # Clean up
+    os.remove(checkpoint_path)
+
+    print("✅ Trainer.save_checkpoint works correctly!")
+
+if __name__ == "__main__":
+    test_unit_trainer_save_checkpoint()
+
+# %% [markdown]
+"""
+### 🏗️ Trainer.load_checkpoint - Resuming Training
+
+Loading a checkpoint restores the exact training state so you can continue
+where you left off. This means restoring epoch count, optimizer state
+(including momentum buffers), and the full training history.
+
+```
+Load Flow:
+checkpoint.pkl ──→ pickle.load() ──→ restore epoch, step
+                                  ──→ restore model weights
+                                  ──→ restore optimizer state
+                                  ──→ restore scheduler state
+                                  ──→ restore history
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "trainer-load-checkpoint", "locked": false, "solution": true}
+def trainer_load_checkpoint(self, path: str):
+    """
+    Load training state from checkpoint.
+
+    Args:
+        path: File path to load checkpoint from (.pkl)
+
+    TODO: Deserialize training state from disk and restore all components
+
+    APPROACH:
+    1. Open and unpickle the checkpoint file
+    2. Restore self.epoch, self.step, self.history, self.training_mode
+    3. Call self._set_model_state() if 'model_state' in checkpoint
+    4. Call self._set_optimizer_state() if 'optimizer_state' in checkpoint
+    5. Call self._set_scheduler_state() if 'scheduler_state' in checkpoint
+
+    EXAMPLE:
+    >>> trainer.save_checkpoint('/tmp/checkpoint.pkl')
+    >>> trainer.epoch = 999  # Some change
+    >>> trainer.load_checkpoint('/tmp/checkpoint.pkl')
+    >>> print(trainer.epoch)  # Restored to original value
+
+    HINT: The private _set_*_state() helpers are already provided.
+    """
+    ### BEGIN SOLUTION
+    with open(path, 'rb') as f:
+        checkpoint = pickle.load(f)
+
+    self.epoch = checkpoint['epoch']
+    self.step = checkpoint['step']
+    self.history = checkpoint['history']
+    self.training_mode = checkpoint['training_mode']
+
+    # Restore states
+    if 'model_state' in checkpoint:
+        self._set_model_state(checkpoint['model_state'])
+    if 'optimizer_state' in checkpoint:
+        self._set_optimizer_state(checkpoint['optimizer_state'])
+    if 'scheduler_state' in checkpoint:
+        self._set_scheduler_state(checkpoint['scheduler_state'])
+    ### END SOLUTION
+
+Trainer.load_checkpoint = trainer_load_checkpoint
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer.load_checkpoint
+
+**What we're testing**: Checkpoint loading restores exact training state
+**Why it matters**: Resuming training must produce the same result as uninterrupted training
+**Expected**: All state (epoch, step, model weights, history) restored correctly
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-load-checkpoint", "locked": true, "points": 5}
+def test_unit_trainer_load_checkpoint():
+    """🧪 Test Trainer.load_checkpoint implementation."""
+    print("🧪 Unit Test: Trainer.load_checkpoint...")
+
+    class DummyModel:
+        def __init__(self):
+            self.layer = Linear(2, 1)
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    model = DummyModel()
+    optimizer = SGD(model.parameters(), lr=0.05)
+    trainer = Trainer(model, optimizer, MSELoss())
+
+    # Set distinctive state
+    trainer.epoch = 7
+    trainer.step = 200
+    trainer.history['train_loss'].extend([0.9, 0.7, 0.5])
+    trainer.training_mode = False
+
+    # Save original model weights for comparison
+    original_weights = model.parameters()[0].data.copy()
+
+    checkpoint_path = "/tmp/test_load_checkpoint.pkl"
+    trainer.save_checkpoint(checkpoint_path)
+
+    # Corrupt state
+    trainer.epoch = 999
+    trainer.step = 0
+    trainer.history = {'train_loss': [], 'eval_loss': [], 'learning_rates': []}
+    trainer.training_mode = True
+
+    # Restore
+    trainer.load_checkpoint(checkpoint_path)
+
+    # Verify restoration
+    assert trainer.epoch == 7, f"Expected epoch=7, got {trainer.epoch}"
+    assert trainer.step == 200, f"Expected step=200, got {trainer.step}"
+    assert trainer.training_mode is False, "training_mode should be restored to False"
+    assert len(trainer.history['train_loss']) == 3, "History should have 3 entries"
+    assert trainer.history['train_loss'] == [0.9, 0.7, 0.5], "History values should match"
+
+    # Verify model weights restored
+    restored_weights = model.parameters()[0].data
+    assert np.allclose(restored_weights, original_weights), "Model weights should be restored"
+
+    # Clean up
+    os.remove(checkpoint_path)
+
+    print("✅ Trainer.load_checkpoint works correctly!")
+
+if __name__ == "__main__":
+    test_unit_trainer_load_checkpoint()
 
 # %% [markdown]
 """
@@ -1200,7 +1618,11 @@ def test_module():
     print("Running unit tests...")
     test_unit_cosine_schedule()
     test_unit_clip_grad_norm()
-    test_unit_trainer()
+    test_unit_trainer_init()
+    test_unit_trainer_train_epoch()
+    test_unit_trainer_evaluate()
+    test_unit_trainer_save_checkpoint()
+    test_unit_trainer_load_checkpoint()
 
     print("\nRunning integration scenarios...")
 
@@ -1347,7 +1769,7 @@ Answer these to deepen your understanding of training systems and their implicat
 **Question**: Why is it crucial to set model.training = False during evaluation?
 
 **Consider**:
-- What layers might behave differently in training vs eval? (You'll see specific examples in Module 09)
+- What layers might behave differently in training vs eval? (Think about dropout.)
 - What would happen if you forgot to zero gradients between training steps?
 - How does gradient accumulation intentionally exploit not zeroing?
 

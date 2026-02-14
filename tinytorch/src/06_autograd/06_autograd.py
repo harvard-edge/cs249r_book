@@ -1615,6 +1615,209 @@ class BCEBackward(Function):
         return None,
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### Helper: Numerically Stable Softmax
+
+Computing softmax naively as `exp(x) / sum(exp(x))` overflows for large values.
+The fix is to subtract the maximum value first, which is mathematically equivalent
+but numerically stable.
+
+```
+Naive (overflows):     softmax(x) = exp(x) / sum(exp(x))
+Stable (safe):         softmax(x) = exp(x - max(x)) / sum(exp(x - max(x)))
+
+Why it works:
+  exp(x - max(x)) / sum(exp(x - max(x)))
+= exp(x) * exp(-max(x)) / (sum(exp(x)) * exp(-max(x)))
+= exp(x) / sum(exp(x))
+```
+
+This helper is used by CrossEntropyBackward to convert logits to probabilities.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "stable-softmax-helper", "solution": true}
+def _stable_softmax(logits_data):
+    """
+    Compute softmax probabilities with numerical stability.
+
+    Subtracts the max value per row before exponentiating to prevent overflow.
+
+    Args:
+        logits_data: numpy array of shape (batch_size, num_classes)
+
+    Returns:
+        numpy array of softmax probabilities, same shape as input
+
+    TODO: Implement numerically stable softmax computation.
+
+    APPROACH:
+    1. Find the maximum value per row: np.max(logits_data, axis=1, keepdims=True)
+    2. Subtract max from logits: logits_data - max_logits
+    3. Exponentiate: np.exp(shifted_logits)
+    4. Normalize by row sum: exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+
+    EXAMPLE:
+    >>> logits = np.array([[2.0, 1.0, 0.1]])
+    >>> probs = _stable_softmax(logits)
+    >>> # probs ≈ [[0.659, 0.242, 0.099]]
+    >>> # Each row sums to 1.0
+
+    HINT: keepdims=True is essential for correct broadcasting.
+    """
+    ### BEGIN SOLUTION
+    max_logits = np.max(logits_data, axis=1, keepdims=True)
+    exp_logits = np.exp(logits_data - max_logits)
+    return exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### Unit Test: Stable Softmax Helper
+
+**What we're testing**: Numerically stable softmax computation
+**Why it matters**: Unstable softmax causes NaN/Inf in cross-entropy gradients
+**Expected**: Probabilities sum to 1.0, correct values, no overflow on large inputs
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-stable-softmax-helper", "locked": true, "points": 3}
+def test_unit_stable_softmax():
+    """Test stable softmax helper."""
+    print("Testing stable softmax helper...")
+
+    # Basic correctness
+    logits = np.array([[1.0, 2.0, 3.0]])
+    probs = _stable_softmax(logits)
+    assert np.allclose(probs.sum(axis=1), 1.0), f"Softmax should sum to 1, got {probs.sum(axis=1)}"
+
+    # Verify correct values
+    expected = np.exp(logits) / np.sum(np.exp(logits), axis=1, keepdims=True)
+    assert np.allclose(probs, expected), f"Softmax values wrong: {probs}"
+
+    # Numerical stability: large values that would overflow naive exp()
+    large_logits = np.array([[1000.0, 1001.0, 1002.0]])
+    probs_large = _stable_softmax(large_logits)
+    assert not np.any(np.isnan(probs_large)), "Stable softmax should handle large values"
+    assert not np.any(np.isinf(probs_large)), "Stable softmax should not overflow"
+    assert np.allclose(probs_large.sum(axis=1), 1.0), "Large softmax should sum to 1"
+
+    # Batch dimension
+    batch_logits = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+    batch_probs = _stable_softmax(batch_logits)
+    assert batch_probs.shape == (3, 2), f"Expected (3, 2), got {batch_probs.shape}"
+    assert np.allclose(batch_probs.sum(axis=1), np.ones(3)), "Each row should sum to 1"
+
+    print("  Stable softmax helper works correctly!")
+
+if __name__ == "__main__":
+    test_unit_stable_softmax()
+
+# %% [markdown]
+"""
+### Helper: One-Hot Encoding
+
+Converts class indices to one-hot vectors. This is needed by the cross-entropy
+gradient formula: `grad = softmax - one_hot`.
+
+```
+Indices: [0, 2, 1]  with 3 classes
+
+One-hot:
+  [[1, 0, 0],    ← class 0
+   [0, 0, 1],    ← class 2
+   [0, 1, 0]]    ← class 1
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "one-hot-helper", "solution": true}
+def _one_hot_encode(targets, batch_size, num_classes):
+    """
+    Convert class indices to one-hot vectors.
+
+    Args:
+        targets: numpy array of integer class indices, shape (batch_size,)
+        batch_size: number of samples
+        num_classes: number of classes
+
+    Returns:
+        numpy array of one-hot vectors, shape (batch_size, num_classes)
+
+    TODO: Implement one-hot encoding of target class indices.
+
+    APPROACH:
+    1. Create zeros array: np.zeros((batch_size, num_classes), dtype=np.float32)
+    2. Set target positions to 1.0: result[np.arange(batch_size), targets] = 1.0
+    3. Return the one-hot array
+
+    EXAMPLE:
+    >>> targets = np.array([0, 2, 1])
+    >>> one_hot = _one_hot_encode(targets, batch_size=3, num_classes=3)
+    >>> # one_hot = [[1, 0, 0], [0, 0, 1], [0, 1, 0]]
+
+    HINT: Use advanced indexing with np.arange for the row indices.
+    """
+    ### BEGIN SOLUTION
+    one_hot = np.zeros((batch_size, num_classes), dtype=np.float32)
+    one_hot[np.arange(batch_size), targets] = 1.0
+    return one_hot
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### Unit Test: One-Hot Encoding Helper
+
+**What we're testing**: Conversion from class indices to one-hot vectors
+**Why it matters**: Incorrect one-hot encoding produces wrong cross-entropy gradients
+**Expected**: Each row has exactly one 1.0, at the correct class position
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-one-hot-helper", "locked": true, "points": 3}
+def test_unit_one_hot_encode():
+    """Test one-hot encoding helper."""
+    print("Testing one-hot encoding helper...")
+
+    # Basic test
+    targets = np.array([0, 2, 1])
+    result = _one_hot_encode(targets, batch_size=3, num_classes=3)
+    expected = np.array([[1, 0, 0], [0, 0, 1], [0, 1, 0]], dtype=np.float32)
+    assert np.allclose(result, expected), f"One-hot encoding wrong: {result}"
+
+    # Single sample
+    result_single = _one_hot_encode(np.array([1]), batch_size=1, num_classes=4)
+    assert result_single.shape == (1, 4), f"Expected (1, 4), got {result_single.shape}"
+    assert result_single[0, 1] == 1.0, "Target class should be 1.0"
+    assert result_single.sum() == 1.0, "Should have exactly one 1.0"
+
+    # Each row sums to 1
+    targets_batch = np.array([0, 1, 2, 3, 4])
+    result_batch = _one_hot_encode(targets_batch, batch_size=5, num_classes=5)
+    assert np.allclose(result_batch.sum(axis=1), np.ones(5)), "Each row should sum to 1"
+
+    print("  One-hot encoding helper works correctly!")
+
+if __name__ == "__main__":
+    test_unit_one_hot_encode()
+
+# %% [markdown]
+"""
+### CrossEntropyBackward - Gradient Rules for Cross-Entropy Loss
+
+The cross-entropy gradient combines three sub-computations:
+1. **Stable softmax**: Convert raw logits to probabilities
+2. **One-hot encoding**: Convert target indices to indicator vectors
+3. **Gradient formula**: `(softmax - one_hot) / batch_size`
+
+```
+Logits: [2.0, 1.0, 0.1]     Target: class 0
+
+Step 1 - Softmax:   [0.659, 0.242, 0.099]
+Step 2 - One-hot:   [1.000, 0.000, 0.000]
+Step 3 - Gradient:  [0.659-1, 0.242-0, 0.099-0] / 1 = [-0.341, 0.242, 0.099]
+```
+
+The gradient is simply "how far off each class probability is from the target."
+This is one of the most elegant results in machine learning.
+"""
 
 # %% nbgrader={"grade": false, "grade_id": "ce-backward", "solution": true}
 #| export
@@ -1644,13 +1847,17 @@ class CrossEntropyBackward(Function):
         """
         Compute gradient for cross-entropy loss.
 
+        Uses helper functions for each sub-computation:
+        - _stable_softmax(): Converts logits to probabilities (numerically stable)
+        - _one_hot_encode(): Converts target indices to one-hot vectors
+
         TODO: Implement gradient computation for Cross-Entropy loss.
 
         APPROACH:
         1. Extract logits tensor from self.saved_tensors
         2. If logits requires gradients:
-           - Compute stable softmax: subtract max, exponentiate, normalize
-           - Create one-hot encoding of targets
+           - Compute softmax using _stable_softmax(logits.data)
+           - Encode targets using _one_hot_encode(targets, batch_size, num_classes)
            - Apply CE derivative: (softmax - one_hot) / batch_size
            - Multiply by grad_output
            - Return as tuple: (result,)
@@ -1666,24 +1873,15 @@ class CrossEntropyBackward(Function):
 
         HINTS:
         - CE gradient: (softmax(logits) - one_hot(targets)) / batch_size
-        - This is one of the most elegant gradients in ML!
-        - Use stable softmax: subtract max before exp
-        - Create one_hot: zeros array, set target indices to 1.0
+        - Use _stable_softmax() for numerically stable softmax
+        - Use _one_hot_encode() for target encoding
         """
         ### BEGIN SOLUTION
         logits, = self.saved_tensors
 
         if isinstance(logits, Tensor) and logits.requires_grad:
-            # Compute softmax probabilities
-            # Using stable softmax: subtract max for numerical stability
-            logits_data = logits.data
-            max_logits = np.max(logits_data, axis=1, keepdims=True)
-            exp_logits = np.exp(logits_data - max_logits)
-            softmax = exp_logits / np.sum(exp_logits, axis=1, keepdims=True)
-
-            # Create one-hot encoding of targets
-            one_hot = np.zeros((self.batch_size, self.num_classes), dtype=np.float32)
-            one_hot[np.arange(self.batch_size), self.targets_data] = 1.0
+            softmax = _stable_softmax(logits.data)
+            one_hot = _one_hot_encode(self.targets_data, self.batch_size, self.num_classes)
 
             # Gradient: (softmax - one_hot) / batch_size
             grad = (softmax - one_hot) / self.batch_size
@@ -2452,6 +2650,8 @@ def test_module():
 
     # Run all unit tests
     print("Running unit tests...")
+    test_unit_stable_softmax()
+    test_unit_one_hot_encode()
     test_unit_function_classes()
     test_unit_tensor_autograd()
 

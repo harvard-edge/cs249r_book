@@ -425,31 +425,31 @@ class Tensor:
             return Tensor(self.data / other)
         ### END SOLUTION
 
-    def matmul(self, other):
-        """Matrix multiplication of two tensors.
+    def _validate_matmul_shapes(self, other):
+        """Validate that two tensors are compatible for matrix multiplication.
 
-        TODO: Implement matrix multiplication with shape validation.
+        This helper checks three conditions before any computation begins:
+        1. The other operand must be a Tensor (not a plain number or array)
+        2. Neither operand can be a 0D scalar (scalars use * instead)
+        3. For 2D+ tensors, the inner dimensions must align
+
+        TODO: Implement the three validation checks for matrix multiplication.
 
         APPROACH:
-        1. Validate other is a Tensor (raise TypeError if not)
-        2. Check for scalar cases (0D tensors) - use element-wise multiply
-        3. For 2D+ matrices: validate inner dimensions match (shape[-1] == shape[-2])
-        4. For 2D matrices: use explicit nested loops (educational)
-        5. For batched (3D+): use np.matmul for correctness
-        6. Return result wrapped in Tensor
+        1. Check isinstance(other, Tensor) - raise TypeError if not
+        2. Check both tensors are at least 1D - raise ValueError if 0D
+        3. For 2D+ tensors, check self.shape[-1] == other.shape[-2]
 
         EXAMPLE:
-        >>> a = Tensor([[1, 2], [3, 4]])  # 2×2
-        >>> b = Tensor([[5, 6], [7, 8]])  # 2×2
-        >>> c = a.matmul(b)
-        >>> print(c.data)
-        [[19. 22.]
-         [43. 50.]]
+        >>> a = Tensor([[1, 2], [3, 4]])  # 2x2
+        >>> b = Tensor([[5, 6], [7, 8]])  # 2x2
+        >>> a._validate_matmul_shapes(b)  # No error - shapes are compatible
+        >>> c = Tensor([[1, 2, 3]])        # 1x3
+        >>> d = Tensor([[1], [2]])         # 2x1
+        >>> c._validate_matmul_shapes(d)   # ValueError - 3 != 2
 
-        HINTS:
-        - Inner dimensions must match: (M, K) @ (K, N) = (M, N)
-        - For 2D case: use np.dot(a[i, :], b[:, j]) for each output element
-        - Raise ValueError with clear message if shapes incompatible
+        HINT: Use len(tensor.shape) to check dimensionality and tensor.shape[-1]
+        to access the last dimension.
         """
         ### BEGIN SOLUTION
         if not isinstance(other, Tensor):
@@ -474,10 +474,43 @@ class Tensor:
                     f"  💡 For A @ B, A's last dim must equal B's second-to-last dim\n"
                     f"  🔧 Try: other.transpose() to get shape {other.shape[::-1]}, or reshape self"
                 )
+        ### END SOLUTION
+
+    def matmul(self, other):
+        """Matrix multiplication of two tensors.
+
+        Validates shapes via _validate_matmul_shapes, then computes the product.
+        For 2D matrices, uses explicit nested loops so you can see exactly how
+        each output element is a dot product of a row and a column. For batched
+        (3D+) inputs, delegates to np.matmul.
+
+        TODO: Validate inputs with _validate_matmul_shapes, then compute the
+        matrix product using explicit loops for 2D and np.matmul for 3D+.
+
+        APPROACH:
+        1. Call self._validate_matmul_shapes(other) to check compatibility
+        2. For 2D matrices: use explicit nested loops with np.dot per element
+        3. For batched (3D+): use np.matmul for correctness
+        4. Return result wrapped in Tensor
+
+        EXAMPLE:
+        >>> a = Tensor([[1, 2], [3, 4]])  # 2x2
+        >>> b = Tensor([[5, 6], [7, 8]])  # 2x2
+        >>> c = a.matmul(b)
+        >>> print(c.data)
+        [[19. 22.]
+         [43. 50.]]
+
+        HINTS:
+        - Inner dimensions must match: (M, K) @ (K, N) = (M, N)
+        - For 2D case: use np.dot(a[i, :], b[:, j]) for each output element
+        - The validation helper already handles all error cases
+        """
+        ### BEGIN SOLUTION
+        self._validate_matmul_shapes(other)
 
         # Educational implementation: explicit loops to show what matrix multiplication does
         # This is intentionally slower than np.matmul to demonstrate the value of vectorization
-        # In Module 17 (Acceleration), students will learn to use optimized BLAS operations
 
         a = self.data
         b = other.data
@@ -999,56 +1032,126 @@ FLOPs for both multiplications (100 samples):
 This is why hardware acceleration matters - modern processors can perform thousands of these operations in parallel!
 """
 
+# %% [markdown]
+"""
+### Shape Validation for Matrix Multiplication
+
+Before performing any computation, matrix multiplication must verify that the
+two operands are compatible. There are three things that can go wrong, and each
+one deserves a distinct, educational error message.
+
+The first check is a type check: the right-hand operand must be a Tensor, not a
+plain Python number or a raw NumPy array. The second check catches 0D scalars,
+which have no rows or columns and therefore cannot participate in a matrix
+product (students should use `*` for scalar multiplication instead). The third
+check is the classic inner-dimension rule: for `A @ B` where A has shape
+`(M, K)` and B has shape `(K, N)`, the two `K` values must agree.
+
+```
+Validation Decision Tree:
+                     ┌─ Not a Tensor? ──> TypeError
+  _validate_matmul ──┼─ Either is 0D?  ──> ValueError (use * instead)
+                     └─ Inner dims ≠?  ──> ValueError (shape mismatch)
+                         else: pass (ready to compute)
+```
+
+Separating validation from computation keeps each function focused on a single
+concept: `_validate_matmul_shapes` teaches input checking, while `matmul`
+teaches the algorithm itself.
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "tensor-validate-matmul", "locked": true, "points": 5}
+def test_unit_validate_matmul_shapes():
+    """🧪 Test matmul shape validation catches all three error categories."""
+    print("🧪 Unit Test: Validate Matmul Shapes...")
+
+    # Valid shapes should pass without error
+    a = Tensor([[1, 2], [3, 4]])  # 2x2
+    b = Tensor([[5, 6], [7, 8]])  # 2x2
+    a._validate_matmul_shapes(b)  # No exception
+
+    # Valid rectangular shapes
+    c = Tensor([[1, 2, 3]])       # 1x3
+    d = Tensor([[1], [2], [3]])   # 3x1
+    c._validate_matmul_shapes(d)  # No exception (inner dim 3 matches)
+
+    # Check 1: TypeError when other is not a Tensor
+    try:
+        a._validate_matmul_shapes([[1, 2], [3, 4]])
+        assert False, "Should have raised TypeError for non-Tensor"
+    except TypeError as e:
+        assert "requires Tensor" in str(e)
+        assert "list" in str(e)
+
+    # Check 2: ValueError when either operand is a 0D scalar
+    try:
+        scalar = Tensor(5.0)
+        scalar._validate_matmul_shapes(a)
+        assert False, "Should have raised ValueError for 0D tensor"
+    except ValueError as e:
+        assert "at least 1D" in str(e)
+
+    # Check 3: ValueError when inner dimensions don't match
+    try:
+        incompatible_a = Tensor([[1, 2]])         # 1x2
+        incompatible_b = Tensor([[1], [2], [3]])   # 3x1
+        incompatible_a._validate_matmul_shapes(incompatible_b)
+        assert False, "Should have raised ValueError for shape mismatch"
+    except ValueError as e:
+        assert "Inner dimensions don't match" in str(e)
+        assert "2 vs 3" in str(e)
+
+    print("✅ Matmul shape validation works correctly!")
+
+if __name__ == "__main__":
+    test_unit_validate_matmul_shapes()
 
 # %% [markdown]
 """
 ### 🧪 Unit Test: Matrix Multiplication
 
-This test validates matrix multiplication works correctly with proper shape checking and error handling.
+Now that validation is handled by `_validate_matmul_shapes`, this test focuses
+on the computational correctness of `matmul` itself. We verify square matrices,
+rectangular matrices, and matrix-vector products all produce the expected
+numerical results.
 
-**What we're testing**: Matrix multiplication with shape validation and edge cases
+**What we're testing**: Matrix multiplication computation for various shape combinations
 **Why it matters**: Core operation in linear algebra and data transformations
-**Expected**: Correct results for valid shapes, clear error messages for invalid shapes
+**Expected**: Correct numerical results matching hand-calculated dot products
 """
 
-# %% nbgrader={"grade": true, "grade_id": "test-matmul", "locked": true, "points": 15}
+# %% nbgrader={"grade": true, "grade_id": "tensor-matmul", "locked": true, "points": 15}
 def test_unit_matrix_multiplication():
     """🧪 Test matrix multiplication operations."""
     print("🧪 Unit Test: Matrix Multiplication...")
 
-    # Test 2×2 matrix multiplication (basic case)
-    a = Tensor([[1, 2], [3, 4]])  # 2×2
-    b = Tensor([[5, 6], [7, 8]])  # 2×2
+    # Test 2x2 matrix multiplication (basic case)
+    a = Tensor([[1, 2], [3, 4]])  # 2x2
+    b = Tensor([[5, 6], [7, 8]])  # 2x2
     result = a.matmul(b)
-    # Expected: [[1×5+2×7, 1×6+2×8], [3×5+4×7, 3×6+4×8]] = [[19, 22], [43, 50]]
+    # Expected: [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]] = [[19, 22], [43, 50]]
     expected = np.array([[19, 22], [43, 50]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
     # Test rectangular matrices (common in data transformations)
-    c = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3 (like samples=2, features=3)
-    d = Tensor([[7, 8], [9, 10], [11, 12]])  # 3×2 (like features=3, outputs=2)
+    c = Tensor([[1, 2, 3], [4, 5, 6]])  # 2x3 (like samples=2, features=3)
+    d = Tensor([[7, 8], [9, 10], [11, 12]])  # 3x2 (like features=3, outputs=2)
     result = c.matmul(d)
-    # Expected: [[1×7+2×9+3×11, 1×8+2×10+3×12], [4×7+5×9+6×11, 4×8+5×10+6×12]]
+    # Expected: [[1*7+2*9+3*11, 1*8+2*10+3*12], [4*7+5*9+6*11, 4*8+5*10+6*12]]
     expected = np.array([[58, 64], [139, 154]], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
     # Test matrix-vector multiplication (common in linear transforms)
-    matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # 2×3
-    vector = Tensor([1, 2, 3])  # 3×1 (conceptually)
+    matrix = Tensor([[1, 2, 3], [4, 5, 6]])  # 2x3
+    vector = Tensor([1, 2, 3])  # 1D vector
     result = matrix.matmul(vector)
-    # Expected: [1×1+2×2+3×3, 4×1+5×2+6×3] = [14, 32]
+    # Expected: [1*1+2*2+3*3, 4*1+5*2+6*3] = [14, 32]
     expected = np.array([14, 32], dtype=np.float32)
     assert np.array_equal(result.data, expected)
 
-    # Test shape validation - should raise clear error
-    try:
-        incompatible_a = Tensor([[1, 2]])     # 1×2
-        incompatible_b = Tensor([[1], [2], [3]])  # 3×1
-        incompatible_a.matmul(incompatible_b)  # 1×2 @ 3×1 should fail (2 ≠ 3)
-        assert False, "Should have raised ValueError for incompatible shapes"
-    except ValueError as e:
-        assert "Inner dimensions don't match" in str(e)
-        assert "2 vs 3" in str(e)  # Should show specific dimensions
+    # Test @ operator sugar
+    result_at = a @ b
+    assert np.array_equal(result_at.data, np.array([[19, 22], [43, 50]], dtype=np.float32))
 
     print("✅ Matrix multiplication works correctly!")
 
@@ -1536,6 +1639,7 @@ def test_module():
     print("Running unit tests...")
     test_unit_tensor_creation()
     test_unit_arithmetic_operations()
+    test_unit_validate_matmul_shapes()
     test_unit_matrix_multiplication()
     test_unit_shape_manipulation()
     test_unit_reduction_operations()

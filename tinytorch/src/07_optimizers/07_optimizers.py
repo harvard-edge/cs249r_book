@@ -317,6 +317,108 @@ class Optimizer:
 
 # %% [markdown]
 """
+### 🏗️ Gradient Extraction - Handling Tensor vs NumPy Gradients
+
+When autograd computes gradients, they can arrive as either a `Tensor` object
+(wrapping a NumPy array in `.data`) or as a raw NumPy array. Every optimizer
+needs to normalize this before doing math on the gradient.
+
+```
+param.grad
+    │
+    ├── Tensor?  ──→  return grad.data  (unwrap the NumPy array)
+    │
+    └── ndarray? ──→  return grad       (already NumPy, use directly)
+```
+
+This helper lives in the base `Optimizer` class so SGD, Adam, and AdamW
+all share the same extraction logic.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "extract-gradient", "solution": true}
+class _ExtractGradientMixin:
+    """Mixin added to Optimizer for gradient extraction."""
+    def _extract_gradient(self, param: Tensor) -> np.ndarray:
+        """
+        Extract gradient data as a NumPy array from a parameter.
+
+        Gradients can be stored as either a Tensor (with .data attribute)
+        or as a raw NumPy array (from autograd). This helper normalizes
+        both cases to a plain NumPy array for optimizer math.
+
+        TODO: Return the gradient's underlying NumPy array
+
+        APPROACH:
+        1. Get param.grad
+        2. If it's a Tensor, return its .data attribute
+        3. If it's already a NumPy array, return it directly
+
+        EXAMPLE:
+        >>> param = Tensor([1.0, 2.0], requires_grad=True)
+        >>> param.grad = Tensor([0.1, 0.2])
+        >>> optimizer._extract_gradient(param)
+        array([0.1, 0.2])
+
+        HINT: Use isinstance(grad, Tensor) to check the type
+        """
+        ### BEGIN SOLUTION
+        grad = param.grad
+        if isinstance(grad, Tensor):
+            return grad.data
+        else:
+            return grad
+        ### END SOLUTION
+
+# Attach _extract_gradient to Optimizer so all subclasses inherit it
+Optimizer._extract_gradient = _ExtractGradientMixin._extract_gradient
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Gradient Extraction
+
+This test validates that `_extract_gradient` correctly handles both
+Tensor-wrapped gradients and raw NumPy array gradients.
+
+**What we're testing**: Gradient normalization across storage formats
+**Why it matters**: Every optimizer needs raw NumPy data for update math
+**Expected**: NumPy array output regardless of input format
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-extract-gradient", "locked": true, "points": 5}
+def test_unit_extract_gradient():
+    """🧪 Test _extract_gradient handles Tensor and ndarray gradients."""
+    print("🧪 Unit Test: Gradient Extraction...")
+
+    param = Tensor([1.0, 2.0], requires_grad=True)
+    optimizer = Optimizer([param])
+
+    # Case 1: Gradient is a Tensor
+    param.grad = Tensor([0.1, 0.2])
+    grad_data = optimizer._extract_gradient(param)
+    assert isinstance(grad_data, np.ndarray), "Should return ndarray from Tensor grad"
+    assert np.allclose(grad_data, [0.1, 0.2])
+
+    # Case 2: Gradient is a raw NumPy array
+    param.grad = np.array([0.3, 0.4])
+    grad_data = optimizer._extract_gradient(param)
+    assert isinstance(grad_data, np.ndarray), "Should return ndarray from ndarray grad"
+    assert np.allclose(grad_data, [0.3, 0.4])
+
+    # Case 3: Multi-dimensional gradient
+    param_2d = Tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+    opt_2d = Optimizer([param_2d])
+    param_2d.grad = Tensor([[0.1, 0.2], [0.3, 0.4]])
+    grad_data_2d = opt_2d._extract_gradient(param_2d)
+    assert grad_data_2d.shape == (2, 2)
+    assert np.allclose(grad_data_2d, [[0.1, 0.2], [0.3, 0.4]])
+
+    print("✅ Gradient extraction works correctly!")
+
+if __name__ == "__main__":
+    test_unit_extract_gradient()
+
+# %% [markdown]
+"""
 ### 🧪 Unit Test: Base Optimizer
 
 This test validates our base Optimizer class works correctly.
@@ -546,13 +648,14 @@ class SGD(Optimizer):
         """
         Perform SGD update step with momentum.
 
-        TODO: Implement SGD parameter update with momentum
+        TODO: Implement SGD parameter update by composing helpers
 
         APPROACH:
         1. For each parameter with gradients:
-           a. Apply weight decay if specified
-           b. Update momentum buffer
-           c. Update parameter using momentum
+           a. Extract gradient using self._extract_gradient(param)
+           b. Apply weight decay if specified
+           c. Update momentum buffer
+           d. Update parameter using momentum
 
         FORMULA:
         - With weight decay: grad = grad + weight_decay * param
@@ -561,22 +664,16 @@ class SGD(Optimizer):
 
         HINTS:
         - Skip parameters without gradients
+        - Use self._extract_gradient() from the base class
         - Initialize momentum buffers on first use
-        - Use in-place operations to save memory
         """
         ### BEGIN SOLUTION
         for i, param in enumerate(self.params):
             if param.grad is None:
                 continue
 
-            # Get gradient data - grad can be Tensor or numpy array
-            grad = param.grad
-            # Handle both Tensor (with .data) and numpy array (from autograd) cases
-            if isinstance(grad, Tensor):
-                grad_data = grad.data
-            else:
-                # grad is already a numpy array from autograd
-                grad_data = grad
+            # Extract gradient using shared helper
+            grad_data = self._extract_gradient(param)
 
             # Apply weight decay
             if self.weight_decay != 0:
@@ -775,31 +872,181 @@ class Adam(Optimizer):
         self.v_buffers = [None for _ in self.params]  # Second moment (variance)
         ### END SOLUTION
 
-    def step(self):
-        """
-        Perform Adam update step.
+# %% [markdown]
+"""
+### 🏗️ Moment Updates - EMA and Bias Correction
 
-        TODO: Implement Adam parameter update with adaptive learning rates
+Adam tracks two running statistics per parameter: a first moment (mean of
+gradients) and a second moment (mean of squared gradients). Both use
+exponential moving averages (EMA) and need bias correction because they
+start from zero.
+
+```
+grad_data ──→ m = β₁ * m + (1-β₁) * grad       (direction EMA)
+         └──→ v = β₂ * v + (1-β₂) * grad²      (magnitude EMA)
+
+             m̂ = m / (1 - β₁^t)                 (bias-corrected mean)
+             v̂ = v / (1 - β₂^t)                 (bias-corrected variance)
+```
+
+This helper isolates the EMA + bias correction math so that `step()`
+only has to compose: extract gradient, update moments, apply update.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "adam-update-moments", "solution": true}
+class _AdamUpdateMomentsMixin:
+    """Mixin added to Adam for moment updates."""
+    def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
+        """
+        Update first and second moment estimates with bias correction.
+
+        Computes the exponential moving averages of the gradient (first moment)
+        and the squared gradient (second moment), then applies bias correction
+        to counteract the zero-initialization bias in early training steps.
+
+        TODO: Update moment buffers and return bias-corrected estimates
 
         APPROACH:
-        1. For each parameter with gradients:
-           a. Apply weight decay if specified
-           b. Update first moment estimate (momentum of gradient)
-           c. Update second moment estimate (momentum of squared gradient)
-           d. Compute bias-corrected moments
-           e. Update parameter using adaptive learning rate
+        1. Initialize m and v buffers to zeros if this is the first call
+        2. Update first moment: m = beta1 * m + (1 - beta1) * grad
+        3. Update second moment: v = beta2 * v + (1 - beta2) * grad^2
+        4. Compute bias corrections using step_count
+        5. Return bias-corrected m_hat and v_hat
+
+        EXAMPLE:
+        >>> m_hat, v_hat = self._update_moments(0, np.array([0.1, 0.2]))
+        >>> # m_hat ≈ grad (after bias correction at step 1)
+        >>> # v_hat ≈ grad^2 (after bias correction at step 1)
+
+        HINTS:
+        - Use self.step_count (already incremented before this call)
+        - Bias correction denominators: (1 - beta^t) approach 1 as t grows
+        """
+        ### BEGIN SOLUTION
+        # Initialize buffers if needed
+        if self.m_buffers[i] is None:
+            self.m_buffers[i] = np.zeros_like(grad_data)
+            self.v_buffers[i] = np.zeros_like(grad_data)
+
+        # Update biased first moment estimate
+        self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
+
+        # Update biased second moment estimate
+        self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
+
+        # Compute bias correction
+        bias_correction1 = 1 - self.beta1 ** self.step_count
+        bias_correction2 = 1 - self.beta2 ** self.step_count
+
+        # Compute bias-corrected moments
+        m_hat = self.m_buffers[i] / bias_correction1
+        v_hat = self.v_buffers[i] / bias_correction2
+
+        return m_hat, v_hat
+        ### END SOLUTION
+
+# Attach _update_moments to Adam
+Adam._update_moments = _AdamUpdateMomentsMixin._update_moments
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Adam Moment Updates
+
+This test validates that `_update_moments` correctly computes exponential
+moving averages and bias correction for Adam's first and second moments.
+
+**What we're testing**: EMA computation and bias correction math
+**Why it matters**: Incorrect moments produce wrong adaptive learning rates
+**Expected**: Bias-corrected moments match hand-calculated values
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-adam-update-moments", "locked": true, "points": 10}
+def test_unit_adam_update_moments():
+    """🧪 Test Adam _update_moments computes correct EMA and bias correction."""
+    print("🧪 Unit Test: Adam Moment Updates...")
+
+    param = Tensor([1.0, 2.0], requires_grad=True)
+    optimizer = Adam([param], lr=0.01, betas=(0.9, 0.999), eps=1e-8)
+
+    grad = np.array([0.1, 0.2])
+
+    # Simulate step 1 (step_count must be set before calling _update_moments)
+    optimizer.step_count = 1
+
+    m_hat, v_hat = optimizer._update_moments(0, grad)
+
+    # Manual calculation for step 1:
+    # m = 0.9 * 0 + 0.1 * [0.1, 0.2] = [0.01, 0.02]
+    # v = 0.999 * 0 + 0.001 * [0.01, 0.04] = [0.00001, 0.00004]
+    # bias_correction1 = 1 - 0.9^1 = 0.1
+    # bias_correction2 = 1 - 0.999^1 = 0.001
+    # m_hat = [0.01, 0.02] / 0.1 = [0.1, 0.2]  (= grad, as expected!)
+    # v_hat = [0.00001, 0.00004] / 0.001 = [0.01, 0.04]  (= grad^2)
+
+    assert np.allclose(m_hat, grad), f"m_hat should equal grad at step 1, got {m_hat}"
+    assert np.allclose(v_hat, grad ** 2), f"v_hat should equal grad^2 at step 1, got {v_hat}"
+
+    # Step 2 with same gradient
+    optimizer.step_count = 2
+    m_hat2, v_hat2 = optimizer._update_moments(0, grad)
+
+    # Moments should still be close to grad (converging to true mean)
+    assert m_hat2 is not None
+    assert v_hat2 is not None
+    # Buffers should be updated in-place
+    assert optimizer.m_buffers[0] is not None
+    assert optimizer.v_buffers[0] is not None
+
+    print("✅ Adam moment updates work correctly!")
+
+if __name__ == "__main__":
+    test_unit_adam_update_moments()
+
+# %% [markdown]
+"""
+### 🏗️ Adam Step - Composing Gradient Extraction, Moments, and Update
+
+The `step()` method now composes three focused operations:
+1. `_extract_gradient()` -- normalize Tensor/ndarray gradient to NumPy
+2. `_update_moments()` -- EMA + bias correction for adaptive scaling
+3. Parameter update -- `param -= lr * m_hat / (sqrt(v_hat) + eps)`
+
+```
+For each parameter:
+    param.grad ──→ _extract_gradient() ──→ grad_data
+                                               │
+                   (optional weight decay)  ←──┘
+                                               │
+                   _update_moments(i, grad) ──→ (m_hat, v_hat)
+                                                     │
+                   param.data -= lr * m_hat / (√v_hat + ε)
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "adam-step", "solution": true}
+class _AdamStepMixin:
+    """Mixin added to Adam for step method."""
+    def step(self):
+        """
+        Perform Adam update step by composing helpers.
+
+        TODO: Implement Adam parameter update using _extract_gradient and _update_moments
+
+        APPROACH:
+        1. Increment step_count (needed for bias correction)
+        2. For each parameter with gradients:
+           a. Extract gradient with self._extract_gradient(param)
+           b. Apply weight decay to gradient if specified
+           c. Update moments with self._update_moments(i, grad_data)
+           d. Update parameter: param -= lr * m_hat / (sqrt(v_hat) + eps)
 
         FORMULAS:
-        - m_t = β₁ * m_{t-1} + (1-β₁) * g_t
-        - v_t = β₂ * v_{t-1} + (1-β₂) * g_t²
-        - m̂_t = m_t / (1-β₁^t)
-        - v̂_t = v_t / (1-β₂^t)
         - θ_t = θ_{t-1} - lr * m̂_t / (√v̂_t + ε)
 
         HINTS:
-        - Initialize buffers as zeros on first use
-        - Use step_count for bias correction
-        - Square gradients element-wise for second moment
+        - Increment step_count FIRST (before the loop)
+        - _update_moments returns (m_hat, v_hat) tuple
+        - Weight decay modifies grad_data before moment update
         """
         ### BEGIN SOLUTION
         # Increment step counter first (needed for bias correction)
@@ -809,41 +1056,22 @@ class Adam(Optimizer):
             if param.grad is None:
                 continue
 
-            # Get gradient data - grad can be Tensor or numpy array
-            grad = param.grad
-            # Handle both Tensor (with .data) and numpy array (from autograd) cases
-            if isinstance(grad, Tensor):
-                grad_data = grad.data
-            else:
-                # grad is already a numpy array from autograd
-                grad_data = grad
+            # Extract gradient using shared helper
+            grad_data = self._extract_gradient(param)
 
             # Apply weight decay
             if self.weight_decay != 0:
                 grad_data = grad_data + self.weight_decay * param.data
 
-            # Initialize buffers if needed
-            if self.m_buffers[i] is None:
-                self.m_buffers[i] = np.zeros_like(param.data)
-                self.v_buffers[i] = np.zeros_like(param.data)
-
-            # Update biased first moment estimate
-            self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
-
-            # Update biased second moment estimate
-            self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
-
-            # Compute bias correction
-            bias_correction1 = 1 - self.beta1 ** self.step_count
-            bias_correction2 = 1 - self.beta2 ** self.step_count
-
-            # Compute bias-corrected moments
-            m_hat = self.m_buffers[i] / bias_correction1
-            v_hat = self.v_buffers[i] / bias_correction2
+            # Update moments and get bias-corrected estimates
+            m_hat, v_hat = self._update_moments(i, grad_data)
 
             # Update parameter
             param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
         ### END SOLUTION
+
+# Attach step to Adam
+Adam.step = _AdamStepMixin.step
 
 # %% [markdown]
 """
@@ -1028,29 +1256,176 @@ class AdamW(Optimizer):
         self.v_buffers = [None for _ in self.params]
         ### END SOLUTION
 
-    def step(self):
-        """
-        Perform AdamW update step with decoupled weight decay.
+# %% [markdown]
+"""
+### 🏗️ AdamW Moment Updates - Same EMA, Different Context
 
-        TODO: Implement AdamW parameter update
+AdamW uses identical moment update math as Adam (EMA + bias correction).
+The critical difference is that AdamW passes **pure gradients** to moment
+updates -- weight decay is applied separately to parameters, not mixed
+into the gradient signal.
+
+```
+AdamW flow:
+    grad_data ──→ _update_moments(i, grad_data)  ← pure gradient, no decay
+                        │
+                   (m_hat, v_hat)
+                        │
+    param -= lr * m_hat / (√v_hat + ε)           ← gradient update
+    param *= (1 - lr * weight_decay)              ← separate decay step
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "adamw-update-moments", "solution": true}
+class _AdamWUpdateMomentsMixin:
+    """Mixin added to AdamW for moment updates."""
+    def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
+        """
+        Update first and second moment estimates with bias correction for AdamW.
+
+        Identical math to Adam's _update_moments: EMA of gradient and squared
+        gradient, with bias correction. The key difference is in how step()
+        calls this -- AdamW passes pure gradients without weight decay mixed in.
+
+        TODO: Update moment buffers and return bias-corrected estimates
 
         APPROACH:
-        1. For each parameter with gradients:
-           a. Update moments using gradients (NOT modified by weight decay)
-           b. Compute bias-corrected moments
-           c. Apply gradient-based update
-           d. Apply weight decay directly to parameters
+        1. Initialize m and v buffers to zeros if this is the first call
+        2. Update first moment: m = beta1 * m + (1 - beta1) * grad
+        3. Update second moment: v = beta2 * v + (1 - beta2) * grad^2
+        4. Compute bias corrections using step_count
+        5. Return bias-corrected m_hat and v_hat
+
+        EXAMPLE:
+        >>> m_hat, v_hat = self._update_moments(0, np.array([0.1, 0.2]))
+
+        HINT: Same math as Adam -- the decoupling happens in step(), not here
+        """
+        ### BEGIN SOLUTION
+        # Initialize buffers if needed
+        if self.m_buffers[i] is None:
+            self.m_buffers[i] = np.zeros_like(grad_data)
+            self.v_buffers[i] = np.zeros_like(grad_data)
+
+        # Update biased first moment estimate
+        self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
+
+        # Update biased second moment estimate
+        self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
+
+        # Compute bias correction
+        bias_correction1 = 1 - self.beta1 ** self.step_count
+        bias_correction2 = 1 - self.beta2 ** self.step_count
+
+        # Compute bias-corrected moments
+        m_hat = self.m_buffers[i] / bias_correction1
+        v_hat = self.v_buffers[i] / bias_correction2
+
+        return m_hat, v_hat
+        ### END SOLUTION
+
+# Attach _update_moments to AdamW
+AdamW._update_moments = _AdamWUpdateMomentsMixin._update_moments
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: AdamW Moment Updates
+
+This test validates that AdamW's `_update_moments` computes the same EMA
+and bias correction as Adam (the math is identical; the decoupling
+difference is in how `step()` uses these results).
+
+**What we're testing**: EMA computation for AdamW
+**Why it matters**: Correct moments are needed for adaptive learning rates
+**Expected**: Same bias-corrected values as Adam for identical inputs
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-adamw-update-moments", "locked": true, "points": 10}
+def test_unit_adamw_update_moments():
+    """🧪 Test AdamW _update_moments produces correct bias-corrected moments."""
+    print("🧪 Unit Test: AdamW Moment Updates...")
+
+    param = Tensor([1.0, 2.0], requires_grad=True)
+    optimizer = AdamW([param], lr=0.01, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01)
+
+    grad = np.array([0.1, 0.2])
+
+    # Simulate step 1
+    optimizer.step_count = 1
+    m_hat, v_hat = optimizer._update_moments(0, grad)
+
+    # At step 1, bias-corrected m_hat should equal the gradient
+    assert np.allclose(m_hat, grad), f"m_hat should equal grad at step 1, got {m_hat}"
+    assert np.allclose(v_hat, grad ** 2), f"v_hat should equal grad^2 at step 1, got {v_hat}"
+
+    # Verify buffers were initialized
+    assert optimizer.m_buffers[0] is not None
+    assert optimizer.v_buffers[0] is not None
+
+    # Verify AdamW and Adam produce same moment values for same input
+    param_adam = Tensor([1.0, 2.0], requires_grad=True)
+    adam_opt = Adam([param_adam], lr=0.01, betas=(0.9, 0.999), eps=1e-8)
+    adam_opt.step_count = 1
+
+    # Reset AdamW buffers for fair comparison
+    param_adamw = Tensor([1.0, 2.0], requires_grad=True)
+    adamw_opt = AdamW([param_adamw], lr=0.01, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.01)
+    adamw_opt.step_count = 1
+
+    m_adam, v_adam = adam_opt._update_moments(0, grad)
+    m_adamw, v_adamw = adamw_opt._update_moments(0, grad)
+
+    assert np.allclose(m_adam, m_adamw), "Adam and AdamW moments should be identical"
+    assert np.allclose(v_adam, v_adamw), "Adam and AdamW moments should be identical"
+
+    print("✅ AdamW moment updates work correctly!")
+
+if __name__ == "__main__":
+    test_unit_adamw_update_moments()
+
+# %% [markdown]
+"""
+### 🏗️ AdamW Step - Decoupled Weight Decay Composition
+
+AdamW's `step()` composes the same helpers as Adam, but with one critical
+difference: weight decay is applied **after** the gradient update, directly
+to the parameter values, rather than being mixed into the gradient.
+
+```
+For each parameter:
+    param.grad ──→ _extract_gradient() ──→ grad_data
+                                               │
+                   _update_moments(i, grad) ──→ (m_hat, v_hat)
+                                                     │
+                   param.data -= lr * m_hat / (√v_hat + ε)   ← gradient step
+                   param.data *= (1 - lr * weight_decay)      ← separate decay
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "adamw-step", "solution": true}
+class _AdamWStepMixin:
+    """Mixin added to AdamW for step method."""
+    def step(self):
+        """
+        Perform AdamW update step by composing helpers with decoupled weight decay.
+
+        TODO: Implement AdamW parameter update using _extract_gradient and _update_moments
+
+        APPROACH:
+        1. Increment step_count (needed for bias correction)
+        2. For each parameter with gradients:
+           a. Extract gradient with self._extract_gradient(param)
+           b. Update moments with self._update_moments(i, grad_data) -- pure gradient
+           c. Apply gradient update: param -= lr * m_hat / (sqrt(v_hat) + eps)
+           d. Apply weight decay separately: param *= (1 - lr * weight_decay)
 
         KEY DIFFERENCE from Adam:
-        - Weight decay: θ_t = θ_t - lr * weight_decay * θ_t (applied after gradient update)
-        - NOT: grad = grad + weight_decay * param (Adam's incorrect approach)
+        - NO weight decay added to gradient before moment update
+        - Weight decay applied directly to parameter AFTER gradient update
 
-        FORMULAS:
-        - Same moment updates as Adam (using unmodified gradients)
-        - Gradient update: θ_t = θ_{t-1} - lr * m̂_t / (√v̂_t + ε)
-        - Weight decay: θ_t = θ_t * (1 - lr * weight_decay)
-
-        HINT: Apply weight decay after gradient update for proper decoupling
+        HINTS:
+        - Do NOT modify grad_data with weight decay (that's Adam's bug)
+        - Apply decay as a multiplicative factor on param.data
         """
         ### BEGIN SOLUTION
         # Increment step counter first
@@ -1060,39 +1435,22 @@ class AdamW(Optimizer):
             if param.grad is None:
                 continue
 
-            # Get gradient data - grad can be Tensor or numpy array
-            grad = param.grad
-            # Handle both Tensor (with .data) and numpy array (from autograd) cases
-            if isinstance(grad, Tensor):
-                grad_data = grad.data
-            else:
-                # grad is already a numpy array from autograd
-                grad_data = grad
+            # Extract gradient using shared helper
+            grad_data = self._extract_gradient(param)
 
-            # Initialize buffers if needed
-            if self.m_buffers[i] is None:
-                self.m_buffers[i] = np.zeros_like(param.data)
-                self.v_buffers[i] = np.zeros_like(param.data)
-
-            # Update moments using pure gradients
-            self.m_buffers[i] = self.beta1 * self.m_buffers[i] + (1 - self.beta1) * grad_data
-            self.v_buffers[i] = self.beta2 * self.v_buffers[i] + (1 - self.beta2) * (grad_data ** 2)
-
-            # Compute bias correction
-            bias_correction1 = 1 - self.beta1 ** self.step_count
-            bias_correction2 = 1 - self.beta2 ** self.step_count
-
-            # Compute bias-corrected moments
-            m_hat = self.m_buffers[i] / bias_correction1
-            v_hat = self.v_buffers[i] / bias_correction2
+            # Update moments using PURE gradients (no weight decay mixed in)
+            m_hat, v_hat = self._update_moments(i, grad_data)
 
             # Apply gradient-based update
             param.data = param.data - self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 
-            # Apply decoupled weight decay
+            # Apply decoupled weight decay (separate from gradient update)
             if self.weight_decay != 0:
                 param.data = param.data * (1 - self.lr * self.weight_decay)
         ### END SOLUTION
+
+# Attach step to AdamW
+AdamW.step = _AdamWStepMixin.step
 
 # %% [markdown]
 """
@@ -1365,9 +1723,12 @@ def test_module():
 
     # Run all unit tests
     print("Running unit tests...")
+    test_unit_extract_gradient()
     test_unit_optimizer_base()
     test_unit_sgd_optimizer()
+    test_unit_adam_update_moments()
     test_unit_adam_optimizer()
+    test_unit_adamw_update_moments()
     test_unit_adamw_optimizer()
 
     print("\nRunning integration scenarios...")

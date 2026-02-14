@@ -889,6 +889,237 @@ class RandomHorizontalFlip:
         return x
         ### END SOLUTION
 
+# %% [markdown]
+"""
+### Padding an Image for Random Cropping
+
+Before we can randomly crop an image, we need to pad it with zeros on all sides.
+This creates extra space so that when we crop back to the original size, we get
+a slightly shifted version of the image.
+
+```
+Original (H, W):          Padded (H+2p, W+2p):
+┌──────────┐              ┌──────────────────┐
+│  image   │    pad=4     │ 0 0 0 0 0 0 0 0  │
+│  data    │  ────────>   │ 0  image      0  │
+│          │              │ 0  data       0  │
+└──────────┘              │ 0 0 0 0 0 0 0 0  │
+                          └──────────────────┘
+```
+
+The tricky part is handling different image formats: (H, W) for grayscale,
+(C, H, W) for channels-first color, and (H, W, C) for channels-last color.
+We must pad ONLY spatial dimensions, never the channel dimension.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "dataloader-pad-image", "solution": true}
+def _pad_image(data, padding):
+    """
+    Detect image format and apply zero-padding to spatial dimensions only.
+
+    TODO: Pad the image with zeros on all spatial sides
+
+    APPROACH:
+    1. Check dimensionality: 2D (H,W), 3D (C,H,W or H,W,C), else error
+    2. For 2D: pad uniformly on all sides
+    3. For 3D: determine channel axis (first dim <= 4 → channels-first)
+    4. Pad only H and W dimensions, leave channels untouched
+
+    EXAMPLE:
+    >>> img = np.ones((3, 4, 4))  # (C, H, W) = (3, 4, 4)
+    >>> padded = _pad_image(img, padding=2)
+    >>> print(padded.shape)  # (3, 8, 8) — channels unchanged, spatial +4
+
+    HINTS:
+    - np.pad takes a pad_width per axis: ((before, after), (before, after), ...)
+    - Use (0, 0) for axes you do NOT want to pad (channels)
+    - Use (padding, padding) for axes you DO want to pad (H, W)
+    """
+    ### BEGIN SOLUTION
+    if data.ndim == 2:
+        # (H, W) format — pad both axes
+        return np.pad(data, padding, mode='constant', constant_values=0)
+    elif data.ndim == 3:
+        if data.shape[0] <= 4:
+            # Channels-first: (C, H, W) — pad only H and W
+            return np.pad(data,
+                          ((0, 0), (padding, padding), (padding, padding)),
+                          mode='constant', constant_values=0)
+        else:
+            # Channels-last: (H, W, C) — pad only H and W
+            return np.pad(data,
+                          ((padding, padding), (padding, padding), (0, 0)),
+                          mode='constant', constant_values=0)
+    else:
+        raise ValueError(
+            f"RandomCrop requires 2D or 3D input\n"
+            f"  ❌ Got {data.ndim}D input with shape {data.shape}\n"
+            f"  💡 Expected formats: (H, W) for grayscale, (C, H, W) or (H, W, C) for color images\n"
+            f"  🔧 Reshape your data:\n"
+            f"     - For single grayscale image: x.reshape(height, width)\n"
+            f"     - For single color image: x.reshape(channels, height, width)"
+        )
+    ### END SOLUTION
+
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _pad_image
+
+**What we're testing**: Zero-padding applied correctly to spatial dimensions only
+**Why it matters**: Incorrect padding (e.g., padding the channel axis) corrupts image data
+**Expected**: Shape grows by 2*padding on H and W, channels unchanged
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-pad-image", "locked": true, "points": 5}
+def test_unit_pad_image():
+    """🧪 Test _pad_image helper."""
+    print("🧪 Unit Test: _pad_image...")
+
+    # Test 2D (H, W) — grayscale
+    img_hw = np.ones((8, 8))
+    padded_hw = _pad_image(img_hw, padding=4)
+    assert padded_hw.shape == (16, 16), f"2D pad shape wrong: {padded_hw.shape}"
+    # Corners should be zero (padding), center should be ones
+    assert padded_hw[0, 0] == 0.0, "Padding should be zero"
+    assert padded_hw[4, 4] == 1.0, "Original data should be preserved"
+
+    # Test 3D channels-first (C, H, W)
+    img_chw = np.ones((3, 8, 8))
+    padded_chw = _pad_image(img_chw, padding=4)
+    assert padded_chw.shape == (3, 16, 16), f"CHW pad shape wrong: {padded_chw.shape}"
+    assert padded_chw[0, 0, 0] == 0.0, "Spatial padding should be zero"
+    assert padded_chw[0, 4, 4] == 1.0, "Original data should be preserved"
+
+    # Test 3D channels-last (H, W, C) — shape[0] > 4 triggers this path
+    img_hwc = np.ones((32, 32, 3))
+    padded_hwc = _pad_image(img_hwc, padding=4)
+    assert padded_hwc.shape == (40, 40, 3), f"HWC pad shape wrong: {padded_hwc.shape}"
+
+    # Test error on 1D input
+    try:
+        _pad_image(np.ones((10,)), padding=4)
+        assert False, "Should raise ValueError for 1D input"
+    except ValueError:
+        pass
+
+    print("✅ _pad_image works correctly!")
+
+if __name__ == "__main__":
+    test_unit_pad_image()
+
+
+# %% [markdown]
+"""
+### Sampling a Random Crop Region
+
+Once the image is padded, we need to pick a random top-left corner for the crop.
+The valid range depends on the padded size minus the target crop size:
+
+```
+Padded image (H+2p, W+2p):
+┌──────────────────────┐
+│  ╔══════════╗        │  top is randomly chosen from
+│  ║  crop    ║        │  [0, padded_h - target_h]
+│  ║  region  ║        │
+│  ╚══════════╝        │  left is randomly chosen from
+│                      │  [0, padded_w - target_w]
+└──────────────────────┘
+```
+
+This is a pure random sampling operation — no data manipulation, just
+computing two random integers within valid bounds.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "dataloader-crop-region", "solution": true}
+def _random_crop_region(padded_h, padded_w, target_h, target_w):
+    """
+    Sample a random (top, left) position for cropping.
+
+    TODO: Generate random top-left corner within valid bounds
+
+    APPROACH:
+    1. Compute max valid top: padded_h - target_h
+    2. Compute max valid left: padded_w - target_w
+    3. Sample uniformly from [0, max_top] and [0, max_left]
+
+    EXAMPLE:
+    >>> top, left = _random_crop_region(40, 40, 32, 32)
+    >>> # top in [0, 8], left in [0, 8]
+
+    HINT: np.random.randint(0, high+1) gives values in [0, high] inclusive
+    """
+    ### BEGIN SOLUTION
+    top = np.random.randint(0, padded_h - target_h + 1)
+    left = np.random.randint(0, padded_w - target_w + 1)
+    return top, left
+    ### END SOLUTION
+
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _random_crop_region
+
+**What we're testing**: Random positions fall within valid bounds for all cases
+**Why it matters**: Out-of-bounds positions cause array indexing errors or silent data corruption
+**Expected**: top in [0, padded_h - target_h], left in [0, padded_w - target_w]
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-crop-region", "locked": true, "points": 5}
+def test_unit_random_crop_region():
+    """🧪 Test _random_crop_region helper."""
+    print("🧪 Unit Test: _random_crop_region...")
+
+    padded_h, padded_w = 40, 40
+    target_h, target_w = 32, 32
+    max_top = padded_h - target_h   # 8
+    max_left = padded_w - target_w  # 8
+
+    # Run many trials and verify bounds
+    for _ in range(200):
+        top, left = _random_crop_region(padded_h, padded_w, target_h, target_w)
+        assert 0 <= top <= max_top, f"top={top} out of range [0, {max_top}]"
+        assert 0 <= left <= max_left, f"left={left} out of range [0, {max_left}]"
+
+    # Verify both endpoints are reachable (statistical test)
+    tops = set()
+    lefts = set()
+    for _ in range(500):
+        t, l = _random_crop_region(padded_h, padded_w, target_h, target_w)
+        tops.add(t)
+        lefts.add(l)
+
+    assert 0 in tops, "Position 0 should be reachable"
+    assert max_top in tops, f"Position {max_top} should be reachable"
+    assert 0 in lefts, "Position 0 should be reachable"
+    assert max_left in lefts, f"Position {max_left} should be reachable"
+
+    # Edge case: when padded == target, only one valid position
+    top, left = _random_crop_region(32, 32, 32, 32)
+    assert top == 0 and left == 0, "Only valid position when padded == target"
+
+    print("✅ _random_crop_region works correctly!")
+
+if __name__ == "__main__":
+    test_unit_random_crop_region()
+
+
+# %% [markdown]
+"""
+### RandomCrop — Composing Pad, Sample, and Extract
+
+Now we combine our two helpers into the complete RandomCrop transform.
+The `__call__` method simply orchestrates three clear steps:
+
+```
+Input image ──> _pad_image() ──> _random_crop_region() ──> slice ──> Output
+   (H, W)       (H+2p, W+2p)      (top, left)            (H, W)
+```
+
+Each step does ONE thing. The composition function wires them together.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "dataloader-random-crop", "solution": true}
 #| export
 
 class RandomCrop:
@@ -935,30 +1166,31 @@ class RandomCrop:
         """
         Apply random crop after padding.
 
-        TODO: Implement random crop with padding
+        Composes _pad_image and _random_crop_region to perform:
+        1. Pad the image with zeros on spatial dimensions
+        2. Sample a random crop position
+        3. Extract the crop and return
+
+        TODO: Compose _pad_image → _random_crop_region → slice extraction
 
         APPROACH:
-        1. Add zero-padding to all sides
-        2. Choose random top-left corner for crop
-        3. Extract crop of target size
-
-        Args:
-            x: Input image with shape (C, H, W) or (H, W) or (H, W, C)
-               Assumes spatial dimensions are H, W
-
-        Returns:
-            Cropped image with target size
+        1. Unwrap Tensor if needed, get raw numpy array
+        2. Call _pad_image(data, self.padding) to pad spatial dims
+        3. Determine padded spatial dimensions (H, W) based on format
+        4. Call _random_crop_region(padded_h, padded_w, target_h, target_w)
+        5. Slice the padded array at (top, left) for target size
+        6. Re-wrap as Tensor if input was Tensor
 
         EXAMPLE:
         >>> crop = RandomCrop(32, padding=4)
-        >>> img = np.random.randn(3, 32, 32)  # CIFAR-10 format (C, H, W)
+        >>> img = np.random.randn(3, 32, 32)
         >>> out = crop(img)
         >>> print(out.shape)  # (3, 32, 32)
 
-        HINTS:
-        - Use np.pad for adding zeros
-        - Handle both (C, H, W) and (H, W) formats
-        - Random offsets should be in [0, 2*padding]
+        HINT: The slicing pattern differs by format:
+          2D:  padded[top:top+h, left:left+w]
+          CHW: padded[:, top:top+h, left:left+w]
+          HWC: padded[top:top+h, left:left+w, :]
         """
         ### BEGIN SOLUTION
         is_tensor = isinstance(x, Tensor)
@@ -966,50 +1198,24 @@ class RandomCrop:
 
         target_h, target_w = self.size
 
-        # Determine image format and dimensions
-        if len(data.shape) == 2:
-            # (H, W) format
-            h, w = data.shape
-            padded = np.pad(data, self.padding, mode='constant', constant_values=0)
+        # Step 1: Pad the image (handles format detection internally)
+        padded = _pad_image(data, self.padding)
 
-            # Random crop position
-            top = np.random.randint(0, 2 * self.padding + h - target_h + 1)
-            left = np.random.randint(0, 2 * self.padding + w - target_w + 1)
-
+        # Step 2: Determine padded spatial dims and sample crop position
+        if data.ndim == 2:
+            padded_h, padded_w = padded.shape
+            top, left = _random_crop_region(padded_h, padded_w, target_h, target_w)
             cropped = padded[top:top + target_h, left:left + target_w]
-
-        elif len(data.shape) == 3:
-            if data.shape[0] <= 4:  # Likely (C, H, W) format
-                c, h, w = data.shape
-                # Pad only spatial dimensions
-                padded = np.pad(data,
-                              ((0, 0), (self.padding, self.padding), (self.padding, self.padding)),
-                              mode='constant', constant_values=0)
-
-                # Random crop position
-                top = np.random.randint(0, 2 * self.padding + 1)
-                left = np.random.randint(0, 2 * self.padding + 1)
-
-                cropped = padded[:, top:top + target_h, left:left + target_w]
-            else:  # Likely (H, W, C) format
-                h, w, c = data.shape
-                padded = np.pad(data,
-                              ((self.padding, self.padding), (self.padding, self.padding), (0, 0)),
-                              mode='constant', constant_values=0)
-
-                top = np.random.randint(0, 2 * self.padding + 1)
-                left = np.random.randint(0, 2 * self.padding + 1)
-
-                cropped = padded[top:top + target_h, left:left + target_w, :]
+        elif data.shape[0] <= 4:
+            # Channels-first: (C, H, W)
+            padded_h, padded_w = padded.shape[1], padded.shape[2]
+            top, left = _random_crop_region(padded_h, padded_w, target_h, target_w)
+            cropped = padded[:, top:top + target_h, left:left + target_w]
         else:
-            raise ValueError(
-                f"RandomCrop requires 2D or 3D input\n"
-                f"  ❌ Got {len(data.shape)}D input with shape {data.shape}\n"
-                f"  💡 Expected formats: (H, W) for grayscale, (C, H, W) or (H, W, C) for color images\n"
-                f"  🔧 Reshape your data:\n"
-                f"     - For single grayscale image: x.reshape(height, width)\n"
-                f"     - For single color image: x.reshape(channels, height, width)"
-            )
+            # Channels-last: (H, W, C)
+            padded_h, padded_w = padded.shape[0], padded.shape[1]
+            top, left = _random_crop_region(padded_h, padded_w, target_h, target_w)
+            cropped = padded[top:top + target_h, left:left + target_w, :]
 
         return Tensor(cropped) if is_tensor else cropped
         ### END SOLUTION
@@ -1694,7 +1900,7 @@ Repeat until you find the sweet spot (usually 32-256)
 
 **4. Memory-Constrained Scenarios**
 
-With larger batch sizes, you process more data per step, but large batches may not fit in memory. When that happens, techniques exist to simulate larger batches using smaller ones that fit -- you'll learn these in later modules. For now, just choose a batch size that fits comfortably in your available memory.
+With larger batch sizes, you process more data per step, but large batches may not fit in memory. When that happens, techniques like gradient accumulation can simulate larger batches using smaller ones that fit. For now, just choose a batch size that fits comfortably in your available memory.
 
 These patterns will save you hours of debugging and help you build robust data pipelines!
 """
@@ -1818,6 +2024,8 @@ def test_module():
     test_unit_tensordataset()
     test_unit_dataloader()
     test_unit_dataloader_deterministic()
+    test_unit_pad_image()
+    test_unit_random_crop_region()
     test_unit_augmentation()
 
     print("\nRunning integration scenarios...")
@@ -2133,5 +2341,5 @@ You've implemented the same patterns used in:
 - **Production ML**: Essential for handling large-scale training efficiently
 - **Research**: Standard foundation for all deep learning experiments
 
-Your data loading pipeline is now ready to power the CNN training in Module 09!
+Your data loading pipeline is now ready to power neural network training!
 """
