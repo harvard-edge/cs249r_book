@@ -454,8 +454,9 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     APPROACH:
     1. Find min/max values in tensor data
     2. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
-    3. Calculate zero_point: offset to map FP32 zero to INT8 zero
-    4. Apply quantization formula: round((value - zero_point) / scale)
+    3. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
+       Formula: zero_point = round(INT8_MIN - min_val / scale)
+    4. Apply quantization formula: round(value / scale + zero_point)
     5. Clamp to INT8 range [-128, 127]
 
     Args:

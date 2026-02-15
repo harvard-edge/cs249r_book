@@ -425,6 +425,19 @@ Restore INT8 tensor to FP32 using quantization parameters.
 | `quantize_model` | `quantize_model(model, calibration_data=None)` | Quantize all Linear layers in-place |
 | `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Measure compression ratio and memory saved |
 
+### Quantizer Class
+
+```python
+Quantizer()
+```
+
+Object-oriented interface wrapping the standalone quantization functions. Provides a convenient API for milestone scripts and production workflows.
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `quantize_model` | `quantize_model(model, calibration_data=None)` | Quantize model via static method |
+| `analyze_model_sizes` | `analyze_model_sizes(original, quantized)` | Compare original vs quantized model sizes |
+
 ## Core Concepts
 
 This section covers the fundamental ideas behind quantization. Understanding these concepts will help you implement efficient model compression and debug quantization errors.

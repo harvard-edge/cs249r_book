@@ -66,6 +66,7 @@ import numpy as np
 
 from tinytorch.core.activations import GELU
 from tinytorch.core.attention import MultiHeadAttention
+from tinytorch.core.autograd import Function
 from tinytorch.core.embeddings import EmbeddingLayer
 from tinytorch.core.layers import Linear
 
@@ -442,6 +443,59 @@ Without normalization, deep networks suffer from "internal covariate shift" - th
 
 # %% nbgrader={"grade": false, "grade_id": "layer-norm", "solution": true}
 #| export
+
+
+class _LayerNormBackward(Function):
+    """
+    Gradient computation for the full layer normalization operation.
+
+    Computes gradients for x, gamma, and beta in one pass.
+    output = gamma * ((x - mean) / std) + beta
+
+    The gradient for x uses the standard LayerNorm formula:
+        dx = (gamma/std) * (grad - mean(grad) - normalized * mean(grad * normalized))
+    """
+
+    def __init__(self, x, gamma, beta, normalized_data, std_data):
+        """Initialize with forward pass values needed for gradient computation."""
+        super().__init__(x, gamma, beta)
+        self.normalized_data = normalized_data
+        self.std_data = std_data
+
+    def apply(self, grad_output):
+        """Compute gradients for LayerNorm (x, gamma, beta)."""
+        x, gamma, beta = self.saved_tensors
+
+        grad_x = grad_gamma = grad_beta = None
+        normalized = self.normalized_data
+        std_data = self.std_data
+
+        # Gradient for beta: sum over all dims except last
+        if isinstance(beta, Tensor) and beta.requires_grad:
+            # Sum over batch and sequence dimensions
+            grad_beta = grad_output.copy()
+            while grad_beta.ndim > 1:
+                grad_beta = grad_beta.sum(axis=0)
+
+        # Gradient for gamma: sum of (grad_output * normalized) over batch/seq dims
+        if isinstance(gamma, Tensor) and gamma.requires_grad:
+            grad_gamma = (grad_output * normalized).copy()
+            while grad_gamma.ndim > 1:
+                grad_gamma = grad_gamma.sum(axis=0)
+
+        # Gradient for x: full LayerNorm backward formula
+        if isinstance(x, Tensor) and x.requires_grad:
+            # grad flowing through gamma: grad_output * gamma
+            gamma_data = gamma.data if isinstance(gamma, Tensor) else gamma
+            grad_norm = grad_output * gamma_data
+
+            mean_grad = np.mean(grad_norm, axis=-1, keepdims=True)
+            mean_grad_norm = np.mean(grad_norm * normalized, axis=-1, keepdims=True)
+            grad_x = (1.0 / std_data) * (grad_norm - mean_grad - normalized * mean_grad_norm)
+
+        return (grad_x, grad_gamma, grad_beta)
+
+
 class LayerNorm:
     """
     Layer Normalization for transformer blocks.
@@ -500,19 +554,27 @@ class LayerNorm:
         """
         ### BEGIN SOLUTION
         # Compute statistics across last dimension (features)
-        mean = x.mean(axis=-1, keepdims=True)
+        mean_data = np.mean(x.data, axis=-1, keepdims=True)
 
         # Compute variance: E[(x - μ)²]
-        # Use Tensor operations to preserve computation graph!
-        diff = x - mean
-        variance = (diff * diff).mean(axis=-1, keepdims=True)
+        diff = x.data - mean_data
+        variance = np.mean(diff * diff, axis=-1, keepdims=True)
 
-        # Normalize
-        std = Tensor(np.sqrt(variance.data + self.eps))
-        normalized = (x - mean) / std
+        # Normalize: (x - mean) / sqrt(variance + eps)
+        std_data = np.sqrt(variance + self.eps)
+        normalized_data = diff / std_data
 
-        # Apply learnable transformation
-        output = normalized * self.gamma + self.beta
+        # Apply learnable transformation: gamma * normalized + beta
+        output_data = self.gamma.data * normalized_data + self.beta.data
+        output = Tensor(output_data)
+
+        # Attach gradient function for full LayerNorm backward
+        if x.requires_grad or self.gamma.requires_grad or self.beta.requires_grad:
+            output.requires_grad = True
+            output._grad_fn = _LayerNormBackward(
+                x, self.gamma, self.beta, normalized_data, std_data
+            )
+
         return output
         ### END SOLUTION
 

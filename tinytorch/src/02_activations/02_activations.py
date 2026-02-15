@@ -240,23 +240,8 @@ class Sigmoid:
         """
         ### BEGIN SOLUTION
         # Apply sigmoid: 1 / (1 + exp(-x))
-        x_data = x.data
-
-        # Use numerically stable sigmoid
-        # For positive values: 1 / (1 + exp(-x))
-        # For negative values: exp(x) / (1 + exp(x)) = 1 / (1 + exp(-x)) after clipping
-        result_data = np.zeros_like(x_data)
-
-        # Positive values (including zero)
-        pos_mask = x_data >= 0
-        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-x_data[pos_mask]))
-
-        # Negative values
-        neg_mask = x_data < 0
-        exp_x = np.exp(x_data[neg_mask])
-        result_data[neg_mask] = exp_x / (1.0 + exp_x)
-
-        return Tensor(result_data)
+        result = 1.0 / (1.0 + np.exp(-x.data))
+        return Tensor(result)
         ### END SOLUTION
 
     def __call__(self, x: Tensor) -> Tensor:

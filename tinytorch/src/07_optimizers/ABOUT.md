@@ -372,7 +372,7 @@ flowchart LR
 ```python
 # Training loop with optimizer
 optimizer = Adam(model.parameters(), lr=0.001)
-loss.backward()  # Compute gradients (Module 05)
+loss.backward()  # Compute gradients (Module 06)
 optimizer.step()  # Update parameters using gradients
 optimizer.zero_grad()  # Clear gradients for next iteration
 ```

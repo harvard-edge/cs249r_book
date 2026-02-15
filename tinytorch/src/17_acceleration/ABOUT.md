@@ -841,15 +841,16 @@ For students who want to understand the academic foundations and implementation 
 
 ## What's Next
 
-```{seealso} Coming Up: Module 19 - Benchmarking
+```{seealso} Coming Up: Module 18 - Memoization
 
-Learn to measure and compare performance systematically. You'll build benchmarking tools that isolate hardware effects, statistical analysis for reliable measurements, and comparison frameworks for evaluating optimization techniques.
+Implement caching and memoization strategies to eliminate redundant computations. You'll build KV-caching for transformer generation, cache repeated forward passes, and store attention patterns for dramatic speedups in production inference.
 ```
 
 **Preview - How Acceleration Gets Used in Future Modules:**
 
 | Module | What It Does | Your Acceleration In Action |
 |--------|--------------|---------------------------|
+| **18: Memoization** | Cache repeated computations | Fused kernels + KV cache minimize memory traffic |
 | **19: Benchmarking** | Systematic performance measurement | `benchmark(vectorized_matmul, sizes=[128, 256, 512])` |
 | **20: Capstone** | Complete optimized model | Acceleration throughout model pipeline |
 

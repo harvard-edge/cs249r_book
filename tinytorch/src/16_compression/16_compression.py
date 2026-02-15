@@ -720,9 +720,9 @@ def structured_prune(model, prune_ratio=0.5):
     Structured sparsity: 30.0%
 
     HINTS:
-    - Calculate L2 norm along input dimension for each output channel
-    - Use np.linalg.norm(weights[:, channel]) for channel importance
-    - Set entire channels to zero (not just individual weights)
+    - Calculate L2 norm for all channels at once: np.linalg.norm(weight, axis=0)
+    - Find the lowest-norm channels: np.argpartition(norms, k)[:k] or np.argsort(norms)[:k]
+    - Set entire channels to zero: weight[:, prune_indices] = 0
     """
     ### BEGIN SOLUTION
     # All Linear layers have .weight attribute

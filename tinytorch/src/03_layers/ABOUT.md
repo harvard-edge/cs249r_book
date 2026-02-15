@@ -389,8 +389,8 @@ output = layer2(x)
 
 To keep this module focused, you will **not** implement:
 
-- Automatic gradient computation (that's Module 06: Autograd)
-- Parameter optimization (that's Module 07: Optimizers)
+- Automatic gradient computation (autograd is a later module)
+- Parameter optimization (optimizers are a later module)
 - Hundreds of layer types (PyTorch has Conv2d, LSTM, Attention - you'll build Linear and Dropout)
 - Automatic training/eval mode switching (PyTorch's `model.train()` - you'll manually pass `training` flag)
 
@@ -428,8 +428,8 @@ Linear (fully connected) layer implementing `y = xW + b`.
 - `bias`: Whether to include bias term (default: True)
 
 **Attributes:**
-- `weight`: Tensor of shape `(in_features, out_features)` (gradient tracking enabled in Module 06)
-- `bias`: Tensor of shape `(out_features,)` or None (gradient tracking enabled in Module 06)
+- `weight`: Tensor of shape `(in_features, out_features)` (gradient tracking enabled later by autograd)
+- `bias`: Tensor of shape `(out_features,)` or None (gradient tracking enabled later by autograd)
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
@@ -521,7 +521,7 @@ def __init__(self, in_features, out_features, bias=True):
         self.bias = None
 ```
 
-Weights and biases are created as plain Tensors. In Module 06 (Autograd), you'll learn to enable gradient tracking via `enable_autograd()`, which monkey patches the Tensor class to support `requires_grad`. At that point, you can set `layer.weight.requires_grad = True` for parameters that need gradients. Bias starts at zero because the weight initialization already handles the scale, and zero is a neutral starting point for per-class adjustments.
+Weights and biases are created as plain Tensors. When autograd is enabled later, it monkey-patches the Tensor class to support `requires_grad`, at which point you can set `layer.weight.requires_grad = True` for parameters that need gradients. Bias starts at zero because the weight initialization already handles the scale, and zero is a neutral starting point for per-class adjustments.
 
 For Linear(1000, 10), the scale is `sqrt(1/1000) ≈ 0.032`. For Linear(10, 1000), the scale is `sqrt(1/10) ≈ 0.316`. Layers with more inputs get smaller initial weights because each input contributes to the output, and you want their combined effect to remain stable.
 
@@ -545,7 +545,7 @@ layer1 = Linear(784, 256)
 layer2 = Linear(256, 10)
 
 all_params = layer1.parameters() + layer2.parameters()
-# In Module 07, you'll pass all_params to optimizer.step()
+# Pass all_params to optimizer.step() during training
 ```
 
 Each Linear layer independently manages its own parameters. The Sequential container extends this pattern by collecting parameters from all its contained layers, enabling hierarchical composition.

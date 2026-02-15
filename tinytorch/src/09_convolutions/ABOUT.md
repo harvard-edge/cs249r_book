@@ -442,12 +442,25 @@ Creates an average pooling layer for smooth spatial reduction.
 - `stride`: Stride of pooling (default: same as kernel_size)
 - `padding`: Zero-padding added to input (default: 0)
 
+### BatchNorm2d Constructor
+
+```python
+BatchNorm2d(num_features, eps=1e-5, momentum=0.1)
+```
+
+Batch normalization for 2D inputs (4D tensor: batch, channels, height, width). Normalizes each channel across the batch to stabilize training.
+
+**Parameters:**
+- `num_features`: Number of channels (must match input channel dimension)
+- `eps`: Small constant for numerical stability (default: 1e-5)
+- `momentum`: Running mean/variance update rate (default: 0.1)
+
 ### Core Methods
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
 | `forward` | `forward(x: Tensor) -> Tensor` | Apply spatial operation to input |
-| `parameters` | `parameters() -> list` | Return trainable parameters (Conv2d only) |
+| `parameters` | `parameters() -> list` | Return trainable parameters (Conv2d, BatchNorm2d) |
 | `__call__` | `__call__(x: Tensor) -> Tensor` | Enable `layer(x)` syntax |
 
 ### Output Shape Calculation

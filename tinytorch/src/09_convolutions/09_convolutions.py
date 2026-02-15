@@ -65,7 +65,7 @@ import time
 from tinytorch.core.tensor import Tensor
 
 # Enable autograd for gradient tracking (required for BatchNorm2d learnable parameters)
-from tinytorch.core.autograd import enable_autograd, Function
+from tinytorch.core.autograd import enable_autograd, Function, ReLUBackward
 enable_autograd()
 
 # Constants for convolution defaults
@@ -2822,16 +2822,21 @@ class SimpleCNN:
 
         # Flatten for classification (reshape to 2D)
         batch_size = x.shape[0]
-        x_flat = x.data.reshape(batch_size, -1)
+        x = x.reshape(batch_size, -1)
 
         # Return flattened features
         # In a complete implementation, this would go through a Linear layer
-        return Tensor(x_flat)
+        return x
         ### END SOLUTION
 
     def relu(self, x):
-        """Simple ReLU implementation for CNN."""
-        return Tensor(np.maximum(0, x.data))
+        """ReLU activation with gradient tracking for CNN."""
+        result_data = np.maximum(0, x.data)
+        result = Tensor(result_data)
+        if x.requires_grad:
+            result.requires_grad = True
+            result._grad_fn = ReLUBackward(x)
+        return result
 
     def parameters(self):
         """Return all trainable parameters."""
