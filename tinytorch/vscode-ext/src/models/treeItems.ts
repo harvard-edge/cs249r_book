@@ -25,7 +25,8 @@ export class ActionTreeItem extends vscode.TreeItem {
     args: unknown[] = [],
     icon?: string,
   ) {
-    super(label, vscode.TreeItemCollapsibleState.None);
+    // Visually offset leaf actions under expanded categories in sidebars.
+    super(`  ${label}`, vscode.TreeItemCollapsibleState.None);
     this.command = { command: commandId, title: label, arguments: args };
     if (icon) {
       this.iconPath = new vscode.ThemeIcon(icon);
