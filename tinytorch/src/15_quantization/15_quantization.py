@@ -121,7 +121,7 @@ FP32 weights actually consume. This will show us why reduced precision matters.
 """
 
 # %%
-def demo_motivation_profiling():
+def explore_motivation_profiling():
     """Profile model memory usage to discover the quantization problem."""
     from tinytorch.perf.profiling import Profiler
 
@@ -176,7 +176,7 @@ def demo_motivation_profiling():
     print("   Accuracy: Minimal loss (<1% typically) with proper calibration\n")
 
 if __name__ == "__main__":
-    demo_motivation_profiling()
+    explore_motivation_profiling()
 
 # %% [markdown]
 """
@@ -1939,7 +1939,7 @@ This is the production workflow: measure -> compress -> validate -> deploy.
 # Import Profiler from Module 14
 from tinytorch.perf.profiling import Profiler
 
-def demo_quantization_with_profiler():
+def explore_quantization_with_profiler():
     """Demonstrate memory savings using Profiler from Module 14."""
     print("Measuring Quantization Memory Savings with Profiler")
     print("=" * 70)
@@ -2001,7 +2001,7 @@ def demo_quantization_with_profiler():
     print("\nThis is the power of quantization: same functionality, 4x less memory!")
 
 if __name__ == "__main__":
-    demo_quantization_with_profiler()
+    explore_quantization_with_profiler()
 
 # %% [markdown]
 """
@@ -2079,7 +2079,7 @@ Final validation that everything works together correctly before module completi
 
 # %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20, "solution": false, "schema_version": 3}
 def test_module():
-    """Module Test: Complete Integration
+    """🧪 Module Test: Complete Integration
 
     Comprehensive test of entire module functionality.
 
@@ -2088,7 +2088,7 @@ def test_module():
     - Functions work together correctly
     - Module is ready for integration with TinyTorch
     """
-    print("RUNNING MODULE INTEGRATION TEST")
+    print("🧪 RUNNING MODULE INTEGRATION TEST")
     print("=" * 50)
 
     # Run all unit tests
@@ -2189,8 +2189,8 @@ def test_module():
     print("Edge cases handled correctly!")
 
     print("\n" + "=" * 50)
-    print("ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 15_quantization")
+    print("🎉 ALL TESTS PASSED! Module ready for export.")
+    print("Run: tito module complete 15")
 
 # %% [markdown]
 """
@@ -2294,8 +2294,8 @@ Your quantization system is ready for production deployment!
 
 # %%
 def demo_quantization():
-    """See quantization shrink model size."""
-    print("AHA MOMENT: Quantization Shrinks Models")
+    """🎯 See quantization shrink model size."""
+    print("🎯 AHA MOMENT: Quantization Shrinks Models")
     print("=" * 45)
 
     # Create FP32 weights with concrete values
@@ -2321,7 +2321,7 @@ def demo_quantization():
     print(f"INT8 range: [{q_weights.data.min()}, {q_weights.data.max()}]")
     print(f"Restoration error: {error:.6f}")
 
-    print("\nSame values, 4x less memory!")
+    print("\n✨ Same values, 4x less memory!")
 
 # %%
 if __name__ == "__main__":
@@ -2349,7 +2349,7 @@ Congratulations! You've built a complete INT8 quantization system that can reduc
 - Hardware efficiency: Specialized INT8 instructions provide 2-4x speedup
 - Deployment benefits: Smaller models fit on mobile and edge devices
 
-Export with: `tito module complete 15_quantization`
+Export with: `tito module complete 15`
 
 Quantization is one of the most impactful optimization techniques — reducing precision to INT8 delivers 4x memory savings with minimal accuracy loss.
 """

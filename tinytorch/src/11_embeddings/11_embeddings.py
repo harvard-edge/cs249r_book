@@ -1373,7 +1373,7 @@ encoding addition across all three PE strategies.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-emblayer-forward", "locked": true, "points": 10}
-def test_unitemblayer_forward():
+def test_unit_emblayer_forward():
     """🧪 Test EmbeddingLayer.forward composition."""
     print("🧪 Unit Test: EmbeddingLayer Forward Pass...")
 
@@ -1410,7 +1410,7 @@ def test_unitemblayer_forward():
     print("✅ EmbeddingLayer forward pass works correctly!")
 
 if __name__ == "__main__":
-    test_unitemblayer_forward()
+    test_unit_emblayer_forward()
 
 # %% [markdown]
 """
@@ -1715,7 +1715,7 @@ def test_module():
     test_unit_sinusoidal_table()
     test_unit_sinusoidal_embeddings()
     test_unit_emblayer_init()
-    test_unitemblayer_forward()
+    test_unit_emblayer_forward()
     test_unit_complete_embedding_system()
 
     print("\nRunning integration scenarios...")

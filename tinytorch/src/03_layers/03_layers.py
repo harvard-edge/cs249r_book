@@ -459,7 +459,7 @@ Additional tests for edge cases and error handling.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
-def test_edge_cases_linear():
+def test_unit_edge_cases_linear():
     """🧪 Test Linear layer edge cases."""
     print("🧪 Edge Case Tests: Linear Layer...")
 
@@ -492,7 +492,7 @@ def test_edge_cases_linear():
     print("✅ Edge cases handled correctly!")
 
 if __name__ == "__main__":
-    test_edge_cases_linear()
+    test_unit_edge_cases_linear()
 
 # %% [markdown]
 """
@@ -502,7 +502,7 @@ Tests to ensure Linear layer parameters can be collected for optimization.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
-def test_parameter_collection_linear():
+def test_unit_parameter_collection_linear():
     """🧪 Test Linear layer parameter collection."""
     print("🧪 Parameter Collection Test: Linear Layer...")
 
@@ -522,7 +522,7 @@ def test_parameter_collection_linear():
     print("✅ Parameter collection works correctly!")
 
 if __name__ == "__main__":
-    test_parameter_collection_linear()
+    test_unit_parameter_collection_linear()
 
 
 # %% [markdown]
@@ -1238,8 +1238,8 @@ def test_module():
     # Run all unit tests
     print("Running unit tests...")
     test_unit_linear_layer()
-    test_edge_cases_linear()
-    test_parameter_collection_linear()
+    test_unit_edge_cases_linear()
+    test_unit_parameter_collection_linear()
     test_unit_should_apply_dropout()
     test_unit_generate_dropout_mask()
     test_unit_dropout_layer()
@@ -1293,7 +1293,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 03_layers")
+    print("Run: tito module complete 03")
 
 # %% [markdown]
 """
@@ -1443,7 +1443,7 @@ Congratulations! You've built the fundamental building blocks that make neural n
 ### Ready for Next Steps
 Your layer implementation enables building complete neural networks! The Linear layer provides learnable transformations, manual composition chains them together, and Dropout prevents overfitting.
 
-Export with: `tito module complete 03_layers`
+Export with: `tito module complete 03`
 
 **Next**: Module 04 will add loss functions (CrossEntropyLoss, MSELoss) that measure how wrong your model is - the foundation for learning!
 """

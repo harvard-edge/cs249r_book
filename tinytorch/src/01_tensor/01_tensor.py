@@ -1719,7 +1719,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 01_tensor")
+    print("Run: tito module complete 01")
 
 # Run comprehensive module test
 if __name__ == "__main__":
@@ -1728,7 +1728,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Tensor Operations
+## 🤔 ML Systems Reflection Questions
 
 Now that you've built a complete Tensor class, let's think about its systems-level implications.
 Understanding memory layout, scaling behavior, and computational costs helps you make informed
@@ -1864,7 +1864,7 @@ Congratulations! You've built the foundational Tensor class that powers all mach
 
 ### Ready for Next Steps
 Your Tensor implementation enables all future ML operations.
-Export with: `tito module complete 01_tensor`
+Export with: `tito module complete 01`
 
 **Next**: Module 02 will add Activations that introduce nonlinearity to your tensors!
 """

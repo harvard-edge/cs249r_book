@@ -1131,8 +1131,8 @@ Your activations are ready to be combined with Linear layers in Module 03!
 
 # %%
 def demo_activations():
-    """See how activations transform data."""
-    print("AHA MOMENT: Activations Add Intelligence")
+    """🎯 See how activations transform data."""
+    print("🎯 AHA MOMENT: Activations Add Intelligence")
     print("=" * 45)
 
     # Test input with positive and negative values
@@ -1157,8 +1157,7 @@ def demo_activations():
     print(f"\nSoftmax: {np.round(softmax_out.data, 3)}")
     print(f"         Sum = {softmax_out.data.sum():.1f} (valid probability distribution!)")
 
-    print("\n" + "=" * 45)
-    print("Activations add nonlinearity - the key to deep learning!")
+    print("\n✨ Activations add nonlinearity—the key to deep learning!")
 
 # %%
 if __name__ == "__main__":

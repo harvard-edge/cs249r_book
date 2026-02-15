@@ -1924,7 +1924,7 @@ Let's test how our DataLoader integrates with a complete training workflow, simu
 """
 
 # %% nbgrader={"grade": false, "grade_id": "integration-test", "solution": true}
-def test_training_integration():
+def test_unit_training_integration():
     """🧪 Test DataLoader integration with training workflow."""
     print("🧪 Integration Test: Training Workflow...")
 
@@ -1995,7 +1995,7 @@ def test_training_integration():
     print("✅ Training integration works correctly!")
 
 if __name__ == "__main__":
-    test_training_integration()
+    test_unit_training_integration()
 
 # %% [markdown]
 """
@@ -2031,7 +2031,7 @@ def test_module():
     print("\nRunning integration scenarios...")
 
     # Test complete workflow
-    test_training_integration()
+    test_unit_training_integration()
 
     # Test augmentation with DataLoader
     print("🧪 Integration Test: Augmentation with DataLoader...")
@@ -2326,7 +2326,7 @@ Congratulations! You've built a complete data loading pipeline for ML training!
 
 ### Ready for Next Steps
 Your DataLoader implementation enables efficient training of CNNs and larger models with proper data pipeline management.
-Export with: `tito export 05_dataloader`
+Export with: `tito module complete 05`
 
 **Apply your knowledge:**
 - Milestone 03: Train MLP on real MNIST digits

@@ -248,7 +248,7 @@ Each row sums to 1.0 (probability distribution)
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Scaled Dot-Product Attention
+## 🏗️ Implementation: Building Scaled Dot-Product Attention
 
 Now let's implement the core attention mechanism that powers all transformer models. We'll use explicit loops first to make the O(n²) complexity visible and educational.
 
@@ -602,7 +602,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Multi-Head Attention
+## 🏗️ Implementation: Multi-Head Attention
 
 Multi-head attention runs multiple attention "heads" in parallel, each learning to focus on different types of relationships. Think of it as having multiple specialists: one for syntax, one for semantics, one for long-range dependencies, etc.
 
@@ -1254,7 +1254,7 @@ Let's see these patterns emerge in our implementation.
 """
 
 # %%
-def test_attention_scenarios():
+def test_unit_attention_scenarios():
     """Test attention mechanisms in realistic scenarios."""
     print("🧪 Testing Attention Scenarios...")
 
@@ -1367,7 +1367,7 @@ def test_module():
     test_unit_multihead_attention()
 
     print("\nRunning integration scenarios...")
-    test_attention_scenarios()
+    test_unit_attention_scenarios()
 
     print("\nRunning performance analysis...")
     analyze_attention_complexity()

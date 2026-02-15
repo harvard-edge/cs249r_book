@@ -237,7 +237,7 @@ This is why kernel size matters enormously - a 7×7 kernel would require 5.4× m
 
 # %% [markdown]
 """
-## 🏗️ Implementation - Building Spatial Operations
+## 🏗️ Implementation: Building Spatial Operations
 
 Now we'll implement convolution step by step, using explicit loops so you can see and feel the computational complexity. This helps you understand why modern optimizations matter!
 
@@ -3027,7 +3027,7 @@ In the milestones, you'll use these spatial operations to build a CNN that recog
 """
 
 # %%
-def demo_spatial():
+def demo_convolutions():
     """🎯 See Conv2d process spatial data."""
     print("🎯 AHA MOMENT: Convolution Extracts Features")
     print("=" * 45)
@@ -3051,7 +3051,7 @@ def demo_spatial():
 if __name__ == "__main__":
     test_module()
     print("\n")
-    demo_spatial()
+    demo_convolutions()
 
 # %% [markdown]
 """

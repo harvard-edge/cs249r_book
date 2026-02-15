@@ -1427,7 +1427,7 @@ This is the production workflow: measure → prune → validate → deploy.
 # %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": true}
 # Import Profiler from Module 14 (already imported above)
 
-def demo_compression_with_profiler():
+def explore_compression_with_profiler():
     """📊 Demonstrate parameter reduction using Profiler from Module 14."""
     print("📊 Measuring Compression Impact with Profiler")
     print("=" * 70)
@@ -1491,7 +1491,7 @@ def demo_compression_with_profiler():
     print("\n✅ This is the power of compression: remove what doesn't matter!")
 
 if __name__ == "__main__":
-    demo_compression_with_profiler()
+    explore_compression_with_profiler()
 
 # %% [markdown]
 """
@@ -1679,72 +1679,6 @@ class Compressor:
 
 # %% [markdown]
 """
-## 🤔 ML Systems Reflection Questions
-
-Answer these to deepen your understanding of compression techniques and their systems implications:
-
-### 1. Compression Trade-offs
-**Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
-
-**Consider**:
-- How many parameters remain active? _____ M parameters
-- If the original model was 40MB, what's the theoretical minimum storage? _____ MB
-- Why might actual speedup be less than 10x?
-
-**Real-world context**: Sparse matrix formats have indexing overhead, and many hardware accelerators cannot efficiently exploit unstructured sparsity.
-
----
-
-### 2. Structured vs Unstructured Sparsity
-**Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
-
-**Consider**:
-- Which enables better hardware acceleration?
-- Which preserves accuracy better at high sparsity?
-- Which creates more predictable memory access patterns?
-
-**Think about**: How would you choose between these approaches for different deployment targets (GPU, CPU, mobile)?
-
----
-
-### 3. Knowledge Distillation Efficiency
-**Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
-
-**Calculate**:
-- Compression ratio: _____x
-- If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
-- Why is the speedup greater than the compression ratio?
-
-**Real-world context**: Smaller models often have better cache locality and fewer memory bottlenecks.
-
----
-
-### 4. Low-Rank Decomposition
-**Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
-
-**Calculate**:
-- Original parameter count: _____ parameters
-- Decomposed parameter count: (512 x 64) + 64 + (64 x 256) = _____ parameters
-- Compression ratio: _____x
-- At what rank does compression become ineffective? rank > _____
-
-**Trade-offs to consider**: Reconstruction error vs. compression ratio, and the overhead of two matrix multiplications vs. one.
-
----
-
-### 5. Pruning Strategy Selection
-**Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
-
-**Consider**:
-- Which pruning strategy optimizes for memory? [magnitude/structured/both]
-- Which pruning strategy optimizes for speed? [magnitude/structured/both]
-- What order should you apply compression techniques?
-
-**Real-world context**: Mobile devices have limited memory bandwidth, making structured sparsity more beneficial for latency.
-"""
-
-# %% [markdown]
-"""
 ## 🔧 Verification: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
@@ -1918,6 +1852,72 @@ def test_module():
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 16")
+
+# %% [markdown]
+"""
+## 🤔 ML Systems Reflection Questions
+
+Answer these to deepen your understanding of compression techniques and their systems implications:
+
+### 1. Compression Trade-offs
+**Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
+
+**Consider**:
+- How many parameters remain active? _____ M parameters
+- If the original model was 40MB, what's the theoretical minimum storage? _____ MB
+- Why might actual speedup be less than 10x?
+
+**Real-world context**: Sparse matrix formats have indexing overhead, and many hardware accelerators cannot efficiently exploit unstructured sparsity.
+
+---
+
+### 2. Structured vs Unstructured Sparsity
+**Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
+
+**Consider**:
+- Which enables better hardware acceleration?
+- Which preserves accuracy better at high sparsity?
+- Which creates more predictable memory access patterns?
+
+**Think about**: How would you choose between these approaches for different deployment targets (GPU, CPU, mobile)?
+
+---
+
+### 3. Knowledge Distillation Efficiency
+**Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
+
+**Calculate**:
+- Compression ratio: _____x
+- If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
+- Why is the speedup greater than the compression ratio?
+
+**Real-world context**: Smaller models often have better cache locality and fewer memory bottlenecks.
+
+---
+
+### 4. Low-Rank Decomposition
+**Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
+
+**Calculate**:
+- Original parameter count: _____ parameters
+- Decomposed parameter count: (512 x 64) + 64 + (64 x 256) = _____ parameters
+- Compression ratio: _____x
+- At what rank does compression become ineffective? rank > _____
+
+**Trade-offs to consider**: Reconstruction error vs. compression ratio, and the overhead of two matrix multiplications vs. one.
+
+---
+
+### 5. Pruning Strategy Selection
+**Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
+
+**Consider**:
+- Which pruning strategy optimizes for memory? [magnitude/structured/both]
+- Which pruning strategy optimizes for speed? [magnitude/structured/both]
+- What order should you apply compression techniques?
+
+**Real-world context**: Mobile devices have limited memory bandwidth, making structured sparsity more beneficial for latency.
+"""
 
 # %% [markdown]
 """

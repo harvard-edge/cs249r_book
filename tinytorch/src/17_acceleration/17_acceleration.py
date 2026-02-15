@@ -1172,7 +1172,7 @@ This is how professional ML engineers work: profile → optimize → measure →
 # Import Profiler from Module 14 (Module 17 comes after Module 14)
 from tinytorch.perf.profiling import Profiler
 
-def demo_acceleration_with_profiler():
+def explore_acceleration_with_profiler():
     """📊 Demonstrate acceleration gains using Profiler from Module 14."""
 
     print("📊 Measuring Acceleration Gains with Profiler")
@@ -1256,40 +1256,7 @@ def demo_acceleration_with_profiler():
     print("\n✅ This is the power of acceleration: same math, different execution!")
 
 if __name__ == "__main__":
-    demo_acceleration_with_profiler()
-
-# %% [markdown]
-"""
-## 🤔 ML Systems Reflection Questions
-
-Answer these to deepen your understanding of acceleration techniques and their systems implications:
-
-### 1. Arithmetic Intensity Analysis
-You implemented vectorized matrix multiplication and fused GELU.
-- Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
-- Arithmetic intensity: _____ FLOPs/byte
-- Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
-- Why does this make matrix multiplication ideal for GPUs? _____
-
----
-
-### 2. Kernel Fusion Memory Benefits
-Your fused_gelu combines 7 operations into a single expression.
-- Unfused version memory accesses: 7 reads + 7 writes = _____ per element
-- Fused version memory accesses: 1 read + 1 write = _____ per element
-- Memory bandwidth reduction: _____%
-- Why is this critical for transformer inference? _____
-
----
-
-### 3. Production Optimization Strategy
-Based on your decision framework analysis:
-For edge deployment (memory critical, stability required, hardware diverse):
-- Priority 1 technique: _____ (low risk, universal)
-- Priority 2 technique: _____ (memory benefits)
-- Skip technique: _____ (why: _____)
-- What's the primary constraint: memory, compute, or power? _____
-"""
+    explore_acceleration_with_profiler()
 
 # %% [markdown]
 """
@@ -1435,6 +1402,39 @@ def test_module():
 # Run comprehensive module test
 if __name__ == "__main__":
     test_module()
+
+# %% [markdown]
+"""
+## 🤔 ML Systems Reflection Questions
+
+Answer these to deepen your understanding of acceleration techniques and their systems implications:
+
+### 1. Arithmetic Intensity Analysis
+You implemented vectorized matrix multiplication and fused GELU.
+- Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
+- Arithmetic intensity: _____ FLOPs/byte
+- Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
+- Why does this make matrix multiplication ideal for GPUs? _____
+
+---
+
+### 2. Kernel Fusion Memory Benefits
+Your fused_gelu combines 7 operations into a single expression.
+- Unfused version memory accesses: 7 reads + 7 writes = _____ per element
+- Fused version memory accesses: 1 read + 1 write = _____ per element
+- Memory bandwidth reduction: _____%
+- Why is this critical for transformer inference? _____
+
+---
+
+### 3. Production Optimization Strategy
+Based on your decision framework analysis:
+For edge deployment (memory critical, stability required, hardware diverse):
+- Priority 1 technique: _____ (low risk, universal)
+- Priority 2 technique: _____ (memory benefits)
+- Skip technique: _____ (why: _____)
+- What's the primary constraint: memory, compute, or power? _____
+"""
 
 # %% [markdown]
 """

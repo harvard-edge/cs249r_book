@@ -2731,7 +2731,7 @@ def test_module():
 
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 06_autograd")
+    print("Run: tito module complete 06")
 
 # Test function defined above, will be called in main block
 
@@ -2909,7 +2909,8 @@ Congratulations! You've built the gradient engine that makes neural networks lea
 - **Graph retention**: Must call zero_grad() to prevent gradient accumulation across iterations
 
 ### Ready for Next Steps
-Your autograd implementation enables optimization! Export with: `tito module complete 06_autograd`
+Your autograd implementation enables optimization!
+Export with: `tito module complete 06`
 
 **Next**: Module 07 will add optimizers (SGD, Adam) that use these gradients to actually train neural networks!
 """

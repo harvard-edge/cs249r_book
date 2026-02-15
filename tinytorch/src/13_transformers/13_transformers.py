@@ -41,6 +41,22 @@ By the end of this module, you will:
 5. Test transformer components and generation pipeline
 
 Let's get started!
+
+## 📦 Where This Code Lives in the Final Package
+
+**Learning Side:** You work in `modules/13_transformers/transformers_dev.py`
+**Building Side:** Code exports to `tinytorch.core.transformers`
+
+```python
+# How to use this module:
+from tinytorch.core.transformers import LayerNorm, MLP, TransformerBlock, GPT
+```
+
+**Why this matters:**
+- **Learning:** Complete transformer architecture in one focused module for deep understanding
+- **Production:** Proper organization like PyTorch's torch.nn with transformer components
+- **Consistency:** All transformer building blocks (LayerNorm, MLP, TransformerBlock, GPT) in core.transformers
+- **Integration:** Works seamlessly with attention, embeddings, and tokenization for complete language models
 """
 
 # %% nbgrader={"grade": false, "grade_id": "imports", "solution": true}
@@ -1822,7 +1838,7 @@ def test_module():
 
 # %% [markdown]
 """
-## 🤔 ML Systems Thinking: Transformer Architecture
+## 🤔 ML Systems Reflection Questions
 
 Now that you've built a complete transformer architecture, let's think about its systems-level implications. Understanding memory scaling, gradient flow, and parameter distribution helps you make informed decisions when building and deploying production language models.
 
