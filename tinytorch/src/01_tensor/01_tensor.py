@@ -860,7 +860,7 @@ Element-wise Operations:
 │ Subtraction     │ Multiplication  │ Division        │ Use Cases       │
 ├─────────────────┼─────────────────┼─────────────────┼─────────────────┤
 │ [6,8] - [1,2]   │ [2,3] * [4,5]   │ [8,9] / [2,3]   │ • Data centering│
-│ = [5,6]         │ = [8,15]        │ = [4.0, 3.0]    │   (x - mean)   │
+│ = [5,6]         │ = [8,15]        │ = [4.0, 3.0]    │   (x - mean)    │
 │                 │                 │                 │ • Feature       │
 │ Center data:    │ Gate values:    │ Scale features: │   scaling       │
 │ x - mean        │ x * mask        │ x / std         │ • Statistics    │
@@ -968,10 +968,10 @@ Data Samples × Projection Matrix = Projected Data
 Matrix Multiplication Process:
     A (2×3)      B (3×2)         C (2×2)
    ┌       ┐    ┌     ┐       ┌         ┐
-   │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 │   ┌      ┐
-   │       │ ×  │ 9 1 │  =    │             │ = │ 28 16│
-   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 │   │ 79 49│
-   └       ┘    └     ┘       └             ┘   └      ┘
+   │ 1 2 3 │    │ 7 8 │       │ 1×7+2×9+3×1 │   ┌       ┐
+   │       │ ×  │ 9 1 │  =    │             │ = │ 28 16 │
+   │ 4 5 6 │    │ 1 2 │       │ 4×7+5×9+6×1 │   │ 79 49 │
+   └       ┘    └     ┘       └             ┘   └       ┘
 
 Computation Breakdown:
 C[0,0] = A[0,:] · B[:,0] = [1,2,3] · [7,9,1] = 1×7 + 2×9 + 3×1 = 28
@@ -1198,12 +1198,12 @@ Key Insight: Reshape is O(1) operation - no data copying!
 Just changes how we interpret the memory layout.
 
 Common ML Reshapes:
-┌─────────────────────┬─────────────────────┬─────────────────────┐
-│ Flatten 2D → 1D     │ Unflatten 1D → 2D   │ Batch Dimension     │
-├─────────────────────┼─────────────────────┼─────────────────────┤
-│ (N,H,W,C) → (N,H×W×C) │ (N,D) → (N,H,W,C)   │ (H,W) → (1,H,W)   │
-│ Matrix to vector    │ Vector to matrix    │ Add batch dimension │
-└─────────────────────┴─────────────────────┴─────────────────────┘
+┌───────────────────────┬─────────────────────┬─────────────────────┐
+│ Flatten 2D → 1D       │ Unflatten 1D → 2D   │ Batch Dimension     │
+├───────────────────────┼─────────────────────┼─────────────────────┤
+│ (N,H,W,C) → (N,H×W×C) │ (N,D) → (N,H,W,C)   │ (H,W) → (1,H,W)     │
+│ Matrix to vector      │ Vector to matrix    │ Add batch dimension │
+└───────────────────────┴─────────────────────┴─────────────────────┘
 ```
 
 ### Transpose: Swapping Dimensions
@@ -1229,7 +1229,7 @@ Common Linear Algebra Usage:
 │                     │ Squares             │                     │
 ├─────────────────────┼─────────────────────┼─────────────────────┤
 │ X^T @ X computes    │ A^T @ b projects    │ Swap rows/columns   │
-│ feature correlations│ onto column space   │ for different views  │
+│ feature correlations│ onto column space   │ for different views │
 └─────────────────────┴─────────────────────┴─────────────────────┘
 ```
 
@@ -1337,7 +1337,7 @@ Reduction operations appear throughout neural networks:
 Common Data Reduction Patterns:
 
 ┌─────────────────────┬─────────────────────┬───────────────────────┐
-│ Column Statistics    │ Row Aggregation     │ Spatial Averaging     │
+│ Column Statistics   │ Row Aggregation     │ Spatial Averaging     │
 ├─────────────────────┼─────────────────────┼───────────────────────┤
 │ Per-column stats →  │ Per-row stats →     │ 2D data →             │
 │ Summary per feature │ Summary per sample  │ Single value per item │

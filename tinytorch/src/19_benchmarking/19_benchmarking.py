@@ -1756,27 +1756,163 @@ Results Dict ──> System Info Section ──> Per-Metric Summaries ──> Tr
                                                                          ↓
                                                               Save to benchmark_report.md
 ```
+
+We'll build this in three steps: format the per-metric results summary,
+compute trade-off recommendations, then compose the full report.
+"""
+
+# %% [markdown]
+"""
+#### Step 1: Format Per-Metric Results Summary
+
+For each metric type, identify the best performer and list all model scores.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "benchsuite-format-results", "solution": true}
+def _benchsuite_format_results_summary(self) -> List[str]:
+    """
+    Format per-metric results into report lines.
+
+    Returns:
+        List of markdown-formatted lines
+
+    TODO: Summarize each metric with best performer and detailed scores
+
+    APPROACH:
+    1. For each metric type in self.results:
+       a. Determine if lower or higher is better
+       b. Find the best performer (min for latency/memory/energy, max for accuracy)
+       c. List all models with mean ± std
+    """
+    ### BEGIN SOLUTION
+    lines = []
+    lines.append("## Benchmark Results Summary")
+    lines.append("")
+
+    for metric_type, results in self.results.items():
+        lines.append(f"### {metric_type.capitalize()} Results")
+        lines.append("")
+
+        # Find best performer
+        if metric_type in ['latency', 'memory', 'energy']:
+            best_model = min(results.items(), key=lambda x: x[1].mean)
+            comparison_text = "fastest" if metric_type == 'latency' else "most efficient"
+        else:
+            best_model = max(results.items(), key=lambda x: x[1].mean)
+            comparison_text = "most accurate"
+
+        lines.append(f"**Best performer**: {best_model[0]} ({comparison_text})")
+        lines.append("")
+
+        for model_name, result in results.items():
+            clean_name = model_name.replace(f'_{metric_type}', '').replace('_ms', '').replace('_mb', '').replace('_joules', '')
+            lines.append(f"- **{clean_name}**: {result.mean:.4f} ± {result.std:.4f}")
+        lines.append("")
+
+    return lines
+    ### END SOLUTION
+
+BenchmarkSuite._format_results_summary = _benchsuite_format_results_summary
+
+# %% [markdown]
+"""
+#### Step 2: Compute Trade-off Recommendations
+
+Analyze accuracy vs speed trade-offs and generate use-case recommendations.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "benchsuite-format-recs", "solution": true}
+def _benchsuite_format_recommendations(self) -> List[str]:
+    """
+    Generate recommendation lines from benchmark results.
+
+    Returns:
+        List of markdown-formatted recommendation lines
+
+    TODO: Compute trade-off scores and generate use-case recommendations
+
+    APPROACH:
+    1. If latency and accuracy results exist, normalize and compute combined scores
+    2. Find best overall trade-off model
+    3. Add use-case recommendations (max accuracy, min latency, production)
+
+    HINTS:
+    - Normalize: 1 - (val - min) / (max - min) for lower-is-better
+    - Normalize: (val - min) / (max - min) for higher-is-better
+    """
+    ### BEGIN SOLUTION
+    lines = []
+    lines.append("## Recommendations")
+    lines.append("")
+
+    if len(self.results) >= 2:
+        if 'latency' in self.results and 'accuracy' in self.results:
+            lines.append("### Accuracy vs Speed Trade-off")
+
+            latency_results = self.results['latency']
+            accuracy_results = self.results['accuracy']
+
+            scores = {}
+            for model_name in latency_results.keys():
+                clean_name = model_name.replace('_latency', '').replace('_ms', '')
+
+                acc_key = None
+                for key in accuracy_results.keys():
+                    if clean_name in key:
+                        acc_key = key
+                        break
+
+                if acc_key:
+                    lat_vals = [r.mean for r in latency_results.values()]
+                    acc_vals = [r.mean for r in accuracy_results.values()]
+
+                    norm_latency = 1 - (latency_results[model_name].mean - min(lat_vals)) / (max(lat_vals) - min(lat_vals) + 1e-8)
+                    norm_accuracy = (accuracy_results[acc_key].mean - min(acc_vals)) / (max(acc_vals) - min(acc_vals) + 1e-8)
+
+                    scores[clean_name] = (norm_latency + norm_accuracy) / 2
+
+            if scores:
+                best_overall = max(scores.items(), key=lambda x: x[1])
+                lines.append(f"- **Best overall trade-off**: {best_overall[0]} (score: {best_overall[1]:.3f})")
+                lines.append("")
+
+    lines.append("### Usage Recommendations")
+    if 'accuracy' in self.results and 'latency' in self.results:
+        acc_results = self.results['accuracy']
+        lat_results = self.results['latency']
+
+        best_acc_model = max(acc_results.items(), key=lambda x: x[1].mean)
+        best_lat_model = min(lat_results.items(), key=lambda x: x[1].mean)
+
+        lines.append(f"- **For maximum accuracy**: Use {best_acc_model[0].replace('_accuracy', '')}")
+        lines.append(f"- **For minimum latency**: Use {best_lat_model[0].replace('_latency_ms', '')}")
+        lines.append("- **For production deployment**: Consider the best overall trade-off model above")
+
+    return lines
+    ### END SOLUTION
+
+BenchmarkSuite._format_recommendations = _benchsuite_format_recommendations
+
+# %% [markdown]
+"""
+#### Step 3: Compose the Full Report
+
+Combine system info, results summary, and recommendations into a complete
+markdown report and save it to disk.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-report", "solution": true}
-    # --- BenchmarkSuite.generate_report ---
 def benchsuite_generate_report(self) -> str:
     """
     Generate comprehensive benchmark report.
 
-    TODO: Compile results into a structured markdown report
+    TODO: Compose _format_results_summary and _format_recommendations into a full report
 
     APPROACH:
-    1. Add system information header
-    2. Summarize results per metric type with best performer
-    3. Calculate accuracy vs speed trade-off scores
-    4. Generate use-case recommendations
-    5. Save report to output_dir
-
-    HINTS:
-    - For latency/memory/energy, lower is better (use min)
-    - For accuracy, higher is better (use max)
-    - Normalize metrics for combined scoring
+    1. Add report header and system information
+    2. Call self._format_results_summary() for per-metric data
+    3. Call self._format_recommendations() for trade-off analysis
+    4. Save to output_dir/benchmark_report.md
     """
     ### BEGIN SOLUTION
     if not self.results:
@@ -1794,85 +1930,11 @@ def benchsuite_generate_report(self) -> str:
         report_lines.append(f"- {key}: {value}")
     report_lines.append("")
 
-    # Results summary
-    report_lines.append("## Benchmark Results Summary")
-    report_lines.append("")
+    # Results summary (from helper)
+    report_lines.extend(self._format_results_summary())
 
-    for metric_type, results in self.results.items():
-        report_lines.append(f"### {metric_type.capitalize()} Results")
-        report_lines.append("")
-
-        # Find best performer
-        if metric_type in ['latency', 'memory', 'energy']:
-            # Lower is better
-            best_model = min(results.items(), key=lambda x: x[1].mean)
-            comparison_text = "fastest" if metric_type == 'latency' else "most efficient"
-        else:
-            # Higher is better
-            best_model = max(results.items(), key=lambda x: x[1].mean)
-            comparison_text = "most accurate"
-
-        report_lines.append(f"**Best performer**: {best_model[0]} ({comparison_text})")
-        report_lines.append("")
-
-        # Detailed results
-        for model_name, result in results.items():
-            clean_name = model_name.replace(f'_{metric_type}', '').replace('_ms', '').replace('_mb', '').replace('_joules', '')
-            report_lines.append(f"- **{clean_name}**: {result.mean:.4f} ± {result.std:.4f}")
-        report_lines.append("")
-
-    # Recommendations
-    report_lines.append("## Recommendations")
-    report_lines.append("")
-
-    if len(self.results) >= 2:
-        # Find overall best trade-off model
-        if 'latency' in self.results and 'accuracy' in self.results:
-            report_lines.append("### Accuracy vs Speed Trade-off")
-
-            # Simple scoring: normalize metrics and combine
-            latency_results = self.results['latency']
-            accuracy_results = self.results['accuracy']
-
-            scores = {}
-            for model_name in latency_results.keys():
-                clean_name = model_name.replace('_latency', '').replace('_ms', '')
-
-                # Find corresponding accuracy
-                acc_key = None
-                for key in accuracy_results.keys():
-                    if clean_name in key:
-                        acc_key = key
-                        break
-
-                if acc_key:
-                    # Normalize: latency (lower better), accuracy (higher better)
-                    lat_vals = [r.mean for r in latency_results.values()]
-                    acc_vals = [r.mean for r in accuracy_results.values()]
-
-                    norm_latency = 1 - (latency_results[model_name].mean - min(lat_vals)) / (max(lat_vals) - min(lat_vals) + 1e-8)
-                    norm_accuracy = (accuracy_results[acc_key].mean - min(acc_vals)) / (max(acc_vals) - min(acc_vals) + 1e-8)
-
-                    # Combined score (equal weight)
-                    scores[clean_name] = (norm_latency + norm_accuracy) / 2
-
-            if scores:
-                best_overall = max(scores.items(), key=lambda x: x[1])
-                report_lines.append(f"- **Best overall trade-off**: {best_overall[0]} (score: {best_overall[1]:.3f})")
-                report_lines.append("")
-
-    report_lines.append("### Usage Recommendations")
-    if 'accuracy' in self.results and 'latency' in self.results:
-        acc_results = self.results['accuracy']
-        lat_results = self.results['latency']
-
-        # Find highest accuracy model
-        best_acc_model = max(acc_results.items(), key=lambda x: x[1].mean)
-        best_lat_model = min(lat_results.items(), key=lambda x: x[1].mean)
-
-        report_lines.append(f"- **For maximum accuracy**: Use {best_acc_model[0].replace('_accuracy', '')}")
-        report_lines.append(f"- **For minimum latency**: Use {best_lat_model[0].replace('_latency_ms', '')}")
-        report_lines.append("- **For production deployment**: Consider the best overall trade-off model above")
+    # Recommendations (from helper)
+    report_lines.extend(self._format_recommendations())
 
     report_lines.append("")
     report_lines.append("---")
@@ -1889,6 +1951,85 @@ def benchsuite_generate_report(self) -> str:
     ### END SOLUTION
 
 BenchmarkSuite.generate_report = benchsuite_generate_report
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: BenchmarkSuite._format_results_summary
+
+**What we're testing**: Per-metric results formatting with best performer identification
+**Why it matters**: Correct summaries help engineers quickly identify winners
+**Expected**: Markdown lines with metric headers, best performers, and model scores
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchsuite-format-results", "locked": true, "points": 3}
+def test_unit_benchsuite_format_results():
+    """🧪 Test BenchmarkSuite._format_results_summary implementation."""
+    print("🧪 Unit Test: BenchmarkSuite._format_results_summary...")
+
+    class MockModel:
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            return x * 0.5
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        models = [MockModel("fast_model"), MockModel("accurate_model")]
+        suite = BenchmarkSuite(models, [{"data": "test"}], output_dir=tmp_dir)
+        suite.run_full_benchmark()
+
+        lines = suite._format_results_summary()
+
+        # Should return a list of strings
+        assert isinstance(lines, list), f"Expected list, got {type(lines)}"
+        assert len(lines) > 0, "Should produce at least some lines"
+
+        # Should contain results summary header
+        text = "\n".join(lines)
+        assert "Results Summary" in text, "Should contain 'Results Summary'"
+        assert "Best performer" in text, "Should identify best performer"
+
+    print("✅ BenchmarkSuite._format_results_summary works correctly!")
+
+if __name__ == "__main__":
+    test_unit_benchsuite_format_results()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: BenchmarkSuite._format_recommendations
+
+**What we're testing**: Trade-off analysis and use-case recommendation generation
+**Why it matters**: Wrong recommendations lead to wrong deployment decisions
+**Expected**: Markdown lines with trade-off scores and use-case guidance
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-benchsuite-format-recs", "locked": true, "points": 3}
+def test_unit_benchsuite_format_recs():
+    """🧪 Test BenchmarkSuite._format_recommendations implementation."""
+    print("🧪 Unit Test: BenchmarkSuite._format_recommendations...")
+
+    class MockModel:
+        def __init__(self, name):
+            self.name = name
+        def forward(self, x):
+            return x * 0.5
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        models = [MockModel("fast_model"), MockModel("accurate_model")]
+        suite = BenchmarkSuite(models, [{"data": "test"}], output_dir=tmp_dir)
+        suite.run_full_benchmark()
+
+        lines = suite._format_recommendations()
+
+        assert isinstance(lines, list), f"Expected list, got {type(lines)}"
+        text = "\n".join(lines)
+        assert "Recommendations" in text, "Should contain 'Recommendations'"
+
+    print("✅ BenchmarkSuite._format_recommendations works correctly!")
+
+if __name__ == "__main__":
+    test_unit_benchsuite_format_recs()
 
 # %% [markdown]
 """
@@ -2263,49 +2404,87 @@ This helper calculates accuracy by comparing model predictions against synthetic
 ground truth labels. It handles both binary classification (keyword spotting,
 visual wake words) and multi-class classification (image classification,
 anomaly detection).
+
+We'll build this in two steps: first a helper to extract a clean prediction
+array from various output formats, then the accuracy calculation itself.
+"""
+
+# %% [markdown]
+"""
+#### Step 1: Extract Prediction Array
+
+Model outputs can be TinyTorch Tensors, numpy arrays, or plain Python objects.
+This helper normalizes them into a flat numpy array for label extraction.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "tinymlperf-extract-pred", "solution": true}
+def _extract_pred_array(pred) -> np.ndarray:
+    """
+    Extract a flat numpy array from a model prediction.
+
+    Args:
+        pred: Raw prediction (Tensor, numpy array, or list)
+
+    Returns:
+        Flattened numpy array of prediction values
+
+    TODO: Normalize various prediction formats into a flat numpy array
+
+    APPROACH:
+    1. If pred has .data attribute (TinyTorch Tensor), use it
+    2. Otherwise convert to numpy array
+    3. Flatten if multi-dimensional
+    """
+    ### BEGIN SOLUTION
+    if hasattr(pred, 'data'):
+        pred_array = pred.data
+    else:
+        pred_array = np.array(pred)
+
+    # Convert to numpy array if needed (handle memoryview objects)
+    if not isinstance(pred_array, np.ndarray):
+        pred_array = np.array(pred_array)
+
+    if len(pred_array.shape) > 1:
+        pred_array = pred_array.flatten()
+
+    return pred_array
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+#### Step 2: Calculate Accuracy
+
+Use _extract_pred_array to get clean predictions, then compare against
+synthetic ground truth for binary and multi-class tasks.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-memory", "solution": true}
-    # --- TinyMLPerf._run_accuracy_test ---
 def _tinymlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
                                     benchmark_name: str, num_runs: int) -> float:
     """
     Calculate accuracy from predictions against synthetic ground truth.
 
-    TODO: Implement accuracy calculation for binary and multi-class tasks
+    TODO: Implement accuracy calculation using _extract_pred_array helper
 
     APPROACH:
     1. Generate synthetic ground truth using fixed seed
-    2. For binary tasks: compare argmax of 2-class outputs
-    3. For multi-class: compare argmax of N-class outputs
+    2. For binary tasks: use _extract_pred_array, compare class scores
+    3. For multi-class: use _extract_pred_array, take argmax
     4. Add realistic noise based on model name
 
     HINTS:
     - keyword_spotting and visual_wake_words are binary (2 classes)
     - image_classification has 10 classes, anomaly_detection has 5
-    - Handle pred.data attribute (TinyTorch Tensors) and plain numpy
     """
     ### BEGIN SOLUTION
-    # Simulate accuracy calculation (would use real labels in practice)
-    # Generate synthetic ground truth labels
     np.random.seed(self.random_seed)
     if benchmark_name in ['keyword_spotting', 'visual_wake_words']:
         # Binary classification
         true_labels = np.random.randint(0, 2, num_runs)
         predicted_labels = []
         for pred in predictions:
-            if hasattr(pred, 'data'):
-                pred_array = pred.data
-            else:
-                pred_array = np.array(pred)
-
-            # Convert to numpy array if needed (handle memoryview objects)
-            if not isinstance(pred_array, np.ndarray):
-                pred_array = np.array(pred_array)
-
-            if len(pred_array.shape) > 1:
-                pred_array = pred_array.flatten()
-
+            pred_array = _extract_pred_array(pred)
             if len(pred_array) >= 2:
                 predicted_labels.append(1 if pred_array[1] > pred_array[0] else 0)
             else:
@@ -2316,31 +2495,56 @@ def _tinymlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
         true_labels = np.random.randint(0, num_classes, num_runs)
         predicted_labels = []
         for pred in predictions:
-            if hasattr(pred, 'data'):
-                pred_array = pred.data
-            else:
-                pred_array = np.array(pred)
-
-            if len(pred_array.shape) > 1:
-                pred_array = pred_array.flatten()
-
+            pred_array = _extract_pred_array(pred)
             predicted_labels.append(np.argmax(pred_array) % num_classes)
 
     # Calculate accuracy
     correct_predictions = sum(1 for true, pred in zip(true_labels, predicted_labels) if true == pred)
     accuracy = correct_predictions / num_runs
 
-    # Add some realistic noise based on model complexity
+    # Add realistic noise based on model complexity
     model_name = getattr(model, 'name', 'unknown_model')
     if 'efficient' in model_name.lower():
-        accuracy = min(0.95, accuracy + 0.1)  # Efficient models might be less accurate
+        accuracy = min(0.95, accuracy + 0.1)
     elif 'accurate' in model_name.lower():
-        accuracy = min(0.98, accuracy + 0.2)  # Accurate models perform better
+        accuracy = min(0.98, accuracy + 0.2)
 
     return accuracy
     ### END SOLUTION
 
 TinyMLPerf._run_accuracy_test = _tinymlperf_run_accuracy_test
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: _extract_pred_array
+
+**What we're testing**: Prediction array extraction from various output formats
+**Why it matters**: Models return Tensors, numpy arrays, or lists — we need to handle all
+**Expected**: Always returns a flat numpy array regardless of input format
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-extract-pred", "locked": true, "points": 3}
+def test_unit_extract_pred_array():
+    """🧪 Test _extract_pred_array helper."""
+    print("🧪 Unit Test: _extract_pred_array...")
+
+    # Test with plain numpy array
+    result = _extract_pred_array(np.array([0.3, 0.7]))
+    assert isinstance(result, np.ndarray), f"Expected ndarray, got {type(result)}"
+    assert result.shape == (2,), f"Expected shape (2,), got {result.shape}"
+
+    # Test with 2D array (should flatten)
+    result_2d = _extract_pred_array(np.array([[0.3, 0.7]]))
+    assert len(result_2d.shape) == 1, "Should flatten multi-dimensional input"
+
+    # Test with list
+    result_list = _extract_pred_array([0.3, 0.7])
+    assert isinstance(result_list, np.ndarray), "Should convert list to ndarray"
+
+    print("✅ _extract_pred_array works correctly!")
+
+if __name__ == "__main__":
+    test_unit_extract_pred_array()
 
 # %% [markdown]
 """
@@ -2559,35 +2763,47 @@ compliance determination.
 
 ```
 Report Generation:
-Results Dict ──> Count compliant benchmarks ──> JSON report
-                                              ──> Markdown summary
+Results Dict ──> Count compliant benchmarks ──> JSON report (structured data)
+                                              ──> Markdown summary (human-readable)
                                               ──> Overall: COMPLIANT/NON-COMPLIANT
 ```
+
+We'll build this in two steps: compile the structured report data,
+then format it into a human-readable summary.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "tinymlperf-scorecard", "solution": true}
-    # --- TinyMLPerf.generate_compliance_report ---
-def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
-                                 output_path: str = "tinymlperf_report.json") -> str:
-    """
-    Generate TinyMLPerf compliance report.
+# %% [markdown]
+"""
+#### Step 1: Compile Structured Report Data
 
-    TODO: Compile benchmark results into JSON and markdown reports
+Process raw benchmark results into a structured dictionary with compliance
+statistics, ready for JSON serialization.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "tinymlperf-compile-data", "solution": true}
+def _tinymlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Compile benchmark results into structured report data.
+
+    Args:
+        results: Raw benchmark results dict
+
+    Returns:
+        Structured report_data dict with benchmarks and summary
+
+    TODO: Process results into a structured dict with compliance stats
 
     APPROACH:
-    1. Count compliant vs total benchmarks
-    2. Build structured report_data dict
-    3. Save JSON report to output_path
-    4. Generate human-readable markdown summary
-    5. Save summary alongside JSON
+    1. Initialize report_data with version, seed, timestamp
+    2. Loop through results, skipping errors
+    3. Count compliant benchmarks and compute compliance_rate
+    4. Store per-benchmark metrics
 
     HINTS:
     - overall_compliant = compliance_rate == 1.0
-    - Use json.dump with indent=2 for readable JSON
-    - Summary path: output_path.replace('.json', '_summary.md')
+    - Set model_name from first successful result
     """
     ### BEGIN SOLUTION
-    # Calculate overall compliance
     compliant_benchmarks = []
     total_benchmarks = 0
 
@@ -2606,11 +2822,9 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
             if result.get('compliant', False):
                 compliant_benchmarks.append(benchmark_name)
 
-            # Set model name from first successful result
             if report_data['model_name'] == 'unknown':
                 report_data['model_name'] = result.get('model_name', 'unknown')
 
-            # Store benchmark results
             report_data['benchmarks'][benchmark_name] = {
                 'accuracy': result['accuracy'],
                 'mean_latency_ms': result['mean_latency_ms'],
@@ -2623,7 +2837,6 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
                 'compliant': result['compliant']
             }
 
-    # Summary statistics
     if total_benchmarks > 0:
         compliance_rate = len(compliant_benchmarks) / total_benchmarks
         report_data['summary'] = {
@@ -2634,11 +2847,37 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
             'compliant_benchmark_names': compliant_benchmarks
         }
 
-    # Save report
-    with open(output_path, 'w') as f:
-        json.dump(report_data, f, indent=2)
+    return report_data
+    ### END SOLUTION
 
-    # Generate human-readable summary
+TinyMLPerf._compile_report_data = _tinymlperf_compile_report_data
+
+# %% [markdown]
+"""
+#### Step 2: Format Human-Readable Summary
+
+Convert structured report data into a markdown compliance summary.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "tinymlperf-format-summary", "solution": true}
+def _tinymlperf_format_summary(self, report_data: Dict[str, Any]) -> str:
+    """
+    Format report data into a human-readable markdown summary.
+
+    Args:
+        report_data: Structured report dict from _compile_report_data
+
+    Returns:
+        Markdown-formatted summary string
+
+    TODO: Generate markdown summary from structured report data
+
+    APPROACH:
+    1. Add header with model name and date
+    2. Show overall COMPLIANT/NON-COMPLIANT status
+    3. List each benchmark with PASS/FAIL and metrics
+    """
+    ### BEGIN SOLUTION
     summary_lines = []
     summary_lines.append("# TinyMLPerf Compliance Report")
     summary_lines.append("=" * 40)
@@ -2646,9 +2885,14 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
     summary_lines.append(f"Date: {report_data['timestamp']}")
     summary_lines.append("")
 
-    if total_benchmarks > 0:
-        summary_lines.append(f"## Overall Result: {'✅ COMPLIANT' if report_data['summary']['overall_compliant'] else '❌ NON-COMPLIANT'}")
-        summary_lines.append(f"Compliance Rate: {compliance_rate:.1%} ({len(compliant_benchmarks)}/{total_benchmarks})")
+    if report_data['summary']:
+        overall = report_data['summary']['overall_compliant']
+        rate = report_data['summary']['compliance_rate']
+        compliant_count = report_data['summary']['compliant_benchmarks']
+        total = report_data['summary']['total_benchmarks']
+
+        summary_lines.append(f"## Overall Result: {'✅ COMPLIANT' if overall else '❌ NON-COMPLIANT'}")
+        summary_lines.append(f"Compliance Rate: {rate:.1%} ({compliant_count}/{total})")
         summary_lines.append("")
 
         summary_lines.append("## Benchmark Details:")
@@ -2661,9 +2905,43 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
     else:
         summary_lines.append("No successful benchmark runs.")
 
-    summary_text = "\n".join(summary_lines)
+    return "\n".join(summary_lines)
+    ### END SOLUTION
 
-    # Save human-readable report
+TinyMLPerf._format_compliance_summary = _tinymlperf_format_summary
+
+# %% [markdown]
+"""
+#### Step 3: Compose the Full Compliance Report
+
+Combine data compilation, JSON serialization, and summary formatting.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "tinymlperf-scorecard", "solution": true}
+def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
+                                 output_path: str = "tinymlperf_report.json") -> str:
+    """
+    Generate TinyMLPerf compliance report.
+
+    TODO: Compose _compile_report_data and _format_compliance_summary
+
+    APPROACH:
+    1. Compile structured data with self._compile_report_data(results)
+    2. Save JSON report with json.dump
+    3. Format summary with self._format_compliance_summary(report_data)
+    4. Save summary markdown alongside JSON
+    """
+    ### BEGIN SOLUTION
+    # Compile structured report data
+    report_data = self._compile_report_data(results)
+
+    # Save JSON report
+    with open(output_path, 'w') as f:
+        json.dump(report_data, f, indent=2)
+
+    # Generate and save human-readable summary
+    summary_text = self._format_compliance_summary(report_data)
+
     summary_path = output_path.replace('.json', '_summary.md')
     with open(summary_path, 'w') as f:
         f.write(summary_text)
@@ -2675,6 +2953,90 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
     ### END SOLUTION
 
 TinyMLPerf.generate_compliance_report = tinymlperf_generate_report
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: TinyMLPerf._compile_report_data
+
+**What we're testing**: Structured data compilation from raw benchmark results
+**Why it matters**: Correct data structure is the foundation for both JSON and markdown reports
+**Expected**: Dict with benchmarks, summary, compliance stats
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-compile", "locked": true, "points": 3}
+def test_unit_tinymlperf_compile_data():
+    """🧪 Test TinyMLPerf._compile_report_data implementation."""
+    print("🧪 Unit Test: TinyMLPerf._compile_report_data...")
+
+    perf = TinyMLPerf(random_seed=42)
+
+    # Simulate results from run_standard_benchmark
+    mock_results = {
+        'keyword_spotting': {
+            'accuracy': 0.92, 'mean_latency_ms': 50.0, 'p99_latency_ms': 80.0,
+            'throughput_fps': 20.0, 'target_accuracy': 0.90, 'target_latency_ms': 100,
+            'accuracy_met': True, 'latency_met': True, 'compliant': True,
+            'model_name': 'test_model'
+        }
+    }
+
+    report_data = perf._compile_report_data(mock_results)
+
+    assert 'benchmarks' in report_data, "Should have 'benchmarks' key"
+    assert 'summary' in report_data, "Should have 'summary' key"
+    assert report_data['summary']['total_benchmarks'] == 1
+    assert report_data['summary']['overall_compliant'] == True
+    assert report_data['model_name'] == 'test_model'
+
+    print("✅ TinyMLPerf._compile_report_data works correctly!")
+
+if __name__ == "__main__":
+    test_unit_tinymlperf_compile_data()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: TinyMLPerf._format_compliance_summary
+
+**What we're testing**: Markdown summary generation from structured report data
+**Why it matters**: Human-readable reports are what engineers actually read
+**Expected**: Markdown string with COMPLIANT/NON-COMPLIANT status and benchmark details
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-format", "locked": true, "points": 3}
+def test_unit_tinymlperf_format_summary():
+    """🧪 Test TinyMLPerf._format_compliance_summary implementation."""
+    print("🧪 Unit Test: TinyMLPerf._format_compliance_summary...")
+
+    perf = TinyMLPerf(random_seed=42)
+
+    report_data = {
+        'model_name': 'test_model',
+        'timestamp': '2025-01-01 00:00:00',
+        'summary': {
+            'total_benchmarks': 1, 'compliant_benchmarks': 1,
+            'compliance_rate': 1.0, 'overall_compliant': True,
+            'compliant_benchmark_names': ['keyword_spotting']
+        },
+        'benchmarks': {
+            'keyword_spotting': {
+                'accuracy': 0.92, 'mean_latency_ms': 50.0,
+                'target_accuracy': 0.90, 'target_latency_ms': 100,
+                'compliant': True
+            }
+        }
+    }
+
+    summary = perf._format_compliance_summary(report_data)
+
+    assert isinstance(summary, str), f"Expected string, got {type(summary)}"
+    assert "COMPLIANT" in summary, "Should contain compliance status"
+    assert "keyword_spotting" in summary, "Should list benchmark names"
+    assert "PASS" in summary, "Compliant benchmark should show PASS"
+
+    print("✅ TinyMLPerf._format_compliance_summary works correctly!")
+
+if __name__ == "__main__":
+    test_unit_tinymlperf_format_summary()
 
 # %% [markdown]
 """
@@ -3447,11 +3809,16 @@ def test_module():
     test_unit_benchsuite_run()
     test_unit_benchsuite_energy()
     test_unit_benchsuite_plot()
+    test_unit_benchsuite_format_results()
+    test_unit_benchsuite_format_recs()
     test_unit_benchmark_suite()
     test_unit_tinymlperf_init()
     test_unit_tinymlperf_latency()
+    test_unit_extract_pred_array()
     test_unit_tinymlperf_accuracy()
     test_unit_tinymlperf_run()
+    test_unit_tinymlperf_compile_data()
+    test_unit_tinymlperf_format_summary()
     test_unit_tinymlperf()
     test_unit_collect_base_metrics()
     test_unit_calculate_improvements()

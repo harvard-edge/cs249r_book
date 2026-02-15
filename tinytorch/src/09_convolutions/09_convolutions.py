@@ -2065,36 +2065,22 @@ class BatchNorm2d:
         self.training = False
         return self
 
-    def forward(self, x):
+    def _validate_input(self, x):
         """
-        Forward pass through BatchNorm2d.
+        Validate that input tensor has the correct shape for BatchNorm2d.
 
-        TODO: Implement batch normalization forward pass
+        TODO: Validate input is 4D with correct channel count
 
         APPROACH:
-        1. Validate input shape (must be 4D: batch, channels, height, width)
-        2. If training:
-           a. Compute batch mean and variance per channel
-           b. Normalize using batch statistics
-           c. Update running statistics with momentum
-        3. If eval:
-           a. Use running mean and variance
-           b. Normalize using frozen statistics
-        4. Apply scale (gamma) and shift (beta)
-
-        EXAMPLE:
-        >>> bn = BatchNorm2d(16)
-        >>> x = Tensor(np.random.randn(2, 16, 8, 8))  # batch=2, channels=16, 8x8
-        >>> y = bn(x)
-        >>> print(y.shape)  # (2, 16, 8, 8) - same shape
+        1. Check input is 4D (batch, channels, height, width)
+        2. Provide helpful error messages for common mistakes (3D, 2D)
+        3. Verify channel dimension matches num_features
 
         HINTS:
-        - Compute mean/var over axes (0, 2, 3) to get per-channel statistics
-        - Reshape gamma/beta to (1, C, 1, 1) for broadcasting
-        - Running stat update: running = (1 - momentum) * running + momentum * batch
+        - Use len(x.shape) to check dimensionality
+        - Use ❌ What → 💡 Why → 🔧 Fix error message format
         """
         ### BEGIN SOLUTION
-        # Input validation
         if len(x.shape) != 4:
             if len(x.shape) == 3:
                 raise ValueError(
@@ -2127,7 +2113,24 @@ class BatchNorm2d:
                 f"  💡 BatchNorm2d(num_features) must match the channel dimension of your input\n"
                 f"  🔧 Either fix your input shape or create BatchNorm2d({channels})"
             )
+        ### END SOLUTION
 
+    def _get_stats(self, x):
+        """
+        Get mean and variance for normalization (batch or running stats).
+
+        TODO: Compute or retrieve normalization statistics based on mode
+
+        APPROACH:
+        1. If training: compute batch mean/var over axes (0, 2, 3),
+           then update running statistics with momentum
+        2. If eval: use frozen running_mean and running_var
+
+        HINTS:
+        - np.mean(x.data, axis=(0, 2, 3)) gives per-channel mean
+        - Running update: running = (1 - momentum) * running + momentum * batch
+        """
+        ### BEGIN SOLUTION
         if self.training:
             # Compute batch statistics per channel
             # Mean over batch and spatial dimensions: axes (0, 2, 3)
@@ -2138,13 +2141,38 @@ class BatchNorm2d:
             self.running_mean = (1 - self.momentum) * self.running_mean + self.momentum * batch_mean
             self.running_var = (1 - self.momentum) * self.running_var + self.momentum * batch_var
 
-            # Use batch statistics for normalization
-            mean = batch_mean
-            var = batch_var
+            return batch_mean, batch_var
         else:
             # Use running statistics (frozen during eval)
-            mean = self.running_mean
-            var = self.running_var
+            return self.running_mean, self.running_var
+        ### END SOLUTION
+
+    def forward(self, x):
+        """
+        Forward pass through BatchNorm2d.
+
+        TODO: Compose _validate_input, _get_stats, and normalize+scale
+
+        APPROACH:
+        1. Validate input with self._validate_input(x)
+        2. Get mean/var with self._get_stats(x)
+        3. Normalize: (x - mean) / sqrt(var + eps) with proper broadcasting
+        4. Scale by gamma and shift by beta
+
+        EXAMPLE:
+        >>> bn = BatchNorm2d(16)
+        >>> x = Tensor(np.random.randn(2, 16, 8, 8))
+        >>> y = bn(x)
+        >>> print(y.shape)  # (2, 16, 8, 8)
+
+        HINTS:
+        - Reshape mean/var/gamma/beta to (1, C, 1, 1) for broadcasting
+        """
+        ### BEGIN SOLUTION
+        self._validate_input(x)
+
+        batch_size, channels, height, width = x.shape
+        mean, var = self._get_stats(x)
 
         # Normalize: (x - mean) / sqrt(var + eps)
         # Reshape mean and var for broadcasting: (C,) -> (1, C, 1, 1)
@@ -2154,7 +2182,6 @@ class BatchNorm2d:
         x_normalized = (x.data - mean_reshaped) / np.sqrt(var_reshaped + self.eps)
 
         # Apply scale (gamma) and shift (beta)
-        # Reshape for broadcasting: (C,) -> (1, C, 1, 1)
         gamma_reshaped = self.gamma.data.reshape(1, channels, 1, 1)
         beta_reshaped = self.beta.data.reshape(1, channels, 1, 1)
 
@@ -2173,6 +2200,87 @@ class BatchNorm2d:
     def __call__(self, x):
         """Enable model(x) syntax."""
         return self.forward(x)
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: BatchNorm2d._validate_input
+
+**What we're testing**: Input shape validation catches common mistakes
+**Why it matters**: Clear errors save hours of debugging wrong tensor shapes
+**Expected**: Accepts valid 4D input, rejects 2D/3D/wrong channels with helpful messages
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-validate", "locked": true, "points": 3}
+def test_unit_batchnorm2d_validate_input():
+    """🧪 Test BatchNorm2d._validate_input implementation."""
+    print("🧪 Unit Test: BatchNorm2d._validate_input...")
+
+    bn = BatchNorm2d(num_features=16)
+
+    # Valid 4D input should not raise
+    x_valid = Tensor(np.random.randn(2, 16, 8, 8))
+    bn._validate_input(x_valid)  # Should pass silently
+
+    # 3D input should raise
+    try:
+        bn._validate_input(Tensor(np.random.randn(16, 8, 8)))
+        assert False, "Should have raised ValueError for 3D input"
+    except ValueError as e:
+        assert "3D" in str(e), f"Error should mention 3D, got: {e}"
+
+    # Wrong channel count should raise
+    try:
+        bn._validate_input(Tensor(np.random.randn(2, 8, 4, 4)))
+        assert False, "Should have raised ValueError for wrong channels"
+    except ValueError as e:
+        assert "mismatch" in str(e), f"Error should mention mismatch, got: {e}"
+
+    print("✅ BatchNorm2d._validate_input works correctly!")
+
+if __name__ == "__main__":
+    test_unit_batchnorm2d_validate_input()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: BatchNorm2d._get_stats
+
+**What we're testing**: Statistics computation in training vs eval mode
+**Why it matters**: Wrong statistics = wrong normalization = broken model
+**Expected**: Training mode computes batch stats and updates running stats; eval mode uses frozen stats
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-batchnorm2d-get-stats", "locked": true, "points": 3}
+def test_unit_batchnorm2d_get_stats():
+    """🧪 Test BatchNorm2d._get_stats implementation."""
+    print("🧪 Unit Test: BatchNorm2d._get_stats...")
+
+    bn = BatchNorm2d(num_features=4)
+    x = Tensor(np.random.randn(8, 4, 6, 6))
+
+    # Training mode: should return batch stats and update running stats
+    bn.train()
+    running_mean_before = bn.running_mean.copy()
+    mean, var = bn._get_stats(x)
+
+    assert mean.shape == (4,), f"Expected per-channel mean shape (4,), got {mean.shape}"
+    assert var.shape == (4,), f"Expected per-channel var shape (4,), got {var.shape}"
+    assert not np.allclose(bn.running_mean, running_mean_before), \
+        "Running mean should be updated in training mode"
+
+    # Eval mode: should return running stats (frozen)
+    bn.eval()
+    running_mean_snapshot = bn.running_mean.copy()
+    mean_eval, var_eval = bn._get_stats(x)
+
+    assert np.allclose(mean_eval, running_mean_snapshot), \
+        "Eval mode should return running mean"
+    assert np.allclose(bn.running_mean, running_mean_snapshot), \
+        "Running mean should not change in eval mode"
+
+    print("✅ BatchNorm2d._get_stats works correctly!")
+
+if __name__ == "__main__":
+    test_unit_batchnorm2d_get_stats()
 
 # %% [markdown]
 """
@@ -2836,6 +2944,10 @@ def test_module():
     test_unit_conv2d_padding()
     test_unit_conv2d_convolve_loops()
     test_unit_conv2d()
+
+    # BatchNorm2d helper tests
+    test_unit_batchnorm2d_validate_input()
+    test_unit_batchnorm2d_get_stats()
 
     # MaxPool2d helper tests
     test_unit_maxpool2d_output_shape()

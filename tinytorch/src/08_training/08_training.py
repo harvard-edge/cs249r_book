@@ -720,6 +720,96 @@ Training Loop Flow:
 
 With gradient accumulation, the update step happens every N batches instead
 of every batch, enabling larger effective batch sizes without more memory.
+
+We'll build this in three pieces: process a single batch, perform an optimizer
+update, then compose them into the full epoch loop.
+"""
+
+# %% [markdown]
+"""
+#### Step 1: Process a Single Batch
+
+The inner loop body: run forward pass, compute loss, and run backward pass
+with scaled gradients for accumulation.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "trainer-process-batch", "locked": false, "solution": true}
+def _trainer_process_batch(self, inputs, targets, accumulation_steps):
+    """
+    Process one batch: forward pass, loss computation, backward pass.
+
+    Args:
+        inputs: Input tensor for this batch
+        targets: Target tensor for this batch
+        accumulation_steps: Number of batches per optimizer update (for scaling)
+
+    Returns:
+        Scaled loss value (float) for accumulation tracking
+
+    TODO: Implement the forward-backward cycle for a single batch
+
+    APPROACH:
+    1. Forward pass: model.forward(inputs)
+    2. Compute loss: loss_fn.forward(outputs, targets)
+    3. Scale loss by 1/accumulation_steps
+    4. Backward pass with scaled gradient
+
+    HINT: scaled_gradient = np.ones_like(loss.data) / accumulation_steps
+    """
+    ### BEGIN SOLUTION
+    # Forward pass
+    outputs = self.model.forward(inputs)
+    loss = self.loss_fn.forward(outputs, targets)
+
+    # Scale loss for accumulation
+    scaled_loss = loss.data / accumulation_steps
+
+    # Backward pass with scaled gradient
+    scaled_gradient = np.ones_like(loss.data) / accumulation_steps
+    loss.backward(scaled_gradient)
+
+    return float(scaled_loss)
+    ### END SOLUTION
+
+Trainer._process_batch = _trainer_process_batch
+
+# %% [markdown]
+"""
+#### Step 2: Perform Optimizer Update
+
+When enough gradients have accumulated, clip them (if configured),
+step the optimizer, and reset gradients for the next accumulation window.
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "trainer-optimizer-update", "locked": false, "solution": true}
+def _trainer_optimizer_update(self):
+    """
+    Clip gradients (if enabled) and step the optimizer.
+
+    TODO: Implement the gradient clip + optimizer step + zero_grad cycle
+
+    APPROACH:
+    1. If grad_clip_norm is set, call clip_grad_norm on model parameters
+    2. Call optimizer.step() to update weights
+    3. Call optimizer.zero_grad() to reset gradients
+    """
+    ### BEGIN SOLUTION
+    if self.grad_clip_norm is not None:
+        params = self.model.parameters()
+        clip_grad_norm(params, self.grad_clip_norm)
+
+    self.optimizer.step()
+    self.optimizer.zero_grad()
+    ### END SOLUTION
+
+Trainer._optimizer_update = _trainer_optimizer_update
+
+# %% [markdown]
+"""
+#### Step 3: Compose the Full Epoch Loop
+
+Now combine `_process_batch` and `_optimizer_update` into the complete
+training epoch with accumulation, scheduling, and history tracking.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "locked": false, "solution": true}
@@ -734,29 +824,16 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     Returns:
         Average loss for the epoch (float)
 
-    TODO: Implement the core training loop with gradient accumulation
+    TODO: Compose _process_batch and _optimizer_update into the epoch loop
 
     APPROACH:
     1. Set model.training = True and self.training_mode = True
-    2. For each batch: forward pass, compute loss, backward pass
-    3. Scale loss by 1/accumulation_steps for gradient accumulation
-    4. Every accumulation_steps batches: clip gradients (if enabled),
-       call optimizer.step(), then optimizer.zero_grad()
-    5. Handle remaining accumulated gradients after the loop
-    6. Record average loss in self.history['train_loss']
-    7. Update scheduler and learning rate if scheduler exists
-    8. Increment self.epoch and return average loss
+    2. Loop over batches, calling self._process_batch for each
+    3. Every accumulation_steps batches, call self._optimizer_update
+    4. Handle remaining accumulated gradients after the loop
+    5. Record average loss, update scheduler, increment epoch
 
-    EXAMPLE:
-    >>> data = [(Tensor([[1.0]]), Tensor([[2.0]]))]
-    >>> loss = trainer.train_epoch(data)
-    >>> print(f"Epoch {trainer.epoch}, loss: {loss:.4f}")
-
-    HINTS:
-    - Use loss.backward(scaled_gradient) where scaled_gradient = np.ones_like(loss.data) / accumulation_steps
-    - Check (batch_idx + 1) % accumulation_steps == 0 for update timing
-    - After the loop, check if accumulated_loss > 0 for remaining batches
-    - Update lr via: self.optimizer.lr = self.scheduler.get_lr(self.epoch)
+    HINT: Check (batch_idx + 1) % accumulation_steps == 0 for update timing
     """
     ### BEGIN SOLUTION
     self.model.training = True
@@ -767,29 +844,11 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     accumulated_loss = 0.0
 
     for batch_idx, (inputs, targets) in enumerate(dataloader):
-        # Forward pass
-        outputs = self.model.forward(inputs)
-        loss = self.loss_fn.forward(outputs, targets)
-
-        # Scale loss for accumulation
-        scaled_loss = loss.data / accumulation_steps
-        accumulated_loss += scaled_loss
-
-        # Backward pass with scaled gradient
-        scaled_gradient = np.ones_like(loss.data) / accumulation_steps
-        loss.backward(scaled_gradient)
+        accumulated_loss += self._process_batch(inputs, targets, accumulation_steps)
 
         # Update parameters every accumulation_steps
         if (batch_idx + 1) % accumulation_steps == 0:
-            # Gradient clipping
-            if self.grad_clip_norm is not None:
-                params = self.model.parameters()
-                clip_grad_norm(params, self.grad_clip_norm)
-
-            # Optimizer step
-            self.optimizer.step()
-            self.optimizer.zero_grad()
-
+            self._optimizer_update()
             total_loss += accumulated_loss
             accumulated_loss = 0.0
             num_batches += 1
@@ -797,12 +856,7 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
 
     # Handle remaining accumulated gradients
     if accumulated_loss > 0:
-        if self.grad_clip_norm is not None:
-            params = self.model.parameters()
-            clip_grad_norm(params, self.grad_clip_norm)
-
-        self.optimizer.step()
-        self.optimizer.zero_grad()
+        self._optimizer_update()
         total_loss += accumulated_loss
         num_batches += 1
 
@@ -820,6 +874,98 @@ def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     ### END SOLUTION
 
 Trainer.train_epoch = trainer_train_epoch
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer._process_batch
+
+**What we're testing**: A single forward-backward pass returns a scaled loss value
+**Why it matters**: This is the atomic unit of training — if one batch doesn't work, nothing will
+**Expected**: Returns a float loss, model parameters have gradients after the call
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-process-batch", "locked": true, "points": 5}
+def test_unit_trainer_process_batch():
+    """🧪 Test Trainer._process_batch implementation."""
+    print("🧪 Unit Test: Trainer._process_batch...")
+
+    class SimpleModel:
+        def __init__(self):
+            self.layer = Linear(2, 1)
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    model = SimpleModel()
+    optimizer = SGD(model.parameters(), lr=0.01)
+    loss_fn = MSELoss()
+    trainer = Trainer(model, optimizer, loss_fn)
+
+    inputs = Tensor([[1.0, 0.5]])
+    targets = Tensor([[2.0]])
+
+    scaled_loss = trainer._process_batch(inputs, targets, accumulation_steps=1)
+
+    # Should return a float
+    assert isinstance(scaled_loss, float), f"Expected float, got {type(scaled_loss)}"
+    # Loss should be non-negative
+    assert scaled_loss >= 0, f"Expected non-negative loss, got {scaled_loss}"
+
+    print("✅ Trainer._process_batch works correctly!")
+
+if __name__ == "__main__":
+    test_unit_trainer_process_batch()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Trainer._optimizer_update
+
+**What we're testing**: Gradient clipping + optimizer step + zero_grad cycle
+**Why it matters**: Incorrect update logic causes training to diverge or stall
+**Expected**: Parameters change after update, gradients are zeroed
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-trainer-optimizer-update", "locked": true, "points": 5}
+def test_unit_trainer_optimizer_update():
+    """🧪 Test Trainer._optimizer_update implementation."""
+    print("🧪 Unit Test: Trainer._optimizer_update...")
+
+    class SimpleModel:
+        def __init__(self):
+            self.layer = Linear(2, 1)
+            self.training = True
+        def forward(self, x):
+            return self.layer.forward(x)
+        def parameters(self):
+            return self.layer.parameters()
+
+    model = SimpleModel()
+    optimizer = SGD(model.parameters(), lr=0.01)
+    loss_fn = MSELoss()
+    trainer = Trainer(model, optimizer, loss_fn)
+
+    # Do a forward-backward to create gradients
+    inputs = Tensor([[1.0, 0.5]])
+    targets = Tensor([[2.0]])
+    trainer._process_batch(inputs, targets, accumulation_steps=1)
+
+    # Record params before update
+    params_before = [p.data.copy() for p in model.parameters()]
+
+    # Perform update
+    trainer._optimizer_update()
+
+    # Parameters should have changed
+    params_after = [p.data for p in model.parameters()]
+    changed = any(not np.allclose(b, a) for b, a in zip(params_before, params_after))
+    assert changed, "Parameters should change after optimizer update"
+
+    print("✅ Trainer._optimizer_update works correctly!")
+
+if __name__ == "__main__":
+    test_unit_trainer_optimizer_update()
 
 # %% [markdown]
 """
@@ -1619,6 +1765,8 @@ def test_module():
     test_unit_cosine_schedule()
     test_unit_clip_grad_norm()
     test_unit_trainer_init()
+    test_unit_trainer_process_batch()
+    test_unit_trainer_optimizer_update()
     test_unit_trainer_train_epoch()
     test_unit_trainer_evaluate()
     test_unit_trainer_save_checkpoint()

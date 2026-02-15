@@ -367,7 +367,7 @@ class EmbeddingBackward(Function):
         return (grad_weight,)
         ### END SOLUTION
 
-# %% nbgrader={"grade": false, "grade_id": "embedding-class", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "embedding-init", "solution": true}
 #| export
 class Embedding:
     """
@@ -376,37 +376,28 @@ class Embedding:
     This is the fundamental building block for converting discrete tokens
     into continuous representations that neural networks can process.
 
-    TODO: Implement the Embedding class
-
-    APPROACH:
-    1. Initialize embedding matrix with random weights (vocab_size, embed_dim)
-    2. Implement forward pass as matrix lookup using numpy indexing
-    3. Handle batch dimensions correctly
-    4. Return parameters for optimization
-
-    EXAMPLE:
-    >>> embed = Embedding(vocab_size=100, embed_dim=64)
-    >>> tokens = Tensor([[1, 2, 3], [4, 5, 6]])  # batch_size=2, seq_len=3
-    >>> output = embed.forward(tokens)
-    >>> print(output.shape)
-    (2, 3, 64)
-
-    HINTS:
-    - Use numpy advanced indexing for lookup: weight[indices]
-    - Embedding matrix shape: (vocab_size, embed_dim)
-    - Initialize with Xavier/Glorot uniform for stable gradients
-    - Handle multi-dimensional indices correctly
+    We'll build this in two steps: first initialize the weight matrix,
+    then implement the forward lookup.
     """
 
-    ### BEGIN SOLUTION
     def __init__(self, vocab_size: int, embed_dim: int):
         """
-        Initialize embedding layer.
+        Initialize embedding layer with Xavier-uniform weights.
 
         Args:
             vocab_size: Size of vocabulary (number of unique tokens)
             embed_dim: Dimension of embedding vectors
+
+        TODO: Initialize the embedding weight matrix
+
+        APPROACH:
+        1. Store vocab_size and embed_dim
+        2. Create weight matrix of shape (vocab_size, embed_dim)
+        3. Use Xavier/Glorot uniform initialization: limit = sqrt(6 / (V + D))
+
+        HINT: np.random.uniform(-limit, limit, (vocab_size, embed_dim))
         """
+        ### BEGIN SOLUTION
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
 
@@ -415,6 +406,7 @@ class Embedding:
         self.weight = Tensor(
             np.random.uniform(-limit, limit, (vocab_size, embed_dim))
         )
+        ### END SOLUTION
 
     def forward(self, indices: Tensor) -> Tensor:
         """
@@ -425,7 +417,19 @@ class Embedding:
 
         Returns:
             Embedded vectors of shape (*indices.shape, embed_dim)
+
+        TODO: Implement embedding lookup with validation and gradient tracking
+
+        APPROACH:
+        1. Validate indices are within [0, vocab_size)
+        2. Perform lookup using numpy advanced indexing: weight[indices]
+        3. Attach EmbeddingBackward gradient function if weight requires grad
+
+        HINTS:
+        - Use self.weight.data[indices.data.astype(int)] for the lookup
+        - Attach result._grad_fn = EmbeddingBackward(self.weight, indices)
         """
+        ### BEGIN SOLUTION
         # Handle input validation
         if np.any(indices.data >= self.vocab_size) or np.any(indices.data < 0):
             min_idx = int(np.min(indices.data))
@@ -450,6 +454,7 @@ class Embedding:
             result._grad_fn = EmbeddingBackward(self.weight, indices)
 
         return result
+        ### END SOLUTION
 
     def __call__(self, indices: Tensor) -> Tensor:
         """Allows the embedding to be called like a function."""
@@ -461,11 +466,43 @@ class Embedding:
 
     def __repr__(self):
         return f"Embedding(vocab_size={self.vocab_size}, embed_dim={self.embed_dim})"
-    ### END SOLUTION
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Embedding Layer
+### 🧪 Unit Test: Embedding.__init__
+
+**What we're testing**: Weight matrix initialization with correct shape and Xavier scaling
+**Why it matters**: Bad initialization causes vanishing/exploding gradients from the start
+**Expected**: Weight shape is (vocab_size, embed_dim), values are within Xavier bounds
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-embedding-init", "locked": true, "points": 5}
+def test_unit_embedding_init():
+    """🧪 Test Embedding.__init__ implementation."""
+    print("🧪 Unit Test: Embedding.__init__...")
+
+    embed = Embedding(vocab_size=100, embed_dim=64)
+
+    # Check stored attributes
+    assert embed.vocab_size == 100, f"Expected vocab_size=100, got {embed.vocab_size}"
+    assert embed.embed_dim == 64, f"Expected embed_dim=64, got {embed.embed_dim}"
+
+    # Check weight shape
+    assert embed.weight.shape == (100, 64), f"Expected weight shape (100, 64), got {embed.weight.shape}"
+
+    # Check Xavier bounds: limit = sqrt(6 / (100 + 64)) ≈ 0.191
+    limit = math.sqrt(6.0 / (100 + 64))
+    assert np.all(embed.weight.data >= -limit - 1e-6), "Weights should be >= -limit"
+    assert np.all(embed.weight.data <= limit + 1e-6), "Weights should be <= limit"
+
+    print("✅ Embedding.__init__ works correctly!")
+
+if __name__ == "__main__":
+    test_unit_embedding_init()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Embedding.forward
 
 This test validates our Embedding class works correctly with various token indices and batch configurations.
 
@@ -554,7 +591,7 @@ Result: Position-aware embeddings that can learn task-specific patterns!
 Let's build trainable positional embeddings that can learn position-specific patterns for our specific task.
 """
 
-# %% nbgrader={"grade": false, "grade_id": "positional-encoding", "solution": true}
+# %% nbgrader={"grade": false, "grade_id": "positional-encoding-init", "solution": true}
 #| export
 class PositionalEncoding:
     """
@@ -563,29 +600,10 @@ class PositionalEncoding:
     Adds trainable position-specific vectors to token embeddings,
     allowing the model to learn positional patterns specific to the task.
 
-    TODO: Implement learnable positional encoding
-
-    APPROACH:
-    1. Create embedding matrix for positions: (max_seq_len, embed_dim)
-    2. Forward pass: lookup position embeddings and add to input
-    3. Handle different sequence lengths gracefully
-    4. Return parameters for training
-
-    EXAMPLE:
-    >>> pos_enc = PositionalEncoding(max_seq_len=512, embed_dim=64)
-    >>> embeddings = Tensor(np.random.randn(2, 10, 64))  # (batch, seq, embed)
-    >>> output = pos_enc.forward(embeddings)
-    >>> print(output.shape)
-    (2, 10, 64)  # Same shape, but now position-aware
-
-    HINTS:
-    - Position embeddings shape: (max_seq_len, embed_dim)
-    - Use slice [:seq_len] to handle variable lengths
-    - Add position encodings to input embeddings element-wise
-    - Initialize with smaller values than token embeddings (they're additive)
+    We'll build this in two steps: initialize the position matrix,
+    then implement the forward pass that adds positions to embeddings.
     """
 
-    ### BEGIN SOLUTION
     def __init__(self, max_seq_len: int, embed_dim: int):
         """
         Initialize learnable positional encoding.
@@ -593,7 +611,17 @@ class PositionalEncoding:
         Args:
             max_seq_len: Maximum sequence length to support
             embed_dim: Embedding dimension (must match token embeddings)
+
+        TODO: Create the position embedding matrix
+
+        APPROACH:
+        1. Store max_seq_len and embed_dim
+        2. Create position_embeddings matrix of shape (max_seq_len, embed_dim)
+        3. Use smaller initialization than token embeddings (they're additive)
+
+        HINT: limit = sqrt(2.0 / embed_dim), then uniform(-limit, limit)
         """
+        ### BEGIN SOLUTION
         self.max_seq_len = max_seq_len
         self.embed_dim = embed_dim
 
@@ -603,6 +631,7 @@ class PositionalEncoding:
         self.position_embeddings = Tensor(
             np.random.uniform(-limit, limit, (max_seq_len, embed_dim))
         )
+        ### END SOLUTION
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -613,7 +642,20 @@ class PositionalEncoding:
 
         Returns:
             Position-encoded embeddings of same shape
+
+        TODO: Validate input and add position embeddings
+
+        APPROACH:
+        1. Validate input is 3D with correct embed_dim and seq_len <= max
+        2. Slice position_embeddings[:seq_len] for variable-length support
+        3. Reshape to (1, seq_len, embed_dim) for batch broadcasting
+        4. Add to input embeddings
+
+        HINTS:
+        - pos_embeddings.data[np.newaxis, :, :] adds the batch dimension
+        - Use x + pos_embeddings_batched for element-wise addition
         """
+        ### BEGIN SOLUTION
         if len(x.shape) == 2:
             raise ValueError(
                 f"Expected 3D input (batch, seq, embed), got 2D: {x.shape}\n"
@@ -657,6 +699,7 @@ class PositionalEncoding:
         result = x + pos_embeddings_batched
 
         return result
+        ### END SOLUTION
 
     def __call__(self, x: Tensor) -> Tensor:
         """Allows the positional encoding to be called like a function."""
@@ -668,11 +711,48 @@ class PositionalEncoding:
 
     def __repr__(self):
         return f"PositionalEncoding(max_seq_len={self.max_seq_len}, embed_dim={self.embed_dim})"
-    ### END SOLUTION
 
 # %% [markdown]
 """
-### 🧪 Unit Test: Positional Encoding
+### 🧪 Unit Test: PositionalEncoding.__init__
+
+**What we're testing**: Position embedding matrix initialization with correct shape
+**Why it matters**: Wrong shape or scale breaks the additive position signal
+**Expected**: Matrix shape is (max_seq_len, embed_dim), values are small (additive)
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-positional-init", "locked": true, "points": 5}
+def test_unit_positional_encoding_init():
+    """🧪 Test PositionalEncoding.__init__ implementation."""
+    print("🧪 Unit Test: PositionalEncoding.__init__...")
+
+    pos_enc = PositionalEncoding(max_seq_len=512, embed_dim=64)
+
+    # Check stored attributes
+    assert pos_enc.max_seq_len == 512, f"Expected max_seq_len=512, got {pos_enc.max_seq_len}"
+    assert pos_enc.embed_dim == 64, f"Expected embed_dim=64, got {pos_enc.embed_dim}"
+
+    # Check position embeddings shape
+    assert pos_enc.position_embeddings.shape == (512, 64), \
+        f"Expected shape (512, 64), got {pos_enc.position_embeddings.shape}"
+
+    # Check values are reasonably small (additive initialization)
+    limit = math.sqrt(2.0 / 64)
+    assert np.all(pos_enc.position_embeddings.data >= -limit - 1e-6), "Values should be >= -limit"
+    assert np.all(pos_enc.position_embeddings.data <= limit + 1e-6), "Values should be <= limit"
+
+    # Check parameters returns the position embeddings
+    params = pos_enc.parameters()
+    assert len(params) == 1, f"Expected 1 parameter, got {len(params)}"
+
+    print("✅ PositionalEncoding.__init__ works correctly!")
+
+if __name__ == "__main__":
+    test_unit_positional_encoding_init()
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: PositionalEncoding.forward
 
 This test validates our PositionalEncoding class works correctly with various sequence lengths and configurations.
 
@@ -1710,7 +1790,9 @@ def test_module():
 
     # Run all unit tests
     print("Running unit tests...")
+    test_unit_embedding_init()
     test_unit_embedding()
+    test_unit_positional_encoding_init()
     test_unit_positional_encoding()
     test_unit_sinusoidal_table()
     test_unit_sinusoidal_embeddings()
