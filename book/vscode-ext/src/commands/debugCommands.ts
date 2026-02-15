@@ -14,10 +14,13 @@ import {
 } from '../utils/parallelDebug';
 
 const STATE_LAST_PARALLEL_VOLUME = 'mlsysbook.lastParallelVolume';
+const STATE_LAST_PARALLEL_FORMAT = 'mlsysbook.lastParallelFormat';
+
+type ParallelFormat = 'pdf' | 'html' | 'epub';
 
 /**
- * Test All Chapters — prompts for volume only, then builds every chapter
- * in parallel using PDF format and the configured worker count.
+ * Test All Chapters — prompts for volume and format, then builds every chapter
+ * in parallel using the configured worker count.
  * Requires workspace opened at repo root (folder containing book/) and git in PATH.
  */
 async function runTestAllChapters(
@@ -32,13 +35,23 @@ async function runTestAllChapters(
     return;
   }
   const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
-  const picks = [
+  const volumePicks = [
     { label: defaultVolume === 'vol1' ? 'Volume I (last used)' : 'Volume I', id: 'vol1' as VolumeId },
     { label: defaultVolume === 'vol2' ? 'Volume II (last used)' : 'Volume II', id: 'vol2' as VolumeId },
   ];
-  const selection = await vscode.window.showQuickPick(picks, { placeHolder: 'Select volume to test' });
-  if (!selection) { return; }
-  const volumeId = selection.id;
+  const volumeSelection = await vscode.window.showQuickPick(volumePicks, { placeHolder: 'Select volume' });
+  if (!volumeSelection) { return; }
+  const volumeId = volumeSelection.id;
+
+  const defaultFormat = context.workspaceState.get<ParallelFormat>(STATE_LAST_PARALLEL_FORMAT, 'pdf');
+  const formatPicks = [
+    { label: defaultFormat === 'pdf' ? 'PDF (last used)' : 'PDF', id: 'pdf' as ParallelFormat },
+    { label: defaultFormat === 'html' ? 'HTML (last used)' : 'HTML', id: 'html' as ParallelFormat },
+    { label: defaultFormat === 'epub' ? 'EPUB (last used)' : 'EPUB', id: 'epub' as ParallelFormat },
+  ];
+  const formatSelection = await vscode.window.showQuickPick(formatPicks, { placeHolder: 'Select format' });
+  if (!formatSelection) { return; }
+  const format = formatSelection.id;
 
   const volumes = discoverChapters(repoRoot);
   const volume = volumes.find(v => v.id === volumeId);
@@ -52,16 +65,17 @@ async function runTestAllChapters(
     .get<number>('parallelDebugWorkers', 4);
 
   await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, volumeId);
+  await context.workspaceState.update(STATE_LAST_PARALLEL_FORMAT, format);
 
   const allChapters = volume.chapters.map(ch => ch.name);
   vscode.window.showInformationMessage(
-    `Testing ${allChapters.length} chapters (PDF, ${workers} workers)...`
+    `Testing ${allChapters.length} chapters (${format.toUpperCase()}, ${workers} workers)...`
   );
 
   await runParallelChapterDebug({
     repoRoot,
     volume: volumeId,
-    format: 'pdf',
+    format,
     chapters: allChapters,
     workers,
   });

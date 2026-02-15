@@ -310,7 +310,10 @@ async function writeSummaryReport(
   const totalMs = session.elapsedMs ?? 0;
 
   const lines: string[] = [];
+  const resultLine = failed.length === 0 ? '**ALL PASSED**' : `**${failed.length} FAILED**`;
   lines.push(`# Chapter Build Report`);
+  lines.push('');
+  lines.push(`**Result**: ${resultLine} — ${passed.length}/${results.length} chapters passed`);
   lines.push('');
   lines.push(`- **Volume**: ${session.volume}`);
   lines.push(`- **Format**: ${session.format}`);
@@ -318,7 +321,8 @@ async function writeSummaryReport(
   lines.push(`- **Started**: ${session.startedAt}`);
   lines.push(`- **Finished**: ${session.endedAt ?? 'N/A'}`);
   lines.push(`- **Total time**: ${(totalMs / 1000).toFixed(1)}s`);
-  lines.push(`- **Result**: ${failed.length === 0 ? 'ALL PASSED' : `${failed.length} FAILED`}`);
+  lines.push('');
+  lines.push(`*All files (this report and per-chapter logs) are in this folder.*`);
   lines.push('');
   lines.push(`## Summary: ${passed.length}/${results.length} passed`);
   lines.push('');
@@ -560,7 +564,11 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   // Print summary to output channel
   channel.appendLine('');
   channel.appendLine('═'.repeat(60));
-  channel.appendLine(`  BUILD REPORT: ${passedCount}/${results.length} chapters passed`);
+  if (failed.length === 0) {
+    channel.appendLine(`  ✓ ALL PASSED: ${results.length} chapters built successfully`);
+  } else {
+    channel.appendLine(`  BUILD REPORT: ${passedCount}/${results.length} passed, ${failed.length} failed`);
+  }
   channel.appendLine('═'.repeat(60));
   channel.appendLine('');
   for (const r of results) {
@@ -571,8 +579,8 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   }
   channel.appendLine('');
   channel.appendLine(`Total time: ${((session.elapsedMs ?? 0) / 1000).toFixed(1)}s`);
-  channel.appendLine(`Report: ${reportPath}`);
-  channel.appendLine(`Logs:   ${reportsDir}`);
+  channel.appendLine(`Reports & logs: ${reportsDir}`);
+  channel.appendLine(`Summary: ${reportPath}`);
 
   if (failed.length > 0) {
     channel.appendLine('');
@@ -595,24 +603,30 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
 
   if (failed.length === 0) {
     const action = await vscode.window.showInformationMessage(
-      `All ${results.length} chapters passed.`,
+      `All ${results.length} chapters built successfully. Report and logs saved.`,
       'Open Report',
+      'Open Reports Folder',
     );
     if (action === 'Open Report') {
       const doc = await vscode.workspace.openTextDocument(reportPath);
       await vscode.window.showTextDocument(doc, { preview: true });
+    } else if (action === 'Open Reports Folder') {
+      await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(reportPath));
     }
     return;
   }
 
   const action = await vscode.window.showErrorMessage(
-    `${failed.length} chapter(s) failed: ${failed.join(', ')}`,
+    `${failed.length} chapter(s) failed: ${failed.join(', ')}. Report and logs saved for review.`,
     'Open Report',
+    'Open Reports Folder',
     'Show Output',
   );
   if (action === 'Open Report') {
     const doc = await vscode.workspace.openTextDocument(reportPath);
     await vscode.window.showTextDocument(doc, { preview: true });
+  } else if (action === 'Open Reports Folder') {
+    await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.file(reportPath));
   } else if (action === 'Show Output') {
     channel.show(true);
   }

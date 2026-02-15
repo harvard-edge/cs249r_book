@@ -51,7 +51,7 @@ This keeps daily actions focused while preserving easy access to tuning controls
 
 ## Parallel builds (Test All Chapters)
 
-**Build All Chapters (Parallel)** in the Debug view runs each chapter in a separate git worktree so multiple PDF builds run at once.
+**Build All Chapters (Parallel)** in the Debug view runs each chapter in a separate git worktree so multiple builds run at once. You choose **volume** (Vol I / Vol II) and **format** (PDF, HTML, or EPUB).
 
 **Requirements:**
 
