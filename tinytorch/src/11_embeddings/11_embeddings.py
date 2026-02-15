@@ -895,6 +895,7 @@ Step 3: Outer product → angles     Step 4: Interleave sin/cos
 """
 
 # %% nbgrader={"grade": false, "grade_id": "posenc-sinusoidal-table", "solution": true}
+#| export
 def _compute_sinusoidal_table(max_len: int, embed_dim: int) -> np.ndarray:
     """
     Compute the raw sinusoidal positional encoding table as a numpy array.

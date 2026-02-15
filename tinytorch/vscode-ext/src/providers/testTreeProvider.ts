@@ -40,9 +40,9 @@ export class TestTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       return [
-        new CategoryTreeItem('Run All', 'all'),
-        new CategoryTreeItem('By Stage (CI Pipeline)', 'stages'),
-        new CategoryTreeItem('Single Module', 'module'),
+        new CategoryTreeItem('Run All', 'all', 'run-all'),
+        new CategoryTreeItem('By Stage (CI Pipeline)', 'stages', 'layers'),
+        new CategoryTreeItem('Single Module', 'module', 'symbol-method'),
       ];
     }
 

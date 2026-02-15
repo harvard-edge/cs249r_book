@@ -913,6 +913,7 @@ We must pad ONLY spatial dimensions, never the channel dimension.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-pad-image", "solution": true}
+#| export
 def _pad_image(data, padding):
     """
     Detect image format and apply zero-padding to spatial dimensions only.
@@ -1032,6 +1033,7 @@ computing two random integers within valid bounds.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "dataloader-crop-region", "solution": true}
+#| export
 def _random_crop_region(padded_h, padded_w, target_h, target_w):
     """
     Sample a random (top, left) position for cropping.

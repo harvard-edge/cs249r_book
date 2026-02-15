@@ -301,6 +301,7 @@ scores[i][j] = "how relevant is key j to query i?"
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-compute-scores", "solution": true}
+#| export
 def _compute_attention_scores(Q: Tensor, K: Tensor) -> Tensor:
     """Compute raw attention scores via Q @ K^T.
 
@@ -357,6 +358,7 @@ scores in a stable range regardless of dimension.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-scale-scores", "solution": true}
+#| export
 def _scale_scores(scores: Tensor, d_model: int) -> Tensor:
     """Scale attention scores by 1/sqrt(d_model).
 
@@ -420,6 +422,7 @@ Causal Mask (4 tokens):       After masking:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "attn-apply-mask", "solution": true}
+#| export
 def _apply_mask(scores: Tensor, mask: Tensor) -> Tensor:
     """Apply causal mask by setting masked positions to -infinity.
 

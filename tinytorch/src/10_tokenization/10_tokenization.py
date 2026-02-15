@@ -726,6 +726,7 @@ Count Pairs Across All Words (weighted by frequency):
 """
 
 # %% nbgrader={"grade": false, "grade_id": "bpe-count-pairs", "solution": true}
+#| export
 def _count_byte_pairs(word_tokens: Dict[str, List[str]], word_freq: Counter) -> Counter:
     """
     Count frequency of all adjacent token pairs across all words.
@@ -830,6 +831,7 @@ Algorithm (linear scan per word):
 """
 
 # %% nbgrader={"grade": false, "grade_id": "bpe-merge-pair", "solution": true}
+#| export
 def _merge_pair(word_tokens: Dict[str, List[str]], pair: Tuple[str, str]) -> str:
     """
     Merge the most frequent pair in all word token lists.

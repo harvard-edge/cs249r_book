@@ -881,6 +881,7 @@ Why? Longer sequences = more redundant computation without cache.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "cached-generation-step", "solution": false}
+#| export
 def _cached_generation_step(x, attention, cache_obj, layer_idx):
     """
     Execute a single cached generation step for one new token.
@@ -987,6 +988,7 @@ Model Architecture Inspection:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-create-cache", "solution": true}
+#| export
 def _create_cache_storage(model):
     """
     Validate model architecture and create a KVCache sized for it.
@@ -1145,6 +1147,7 @@ whether to use the cache or fall back to standard attention.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "kv-cached-attention", "solution": true}
+#| export
 def _cached_attention_forward(block, x, cache_obj, layer_idx, original_forward):
     """
     Dispatch attention through the correct path based on context.

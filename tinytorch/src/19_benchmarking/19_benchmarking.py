@@ -286,7 +286,7 @@ Benchmark Architecture:
 │ BenchmarkSuite                          │
 │ • Multi-metric comprehensive evaluation │
 ├─────────────────────────────────────────┤
-│ TinyMLPerf                              │
+│ MLPerf                              │
 │ • Standardized industry-style benchmarks│
 └─────────────────────────────────────────┘
 ```
@@ -769,8 +769,9 @@ Input Tensor ──> Warmup Runs (discard) ──> Measurement Runs ──> Benc
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-latency", "solution": true}
+#| export
     # --- Benchmark.run_latency_benchmark ---
-def benchmark_run_latency(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
+def benchmark_run_latency_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model inference latency using Profiler.
 
@@ -824,7 +825,7 @@ def benchmark_run_latency(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> D
     return results
     ### END SOLUTION
 
-Benchmark.run_latency_benchmark = benchmark_run_latency
+Benchmark.run_latency_benchmark = benchmark_run_latency_benchmark
 
 # %% [markdown]
 """
@@ -879,8 +880,9 @@ Model ──> Dataset 1 ──> accuracy_1 ──┐
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-accuracy", "solution": true}
+#| export
     # --- Benchmark.run_accuracy_benchmark ---
-def benchmark_run_accuracy(self) -> Dict[str, BenchmarkResult]:
+def benchmark_run_accuracy_benchmark(self) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model accuracy across datasets.
 
@@ -930,7 +932,7 @@ def benchmark_run_accuracy(self) -> Dict[str, BenchmarkResult]:
     return results
     ### END SOLUTION
 
-Benchmark.run_accuracy_benchmark = benchmark_run_accuracy
+Benchmark.run_accuracy_benchmark = benchmark_run_accuracy_benchmark
 
 # %% [markdown]
 """
@@ -986,8 +988,9 @@ Model ──> Profiler.measure_memory() ──> peak_memory_mb
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-memory", "solution": true}
+#| export
     # --- Benchmark.run_memory_benchmark ---
-def benchmark_run_memory(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
+def benchmark_run_memory_benchmark(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Dict[str, BenchmarkResult]:
     """
     Benchmark model memory usage using Profiler.
 
@@ -1032,7 +1035,7 @@ def benchmark_run_memory(self, input_shape: Tuple[int, ...] = (1, 28, 28)) -> Di
     return results
     ### END SOLUTION
 
-Benchmark.run_memory_benchmark = benchmark_run_memory
+Benchmark.run_memory_benchmark = benchmark_run_memory_benchmark
 
 # %% [markdown]
 """
@@ -1077,6 +1080,7 @@ This is the primary interface for multi-model evaluation.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-compare", "solution": true}
+#| export
     # --- Benchmark.compare_models ---
 def benchmark_compare_models(self, metric: str = "latency"):
     """
@@ -1348,8 +1352,9 @@ Models ──> Latency Benchmark ──┐
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-run", "solution": true}
+#| export
     # --- BenchmarkSuite.run_full_benchmark ---
-def benchsuite_run_full(self) -> Dict[str, Dict[str, BenchmarkResult]]:
+def benchsuite_run_full_benchmark(self) -> Dict[str, Dict[str, BenchmarkResult]]:
     """
     Run all benchmark categories.
 
@@ -1386,7 +1391,7 @@ def benchsuite_run_full(self) -> Dict[str, Dict[str, BenchmarkResult]]:
     return self.results
     ### END SOLUTION
 
-BenchmarkSuite.run_full_benchmark = benchsuite_run_full
+BenchmarkSuite.run_full_benchmark = benchsuite_run_full_benchmark
 
 # %% [markdown]
 """
@@ -1447,8 +1452,9 @@ energy = base_cost + (latency/1000) * 2.0 + memory * 0.01   (Joules)
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-energy", "solution": true}
+#| export
     # --- BenchmarkSuite._estimate_energy_efficiency ---
-def _benchsuite_estimate_energy(self) -> Dict[str, BenchmarkResult]:
+def _benchsuite_estimate_energy_efficiency(self) -> Dict[str, BenchmarkResult]:
     """
     Estimate energy efficiency (simplified simulation).
 
@@ -1504,7 +1510,7 @@ def _benchsuite_estimate_energy(self) -> Dict[str, BenchmarkResult]:
     return energy_results
     ### END SOLUTION
 
-BenchmarkSuite._estimate_energy_efficiency = _benchsuite_estimate_energy
+BenchmarkSuite._estimate_energy_efficiency = _benchsuite_estimate_energy_efficiency
 
 # %% [markdown]
 """
@@ -1555,6 +1561,7 @@ across all four metrics. The best performer in each category is highlighted gree
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-plot", "solution": true}
+#| export
     # --- BenchmarkSuite.plot_results and plot_pareto_frontier ---
 def benchsuite_plot_results(self, save_plots: bool = True):
     """
@@ -1635,7 +1642,7 @@ def benchsuite_plot_results(self, save_plots: bool = True):
 
 BenchmarkSuite.plot_results = benchsuite_plot_results
 
-def benchsuite_plot_pareto(self, x_metric: str = 'latency', y_metric: str = 'accuracy'):
+def benchsuite_plot_pareto_frontier(self, x_metric: str = 'latency', y_metric: str = 'accuracy'):
     """Plot Pareto frontier for two competing objectives."""
     if not MATPLOTLIB_AVAILABLE:
         print("⚠️ matplotlib not available - skipping plots. Install with: pip install matplotlib")
@@ -1692,7 +1699,7 @@ def benchsuite_plot_pareto(self, x_metric: str = 'latency', y_metric: str = 'acc
     print(f"📊 Pareto plot saved to {plot_path}")
     plt.show()
 
-BenchmarkSuite.plot_pareto_frontier = benchsuite_plot_pareto
+BenchmarkSuite.plot_pareto_frontier = benchsuite_plot_pareto_frontier
 
 # %% [markdown]
 """
@@ -1769,6 +1776,7 @@ For each metric type, identify the best performer and list all model scores.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-format-results", "solution": true}
+#| export
 def _benchsuite_format_results_summary(self) -> List[str]:
     """
     Format per-metric results into report lines.
@@ -1822,6 +1830,7 @@ Analyze accuracy vs speed trade-offs and generate use-case recommendations.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-format-recs", "solution": true}
+#| export
 def _benchsuite_format_recommendations(self) -> List[str]:
     """
     Generate recommendation lines from benchmark results.
@@ -1902,6 +1911,7 @@ markdown report and save it to disk.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchsuite-report", "solution": true}
+#| export
 def benchsuite_generate_report(self) -> str:
     """
     Generate comprehensive benchmark report.
@@ -2096,9 +2106,9 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### TinyMLPerf - Standardized Industry Benchmarking
+### MLPerf - Standardized Industry Benchmarking
 
-TinyMLPerf provides standardized benchmarks that enable fair comparison across different systems, similar to how MLPerf works for larger models. This is crucial for reproducible research and industry adoption.
+MLPerf provides standardized benchmarks that enable fair comparison across different systems, similar to how MLPerf works for larger models. This is crucial for reproducible research and industry adoption.
 
 ### Why Standardization Matters
 
@@ -2109,10 +2119,10 @@ Without standards, every team benchmarks differently:
 
 This makes it impossible to compare results across papers, products, or research groups.
 
-### TinyMLPerf Benchmark Architecture
+### MLPerf Benchmark Architecture
 
 ```
-TinyMLPerf Benchmark Structure:
+MLPerf Benchmark Structure:
 ┌─────────────────────────────────────────────────────────┐
 │                  Benchmark Definition                   │
 │ • Standard datasets (CIFAR-10, Speech Commands, etc.)   │
@@ -2157,7 +2167,7 @@ TinyMLPerf Benchmark Structure:
 
 ### Reproducibility Requirements
 
-All TinyMLPerf benchmarks use:
+All MLPerf benchmarks use:
 - **Fixed random seeds**: Deterministic input generation
 - **Standardized hardware**: Reference implementations for comparison
 - **Statistical validation**: Multiple runs with confidence intervals
@@ -2166,14 +2176,14 @@ All TinyMLPerf benchmarks use:
 
 # %% [markdown]
 """
-### TinyMLPerf.__init__ - Configuring Standard Benchmarks
+### MLPerf.__init__ - Configuring Standard Benchmarks
 
-The TinyMLPerf constructor sets up four standardized benchmark tasks, each with
+The MLPerf constructor sets up four standardized benchmark tasks, each with
 fixed input shapes, target accuracy, and maximum latency thresholds. Using a
 fixed random seed ensures reproducible results across different systems.
 
 ```
-Standard TinyMLPerf Benchmarks:
+Standard MLPerf Benchmarks:
 ┌─────────────────────┬──────────────────┬─────────┬──────────┐
 │ Benchmark           │ Input Shape      │ Acc Tgt │ Lat Tgt  │
 ├─────────────────────┼──────────────────┼─────────┼──────────┤
@@ -2187,22 +2197,22 @@ Standard TinyMLPerf Benchmarks:
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-init", "solution": true}
 #| export
-class TinyMLPerf:
+class MLPerf:
     """
-    TinyMLPerf-style standardized benchmarking for edge ML systems.
+    MLPerf-style standardized benchmarking for edge ML systems.
 
     Provides fixed benchmark configurations with target thresholds,
     standardized measurement protocols, and compliance reporting.
 
     EXAMPLE:
-    >>> perf = TinyMLPerf()
+    >>> perf = MLPerf()
     >>> results = perf.run_standard_benchmark(model, 'keyword_spotting')
     >>> perf.generate_compliance_report(results)
     """
 
     def __init__(self, random_seed: int = 42):
         """
-        Initialize TinyMLPerf benchmark suite.
+        Initialize MLPerf benchmark suite.
 
         TODO: Set up standard benchmark configurations with fixed seeds
 
@@ -2218,7 +2228,7 @@ class TinyMLPerf:
         self.random_seed = random_seed
         np.random.seed(random_seed)
 
-        # Standard TinyMLPerf benchmark configurations
+        # Standard MLPerf benchmark configurations
         self.benchmarks = {
             'keyword_spotting': {
                 'input_shape': (1, 16000),  # 1 second of 16kHz audio
@@ -2249,7 +2259,7 @@ class TinyMLPerf:
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf.__init__
+### 🧪 Unit Test: MLPerf.__init__
 
 **What we're testing**: Benchmark configuration setup with all four standard tasks
 **Why it matters**: Correct configurations ensure fair, standardized comparisons
@@ -2257,11 +2267,11 @@ class TinyMLPerf:
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-init", "locked": true, "points": 5}
-def test_unit_tinymlperf_init():
-    """🧪 Test TinyMLPerf initialization."""
-    print("🧪 Unit Test: TinyMLPerf.__init__...")
+def test_unit_mlperf_init():
+    """🧪 Test MLPerf initialization."""
+    print("🧪 Unit Test: MLPerf.__init__...")
 
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
 
     assert perf.random_seed == 42
     assert len(perf.benchmarks) == 4
@@ -2279,14 +2289,14 @@ def test_unit_tinymlperf_init():
         assert 0 < config['target_accuracy'] <= 1.0
         assert config['max_latency_ms'] > 0
 
-    print("✅ TinyMLPerf.__init__ works correctly!")
+    print("✅ MLPerf.__init__ works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf_init()
+    test_unit_mlperf_init()
 
 # %% [markdown]
 """
-### TinyMLPerf._run_latency_test - Measuring Inference Latency
+### MLPerf._run_latency_test - Measuring Inference Latency
 
 This helper runs the latency measurement phase: warmup, then timed inference
 for each test input. Returns lists of latencies (ms) and model predictions.
@@ -2299,8 +2309,9 @@ Test Inputs ──> Warmup Phase (10%) ──> Measurement Phase (100%) ──> 
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-latency", "solution": true}
-    # --- TinyMLPerf._run_latency_test ---
-def _tinymlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
+#| export
+    # --- MLPerf._run_latency_test ---
+def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
                                   benchmark_name: str, num_runs: int) -> Tuple[List[float], List[Any]]:
     """
     Run latency measurement phase with warmup.
@@ -2358,11 +2369,11 @@ def _tinymlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
     return latencies, predictions
     ### END SOLUTION
 
-TinyMLPerf._run_latency_test = _tinymlperf_run_latency_test
+MLPerf._run_latency_test = _mlperf_run_latency_test
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf._run_latency_test
+### 🧪 Unit Test: MLPerf._run_latency_test
 
 **What we're testing**: Warmup and measurement phase execution
 **Why it matters**: Proper warmup eliminates cold-start bias in measurements
@@ -2370,9 +2381,9 @@ TinyMLPerf._run_latency_test = _tinymlperf_run_latency_test
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-latency", "locked": true, "points": 10}
-def test_unit_tinymlperf_latency():
-    """🧪 Test TinyMLPerf latency measurement phase."""
-    print("🧪 Unit Test: TinyMLPerf._run_latency_test...")
+def test_unit_mlperf_latency():
+    """🧪 Test MLPerf latency measurement phase."""
+    print("🧪 Unit Test: MLPerf._run_latency_test...")
 
     class MockModel:
         def __init__(self, name):
@@ -2381,7 +2392,7 @@ def test_unit_tinymlperf_latency():
             time.sleep(0.001)
             return np.random.rand(2)
 
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
     model = MockModel("test")
 
     test_inputs = [np.random.randn(1, 16000).astype(np.float32) for _ in range(5)]
@@ -2391,14 +2402,14 @@ def test_unit_tinymlperf_latency():
     assert len(predictions) == 5
     assert all(lat > 0 for lat in latencies)
 
-    print("✅ TinyMLPerf._run_latency_test works correctly!")
+    print("✅ MLPerf._run_latency_test works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf_latency()
+    test_unit_mlperf_latency()
 
 # %% [markdown]
 """
-### TinyMLPerf._run_accuracy_test - Evaluating Prediction Quality
+### MLPerf._run_accuracy_test - Evaluating Prediction Quality
 
 This helper calculates accuracy by comparing model predictions against synthetic
 ground truth labels. It handles both binary classification (keyword spotting,
@@ -2418,6 +2429,7 @@ This helper normalizes them into a flat numpy array for label extraction.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-extract-pred", "solution": true}
+#| export
 def _extract_pred_array(pred) -> np.ndarray:
     """
     Extract a flat numpy array from a model prediction.
@@ -2460,7 +2472,8 @@ synthetic ground truth for binary and multi-class tasks.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-memory", "solution": true}
-def _tinymlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
+#| export
+def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
                                     benchmark_name: str, num_runs: int) -> float:
     """
     Calculate accuracy from predictions against synthetic ground truth.
@@ -2512,7 +2525,7 @@ def _tinymlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     return accuracy
     ### END SOLUTION
 
-TinyMLPerf._run_accuracy_test = _tinymlperf_run_accuracy_test
+MLPerf._run_accuracy_test = _mlperf_run_accuracy_test
 
 # %% [markdown]
 """
@@ -2548,7 +2561,7 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf._run_accuracy_test
+### 🧪 Unit Test: MLPerf._run_accuracy_test
 
 **What we're testing**: Accuracy calculation for binary and multi-class tasks
 **Why it matters**: Accuracy determines whether a model meets compliance thresholds
@@ -2556,15 +2569,15 @@ if __name__ == "__main__":
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-accuracy", "locked": true, "points": 10}
-def test_unit_tinymlperf_accuracy():
-    """🧪 Test TinyMLPerf accuracy calculation."""
-    print("🧪 Unit Test: TinyMLPerf._run_accuracy_test...")
+def test_unit_mlperf_accuracy():
+    """🧪 Test MLPerf accuracy calculation."""
+    print("🧪 Unit Test: MLPerf._run_accuracy_test...")
 
     class MockModel:
         def __init__(self, name):
             self.name = name
 
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
     model = MockModel("test_model")
 
     # Binary classification predictions
@@ -2577,14 +2590,14 @@ def test_unit_tinymlperf_accuracy():
     accuracy_mc = perf._run_accuracy_test(model, predictions_mc, 'image_classification', 10)
     assert 0 <= accuracy_mc <= 1
 
-    print("✅ TinyMLPerf._run_accuracy_test works correctly!")
+    print("✅ MLPerf._run_accuracy_test works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf_accuracy()
+    test_unit_mlperf_accuracy()
 
 # %% [markdown]
 """
-### TinyMLPerf.run_standard_benchmark - Complete Benchmark Execution
+### MLPerf.run_standard_benchmark - Complete Benchmark Execution
 
 This method orchestrates a complete standardized benchmark: input generation,
 latency testing, accuracy evaluation, and compliance determination. It composes
@@ -2601,11 +2614,12 @@ Config Lookup ──> Generate Inputs ──> _run_latency_test() ──> _run_a
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-run", "solution": true}
-    # --- TinyMLPerf.run_standard_benchmark ---
-def tinymlperf_run_standard(self, model: Any, benchmark_name: str,
+#| export
+    # --- MLPerf.run_standard_benchmark ---
+def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
                               num_runs: int = 100) -> Dict[str, Any]:
     """
-    Run a standardized TinyMLPerf benchmark.
+    Run a standardized MLPerf benchmark.
 
     TODO: Orchestrate input generation, latency test, accuracy test, and compliance check
 
@@ -2625,14 +2639,14 @@ def tinymlperf_run_standard(self, model: Any, benchmark_name: str,
     if benchmark_name not in self.benchmarks:
         available = list(self.benchmarks.keys())
         raise ValueError(
-            f"Unknown TinyMLPerf benchmark: '{benchmark_name}'\n"
+            f"Unknown MLPerf benchmark: '{benchmark_name}'\n"
             f"  ❌ '{benchmark_name}' is not a registered benchmark\n"
-            f"  💡 TinyMLPerf defines standard edge ML benchmarks for reproducible comparison\n"
+            f"  💡 MLPerf defines standard edge ML benchmarks for reproducible comparison\n"
             f"  🔧 Choose from: {available}"
         )
 
     config = self.benchmarks[benchmark_name]
-    print(f"🧪 Running TinyMLPerf {benchmark_name} benchmark...")
+    print(f"🧪 Running MLPerf {benchmark_name} benchmark...")
     print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
           f"<{config['max_latency_ms']}ms latency")
 
@@ -2683,13 +2697,13 @@ def tinymlperf_run_standard(self, model: Any, benchmark_name: str,
     return results
     ### END SOLUTION
 
-TinyMLPerf.run_standard_benchmark = tinymlperf_run_standard
+MLPerf.run_standard_benchmark = mlperf_run_standard_benchmark
 
-def tinymlperf_run_all(self, model: Any) -> Dict[str, Dict[str, Any]]:
-    """Run all TinyMLPerf benchmarks on a model."""
+def mlperf_run_all_benchmarks(self, model: Any) -> Dict[str, Dict[str, Any]]:
+    """Run all MLPerf benchmarks on a model."""
     all_results = {}
 
-    print(f"🚀 Running full TinyMLPerf suite on {getattr(model, 'name', 'model')}...")
+    print(f"🚀 Running full MLPerf suite on {getattr(model, 'name', 'model')}...")
     print("=" * 60)
 
     for benchmark_name in self.benchmarks.keys():
@@ -2703,11 +2717,11 @@ def tinymlperf_run_all(self, model: Any) -> Dict[str, Dict[str, Any]]:
 
     return all_results
 
-TinyMLPerf.run_all_benchmarks = tinymlperf_run_all
+MLPerf.run_all_benchmarks = mlperf_run_all_benchmarks
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf.run_standard_benchmark
+### 🧪 Unit Test: MLPerf.run_standard_benchmark
 
 **What we're testing**: Complete benchmark execution with compliance determination
 **Why it matters**: The full pipeline must produce valid, reproducible results
@@ -2715,9 +2729,9 @@ TinyMLPerf.run_all_benchmarks = tinymlperf_run_all
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-run", "locked": true, "points": 15}
-def test_unit_tinymlperf_run():
-    """🧪 Test TinyMLPerf standard benchmark execution."""
-    print("🧪 Unit Test: TinyMLPerf.run_standard_benchmark...")
+def test_unit_mlperf_run():
+    """🧪 Test MLPerf standard benchmark execution."""
+    print("🧪 Unit Test: MLPerf.run_standard_benchmark...")
 
     class MockModel:
         def __init__(self, name):
@@ -2728,7 +2742,7 @@ def test_unit_tinymlperf_run():
                 return np.random.rand(2)
             return np.random.rand(10)
 
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
     model = MockModel("test_model")
 
     result = perf.run_standard_benchmark(model, 'keyword_spotting', num_runs=5)
@@ -2748,14 +2762,14 @@ def test_unit_tinymlperf_run():
     except ValueError:
         pass
 
-    print("✅ TinyMLPerf.run_standard_benchmark works correctly!")
+    print("✅ MLPerf.run_standard_benchmark works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf_run()
+    test_unit_mlperf_run()
 
 # %% [markdown]
 """
-### TinyMLPerf.generate_compliance_report - Scorecard Generation
+### MLPerf.generate_compliance_report - Scorecard Generation
 
 The compliance report compiles results from multiple benchmarks into both
 machine-readable JSON and human-readable markdown formats, with overall
@@ -2781,7 +2795,8 @@ statistics, ready for JSON serialization.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-compile-data", "solution": true}
-def _tinymlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+#| export
+def _mlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """
     Compile benchmark results into structured report data.
 
@@ -2808,7 +2823,7 @@ def _tinymlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) ->
     total_benchmarks = 0
 
     report_data = {
-        'tinymlperf_version': '1.0',
+        'mlperf_version': '1.0',
         'random_seed': self.random_seed,
         'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
         'model_name': 'unknown',
@@ -2850,7 +2865,7 @@ def _tinymlperf_compile_report_data(self, results: Dict[str, Dict[str, Any]]) ->
     return report_data
     ### END SOLUTION
 
-TinyMLPerf._compile_report_data = _tinymlperf_compile_report_data
+MLPerf._compile_report_data = _mlperf_compile_report_data
 
 # %% [markdown]
 """
@@ -2860,7 +2875,8 @@ Convert structured report data into a markdown compliance summary.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-format-summary", "solution": true}
-def _tinymlperf_format_summary(self, report_data: Dict[str, Any]) -> str:
+#| export
+def _mlperf_format_compliance_summary(self, report_data: Dict[str, Any]) -> str:
     """
     Format report data into a human-readable markdown summary.
 
@@ -2879,7 +2895,7 @@ def _tinymlperf_format_summary(self, report_data: Dict[str, Any]) -> str:
     """
     ### BEGIN SOLUTION
     summary_lines = []
-    summary_lines.append("# TinyMLPerf Compliance Report")
+    summary_lines.append("# MLPerf Compliance Report")
     summary_lines.append("=" * 40)
     summary_lines.append(f"Model: {report_data['model_name']}")
     summary_lines.append(f"Date: {report_data['timestamp']}")
@@ -2908,7 +2924,7 @@ def _tinymlperf_format_summary(self, report_data: Dict[str, Any]) -> str:
     return "\n".join(summary_lines)
     ### END SOLUTION
 
-TinyMLPerf._format_compliance_summary = _tinymlperf_format_summary
+MLPerf._format_compliance_summary = _mlperf_format_compliance_summary
 
 # %% [markdown]
 """
@@ -2918,10 +2934,11 @@ Combine data compilation, JSON serialization, and summary formatting.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tinymlperf-scorecard", "solution": true}
-def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
-                                 output_path: str = "tinymlperf_report.json") -> str:
+#| export
+def mlperf_generate_compliance_report(self, results: Dict[str, Dict[str, Any]],
+                                           output_path: str = "mlperf_report.json") -> str:
     """
-    Generate TinyMLPerf compliance report.
+    Generate MLPerf compliance report.
 
     TODO: Compose _compile_report_data and _format_compliance_summary
 
@@ -2946,17 +2963,17 @@ def tinymlperf_generate_report(self, results: Dict[str, Dict[str, Any]],
     with open(summary_path, 'w') as f:
         f.write(summary_text)
 
-    print(f"📄 TinyMLPerf report saved to {output_path}")
+    print(f"📄 MLPerf report saved to {output_path}")
     print(f"📄 Summary saved to {summary_path}")
 
     return summary_text
     ### END SOLUTION
 
-TinyMLPerf.generate_compliance_report = tinymlperf_generate_report
+MLPerf.generate_compliance_report = mlperf_generate_compliance_report
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf._compile_report_data
+### 🧪 Unit Test: MLPerf._compile_report_data
 
 **What we're testing**: Structured data compilation from raw benchmark results
 **Why it matters**: Correct data structure is the foundation for both JSON and markdown reports
@@ -2964,11 +2981,11 @@ TinyMLPerf.generate_compliance_report = tinymlperf_generate_report
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-compile", "locked": true, "points": 3}
-def test_unit_tinymlperf_compile_data():
-    """🧪 Test TinyMLPerf._compile_report_data implementation."""
-    print("🧪 Unit Test: TinyMLPerf._compile_report_data...")
+def test_unit_mlperf_compile_data():
+    """🧪 Test MLPerf._compile_report_data implementation."""
+    print("🧪 Unit Test: MLPerf._compile_report_data...")
 
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
 
     # Simulate results from run_standard_benchmark
     mock_results = {
@@ -2988,14 +3005,14 @@ def test_unit_tinymlperf_compile_data():
     assert report_data['summary']['overall_compliant'] == True
     assert report_data['model_name'] == 'test_model'
 
-    print("✅ TinyMLPerf._compile_report_data works correctly!")
+    print("✅ MLPerf._compile_report_data works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf_compile_data()
+    test_unit_mlperf_compile_data()
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf._format_compliance_summary
+### 🧪 Unit Test: MLPerf._format_compliance_summary
 
 **What we're testing**: Markdown summary generation from structured report data
 **Why it matters**: Human-readable reports are what engineers actually read
@@ -3003,11 +3020,11 @@ if __name__ == "__main__":
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf-format", "locked": true, "points": 3}
-def test_unit_tinymlperf_format_summary():
-    """🧪 Test TinyMLPerf._format_compliance_summary implementation."""
-    print("🧪 Unit Test: TinyMLPerf._format_compliance_summary...")
+def test_unit_mlperf_format_summary():
+    """🧪 Test MLPerf._format_compliance_summary implementation."""
+    print("🧪 Unit Test: MLPerf._format_compliance_summary...")
 
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
 
     report_data = {
         'model_name': 'test_model',
@@ -3033,16 +3050,16 @@ def test_unit_tinymlperf_format_summary():
     assert "keyword_spotting" in summary, "Should list benchmark names"
     assert "PASS" in summary, "Compliant benchmark should show PASS"
 
-    print("✅ TinyMLPerf._format_compliance_summary works correctly!")
+    print("✅ MLPerf._format_compliance_summary works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf_format_summary()
+    test_unit_mlperf_format_summary()
 
 # %% [markdown]
 """
-### 🧪 Unit Test: TinyMLPerf (Full Class Integration)
+### 🧪 Unit Test: MLPerf (Full Class Integration)
 
-This test validates our TinyMLPerf class provides standardized benchmarking
+This test validates our MLPerf class provides standardized benchmarking
 with proper compliance reporting.
 
 **What we're testing**: Industry-standard benchmark protocols and compliance reporting
@@ -3051,9 +3068,9 @@ with proper compliance reporting.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-tinymlperf", "locked": true, "points": 10}
-def test_unit_tinymlperf():
-    """🧪 Test TinyMLPerf standardized benchmarking."""
-    print("🧪 Unit Test: TinyMLPerf...")
+def test_unit_mlperf():
+    """🧪 Test MLPerf standardized benchmarking."""
+    print("🧪 Unit Test: MLPerf...")
 
     # Create mock model for testing
     class MockModel:
@@ -3071,7 +3088,7 @@ def test_unit_tinymlperf():
             return np.random.rand(2)
 
     model = MockModel("test_model")
-    perf = TinyMLPerf(random_seed=42)
+    perf = MLPerf(random_seed=42)
 
     # Test individual benchmark
     result = perf.run_standard_benchmark(model, 'keyword_spotting', num_runs=5)
@@ -3097,13 +3114,13 @@ def test_unit_tinymlperf():
 
         # Verify report was created
         assert Path(report_path).exists()
-        assert "TinyMLPerf Compliance Report" in summary
+        assert "MLPerf Compliance Report" in summary
         assert "Compliance Rate" in summary
 
-    print("✅ TinyMLPerf works correctly!")
+    print("✅ MLPerf works correctly!")
 
 if __name__ == "__main__":
-    test_unit_tinymlperf()
+    test_unit_mlperf()
 
 # %% [markdown]
 """
@@ -3187,6 +3204,7 @@ the benchmark results. It establishes the reference point for improvement calcul
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-collect-base", "solution": true}
+#| export
 def _collect_base_metrics(base_name: str, benchmark_results: Dict) -> Dict[str, float]:
     """
     Extract base model metrics from benchmark results.
@@ -3260,6 +3278,7 @@ Accuracy: retention = opt_accuracy / base_accuracy (closer to 1 is better)
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-calc-improvements", "solution": true}
+#| export
 def _calculate_improvements(base_metrics: Dict[str, float], opt_metrics: Dict[str, float]) -> Dict[str, float]:
     """
     Calculate improvement ratios for an optimized model vs baseline.
@@ -3335,6 +3354,7 @@ accuracy-preservation, and balanced deployment.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "benchmark-gen-recs", "solution": true}
+#| export
 def _generate_recommendations(all_improvements: Dict[str, Dict[str, float]]) -> Dict[str, Dict]:
     """
     Generate deployment recommendations from improvement data.
@@ -3740,7 +3760,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 - **Closed:** Same models/datasets, optimize systems (hardware/software)
 - **Open:** Modify models/algorithms, show innovation
 
-**TinyMLPerf:** Edge device benchmarks (<1MB models, <100ms latency, <10mW power) that inspire the capstone.
+**MLPerf:** Edge device benchmarks (<1MB models, <100ms latency, <10mW power) that inspire the capstone.
 
 ### Key Takeaways
 
@@ -3749,7 +3769,7 @@ MLPerf (created by MLCommons) is the industry-standard ML benchmarking framework
 3. Measure multiple metrics (accuracy, latency, memory, energy)
 4. Optimize for real deployment constraints
 
-The capstone project follows TinyMLPerf-style principles!
+The capstone project follows MLPerf-style principles!
 """
 
 # %% [markdown]
@@ -3812,14 +3832,14 @@ def test_module():
     test_unit_benchsuite_format_results()
     test_unit_benchsuite_format_recs()
     test_unit_benchmark_suite()
-    test_unit_tinymlperf_init()
-    test_unit_tinymlperf_latency()
+    test_unit_mlperf_init()
+    test_unit_mlperf_latency()
     test_unit_extract_pred_array()
-    test_unit_tinymlperf_accuracy()
-    test_unit_tinymlperf_run()
-    test_unit_tinymlperf_compile_data()
-    test_unit_tinymlperf_format_summary()
-    test_unit_tinymlperf()
+    test_unit_mlperf_accuracy()
+    test_unit_mlperf_run()
+    test_unit_mlperf_compile_data()
+    test_unit_mlperf_format_summary()
+    test_unit_mlperf()
     test_unit_collect_base_metrics()
     test_unit_calculate_improvements()
     test_unit_generate_recommendations()
@@ -3918,9 +3938,9 @@ def test_module():
     assert "System Information" in report
     assert "Recommendations" in report
 
-    # Test 4: TinyMLPerf compliance
-    print("  Testing TinyMLPerf compliance...")
-    perf = TinyMLPerf(random_seed=42)
+    # Test 4: MLPerf compliance
+    print("  Testing MLPerf compliance...")
+    perf = MLPerf(random_seed=42)
     perf_results = perf.run_standard_benchmark(models[0], 'keyword_spotting', num_runs=5)
 
     required_keys = ['accuracy', 'mean_latency_ms', 'compliant', 'target_accuracy']
@@ -3982,8 +4002,8 @@ For a CI/CD pipeline that runs 100 benchmarks per day:
 - Accurate config (15s each): _____ minutes total daily
 - What's the key trade-off you're making? [accuracy/precision/development velocity]
 
-### 4. TinyMLPerf Compliance Metrics
-You implemented TinyMLPerf-style standardized benchmarks with target thresholds.
+### 4. MLPerf Compliance Metrics
+You implemented MLPerf-style standardized benchmarks with target thresholds.
 If a model achieves 89% accuracy (target: 90%) and 120ms latency (target: <100ms):
 - Is it compliant? [Yes/No] _____
 - Which constraint is more critical for edge deployment? [accuracy/latency]
@@ -4061,7 +4081,7 @@ Congratulations! You've built a professional benchmarking system that rivals ind
 ### Key Accomplishments
 - Built comprehensive benchmarking infrastructure with BenchmarkResult, Benchmark, and BenchmarkSuite classes
 - Implemented statistical rigor with confidence intervals, variance analysis, and measurement optimization
-- Created TinyMLPerf-style standardized benchmarks for reproducible cross-system comparison
+- Created MLPerf-style standardized benchmarks for reproducible cross-system comparison
 - Developed optimization comparison workflows that generate actionable recommendations
 - All tests pass ✅ (validated by `test_module()`)
 

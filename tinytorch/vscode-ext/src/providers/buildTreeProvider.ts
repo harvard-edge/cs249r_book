@@ -14,10 +14,10 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   getChildren(element?: TreeNode): TreeNode[] {
     if (!element) {
       return [
-        new CategoryTreeItem('Site (HTML)', 'site'),
-        new CategoryTreeItem('PDF Course Guide', 'pdf'),
-        new CategoryTreeItem('Research Paper', 'paper'),
-        new CategoryTreeItem('Utilities', 'utilities'),
+        new CategoryTreeItem('Site (HTML)', 'site', 'globe'),
+        new CategoryTreeItem('PDF Course Guide', 'pdf', 'file-pdf'),
+        new CategoryTreeItem('Research Paper', 'paper', 'book'),
+        new CategoryTreeItem('Utilities', 'utilities', 'tools'),
       ];
     }
 

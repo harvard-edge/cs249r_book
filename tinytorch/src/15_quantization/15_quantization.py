@@ -1084,6 +1084,7 @@ Calibration Data Flow for Layer at Index i:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "collect_layer_inputs", "solution": true}
+#| export
 def _collect_layer_inputs(model, layer_index: int, calibration_data: List[Tensor], max_samples: int = 10) -> List[Tensor]:
     """
     Forward calibration data through preceding layers to collect inputs for a specific layer.
@@ -1194,6 +1195,7 @@ Single Layer Quantization:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "quantize_single_layer", "solution": true}
+#| export
 def _quantize_single_layer(layer: Linear, calibration_inputs: Optional[List[Tensor]] = None) -> QuantizedLinear:
     """
     Quantize a single Linear layer and optionally calibrate it.

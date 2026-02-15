@@ -591,6 +591,7 @@ Trainer State After __init__:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-init", "locked": false, "solution": true}
+#| export
 def trainer_init(self, model, optimizer, loss_fn, scheduler=None, grad_clip_norm=None):
     """
     Initialize trainer with model and training components.
@@ -734,6 +735,7 @@ with scaled gradients for accumulation.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-process-batch", "locked": false, "solution": true}
+#| export
 def _trainer_process_batch(self, inputs, targets, accumulation_steps):
     """
     Process one batch: forward pass, loss computation, backward pass.
@@ -782,6 +784,7 @@ step the optimizer, and reset gradients for the next accumulation window.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-optimizer-update", "locked": false, "solution": true}
+#| export
 def _trainer_optimizer_update(self):
     """
     Clip gradients (if enabled) and step the optimizer.
@@ -813,6 +816,7 @@ training epoch with accumulation, scheduling, and history tracking.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-train-epoch", "locked": false, "solution": true}
+#| export
 def trainer_train_epoch(self, dataloader, accumulation_steps=1):
     """
     Train for one epoch through the dataset.
@@ -1073,6 +1077,7 @@ no gradient clipping.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-evaluate", "locked": false, "solution": true}
+#| export
 def trainer_evaluate(self, dataloader):
     """
     Evaluate model on dataset without updating parameters.
@@ -1217,6 +1222,7 @@ Checkpoint Contents:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-save-checkpoint", "locked": false, "solution": true}
+#| export
 def trainer_save_checkpoint(self, path: str):
     """
     Save complete training state for resumption.
@@ -1334,6 +1340,7 @@ checkpoint.pkl ──→ pickle.load() ──→ restore epoch, step
 """
 
 # %% nbgrader={"grade": false, "grade_id": "trainer-load-checkpoint", "locked": false, "solution": true}
+#| export
 def trainer_load_checkpoint(self, path: str):
     """
     Load training state from checkpoint.

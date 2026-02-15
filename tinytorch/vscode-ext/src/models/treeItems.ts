@@ -4,13 +4,14 @@ import { ModuleInfo, CommandRunRecord } from '../types';
 /** A module entry in the Modules tree */
 export class ModuleTreeItem extends vscode.TreeItem {
   constructor(public readonly module: ModuleInfo) {
-    const icon = module.status === 'completed' ? '$(pass-filled)'
-               : module.status === 'started'   ? '$(edit)'
-               : '$(circle-outline)';
+    const iconId = module.status === 'completed' ? 'pass-filled'
+                 : module.status === 'started'   ? 'edit'
+                 : 'circle-outline';
     super(
-      `${icon}  ${module.number} — ${module.title ?? module.displayName}`,
+      `${module.number} — ${module.title ?? module.displayName}`,
       vscode.TreeItemCollapsibleState.Collapsed,
     );
+    this.iconPath = new vscode.ThemeIcon(iconId);
     this.contextValue = 'module';
     this.tooltip = `Module ${module.number}: ${module.title ?? module.displayName}\nStatus: ${module.status.replace('_', ' ')}`;
     this.description = module.status === 'not_started' ? '' : module.status.replace('_', ' ');
@@ -25,12 +26,11 @@ export class ActionTreeItem extends vscode.TreeItem {
     args: unknown[] = [],
     icon?: string,
   ) {
-    // Visually offset leaf actions under expanded categories in sidebars.
-    super(`  ${label}`, vscode.TreeItemCollapsibleState.None);
-    this.command = { command: commandId, title: label, arguments: args };
+    super(label, vscode.TreeItemCollapsibleState.None);
     if (icon) {
       this.iconPath = new vscode.ThemeIcon(icon);
     }
+    this.command = { command: commandId, title: label, arguments: args };
     this.contextValue = 'action';
   }
 }
@@ -40,8 +40,10 @@ export class CategoryTreeItem extends vscode.TreeItem {
   constructor(
     label: string,
     public readonly categoryId: string,
+    icon?: string,
   ) {
     super(label, vscode.TreeItemCollapsibleState.Expanded);
+    this.iconPath = new vscode.ThemeIcon(icon ?? 'symbol-folder');
     this.contextValue = 'category';
   }
 }
@@ -49,11 +51,12 @@ export class CategoryTreeItem extends vscode.TreeItem {
 /** An entry in the Run History tree */
 export class RunHistoryTreeItem extends vscode.TreeItem {
   constructor(public readonly record: CommandRunRecord) {
-    const icon = record.status === 'succeeded' ? '$(pass)'
-               : record.status === 'failed'    ? '$(error)'
-               : '$(loading~spin)';
+    const iconId = record.status === 'succeeded' ? 'pass'
+                 : record.status === 'failed'    ? 'error'
+                 : 'loading~spin';
     const time = new Date(record.timestamp).toLocaleTimeString();
-    super(`${icon}  ${record.label}`, vscode.TreeItemCollapsibleState.None);
+    super(record.label, vscode.TreeItemCollapsibleState.None);
+    this.iconPath = new vscode.ThemeIcon(iconId);
     this.description = time;
     this.tooltip = `${record.label}\n${record.command}\n${time}`;
     this.command = {

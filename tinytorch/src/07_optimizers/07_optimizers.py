@@ -336,6 +336,7 @@ all share the same extraction logic.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "extract-gradient", "solution": true}
+#| export
 class _ExtractGradientMixin:
     """Mixin added to Optimizer for gradient extraction."""
     def _extract_gradient(self, param: Tensor) -> np.ndarray:
@@ -894,6 +895,7 @@ only has to compose: extract gradient, update moments, apply update.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-update-moments", "solution": true}
+#| export
 class _AdamUpdateMomentsMixin:
     """Mixin added to Adam for moment updates."""
     def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
@@ -1024,6 +1026,7 @@ For each parameter:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adam-step", "solution": true}
+#| export
 class _AdamStepMixin:
     """Mixin added to Adam for step method."""
     def step(self):
@@ -1277,6 +1280,7 @@ AdamW flow:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adamw-update-moments", "solution": true}
+#| export
 class _AdamWUpdateMomentsMixin:
     """Mixin added to AdamW for moment updates."""
     def _update_moments(self, i: int, grad_data: np.ndarray) -> tuple:
@@ -1403,6 +1407,7 @@ For each parameter:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "adamw-step", "solution": true}
+#| export
 class _AdamWStepMixin:
     """Mixin added to AdamW for step method."""
     def step(self):

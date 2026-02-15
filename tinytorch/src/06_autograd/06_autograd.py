@@ -1637,6 +1637,7 @@ This helper is used by CrossEntropyBackward to convert logits to probabilities.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "stable-softmax-helper", "solution": true}
+#| export
 def _stable_softmax(logits_data):
     """
     Compute softmax probabilities with numerical stability.
@@ -1730,6 +1731,7 @@ One-hot:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "one-hot-helper", "solution": true}
+#| export
 def _one_hot_encode(targets, batch_size, num_classes):
     """
     Convert class indices to one-hot vectors.
