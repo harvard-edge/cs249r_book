@@ -35,6 +35,7 @@ Later files override earlier files.
 - `base/crossref-video.yml`
 - `base/custom-numbered-blocks.yml`
 - `base/diagram.yml`
+- `base/execute-env.yml`
 - `html/announcement.yml`
 - `html/filters.yml`
 - `html/filter-metadata.yml`

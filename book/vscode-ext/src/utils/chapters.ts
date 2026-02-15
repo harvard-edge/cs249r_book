@@ -70,13 +70,18 @@ function readChapterOrderFromConfig(repoRoot: string, vol: VolumeId, source: Cha
         continue;
       }
 
-      // Regular chapter directories: contents/volX/<chapter-dir>/<file>.qmd
+      // Regular chapter entries: use the chapter file stem as command key.
       const dirName = segments[0];
-      if (EXCLUDED_CHAPTER_DIRS.has(dirName) || seen.has(dirName)) {
+      if (EXCLUDED_CHAPTER_DIRS.has(dirName)) {
         continue;
       }
-      seen.add(dirName);
-      chapterOrderKeys.push(dirName);
+      const fileNameOnly = segments[segments.length - 1];
+      const chapterStem = fileNameOnly.replace(/\.qmd$/i, '');
+      if (seen.has(chapterStem)) {
+        continue;
+      }
+      seen.add(chapterStem);
+      chapterOrderKeys.push(chapterStem);
     }
 
     if (chapterOrderKeys.length > 0) {
@@ -108,12 +113,28 @@ export function discoverChapters(repoRoot: string): VolumeInfo[] {
         const dirPath = path.join(contentsDir, e.name);
         return fs.readdirSync(dirPath).some(f => f.endsWith('.qmd'));
       })
-      .map(e => ({
-        name: e.name,
-        volume: vol,
-        dirPath: path.join(contentsDir, e.name),
-        displayName: toDisplayName(e.name),
-      }));
+      .map(e => {
+        const dirPath = path.join(contentsDir, e.name);
+        const qmdFiles = fs.readdirSync(dirPath)
+          .filter(f => f.endsWith('.qmd'))
+          .sort();
+
+        const preferredByConfig = qmdFiles.find(file => {
+          const stem = file.replace(/\.qmd$/i, '');
+          return orderByName.has(stem);
+        });
+        const preferredByDirName = qmdFiles.find(file => file.replace(/\.qmd$/i, '') === e.name);
+        const preferredNonHidden = qmdFiles.find(file => !path.basename(file).startsWith('_'));
+        const selected = preferredByConfig ?? preferredByDirName ?? preferredNonHidden ?? qmdFiles[0];
+        const chapterStem = selected.replace(/\.qmd$/i, '');
+
+        return {
+          name: chapterStem,
+          volume: vol,
+          dirPath,
+          displayName: toDisplayName(chapterStem),
+        };
+      });
 
     const appendixDir = path.join(contentsDir, 'backmatter');
     const appendixChapters: ChapterInfo[] = fs.existsSync(appendixDir)

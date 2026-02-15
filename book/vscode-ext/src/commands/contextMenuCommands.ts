@@ -2,19 +2,22 @@ import * as vscode from 'vscode';
 import { getRepoRoot, parseQmdFile } from '../utils/workspace';
 import { runBookCommand } from '../utils/terminal';
 import { runIsolatedDebugCommand } from '../utils/parallelDebug';
+import { withQuartoResetPrefix } from '../utils/quartoConfigReset';
+import type { BuildFormat } from '../types';
 
 export function registerContextMenuCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
   if (!root) { return; }
 
-  const makeHandler = (format: string) => {
+  const makeHandler = (format: BuildFormat) => {
     return (uri: vscode.Uri) => {
       const ctx = parseQmdFile(uri);
       if (!ctx) {
         vscode.window.showWarningMessage('Could not determine volume/chapter from file path.');
         return;
       }
-      void runBookCommand(`./book/binder build ${format} ${ctx.chapter} --${ctx.volume} -v`, root, {
+      const buildCmd = `./book/binder build ${format} ${ctx.chapter} --${ctx.volume} -v`;
+      void runBookCommand(withQuartoResetPrefix(format, ctx.volume, buildCmd), root, {
         label: `Build ${format.toUpperCase()} (${ctx.volume}/${ctx.chapter})`,
       });
     };

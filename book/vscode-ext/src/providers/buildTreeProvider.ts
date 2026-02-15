@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { VolumeInfo, BuildFormat } from '../types';
+import { VolumeInfo } from '../types';
 import { discoverChapters } from '../utils/chapters';
 import { VolumeTreeItem, ChapterTreeItem, ActionTreeItem } from '../models/treeItems';
 
@@ -37,17 +37,13 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
       const chapterItems = vol.chapters.map(ch => new ChapterTreeItem(ch));
 
-      const formats: BuildFormat[] = ['html', 'pdf', 'epub'];
-      const volumeActions = formats.map(fmt =>
-        new ActionTreeItem(
-          `Build Full ${vol.label} (${fmt.toUpperCase()})`,
-          `mlsysbook.buildVolume${fmt.charAt(0).toUpperCase() + fmt.slice(1)}`,
-          [vol.id],
-          'package',
-        )
-      );
+      const volumeActions = [
+        new ActionTreeItem('Build Full Volume...', 'mlsysbook.buildFullVolume', [vol.id], 'package'),
+        new ActionTreeItem('Build Chapters...', 'mlsysbook.buildSelectedChapters', [vol.id], 'files'),
+        new ActionTreeItem('Build All Chapters (Parallel)...', 'mlsysbook.buildAllChaptersParallel', [vol.id], 'beaker'),
+      ];
 
-      return [...chapterItems, ...volumeActions];
+      return [...volumeActions, ...chapterItems];
     }
 
     if (element instanceof ChapterTreeItem) {

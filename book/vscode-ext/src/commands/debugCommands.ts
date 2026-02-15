@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { VolumeId } from '../types';
-import { getRepoRoot, parseQmdFile } from '../utils/workspace';
-import { runBookCommand } from '../utils/terminal';
+import { getRepoRoot } from '../utils/workspace';
 import { discoverChapters } from '../utils/chapters';
 import {
   cancelActiveDebugSession,
@@ -9,8 +8,6 @@ import {
   getLastFailedDebugSession,
   revealParallelDebugOutput,
   rerunDebugSession,
-  runBisectChapterDebug,
-  runIsolatedDebugCommand,
   runParallelChapterDebug,
 } from '../utils/parallelDebug';
 
@@ -43,7 +40,7 @@ async function runParallelDebugWizard(
   forcePdf: boolean,
 ): Promise<void> {
   const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
-  const volumeId = await pickVolume(defaultVolume, 'Select volume for parallel chapter debug');
+  const volumeId = await pickVolume(defaultVolume, 'Select volume to test');
   if (!volumeId) { return; }
 
   const volumes = discoverChapters(root);
@@ -60,7 +57,7 @@ async function runParallelDebugWizard(
       chapter: ch.name,
     })),
     {
-      placeHolder: 'Select chapters to debug in parallel',
+      placeHolder: 'Select chapters to test (multi-select)',
       canPickMany: true,
       matchOnDescription: true,
     },
@@ -99,121 +96,17 @@ export function registerDebugCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
   if (!root) { return; }
 
-  // Debug full volume
+  // Test All Chapters (Parallel) - main debug entry point
   context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.debugVolumePdf', (vol: VolumeId) => {
-      void runIsolatedDebugCommand({
-        repoRoot: root,
-        command: `./book/binder debug pdf --${vol}`,
-        label: `Debug Volume PDF (${vol})`,
-      });
-    })
-  );
-
-  // Debug chapter sections (interactive QuickPick)
-  context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.debugChapterSections', async () => {
-      const volPick = await vscode.window.showQuickPick(
-        [
-          { label: 'Volume I', id: 'vol1' as VolumeId },
-          { label: 'Volume II', id: 'vol2' as VolumeId },
-        ],
-        { placeHolder: 'Select volume' },
-      );
-      if (!volPick) { return; }
-
-      const volumes = discoverChapters(root);
-      const volume = volumes.find(v => v.id === volPick.id);
-      if (!volume) { return; }
-
-      const chapterPick = await vscode.window.showQuickPick(
-        volume.chapters.map(ch => ({ label: ch.displayName, description: ch.name, id: ch.name })),
-        { placeHolder: 'Select chapter to debug' },
-      );
-      if (!chapterPick) { return; }
-
-      const fmtPick = await vscode.window.showQuickPick(
-        ['pdf', 'html', 'epub'],
-        { placeHolder: 'Select format (default: pdf)' },
-      );
-      const fmt = fmtPick ?? 'pdf';
-
-      void runIsolatedDebugCommand({
-        repoRoot: root,
-        command: `./book/binder debug ${fmt} --${volPick.id} --chapter ${chapterPick.id}`,
-        label: `Debug Chapter ${fmt.toUpperCase()} (${volPick.id}/${chapterPick.id})`,
-      });
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.debugParallelChapters', async () => {
+    vscode.commands.registerCommand('mlsysbook.testAllChaptersParallel', async () => {
       await runParallelDebugWizard(root, context, false);
     })
   );
 
+  // Keep debugParallelChapters as alias for backward compatibility (e.g. command palette)
   context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.debugBisectChapters', async () => {
-      const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
-      const volumeId = await pickVolume(defaultVolume, 'Select volume for bisect debug');
-      if (!volumeId) { return; }
-
-      const volumes = discoverChapters(root);
-      const volume = volumes.find(v => v.id === volumeId);
-      if (!volume || volume.chapters.length === 0) {
-        vscode.window.showWarningMessage(`No chapters found for ${volumeId}.`);
-        return;
-      }
-
-      const candidateMode = await vscode.window.showQuickPick(
-        [
-          { label: 'Use all chapters in this volume', id: 'all' },
-          { label: 'Select candidate chapters manually', id: 'manual' },
-        ],
-        { placeHolder: 'Choose bisect candidate set' },
-      );
-      if (!candidateMode) { return; }
-
-      let chapters = volume.chapters.map(ch => ch.name);
-      if (candidateMode.id === 'manual') {
-        const picks = await vscode.window.showQuickPick(
-          volume.chapters.map(ch => ({
-            label: ch.displayName,
-            description: ch.name,
-            chapter: ch.name,
-          })),
-          {
-            placeHolder: 'Select candidate chapters for bisect',
-            canPickMany: true,
-            matchOnDescription: true,
-          },
-        );
-        if (!picks || picks.length === 0) { return; }
-        chapters = picks.map(p => p.chapter);
-      }
-
-      const fmtPick = await vscode.window.showQuickPick(
-        ['pdf', 'html', 'epub'],
-        { placeHolder: 'Select debug format (default: pdf)' },
-      );
-      const fmt = fmtPick ?? 'pdf';
-
-      const defaultWorkers = vscode.workspace
-        .getConfiguration('mlsysbook')
-        .get<number>('parallelDebugWorkers', 3);
-      const workers = await pickWorkers(defaultWorkers);
-      if (!workers) { return; }
-
-      await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, volumeId);
-      await context.workspaceState.update(STATE_LAST_PARALLEL_WORKERS, workers);
-
-      await runBisectChapterDebug({
-        repoRoot: root,
-        volume: volumeId,
-        format: fmt,
-        chapters,
-        workers,
-      });
+    vscode.commands.registerCommand('mlsysbook.debugParallelChapters', async () => {
+      await runParallelDebugWizard(root, context, false);
     })
   );
 
@@ -277,24 +170,4 @@ export function registerDebugCommands(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.quickBuildCurrentChapterPdf', () => {
-      const uri = vscode.window.activeTextEditor?.document.uri;
-      if (!uri || !uri.fsPath.endsWith('.qmd')) {
-        vscode.window.showWarningMessage('Open a chapter .qmd file to run quick chapter PDF build.');
-        return;
-      }
-      const parsed = parseQmdFile(uri);
-      if (!parsed) {
-        vscode.window.showWarningMessage('Could not determine volume/chapter for active file.');
-        return;
-      }
-      void runBookCommand(`./book/binder build pdf ${parsed.chapter} --${parsed.volume} -v`, root, {
-        label: `Quick Chapter PDF (${parsed.volume}/${parsed.chapter})`,
-      });
-    }),
-    vscode.commands.registerCommand('mlsysbook.quickParallelDebugSelectedPdf', async () => {
-      await runParallelDebugWizard(root, context, true);
-    }),
-  );
 }

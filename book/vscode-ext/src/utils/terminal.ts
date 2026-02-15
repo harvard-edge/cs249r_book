@@ -35,9 +35,11 @@ export interface CommandRunRecord {
   mode: 'raw' | 'focused';
 }
 
-interface RunOptions {
+export interface RunOptions {
   mode?: ExecutionMode;
   label?: string;
+  /** When provided, runs in focused mode to capture exit code, then calls with success. */
+  onComplete?: (success: boolean) => void;
 }
 
 let extensionContext: vscode.ExtensionContext | undefined;
@@ -164,7 +166,7 @@ export function initializeRunManager(context: vscode.ExtensionContext): void {
 }
 
 export async function runBookCommand(command: string, cwd: string, options: RunOptions = {}): Promise<void> {
-  const mode = options.mode ?? getExecutionMode();
+  const mode = options.onComplete ? 'focused' : (options.mode ?? getExecutionMode());
   const label = options.label ?? 'MLSysBook command';
   const runId = Date.now();
   const start = Date.now();
@@ -221,6 +223,8 @@ export async function runBookCommand(command: string, cwd: string, options: RunO
   channel.appendLine('');
   channel.appendLine(makeSummary(runId, label, success, elapsedMs, command));
   channel.appendLine('');
+
+  options.onComplete?.(success);
 
   if (success) {
     void vscode.window.showInformationMessage(`${label} succeeded.`);

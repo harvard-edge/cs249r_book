@@ -3,12 +3,22 @@ import * as path from 'path';
 import { PRECOMMIT_QMD_FILE_FIXERS } from '../constants';
 import { getRepoRoot } from '../utils/workspace';
 import { runBookCommand } from '../utils/terminal';
+import type { PrecommitStatusManager } from '../validation/precommitStatusManager';
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-export function registerPrecommitCommands(context: vscode.ExtensionContext): void {
+/** Extract hook id from pre-commit command, e.g. "pre-commit run codespell --all-files" -> "codespell" */
+function parseHookIdFromCommand(command: string): string | null {
+  const match = command.match(/pre-commit run ([a-zA-Z0-9_-]+)/);
+  return match?.[1] ?? null;
+}
+
+export function registerPrecommitCommands(
+  context: vscode.ExtensionContext,
+  statusManager: PrecommitStatusManager,
+): void {
   const root = getRepoRoot();
   if (!root) { return; }
 
@@ -44,14 +54,25 @@ export function registerPrecommitCommands(context: vscode.ExtensionContext): voi
 
   context.subscriptions.push(
     vscode.commands.registerCommand('mlsysbook.precommitRunAll', () => {
+      statusManager.setRunAllPending();
       void vscode.workspace.saveAll(false).then(() => runBookCommand('pre-commit run --all-files', root, {
         label: 'Pre-commit (all hooks)',
+        onComplete: (success) => statusManager.setRunAllResult(success),
       }));
     }),
 
     vscode.commands.registerCommand('mlsysbook.precommitRunHook', (command: string) => {
+      const hookId = parseHookIdFromCommand(command);
+      if (hookId) {
+        statusManager.setHookPending(hookId);
+      }
       void vscode.workspace.saveAll(false).then(() => runBookCommand(command, root, {
         label: 'Pre-commit (selected hook)',
+        onComplete: (success) => {
+          if (hookId) {
+            statusManager.setHookResult(hookId, success);
+          }
+        },
       }));
     }),
 

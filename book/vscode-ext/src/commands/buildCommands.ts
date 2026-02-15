@@ -5,6 +5,7 @@ import { discoverChapters } from '../utils/chapters';
 import { getRepoRoot, parseQmdFile } from '../utils/workspace';
 import { runInVisibleTerminal } from '../utils/terminal';
 import { getQuartoResetAllFormatsCommand, withQuartoResetPrefix } from '../utils/quartoConfigReset';
+import { runParallelChapterDebug } from '../utils/parallelDebug';
 
 /** Map volume → PDF filename (derived from book title in Quarto config). */
 const PDF_FILENAMES: Record<VolumeId, string> = {
@@ -176,6 +177,43 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
         runInVisibleTerminal(fullCmd, root, label);
       }
     })
+  );
+
+  // Build All Chapters (Parallel)... (format + workers, then run isolated parallel jobs)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mlsysbook.buildAllChaptersParallel', async (vol: VolumeId) => {
+      const volumes = discoverChapters(root);
+      const volume = volumes.find(v => v.id === vol);
+      if (!volume || volume.chapters.length === 0) {
+        vscode.window.showWarningMessage(`No chapters found for ${vol}.`);
+        return;
+      }
+
+      const fmtPick = await vscode.window.showQuickPick(
+        [
+          { label: 'HTML', id: 'html' as BuildFormat },
+          { label: 'PDF', id: 'pdf' as BuildFormat },
+          { label: 'EPUB', id: 'epub' as BuildFormat },
+        ],
+        { placeHolder: 'Select format for parallel chapter build' },
+      );
+      if (!fmtPick) { return; }
+
+      const configDefault = vscode.workspace.getConfiguration('mlsysbook').get<number>('parallelDebugWorkers', 3);
+      const workerPick = await vscode.window.showQuickPick(
+        ['1', '2', '3', '4', '6', '8'],
+        { placeHolder: `Parallel workers (default: ${configDefault})` },
+      );
+      const workers = workerPick ? Number(workerPick) : configDefault;
+
+      await runParallelChapterDebug({
+        repoRoot: root,
+        volume: vol,
+        format: fmtPick.id,
+        chapters: volume.chapters.map(ch => ch.name),
+        workers,
+      });
+    }),
   );
 
   // Quick Build Current Chapter (PDF) - from currently open .qmd file

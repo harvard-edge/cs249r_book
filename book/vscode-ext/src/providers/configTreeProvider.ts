@@ -11,6 +11,7 @@ export class ConfigTreeProvider implements vscode.TreeDataProvider<ActionTreeIte
 
   getChildren(): ActionTreeItem[] {
     return [
+      new ActionTreeItem('Reset Quarto config (uncomment all chapters)', 'mlsysbook.resetQuartoConfig', [], 'refresh'),
       new ActionTreeItem('Set Chapter Order Source', 'mlsysbook.setChapterOrderSource', [], 'list-ordered'),
       new ActionTreeItem('Set QMD Visual Preset', 'mlsysbook.setQmdVisualPreset', [], 'symbol-color'),
       new ActionTreeItem('Open MLSysBook Settings', 'mlsysbook.openSettings', [], 'settings-gear'),

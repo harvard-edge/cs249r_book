@@ -341,11 +341,11 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<Parallel
         continue;
       }
 
-      const debugCommand = `./book/binder debug ${job.format} --${job.volume} --chapter ${job.chapter}`;
+      const buildCommand = `./book/binder build ${job.format} ${job.chapter} --${job.volume} -v`;
       const jobLogLines: string[] = [];
-      channel.appendLine(`[${tag}] running ${debugCommand}`);
+      channel.appendLine(`[${tag}] running ${buildCommand}`);
       const exitCode = await runShellCommand(
-        debugCommand,
+        buildCommand,
         job.worktreePath,
         channel,
         tag,
@@ -445,6 +445,13 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   channel.appendLine(`Summary: ${passed}/${results.length} passed, ${failed.length} failed`);
   if (failed.length > 0) {
     channel.appendLine(`Failed chapters: ${failed.join(', ')}`);
+    const worktrees = Object.entries(session.failedWorktrees);
+    if (worktrees.length > 0) {
+      channel.appendLine('Failed worktrees (kept for inspection):');
+      for (const [chapter, worktreePath] of worktrees) {
+        channel.appendLine(`  ${chapter}: ${worktreePath}`);
+      }
+    }
   }
   if (session.failureLocations.length > 0) {
     channel.appendLine('Top failure locations:');

@@ -2,8 +2,35 @@ import * as vscode from 'vscode';
 import { PRECOMMIT_CHECK_HOOKS, PRECOMMIT_FIXER_HOOKS, CHECK_ACTIONS } from '../constants';
 import { ActionTreeItem } from '../models/treeItems';
 import { HealthManager } from '../validation/healthManager';
+import type { PrecommitStatusManager, HookStatus } from '../validation/precommitStatusManager';
 
-type TreeNode = ActionTreeItem | SeparatorItem | HealthSummaryItem | HealthIssueItem;
+type TreeNode = ActionTreeItem | SeparatorItem | HealthSummaryItem | HealthIssueItem | PrecommitActionItem;
+
+function iconForStatus(status: HookStatus): vscode.ThemeIcon {
+  switch (status) {
+    case 'pass':
+      return new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+    case 'fail':
+      return new vscode.ThemeIcon('close', new vscode.ThemeColor('testing.iconFailed'));
+    case 'pending':
+    default:
+      return new vscode.ThemeIcon('circle-outline');
+  }
+}
+
+class PrecommitActionItem extends vscode.TreeItem {
+  constructor(
+    label: string,
+    commandId: string,
+    commandArgs: unknown[],
+    status: HookStatus,
+  ) {
+    super(label, vscode.TreeItemCollapsibleState.None);
+    this.command = { command: commandId, title: label, arguments: commandArgs };
+    this.iconPath = iconForStatus(status);
+    this.contextValue = 'precommit-action';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tree item helpers
@@ -112,10 +139,17 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> 
 
   private _healthManager: HealthManager | undefined;
   private _healthSummary: HealthSummaryItem | undefined;
+  private _precommitStatusManager: PrecommitStatusManager | undefined;
 
   /** Wire up the health manager (called from extension.ts). */
   setHealthManager(manager: HealthManager): void {
     this._healthManager = manager;
+  }
+
+  /** Wire up pre-commit status (called from extension.ts). */
+  setPrecommitStatusManager(manager: PrecommitStatusManager): void {
+    this._precommitStatusManager = manager;
+    manager.onDidChange(() => this.refresh());
   }
 
   refresh(): void {
@@ -143,20 +177,23 @@ export class PrecommitTreeProvider implements vscode.TreeDataProvider<TreeNode> 
       items.push(new SeparatorItem(''));
     }
 
-    const runAll = new ActionTreeItem(
+    const runAllStatus = this._precommitStatusManager?.runAllStatus ?? 'pending';
+    const runAll = new PrecommitActionItem(
       'Run ALL Hooks',
       'mlsysbook.precommitRunAll',
       [],
-      'checklist',
+      runAllStatus,
     );
 
-    const checkItems = PRECOMMIT_CHECK_HOOKS.map(h =>
-      new ActionTreeItem(h.label, 'mlsysbook.precommitRunHook', [h.command], 'play')
-    );
+    const checkItems = PRECOMMIT_CHECK_HOOKS.map(h => {
+      const status = this._precommitStatusManager?.getHookStatus(h.id) ?? 'pending';
+      return new PrecommitActionItem(h.label, 'mlsysbook.precommitRunHook', [h.command], status);
+    });
 
-    const fixerItems = PRECOMMIT_FIXER_HOOKS.map(h =>
-      new ActionTreeItem(h.label, 'mlsysbook.precommitRunHook', [h.command], 'wrench')
-    );
+    const fixerItems = PRECOMMIT_FIXER_HOOKS.map(h => {
+      const status = this._precommitStatusManager?.getHookStatus(h.id) ?? 'pending';
+      return new PrecommitActionItem(h.label, 'mlsysbook.precommitRunHook', [h.command], status);
+    });
 
     const currentFileFixers = new ActionTreeItem(
       'Run QMD Fixers (Current File)',

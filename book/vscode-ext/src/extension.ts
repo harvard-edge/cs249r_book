@@ -30,6 +30,7 @@ import {
 } from './utils/terminal';
 import { ChapterOrderSource } from './types';
 import { HealthManager, HealthStatus } from './validation/healthManager';
+import { PrecommitStatusManager } from './validation/precommitStatusManager';
 
 export function activate(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
@@ -57,6 +58,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const healthManager = new HealthManager();
   precommitProvider.setHealthManager(healthManager);
 
+  // Pre-commit status (for check/cross icons in precommit tree)
+  const precommitStatusManager = new PrecommitStatusManager();
+  precommitProvider.setPrecommitStatusManager(precommitStatusManager);
+
   const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   statusBarItem.command = 'mlsysbook.showHealthDetails';
   updateStatusBar(statusBarItem, healthManager);
@@ -67,7 +72,7 @@ export function activate(context: vscode.ExtensionContext): void {
     precommitProvider.refresh();
   });
 
-  context.subscriptions.push(healthManager, statusBarItem);
+  context.subscriptions.push(healthManager, precommitStatusManager, statusBarItem);
 
   // Inline Python value resolution (hover, ghost text, CodeLens)
   let pythonResolver: QmdPythonValueResolver | undefined;
@@ -249,7 +254,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Register all command groups
   registerBuildCommands(context);
   registerDebugCommands(context);
-  registerPrecommitCommands(context);
+  registerPrecommitCommands(context, precommitStatusManager);
   registerPublishCommands(context);
   registerContextMenuCommands(context);
 

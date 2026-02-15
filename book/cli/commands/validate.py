@@ -1141,6 +1141,31 @@ class ValidateCommand:
                         )
                     )
 
+            # Missing blank line before footnote definition
+            # Pandoc requires footnote definitions to start a new block.
+            # Without a preceding blank line, Pandoc treats the definition
+            # as continuation text and renders [^fn-name] as literal text.
+            fn_def_line_pat = re.compile(r"^\[\^[^\]]+\]:")
+            for idx, line in enumerate(lines):
+                if fn_def_line_pat.match(line) and idx > 0:
+                    prev = lines[idx - 1]
+                    if prev.strip():  # previous line is not blank
+                        fn_match = re.match(r"^\[\^([^\]]+)\]:", line)
+                        fn_id_str = fn_match.group(1) if fn_match else "?"
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx + 1,
+                                code="footnote_missing_blank_line",
+                                message=(
+                                    f"Footnote definition [^{fn_id_str}] has no blank line before it — "
+                                    f"Pandoc will not parse it as a footnote"
+                                ),
+                                severity="error",
+                                context=f"prev: {prev.strip()[:60]}",
+                            )
+                        )
+
         return ValidationRunResult(
             name="footnote-refs",
             description="Validate footnote references and definitions",
