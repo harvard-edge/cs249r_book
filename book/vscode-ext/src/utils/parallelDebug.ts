@@ -442,6 +442,9 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<{ result
           elapsedMs: Date.now() - start,
         });
         channel.appendLine(`[${tag}] failed to create worktree (exit ${addCode})`);
+        if (index === 0) {
+          channel.appendLine('[session] Tip: ensure the workspace is the repo root and `git` is in PATH.');
+        }
         continue;
       }
 

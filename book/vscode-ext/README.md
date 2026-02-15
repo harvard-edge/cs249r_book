@@ -49,6 +49,21 @@ This keeps daily actions focused while preserving easy access to tuning controls
 - Validate content: `./book/binder validate all`
 - Maintenance checks: `./book/binder maintain repo-health`
 
+## Parallel builds (Test All Chapters)
+
+**Build All Chapters (Parallel)** in the Debug view runs each chapter in a separate git worktree so multiple PDF builds run at once.
+
+**Requirements:**
+
+1. **Open the repo root** — Open the folder that contains `book/` (e.g. `mlsysbook-vols`), not a subfolder like `book/` or `book/quarto/`. The extension needs `book/binder` to be present to register commands and run parallel jobs.
+2. **Git in PATH** — Parallel mode uses `git worktree add --detach`; ensure `git` is available in the environment where the extension runs.
+3. **Optional settings** (VS Code/Cursor → Settings → MLSysBook):
+   - `mlsysbook.parallelDebugWorkers` — number of concurrent builds (default: 4).
+   - `mlsysbook.parallelDebugRoot` — directory for worktrees under repo root (default: `.mlsysbook/worktrees`).
+   - `mlsysbook.keepFailedWorktrees` — keep worktrees for failed chapters for inspection (default: true).
+
+If worktree creation fails, check the **MLSysBook Parallel Debug** output channel; the first failure will include a tip about repo root and git.
+
 ## Quarto Visual Customization
 
 The extension includes QMD-focused visual highlighting to improve scanability in long Quarto documents.

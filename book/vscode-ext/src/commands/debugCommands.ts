@@ -18,11 +18,19 @@ const STATE_LAST_PARALLEL_VOLUME = 'mlsysbook.lastParallelVolume';
 /**
  * Test All Chapters — prompts for volume only, then builds every chapter
  * in parallel using PDF format and the configured worker count.
+ * Requires workspace opened at repo root (folder containing book/) and git in PATH.
  */
 async function runTestAllChapters(
   root: string,
   context: vscode.ExtensionContext,
 ): Promise<void> {
+  const repoRoot = getRepoRoot();
+  if (!repoRoot) {
+    vscode.window.showErrorMessage(
+      'MLSysBook: Parallel build requires the workspace to be the repository root (the folder that contains book/). Open that folder and try again.',
+    );
+    return;
+  }
   const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
   const picks = [
     { label: defaultVolume === 'vol1' ? 'Volume I (last used)' : 'Volume I', id: 'vol1' as VolumeId },
@@ -32,7 +40,7 @@ async function runTestAllChapters(
   if (!selection) { return; }
   const volumeId = selection.id;
 
-  const volumes = discoverChapters(root);
+  const volumes = discoverChapters(repoRoot);
   const volume = volumes.find(v => v.id === volumeId);
   if (!volume || volume.chapters.length === 0) {
     vscode.window.showWarningMessage(`No chapters found for ${volumeId}.`);
@@ -51,7 +59,7 @@ async function runTestAllChapters(
   );
 
   await runParallelChapterDebug({
-    repoRoot: root,
+    repoRoot,
     volume: volumeId,
     format: 'pdf',
     chapters: allChapters,
