@@ -46,8 +46,9 @@ ASSIGNMENT = re.compile(r'^(\w+)\s*=')
 # EXCLUDES _str variables which are pre-formatted strings (no decimals to strip)
 LATEX_INLINE_PYTHON = re.compile(r'(?<!\\)\$\s*`\{python\}\s+(?!\w+_str)[^`]+`|`\{python\}\s+(?!\w+_str)[^`]+`\s*(?<!\\)\$')
 
-# Pattern 2: Inline Python adjacent to LaTeX symbols (will strip decimals)
-# EXCLUDES _str variables which are pre-formatted strings (safe to use adjacent to LaTeX)
+# Pattern 2: Inline Python adjacent to LaTeX symbols (decimal stripping risk)
+# Only flags NON-_str variables. Using _str variables adjacent to $\times$ etc. is the
+# PREFERRED convention — see book-prose.md "Multiplication and Times Notation".
 LATEX_ADJACENT = re.compile(r'`\{python\}\s+(?!\w+_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$')
 
 # Pattern 3: Grid table row separator (indicates grid table format)
@@ -114,12 +115,13 @@ def check_rendering_patterns(qmd_path, verbose=False):
             if verbose:
                 print(f"  ⚠ {qmd_path.name}:{i} — Python inside LaTeX math")
         
-        # Check for inline Python adjacent to LaTeX symbols
+        # Check for non-_str inline Python adjacent to LaTeX symbols (decimal stripping risk)
+        # NOTE: _str variables adjacent to $\times$ is the PREFERRED convention.
         if LATEX_ADJACENT.search(line):
             warnings.append((filepath, i, "LATEX_ADJACENT",
-                "Inline Python adjacent to $\\\\times$ etc - use Unicode × instead"))
+                "Non-_str inline Python adjacent to $\\\\times$ (decimal stripping risk)"))
             if verbose:
-                print(f"  ⚠ {qmd_path.name}:{i} — Python adjacent to LaTeX symbol")
+                print(f"  ⚠ {qmd_path.name}:{i} — Non-_str Python adjacent to LaTeX symbol")
         
         # Track grid tables
         if GRID_TABLE_SEP.match(line.strip()):

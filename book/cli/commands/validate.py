@@ -121,6 +121,7 @@ class ValidateCommand:
     # This is the single source of truth for the hierarchy.
     GROUPS: Dict[str, List[tuple]] = {
         "refs": [
+            ("python-syntax", "_run_python_syntax"),
             ("inline-python", "_run_inline_python"),
             ("cross-refs", "_run_refs"),
             ("citations", "_run_citations"),
@@ -375,6 +376,64 @@ class ValidateCommand:
         except ValueError:
             return str(path)
 
+    def _run_python_syntax(self, root: Path) -> ValidationRunResult:
+        """Compile every ```{python} code block to catch syntax errors."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start_re = re.compile(r"^```\{python\}")
+        block_end_re = re.compile(r"^```\s*$")
+
+        for file in files:
+            content = self._read_text(file)
+            lines = content.split("\n")
+            rel = str(file.relative_to(root)) if file.is_relative_to(root) else str(file)
+
+            in_block = False
+            block_lines: List[str] = []
+            block_start_line = 0
+
+            for i, line in enumerate(lines, start=1):
+                if block_start_re.match(line):
+                    in_block = True
+                    block_lines = []
+                    block_start_line = i
+                    continue
+                if in_block and block_end_re.match(line):
+                    in_block = False
+                    # Skip YAML-style #| directives before compiling
+                    source_lines = [
+                        ln for ln in block_lines
+                        if not ln.strip().startswith("#|")
+                    ]
+                    source = "\n".join(source_lines)
+                    if not source.strip():
+                        continue
+                    try:
+                        compile(source, f"{rel}:{block_start_line}", "exec")
+                    except SyntaxError as exc:
+                        err_line = block_start_line + (exc.lineno or 1)
+                        issues.append(ValidationIssue(
+                            file=rel,
+                            line=err_line,
+                            code="python_syntax",
+                            message=f"Python syntax error: {exc.msg}",
+                            severity="error",
+                            context=(exc.text or "").strip()[:120],
+                        ))
+                    continue
+                if in_block:
+                    block_lines.append(line)
+
+        return ValidationRunResult(
+            name="python-syntax",
+            description="Validate Python code block syntax (compile check)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_inline_python(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
@@ -384,7 +443,9 @@ class ValidateCommand:
             ("missing_backtick", re.compile(r"(?<!`)(\{python\}\s+\w+`)"), "Missing opening backtick before {python}", "error"),
             ("dollar_as_backtick", re.compile(r"\$\{python\}\s+\w+`"), "Dollar sign used instead of backtick before {python}", "error"),
             ("display_math", re.compile(r"\$\$[^$]*`?\{python\}"), "Inline Python inside $$...$$ display math", "error"),
-            ("latex_adjacent", re.compile(r"`\{python\}[^`]+`\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)"), "Inline Python adjacent to LaTeX operator", "warning"),
+            # NOTE: $\times$ adjacent to inline Python is the PREFERRED convention.
+            # Only flag non-_str variables inside $...$ math (decimal stripping risk).
+            ("latex_adjacent_raw", re.compile(r"`\{python\}\s+(?!\w+_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)"), "Non-_str inline Python adjacent to LaTeX operator (decimal stripping risk)", "warning"),
         ]
 
         for file in files:
@@ -1400,12 +1461,38 @@ class ValidateCommand:
         grid_sep_pat = re.compile(r"^\+[-:=+]+\+$")
         math_span_pat = re.compile(r"(?<!\\)\$(?!\$)(?!`)(.+?)(?<!\\)\$")
 
+        # Lowercase 'x' used as multiplication in prose (should be $\times$).
+        # Matches: `...`x word, NUMx word, NUM-NUMx — but NOT inside fig-alt, code, or variable names.
+        # The word list covers common multiplier contexts.
+        _mult_words = (
+            r"speedup|faster|reduction|compression|gap|improvement|memory|cost|"
+            r"difference|degradation|power|longer|price|headroom|accelerator|"
+            r"fewer|more|slower|increase|decrease|overhead|savings|higher|lower|"
+            r"energy|model|size|compute|bandwidth|performance|throughput|"
+            r"hard|drive|the\b"
+        )
+        lowercase_x_mult_pat = re.compile(
+            rf"""`x\s+(?:{_mult_words})"""   # `...`x word  (after inline python)
+            rf"""|"""
+            rf"""\dx\s+(?:{_mult_words})"""  # Nx word  (digit then x)
+        )
+        # fig-alt lines to skip
+        fig_alt_pat = re.compile(r'fig-alt\s*=\s*"')
+
         for file in files:
             lines = self._read_text(file).splitlines()
             in_grid = False
+            in_code = False
 
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
+
+                # Code block tracking
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
 
                 # Grid table tracking
                 if grid_sep_pat.match(stripped):
@@ -1440,6 +1527,21 @@ class ValidateCommand:
                                 message="Inline Python inside $...$ math block",
                                 severity="error",
                                 context=m.group(0)[:120],
+                            )
+                        )
+
+                # Lowercase 'x' used as multiplication in prose
+                # Skip fig-alt lines and index entries
+                if not fig_alt_pat.search(line) and not stripped.startswith("\\index"):
+                    for rm in lowercase_x_mult_pat.finditer(line):
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="lowercase_x_multiplication",
+                                message="Lowercase 'x' used as multiplication — use $\\times$ instead",
+                                severity="warning",
+                                context=rm.group(0)[:120],
                             )
                         )
 
