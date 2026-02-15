@@ -30,6 +30,43 @@ console = Console()
 
 # Path to section_splitter (in content scripts)
 CONTENT_SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "tools" / "scripts" / "content"
+LEGACY_DEBUG_LOG_ROOT = (
+    Path(__file__).resolve().parents[2]
+    / "tools" / "scripts" / "testing" / "logs"
+)
+
+
+def _assimilate_legacy_debug_logs(book_dir: Path) -> List[Tuple[Path, Path]]:
+    """Move legacy debug logs into the new _build/debug structure.
+
+    Returns:
+        List of (source_path, destination_path) moves performed.
+    """
+    if not LEGACY_DEBUG_LOG_ROOT.exists():
+        return []
+
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    migrated: List[Tuple[Path, Path]] = []
+    legacy_target_root = book_dir / "_build" / "debug" / "_legacy"
+
+    for volume_dir in sorted(LEGACY_DEBUG_LOG_ROOT.glob("vol*")):
+        legacy_debug_dir = volume_dir / "debug"
+        if not legacy_debug_dir.exists():
+            continue
+        if not any(legacy_debug_dir.rglob("*.log")):
+            continue
+
+        destination = legacy_target_root / volume_dir.name / f"migrated-{timestamp}"
+        suffix = 1
+        while destination.exists():
+            destination = legacy_target_root / volume_dir.name / f"migrated-{timestamp}-{suffix}"
+            suffix += 1
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(legacy_debug_dir), str(destination))
+        migrated.append((legacy_debug_dir, destination))
+
+    return migrated
 
 
 def _get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
@@ -116,6 +153,12 @@ def _get_output_path(book_dir: Path, format_type: str, volume: str) -> Optional[
     return None
 
 
+def _safe_artifact_stem(stem: str) -> str:
+    """Convert arbitrary labels into filesystem-safe artifact names."""
+    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
+    return cleaned or "artifact"
+
+
 def _build_and_check(
     book_dir: Path,
     chapter_name: str,
@@ -123,6 +166,8 @@ def _build_and_check(
     format_type: str,
     log_file: Path,
     verbose: bool = False,
+    artifact_dir: Optional[Path] = None,
+    artifact_stem: Optional[str] = None,
 ) -> Tuple[bool, float, str]:
     """Run a single chapter build and check if output was created.
 
@@ -131,6 +176,7 @@ def _build_and_check(
     """
     cmd = [
         "./binder",
+        "build",
         format_type,
         chapter_name,
         f"--{volume}",
@@ -167,6 +213,18 @@ def _build_and_check(
         log_file.write_text(full_output)
 
         if output_path and output_path.exists():
+            if artifact_dir is not None:
+                try:
+                    artifact_dir.mkdir(parents=True, exist_ok=True)
+                    stem = _safe_artifact_stem(artifact_stem or chapter_name)
+                    ext = output_path.suffix or ".artifact"
+                    artifact_path = artifact_dir / f"{stem}{ext}"
+                    shutil.copy2(output_path, artifact_path)
+                    console.print(f"[dim]Saved debug artifact: {artifact_path}[/dim]")
+                except Exception as exc:
+                    console.print(
+                        f"[yellow]⚠️ Failed to save debug artifact for {chapter_name}: {exc}[/yellow]"
+                    )
             return True, duration, ""
         else:
             combined = result.stdout + result.stderr
@@ -217,12 +275,22 @@ class DebugCommand:
         )
         console.print(banner)
 
+        migrated_legacy = _assimilate_legacy_debug_logs(self.book_dir)
+        if migrated_legacy:
+            console.print(
+                f"[dim]Migrated {len(migrated_legacy)} legacy debug log folder(s) "
+                "to book/quarto/_build/debug/_legacy/[/dim]"
+            )
+
+        run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
         log_dir = (
-            Path(__file__).resolve().parents[2]
-            / "tools" / "scripts" / "testing" / "logs"
-            / volume / "debug"
+            self.book_dir
+            / "_build" / "debug"
+            / volume / format_type
+            / run_id
         )
         log_dir.mkdir(parents=True, exist_ok=True)
+        console.print(f"[dim]Debug logs: {log_dir}[/dim]")
 
         if chapter:
             # Skip Phase 1, go directly to section debug
@@ -290,7 +358,14 @@ class DebugCommand:
             log_file = chapter_log_dir / f"{chapter_name}.log"
 
             success, duration, error = _build_and_check(
-                self.book_dir, chapter_name, volume, format_type, log_file, self.verbose
+                self.book_dir,
+                chapter_name,
+                volume,
+                format_type,
+                log_file,
+                self.verbose,
+                artifact_dir=log_dir / "phase1" / "artifacts",
+                artifact_stem=f"{i:02d}_{chapter_name}",
             )
 
             if success:
@@ -441,7 +516,14 @@ class DebugCommand:
         qmd_path.write_text(content, encoding="utf-8")
         log_file = log_dir / "binary_preamble.log"
         success, duration, _ = _build_and_check(
-            self.book_dir, chapter_name, volume, format_type, log_file, self.verbose
+            self.book_dir,
+            chapter_name,
+            volume,
+            format_type,
+            log_file,
+            self.verbose,
+            artifact_dir=log_dir / "artifacts",
+            artifact_stem="preamble",
         )
         if not success:
             console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
@@ -454,7 +536,14 @@ class DebugCommand:
         qmd_path.write_text(content, encoding="utf-8")
         log_file = log_dir / "binary_full.log"
         success, duration, _ = _build_and_check(
-            self.book_dir, chapter_name, volume, format_type, log_file, self.verbose
+            self.book_dir,
+            chapter_name,
+            volume,
+            format_type,
+            log_file,
+            self.verbose,
+            artifact_dir=log_dir / "artifacts",
+            artifact_stem="full",
         )
         if success:
             console.print(f"[green]PASS[/green] ({duration:.1f}s)")
@@ -477,7 +566,14 @@ class DebugCommand:
             qmd_path.write_text(content, encoding="utf-8")
             log_file = log_dir / f"binary_step_{build_count:02d}_upto_{mid}.log"
             success, duration, _ = _build_and_check(
-                self.book_dir, chapter_name, volume, format_type, log_file, self.verbose
+                self.book_dir,
+                chapter_name,
+                volume,
+                format_type,
+                log_file,
+                self.verbose,
+                artifact_dir=log_dir / "artifacts",
+                artifact_stem=f"step_{build_count:02d}_upto_{mid}",
             )
 
             if success:

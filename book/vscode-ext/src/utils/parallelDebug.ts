@@ -18,6 +18,7 @@ interface ParallelDebugResult {
   success: boolean;
   exitCode: number;
   elapsedMs: number;
+  logPath?: string;  // path to preserved index.log for this chapter
 }
 
 interface ParallelDebugOptions {
@@ -272,6 +273,104 @@ async function runShellCommand(
   });
 }
 
+/**
+ * Copy the LaTeX index.log from a worktree build to the reports directory.
+ * Returns the destination path, or undefined if no log was found.
+ */
+async function preserveBuildLog(
+  worktreePath: string,
+  chapter: string,
+  reportsDir: string,
+): Promise<string | undefined> {
+  // Quarto places index.log in the book/quarto directory during PDF builds
+  const logSource = path.join(worktreePath, 'book', 'quarto', 'index.log');
+  if (!fs.existsSync(logSource)) {
+    return undefined;
+  }
+  const logDest = path.join(reportsDir, `${chapter}.log`);
+  try {
+    await fs.promises.copyFile(logSource, logDest);
+    return logDest;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Write a markdown summary report for a completed test session.
+ */
+async function writeSummaryReport(
+  reportsDir: string,
+  results: ParallelDebugResult[],
+  session: DebugRunSession,
+): Promise<string> {
+  const reportPath = path.join(reportsDir, 'REPORT.md');
+  const passed = results.filter(r => r.success);
+  const failed = results.filter(r => !r.success);
+  const totalMs = session.elapsedMs ?? 0;
+
+  const lines: string[] = [];
+  lines.push(`# Chapter Build Report`);
+  lines.push('');
+  lines.push(`- **Volume**: ${session.volume}`);
+  lines.push(`- **Format**: ${session.format}`);
+  lines.push(`- **Workers**: ${session.workers}`);
+  lines.push(`- **Started**: ${session.startedAt}`);
+  lines.push(`- **Finished**: ${session.endedAt ?? 'N/A'}`);
+  lines.push(`- **Total time**: ${(totalMs / 1000).toFixed(1)}s`);
+  lines.push(`- **Result**: ${failed.length === 0 ? 'ALL PASSED' : `${failed.length} FAILED`}`);
+  lines.push('');
+  lines.push(`## Summary: ${passed.length}/${results.length} passed`);
+  lines.push('');
+  lines.push('| Chapter | Status | Time | Log |');
+  lines.push('|---------|--------|------|-----|');
+
+  // Sort results by chapter order (same as input)
+  for (const r of results) {
+    const status = r.success ? 'PASS' : '**FAIL**';
+    const time = `${(r.elapsedMs / 1000).toFixed(1)}s`;
+    const logFile = r.logPath ? `[${path.basename(r.logPath)}](${path.basename(r.logPath)})` : '—';
+    lines.push(`| ${r.chapter} | ${status} | ${time} | ${logFile} |`);
+  }
+
+  if (failed.length > 0) {
+    lines.push('');
+    lines.push('## Failed Chapters');
+    lines.push('');
+    for (const r of failed) {
+      lines.push(`### ${r.chapter}`);
+      lines.push('');
+      lines.push(`- Exit code: ${r.exitCode}`);
+      lines.push(`- Elapsed: ${(r.elapsedMs / 1000).toFixed(1)}s`);
+      if (r.logPath) {
+        lines.push(`- Log: \`${r.logPath}\``);
+      }
+      const locations = session.failureLocations.filter(l => l.chapter === r.chapter);
+      if (locations.length > 0) {
+        lines.push('- Error locations:');
+        for (const loc of locations) {
+          lines.push(`  - \`${loc.filePath}:${loc.line}\` — ${loc.message}`);
+        }
+      }
+      lines.push('');
+    }
+  }
+
+  lines.push('');
+  lines.push(`## Log Files`);
+  lines.push('');
+  lines.push(`All logs stored in: \`${reportsDir}\``);
+  lines.push('');
+  for (const r of results) {
+    if (r.logPath) {
+      lines.push(`- \`${path.basename(r.logPath)}\` — ${r.chapter} (${r.success ? 'pass' : 'fail'})`);
+    }
+  }
+
+  await fs.promises.writeFile(reportPath, lines.join('\n'), 'utf8');
+  return reportPath;
+}
+
 async function cleanupWorktree(
   repoRoot: string,
   worktreePath: string,
@@ -284,7 +383,7 @@ async function cleanupWorktree(
   }
 }
 
-async function runParallelDebugBatch(options: BatchRunOptions): Promise<ParallelDebugResult[]> {
+async function runParallelDebugBatch(options: BatchRunOptions): Promise<{ results: ParallelDebugResult[]; reportsDir: string }> {
   const { repoRoot, volume, format, chapters, workers, sessionLabel, clearChannel, session, controller } = options;
   const channel = getParallelDebugChannel();
   if (clearChannel) {
@@ -295,6 +394,10 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<Parallel
   const sessionId = `${sessionLabel}-${volume}-${format}-${nowStamp()}`;
   const sessionDir = path.join(getWorktreeBaseDir(repoRoot), sessionId);
   await fs.promises.mkdir(sessionDir, { recursive: true });
+
+  // Create a reports directory to store logs and the summary report
+  const reportsDir = path.join(repoRoot, '.mlsysbook', 'reports', sessionId);
+  await fs.promises.mkdir(reportsDir, { recursive: true });
 
   const jobs: ParallelDebugJob[] = chapters.map(chapter => ({
     chapter,
@@ -308,6 +411,7 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<Parallel
   channel.appendLine(`Format: ${format}`);
   channel.appendLine(`Workers: ${workers}`);
   channel.appendLine(`Chapters: ${chapters.join(', ')}`);
+  channel.appendLine(`Reports: ${reportsDir}`);
   channel.appendLine('');
 
   const results: ParallelDebugResult[] = [];
@@ -355,7 +459,13 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<Parallel
       const elapsedMs = Date.now() - start;
       const success = exitCode === 0;
 
-      results.push({ chapter: job.chapter, success, exitCode, elapsedMs });
+      // Preserve the build log before worktree cleanup
+      const logPath = await preserveBuildLog(job.worktreePath, job.chapter, reportsDir);
+      if (logPath) {
+        channel.appendLine(`[${tag}] log saved: ${logPath}`);
+      }
+
+      results.push({ chapter: job.chapter, success, exitCode, elapsedMs, logPath });
       channel.appendLine(`[${tag}] ${success ? 'PASS' : 'FAIL'} in ${(elapsedMs / 1000).toFixed(1)}s`);
 
       if (success || !keepFailedWorktrees()) {
@@ -399,7 +509,7 @@ async function runParallelDebugBatch(options: BatchRunOptions): Promise<Parallel
   );
 
   await runShellCommand('git worktree prune', repoRoot, channel, 'cleanup');
-  return results;
+  return { results, reportsDir };
 }
 
 export async function runParallelChapterDebug(options: ParallelDebugOptions): Promise<void> {
@@ -417,7 +527,7 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   upsertSession(session);
 
   const start = Date.now();
-  const results = await runParallelDebugBatch({
+  const { results, reportsDir } = await runParallelDebugBatch({
     repoRoot,
     volume,
     format,
@@ -430,7 +540,7 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   });
 
   const failed = results.filter(r => !r.success).map(r => r.chapter);
-  const passed = results.length - failed.length;
+  const passedCount = results.length - failed.length;
   session.failedChapters = failed;
   session.endedAt = new Date().toISOString();
   session.elapsedMs = Date.now() - start;
@@ -441,24 +551,38 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   activeSessionId = undefined;
   activeController = undefined;
 
+  // Write the summary report
+  const reportPath = await writeSummaryReport(reportsDir, results, session);
+
+  // Print summary to output channel
   channel.appendLine('');
-  channel.appendLine(`Summary: ${passed}/${results.length} passed, ${failed.length} failed`);
+  channel.appendLine('═'.repeat(60));
+  channel.appendLine(`  BUILD REPORT: ${passedCount}/${results.length} chapters passed`);
+  channel.appendLine('═'.repeat(60));
+  channel.appendLine('');
+  for (const r of results) {
+    const status = r.success ? '✓ PASS' : '✗ FAIL';
+    const time = `${(r.elapsedMs / 1000).toFixed(1)}s`;
+    const log = r.logPath ? path.basename(r.logPath) : '—';
+    channel.appendLine(`  ${status}  ${r.chapter.padEnd(25)} ${time.padStart(8)}   log: ${log}`);
+  }
+  channel.appendLine('');
+  channel.appendLine(`Total time: ${((session.elapsedMs ?? 0) / 1000).toFixed(1)}s`);
+  channel.appendLine(`Report: ${reportPath}`);
+  channel.appendLine(`Logs:   ${reportsDir}`);
+
   if (failed.length > 0) {
+    channel.appendLine('');
     channel.appendLine(`Failed chapters: ${failed.join(', ')}`);
-    const worktrees = Object.entries(session.failedWorktrees);
-    if (worktrees.length > 0) {
-      channel.appendLine('Failed worktrees (kept for inspection):');
-      for (const [chapter, worktreePath] of worktrees) {
-        channel.appendLine(`  ${chapter}: ${worktreePath}`);
+    if (session.failureLocations.length > 0) {
+      channel.appendLine('');
+      channel.appendLine('Error locations:');
+      for (const location of session.failureLocations.slice(0, 8)) {
+        channel.appendLine(`  ${location.filePath}:${location.line} (${location.chapter})`);
       }
     }
   }
-  if (session.failureLocations.length > 0) {
-    channel.appendLine('Top failure locations:');
-    for (const location of session.failureLocations.slice(0, 8)) {
-      channel.appendLine(`- ${location.filePath}:${location.line} (${location.chapter})`);
-    }
-  }
+  channel.appendLine('═'.repeat(60));
   channel.show(true);
 
   if (controller.cancelRequested) {
@@ -467,17 +591,26 @@ export async function runParallelChapterDebug(options: ParallelDebugOptions): Pr
   }
 
   if (failed.length === 0) {
-    void vscode.window.showInformationMessage(
-      `Parallel debug passed for ${results.length} chapter(s).`
+    const action = await vscode.window.showInformationMessage(
+      `All ${results.length} chapters passed.`,
+      'Open Report',
     );
+    if (action === 'Open Report') {
+      const doc = await vscode.workspace.openTextDocument(reportPath);
+      await vscode.window.showTextDocument(doc, { preview: true });
+    }
     return;
   }
 
-  const openOutput = await vscode.window.showErrorMessage(
-    `Parallel debug failed for ${failed.length} chapter(s).`,
-    'Open Parallel Debug Output',
+  const action = await vscode.window.showErrorMessage(
+    `${failed.length} chapter(s) failed: ${failed.join(', ')}`,
+    'Open Report',
+    'Show Output',
   );
-  if (openOutput === 'Open Parallel Debug Output') {
+  if (action === 'Open Report') {
+    const doc = await vscode.workspace.openTextDocument(reportPath);
+    await vscode.window.showTextDocument(doc, { preview: true });
+  } else if (action === 'Show Output') {
     channel.show(true);
   }
 }
@@ -512,7 +645,7 @@ export async function runBisectChapterDebug(options: ParallelDebugOptions): Prom
   while (candidates.length > 1) {
     const [left, right] = splitInHalf(candidates);
     channel.appendLine(`Iteration ${iteration}: testing left half (${left.length})`);
-    const leftResults = await runParallelDebugBatch({
+    const leftBatch = await runParallelDebugBatch({
       repoRoot,
       volume,
       format,
@@ -524,7 +657,7 @@ export async function runBisectChapterDebug(options: ParallelDebugOptions): Prom
       controller,
     });
     if (controller.cancelRequested) { break; }
-    const leftFailed = leftResults.filter(r => !r.success).map(r => r.chapter);
+    const leftFailed = leftBatch.results.filter(r => !r.success).map(r => r.chapter);
     if (leftFailed.length > 0) {
       channel.appendLine(`Iteration ${iteration}: left half contains failures -> narrowing`);
       channel.appendLine('');
@@ -534,7 +667,7 @@ export async function runBisectChapterDebug(options: ParallelDebugOptions): Prom
     }
 
     channel.appendLine(`Iteration ${iteration}: testing right half (${right.length})`);
-    const rightResults = await runParallelDebugBatch({
+    const rightBatch = await runParallelDebugBatch({
       repoRoot,
       volume,
       format,
@@ -546,7 +679,7 @@ export async function runBisectChapterDebug(options: ParallelDebugOptions): Prom
       controller,
     });
     if (controller.cancelRequested) { break; }
-    const rightFailed = rightResults.filter(r => !r.success).map(r => r.chapter);
+    const rightFailed = rightBatch.results.filter(r => !r.success).map(r => r.chapter);
     if (rightFailed.length > 0) {
       channel.appendLine(`Iteration ${iteration}: right half contains failures -> narrowing`);
       channel.appendLine('');

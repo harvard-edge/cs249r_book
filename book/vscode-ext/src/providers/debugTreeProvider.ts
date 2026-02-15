@@ -11,10 +11,10 @@ export class DebugTreeProvider implements vscode.TreeDataProvider<ActionTreeItem
 
   getChildren(): ActionTreeItem[] {
     return [
-      new ActionTreeItem('Test All Chapters (Parallel)...', 'mlsysbook.testAllChaptersParallel', [], 'beaker'),
-      new ActionTreeItem('Cancel Current Parallel Session', 'mlsysbook.cancelParallelSession', [], 'debug-stop'),
+      new ActionTreeItem('Build All Chapters (Sequential)', 'mlsysbook.debugAllChapters', [], 'run-all'),
+      new ActionTreeItem('Build All Chapters (Parallel)', 'mlsysbook.testAllChaptersParallel', [], 'server-process'),
+      new ActionTreeItem('Cancel Current Session', 'mlsysbook.cancelParallelSession', [], 'debug-stop'),
       new ActionTreeItem('Rerun Failed Chapters', 'mlsysbook.rerunFailedParallel', [], 'debug-rerun'),
-      new ActionTreeItem('Open Last Failure Details', 'mlsysbook.openLastFailureDetails', [], 'warning'),
     ];
   }
 }

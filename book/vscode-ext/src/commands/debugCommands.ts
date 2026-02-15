@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { VolumeId } from '../types';
 import { getRepoRoot } from '../utils/workspace';
 import { discoverChapters } from '../utils/chapters';
+import { runInVisibleTerminal } from '../utils/terminal';
 import {
   cancelActiveDebugSession,
   getDebugSessionById,
@@ -12,36 +14,23 @@ import {
 } from '../utils/parallelDebug';
 
 const STATE_LAST_PARALLEL_VOLUME = 'mlsysbook.lastParallelVolume';
-const STATE_LAST_PARALLEL_WORKERS = 'mlsysbook.lastParallelWorkers';
 
-async function pickVolume(defaultVolume: VolumeId | undefined, placeHolder: string): Promise<VolumeId | undefined> {
+/**
+ * Test All Chapters — prompts for volume only, then builds every chapter
+ * in parallel using PDF format and the configured worker count.
+ */
+async function runTestAllChapters(
+  root: string,
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
   const picks = [
     { label: defaultVolume === 'vol1' ? 'Volume I (last used)' : 'Volume I', id: 'vol1' as VolumeId },
     { label: defaultVolume === 'vol2' ? 'Volume II (last used)' : 'Volume II', id: 'vol2' as VolumeId },
   ];
-  const selection = await vscode.window.showQuickPick(picks, { placeHolder });
-  return selection?.id;
-}
-
-async function pickWorkers(defaultWorkers: number): Promise<number | undefined> {
-  const workerPick = await vscode.window.showQuickPick(
-    ['1', '2', '3', '4', '6', '8'],
-    { placeHolder: `Parallel workers (default: ${defaultWorkers})` },
-  );
-  if (!workerPick) {
-    return defaultWorkers;
-  }
-  return Number(workerPick);
-}
-
-async function runParallelDebugWizard(
-  root: string,
-  context: vscode.ExtensionContext,
-  forcePdf: boolean,
-): Promise<void> {
-  const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
-  const volumeId = await pickVolume(defaultVolume, 'Select volume to test');
-  if (!volumeId) { return; }
+  const selection = await vscode.window.showQuickPick(picks, { placeHolder: 'Select volume to test' });
+  if (!selection) { return; }
+  const volumeId = selection.id;
 
   const volumes = discoverChapters(root);
   const volume = volumes.find(v => v.id === volumeId);
@@ -50,63 +39,67 @@ async function runParallelDebugWizard(
     return;
   }
 
-  const chapterPicks = await vscode.window.showQuickPick(
-    volume.chapters.map(ch => ({
-      label: ch.displayName,
-      description: ch.name,
-      chapter: ch.name,
-    })),
-    {
-      placeHolder: 'Select chapters to test (multi-select)',
-      canPickMany: true,
-      matchOnDescription: true,
-    },
-  );
-  if (!chapterPicks || chapterPicks.length === 0) { return; }
-
-  let format = 'pdf';
-  if (!forcePdf) {
-    const fmtPick = await vscode.window.showQuickPick(
-      ['pdf', 'html', 'epub'],
-      { placeHolder: 'Select debug format (default: pdf)' },
-    );
-    format = fmtPick ?? 'pdf';
-  }
-
-  const defaultWorkers = context.workspaceState.get<number>(
-    STATE_LAST_PARALLEL_WORKERS,
-    vscode.workspace.getConfiguration('mlsysbook').get<number>('parallelDebugWorkers', 3),
-  );
-  const workers = await pickWorkers(defaultWorkers);
-  if (!workers) { return; }
+  const workers = vscode.workspace
+    .getConfiguration('mlsysbook')
+    .get<number>('parallelDebugWorkers', 4);
 
   await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, volumeId);
-  await context.workspaceState.update(STATE_LAST_PARALLEL_WORKERS, workers);
+
+  const allChapters = volume.chapters.map(ch => ch.name);
+  vscode.window.showInformationMessage(
+    `Testing ${allChapters.length} chapters (PDF, ${workers} workers)...`
+  );
 
   await runParallelChapterDebug({
     repoRoot: root,
     volume: volumeId,
-    format,
-    chapters: chapterPicks.map(p => p.chapter),
+    format: 'pdf',
+    chapters: allChapters,
     workers,
   });
+}
+
+/**
+ * Debug All Chapters (Sequential) — runs `./binder debug pdf --vol1` in a
+ * visible terminal.  This builds each chapter one-by-one inside the current
+ * repo (no worktrees), reports pass/fail, and binary-searches any failures.
+ */
+async function runDebugAllChapters(
+  root: string,
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  const defaultVolume = context.workspaceState.get<VolumeId>(STATE_LAST_PARALLEL_VOLUME);
+  const picks = [
+    { label: defaultVolume === 'vol1' ? 'Volume I (last used)' : 'Volume I', id: 'vol1' as VolumeId },
+    { label: defaultVolume === 'vol2' ? 'Volume II (last used)' : 'Volume II', id: 'vol2' as VolumeId },
+  ];
+  const selection = await vscode.window.showQuickPick(picks, {
+    placeHolder: 'Select volume to debug (sequential build)',
+  });
+  if (!selection) { return; }
+
+  await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, selection.id);
+
+  const bookDir = path.join(root, 'book');
+  const cmd = `./binder debug pdf --${selection.id} -v`;
+  runInVisibleTerminal(cmd, bookDir, `Debug All Chapters (${selection.id})`);
 }
 
 export function registerDebugCommands(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
   if (!root) { return; }
 
-  // Test All Chapters (Parallel) - main debug entry point
+  // Debug All Chapters (Sequential) — runs binder debug in a terminal
   context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.testAllChaptersParallel', async () => {
-      await runParallelDebugWizard(root, context, false);
+    vscode.commands.registerCommand('mlsysbook.debugAllChapters', async () => {
+      await runDebugAllChapters(root, context);
     })
   );
 
-  // Keep debugParallelChapters as alias for backward compatibility (e.g. command palette)
+  // Test All Chapters (Parallel) — worktree-based parallel build
   context.subscriptions.push(
-    vscode.commands.registerCommand('mlsysbook.debugParallelChapters', async () => {
-      await runParallelDebugWizard(root, context, false);
+    vscode.commands.registerCommand('mlsysbook.testAllChaptersParallel', async () => {
+      await runTestAllChapters(root, context);
     })
   );
 

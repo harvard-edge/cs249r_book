@@ -40,7 +40,6 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       const volumeActions = [
         new ActionTreeItem('Build Full Volume...', 'mlsysbook.buildFullVolume', [vol.id], 'package'),
         new ActionTreeItem('Build Chapters...', 'mlsysbook.buildSelectedChapters', [vol.id], 'files'),
-        new ActionTreeItem('Build All Chapters (Parallel)...', 'mlsysbook.buildAllChaptersParallel', [vol.id], 'beaker'),
       ];
 
       return [...volumeActions, ...chapterItems];
