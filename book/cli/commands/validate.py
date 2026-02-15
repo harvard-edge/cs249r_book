@@ -1462,20 +1462,16 @@ class ValidateCommand:
         math_span_pat = re.compile(r"(?<!\\)\$(?!\$)(?!`)(.+?)(?<!\\)\$")
 
         # Lowercase 'x' used as multiplication in prose (should be $\times$).
-        # Matches: `...`x word, NUMx word, NUM-NUMx — but NOT inside fig-alt, code, or variable names.
-        # The word list covers common multiplier contexts.
-        _mult_words = (
-            r"speedup|faster|reduction|compression|gap|improvement|memory|cost|"
-            r"difference|degradation|power|longer|price|headroom|accelerator|"
-            r"fewer|more|slower|increase|decrease|overhead|savings|higher|lower|"
-            r"energy|model|size|compute|bandwidth|performance|throughput|"
-            r"hard|drive|the\b"
-        )
+        # Matches: `...`x word, NUMx word — but NOT hex (0x61), code, fig-alt, or \index.
+        # The pattern requires a lowercase letter after x+space, which naturally
+        # excludes hardware counts like "8x A100" (uppercase after x).
         lowercase_x_mult_pat = re.compile(
-            rf"""`x\s+(?:{_mult_words})"""   # `...`x word  (after inline python)
-            rf"""|"""
-            rf"""\dx\s+(?:{_mult_words})"""  # Nx word  (digit then x)
+            r"""`x\s+[a-z]"""    # `...`x word  (after inline python)
+            r"""|"""
+            r"""\dx\s+[a-z]"""   # Nx word  (digit then x then lowercase)
         )
+        # Hex literal pattern to exclude matches like 0x61, 0xff
+        hex_literal_pat = re.compile(r"0x[0-9a-fA-F]")
         # fig-alt lines to skip
         fig_alt_pat = re.compile(r'fig-alt\s*=\s*"')
 
@@ -1534,6 +1530,10 @@ class ValidateCommand:
                 # Skip fig-alt lines and index entries
                 if not fig_alt_pat.search(line) and not stripped.startswith("\\index"):
                     for rm in lowercase_x_mult_pat.finditer(line):
+                        # Exclude hex literals like 0x61, 0xff
+                        ctx_start = max(0, rm.start() - 1)
+                        if hex_literal_pat.match(line[ctx_start : rm.end()]):
+                            continue
                         issues.append(
                             ValidationIssue(
                                 file=self._relative_file(file),
