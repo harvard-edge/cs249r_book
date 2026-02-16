@@ -70,6 +70,9 @@ tito module status
 
 **Your Workflow:**
 ```bash
+# Initialize nbgrader environment
+tito nbgrader init
+
 # Generate assignments
 tito nbgrader generate 01
 
@@ -82,6 +85,11 @@ tito nbgrader autograde 01
 
 # Provide feedback
 tito nbgrader feedback 01
+
+# View analytics & export grades
+tito nbgrader status
+tito nbgrader analytics 01
+tito nbgrader report
 ```
 
 **Key Commands:**
@@ -124,6 +132,14 @@ tito dev test --all
 
 ## Complete Command Reference
 
+### Setup Command
+
+**Purpose**: First-time environment and profile setup
+
+| Command | Description | Guide |
+|---------|-------------|-------|
+| `tito setup` | Set up development environment (venv, packages, profile) | [Module Workflow](modules.md) |
+
 ### System Commands
 
 **Purpose**: Environment health, validation, and configuration
@@ -133,6 +149,8 @@ tito dev test --all
 | `tito system health` | Environment health check and validation | [Module Workflow](modules.md) |
 | `tito system info` | System resources (paths, disk, memory) | [Module Workflow](modules.md) |
 | `tito system jupyter` | Start Jupyter Lab server | [Module Workflow](modules.md) |
+| `tito system update` | Check for and install updates | [Module Workflow](modules.md) |
+| `tito system reset` | Reset TinyTorch to pristine state | [Troubleshooting](troubleshooting.md) |
 
 ### Module Commands
 
@@ -140,9 +158,12 @@ tito dev test --all
 
 | Command | Description | Guide |
 |---------|-------------|-------|
+| `tito module list` | List all available modules | [Module Workflow](modules.md) |
 | `tito module start XX` | Begin working on a module (first time) | [Module Workflow](modules.md) |
+| `tito module view XX` | Open module notebook (no status update) | [Module Workflow](modules.md) |
 | `tito module resume XX` | Continue working on a module | [Module Workflow](modules.md) |
 | `tito module complete XX` | Test, export, and track module completion | [Module Workflow](modules.md) |
+| `tito module test XX` | Run module tests independently | [Module Workflow](modules.md) |
 | `tito module status` | View module completion progress | [Module Workflow](modules.md) |
 | `tito module reset XX` | Reset module to clean state | [Module Workflow](modules.md) |
 
@@ -159,6 +180,8 @@ tito dev test --all
 | `tito milestone info XX` | Get detailed milestone information | [Milestone System](milestones.md) |
 | `tito milestone status` | View milestone progress and achievements | [Milestone System](milestones.md) |
 | `tito milestone timeline` | Visual timeline of your journey | [Milestone System](milestones.md) |
+| `tito milestone test XX` | Test milestone achievement requirements | [Milestone System](milestones.md) |
+| `tito milestone demo XX` | Run milestone capability demonstration | [Milestone System](milestones.md) |
 
 **See**: [Milestone System Guide](milestones.md) for complete details
 
@@ -194,10 +217,10 @@ tito dev test --all
 
 | Command | Description | Guide |
 |---------|-------------|-------|
-| `tito benchmark baseline` | Quick setup validation ("Hello World") | [Community Guide](../community.md) |
-| `tito benchmark capstone` | Full Module 20 performance evaluation | [Community Guide](../community.md) |
+| `tito benchmark baseline` | Quick setup validation ("Hello World") | [Troubleshooting](troubleshooting.md) |
+| `tito benchmark capstone` | Full Module 20 performance evaluation | [Troubleshooting](troubleshooting.md) |
 
-**See**: [Community Guide](../community.md) for complete details
+**See**: [Troubleshooting](troubleshooting.md) for validation and benchmark help
 
 ### Developer Commands
 
@@ -235,11 +258,13 @@ tinytorch/        ← Package code (auto-generated)
 ### First-Time Setup
 
 ```bash
-# Clone and setup
-git clone https://github.com/harvard-edge/cs249r_book.git
-cd TinyTorch
-./setup-environment.sh
-source activate.sh
+# Install TinyTorch (downloads and sets up everything)
+curl -sSL mlsysbook.ai/tinytorch/install.sh | bash
+cd tinytorch
+source .venv/bin/activate
+
+# First-time profile setup
+tito setup
 
 # Verify environment
 tito system health
@@ -312,8 +337,8 @@ Here's what a typical TinyTorch session looks like:
 
 **1. Start Session**
 ```bash
-cd TinyTorch
-source activate.sh
+cd tinytorch
+source .venv/bin/activate
 tito system health         # Verify environment
 ```
 
