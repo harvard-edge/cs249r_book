@@ -116,7 +116,7 @@ Input → Linear Transform → Output
 
 **With Activations (Nonlinear):**
 ```
-Input → Linear → Activation → Linear → Activation → Output
+Input → Transform → Activation → Transform → Activation → Output
 [1, 2] → [3, 4] → [3, 4] → [7] → [7] → Complex Pattern!
 ```
 
@@ -124,34 +124,34 @@ The magic happens in those activation functions. They introduce **nonlinearity**
 
 ### Why Nonlinearity Matters
 
-Without activation functions, stacking multiple linear layers is pointless:
+Without activation functions, stacking multiple linear transformations is pointless:
 ```
-Linear(Linear(x)) = Linear(x)  # Same as single layer!
-```
-
-With activation functions, each layer can learn increasingly complex patterns:
-```
-Layer 1: Simple edges and lines
-Layer 2: Curves and shapes
-Layer 3: Complex objects and concepts
+Linear(Linear(x)) = Linear(x)  # Same as a single transform!
 ```
 
-This is how deep networks build intelligence from simple mathematical operations.
+With activation functions between transformations, each stage can represent increasingly complex patterns:
+```
+Stage 1: Simple edges and lines
+Stage 2: Curves and shapes
+Stage 3: Complex objects and concepts
+```
+
+This is how nonlinearity turns simple math into powerful function approximation.
 """
 
 # %% [markdown]
 """
 ## 📐 Mathematical Foundations
 
-Each activation function serves a different purpose in neural networks:
+Each activation function serves a different purpose in computation:
 
 ### The Five Essential Activations
 
 1. **Sigmoid**: Maps to (0, 1) - perfect for probabilities
 2. **ReLU**: Removes negatives - creates sparsity and efficiency
 3. **Tanh**: Maps to (-1, 1) - zero-centered for better training
-4. **GELU**: Smooth ReLU - modern choice for transformers
-5. **Softmax**: Creates probability distributions - essential for classification
+4. **GELU**: Smooth ReLU - modern choice for advanced architectures
+5. **Softmax**: Creates probability distributions - converts values to probabilities
 
 Let's implement each one with clear explanations and immediate testing!
 """
@@ -240,23 +240,8 @@ class Sigmoid:
         """
         ### BEGIN SOLUTION
         # Apply sigmoid: 1 / (1 + exp(-x))
-        x_data = x.data
-
-        # Use numerically stable sigmoid
-        # For positive values: 1 / (1 + exp(-x))
-        # For negative values: exp(x) / (1 + exp(x)) = 1 / (1 + exp(-x)) after clipping
-        result_data = np.zeros_like(x_data)
-
-        # Positive values (including zero)
-        pos_mask = x_data >= 0
-        result_data[pos_mask] = 1.0 / (1.0 + np.exp(-x_data[pos_mask]))
-
-        # Negative values
-        neg_mask = x_data < 0
-        exp_x = np.exp(x_data[neg_mask])
-        result_data[neg_mask] = exp_x / (1.0 + exp_x)
-
-        return Tensor(result_data)
+        result = 1.0 / (1.0 + np.exp(-x.data))
+        return Tensor(result)
         ### END SOLUTION
 
     def __call__(self, x: Tensor) -> Tensor:
@@ -429,7 +414,7 @@ if __name__ == "__main__":
 """
 ### Tanh - The Zero-Centered Alternative
 
-Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering helps with gradient flow during training.
+Tanh (hyperbolic tangent) is like sigmoid but centered around zero, mapping inputs to (-1, 1). This zero-centering is a desirable mathematical property.
 
 ### Mathematical Definition
 ```
@@ -454,7 +439,7 @@ Tanh Curve:
      -3  0  3
 ```
 
-**Why Tanh matters**: Unlike sigmoid, tanh outputs are centered around zero, which can help gradients flow better through deep networks.
+**Why Tanh matters**: Unlike sigmoid, tanh outputs are centered around zero, which is a desirable property for composing multiple transformations.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "tanh-impl", "solution": true}
@@ -507,7 +492,7 @@ class Tanh:
 This test validates tanh activation behavior.
 
 **What we're testing**: Tanh maps inputs to (-1, 1) range, zero-centered
-**Why it matters**: Zero-centered activations can help with gradient flow
+**Why it matters**: Zero-centered activations have desirable mathematical properties
 **Expected**: All outputs in (-1, 1), tanh(0) = 0, symmetric behavior
 """
 
@@ -590,7 +575,7 @@ GELU Function:
 -2  0  2
 ```
 
-**Why GELU matters**: Used in GPT, BERT, and other transformers. The smoothness helps with optimization compared to ReLU's sharp corner.
+**Why GELU matters**: Used in GPT, BERT, and other modern architectures. The smoothness helps with optimization compared to ReLU's sharp corner.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "gelu-impl", "solution": true}
@@ -599,7 +584,7 @@ class GELU:
     """
     GELU activation: f(x) = x * Φ(x) ≈ x * Sigmoid(1.702 * x)
 
-    Smooth approximation to ReLU, used in modern transformers.
+    Smooth approximation to ReLU, used in modern architectures.
     Where Φ(x) is the cumulative distribution function of standard normal.
     """
 
@@ -849,11 +834,11 @@ From the demonstration above, notice how each activation serves a different purp
 
 **Sigmoid**: Squashes everything to (0, 1) - good for probabilities
 **ReLU**: Zeros negatives, keeps positives - creates sparsity
-**Tanh**: Like sigmoid but centered at zero (-1, 1) - better gradient flow
-**GELU**: Smooth ReLU-like behavior - modern choice for transformers
+**Tanh**: Like sigmoid but centered at zero (-1, 1) - better mathematical properties for composing transformations
+**GELU**: Smooth ReLU-like behavior - modern choice for advanced architectures
 **Softmax**: Converts to probability distribution - sum equals 1
 
-These different behaviors make each activation suitable for different parts of neural networks.
+These different behaviors make each activation suitable for different computational tasks.
 """
 
 # %% [markdown]
@@ -975,7 +960,7 @@ Answer these to deepen your understanding of activation functions and their syst
 ---
 
 ### 3. Sparsity and Efficiency
-**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for neural networks?
+**Question**: ReLU creates "sparsity" by zeroing negative values. Why might having many zero activations be beneficial for computation?
 
 **Consider**:
 - Memory: Do zeros need to be stored differently than non-zeros?
@@ -985,37 +970,37 @@ Answer these to deepen your understanding of activation functions and their syst
 **Think about**:
 - Sparse matrix representations and their memory benefits
 - How GPUs handle sparse operations
-- Whether sparsity helps or hurts different types of neural networks
+- Whether sparsity helps or hurts different types of computations
 
 ---
 
-### 4. Activation Selection for Different Layers
-**Question**: Why do we typically use different activations for hidden layers vs. output layers?
+### 4. Activation Selection for Different Stages
+**Question**: Why do we typically use different activations for hidden stages vs. output stages of a computation?
 
 **Consider the requirements**:
-- Hidden layers: Need to preserve gradients, be efficient, add nonlinearity
+- Hidden stages: Need to preserve information flowing through the computation, be efficient, add nonlinearity
 - Binary classification output: Need values in (0, 1) representing probability
 - Multi-class classification output: Need probability distribution (sum = 1)
 
 **Match the activation to the use case**:
-- ReLU for hidden layers (why?)
+- ReLU for hidden stages (why?)
 - Sigmoid for binary output (why?)
 - Softmax for multi-class output (why?)
 
 ---
 
 ### 5. The "Dying ReLU" Problem
-**Question**: A neuron's output is always zero if its input is always negative. What situations might cause this, and why is it a problem?
+**Question**: If ReLU outputs 0 for some inputs, those inputs get no signal passed through -- they effectively "die." What situations might cause this, and why is it a problem?
 
 **Consider**:
-- If weights are initialized poorly, could all inputs to a neuron be negative?
-- Once a ReLU neuron "dies" (always outputs 0), can it recover during training?
-- How does the gradient flow through a ReLU that outputs 0?
+- If inputs to a ReLU are always negative, its output is permanently zero
+- Once a ReLU "dies" (always outputs 0), no information flows through it -- it contributes nothing to the computation
+- A dead ReLU is wasted capacity: it takes up memory and compute but produces no useful signal
 
 **Solutions used in practice**:
-- LeakyReLU: f(x) = max(0.01*x, x) - small slope for negatives
-- PReLU: Learnable slope for negative values
-- GELU: Smooth approximation with no sharp corner
+- LeakyReLU: f(x) = max(0.01*x, x) - allows a small signal even for negative inputs
+- PReLU: Adjustable slope for negative values (a learnable parameter controls the slope)
+- GELU: Smooth approximation that never fully zeroes out
 
 ---
 
@@ -1131,8 +1116,8 @@ Your activations are ready to be combined with Linear layers in Module 03!
 
 # %%
 def demo_activations():
-    """See how activations transform data."""
-    print("AHA MOMENT: Activations Add Intelligence")
+    """🎯 See how activations transform data."""
+    print("🎯 AHA MOMENT: Activations Add Intelligence")
     print("=" * 45)
 
     # Test input with positive and negative values
@@ -1157,8 +1142,7 @@ def demo_activations():
     print(f"\nSoftmax: {np.round(softmax_out.data, 3)}")
     print(f"         Sum = {softmax_out.data.sum():.1f} (valid probability distribution!)")
 
-    print("\n" + "=" * 45)
-    print("Activations add nonlinearity - the key to deep learning!")
+    print("\n✨ Activations add nonlinearity—the key to deep learning!")
 
 # %%
 if __name__ == "__main__":

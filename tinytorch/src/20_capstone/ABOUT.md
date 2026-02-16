@@ -453,7 +453,7 @@ from tinytorch.core.losses import CrossEntropyLoss
 try:
     from tinytorch.perf.profiling import Profiler, quick_profile
     from tinytorch.perf.compression import magnitude_prune, structured_prune
-    from tinytorch.benchmarking import Benchmark, BenchmarkResult
+    from tinytorch.perf.benchmarking import Benchmark, BenchmarkResult
 except ImportError:
     # Core benchmarking still works without optimization modules
     pass

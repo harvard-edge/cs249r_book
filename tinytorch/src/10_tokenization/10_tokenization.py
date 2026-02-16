@@ -702,6 +702,234 @@ BPE is the secret sauce behind modern language models (GPT, BERT, etc.). It lear
 **Why BPE Works**: By starting with characters and iteratively merging frequent pairs, BPE discovers the natural statistical patterns in language. Common words become single tokens, rare words split into recognizable subword pieces!
 """
 
+# %% [markdown]
+"""
+### Counting Byte Pairs
+
+The first step in each BPE iteration is counting how often each adjacent token pair
+appears across all words, weighted by word frequency. This tells us which pair to merge next.
+
+```
+Count Pairs Across All Words (weighted by frequency):
+
+  word_tokens:                     word_freq:
+  "hello" → ['h','e','l','l','o</w>']    freq=3
+  "help"  → ['h','e','l','p</w>']        freq=1
+
+  Pair counting (freq-weighted):
+    ('h','e'):  3+1 = 4   ← appears in both words
+    ('e','l'):  3+1 = 4   ← appears in both words
+    ('l','l'):  3   = 3   ← only in "hello"
+    ('l','o</w>'): 3 = 3  ← only in "hello"
+    ('l','p</w>'): 1 = 1  ← only in "help"
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "bpe-count-pairs", "solution": true}
+#| export
+def _count_byte_pairs(word_tokens: Dict[str, List[str]], word_freq: Counter) -> Counter:
+    """
+    Count frequency of all adjacent token pairs across all words.
+
+    Each pair's count is weighted by how often its containing word appears
+    in the corpus, so frequent words contribute more to pair statistics.
+
+    TODO: Count all adjacent pairs weighted by word frequency
+
+    APPROACH:
+    1. Iterate through each word and its frequency
+    2. Get all adjacent pairs from the word's tokens
+    3. Add the word's frequency to each pair's count
+    4. Return the Counter of pair frequencies
+
+    EXAMPLE:
+    >>> word_tokens = {"hello": ['h', 'e', 'l', 'l', 'o</w>']}
+    >>> word_freq = Counter({"hello": 3})
+    >>> counts = _count_byte_pairs(word_tokens, word_freq)
+    >>> counts[('h', 'e')]
+    3
+
+    HINT: For each word, get pairs with a zip-based loop, then add freq to each pair count
+    """
+    ### BEGIN SOLUTION
+    pair_counts = Counter()
+
+    for word, freq in word_freq.items():
+        tokens = word_tokens[word]
+        # Count adjacent pairs
+        for i in range(len(tokens) - 1):
+            pair = (tokens[i], tokens[i + 1])
+            pair_counts[pair] += freq
+
+    return pair_counts
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Count Byte Pairs
+
+**What we're testing**: Frequency-weighted pair counting across multiple words
+**Why it matters**: The most frequent pair determines which merge to perform next
+**Expected**: Pairs appearing in frequent words get higher counts
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-bpe-count-pairs", "locked": true, "points": 5}
+def test_unit_count_byte_pairs():
+    """🧪 Test byte pair counting with frequency weighting."""
+    print("🧪 Unit Test: Count Byte Pairs...")
+
+    # Two words: "hello" appears 3 times, "help" appears 1 time
+    word_tokens = {
+        "hello": ['h', 'e', 'l', 'l', 'o</w>'],
+        "help": ['h', 'e', 'l', 'p</w>']
+    }
+    word_freq = Counter({"hello": 3, "help": 1})
+
+    counts = _count_byte_pairs(word_tokens, word_freq)
+
+    # ('h','e') appears in both words: 3 + 1 = 4
+    assert counts[('h', 'e')] == 4, f"Expected 4, got {counts[('h', 'e')]}"
+
+    # ('e','l') appears in both words: 3 + 1 = 4
+    assert counts[('e', 'l')] == 4, f"Expected 4, got {counts[('e', 'l')]}"
+
+    # ('l','l') appears only in "hello" (freq 3)
+    assert counts[('l', 'l')] == 3, f"Expected 3, got {counts[('l', 'l')]}"
+
+    # ('l','p</w>') appears only in "help" (freq 1)
+    assert counts[('l', 'p</w>')] == 1, f"Expected 1, got {counts[('l', 'p</w>')]}"
+
+    # Empty case
+    empty_counts = _count_byte_pairs({}, Counter())
+    assert len(empty_counts) == 0
+
+    print("✅ Byte pair counting works correctly!")
+
+if __name__ == "__main__":
+    test_unit_count_byte_pairs()
+
+# %% [markdown]
+"""
+### Merging a Byte Pair
+
+Once we identify the most frequent pair, we need to merge it everywhere it appears.
+This scans through every word's token list and replaces adjacent occurrences of the
+pair with a single concatenated token.
+
+```
+Merge Operation: ('h', 'e') → 'he'
+
+BEFORE merging:                    AFTER merging:
+  "hello" → ['h','e','l','l','o</w>']  →  ['he','l','l','o</w>']
+  "help"  → ['h','e','l','p</w>']      →  ['he','l','p</w>']
+
+Algorithm (linear scan per word):
+  i=0: tokens[0]='h', tokens[1]='e' → match! append 'he', skip 2
+  i=2: tokens[2]='l' → no match, append 'l', advance 1
+  ...continue until end of tokens
+```
+"""
+
+# %% nbgrader={"grade": false, "grade_id": "bpe-merge-pair", "solution": true}
+#| export
+def _merge_pair(word_tokens: Dict[str, List[str]], pair: Tuple[str, str]) -> str:
+    """
+    Merge the most frequent pair in all word token lists.
+
+    Scans through every word's tokens and replaces adjacent occurrences
+    of the pair with a single concatenated token. Modifies word_tokens
+    in place and returns the new merged token string.
+
+    TODO: Merge the given pair in all word token sequences
+
+    APPROACH:
+    1. For each word in word_tokens, scan through its token list
+    2. When two adjacent tokens match the pair, replace with concatenation
+    3. Otherwise keep the token as-is
+    4. Update word_tokens in place, return the merged token string
+
+    EXAMPLE:
+    >>> word_tokens = {"hello": ['h', 'e', 'l', 'l', 'o</w>']}
+    >>> merged = _merge_pair(word_tokens, ('h', 'e'))
+    >>> word_tokens["hello"]
+    ['he', 'l', 'l', 'o</w>']
+    >>> merged
+    'he'
+
+    HINTS:
+    - Use a while loop with index i to scan each word's tokens
+    - When pair matches at position i, append pair[0]+pair[1] and skip 2
+    - Otherwise append tokens[i] and advance by 1
+    """
+    ### BEGIN SOLUTION
+    merged_token = pair[0] + pair[1]
+
+    for word in word_tokens:
+        tokens = word_tokens[word]
+        new_tokens = []
+        i = 0
+        while i < len(tokens):
+            if (i < len(tokens) - 1 and
+                tokens[i] == pair[0] and
+                tokens[i + 1] == pair[1]):
+                # Merge pair
+                new_tokens.append(merged_token)
+                i += 2
+            else:
+                new_tokens.append(tokens[i])
+                i += 1
+        word_tokens[word] = new_tokens
+
+    return merged_token
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Merge Pair
+
+**What we're testing**: In-place merging of a specific pair across all word token lists
+**Why it matters**: This is the core operation that builds the BPE vocabulary
+**Expected**: Adjacent pair occurrences replaced by concatenated token, non-matching tokens preserved
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-bpe-merge-pair", "locked": true, "points": 10}
+def test_unit_merge_pair():
+    """🧪 Test byte pair merging across word token lists."""
+    print("🧪 Unit Test: Merge Pair...")
+
+    # Set up word tokens
+    word_tokens = {
+        "hello": ['h', 'e', 'l', 'l', 'o</w>'],
+        "help": ['h', 'e', 'l', 'p</w>']
+    }
+
+    # Merge ('h', 'e') → 'he'
+    merged = _merge_pair(word_tokens, ('h', 'e'))
+    assert merged == 'he', f"Expected 'he', got '{merged}'"
+    assert word_tokens["hello"] == ['he', 'l', 'l', 'o</w>'], \
+        f"Expected ['he', 'l', 'l', 'o</w>'], got {word_tokens['hello']}"
+    assert word_tokens["help"] == ['he', 'l', 'p</w>'], \
+        f"Expected ['he', 'l', 'p</w>'], got {word_tokens['help']}"
+
+    # Now merge ('l', 'l') → 'll' (only affects "hello")
+    merged2 = _merge_pair(word_tokens, ('l', 'l'))
+    assert merged2 == 'll', f"Expected 'll', got '{merged2}'"
+    assert word_tokens["hello"] == ['he', 'll', 'o</w>'], \
+        f"Expected ['he', 'll', 'o</w>'], got {word_tokens['hello']}"
+    # "help" unchanged (no 'l','l' pair)
+    assert word_tokens["help"] == ['he', 'l', 'p</w>'], \
+        f"help should be unchanged, got {word_tokens['help']}"
+
+    # Edge case: pair not present
+    word_tokens_empty = {"ab": ['a', 'b</w>']}
+    _merge_pair(word_tokens_empty, ('x', 'y'))
+    assert word_tokens_empty["ab"] == ['a', 'b</w>'], "No-match merge should leave tokens unchanged"
+
+    print("✅ Byte pair merging works correctly!")
+
+if __name__ == "__main__":
+    test_unit_merge_pair()
+
 # %% nbgrader={"grade": false, "grade_id": "bpe-tokenizer", "solution": true}
 #| export
 class BPETokenizer(Tokenizer):
@@ -795,13 +1023,17 @@ class BPETokenizer(Tokenizer):
         """
         Train BPE on corpus to learn merge rules.
 
-        TODO: Implement BPE training algorithm
+        This is the composition function: it initializes character vocabulary,
+        then runs a greedy merge loop using _count_byte_pairs() to find the
+        best pair and _merge_pair() to apply it.
+
+        TODO: Implement BPE training using the greedy merge loop
 
         APPROACH:
-        1. Build initial character vocabulary
-        2. Count word frequencies in corpus
-        3. Iteratively merge most frequent pairs
-        4. Build final vocabulary and mappings
+        1. Build initial character vocabulary from corpus words
+        2. Loop: count pairs, find best, merge it, add to vocab
+        3. Stop when vocab reaches target size or no pairs remain
+        4. Build final mappings
 
         EXAMPLE:
         >>> corpus = ["hello", "hello", "help"]
@@ -811,19 +1043,17 @@ class BPETokenizer(Tokenizer):
         True
 
         HINTS:
-        - Start with character-level tokens using _get_word_tokens()
-        - Use Counter to track word frequencies
-        - Count all pairs, merge most frequent, repeat until vocab_size reached
+        - Use _get_word_tokens() for initial character tokenization
+        - Use _count_byte_pairs(word_tokens, word_freq) to find pair frequencies
+        - Use _merge_pair(word_tokens, best_pair) to apply the merge
         - Don't forget to call _build_mappings() at the end
         """
         ### BEGIN SOLUTION
         if vocab_size:
             self.vocab_size = vocab_size
 
-        # Count word frequencies
+        # Count word frequencies and initialize character vocabulary
         word_freq = Counter(corpus)
-
-        # Initialize vocabulary with characters
         vocab = set()
         word_tokens = {}
 
@@ -832,55 +1062,23 @@ class BPETokenizer(Tokenizer):
             word_tokens[word] = tokens
             vocab.update(tokens)
 
-        # Convert to sorted list for consistency
         self.vocab = sorted(vocab)
-
-        # Add special tokens
         if '<UNK>' not in vocab:
             self.vocab = ['<UNK>'] + self.vocab
 
-        # Learn merges
+        # Greedy merge loop: count pairs, merge best, repeat
         self.merges = []
 
         while len(self.vocab) < self.vocab_size:
-            # Count all pairs across all words
-            pair_counts = Counter()
-
-            for word, freq in word_freq.items():
-                tokens = word_tokens[word]
-                pairs = self._get_pairs(tokens)
-                for pair in pairs:
-                    pair_counts[pair] += freq
-
+            pair_counts = _count_byte_pairs(word_tokens, word_freq)
             if not pair_counts:
                 break
 
-            # Get most frequent pair
             best_pair = pair_counts.most_common(1)[0][0]
-
-            # Merge this pair in all words
-            for word in word_tokens:
-                tokens = word_tokens[word]
-                new_tokens = []
-                i = 0
-                while i < len(tokens):
-                    if (i < len(tokens) - 1 and
-                        tokens[i] == best_pair[0] and
-                        tokens[i + 1] == best_pair[1]):
-                        # Merge pair
-                        new_tokens.append(best_pair[0] + best_pair[1])
-                        i += 2
-                    else:
-                        new_tokens.append(tokens[i])
-                        i += 1
-                word_tokens[word] = new_tokens
-
-            # Add merged token to vocabulary
-            merged_token = best_pair[0] + best_pair[1]
+            merged_token = _merge_pair(word_tokens, best_pair)
             self.vocab.append(merged_token)
             self.merges.append(best_pair)
 
-        # Build final mappings
         self._build_mappings()
         ### END SOLUTION
 
@@ -1575,59 +1773,15 @@ T5:          ~32K SentencePiece tokens, handles 100+ languages
 ChatGPT:     ~100K tokens with extended vocabulary
 ```
 
-**Memory implications for embedding tables**:
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ EMBEDDING TABLE MEMORY: Vocabulary Size × Embedding Dimension       │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│ CHARACTER TOKENIZER (Vocab: 100)                                    │
-│ ┌────────────────────────────┐                                      │
-│ │  100 × 512 = 51,200 params │     Memory: 204 KB                   │
-│ │  ████                      │     ↑ Tiny embedding table!          │
-│ └────────────────────────────┘                                      │
-│                                                                     │
-│ BPE-SMALL (Vocab: 1,000)                                            │
-│ ┌────────────────────────────┐                                      │
-│ │  1K × 512 = 512K params    │     Memory: 2.0 MB                   │
-│ │  ██████████                │     ↑ Still manageable               │
-│ └────────────────────────────┘                                      │
-│                                                                     │
-│ BPE-LARGE (Vocab: 50,000) ← MOST PRODUCTION MODELS                  │
-│ ┌────────────────────────────────────────────────────────┐          │
-│ │  50K × 512 = 25.6M params                              │          │
-│ │  ████████████████████████████████████████████████      │          │
-│ │                                                        │          │
-│ │  Memory: 102.4 MB (fp32)                               │          │
-│ │          51.2 MB (fp16)    ← Half precision saves 50%  │          │
-│ │          25.6 MB (int8)    ← Quantization saves 75%    │          │
-│ └────────────────────────────────────────────────────────┘          │
-│                                                                     │
-│ WORD-LEVEL (Vocab: 100,000)                                         │
-│ ┌────────────────────────────────────────────────────────┐          │
-│ │  100K × 512 = 51.2M params                             │          │
-│ │  ████████████████████████████████████████████████████  │          │
-│ │                                                        │          │
-│ │  Memory: 204.8 MB (fp32)  ← Often too large!           │          │
-│ │          102.4 MB (fp16)                               │          │
-│ └────────────────────────────────────────────────────────┘          │
-│                                                                     │
-│  Key Trade-off:                                                     │
-│    Larger vocab → Shorter sequences → Less compute                  │
-│    BUT larger vocab → More embedding memory → Harder to train       │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+**Downstream memory impact of vocabulary size**:
 
-Real-World Production Examples:
-┌─────────────┬──────────────┬───────────────┬──────────────────┐
-│   Model     │  Vocab Size  │  Embed Dim    │  Embed Memory    │
-├─────────────┼──────────────┼───────────────┼──────────────────┤
-│  GPT-2      │    50,257    │     1,600     │     321 MB       │
-│  GPT-3      │    50,257    │    12,288     │     2.4 GB       │
-│  BERT       │    30,522    │       768     │      94 MB       │
-│  T5         │    32,128    │       512     │      66 MB       │
-│  LLaMA-7B   │    32,000    │     4,096     │     524 MB       │
-└─────────────┴──────────────┴───────────────┴──────────────────┘
+Each token ID will eventually map to a vector of numbers (you'll build this in Module 11: Embeddings).
+Larger vocabularies mean more mappings to store -- a vocab_size of 50K vs 100K doubles this storage.
+
+```
+Key Trade-off:
+  Larger vocab → Shorter sequences → Less compute
+  BUT larger vocab → More mappings to store → Harder to train
 ```
 """
 
@@ -1656,6 +1810,8 @@ def test_module():
     print("Running unit tests...")
     test_unit_base_tokenizer()
     test_unit_char_tokenizer()
+    test_unit_count_byte_pairs()
+    test_unit_merge_pair()
     test_unit_bpe_tokenizer()
     test_unit_tokenization_utils()
 
@@ -1724,17 +1880,18 @@ if __name__ == "__main__":
 
 Answer these to deepen your understanding of tokenization and its systems implications:
 
-### 1. Vocabulary Size vs Memory
-**Question**: You implemented tokenizers with different vocabulary sizes. If you have a BPE tokenizer with vocab_size=50,000 and embed_dim=512:
+### 1. Vocabulary Size and Storage
+**Question**: You implemented tokenizers with different vocabulary sizes.
 
 **Calculate**:
-- Parameters in embedding table: vocab_size x embed_dim = _____ million
-- Memory usage (float32, 4 bytes per param): _____ MB
+- A character tokenizer with vocab ~100 needs to store ~100 token-to-ID mappings
+- A BPE tokenizer with vocab_size=50,000 needs to store ~50,000 token-to-ID mappings
+- How much memory does each vocabulary lookup dictionary require? (Hint: each entry stores a string key and an integer value)
 
 **Consider**:
-- How does this compare to character tokenization (vocab ~100)?
-- What happens to memory when you increase embed_dim to 4096 (like GPT-3)?
-- Why do production models use float16 or int8 for embeddings?
+- How does vocabulary storage scale with vocab size?
+- BPE tokens are variable-length strings — how does this affect dictionary memory?
+- What's the trade-off between vocabulary size and sequence length for downstream processing?
 
 ---
 
@@ -1749,9 +1906,9 @@ Answer these to deepen your understanding of tokenization and its systems implic
   - BPE model processes: _____ total tokens per batch
 
 **Think about**:
-- Which requires more compute during attention (attention is O(n^2))?
+- Which produces longer sequences that downstream processing must handle?
 - How does this affect training time for large language models?
-- Why is sequence length often the bottleneck for transformer models?
+- Why might longer sequences create computational challenges for the models that process them?
 
 ---
 

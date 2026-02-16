@@ -17,7 +17,7 @@ TinyTorch is an **educational framework** where every contribution should:
 1. **Clone and setup environment**:
    ```bash
    git clone https://github.com/harvard-edge/cs249r_book.git
-   cd TinyTorch
+   cd cs249r_book/tinytorch
    python -m venv .venv
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    pip install -r requirements.txt
@@ -32,9 +32,9 @@ TinyTorch is an **educational framework** where every contribution should:
    ```
 
 3. **Read the development guidelines**:
-   - `CLAUDE.md` - Complete development standards
-   - `docs/INSTRUCTOR_GUIDE.md` - Educational context
-   - `docs/development/` - Technical guidelines
+   - `CONTRIBUTING.md` - Development standards (this file)
+   - `INSTRUCTOR.md` - Educational context and teaching approach
+   - `README.md` - Repository structure and project overview
 
 ## 🛠️ Types of Contributions
 
@@ -75,9 +75,9 @@ git checkout dev
 git pull origin dev
 git checkout -b feature/your-improvement
 
-# 3. Make changes following standards in CLAUDE.md
+# 3. Make changes following standards in CONTRIBUTING.md
 # 4. Test thoroughly
-python tests/run_all_modules.py
+pytest tests/
 tito module test 01
 
 # 5. Commit with descriptive messages (NO auto-attribution)
@@ -106,25 +106,21 @@ git branch -d feature/your-improvement
 
 All contributions must pass:
 
-1. **Module Tests**:
+1. **Module Tests** (run tests for a specific module):
    ```bash
-   python tests/module_XX/run_all_tests.py
+   pytest tests/NN_name/             # e.g., pytest tests/01_tensor/
+   tito module test NN               # e.g., tito module test 01
    ```
 
 2. **Integration Tests**:
    ```bash
-   python tests/integration/run_integration_tests.py
+   pytest tests/integration/
    ```
 
-3. **Module Testing**:
+3. **Milestone Verification** (end-to-end examples):
    ```bash
-   tito module test XX
-   ```
-
-4. **Example Verification**:
-   ```bash
-   cd examples/xornet && python train.py
-   cd examples/cifar10 && python train_cifar10_mlp.py
+   python milestones/02_1969_xor/02_xor_solved.py
+   python milestones/04_1998_cnn/01_lecun_tinydigits.py
    ```
 
 ## 📝 Code Standards
@@ -132,13 +128,13 @@ All contributions must pass:
 ### Module Development
 
 **For Students** (using the framework):
-- **File Format**: Edit `*_dev.ipynb` notebooks in Jupyter Lab
-- **Location**: Notebooks are in `modules/NN_name/` directories
+- **File Format**: Work in `modules/NN_name/name.ipynb` notebooks in Jupyter Lab
+- **Location**: Notebooks are in `modules/NN_name/` directories (e.g., `modules/01_tensor/tensor.ipynb`)
 - **Testing**: Run tests inline as you build
 - **Export**: Use `tito module complete N` to export to package
 
 **For Contributors** (improving the framework):
-- **Source Files**: Edit `*_dev.py` files (source of truth)
+- **Source Files**: Edit `src/NN_name/NN_name.py` files (source of truth, e.g., `src/01_tensor/01_tensor.py`)
 - **Notebooks**: Generated from source files using `tito src export`
 - **Structure**: Follow the standardized module structure
 - **Testing**: Include immediate testing after each implementation
@@ -209,8 +205,8 @@ For new features, please:
 
 - **Issues**: Use GitHub Issues for bugs and feature requests
 - **Discussions**: GitHub Discussions for questions and ideas
-- **Documentation**: Check `docs/` directory for detailed guides
-- **Development**: Follow `CLAUDE.md` for complete standards
+- **Documentation**: Check `README.md` for project structure and guides
+- **Development**: Follow `CONTRIBUTING.md` for complete standards
 
 ## 🏆 Recognition
 
@@ -257,14 +253,14 @@ Your commits will be included in the next release with appropriate version bump.
 ## 📚 Resources
 
 ### Essential Reading
-- **`CLAUDE.md`** - Complete development standards and workflow
-- **`docs/INSTRUCTOR_GUIDE.md`** - Educational context and teaching approach
-- **`docs/development/`** - Technical implementation guidelines
+- **`CONTRIBUTING.md`** - Development standards and workflow (this file)
+- **`INSTRUCTOR.md`** - Educational context and teaching approach
+- **`README.md`** - Repository structure and project overview
 
 ### Quick References
-- **Module Structure**: See any `modules/XX_name/` directory
-- **Testing Patterns**: Check `tests/module_template/`
-- **Example Code**: Look at `examples/xornet/` and `examples/cifar10/`
+- **Module Structure**: See any `src/NN_name/` directory (e.g., `src/01_tensor/`)
+- **Testing Patterns**: Check `tests/NN_name/` directories (e.g., `tests/01_tensor/`)
+- **Example Code**: Look at `milestones/` for end-to-end working examples
 
 ---
 

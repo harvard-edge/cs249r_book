@@ -441,6 +441,13 @@ Initializes profiler with measurement tracking structures.
 | `profile_forward_pass` | `profile_forward_pass(model, input_tensor) -> Dict` | Complete forward pass analysis |
 | `profile_backward_pass` | `profile_backward_pass(model, input_tensor) -> Dict` | Training iteration analysis |
 
+### Utility Functions
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `quick_profile` | `quick_profile(model, input_tensor, profiler=None) -> Dict` | One-call convenience profiling |
+| `analyze_weight_distribution` | `analyze_weight_distribution(model, percentiles) -> Dict` | Statistical analysis of model weight distributions |
+
 ## Core Concepts
 
 This section covers the fundamental ideas you need to understand profiling deeply. Measurement is the foundation of optimization, and understanding what you're measuring matters as much as how you measure it.

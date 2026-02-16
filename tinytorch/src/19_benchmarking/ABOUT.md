@@ -742,7 +742,7 @@ The following shows equivalent benchmarking patterns in TinyTorch and production
 `````{tab-set}
 ````{tab-item} Your TinyTorch
 ```python
-from tinytorch.benchmarking import Benchmark
+from tinytorch.perf.benchmarking import Benchmark
 
 # Setup models and benchmark
 benchmark = Benchmark(
@@ -932,7 +932,7 @@ Apply everything you have learned in Modules 01-19 to compete in the TorchPerf O
 | **Latency Sprint** | Minimize inference time | `benchmark.run_latency_benchmark()` determines winners |
 | **Memory Challenge** | Minimize model size | `benchmark.run_memory_benchmark()` tracks footprint |
 | **Accuracy Contest** | Maximize accuracy under constraints | `benchmark.run_accuracy_benchmark()` validates quality |
-| **All-Around** | Balanced Pareto frontier | `suite.generate_pareto_frontier()` finds optimal trade-offs |
+| **All-Around** | Balanced Pareto frontier | `suite.plot_pareto_frontier()` finds optimal trade-offs |
 
 ## Get Started
 

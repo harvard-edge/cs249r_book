@@ -437,7 +437,7 @@ Feed-forward network with 4x expansion, GELU activation, and projection back to 
 ### TransformerBlock
 
 ```python
-TransformerBlock(embed_dim: int, num_heads: int, mlp_ratio: int = 4, dropout_prob: float = 0.1) -> TransformerBlock
+TransformerBlock(embed_dim: int, num_heads: int, mlp_ratio: int = 4, ff_dim: int = None, dropout_prob: float = 0.1) -> TransformerBlock
 ```
 
 Complete transformer block with self-attention, MLP, layer normalization, and residual connections using pre-norm architecture.

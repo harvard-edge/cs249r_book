@@ -23,7 +23,7 @@ it production-ready. Every technique uses YOUR implementations!
   Module 16: Compression - YOUR Compressor class
   Module 17: Acceleration - YOUR vectorized operations
   Module 18: Memoization - YOUR KVCache class
-  Module 19: Benchmarking - YOUR TinyMLPerf class
+  Module 19: Benchmarking - YOUR MLPerf class
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 🏗️ THE OPTIMIZATION PIPELINE (Using YOUR APIs):
@@ -48,7 +48,7 @@ it production-ready. Every technique uses YOUR implementations!
     └───────────────────────────────────┬─────────────────────────────────────┘
                                         │
     ┌───────────────────────────────────▼─────────────────────────────────────┐
-    │      STEP 4: BENCHMARK (using YOUR TinyMLPerf class)                    │
+    │      STEP 4: BENCHMARK (using YOUR MLPerf class)                    │
     │              Compare before vs after with scientific rigor              │
     └─────────────────────────────────────────────────────────────────────────┘
 
@@ -130,7 +130,7 @@ console = Console()
 # │ Module 18: KVCache  │ Caches attention computations  │ Faster inference for        │
 # │ ★ OPTIMIZATION ★    │ optimized implementations      │ hardware-aware code         │
 # │                     │                                │                             │
-# │ Module 19: TinyMLPerf│ Scientific benchmarking       │ Rigorous before/after       │
+# │ Module 19: MLPerf│ Scientific benchmarking       │ Rigorous before/after       │
 # │ ★ OPTIMIZATION ★    │ with statistical significance  │ comparison                  │
 # └─────────────────────┴────────────────────────────────┴─────────────────────────────┘
 #
@@ -771,8 +771,8 @@ def main():
         from tinytorch.perf.memoization import KVCache
         console.print("  [green]✓[/green] KVCache (YOUR Module 18)")
 
-        from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
-        console.print("  [green]✓[/green] Benchmark, TinyMLPerf (YOUR Module 19)")
+        from tinytorch.perf.benchmarking import Benchmark, MLPerf
+        console.print("  [green]✓[/green] Benchmark, MLPerf (YOUR Module 19)")
 
     except ImportError as e:
         console.print(Panel(

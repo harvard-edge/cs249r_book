@@ -885,7 +885,7 @@ For students who want to understand the academic foundations and production impl
 
 ```{seealso} Coming Up: Module 19 - Benchmarking
 
-Implement kernel fusion, operator batching, and CPU/GPU optimization techniques. You'll combine multiple operations to reduce memory bandwidth bottlenecks and maximize hardware utilization.
+Learn to measure and compare performance systematically. You'll build benchmarking infrastructure with statistical rigor, Pareto frontier analysis, and professional measurement tools for evaluating the optimization techniques you've built.
 ```
 
 **Preview - How Memoization Combines with Future Optimizations:**

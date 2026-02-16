@@ -862,7 +862,7 @@ For students who want to understand the academic foundations and explore compres
 
 ```{seealso} Coming Up: Module 17 - Acceleration
 
-Implement caching and memoization strategies to eliminate redundant computations. You'll cache repeated forward passes, attention patterns, and embedding lookups for dramatic speedups in production inference.
+Implement hardware-aware optimization techniques including vectorized matrix operations, fused kernels, and cache-friendly tiling. You'll combine multiple operations to reduce memory bandwidth bottlenecks and maximize hardware utilization.
 ```
 
 **Preview - How Your Compression Gets Used in Future Modules:**

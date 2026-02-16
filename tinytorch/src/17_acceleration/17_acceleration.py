@@ -1163,7 +1163,7 @@ if __name__ == "__main__":
 """
 ## 🔧 Integration: Measuring Acceleration Gains with Profiler
 
-Now let's use the **Profiler** tool you built in Module 15 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M15), apply optimizations (M16), measure gains (M15+M16).
+Now let's use the **Profiler** tool you built in Module 14 to measure the actual performance improvements from vectorization. This demonstrates the full workflow: build profiling tools (M14), apply optimizations (M15-M17), measure gains.
 
 This is how professional ML engineers work: profile → optimize → measure → repeat.
 """
@@ -1172,7 +1172,7 @@ This is how professional ML engineers work: profile → optimize → measure →
 # Import Profiler from Module 14 (Module 17 comes after Module 14)
 from tinytorch.perf.profiling import Profiler
 
-def demo_acceleration_with_profiler():
+def explore_acceleration_with_profiler():
     """📊 Demonstrate acceleration gains using Profiler from Module 14."""
 
     print("📊 Measuring Acceleration Gains with Profiler")
@@ -1256,40 +1256,7 @@ def demo_acceleration_with_profiler():
     print("\n✅ This is the power of acceleration: same math, different execution!")
 
 if __name__ == "__main__":
-    demo_acceleration_with_profiler()
-
-# %% [markdown]
-"""
-## 🤔 ML Systems Reflection Questions
-
-Answer these to deepen your understanding of acceleration techniques and their systems implications:
-
-### 1. Arithmetic Intensity Analysis
-You implemented vectorized matrix multiplication and fused GELU.
-- Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
-- Arithmetic intensity: _____ FLOPs/byte
-- Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
-- Why does this make matrix multiplication ideal for GPUs? _____
-
----
-
-### 2. Kernel Fusion Memory Benefits
-Your fused_gelu combines 7 operations into a single expression.
-- Unfused version memory accesses: 7 reads + 7 writes = _____ per element
-- Fused version memory accesses: 1 read + 1 write = _____ per element
-- Memory bandwidth reduction: _____%
-- Why is this critical for transformer inference? _____
-
----
-
-### 3. Production Optimization Strategy
-Based on your decision framework analysis:
-For edge deployment (memory critical, stability required, hardware diverse):
-- Priority 1 technique: _____ (low risk, universal)
-- Priority 2 technique: _____ (memory benefits)
-- Skip technique: _____ (why: _____)
-- What's the primary constraint: memory, compute, or power? _____
-"""
+    explore_acceleration_with_profiler()
 
 # %% [markdown]
 """
@@ -1438,6 +1405,39 @@ if __name__ == "__main__":
 
 # %% [markdown]
 """
+## 🤔 ML Systems Reflection Questions
+
+Answer these to deepen your understanding of acceleration techniques and their systems implications:
+
+### 1. Arithmetic Intensity Analysis
+You implemented vectorized matrix multiplication and fused GELU.
+- Matrix multiplication (1024×1024): Performs ~2.1 billion FLOPs, reads ~12 MB data
+- Arithmetic intensity: _____ FLOPs/byte
+- Compared to element-wise addition (0.33 FLOPs/byte): _____× higher intensity
+- Why does this make matrix multiplication ideal for GPUs? _____
+
+---
+
+### 2. Kernel Fusion Memory Benefits
+Your fused_gelu combines 7 operations into a single expression.
+- Unfused version memory accesses: 7 reads + 7 writes = _____ per element
+- Fused version memory accesses: 1 read + 1 write = _____ per element
+- Memory bandwidth reduction: _____%
+- Why is this critical for transformer inference? _____
+
+---
+
+### 3. Production Optimization Strategy
+Based on your decision framework analysis:
+For edge deployment (memory critical, stability required, hardware diverse):
+- Priority 1 technique: _____ (low risk, universal)
+- Priority 2 technique: _____ (memory benefits)
+- Skip technique: _____ (why: _____)
+- What's the primary constraint: memory, compute, or power? _____
+"""
+
+# %% [markdown]
+"""
 ## ⭐ Aha Moment: Vectorization and Fusion Speed Things Up
 
 **What you built:** Vectorized operations and fused kernels that reduce memory traffic.
@@ -1519,5 +1519,5 @@ The performance analysis skills transfer directly to production optimization wor
 
 Export with: `tito module complete 17`
 
-**Next**: Module 18 will build on these acceleration techniques for advanced graph optimization!
+**Next**: Module 18 will add memoization techniques including KV caching for efficient transformer inference!
 """

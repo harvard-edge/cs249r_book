@@ -205,9 +205,19 @@ check_python_version() {
 
 # Find the best Python command (prioritize newer versions)
 get_python_cmd() {
+    local platform
+    platform=$(get_platform)
+
     # Check specific versions first, prioritizing newer versions
-    local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3.9" "python3.8" "python3" "python")
-    
+    # On Windows, prefer 'python' to avoid Microsoft Store alias that
+    # resolves 'python3' to a stub and creates Unix-style venv paths.
+    # Contributed by @adil-mubashir-ch (PR #1169)
+    if [ "$platform" = "windows" ]; then
+        local candidates=("python")
+    else
+        local candidates=("python3.13" "python3.12" "python3.11" "python3.10" "python3.9" "python3.8" "python3" "python")
+    fi
+
     for cmd in "${candidates[@]}"; do
         if command_exists "$cmd"; then
             # Verify this specific candidate actually meets the version requirement

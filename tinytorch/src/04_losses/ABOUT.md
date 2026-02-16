@@ -323,7 +323,7 @@ initSlideViewer('04_losses', '../_static/slides/04_losses.pdf');
 
 Loss functions are the mathematical conscience of machine learning. Every neural network needs to know when it's right and when it's wrong. Loss functions provide that feedback by measuring the distance between what your model predicts and what actually happened. Without loss functions, models have no way to improve - they're like athletes training without knowing their score.
 
-In this module, you'll implement three essential loss functions: Mean Squared Error (MSE) for regression, Cross-Entropy for multi-class classification, and Binary Cross-Entropy for binary decisions. You'll also master the log-sum-exp trick, a crucial numerical stability technique that prevents computational overflow with large numbers. These implementations will serve as the foundation for Module 06: Autograd, where gradients flow backward from these loss values to update model parameters.
+In this module, you'll implement three essential loss functions: Mean Squared Error (MSE) for regression, Cross-Entropy for multi-class classification, and Binary Cross-Entropy for binary decisions. You'll also master the log-sum-exp trick, a crucial numerical stability technique that prevents computational overflow with large numbers. These implementations serve as the foundation for automatic differentiation, where gradients flow backward from loss values to update model parameters.
 
 By the end, you'll understand not just how to compute loss, but why different problems require different loss functions, and how numerical stability shapes production ML systems.
 
@@ -378,7 +378,7 @@ loss = criterion(predictions, targets)  # Scalar feedback signal for learning
 
 To keep this module focused, you will **not** implement:
 
-- Gradient computation (that's Module 06: Autograd)
+- Gradient computation (automatic differentiation is a later module)
 - Advanced loss variants (Focal Loss, Label Smoothing, Huber Loss)
 - Hierarchical or sampled softmax for large vocabularies (PyTorch optimization)
 - Custom reduction strategies beyond mean
@@ -448,7 +448,7 @@ Loss functions transform the abstract question "how good is my model?" into a co
 
 The key insight is that loss functions must be differentiable - you need to know not just the current error, but which direction to move parameters to reduce that error. This is why we use squared differences instead of absolute differences in MSE: the square function has a smooth derivative that points toward improvement.
 
-Every training iteration follows the same pattern: forward pass produces predictions, loss function measures error, backward pass (Module 06) computes how to improve. The loss value itself becomes a single number summarizing model quality across an entire batch of examples.
+Every training iteration follows the same pattern: forward pass produces predictions, loss function measures error, backward pass computes how to improve. The loss value itself becomes a single number summarizing model quality across an entire batch of examples.
 
 ### Mean Squared Error
 
@@ -619,7 +619,7 @@ The following comparison shows equivalent loss computations in TinyTorch and PyT
 `````{tab-set}
 ````{tab-item} Your TinyTorch
 ```python
-from tinytorch import Tensor
+from tinytorch.core.tensor import Tensor
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss
 
 # Regression

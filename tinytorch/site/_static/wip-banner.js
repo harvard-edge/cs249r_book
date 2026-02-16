@@ -3,6 +3,11 @@
  * Elegant navigation bar matching MLSysBook style
  */
 
+// ── Release info (auto-updated by CI on publish) ──────────────
+const TINYTORCH_VERSION = '0.1.8';
+const TINYTORCH_RELEASE_DATE = 'Feb 7, 2026';
+// ───────────────────────────────────────────────────────────────
+
 document.addEventListener('DOMContentLoaded', function() {
     // Only inject if not already present
     if (document.getElementById('tinytorch-bar')) return;
@@ -28,6 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         Tiny<span class="brand-fire">🔥</span>Torch
                     </a>
                     <span class="tinytorch-bar-badge">Under Construction</span>
+                    <a href="https://github.com/harvard-edge/cs249r_book/releases" target="_blank" rel="noopener noreferrer" class="tinytorch-bar-version" title="View releases on GitHub">v${TINYTORCH_VERSION} · ${TINYTORCH_RELEASE_DATE}</a>
                 </div>
                 <div class="tinytorch-bar-links">
                     <a href="${siteRoot}_static/downloads/TinyTorch-Guide.pdf" class="download-link" title="Download Course Guide (PDF)">
