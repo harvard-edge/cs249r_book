@@ -58,8 +58,13 @@ export function registerModuleCommands(
     const filePath = getPathFromTito(projectRoot, moduleNum, kind);
 
     if (filePath && fs.existsSync(filePath)) {
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
-      await vscode.window.showTextDocument(doc, { preview: false });
+      const uri = vscode.Uri.file(filePath);
+      if (kind === 'notebook') {
+        await vscode.commands.executeCommand('vscode.openWith', uri, 'jupyter-notebook');
+      } else {
+        const doc = await vscode.workspace.openTextDocument(uri);
+        await vscode.window.showTextDocument(doc, { preview: false });
+      }
       return;
     }
 
