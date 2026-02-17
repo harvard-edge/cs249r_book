@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 02: Activations
 
 :::{admonition} Module Info
@@ -30,7 +36,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F02_activations%2F02_activations.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F02_activations%2Factivations.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -693,15 +699,46 @@ Let's walk through the key similarities and differences:
 Mathematical functions, numerical stability techniques (max subtraction in softmax), and the concept of element-wise transformations. When you debug PyTorch activation issues, you'll understand exactly what's happening because you implemented the same logic.
 ```
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Prose: "Why Activations Matter at Scale"
+prose_gelu_ops = 96 * 2
+glue("prose_gelu_ops", f"{prose_gelu_ops:,}")
+
+prose_daily_activations = 1000 * 86400
+glue("prose_daily_activations", f"{prose_daily_activations / 1e6:.0f} million")
+```
+
 ### Why Activations Matter at Scale
 
 To appreciate why activation choice matters, consider the scale of modern ML systems:
 
-- **Large language models**: GPT-3 has 96 transformer layers, each with 2 GELU activations. That's **192 GELU operations per forward pass** on billions of parameters.
+- **Large language models**: GPT-3 has 96 transformer layers, each with 2 GELU activations. That's **{glue:text}`prose_gelu_ops` GELU operations per forward pass** on billions of parameters.
 - **Image classification**: ResNet-50 has 49 convolutional layers, each followed by ReLU. Processing a batch of 256 images at 224×224 resolution means **12 billion ReLU operations** per batch.
-- **Production serving**: A model serving 1000 requests per second performs **86 million activation computations per day**. A 20% speedup from ReLU vs GELU saves hours of compute time.
+- **Production serving**: A model serving 1000 requests per second performs **{glue:text}`prose_daily_activations` activation computations per day**. A 20% speedup from ReLU vs GELU saves hours of compute time.
 
 Activation functions account for **5-15% of total training time** in typical networks (the rest is matrix multiplication). But in transformer models with many layers and small matrix sizes, activations can account for **20-30% of compute time**. This is why GELU vs ReLU is a real trade-off: slower computation but potentially better accuracy.
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Memory calculation
+q1_bytes = 32 * 4096 * 4
+glue("q1_bytes", f"{q1_bytes:,}")
+glue("q1_kb", f"{q1_bytes / 1024:.0f} KB")
+
+q1_100layer_kb = 100 * (q1_bytes / 1024)
+glue("q1_100layer_mb", f"{q1_100layer_kb / 1024:.0f} MB")
+
+# Q4: Sparsity analysis
+q4_total = 128 * 1024
+q4_zeros = q4_total // 2
+glue("q4_total", f"{q4_total:,}")
+glue("q4_zeros", f"≈ {q4_zeros:,}")
+```
 
 ## Check Your Understanding
 
@@ -714,9 +751,9 @@ A batch of 32 samples passes through a hidden layer with 4096 neurons and ReLU a
 ```{admonition} Answer
 :class: dropdown
 
-32 × 4096 × 4 bytes = **524,288 bytes ≈ 512 KB**
+32 × 4096 × 4 bytes = **{glue:text}`q1_bytes` bytes ≈ {glue:text}`q1_kb`**
 
-This is the activation memory for ONE layer. A 100-layer network needs 50 MB just to store activations for one forward pass. This is why activation memory dominates training memory usage — activations must be cached for backpropagation.
+This is the activation memory for ONE layer. A 100-layer network needs {glue:text}`q1_100layer_mb` just to store activations for one forward pass. This is why activation memory dominates training memory usage — activations must be cached for backpropagation.
 ```
 
 **Q2: Computational Cost**
@@ -764,8 +801,8 @@ For a standard normal distribution N(0, 1), approximately **50% of values are ne
 
 ReLU zeros all negative values, so approximately **50% of outputs will be exactly zero**.
 
-Total elements: 128 × 1024 = 131,072
-Zeros: ≈ 65,536
+Total elements: 128 × 1024 = {glue:text}`q4_total`
+Zeros: {glue:text}`q4_zeros`
 
 This sparsity has major implications:
 - **Speed**: Multiplying by zero is free, so downstream computations can skip ~50% of operations
@@ -839,7 +876,7 @@ Implement Linear layers that combine your Tensor operations with your activation
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/02_activations/02_activations.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/02_activations/activations.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/02_activations/02_activations.py)** - Browse the implementation code
 ```
 

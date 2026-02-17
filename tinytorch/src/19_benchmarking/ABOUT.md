@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 19: Benchmarking
 
 :::{admonition} Module Info
@@ -25,7 +31,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F19_benchmarking%2F19_benchmarking.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F19_benchmarking%2Fbenchmarking.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -792,15 +798,108 @@ The statistical methodology, warmup protocols, and reproducibility requirements 
 
 ### Why Benchmarking Matters at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Production cost savings from latency reduction
+scale_annual_cost = 50_000_000
+scale_latency_reduction = 0.10
+scale_savings = scale_annual_cost * scale_latency_reduction
+glue("scale_savings", f"${scale_savings / 1_000_000:.0f} million")
+```
+
 Production ML systems operate at scales where small performance differences compound into massive resource consumption:
 
-- **Cost**: A data center running 10,000 GPUs 24/7 consumes $50 million in electricity annually. Reducing latency 10% saves $5 million per year.
+- **Cost**: A data center running 10,000 GPUs 24/7 consumes $50 million in electricity annually. Reducing latency 10% saves {glue:text}`scale_savings` per year.
 - **User Experience**: Search engines must return results in under 200ms. A 50ms latency reduction is the difference between keeping or losing users.
 - **Sustainability**: Training GPT-3 consumed 1,287 MWh of energy, equivalent to the annual energy use of 120 US homes. Optimization reduces carbon footprint.
 
 Fair benchmarking ensures optimization efforts focus on changes that produce measurable, statistically significant improvements.
 
 ## Check Your Understanding
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+
+# Q1: Statistical Significance
+# Baseline: mean=12.5ms, std=1.2ms, n=10
+# Optimized: mean=11.8ms, std=1.5ms, n=10
+q1_n = 10
+q1_bl_mean = 12.5
+q1_bl_std = 1.2
+q1_bl_margin = 1.96 * (q1_bl_std / math.sqrt(q1_n))
+q1_bl_ci_lo = q1_bl_mean - q1_bl_margin
+q1_bl_ci_hi = q1_bl_mean + q1_bl_margin
+
+q1_opt_mean = 11.8
+q1_opt_std = 1.5
+q1_opt_margin = 1.96 * (q1_opt_std / math.sqrt(q1_n))
+q1_opt_ci_lo = q1_opt_mean - q1_opt_margin
+q1_opt_ci_hi = q1_opt_mean + q1_opt_margin
+
+q1_mean_diff = q1_bl_mean - q1_opt_mean
+
+glue("q1_bl_margin", f"{q1_bl_margin:.2f}")
+glue("q1_bl_ci_lo", f"{q1_bl_ci_lo:.2f}")
+glue("q1_bl_ci_hi", f"{q1_bl_ci_hi:.2f}")
+glue("q1_opt_margin", f"{q1_opt_margin:.2f}")
+glue("q1_opt_ci_lo", f"{q1_opt_ci_lo:.2f}")
+glue("q1_opt_ci_hi", f"{q1_opt_ci_hi:.2f}")
+glue("q1_mean_diff", f"{q1_mean_diff:.1f}")
+
+# Q2: Sample Size Calculation
+# std=2.0ms, target margin=±0.5ms
+q2_std = 2.0
+q2_target = 0.5
+q2_sqrt_n = 1.96 * q2_std / q2_target
+q2_n = q2_sqrt_n ** 2
+q2_n_ceil = math.ceil(q2_n)
+
+glue("q2_sqrt_n", f"{q2_sqrt_n:.2f}")
+glue("q2_n_raw", f"{q2_n:.1f}")
+glue("q2_n_ceil", f"{q2_n_ceil}")
+
+# Q3: Warmup Impact
+# Without warmup measurements
+q3_no_warmup = [15.2, 12.1, 10.8, 10.5, 10.6, 10.4]
+q3_warmup = [10.5, 10.6, 10.4, 10.7, 10.5, 10.6]
+q3_nw_mean = sum(q3_no_warmup) / len(q3_no_warmup)
+q3_w_mean = sum(q3_warmup) / len(q3_warmup)
+q3_latency_diff = q3_nw_mean - q3_w_mean
+q3_latency_pct = q3_latency_diff / q3_nw_mean * 100
+
+# Std values are given as approximate in the text (1.8 and 0.1)
+q3_nw_std = 1.8
+q3_w_std = 0.1
+q3_var_reduction = (q3_nw_std - q3_w_std) / q3_nw_std * 100
+
+glue("q3_nw_mean", f"{q3_nw_mean:.1f}ms")
+glue("q3_w_mean", f"{q3_w_mean:.2f}ms")
+glue("q3_latency_diff", f"{q3_latency_diff:.2f}ms")
+glue("q3_latency_pct", f"{q3_latency_pct:.0f}%")
+glue("q3_var_reduction", f"{q3_var_reduction:.0f}%")
+
+# Q5: Measurement Overhead
+# 1μs timer overhead, 50μs operation, 1000 measurements
+q5_op_us = 50
+q5_overhead_us = 1
+q5_n_measurements = 1000
+q5_total_op_us = q5_op_us * q5_n_measurements
+q5_total_overhead_us = q5_overhead_us * q5_n_measurements
+q5_total_op_ms = q5_total_op_us / 1000
+q5_total_overhead_ms = q5_total_overhead_us / 1000
+q5_total_measured_ms = q5_total_op_ms + q5_total_overhead_ms
+q5_overhead_pct = (q5_total_overhead_ms / q5_total_measured_ms) * 100
+
+glue("q5_total_op_us", f"{q5_total_op_us:,}")
+glue("q5_total_op_ms", f"{q5_total_op_ms:.0f}ms")
+glue("q5_total_overhead_us", f"{q5_total_overhead_us:,}")
+glue("q5_total_overhead_ms", f"{q5_total_overhead_ms:.0f}ms")
+glue("q5_total_measured_ms", f"{q5_total_measured_ms:.0f}ms")
+glue("q5_overhead_pct", f"{q5_overhead_pct:.2f}%")
+```
 
 Test your understanding of benchmarking statistics and methodology with these quantitative questions.
 
@@ -813,13 +912,13 @@ You benchmark a baseline model and an optimized model 10 times each. Baseline: m
 
 **Calculate 95% confidence intervals:**
 
-Baseline: CI = mean ± 1.96 * (std / sqrt(n)) = 12.5 ± 1.96 * (1.2 / sqrt(10)) = 12.5 ± 0.74 = [11.76, 13.24]
+Baseline: CI = mean ± 1.96 * (std / sqrt(n)) = 12.5 ± 1.96 * (1.2 / sqrt(10)) = 12.5 ± {glue:text}`q1_bl_margin` = [{glue:text}`q1_bl_ci_lo`, {glue:text}`q1_bl_ci_hi`]
 
-Optimized: CI = 11.8 ± 1.96 * (1.5 / sqrt(10)) = 11.8 ± 0.93 = [10.87, 12.73]
+Optimized: CI = 11.8 ± 1.96 * (1.5 / sqrt(10)) = 11.8 ± {glue:text}`q1_opt_margin` = [{glue:text}`q1_opt_ci_lo`, {glue:text}`q1_opt_ci_hi`]
 
-**Result**: The confidence intervals OVERLAP (baseline goes as low as 11.76, optimized goes as high as 12.73). This means the difference is **NOT statistically significant** at the 95% confidence level. You cannot confidently claim the optimized model is faster.
+**Result**: The confidence intervals OVERLAP (baseline goes as low as {glue:text}`q1_bl_ci_lo`, optimized goes as high as {glue:text}`q1_opt_ci_hi`). This means the difference is **NOT statistically significant** at the 95% confidence level. You cannot confidently claim the optimized model is faster.
 
-**Lesson**: Always compute confidence intervals. A 0.7ms difference in means might seem meaningful, but with these variances and sample sizes, it could be random noise.
+**Lesson**: Always compute confidence intervals. A {glue:text}`q1_mean_diff`ms difference in means might seem meaningful, but with these variances and sample sizes, it could be random noise.
 ```
 
 **Q2: Sample Size Calculation**
@@ -833,9 +932,9 @@ You measure latency with standard deviation of 2.0ms. How many measurements do y
 
 **Solve for n**: 0.5 = 1.96 * (2.0 / sqrt(n))
 
-sqrt(n) = 1.96 * 2.0 / 0.5 = 7.84
+sqrt(n) = 1.96 * 2.0 / 0.5 = {glue:text}`q2_sqrt_n`
 
-n = 7.84² = **61.5 ≈ 62 measurements**
+n = {glue:text}`q2_sqrt_n`² = **{glue:text}`q2_n_raw` ≈ {glue:text}`q2_n_ceil` measurements**
 
 **Lesson**: Achieving tight confidence intervals requires many measurements. Quadrupling precision (from ±1.0ms to ±0.5ms) requires 4x more samples (15 to 60). This is why professional benchmarks run hundreds of iterations.
 ```
@@ -848,16 +947,16 @@ Without warmup, your measurements are: [15.2, 12.1, 10.8, 10.5, 10.6, 10.4] ms. 
 :class: dropdown
 
 **Without warmup:**
-- Mean = (15.2 + 12.1 + 10.8 + 10.5 + 10.6 + 10.4) / 6 = **11.6ms**
+- Mean = (15.2 + 12.1 + 10.8 + 10.5 + 10.6 + 10.4) / 6 = **{glue:text}`q3_nw_mean`**
 - Std = 1.8ms (high variance due to warmup effects)
 
 **With warmup:**
-- Mean = (10.5 + 10.6 + 10.4 + 10.7 + 10.5 + 10.6) / 6 = **10.55ms**
+- Mean = (10.5 + 10.6 + 10.4 + 10.7 + 10.5 + 10.6) / 6 = **{glue:text}`q3_w_mean`**
 - Std = 0.1ms (low variance, stable measurements)
 
 **Impact:**
-- Latency reduced: 11.6 - 10.55 = **1.05ms (9% reduction)**
-- Variance reduced: 1.8 → 0.1ms = **95% reduction in noise**
+- Latency reduced: {glue:text}`q3_nw_mean` - {glue:text}`q3_w_mean` = **{glue:text}`q3_latency_diff` ({glue:text}`q3_latency_pct` reduction)**
+- Variance reduced: 1.8 → 0.1ms = **{glue:text}`q3_var_reduction` reduction in noise**
 
 **Lesson**: Warmup eliminates cold-start effects and dramatically reduces measurement variance. Without warmup, you are measuring system startup behavior, not steady-state performance.
 ```
@@ -888,13 +987,13 @@ Your timer has 1μs overhead per measurement. You measure a 50μs operation 1000
 ```{admonition} Answer
 :class: dropdown
 
-**Total true operation time**: 50μs × 1000 = 50,000μs = 50ms
+**Total true operation time**: 50μs × 1000 = {glue:text}`q5_total_op_us`μs = {glue:text}`q5_total_op_ms`
 
-**Total timer overhead**: 1μs × 1000 = 1,000μs = 1ms
+**Total timer overhead**: 1μs × 1000 = {glue:text}`q5_total_overhead_us`μs = {glue:text}`q5_total_overhead_ms`
 
-**Total measured time**: 50ms + 1ms = 51ms
+**Total measured time**: {glue:text}`q5_total_op_ms` + {glue:text}`q5_total_overhead_ms` = {glue:text}`q5_total_measured_ms`
 
-**Overhead percentage**: (1ms / 51ms) × 100% = **1.96%**
+**Overhead percentage**: ({glue:text}`q5_total_overhead_ms` / {glue:text}`q5_total_measured_ms`) × 100% = **{glue:text}`q5_overhead_pct`**
 
 **Lesson**: Timer overhead is negligible for operations longer than ~50μs, but becomes significant for microsecond-scale operations. This is why we use `time.perf_counter()` with nanosecond resolution and minimal overhead. For operations under 10μs, consider measuring batches and averaging.
 ```
@@ -938,7 +1037,7 @@ Apply everything you have learned in Modules 01-19 to compete in the TorchPerf O
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/19_benchmarking/19_benchmarking.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/19_benchmarking/benchmarking.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/19_benchmarking/19_benchmarking.py)** - Browse the implementation code
 ```
 

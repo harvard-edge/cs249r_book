@@ -32,8 +32,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     <a href="${siteRoot}intro.html" class="tinytorch-bar-brand">
                         Tiny<span class="brand-fire">🔥</span>Torch
                     </a>
+                    <a href="https://github.com/harvard-edge/cs249r_book/releases" target="_blank" rel="noopener noreferrer" class="tinytorch-bar-version" title="View releases on GitHub"><span class="version-number">v${TINYTORCH_VERSION}</span><span class="version-date"> · ${TINYTORCH_RELEASE_DATE}</span></a>
                     <span class="tinytorch-bar-badge">Under Construction</span>
-                    <a href="https://github.com/harvard-edge/cs249r_book/releases" target="_blank" rel="noopener noreferrer" class="tinytorch-bar-version" title="View releases on GitHub">v${TINYTORCH_VERSION} · ${TINYTORCH_RELEASE_DATE}</a>
                 </div>
                 <div class="tinytorch-bar-links">
                     <a href="${siteRoot}_static/downloads/TinyTorch-Guide.pdf" class="download-link" title="Download Course Guide (PDF)">
@@ -44,11 +44,11 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="link-icon">↗</span>
                         <span class="link-text">Paper</span>
                     </a>
-                    <a href="https://mlsysbook.ai" target="_blank">
+                    <a href="https://mlsysbook.ai" target="_blank" class="link-secondary">
                         <span class="link-icon">📖</span>
                         <span class="link-text">MLSysBook</span>
                     </a>
-                    <a href="#" class="subscribe-trigger" onclick="event.preventDefault(); if(window.openSubscribeModal) openSubscribeModal();">
+                    <a href="#" class="subscribe-trigger link-secondary" onclick="event.preventDefault(); if(window.openSubscribeModal) openSubscribeModal();">
                         <span class="link-icon">✉️</span>
                         <span class="link-text">Subscribe</span>
                     </a>
@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         <span class="link-icon">⭐</span>
                         <span class="link-text">Star</span>
                     </a>
-                    <a href="${siteRoot}community.html" target="_blank">
+                    <a href="${siteRoot}community.html" target="_blank" class="link-secondary">
                         <span class="link-icon">🌍</span>
                         <span class="link-text">Community</span>
                     </a>

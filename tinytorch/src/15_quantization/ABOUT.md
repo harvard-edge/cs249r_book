@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 15: Quantization
 
 :::{admonition} Module Info
@@ -31,7 +37,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F15_quantization%2F15_quantization.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F15_quantization%2Fquantization.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -322,7 +328,27 @@ initSlideViewer('15_quantization', '../_static/slides/15_quantization.pdf');
 
 ## Overview
 
-Modern neural networks face a memory wall problem. A BERT model requires 440 MB, GPT-2 needs 6 GB, and GPT-3 demands 700 GB, yet mobile devices have only 4-8 GB of RAM. The culprit? Every parameter uses 4 bytes of FP32 precision, representing values with 32-bit accuracy when 8 bits often suffice. Quantization solves this by converting FP32 weights to INT8, achieving 4× memory reduction with less than 1% accuracy loss.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Model sizes in FP32 (4 bytes per parameter)
+bert_params = 110_000_000
+gpt2_params = 1_500_000_000
+gpt3_params = 175_000_000_000
+bert_mb = bert_params * 4 / 1024**2
+gpt2_gb = gpt2_params * 4 / 1024**3
+gpt3_gb = gpt3_params * 4 / 1024**3
+glue("bert_mb", f"{bert_mb:.0f} MB")
+glue("gpt2_gb", f"{gpt2_gb:.1f} GB")
+glue("gpt3_gb", f"{gpt3_gb:.0f} GB")
+
+# Quantized BERT (INT8 = 1 byte per param)
+bert_int8_mb = bert_params * 1 / 1024**2
+glue("bert_int8_mb", f"{bert_int8_mb:.0f} MB")
+```
+
+Modern neural networks face a memory wall problem. A BERT model requires {glue:text}`bert_mb`, GPT-2 needs {glue:text}`gpt2_gb`, and GPT-3 demands {glue:text}`gpt3_gb`, yet mobile devices have only 4-8 GB of RAM. The culprit? Every parameter uses 4 bytes of FP32 precision, representing values with 32-bit accuracy when 8 bits often suffice. Quantization solves this by converting FP32 weights to INT8, achieving 4× memory reduction with less than 1% accuracy loss.
 
 In this module, you'll build a production-quality INT8 quantization system. You'll implement the core quantization algorithm, create quantized layer classes, and develop calibration techniques that optimize quantization parameters for minimal accuracy degradation. By the end, you'll compress entire neural networks from hundreds of megabytes to a fraction of their original size, enabling deployment on memory-constrained devices.
 
@@ -448,7 +474,7 @@ Neural networks use FP32 (32-bit floating point) by default, which can represent
 
 INT8 quantization maps this continuous FP32 range to just 256 discrete values (from -128 to 127). The key insight is that we can preserve model accuracy by carefully choosing how to map these 256 levels across the actual range of values in each tensor. A tensor with values in [-0.5, 0.5] needs different quantization parameters than one with values in [-10, 10].
 
-Consider the storage implications. A single FP32 parameter requires 4 bytes, while INT8 uses 1 byte. For a model with 100 million parameters, this is the difference between 400 MB (FP32) and 100 MB (INT8). The 4× compression ratio is consistent across all model sizes because we're always reducing from 32 bits to 8 bits per value.
+Consider the storage implications. A single FP32 parameter requires 4 bytes, while INT8 uses 1 byte. For a model with 100 million parameters, this is the difference between {glue:text}`q4_fp32_mb` (FP32) and {glue:text}`q4_int8_mb` (INT8). The 4× compression ratio is consistent across all model sizes because we're always reducing from 32 bits to 8 bits per value.
 
 ### Quantization Schemes
 
@@ -661,12 +687,65 @@ The core quantization mathematics: scale calculation, zero-point mapping, INT8 r
 
 To appreciate why quantization is critical for production ML, consider these deployment scenarios:
 
-- **Mobile AI**: iPhone has 6 GB RAM shared across all apps. A quantized BERT (110 MB) fits comfortably; FP32 version (440 MB) causes memory pressure and swapping.
+- **Mobile AI**: iPhone has 6 GB RAM shared across all apps. A quantized BERT ({glue:text}`bert_int8_mb`) fits comfortably; FP32 version ({glue:text}`bert_mb`) causes memory pressure and swapping.
 - **Edge computing**: IoT devices often have 512 MB RAM. Quantization enables on-device inference for privacy-sensitive applications (medical devices, security cameras).
 - **Data centers**: Serving 1000 requests/second requires multiple model replicas. With 4× memory reduction, you fit 4× more models per GPU, reducing serving costs by 75%.
 - **Battery life**: INT8 operations consume 2-4× less energy than FP32 on mobile processors. Quantized models drain battery slower, improving user experience.
 
 ## Check Your Understanding
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+
+# Q1: 3-layer network parameter counting
+q1_l1 = 784 * 256 + 256
+q1_l2 = 256 * 128 + 128
+q1_l3 = 128 * 10 + 10
+q1_total = q1_l1 + q1_l2 + q1_l3
+q1_fp32_bytes = q1_total * 4
+q1_int8_bytes = q1_total * 1
+q1_savings = q1_fp32_bytes - q1_int8_bytes
+glue("q1_l1", f"{q1_l1:,}")
+glue("q1_l2", f"{q1_l2:,}")
+glue("q1_l3", f"{q1_l3:,}")
+glue("q1_total", f"{q1_total:,}")
+glue("q1_fp32_bytes", f"{q1_fp32_bytes:,}")
+glue("q1_fp32_mb", f"{q1_fp32_bytes / 1024**2:.2f} MB")
+glue("q1_int8_bytes", f"{q1_int8_bytes:,}")
+glue("q1_int8_mb", f"{q1_int8_bytes / 1024**2:.2f} MB")
+glue("q1_savings_mb", f"{q1_savings / 1024**2:.2f} MB")
+
+# Q2: Quantization error and SNR
+q2_range = 1.0
+q2_levels = 255
+q2_scale = q2_range / q2_levels
+q2_max_error = q2_scale / 2
+q2_snr = 20 * math.log10(q2_range / q2_scale)
+glue("q2_scale", f"{q2_scale:.6f}")
+glue("q2_max_error", f"±{q2_max_error:.6f}")
+glue("q2_snr", f"{q2_snr:.0f} dB")
+
+# Q4: Loading time
+q4_fp32_mb = 100_000_000 * 4 / 1024**2
+q4_int8_mb = 100_000_000 * 1 / 1024**2
+q4_bandwidth = 500  # MB/s
+q4_fp32_time = q4_fp32_mb / q4_bandwidth
+q4_int8_time = q4_int8_mb / q4_bandwidth
+glue("q4_fp32_mb", f"{q4_fp32_mb:.0f} MB")
+glue("q4_int8_mb", f"{q4_int8_mb:.0f} MB")
+glue("q4_fp32_time", f"{q4_fp32_time:.1f} seconds")
+glue("q4_int8_time", f"{q4_int8_time:.2f} seconds")
+glue("q4_time_saved", f"{q4_fp32_time - q4_int8_time:.1f}s")
+
+# Q5: SIMD register capacity
+simd_bits = 512
+fp32_per_reg = simd_bits // 32
+int8_per_reg = simd_bits // 8
+glue("q5_fp32", f"{fp32_per_reg}")
+glue("q5_int8", f"{int8_per_reg}")
+glue("q5_ratio", f"{int8_per_reg // fp32_per_reg}×")
+```
 
 Test your quantization knowledge with these systems thinking questions. They're designed to build intuition for memory, precision, and performance trade-offs.
 
@@ -678,15 +757,15 @@ A neural network has three Linear layers: 784→256, 256→128, 128→10. How mu
 :class: dropdown
 
 **Parameter count:**
-- Layer 1: (784 × 256) + 256 = 200,960
-- Layer 2: (256 × 128) + 128 = 32,896
-- Layer 3: (128 × 10) + 10 = 1,290
-- **Total: 235,146 parameters**
+- Layer 1: (784 × 256) + 256 = {glue:text}`q1_l1`
+- Layer 2: (256 × 128) + 128 = {glue:text}`q1_l2`
+- Layer 3: (128 × 10) + 10 = {glue:text}`q1_l3`
+- **Total: {glue:text}`q1_total` parameters**
 
 **Memory usage:**
-- FP32: 235,146 × 4 bytes = **940,584 bytes ≈ 0.92 MB**
-- INT8: 235,146 × 1 byte = **235,146 bytes ≈ 0.23 MB**
-- **Savings: 0.69 MB (75% reduction, 4× compression)**
+- FP32: {glue:text}`q1_total` × 4 bytes = **{glue:text}`q1_fp32_bytes` bytes ≈ {glue:text}`q1_fp32_mb`**
+- INT8: {glue:text}`q1_total` × 1 byte = **{glue:text}`q1_int8_bytes` bytes ≈ {glue:text}`q1_int8_mb`**
+- **Savings: {glue:text}`q1_savings_mb` (75% reduction, 4× compression)**
 
 This shows why quantization matters: even small models benefit significantly.
 ```
@@ -700,14 +779,14 @@ For FP32 weights uniformly distributed in [-0.5, 0.5], what is the maximum quant
 
 **Quantization error:**
 - Range: 0.5 - (-0.5) = 1.0
-- Scale: 1.0 / 255 = **0.003922**
-- Max error: scale / 2 = **±0.001961** (half step size)
+- Scale: 1.0 / 255 = **{glue:text}`q2_scale`**
+- Max error: scale / 2 = **{glue:text}`q2_max_error`** (half step size)
 
 **Signal-to-noise ratio:**
 - SNR = 20 × log₁₀(signal_range / quantization_step)
-- SNR = 20 × log₁₀(1.0 / 0.003922)
+- SNR = 20 × log₁₀(1.0 / {glue:text}`q2_scale`)
 - SNR = 20 × log₁₀(255)
-- SNR ≈ **48 dB**
+- SNR ≈ **{glue:text}`q2_snr`**
 
 This is sufficient for neural networks (typical requirement: >40 dB). The 8-bit quantization provides approximately 6 dB per bit, matching the theoretical limit.
 ```
@@ -743,16 +822,16 @@ A model has 100M parameters. Loading from SSD to RAM at 500 MB/s, how long does 
 :class: dropdown
 
 **Loading time:**
-- FP32 size: 100M × 4 bytes = 400 MB
-- INT8 size: 100M × 1 byte = 100 MB
-- FP32 load time: 400 MB / 500 MB/s = **0.8 seconds**
-- INT8 load time: 100 MB / 500 MB/s = **0.2 seconds**
+- FP32 size: 100M × 4 bytes = {glue:text}`q4_fp32_mb`
+- INT8 size: 100M × 1 byte = {glue:text}`q4_int8_mb`
+- FP32 load time: {glue:text}`q4_fp32_mb` / 500 MB/s = **{glue:text}`q4_fp32_time`**
+- INT8 load time: {glue:text}`q4_int8_mb` / 500 MB/s = **{glue:text}`q4_int8_time`**
 - **Speedup: 4× faster loading**
 
 **User experience impact:**
-- Mobile app launch: 0.8s → 0.2s (**0.6s faster startup**)
-- Cloud inference: 0.8s latency → 0.2s latency (**4× better throughput**)
-- Model updates: 400 MB download → 100 MB download (**75% less data usage**)
+- Mobile app launch: {glue:text}`q4_fp32_time` → {glue:text}`q4_int8_time` (**{glue:text}`q4_time_saved` faster startup**)
+- Cloud inference: {glue:text}`q4_fp32_time` latency → {glue:text}`q4_int8_time` latency (**4× better throughput**)
+- Model updates: {glue:text}`q4_fp32_mb` download → {glue:text}`q4_int8_mb` download (**75% less data usage**)
 
 **Key insight**: Quantization reduces not just RAM usage, but also disk I/O, network transfer, and cold-start latency. The 4× reduction applies to all memory movement operations.
 ```
@@ -765,9 +844,9 @@ Modern CPUs have AVX-512 VNNI instructions that can perform INT8 matrix multiply
 :class: dropdown
 
 **SIMD capacity:**
-- 512-bit register with FP32: 512 / 32 = **16 values**
-- 512-bit register with INT8: 512 / 8 = **64 values**
-- **Theoretical speedup: 64/16 = 4×**
+- 512-bit register with FP32: 512 / 32 = **{glue:text}`q5_fp32` values**
+- 512-bit register with INT8: 512 / 8 = **{glue:text}`q5_int8` values**
+- **Theoretical speedup: {glue:text}`q5_int8`/{glue:text}`q5_fp32` = {glue:text}`q5_ratio`**
 
 **Why actual speedup is 2-3× (not 4×):**
 
@@ -823,7 +902,7 @@ Implement model pruning and weight compression techniques. You'll build structur
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/15_quantization/15_quantization.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/15_quantization/quantization.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/15_quantization/15_quantization.py)** - Browse the implementation code
 ```
 

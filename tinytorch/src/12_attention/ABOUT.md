@@ -1,3 +1,88 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# --- Multi-Head Attention: head dimension ---
+mha_embed_dim = 512
+mha_num_heads = 8
+mha_head_dim = mha_embed_dim // mha_num_heads
+glue("mha_head_dim", f"{mha_embed_dim}/{mha_num_heads}={mha_head_dim}")
+
+# --- Computational Complexity (prose): GPT-3 scale ---
+complexity_seq = 2048
+complexity_elements = complexity_seq ** 2
+complexity_bytes = complexity_elements * 4
+complexity_mb = complexity_bytes / 1024**2
+complexity_gpt3_layers = 96
+complexity_gpt3_attn_gb = complexity_gpt3_layers * complexity_mb / 1024
+
+glue("complexity_elements", f"{complexity_elements:,}")
+glue("complexity_mb", f"{complexity_mb:.0f} MB")
+glue("complexity_gpt3_attn_gb", f"{complexity_gpt3_attn_gb:.1f} GB")
+
+# --- Computational Complexity (prose): GPT-3 training (5x inference) ---
+complexity_train_multiplier = 5
+complexity_gpt3_train_gb = complexity_train_multiplier * complexity_gpt3_attn_gb
+glue("complexity_gpt3_train_gb", f"~{complexity_gpt3_train_gb:.1f} GB")
+
+# --- Computational Complexity (prose): GPT-4 estimate ---
+complexity_gpt4_layers = 120
+complexity_gpt4_ctx = 32768
+complexity_gpt4_gb = (complexity_gpt4_layers * (complexity_gpt4_ctx ** 2) * 4) / 1024**3
+glue("complexity_gpt4_gb", f"~{complexity_gpt4_gb:.0f} GB")
+
+# --- Q1: Memory Calculation ---
+q1_seq_a = 1024
+q1_elements_a = q1_seq_a ** 2
+q1_bytes_a = q1_elements_a * 4
+q1_mb_a = q1_bytes_a / 1024**2
+
+q1_seq_b = 2048
+q1_elements_b = q1_seq_b ** 2
+q1_bytes_b = q1_elements_b * 4
+q1_mb_b = q1_bytes_b / 1024**2
+
+q1_scale_factor = (q1_seq_b // q1_seq_a) ** 2
+q1_gpt3_layers = 96
+q1_gpt3_gb = q1_gpt3_layers * q1_mb_b / 1024
+
+glue("q1_elements_a", f"{q1_elements_a:,}")
+glue("q1_mb_a", f"{q1_mb_a:.1f} MB")
+glue("q1_elements_b", f"{q1_elements_b:,}")
+glue("q1_mb_b", f"{q1_mb_b:.1f} MB")
+glue("q1_scale_factor", f"{q1_scale_factor}")
+glue("q1_gpt3_layers", f"{q1_gpt3_layers}")
+glue("q1_gpt3_mb_b", f"{q1_mb_b:.1f} MB")
+glue("q1_gpt3_total_gb", f"{q1_gpt3_gb:.1f} GB")
+
+# --- Q2: Attention Bottleneck ---
+q2_d = 512
+q2_d_squared = q2_d ** 2
+q2_crossover = q2_d_squared // q2_d
+
+glue("q2_d_squared", f"{q2_d_squared:,}")
+glue("q2_crossover", f"{q2_crossover}")
+
+# --- Q5: Gradient Memory ---
+q5_multiplier = 5
+q5_layers = 96
+q5_attn_mb = q1_mb_b  # reuse 2048-context value: 16.0 MB
+q5_inference_gb = q5_layers * q5_attn_mb / 1024
+q5_training_gb = q5_layers * q5_attn_mb * q5_multiplier / 1024
+
+glue("q5_multiplier", f"{q5_multiplier}")
+glue("q5_attn_mb", f"{q5_attn_mb:.0f} MB")
+glue("q5_inference_gb", f"{q5_inference_gb:.1f} GB")
+glue("q5_training_gb", f"{q5_training_gb:.1f} GB")
+```
+
 # Module 12: Attention
 
 :::{admonition} Module Info
@@ -32,7 +117,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F12_attention%2F12_attention.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F12_attention%2Fattention.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -525,7 +610,7 @@ The mask addition is clever: for positions where `mask=0` (masked), we add -1e9 
 
 Single-head attention learns one similarity function between queries and keys. But sequences have multiple types of relationships: syntactic dependencies, semantic similarity, positional patterns, long-range coreference. Multi-head attention addresses this by running multiple attention mechanisms in parallel, each with different learned projections.
 
-The key insight is splitting the embedding dimension across heads rather than duplicating it. For `embed_dim=512` and `num_heads=8`, each head operates on `512/8=64` dimensions. This keeps parameter count constant while allowing diverse specialization. One head might learn to focus on adjacent tokens (local syntax), another on semantically similar words (meaning), another on specific positional offsets (structured patterns).
+The key insight is splitting the embedding dimension across heads rather than duplicating it. For `embed_dim=512` and `num_heads=8`, each head operates on {glue:text}`mha_head_dim` dimensions. This keeps parameter count constant while allowing diverse specialization. One head might learn to focus on adjacent tokens (local syntax), another on semantically similar words (meaning), another on specific positional offsets (structured patterns).
 
 Your implementation handles this through reshape and transpose operations:
 
@@ -579,7 +664,7 @@ When combined with the masking logic in attention (adding -1e9 to masked scores 
 
 Attention's power comes from all-to-all connectivity: every position can attend to every other position. But this creates quadratic scaling in both computation and memory. For sequence length n, the attention matrix has n² elements. The vectorized `Q @ K^T` operation computes all n² similarity scores in one matrix multiplication, softmax normalizes n² values, and applying attention to values multiplies n² weights by the value vectors.
 
-The memory cost is particularly severe. For GPT-3 with 2048-token context, a single attention matrix stores 2048² = 4,194,304 float32 values, requiring 16 MB. With 96 layers, attention matrices alone need 1.5 GB, excluding activations, gradients, and other tensors. This quadratic wall is why long-context AI remains an active research challenge.
+The memory cost is particularly severe. For GPT-3 with 2048-token context, a single attention matrix stores 2048² = {glue:text}`complexity_elements` float32 values, requiring {glue:text}`complexity_mb`. With 96 layers, attention matrices alone need {glue:text}`complexity_gpt3_attn_gb`, excluding activations, gradients, and other tensors. This quadratic wall is why long-context AI remains an active research challenge.
 
 | Operation | Time Complexity | Memory Complexity | Dominates When |
 |-----------|----------------|-------------------|----------------|
@@ -716,8 +801,8 @@ The mathematical operations, architectural patterns, and shape conventions are i
 
 To appreciate why attention research is crucial, consider the scaling characteristics of modern language models:
 
-- **GPT-3** (96 layers, 2048 context): ~1.5 GB just for attention matrices during forward pass, ~6 GB with gradients during training
-- **GPT-4** (estimated 120 layers, 32K context): Would require ~480 GB for attention alone without optimization, exceeding single-GPU memory
+- **GPT-3** (96 layers, 2048 context): ~{glue:text}`complexity_gpt3_attn_gb` just for attention matrices during forward pass, {glue:text}`complexity_gpt3_train_gb` with gradients during training
+- **GPT-4** (estimated 120 layers, 32K context): Would require {glue:text}`complexity_gpt4_gb` for attention alone without optimization, exceeding single-GPU memory
 - **Long-context models** (100K+ tokens): Attention becomes computationally prohibitive without algorithmic improvements
 
 These constraints drive modern attention research:
@@ -741,17 +826,17 @@ For sequence length 1024, how much memory does a single attention matrix require
 :class: dropdown
 
 **Sequence length 1024:**
-- Attention matrix: 1024 × 1024 = 1,048,576 elements
-- Memory: 1,048,576 × 4 bytes = **4.2 MB**
+- Attention matrix: 1024 × 1024 = {glue:text}`q1_elements_a` elements
+- Memory: {glue:text}`q1_elements_a` × 4 bytes = **{glue:text}`q1_mb_a`**
 
 **Sequence length 2048:**
-- Attention matrix: 2048 × 2048 = 4,194,304 elements
-- Memory: 4,194,304 × 4 bytes = **16.8 MB**
+- Attention matrix: 2048 × 2048 = {glue:text}`q1_elements_b` elements
+- Memory: {glue:text}`q1_elements_b` × 4 bytes = **{glue:text}`q1_mb_b`**
 
-**Scaling factor:** Doubling sequence length quadruples memory (2² = 4×)
+**Scaling factor:** Doubling sequence length quadruples memory (2² = {glue:text}`q1_scale_factor`×)
 
-For GPT-3 (96 layers, 2048 context):
-- 96 layers × 16.8 MB = **1.6 GB** just for attention matrices!
+For GPT-3 ({glue:text}`q1_gpt3_layers` layers, 2048 context):
+- {glue:text}`q1_gpt3_layers` layers × {glue:text}`q1_gpt3_mb_b` = **{glue:text}`q1_gpt3_total_gb`** just for attention matrices!
 - This excludes Q/K/V projections, gradients, and all other tensors.
 ```
 
@@ -764,12 +849,12 @@ A transformer layer has attention (O(n² × d)) and feed-forward network (O(n ×
 
 **Complexity comparison:**
 - Attention: O(n² × d) = O(n² × 512)
-- FFN: O(n × d²) = O(n × 512²) = O(n × 262,144)
+- FFN: O(n × d²) = O(n × 512²) = O(n × {glue:text}`q2_d_squared`)
 
-**Crossover point:** n² × 512 > n × 262,144
-- Simplify: n > 262,144 / 512 = **512**
+**Crossover point:** n² × 512 > n × {glue:text}`q2_d_squared`
+- Simplify: n > {glue:text}`q2_d_squared` / 512 = **{glue:text}`q2_crossover`**
 
-**When n > 512**, attention becomes the memory bottleneck.
+**When n > {glue:text}`q2_crossover`**, attention becomes the memory bottleneck.
 
 **Real-world implications:**
 - Short sequences (n=128): FFN dominates, 262K vs 8K operations
@@ -815,7 +900,7 @@ Why use 8 heads of 64 dimensions instead of 1 head of 512 dimensions? Parameters
 
 Causal masking zeros out the upper triangle (roughly half the attention matrix). Do we save computation, or just ensure correctness?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **In your implementation: NO computation saved**
@@ -842,7 +927,7 @@ scores = scores + adder_mask_tensor  # Masking happens after
 - Sparse attention (BigBird, Longformer): Actually skips computation for sparse patterns
 
 **Memory could be saved:** Store only lower triangle (n²/2 elements), but requires custom indexing
-```
+````
 
 **Q5: Gradient Memory**
 
@@ -867,11 +952,11 @@ Training attention requires storing activations for backpropagation. How much me
 - Forward: 1× (attention weights)
 - Backward: +2× (gradients)
 - Optimizer: +2× (Adam state)
-- **Total: 5× inference memory**
+- **Total: {glue:text}`q5_multiplier`× inference memory**
 
 **For GPT-3 scale (96 layers, 2048 context):**
-- Inference: 96 × 16 MB = 1.5 GB
-- Training: 96 × 16 MB × 5 = **7.5 GB** just for attention gradients and optimizer state!
+- Inference: 96 × {glue:text}`q5_attn_mb` = {glue:text}`q5_inference_gb`
+- Training: 96 × {glue:text}`q5_attn_mb` × {glue:text}`q5_multiplier` = **{glue:text}`q5_training_gb`** just for attention gradients and optimizer state!
 
 This excludes Q/K/V matrices, feed-forward networks, embeddings, and activations from other layers. Full GPT-3 training requires 350+ GB.
 ```
@@ -915,7 +1000,7 @@ Build complete transformer blocks by combining your attention mechanism with fee
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/12_attention/12_attention.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/12_attention/attention.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/12_attention/12_attention.py)** - Browse the implementation code
 ```
 

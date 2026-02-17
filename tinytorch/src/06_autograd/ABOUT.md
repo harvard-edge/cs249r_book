@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 06: Autograd
 
 :::{admonition} Module Info
@@ -32,7 +38,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F06_autograd%2F06_autograd.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F06_autograd%2Fautograd.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -620,20 +626,51 @@ Consider a simple linear layer: `y = x @ W + b`
 - grad_W (same shape as W)
 - grad_b (same shape as b)
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Memory Management: linear layer with batch=32, input=512, output=768
+mem_x_bytes = 32 * 512 * 4
+mem_x_kb = mem_x_bytes / 1024
+glue("mem_x_bytes", f"{mem_x_bytes:,}")
+glue("mem_x_kb", f"{mem_x_kb:,.0f}")
+
+mem_W_bytes = 512 * 768 * 4
+mem_W_kb = mem_W_bytes / 1024
+glue("mem_W_bytes", f"{mem_W_bytes:,}")
+glue("mem_W_kb", f"{mem_W_kb:,.0f}")
+
+mem_grad_x_kb = mem_x_kb
+glue("mem_grad_x_bytes", f"{mem_x_bytes:,}")
+glue("mem_grad_x_kb", f"{mem_grad_x_kb:,.0f}")
+
+mem_grad_W_kb = mem_W_kb
+glue("mem_grad_W_bytes", f"{mem_W_bytes:,}")
+glue("mem_grad_W_kb", f"{mem_grad_W_kb:,.0f}")
+
+mem_grad_b_bytes = 768 * 4
+mem_grad_b_kb = mem_grad_b_bytes / 1024
+glue("mem_grad_b_bytes", f"{mem_grad_b_bytes:,}")
+glue("mem_grad_b_kb", f"{mem_grad_b_kb:,.0f}")
+
+mem_total_bytes = mem_x_bytes + mem_W_bytes + mem_x_bytes + mem_W_bytes + mem_grad_b_bytes
+mem_total_mb = mem_total_bytes / 1024**2
+glue("mem_total_mb", f"{mem_total_mb:.1f}")
+```
+
 For a batch of 32 samples through a (512, 768) linear layer, the memory breakdown is:
 
-```
 Forward storage:
-  x: 32 × 512 × 4 bytes = 64 KB
-  W: 512 × 768 × 4 bytes = 1,572 KB
+  x: 32 × 512 × 4 bytes = {glue:text}`mem_x_kb` KB
+  W: 512 × 768 × 4 bytes = {glue:text}`mem_W_kb` KB
 
 Backward storage:
-  grad_x: 32 × 512 × 4 bytes = 64 KB
-  grad_W: 512 × 768 × 4 bytes = 1,572 KB
-  grad_b: 768 × 4 bytes = 3 KB
+  grad_x: 32 × 512 × 4 bytes = {glue:text}`mem_grad_x_kb` KB
+  grad_W: 512 × 768 × 4 bytes = {glue:text}`mem_grad_W_kb` KB
+  grad_b: 768 × 4 bytes = {glue:text}`mem_grad_b_kb` KB
 
-Total: ~3.3 MB for one layer (2× parameter size + activation size)
-```
+Total: ~{glue:text}`mem_total_mb` MB for one layer (2× parameter size + activation size)
 
 Multiply by network depth and you see why memory limits batch size. A 100-layer transformer stores 100× the activations, which can easily exceed GPU memory.
 
@@ -763,16 +800,48 @@ Test yourself with these systems thinking questions. They're designed to build i
 
 A 5-layer MLP processes a batch of 64 samples. Each layer stores its input activation for backward pass. Layer dimensions are: 784 → 512 → 256 → 128 → 10. How much memory (in MB) is used to store activations for one batch?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Computation Graph Memory — 5-layer MLP, batch=64, float32 (4 bytes)
+q1_l1_bytes = 64 * 784 * 4
+q1_l1_kb = q1_l1_bytes / 1024
+glue("q1_l1_kb", f"{q1_l1_kb:,.0f}")
+
+q1_l2_bytes = 64 * 512 * 4
+q1_l2_kb = q1_l2_bytes / 1024
+glue("q1_l2_kb", f"{q1_l2_kb:,.0f}")
+
+q1_l3_bytes = 64 * 256 * 4
+q1_l3_kb = q1_l3_bytes / 1024
+glue("q1_l3_kb", f"{q1_l3_kb:,.0f}")
+
+q1_l4_bytes = 64 * 128 * 4
+q1_l4_kb = q1_l4_bytes / 1024
+glue("q1_l4_kb", f"{q1_l4_kb:,.0f}")
+
+q1_l5_bytes = 64 * 10 * 4
+q1_l5_kb = q1_l5_bytes / 1024
+glue("q1_l5_kb", f"{q1_l5_kb:.1f}")
+
+q1_total_bytes = q1_l1_bytes + q1_l2_bytes + q1_l3_bytes + q1_l4_bytes + q1_l5_bytes
+q1_total_kb = q1_total_bytes / 1024
+q1_total_mb = q1_total_bytes / 1024**2
+glue("q1_total_kb", f"{q1_total_kb:.1f}")
+glue("q1_total_mb", f"{q1_total_mb:.2f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-Layer 1 input: 64 × 784 × 4 bytes = 200 KB
-Layer 2 input: 64 × 512 × 4 bytes = 131 KB
-Layer 3 input: 64 × 256 × 4 bytes = 66 KB
-Layer 4 input: 64 × 128 × 4 bytes = 33 KB
-Layer 5 input: 64 × 10 × 4 bytes = 3 KB
+Layer 1 input: 64 × 784 × 4 bytes = {glue:text}`q1_l1_kb` KB
+Layer 2 input: 64 × 512 × 4 bytes = {glue:text}`q1_l2_kb` KB
+Layer 3 input: 64 × 256 × 4 bytes = {glue:text}`q1_l3_kb` KB
+Layer 4 input: 64 × 128 × 4 bytes = {glue:text}`q1_l4_kb` KB
+Layer 5 input: 64 × 10 × 4 bytes = {glue:text}`q1_l5_kb` KB
 
-**Total: ~433 KB ≈ 0.43 MB**
+**Total: ~{glue:text}`q1_total_kb` KB = {glue:text}`q1_total_mb` MB**
 
 This is per forward pass! A 100-layer transformer would store 100× this amount, which is why gradient checkpointing trades compute for memory by recomputing activations during backward pass.
 ```
@@ -799,14 +868,32 @@ This is why training (forward + backward) takes roughly 3× inference time. GPU 
 
 You have 16GB GPU memory and a model with 1B parameters (float32). How much memory is available for activations and gradients during training?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q3: Gradient Accumulation Memory — 1B params, float32
+# Using decimal GB (1 GB = 10^9 bytes) for clean round numbers
+q3_params = 1_000_000_000
+q3_model_gb = q3_params * 4 / 10**9
+q3_grad_gb = q3_params * 4 / 10**9
+q3_opt_gb = q3_params * 8 / 10**9
+q3_total_gb = q3_model_gb + q3_grad_gb + q3_opt_gb
+
+glue("q3_model_gb", f"{q3_model_gb:.0f}")
+glue("q3_grad_gb", f"{q3_grad_gb:.0f}")
+glue("q3_opt_gb", f"{q3_opt_gb:.0f}")
+glue("q3_total_gb", f"{q3_total_gb:.0f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-Model parameters: 1B × 4 bytes = 4 GB
-Gradients: 1B × 4 bytes = 4 GB
-Optimizer state (Adam): 1B × 8 bytes = 8 GB (momentum + variance)
+Model parameters: 1B × 4 bytes = {glue:text}`q3_model_gb` GB
+Gradients: 1B × 4 bytes = {glue:text}`q3_grad_gb` GB
+Optimizer state (Adam): 1B × 8 bytes = {glue:text}`q3_opt_gb` GB (momentum + variance)
 
-**Total framework overhead: 16 GB**
+**Total framework overhead: {glue:text}`q3_total_gb` GB**
 
 **Available for activations: 0 GB** - you've already exceeded memory!
 
@@ -816,6 +903,21 @@ This is why large models use gradient accumulation across multiple forward passe
 **Q4: requires_grad Performance**
 
 A typical training batch has: 32 images (input), 10M parameter tensors (weights), 50 intermediate activation tensors. If requires_grad defaults to True for all tensors, how many tensors unnecessarily track gradients?
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q4: requires_grad Performance — batch of 32 images, 3×224×224, float32
+q4_per_image = 3 * 224 * 224
+q4_batch_values = 32 * q4_per_image
+q4_batch_bytes = q4_batch_values * 4
+q4_batch_mb = q4_batch_bytes / 1024**2
+
+glue("q4_batch_values", f"{q4_batch_values / 1e6:.1f}M")
+glue("q4_batch_bytes", f"{q4_batch_bytes:,}")
+glue("q4_batch_mb", f"{q4_batch_mb:.1f}")
+```
 
 ```{admonition} Answer
 :class: dropdown
@@ -829,7 +931,7 @@ Tensors that DON'T need gradients:
 
 **32 input tensors unnecessarily track gradients** if requires_grad defaults to True.
 
-This is why PyTorch defaults requires_grad=False for new tensors and requires explicit opt-in for parameters. For image inputs with 32×3×224×224 = 4.8M values each, tracking gradients wastes 4.8M × 4 bytes = 19 MB per image × 32 = 608 MB for the batch!
+This is why PyTorch defaults requires_grad=False for new tensors and requires explicit opt-in for parameters. For a batch of 32 images with 3×224×224 pixels each, tracking gradients wastes {glue:text}`q4_batch_values` values × 4 bytes = {glue:text}`q4_batch_mb` MB for the batch!
 ```
 
 **Q5: Graph Retention**
@@ -890,7 +992,7 @@ Implement SGD, Adam, and other optimization algorithms that use your autograd gr
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/06_autograd/06_autograd.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/06_autograd/autograd.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/06_autograd/06_autograd.py)** - Browse the implementation code
 ```
 

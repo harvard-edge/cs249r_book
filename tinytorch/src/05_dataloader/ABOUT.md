@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 05: DataLoader
 
 :::{admonition} Module Info
@@ -25,7 +31,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F05_dataloader%2F05_dataloader.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F05_dataloader%2Fdataloader.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -557,11 +563,24 @@ def __iter__(self) -> Iterator:
         yield self._collate_batch(batch)
 ```
 
-The key insight: `random.shuffle(indices)` randomizes a list of integers, not actual data. For 50,000 samples, this shuffles 50,000 integers (400 KB) instead of 50,000 images (potentially gigabytes). The actual data stays in place; only the access order changes.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Shuffling: index memory for 50K samples (SI — illustrative)
+shuffle_50k_bytes = 50_000 * 8
+glue("shuffle_50k_kb", f"{shuffle_50k_bytes // 1000:,} KB")
+
+# Shuffling: index memory for 1M samples (SI — illustrative)
+shuffle_1m_bytes = 1_000_000 * 8
+glue("shuffle_1m_mb", f"{shuffle_1m_bytes // 10**6} MB")
+```
+
+The key insight: `random.shuffle(indices)` randomizes a list of integers, not actual data. For 50,000 samples, this shuffles 50,000 integers ({glue:text}`shuffle_50k_kb`) instead of 50,000 images (potentially gigabytes). The actual data stays in place; only the access order changes.
 
 Each epoch generates a fresh shuffle, so the same samples appear in different batches. If sample 42 and sample 1337 were in the same batch in epoch 1, they're likely in different batches in epoch 2. This decorrelation is essential for generalization.
 
-The memory cost of shuffling is `8 bytes × dataset_size`. For 1 million samples, that's 8 MB, negligible compared to the actual data. The time cost is O(n) for generating and shuffling indices, which happens once per epoch, not per batch.
+The memory cost of shuffling is `8 bytes × dataset_size`. For 1 million samples, that's {glue:text}`shuffle_1m_mb`, negligible compared to the actual data. The time cost is O(n) for generating and shuffling indices, which happens once per epoch, not per batch.
 
 ### Iterator Protocol and Generator Pattern
 
@@ -774,13 +793,27 @@ The Dataset abstraction, DataLoader interface, and batching semantics are identi
 
 ### Why DataLoaders Matter at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Scale section: batch memory (SI units — illustrative values)
+scale_batch_bytes = 256 * 150_000  # 256 images × 150 KB (SI) per image
+scale_batch_mb = scale_batch_bytes / 10**6
+glue("scale_batch_mb", f"{scale_batch_mb:.0f} MB")
+
+# Scale section: I/O throughput (use rounded MB value to match illustrative style)
+scale_io_time_ms = int(scale_batch_mb) / 500 * 1000  # 38 MB / 500 MB/s
+glue("scale_io_ms", f"{scale_io_time_ms:.0f} ms")
+```
+
 To appreciate why data loading infrastructure matters, consider the scale of production training:
 
 - **ImageNet training**: 1.2 million images at 224×224×3 pixels = **600 GB** of uncompressed data
-- **Batch memory**: batch_size=256 with 150 KB per image = **38 MB** per batch
-- **I/O throughput**: Loading from SSD at 500 MB/s = **76 ms per batch** just for disk reads
+- **Batch memory**: batch_size=256 with 150 KB per image = **{glue:text}`scale_batch_mb`** per batch
+- **I/O throughput**: Loading from SSD at 500 MB/s = **{glue:text}`scale_io_ms` per batch** just for disk reads
 
-Without proper batching and prefetching, data loading would dominate training time. A forward and backward pass might take 50 ms, but loading the data takes 76 ms. The GPU sits idle 60% of the time waiting for data.
+Without proper batching and prefetching, data loading would dominate training time. A forward and backward pass might take 50 ms, but loading the data takes {glue:text}`scale_io_ms`. The GPU sits idle 60% of the time waiting for data.
 
 Production solutions:
 
@@ -792,6 +825,57 @@ Your DataLoader provides the interface that enables these optimizations. Add `nu
 
 ## Check Your Understanding
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Memory Calculation — CIFAR-10 batch
+q1_image_bytes = 32 * 32 * 3 * 4
+q1_image_kb = q1_image_bytes / 1024
+q1_batch_bytes = 128 * q1_image_bytes
+q1_batch_kb = q1_batch_bytes / 1024
+q1_batch_mb = q1_batch_bytes / 1024**2
+glue("q1_image_bytes", f"{q1_image_bytes:,}")
+glue("q1_image_kb", f"{q1_image_kb:.0f} KB")
+glue("q1_batch_kb", f"{q1_batch_kb:,.0f} KB")
+glue("q1_batch_mb", f"{q1_batch_mb:.1f} MB")
+
+# Q2: Throughput Analysis
+q2_data_ms = 45
+q2_total_ms = 120
+q2_pct = q2_data_ms / q2_total_ms * 100
+q2_compute_ms = 30 + 35 + 10
+q2_speedup = q2_total_ms / q2_compute_ms
+glue("q2_pct", f"{q2_pct:.1f}%")
+glue("q2_compute_ms", f"{q2_compute_ms}")
+glue("q2_speedup", f"{q2_speedup:.1f}")
+
+# Q3: Shuffle Memory Overhead (SI units — illustrative)
+q3_num_samples = 10_000_000
+q3_index_bytes = q3_num_samples * 8
+q3_index_mb = q3_index_bytes / 10**6
+q3_dataset_bytes = q3_num_samples * 10_000  # 10 KB per sample (SI)
+q3_dataset_gb = q3_dataset_bytes / 10**9
+q3_overhead_pct = q3_index_bytes / q3_dataset_bytes * 100
+glue("q3_index_mb", f"{q3_index_mb:.0f} MB")
+glue("q3_dataset_gb", f"{q3_dataset_gb:.0f} GB")
+glue("q3_overhead_pct", f"{q3_overhead_pct:.2f}%")
+
+# Q5: Collation Cost (binary units for KB/MB)
+q5_sample_bytes = 3 * 224 * 224 * 4
+q5_sample_kb = q5_sample_bytes / 1024
+q5_batch_bytes = 128 * q5_sample_bytes
+q5_batch_kb = q5_batch_bytes / 1024
+q5_batch_mb = q5_batch_bytes / 1024**2
+# Copy time: use rounded binary MB / SI bandwidth for ~3.7 ms (matches text)
+q5_copy_time_ms = q5_batch_mb / (20 * 1000) * 1000
+glue("q5_sample_bytes", f"{q5_sample_bytes:,}")
+glue("q5_sample_kb", f"{q5_sample_kb:.0f} KB")
+glue("q5_batch_kb", f"{q5_batch_kb:,.0f} KB")
+glue("q5_batch_mb", f"{q5_batch_mb:.1f} MB")
+glue("q5_copy_ms", f"~{q5_copy_time_ms:.1f} milliseconds")
+```
+
 Test your understanding with these systems thinking questions. Focus on quantitative analysis and performance trade-offs.
 
 **Q1: Memory Calculation**
@@ -801,9 +885,9 @@ You're training on CIFAR-10 with 50,000 RGB images (32×32×3 pixels, float32). 
 ```{admonition} Answer
 :class: dropdown
 
-Each image: 32 × 32 × 3 × 4 bytes = 12,288 bytes ≈ 12 KB
+Each image: 32 × 32 × 3 × 4 bytes = {glue:text}`q1_image_bytes` bytes ≈ {glue:text}`q1_image_kb`
 
-Batch of 128 images: 128 × 12 KB = **1,536 KB ≈ 1.5 MB**
+Batch of 128 images: 128 × {glue:text}`q1_image_kb` = **{glue:text}`q1_batch_kb` ≈ {glue:text}`q1_batch_mb`**
 
 This is the minimum memory just for the input batch. Add activations, gradients, and model parameters, and peak memory might be 50-100× higher. But the **batch size directly controls the baseline memory consumption**.
 ```
@@ -821,11 +905,11 @@ Total: 120ms per batch. Where's the bottleneck? How much faster could training b
 ```{admonition} Answer
 :class: dropdown
 
-Data loading takes 45ms out of 120ms = **37.5% of total time**.
+Data loading takes 45ms out of 120ms = **{glue:text}`q2_pct` of total time**.
 
-If data loading were instant (via prefetching or caching), total time would be 30+35+10 = **75ms per batch**.
+If data loading were instant (via prefetching or caching), total time would be 30+35+10 = **{glue:text}`q2_compute_ms`ms per batch**.
 
-Speedup: 120ms → 75ms = **1.6× faster training** just by fixing data loading!
+Speedup: 120ms → {glue:text}`q2_compute_ms`ms = **{glue:text}`q2_speedup`× faster training** just by fixing data loading!
 
 This shows why production systems use prefetching with `num_workers`: while the GPU computes batch N, the CPU loads batch N+1. Data loading and computation overlap, hiding the I/O latency.
 ```
@@ -837,11 +921,11 @@ You're training on a dataset with 10 million samples. How much extra memory does
 ```{admonition} Answer
 :class: dropdown
 
-Shuffling requires storing the index array: 10,000,000 indices × 8 bytes = **80 MB**
+Shuffling requires storing the index array: 10,000,000 indices × 8 bytes = **{glue:text}`q3_index_mb`**
 
 This is the complete overhead. The actual data isn't copied or moved, only the index array is shuffled.
 
-For comparison, if each sample is 10 KB, the full dataset is 100 GB. Shuffling adds 80 MB to randomize access to 100 GB of data, **0.08% overhead**. This is why index-based shuffling scales to massive datasets.
+For comparison, if each sample is 10 KB, the full dataset is {glue:text}`q3_dataset_gb` GB. Shuffling adds {glue:text}`q3_index_mb` to randomize access to {glue:text}`q3_dataset_gb` GB of data, **{glue:text}`q3_overhead_pct` overhead**. This is why index-based shuffling scales to massive datasets.
 ```
 
 **Q4: Batch Size Trade-offs**
@@ -878,11 +962,11 @@ Your DataLoader collates batches using `np.stack()`. For batch_size=128 with sam
 ```{admonition} Answer
 :class: dropdown
 
-Each sample: 3 × 224 × 224 × 4 bytes = 602,112 bytes ≈ 588 KB
+Each sample: 3 × 224 × 224 × 4 bytes = {glue:text}`q5_sample_bytes` bytes ≈ {glue:text}`q5_sample_kb`
 
-Batch of 128 samples: 128 × 588 KB = **75,264 KB ≈ 73.5 MB**
+Batch of 128 samples: 128 × {glue:text}`q5_sample_kb` = **{glue:text}`q5_batch_kb` ≈ {glue:text}`q5_batch_mb`**
 
-`np.stack()` allocates a new array of this size and copies all 128 samples into contiguous memory. On a modern CPU with 20 GB/s memory bandwidth, this copy takes approximately **3.7 milliseconds**.
+`np.stack()` allocates a new array of this size and copies all 128 samples into contiguous memory. On a modern CPU with 20 GB/s memory bandwidth, this copy takes approximately **{glue:text}`q5_copy_ms`**.
 
 This is why larger batch sizes can have higher absolute collation costs (more data to copy), but the per-sample overhead decreases because you're copying 128 samples in one operation instead of processing 128 tiny batches separately.
 ```
@@ -923,7 +1007,7 @@ Implement automatic differentiation that computes gradients through computation 
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/05_dataloader/05_dataloader.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/05_dataloader/dataloader.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/05_dataloader/05_dataloader.py)** - Browse the implementation code
 ```
 

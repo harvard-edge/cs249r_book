@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 09: Convolutions
 
 :::{admonition} Module Info
@@ -30,7 +36,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F09_convolutions%2F09_convolutions.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F09_convolutions%2Fconvolutions.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -512,7 +518,16 @@ def forward(self, x):
                     output[b, out_ch, out_h, out_w] = conv_sum
 ```
 
-The seven nested loops reveal where the computational cost comes from. For a typical CNN layer processing a batch of 32 RGB images (224×224) with 64 output channels and 3×3 kernels, this structure executes **2.8 billion multiply-accumulate operations** per forward pass. This is why optimized implementations matter.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Prose: typical CNN layer ops (batch=32, 3 RGB channels, 224x224, 64 output channels, 3x3 kernel)
+conv_ops_prose = 32 * 64 * 224 * 224 * 3 * 3 * 3
+glue("conv_ops_billions", f"{conv_ops_prose / 1e9:.1f} billion")
+```
+
+The seven nested loops reveal where the computational cost comes from. For a typical CNN layer processing a batch of 32 RGB images (224×224) with 64 output channels and 3×3 kernels, this structure executes **{glue:text}`conv_ops_billions` multiply-accumulate operations** per forward pass. This is why optimized implementations matter.
 
 Each output pixel summarizes information from a local neighborhood in the input. A 3×3 convolution looks at 9 pixels to produce each output value, enabling the network to detect local patterns like edges, corners, and textures.
 
@@ -542,6 +557,17 @@ Output: 3×3                     Output: 5×5
                                 5×5 output preserved
 ```
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Stride and padding output dimension examples
+stride1_out = (224 + 2 * 1 - 3) // 1 + 1
+stride2_out = (224 + 2 * 1 - 3) // 2 + 1
+glue("stride1_out", f"{stride1_out}")
+glue("stride2_out", f"{stride2_out}")
+```
+
 The formula connecting these parameters is:
 
 ```
@@ -549,14 +575,12 @@ output_size = (input_size + 2×padding - kernel_size) / stride + 1
 ```
 
 For a 224×224 input with kernel=3, padding=1, stride=1:
-```
-output_size = (224 + 2×1 - 3) / 1 + 1 = 224
-```
+
+output_size = (224 + 2×1 - 3) / 1 + 1 = {glue:text}`stride1_out`
 
 For the same input with stride=2:
-```
-output_size = (224 + 2×1 - 3) / 2 + 1 = 112
-```
+
+output_size = (224 + 2×1 - 3) / 2 + 1 = {glue:text}`stride2_out`
 
 ### Receptive Fields
 
@@ -616,7 +640,20 @@ def forward(self, x):
                     output[b, c, out_h, out_w] = max_val
 ```
 
-A 2×2 max pooling with stride=2 divides spatial dimensions by 2, reducing memory and computation by 4×. For a 224×224×64 feature map (12.8 MB), pooling produces 112×112×64 (3.2 MB), saving 9.6 MB.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Pooling memory example: 224x224x64 feature map -> 112x112x64 after 2x2 pool
+pool_before_bytes = 224 * 224 * 64 * 4
+pool_after_bytes = 112 * 112 * 64 * 4
+pool_saved_bytes = pool_before_bytes - pool_after_bytes
+glue("pool_before_mb", f"{pool_before_bytes / 1024**2:.1f} MB")
+glue("pool_after_mb", f"{pool_after_bytes / 1024**2:.1f} MB")
+glue("pool_saved_mb", f"{pool_saved_bytes / 1024**2:.1f} MB")
+```
+
+A 2×2 max pooling with stride=2 divides spatial dimensions by 2, reducing memory and computation by 4×. For a 224×224×64 feature map ({glue:text}`pool_before_mb`), pooling produces 112×112×64 ({glue:text}`pool_after_mb`), saving {glue:text}`pool_saved_mb`.
 
 Max pooling provides translation invariance: if a cat's ear moves one pixel, the max in that region remains roughly the same, making the network robust to small shifts. This is crucial for object recognition where precise pixel alignment doesn't matter.
 
@@ -635,26 +672,41 @@ W_out = ⌊(W_in + 2×padding - kernel_w) / stride⌋ + 1
 
 The floor operation (⌊⌋) ensures integer dimensions. If the calculation doesn't divide evenly, the rightmost and bottommost regions get ignored.
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Output shape example 1: Conv2d(3, 64, k=3, p=1, s=1) on 224x224
+ex1_h = (224 + 2 * 1 - 3) // 1 + 1
+glue("ex1_h", f"{ex1_h}")
+
+# Output shape example 2: MaxPool2d(k=2, s=2) on 224x224
+ex2_h = (224 + 0 - 2) // 2 + 1
+glue("ex2_h", f"{ex2_h}")
+
+# Output shape example 3: Conv2d(64, 128, k=3, p=0, s=2) on 112x112
+ex3_h = (112 + 0 - 3) // 2 + 1
+glue("ex3_h", f"{ex3_h}")
+```
+
 **Example calculations:**
 
-```
 Input: (32, 3, 224, 224)  [batch=32, RGB channels, 224×224 image]
 
 Conv2d(3, 64, kernel_size=3, padding=1, stride=1):
-H_out = (224 + 2×1 - 3) / 1 + 1 = 224
-W_out = (224 + 2×1 - 3) / 1 + 1 = 224
-Output: (32, 64, 224, 224)
+H_out = (224 + 2×1 - 3) / 1 + 1 = {glue:text}`ex1_h`
+W_out = (224 + 2×1 - 3) / 1 + 1 = {glue:text}`ex1_h`
+Output: (32, 64, {glue:text}`ex1_h`, {glue:text}`ex1_h`)
 
 MaxPool2d(kernel_size=2, stride=2):
-H_out = (224 + 0 - 2) / 2 + 1 = 112
-W_out = (224 + 0 - 2) / 2 + 1 = 112
-Output: (32, 64, 112, 112)
+H_out = (224 + 0 - 2) / 2 + 1 = {glue:text}`ex2_h`
+W_out = (224 + 0 - 2) / 2 + 1 = {glue:text}`ex2_h`
+Output: (32, 64, {glue:text}`ex2_h`, {glue:text}`ex2_h`)
 
 Conv2d(64, 128, kernel_size=3, padding=0, stride=2):
-H_out = (112 + 0 - 3) / 2 + 1 = 55
-W_out = (112 + 0 - 3) / 2 + 1 = 55
-Output: (32, 128, 55, 55)
-```
+H_out = (112 + 0 - 3) / 2 + 1 = {glue:text}`ex3_h`
+W_out = (112 + 0 - 3) / 2 + 1 = {glue:text}`ex3_h`
+Output: (32, 128, {glue:text}`ex3_h`, {glue:text}`ex3_h`)
 
 **Common patterns:**
 - **Same convolution** (padding=1, stride=1, kernel=3): Preserves spatial dimensions
@@ -670,15 +722,37 @@ For a single Conv2d forward pass:
 Operations = B × C_out × H_out × W_out × C_in × K_h × K_w
 ```
 
-**Example:** Batch=32, Input=(3, 224, 224), Conv2d(3→64, kernel=3, padding=1, stride=1)
-```
-Operations = 32 × 64 × 224 × 224 × 3 × 3 × 3
-          = 32 × 64 × 50,176 × 27
-          = 2,764,800,000 multiply-accumulate operations
-          ≈ 2.8 billion operations per forward pass!
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Complexity example: Batch=32, Input=(3, 224, 224), Conv2d(3->64, k=3, p=1, s=1)
+complexity_h_out = 224  # (224 + 2*1 - 3) // 1 + 1
+complexity_hw = complexity_h_out * complexity_h_out
+complexity_kernel = 3 * 3 * 3
+complexity_ops = 32 * 64 * complexity_hw * complexity_kernel
+glue("complexity_hw", f"{complexity_hw:,}")
+glue("complexity_kernel", f"{complexity_kernel}")
+glue("complexity_ops", f"{complexity_ops:,}")
+glue("complexity_approx", f"{complexity_ops / 1e9:.1f}")
+
+# 7x7 vs 3x3 kernel ratio
+kernel_ratio = (7 * 7) / (3 * 3)
+glue("kernel_ratio", f"{kernel_ratio:.1f}")
+
+# Memory for (32, 64, 224, 224) float32 tensor
+mem_bytes = 32 * 64 * 224 * 224 * 4
+glue("tensor_mem_mb", f"{mem_bytes / 1024**2:.0f} MB")
 ```
 
-This is why kernel size matters enormously. A 7×7 kernel requires (7×7)/(3×3) = 5.4× more computation than 3×3. Modern architectures favor stacking multiple 3×3 convolutions instead of using large kernels.
+**Example:** Batch=32, Input=(3, 224, 224), Conv2d(3→64, kernel=3, padding=1, stride=1)
+
+Operations = 32 × 64 × 224 × 224 × 3 × 3 × 3
+= 32 × 64 × {glue:text}`complexity_hw` × {glue:text}`complexity_kernel`
+= {glue:text}`complexity_ops` multiply-accumulate operations
+≈ {glue:text}`complexity_approx` billion operations per forward pass!
+
+This is why kernel size matters enormously. A 7×7 kernel requires (7×7)/(3×3) = {glue:text}`kernel_ratio`× more computation than 3×3. Modern architectures favor stacking multiple 3×3 convolutions instead of using large kernels.
 
 Pooling operations are cheap by comparison: no learnable parameters, just comparison or addition operations. A 2×2 max pooling visits each output position once and compares 4 values, requiring only 4× comparisons per output.
 
@@ -689,9 +763,8 @@ Pooling operations are cheap by comparison: no learnable parameters, just compar
 | AvgPool2d (K×K) | O(B×C×H×W×K²) | Same as MaxPool but with addition |
 
 Memory consumption follows the output shape. A (32, 64, 224, 224) float32 tensor requires:
-```
-32 × 64 × 224 × 224 × 4 bytes = 411 MB
-```
+
+32 × 64 × 224 × 224 × 4 bytes = {glue:text}`tensor_mem_mb`
 
 This is why batch size matters: doubling batch size doubles memory usage. GPUs have limited memory (typically 8-24 GB), constraining how large your batches and feature maps can be.
 
@@ -713,11 +786,19 @@ Conv2d requires 4D input: (batch, channels, height, width). If you forget the ba
 
 The floor operation in output dimension calculation can surprise you. If `(input + 2×padding - kernel) / stride` doesn't divide evenly, the result gets floored.
 
-**Example**:
-```python
-# Input: 224×224, kernel=3, padding=0, stride=2
-output_size = (224 + 0 - 3) // 2 + 1 = 221 // 2 + 1 = 110 + 1 = 111
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Dimension error example: 224x224, k=3, p=0, s=2
+dim_err_result = (224 + 0 - 3) // 2 + 1
+glue("dim_err_result", f"{dim_err_result}")
 ```
+
+**Example**:
+
+Input: 224×224, kernel=3, padding=0, stride=2
+output_size = (224 + 0 - 3) // 2 + 1 = 221 // 2 + 1 = 110 + 1 = {glue:text}`dim_err_result`
 
 **Fix**: Use calculators or test with dummy data to verify dimensions before building full architecture.
 
@@ -744,7 +825,16 @@ By convention, pooling uses non-overlapping windows: `stride = kernel_size`. If 
 
 **Error**: `RuntimeError: CUDA out of memory` or system hangs
 
-Large feature maps consume enormous memory. A batch of 64 images at 224×224×64 channels = 1.3 GB for a single layer's output. Deep networks with many layers can exceed GPU memory.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Memory overflow example: 64 images at 224x224x64 channels
+overflow_bytes = 64 * 224 * 224 * 64 * 4
+glue("overflow_gb", f"{overflow_bytes / 1024**3:.1f} GB")
+```
+
+Large feature maps consume enormous memory. A batch of 64 images at 224×224×64 channels = {glue:text}`overflow_gb` for a single layer's output. Deep networks with many layers can exceed GPU memory.
 
 **Fix**: Reduce batch size, use smaller images, or add more pooling layers to reduce spatial dimensions faster.
 
@@ -838,6 +928,59 @@ Modern frameworks achieve this through:
 
 ## Check Your Understanding
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Conv2d(3, 64, k=5, p=2, s=2) on (32, 3, 128, 128)
+q1_h = (128 + 2 * 2 - 5) // 2 + 1
+glue("q1_h", f"{q1_h}")
+
+# Q2: Conv2d(3, 64, k=3, bias=True) parameter count
+q2_weight = 64 * 3 * 3 * 3
+q2_bias = 64
+q2_total = q2_weight + q2_bias
+glue("q2_weight", f"{q2_weight:,}")
+glue("q2_bias", f"{q2_bias}")
+glue("q2_total", f"{q2_total:,}")
+
+# Q2: Dense layer comparison
+q2_dense_input = 224 * 224 * 3
+q2_dense_params = q2_dense_input * 64
+q2_ratio = q2_dense_params // q2_total
+glue("q2_dense_input", f"{q2_dense_input:,}")
+glue("q2_dense_params", f"{q2_dense_params:,}")
+glue("q2_ratio", f"{q2_ratio:,}")
+
+# Q3: Conv2d(64, 128, k=3, p=1, s=1) on (16, 64, 56, 56)
+q3_h = (56 + 2 * 1 - 3) // 1 + 1
+q3_hw = q3_h * q3_h
+q3_kernel_block = 64 * 3 * 3
+q3_ops = 16 * 128 * q3_hw * q3_kernel_block
+glue("q3_h", f"{q3_h}")
+glue("q3_hw", f"{q3_hw:,}")
+glue("q3_kernel_block", f"{q3_kernel_block}")
+glue("q3_ops", f"{q3_ops:,}")
+glue("q3_approx", f"{q3_ops / 1e9:.1f}")
+
+# Q4: Conv2d(3, 256, k=7, s=2, p=3) on (64, 3, 224, 224)
+q4_h = (224 + 2 * 3 - 7) // 2 + 1
+q4_mem_bytes = 64 * 256 * q4_h * q4_h * 4
+glue("q4_h", f"{q4_h}")
+glue("q4_mem_bytes", f"{q4_mem_bytes:,}")
+glue("q4_mem_mb", f"{q4_mem_bytes / 1024**2:.0f} MB")
+
+# Q5: Receptive field growth
+q5_rf1 = 3
+q5_rf2 = q5_rf1 + (2 - 1) * 1   # MaxPool(2x2, s=2)
+q5_rf3 = q5_rf2 + (3 - 1) * 2   # Conv(3x3, s=1), accumulated stride = 2
+q5_rf4 = q5_rf3 + (3 - 1) * 2   # Conv(3x3, s=1), accumulated stride = 2
+glue("q5_rf1", f"{q5_rf1}")
+glue("q5_rf2", f"{q5_rf2}")
+glue("q5_rf3", f"{q5_rf3}")
+glue("q5_rf4", f"{q5_rf4}")
+```
+
 Test yourself with these systems thinking questions. They're designed to build intuition for the spatial operations and performance characteristics you'll encounter in real CNN architectures.
 
 **Q1: Output Shape Calculation**
@@ -848,12 +991,11 @@ Given input (32, 3, 128, 128), what's the output shape after Conv2d(3, 64, kerne
 :class: dropdown
 
 Calculate height and width:
-```
-H_out = (128 + 2×2 - 5) / 2 + 1 = (128 + 4 - 5) / 2 + 1 = 127 / 2 + 1 = 63 + 1 = 64
-W_out = (128 + 2×2 - 5) / 2 + 1 = 64
-```
 
-Output shape: **(32, 64, 64, 64)**
+H_out = (128 + 2×2 - 5) / 2 + 1 = (128 + 4 - 5) / 2 + 1 = 127 / 2 + 1 = 63 + 1 = {glue:text}`q1_h`
+W_out = (128 + 2×2 - 5) / 2 + 1 = {glue:text}`q1_h`
+
+Output shape: **(32, 64, {glue:text}`q1_h`, {glue:text}`q1_h`)**
 
 Batch and channels change (3→64), spatial dimensions halve due to stride=2.
 ```
@@ -866,18 +1008,16 @@ How many parameters in Conv2d(3, 64, kernel_size=3, bias=True)?
 :class: dropdown
 
 Weight parameters: out_channels × in_channels × kernel_h × kernel_w
-```
-Weight: 64 × 3 × 3 × 3 = 1,728 parameters
-Bias: 64 parameters
-Total: 1,792 parameters
-```
+
+Weight: 64 × 3 × 3 × 3 = {glue:text}`q2_weight` parameters
+Bias: {glue:text}`q2_bias` parameters
+Total: {glue:text}`q2_total` parameters
 
 Compare this to a fully connected layer for 224×224 RGB images:
-```
-Dense(224×224×3, 64) = 150,528 × 64 = 9,633,792 parameters!
-```
 
-Convolution achieves **5,373× fewer parameters** through parameter sharing!
+Dense(224×224×3, 64) = {glue:text}`q2_dense_input` × 64 = {glue:text}`q2_dense_params` parameters!
+
+Convolution achieves **{glue:text}`q2_ratio`× fewer parameters** through parameter sharing!
 ```
 
 **Q3: Computational Complexity**
@@ -890,18 +1030,16 @@ For input (16, 64, 56, 56) and Conv2d(64, 128, kernel_size=3, padding=1, stride=
 Operations = B × C_out × H_out × W_out × C_in × K_h × K_w
 
 First calculate output dimensions:
-```
-H_out = (56 + 2×1 - 3) / 1 + 1 = 56
-W_out = (56 + 2×1 - 3) / 1 + 1 = 56
-```
+
+H_out = (56 + 2×1 - 3) / 1 + 1 = {glue:text}`q3_h`
+W_out = (56 + 2×1 - 3) / 1 + 1 = {glue:text}`q3_h`
 
 Then total operations:
-```
-16 × 128 × 56 × 56 × 64 × 3 × 3
-= 16 × 128 × 3,136 × 576
-= 3,707,764,736 operations
-≈ 3.7 billion operations per forward pass!
-```
+
+16 × 128 × {glue:text}`q3_h` × {glue:text}`q3_h` × 64 × 3 × 3
+= 16 × 128 × {glue:text}`q3_hw` × {glue:text}`q3_kernel_block`
+= {glue:text}`q3_ops` operations
+≈ {glue:text}`q3_approx` billion operations per forward pass!
 
 This is why batch size directly impacts training time: doubling batch doubles operations.
 ```
@@ -914,18 +1052,16 @@ What's the memory requirement for storing the output of Conv2d(3, 256, kernel_si
 :class: dropdown
 
 First calculate output dimensions:
-```
-H_out = (224 + 2×3 - 7) / 2 + 1 = (224 + 6 - 7) / 2 + 1 = 223 / 2 + 1 = 111 + 1 = 112
-W_out = 112
-```
 
-Output shape: (64, 256, 112, 112)
+H_out = (224 + 2×3 - 7) / 2 + 1 = (224 + 6 - 7) / 2 + 1 = 223 / 2 + 1 = 111 + 1 = {glue:text}`q4_h`
+W_out = {glue:text}`q4_h`
+
+Output shape: (64, 256, {glue:text}`q4_h`, {glue:text}`q4_h`)
 
 Memory (float32 = 4 bytes):
-```
-64 × 256 × 112 × 112 × 4 = 825,753,600 bytes
-≈ 826 MB for a single layer's output!
-```
+
+64 × 256 × {glue:text}`q4_h` × {glue:text}`q4_h` × 4 = {glue:text}`q4_mem_bytes` bytes
+≈ {glue:text}`q4_mem_mb` for a single layer's output!
 
 This is why deep CNNs require GPUs with large memory (16+ GB). Storing activations for backpropagation across 50+ layers quickly exceeds memory limits.
 ```
@@ -939,14 +1075,14 @@ Starting with 224×224 input, you stack: Conv(3×3, stride=1) → MaxPool(2×2, 
 
 Track receptive field growth through each layer:
 
-Layer 1 - Conv(3×3, stride=1): RF = 3
-Layer 2 - MaxPool(2×2, stride=2): RF = 3 + (2-1)×1 = 4
-Layer 3 - Conv(3×3, stride=1): RF = 4 + (3-1)×2 = 8  (stride accumulates)
-Layer 4 - Conv(3×3, stride=1): RF = 8 + (3-1)×2 = 12
+Layer 1 - Conv(3×3, stride=1): RF = {glue:text}`q5_rf1`
+Layer 2 - MaxPool(2×2, stride=2): RF = {glue:text}`q5_rf1` + (2-1)×1 = {glue:text}`q5_rf2`
+Layer 3 - Conv(3×3, stride=1): RF = {glue:text}`q5_rf2` + (3-1)×2 = {glue:text}`q5_rf3`  (stride accumulates)
+Layer 4 - Conv(3×3, stride=1): RF = {glue:text}`q5_rf3` + (3-1)×2 = {glue:text}`q5_rf4`
 
-**Receptive field = 12×12**
+**Receptive field = {glue:text}`q5_rf4`×{glue:text}`q5_rf4`**
 
-Each neuron in the final layer sees a 12×12 region of the original input. This is why stacking layers with stride/pooling is crucial: it grows the receptive field so deeper layers can detect larger patterns.
+Each neuron in the final layer sees a {glue:text}`q5_rf4`×{glue:text}`q5_rf4` region of the original input. This is why stacking layers with stride/pooling is crucial: it grows the receptive field so deeper layers can detect larger patterns.
 
 Formula: RF_new = RF_old + (kernel_size - 1) × stride_product
 
@@ -992,7 +1128,7 @@ Shift from spatial processing (images) to sequential processing (text). You'll i
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/09_convolutions/09_convolutions.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/09_convolutions/convolutions.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/09_convolutions/09_convolutions.py)** - Browse the implementation code
 ```
 
