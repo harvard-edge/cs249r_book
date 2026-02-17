@@ -104,10 +104,10 @@ This opens the module notebook and tracks your progress.
 
 ### Work in the notebook
 
-Edit `modules/01_tensor/01_tensor.ipynb` in Jupyter:
+Edit `modules/01_tensor/tensor.ipynb` in Jupyter:
 
 ```bash
-jupyter lab modules/01_tensor/01_tensor.ipynb
+jupyter lab modules/01_tensor/tensor.ipynb
 ```
 
 You'll implement:
