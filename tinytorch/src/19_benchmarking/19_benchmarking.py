@@ -286,7 +286,7 @@ Benchmark Architecture:
 │ BenchmarkSuite                          │
 │ • Multi-metric comprehensive evaluation │
 ├─────────────────────────────────────────┤
-│ MLPerf                              │
+│ MLPerf                                  │
 │ • Standardized industry-style benchmarks│
 └─────────────────────────────────────────┘
 ```
