@@ -1,25 +1,43 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import * as fs from 'fs';
 import { runInTerminal } from '../utils/terminal';
 import { discoverModules } from '../utils/modules';
+import { callTito, logError, titoTerminalCommand } from '../utils/tito';
+
+/**
+ * Get a file path from `tito module path <num> --<kind>`.
+ * Returns the absolute path string, or null on error (logged to output channel).
+ */
+function getPathFromTito(projectRoot: string, num: string, kind: 'notebook' | 'source' | 'about'): string | null {
+  return callTito(projectRoot, `module path ${num} --${kind}`, `module path (${kind})`);
+}
 
 /**
  * Register all module-related commands.
  *
- * Each command shells out to `tito` — the extension never reimplements
+ * Each command delegates to `tito` — the extension never reimplements
  * CLI logic; it just provides a GUI wrapper.
+ *
+ * Note: Module tree refreshes happen automatically via the .tito/progress.json
+ * file watcher set up in extension.ts — no setTimeout refreshes needed.
  */
 export function registerModuleCommands(
   context: vscode.ExtensionContext,
   projectRoot: string,
-  refreshModules: () => void,
 ): void {
 
   // Helper: pick a module if not provided as an argument
   async function pickModule(argNumber?: string): Promise<string | undefined> {
     if (argNumber) { return argNumber; }
-    const modules = discoverModules(projectRoot);
+    const { modules, error } = discoverModules(projectRoot);
+    if (error) {
+      vscode.window.showWarningMessage(`TinyTorch: ${error}`);
+      return undefined;
+    }
+    if (modules.length === 0) {
+      vscode.window.showInformationMessage('No modules found. Run "tito setup" first.');
+      return undefined;
+    }
     const picks = modules.map(m => ({
       label: `${m.number} — ${m.title ?? m.displayName}`,
       description: m.status.replace('_', ' '),
@@ -31,76 +49,70 @@ export function registerModuleCommands(
     return selected?.number;
   }
 
-  // Helper: resolve a module's folder from number
-  function resolveFolder(num: string, folder?: string): string | undefined {
-    if (folder) { return folder; }
-    const modules = discoverModules(projectRoot);
-    return modules.find(m => m.number === num)?.folder;
+  /** Open a file returned by Tito, with a user-facing message on failure */
+  async function openFileFromTito(
+    moduleNum: string,
+    kind: 'notebook' | 'source' | 'about',
+    fallbackAction?: () => void,
+  ): Promise<void> {
+    const filePath = getPathFromTito(projectRoot, moduleNum, kind);
+
+    if (filePath && fs.existsSync(filePath)) {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+      return;
+    }
+
+    // File not found — give context-specific feedback
+    const kindLabel = kind === 'notebook' ? 'Notebook' : kind === 'source' ? 'Source file' : 'ABOUT.md';
+    if (fallbackAction) {
+      const action = await vscode.window.showWarningMessage(
+        `${kindLabel} not found for module ${moduleNum}.`,
+        'Start Module (generates files)',
+      );
+      if (action) { fallbackAction(); }
+    } else {
+      vscode.window.showWarningMessage(`${kindLabel} not found for module ${moduleNum}.`);
+    }
   }
 
   context.subscriptions.push(
     // Open the .ipynb notebook directly in VS Code's notebook editor
-    vscode.commands.registerCommand('tinytorch.openNotebook', async (num?: string, folder?: string) => {
+    vscode.commands.registerCommand('tinytorch.openNotebook', async (num?: string) => {
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
-      const moduleFolder = resolveFolder(moduleNum, folder);
-      if (!moduleFolder) { return; }
 
-      // Notebooks live in modules/<folder>/<slug>.ipynb
-      const slug = moduleFolder.replace(/^\d{2}_/, '');
-      const nbPath = path.join(projectRoot, 'modules', moduleFolder, `${slug}.ipynb`);
-
-      if (fs.existsSync(nbPath)) {
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(nbPath));
-        await vscode.window.showTextDocument(doc, { preview: false });
-      } else {
-        // Notebook might not exist yet — offer to generate it
-        const action = await vscode.window.showWarningMessage(
-          `Notebook not found: modules/${moduleFolder}/${slug}.ipynb`,
-          'Start Module (generates notebook)',
+      await openFileFromTito(moduleNum, 'notebook', () => {
+        runInTerminal(
+          titoTerminalCommand(`module start ${moduleNum}`),
+          projectRoot,
+          `Start Module ${moduleNum}`,
         );
-        if (action) {
-          runInTerminal(
-            `python3 -m tito.main module start ${moduleNum}`,
-            projectRoot,
-            `Start Module ${moduleNum}`,
-          );
-        }
-      }
+      });
     }),
 
     // Open the source .py file
-    vscode.commands.registerCommand('tinytorch.openSource', async (num?: string, folder?: string) => {
+    vscode.commands.registerCommand('tinytorch.openSource', async (num?: string) => {
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
-      const moduleFolder = resolveFolder(moduleNum, folder);
-      if (!moduleFolder) { return; }
-
-      const pyPath = path.join(projectRoot, 'src', moduleFolder, `${moduleFolder}.py`);
-      if (fs.existsSync(pyPath)) {
-        const doc = await vscode.workspace.openTextDocument(pyPath);
-        await vscode.window.showTextDocument(doc, { preview: false });
-      } else {
-        vscode.window.showWarningMessage(`Source file not found: src/${moduleFolder}/${moduleFolder}.py`);
-      }
+      await openFileFromTito(moduleNum, 'source');
     }),
 
     vscode.commands.registerCommand('tinytorch.startModule', async (num?: string) => {
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
       runInTerminal(
-        `python3 -m tito.main module start ${moduleNum}`,
+        titoTerminalCommand(`module start ${moduleNum}`),
         projectRoot,
         `Start Module ${moduleNum}`,
       );
-      setTimeout(refreshModules, 3000);
     }),
 
     vscode.commands.registerCommand('tinytorch.viewModule', async (num?: string) => {
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
       runInTerminal(
-        `python3 -m tito.main module view ${moduleNum}`,
+        titoTerminalCommand(`module view ${moduleNum}`),
         projectRoot,
         `View Module ${moduleNum}`,
       );
@@ -110,7 +122,7 @@ export function registerModuleCommands(
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
       runInTerminal(
-        `python3 -m tito.main module test ${moduleNum}`,
+        titoTerminalCommand(`module test ${moduleNum}`),
         projectRoot,
         `Test Module ${moduleNum}`,
       );
@@ -120,11 +132,10 @@ export function registerModuleCommands(
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
       runInTerminal(
-        `python3 -m tito.main module complete ${moduleNum}`,
+        titoTerminalCommand(`module complete ${moduleNum}`),
         projectRoot,
         `Complete Module ${moduleNum}`,
       );
-      setTimeout(refreshModules, 5000);
     }),
 
     vscode.commands.registerCommand('tinytorch.resetModule', async (num?: string) => {
@@ -137,25 +148,16 @@ export function registerModuleCommands(
       );
       if (confirm !== 'Reset') { return; }
       runInTerminal(
-        `python3 -m tito.main module reset ${moduleNum}`,
+        titoTerminalCommand(`module reset ${moduleNum}`),
         projectRoot,
         `Reset Module ${moduleNum}`,
       );
-      setTimeout(refreshModules, 3000);
     }),
 
-    vscode.commands.registerCommand('tinytorch.openAbout', async (num?: string, folder?: string) => {
+    vscode.commands.registerCommand('tinytorch.openAbout', async (num?: string) => {
       const moduleNum = await pickModule(num);
       if (!moduleNum) { return; }
-      const moduleFolder = resolveFolder(moduleNum, folder);
-      if (!moduleFolder) { return; }
-      const aboutPath = path.join(projectRoot, 'src', moduleFolder, 'ABOUT.md');
-      try {
-        const doc = await vscode.workspace.openTextDocument(aboutPath);
-        await vscode.window.showTextDocument(doc, { preview: false });
-      } catch {
-        vscode.window.showWarningMessage(`ABOUT.md not found for module ${moduleNum}`);
-      }
+      await openFileFromTito(moduleNum, 'about');
     }),
   );
 }

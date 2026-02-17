@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { discoverModules } from '../utils/modules';
+import { titoTerminalCommand } from '../utils/tito';
 import { ModuleInfo } from '../types';
 import { CategoryTreeItem, ActionTreeItem } from '../models/treeItems';
 
@@ -25,11 +26,11 @@ export class TestTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private modules: ModuleInfo[] = [];
 
   constructor(private projectRoot: string) {
-    this.modules = discoverModules(projectRoot);
+    this.modules = discoverModules(projectRoot).modules;
   }
 
   refresh(): void {
-    this.modules = discoverModules(this.projectRoot);
+    this.modules = discoverModules(this.projectRoot).modules;
     this._onDidChange.fire(undefined);
   }
 
@@ -51,29 +52,29 @@ export class TestTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         case 'all':
           return [
             new ActionTreeItem('Quick (Unit + CLI)', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --unit --cli', 'Quick Tests'], 'zap'),
+              [titoTerminalCommand('dev test --unit --cli'), 'Quick Tests'], 'zap'),
             new ActionTreeItem('Standard (Stages 1-5)', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --inline --unit --integration --cli --e2e', 'Standard Tests'], 'test-view-icon'),
+              [titoTerminalCommand('dev test --inline --unit --integration --cli --e2e'), 'Standard Tests'], 'test-view-icon'),
             new ActionTreeItem('All Tests', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --all', 'All Tests'], 'checklist'),
+              [titoTerminalCommand('dev test --all'), 'All Tests'], 'checklist'),
             new ActionTreeItem('User Journey (destructive)', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --user-journey', 'User Journey'], 'warning'),
+              [titoTerminalCommand('dev test --user-journey'), 'User Journey'], 'warning'),
           ];
 
         case 'stages':
           return [
             new ActionTreeItem('Stage 1: Inline Build', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --inline', 'Inline Build'], 'symbol-constructor'),
+              [titoTerminalCommand('dev test --inline'), 'Inline Build'], 'symbol-constructor'),
             new ActionTreeItem('Stage 2: Unit Tests', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --unit', 'Unit Tests'], 'beaker'),
+              [titoTerminalCommand('dev test --unit'), 'Unit Tests'], 'beaker'),
             new ActionTreeItem('Stage 3: Integration', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --integration', 'Integration Tests'], 'link'),
+              [titoTerminalCommand('dev test --integration'), 'Integration Tests'], 'link'),
             new ActionTreeItem('Stage 4: CLI Tests', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --cli', 'CLI Tests'], 'terminal'),
+              [titoTerminalCommand('dev test --cli'), 'CLI Tests'], 'terminal'),
             new ActionTreeItem('Stage 5: E2E Tests', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --e2e', 'E2E Tests'], 'globe'),
+              [titoTerminalCommand('dev test --e2e'), 'E2E Tests'], 'globe'),
             new ActionTreeItem('Stage 6: Milestone Tests', 'tinytorch.runAction',
-              ['python3 -m tito.main dev test --milestone', 'Milestone Tests'], 'mortar-board'),
+              [titoTerminalCommand('dev test --milestone'), 'Milestone Tests'], 'mortar-board'),
           ];
 
         case 'module':
@@ -81,7 +82,7 @@ export class TestTreeProvider implements vscode.TreeDataProvider<TreeNode> {
             new ActionTreeItem(
               `${m.number} — ${m.title ?? m.displayName}`,
               'tinytorch.runAction',
-              [`python3 -m tito.main dev test --unit --module ${m.number}`, `Test Module ${m.number}`],
+              [titoTerminalCommand(`dev test --unit --module ${m.number}`), `Test Module ${m.number}`],
               'beaker',
             )
           );

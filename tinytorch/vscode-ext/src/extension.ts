@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getProjectRoot } from './utils/workspace';
 import { initializeRunManager, runInTerminal, rerunLastCommand, rerunCommand, revealTerminal } from './utils/terminal';
+import { isTitoAvailable, log, titoTerminalCommand } from './utils/tito';
 import { ModuleTreeProvider } from './providers/moduleTreeProvider';
 import { TestTreeProvider } from './providers/testTreeProvider';
 import { BuildTreeProvider } from './providers/buildTreeProvider';
@@ -18,6 +19,21 @@ export function activate(context: vscode.ExtensionContext): void {
       'TinyTorch Workbench: could not find project root (src/01_tensor not found).',
     );
     return;
+  }
+
+  log(`Activated with project root: ${root}`);
+
+  // Pre-flight: check that Tito CLI is reachable
+  if (!isTitoAvailable(root)) {
+    void vscode.window.showWarningMessage(
+      'TinyTorch: Tito CLI is not available. Run "pip install -e ." in the tinytorch directory.',
+      'Show Setup Instructions',
+    ).then(choice => {
+      if (choice === 'Show Setup Instructions') {
+        runInTerminal(titoTerminalCommand('setup'), root, 'Setup');
+      }
+    });
+    log('WARNING: Tito CLI not available — extension will have limited functionality.');
   }
 
   initializeRunManager(context);
@@ -59,17 +75,21 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   // --- Register command groups ---
-  registerModuleCommands(context, root, () => moduleProvider.refresh());
+  registerModuleCommands(context, root);
   registerTestCommands(context, root);
   registerBuildCommands(context, root);
 
-  // --- Watch progress.json for changes ---
+  // --- Watch .tito/progress.json for changes (where Tito stores module status) ---
+  // This is the SOLE mechanism for refreshing the module tree after start/complete/reset.
+  // No setTimeout hacks — the file watcher fires whenever Tito writes progress.
   const progressWatcher = vscode.workspace.createFileSystemWatcher(
-    new vscode.RelativePattern(root, 'progress.json'),
+    new vscode.RelativePattern(root, '.tito/progress.json'),
   );
   progressWatcher.onDidChange(() => moduleProvider.refresh());
   progressWatcher.onDidCreate(() => moduleProvider.refresh());
   context.subscriptions.push(progressWatcher);
+
+  log('Extension fully activated.');
 }
 
 export function deactivate(): void {

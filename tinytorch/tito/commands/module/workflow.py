@@ -186,6 +186,37 @@ class ModuleWorkflowCommand(BaseCommand):
             'list',
             help='List all available modules'
         )
+        list_parser.add_argument(
+            '--json',
+            action='store_true',
+            help='Output as JSON (for IDE integrations)'
+        )
+
+        # PATH command - get file paths for a module
+        path_parser = subparsers.add_parser(
+            'path',
+            help='Get file path for a module (for IDE integrations)'
+        )
+        path_parser.add_argument(
+            'module_number',
+            help='Module number (01, 02, etc.)'
+        )
+        path_group = path_parser.add_mutually_exclusive_group(required=True)
+        path_group.add_argument(
+            '--notebook',
+            action='store_true',
+            help='Path to module notebook (.ipynb)'
+        )
+        path_group.add_argument(
+            '--source',
+            action='store_true',
+            help='Path to module source (.py)'
+        )
+        path_group.add_argument(
+            '--about',
+            action='store_true',
+            help='Path to module ABOUT.md'
+        )
 
     # Module mapping and normalization now imported from core.modules
 
@@ -1262,16 +1293,46 @@ class ModuleWorkflowCommand(BaseCommand):
                 border_style="gold1"
             ))
 
-    def list_modules(self) -> int:
+    def list_modules(self, json_mode: bool = False) -> int:
         """List all available modules with descriptions (auto-discovered)."""
-        from rich.table import Table
-        from rich import box
+        import json
 
         # Auto-discover modules from filesystem
         module_mapping = get_module_mapping()
         metadata = get_all_module_metadata()
+        progress = self.get_progress_data()
+        started = progress.get('started_modules', [])
+        completed = progress.get('completed_modules', [])
 
-        # Build table
+        if json_mode:
+            # Machine-readable output for IDE integrations
+            modules = []
+            for num, folder_name in sorted(module_mapping.items()):
+                meta = metadata.get(num)
+                title = meta.title if meta else get_module_display_name(num)
+                desc = meta.description if meta else ""
+
+                if num in completed:
+                    status = "completed"
+                elif num in started:
+                    status = "started"
+                else:
+                    status = "not_started"
+
+                modules.append({
+                    "number": num,
+                    "folder": folder_name,
+                    "title": title,
+                    "description": desc,
+                    "status": status,
+                })
+            print(json.dumps(modules))
+            return 0
+
+        # Human-readable Rich table output
+        from rich.table import Table
+        from rich import box
+
         table = Table(
             title="📚 Tiny🔥Torch Modules",
             box=box.ROUNDED,
@@ -1300,6 +1361,33 @@ class ModuleWorkflowCommand(BaseCommand):
         self.console.print()
 
         return 0
+
+    def get_path(self, module_number: str, notebook: bool = False,
+                 source: bool = False, about: bool = False) -> int:
+        """Print the absolute path to a module file. For IDE integrations."""
+        module_mapping = get_module_mapping()
+        normalized = normalize_module_number(module_number)
+
+        if normalized not in module_mapping:
+            self.console.print(f"[red]❌ Module {normalized} not found[/red]")
+            return 1
+
+        folder = module_mapping[normalized]
+        project_root = self.config.project_root
+
+        if notebook:
+            slug = folder.split("_", 1)[1] if "_" in folder else folder
+            target = project_root / "modules" / folder / f"{slug}.ipynb"
+        elif source:
+            target = project_root / "src" / folder / f"{folder}.py"
+        elif about:
+            target = project_root / "src" / folder / "ABOUT.md"
+        else:
+            self.console.print("[red]❌ Specify --notebook, --source, or --about[/red]")
+            return 1
+
+        print(str(target))
+        return 0 if target.exists() else 1
 
     def show_status(self) -> int:
         """Show module completion status with enhanced visuals."""
@@ -1510,7 +1598,14 @@ class ModuleWorkflowCommand(BaseCommand):
             elif args.module_command == 'status':
                 return self.show_status()
             elif args.module_command == 'list':
-                return self.list_modules()
+                return self.list_modules(json_mode=getattr(args, 'json', False))
+            elif args.module_command == 'path':
+                return self.get_path(
+                    args.module_number,
+                    notebook=getattr(args, 'notebook', False),
+                    source=getattr(args, 'source', False),
+                    about=getattr(args, 'about', False),
+                )
 
         # Show help if no valid command
         self.console.print(Panel(
