@@ -1,3 +1,110 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# === Overview section: 100-token generation ===
+overview_n = 100
+overview_without = overview_n * (overview_n + 1) // 2
+overview_with = overview_n
+overview_speedup = overview_without / overview_with
+glue("overview_without_cache", f"{overview_without:,}")
+glue("overview_with_cache", f"{overview_with:,}")
+glue("overview_speedup", f"{overview_without // overview_with}x")
+
+# === Gradient checkpointing: 96-layer transformer ===
+ckpt_layers = 96
+ckpt_interval = 12
+ckpt_stored = ckpt_layers // ckpt_interval
+ckpt_recomputed = ckpt_interval - 1
+ckpt_reduction = ckpt_layers // ckpt_stored
+glue("ckpt_stored", f"{ckpt_stored}")
+glue("ckpt_recomputed", f"{ckpt_recomputed}")
+glue("ckpt_reduction", f"{ckpt_reduction}x")
+
+# === Memory-Compute Trade-offs: GPT-2 Small cache ===
+L, H, S, D = 12, 12, 1024, 64
+bytes_per_element = 4
+gpt2_cache_bytes = 2 * L * H * S * D * bytes_per_element
+gpt2_cache_mb = gpt2_cache_bytes / (1024 ** 2)
+gpt2_model_mb = 500
+gpt2_overhead_pct = gpt2_cache_mb / gpt2_model_mb * 100
+glue("gpt2_cache_bytes", f"{gpt2_cache_bytes:,}")
+glue("gpt2_cache_mb", f"{gpt2_cache_mb:.0f}")
+glue("gpt2_overhead_pct", f"{gpt2_overhead_pct:.0f}%")
+
+# === Compute reduction examples (inline prose) ===
+for n in [100, 1000]:
+    without = n * (n + 1) / 2
+    reduction = without / n
+    glue(f"compute_red_{n}", f"{reduction:.0f}x")
+
+# === Compute reduction table ===
+for n in [10, 50, 100, 500]:
+    without = n * (n + 1) / 2
+    reduction = without / n
+    glue(f"table_red_{n}", f"{reduction:.1f}x")
+
+# === Production context: concurrent users ===
+prod_cache_per_user_mb = 75
+prod_users = 10
+prod_total_cache_mb = prod_cache_per_user_mb * prod_users
+prod_model_mb = 500
+prod_total_gb = (prod_total_cache_mb + prod_model_mb) / 1000
+glue("prod_total_cache_mb", f"{prod_total_cache_mb:,}")
+glue("prod_total_gb", f"{prod_total_gb:.2f}")
+
+# === Q1: Cache Memory Calculation ===
+q1_batch, q1_heads, q1_seq, q1_dim, q1_layers = 4, 8, 1024, 64, 12
+q1_elements_per_tensor = q1_batch * q1_heads * q1_seq * q1_dim
+q1_elements_per_layer = 2 * q1_elements_per_tensor
+q1_total_elements = q1_layers * q1_elements_per_layer
+q1_total_bytes = q1_total_elements * bytes_per_element
+q1_total_mb = q1_total_bytes / (1024 ** 2)
+glue("q1_per_tensor", f"{q1_elements_per_tensor:,}")
+glue("q1_per_layer", f"{q1_elements_per_layer:,}")
+glue("q1_total_elements", f"{q1_total_elements:,}")
+glue("q1_total_bytes", f"{q1_total_bytes:,}")
+glue("q1_total_mb", f"{q1_total_mb:.0f}")
+
+# === Q2: Complexity Reduction (200 tokens) ===
+q2_n = 200
+q2_without = q2_n * (q2_n + 1) // 2
+q2_with = q2_n
+q2_reduction = q2_without / q2_with
+glue("q2_without", f"{q2_without:,}")
+glue("q2_with", f"{q2_with:,}")
+glue("q2_reduction", f"{q2_reduction:.1f}x")
+
+# === Q3: Memory-Compute Trade-off ===
+q3_cache_mb = 300
+q3_model_mb = 2000
+q3_overhead_pct = q3_cache_mb / q3_model_mb * 100
+glue("q3_overhead_pct", f"{q3_overhead_pct:.0f}%")
+
+# === Q4: Cache Hit Rate ===
+for pos in [50, 100, 500]:
+    hit_rate = (pos - 1) / pos * 100
+    glue(f"q4_hit_{pos}", f"{hit_rate:.0f}%" if hit_rate == int(hit_rate) else f"{hit_rate:.1f}%")
+
+# === Q5: Batch Inference Scaling ===
+q5_base_mb = 75
+q5_batch = 8
+q5_total_mb = q5_base_mb * q5_batch
+q5_gpu_mb = 16 * 1000  # 16 GB in decimal MB (as used in the text)
+q5_model_mb = 2000
+q5_avail_mb = q5_gpu_mb - q5_model_mb
+q5_max_seqs = int(q5_avail_mb / q5_base_mb)
+glue("q5_total_mb", f"{q5_total_mb:,}")
+glue("q5_avail_gb", f"{q5_avail_mb / 1000:.0f}")
+glue("q5_max_seqs", f"{q5_max_seqs:,}")
+```
+
 # Module 18: Memoization
 
 :::{admonition} Module Info
@@ -470,9 +577,9 @@ def update(self, layer_idx: int, key: Tensor, value: Tensor) -> None:
 This O(1) update operation writes directly to a pre-allocated position in the cache. No array resizing, no data copying, just an indexed assignment. The use of `.data` accesses the underlying NumPy array directly, avoiding gradient tracking overhead since caching is inference-only.
 
 The computational savings compound across generation steps. For a 100-token sequence:
-- Without caching: 1 + 2 + 3 + ... + 100 = 5,050 K,V computations
-- With caching: 100 K,V computations (one per token)
-- Speedup: 50x reduction in K,V computation alone
+- Without caching: 1 + 2 + 3 + ... + 100 = {glue:text}`overview_without_cache` K,V computations
+- With caching: {glue:text}`overview_with_cache` K,V computations (one per token)
+- Speedup: {glue:text}`overview_speedup` reduction in K,V computation alone
 
 ### KV Cache in Transformers
 
@@ -516,8 +623,8 @@ The technique works by discarding some intermediate activations during the forwa
 
 For a transformer with 96 layers:
 - Without checkpointing: Store 96 sets of activations
-- With checkpointing every 12 layers: Store 8 sets, recompute 11 sets during backward
-- Memory reduction: 12x decrease
+- With checkpointing every 12 layers: Store {glue:text}`ckpt_stored` sets, recompute {glue:text}`ckpt_recomputed` sets during backward
+- Memory reduction: {glue:text}`ckpt_reduction` decrease
 - Compute increase: ~33% slower training (recomputation overhead)
 
 This is the inverse trade-off from KV caching. KV caching spends memory to save compute during inference. Gradient checkpointing spends compute to save memory during training. Both techniques recognize that memory and compute are fungible resources with different costs in different contexts.
@@ -555,7 +662,6 @@ Every optimization involves trade-offs. KV caching trades memory for speed, and 
 
 For a transformer with L layers, H heads per layer, dimension D per head, and maximum sequence length S, the cache requires:
 
-```
 Memory = 2 × L × H × S × D × 4 bytes
 
 Example (GPT-2 Small):
@@ -563,10 +669,9 @@ L = 12 layers
 H = 12 heads
 S = 1024 tokens
 D = 64 dimensions
-Memory = 2 × 12 × 12 × 1024 × 64 × 4 = 75,497,472 bytes ≈ 75 MB
-```
+Memory = 2 × 12 × 12 × 1024 × 64 × 4 = {glue:text}`gpt2_cache_bytes` bytes ≈ {glue:text}`gpt2_cache_mb` MB
 
-For a model with 125 million parameters (500 MB), the cache adds 15% memory overhead. This seems significant until you consider the computational savings.
+For a model with 125 million parameters (500 MB), the cache adds {glue:text}`gpt2_overhead_pct` memory overhead. This seems significant until you consider the computational savings.
 
 Without caching, generating a sequence of length N requires computing K,V for:
 - Step 1: 1 token
@@ -582,14 +687,14 @@ With caching:
 - Step N: 1 token (compute and append)
 - Total: N computations
 
-For N = 100 tokens, caching provides 50x reduction in K,V computation. For N = 1000 tokens, the reduction is 500x. The speedup grows with sequence length, making the memory trade-off increasingly favorable for longer generation.
+For N = 100 tokens, caching provides {glue:text}`compute_red_100` reduction in K,V computation. For N = 1000 tokens, the reduction is {glue:text}`compute_red_1000`. The speedup grows with sequence length, making the memory trade-off increasingly favorable for longer generation.
 
 | Sequence Length | Cache Memory | Compute Reduction | Effective Speedup |
 |-----------------|--------------|-------------------|-------------------|
-| 10 tokens | 75 MB | 5.5x | 3-5x |
-| 50 tokens | 75 MB | 25.5x | 8-12x |
-| 100 tokens | 75 MB | 50.5x | 10-15x |
-| 500 tokens | 75 MB | 250.5x | 12-20x |
+| 10 tokens | {glue:text}`gpt2_cache_mb` MB | {glue:text}`table_red_10` | 3-5x |
+| 50 tokens | {glue:text}`gpt2_cache_mb` MB | {glue:text}`table_red_50` | 8-12x |
+| 100 tokens | {glue:text}`gpt2_cache_mb` MB | {glue:text}`table_red_100` | 10-15x |
+| 500 tokens | {glue:text}`gpt2_cache_mb` MB | {glue:text}`table_red_500` | 12-20x |
 
 The effective speedup is lower than the theoretical compute reduction because attention includes other operations beyond K,V projection, but the benefit is still dramatic.
 
@@ -753,7 +858,7 @@ To appreciate the production impact of KV caching, consider the economics of lan
 The memory cost is modest compared to the benefit. For a GPT-2 model:
 - Model parameters: 500 MB (loaded once, shared across all users)
 - KV cache per user: 75 MB
-- 10 concurrent users: 750 MB cache + 500 MB model = 1.25 GB total
+- 10 concurrent users: {glue:text}`prod_total_cache_mb` MB cache + 500 MB model = {glue:text}`prod_total_gb` GB total
 - Fits comfortably on a 16 GB GPU while delivering 10x throughput
 
 ## Check Your Understanding
@@ -769,13 +874,13 @@ A 12-layer transformer has 8 attention heads per layer, each head has 64 dimensi
 
 Shape per cache tensor: (batch=4, heads=8, seq=1024, dim=64)
 
-Elements per tensor: 4 × 8 × 1024 × 64 = 2,097,152
+Elements per tensor: 4 × 8 × 1024 × 64 = {glue:text}`q1_per_tensor`
 
-Each layer has 2 tensors (K and V): 2 × 2,097,152 = 4,194,304 elements per layer
+Each layer has 2 tensors (K and V): 2 × {glue:text}`q1_per_tensor` = {glue:text}`q1_per_layer` elements per layer
 
-Total across 12 layers: 12 × 4,194,304 = 50,331,648 elements
+Total across 12 layers: 12 × {glue:text}`q1_per_layer` = {glue:text}`q1_total_elements` elements
 
-Memory: 50,331,648 × 4 bytes = 201,326,592 bytes ≈ **192 MB**
+Memory: {glue:text}`q1_total_elements` × 4 bytes = {glue:text}`q1_total_bytes` bytes ≈ **{glue:text}`q1_total_mb` MB**
 
 This is why production systems carefully tune batch size and sequence length!
 ```
@@ -787,11 +892,11 @@ Without caching, generating 200 tokens requires how many K,V computations? With 
 ```{admonition} Answer
 :class: dropdown
 
-**Without caching**: 1 + 2 + 3 + ... + 200 = 200 × 201 / 2 = **20,100 computations**
+**Without caching**: 1 + 2 + 3 + ... + 200 = 200 × 201 / 2 = **{glue:text}`q2_without` computations**
 
-**With caching**: 200 computations (one per token)
+**With caching**: {glue:text}`q2_with` computations (one per token)
 
-**Reduction**: 20,100 / 200 = **100.5x fewer K,V computations**
+**Reduction**: {glue:text}`q2_without` / {glue:text}`q2_with` = **{glue:text}`q2_reduction` fewer K,V computations**
 
 This is why the speedup grows with sequence length!
 ```
@@ -803,12 +908,12 @@ A model uses 2 GB for parameters. Adding KV cache uses 300 MB. Is this trade-off
 ```{admonition} Answer
 :class: dropdown
 
-**Memory overhead**: 300 MB / 2000 MB = 15% increase
+**Memory overhead**: 300 MB / 2000 MB = {glue:text}`q3_overhead_pct` increase
 
 **Speedup**: 12x faster generation
 
 **Analysis**:
-- Cost: 15% more memory
+- Cost: {glue:text}`q3_overhead_pct` more memory
 - Benefit: 12x more throughput (or 12x lower latency)
 - Result: You can serve 12x more users with 1.15x the memory
 
@@ -829,11 +934,11 @@ At token position 50:
 - Cache retrievals: 49 previous K,V pairs
 - Total: 50 K,V pairs needed
 
-**Cache hit rate**: 49/50 = **98%**
+**Cache hit rate**: 49/50 = **{glue:text}`q4_hit_50`**
 
 As generation continues:
-- Token 100: 99/100 = 99% hit rate
-- Token 500: 499/500 = 99.8% hit rate
+- Token 100: 99/100 = {glue:text}`q4_hit_100` hit rate
+- Token 500: 499/500 = {glue:text}`q4_hit_500` hit rate
 
 The cache hit rate approaches 100% for long sequences, explaining why speedup increases with length!
 ```
@@ -847,7 +952,7 @@ Cache memory for batch_size=1 is 75 MB. What is cache memory for batch_size=8?
 
 Cache memory scales linearly with batch size:
 
-**batch_size=8**: 75 MB × 8 = **600 MB**
+**batch_size=8**: 75 MB × 8 = **{glue:text}`q5_total_mb` MB**
 
 This is why production systems carefully manage batch size:
 - Larger batches → higher throughput (more sequences per second)
@@ -855,8 +960,8 @@ This is why production systems carefully manage batch size:
 
 Trade-off example on 16 GB GPU:
 - Model: 2 GB
-- Available for cache: 14 GB
-- Max batch size: 14 GB / 75 MB ≈ 186 sequences
+- Available for cache: {glue:text}`q5_avail_gb` GB
+- Max batch size: {glue:text}`q5_avail_gb` GB / 75 MB ≈ {glue:text}`q5_max_seqs` sequences
 
 Production systems balance batch size against latency requirements and memory constraints.
 ```

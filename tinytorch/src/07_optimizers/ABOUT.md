@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 07: Optimizers
 
 :::{admonition} Module Info
@@ -686,15 +692,101 @@ The optimizer API, update algorithms, and memory patterns are identical. When yo
 
 ### Why Optimizers Matter at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# 175B-parameter model: optimizer state with Adam
+scale_params = 175_000_000_000
+scale_bytes_per_param = 4
+scale_param_bytes = scale_params * scale_bytes_per_param
+scale_param_gb = scale_param_bytes / 1024**3
+scale_state_bytes = 2 * scale_param_bytes  # 2 Adam buffers (m, v)
+scale_state_tb = scale_state_bytes / 1024**4
+scale_multiplier = 3  # params + 2 state buffers
+
+glue("scale_param_gb", f"{scale_param_gb:.1f} GB")
+glue("scale_state_tb", f"{scale_state_tb:.2f} TB")
+glue("scale_multiplier", f"{scale_multiplier}x")
+```
+
 To appreciate optimizer importance, consider production training scenarios:
 
-- **Large language models (175B parameters)**: Optimizer state alone consumes **1.4 TB** with Adam (3x × 700 GB parameters), requiring multi-GPU state sharding
+- **Large language models (175B parameters)**: Optimizer state alone consumes **{glue:text}`scale_state_tb`** with Adam ({glue:text}`scale_multiplier` x {glue:text}`scale_param_gb` parameters), requiring multi-GPU state sharding
 - **Transformer training**: AdamW with weight_decay=0.01 is standard, improving generalization over plain Adam by 2-5% accuracy
 - **Convergence speed**: Adam typically converges in **30-50% fewer steps** than SGD on vision and language tasks, saving hours of GPU time despite higher memory cost
 
 The optimizer choice directly impacts training feasibility. For models that barely fit in memory with SGD, switching to Adam might require distributed training or gradient checkpointing to handle the 1.5x memory increase.
 
 ## Check Your Understanding
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Memory calculation for 10B-parameter model (float32)
+q1_params = 10_000_000_000
+q1_bytes_per_param = 4
+q1_param_bytes = q1_params * q1_bytes_per_param
+q1_param_gb = q1_param_bytes / 1024**3
+
+q1_adam_state_gb = 2 * q1_param_gb       # 2 buffers (m, v)
+q1_total_adam_gb = q1_param_gb + q1_adam_state_gb
+
+q1_sgd_state_gb = q1_param_gb            # 1 buffer (velocity)
+q1_total_sgd_gb = q1_param_gb + q1_sgd_state_gb
+
+q1_diff_gb = q1_total_adam_gb - q1_total_sgd_gb
+
+glue("q1_param_gb", f"{q1_param_gb:.2f} GB")
+glue("q1_adam_state_gb", f"{q1_adam_state_gb:.2f} GB")
+glue("q1_total_adam_gb", f"{q1_total_adam_gb:.2f} GB")
+glue("q1_sgd_state_gb", f"{q1_sgd_state_gb:.2f} GB")
+glue("q1_total_sgd_gb", f"{q1_total_sgd_gb:.2f} GB")
+glue("q1_diff_gb", f"{q1_diff_gb:.2f} GB")
+```
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q2: Convergence trade-off
+q2_adam_steps = 100_000
+q2_adam_overhead = 1.2
+q2_sgd_steps = 200_000
+q2_sgd_overhead = 1.0
+
+q2_adam_time = q2_adam_steps * q2_adam_overhead
+q2_sgd_time = q2_sgd_steps * q2_sgd_overhead
+q2_speedup = q2_sgd_time / q2_adam_time
+
+glue("q2_adam_time", f"{q2_adam_time:,.0f}")
+glue("q2_sgd_time", f"{q2_sgd_time:,.0f}")
+glue("q2_speedup", f"{q2_speedup:.2f}x")
+```
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q3: Bias correction impact
+q3_beta1 = 0.9
+
+q3_corr_step1 = 1 - q3_beta1 ** 1
+q3_corr_step10 = 1 - q3_beta1 ** 10
+q3_corr_step100 = 1 - q3_beta1 ** 100
+
+q3_mult_step1 = 1 / q3_corr_step1
+q3_mult_step10 = 1 / q3_corr_step10
+q3_mult_step100 = 1 / q3_corr_step100
+
+glue("q3_corr_step1", f"{q3_corr_step1:.1f}")
+glue("q3_corr_step10", f"{q3_corr_step10:.3f}")
+glue("q3_corr_step100", f"{q3_corr_step100:.4f}")
+glue("q3_mult_step1", f"{q3_mult_step1:.0f}x")
+glue("q3_mult_step10", f"{q3_mult_step10:.2f}x")
+glue("q3_mult_step100", f"{q3_mult_step100:.1f}x")
+```
 
 Test yourself with these systems thinking questions designed to build intuition for optimization trade-offs in production ML.
 
@@ -705,15 +797,15 @@ A language model has 10 billion float32 parameters. Using Adam optimizer, how mu
 ```{admonition} Answer
 :class: dropdown
 
-**Parameters:** 10B × 4 bytes = **40 GB**
+**Parameters:** 10B x 4 bytes = **{glue:text}`q1_param_gb`**
 
-**Adam state:** 2 buffers (m, v) = 2 × 40 GB = **80 GB**
-**Total with Adam:** 40 GB (params) + 80 GB (state) = **120 GB**
+**Adam state:** 2 buffers (m, v) = 2 x {glue:text}`q1_param_gb` = **{glue:text}`q1_adam_state_gb`**
+**Total with Adam:** {glue:text}`q1_param_gb` (params) + {glue:text}`q1_adam_state_gb` (state) = **{glue:text}`q1_total_adam_gb`**
 
-**SGD with momentum:** 1 buffer (velocity) = **40 GB**
-**Total with SGD:** 40 GB (params) + 40 GB (state) = **80 GB**
+**SGD with momentum:** 1 buffer (velocity) = **{glue:text}`q1_sgd_state_gb`**
+**Total with SGD:** {glue:text}`q1_param_gb` (params) + {glue:text}`q1_sgd_state_gb` (state) = **{glue:text}`q1_total_sgd_gb`**
 
-**Difference:** Adam uses **40 GB more** than SGD (50% increase). This might force you to use fewer GPUs or implement optimizer state sharding.
+**Difference:** Adam uses **{glue:text}`q1_diff_gb` more** than SGD (50% increase). This might force you to use fewer GPUs or implement optimizer state sharding.
 ```
 
 **Q2: Convergence Trade-off**
@@ -723,24 +815,24 @@ If Adam converges in 100,000 steps and SGD needs 200,000 steps, but Adam's per-s
 ```{admonition} Answer
 :class: dropdown
 
-**Adam:** 100,000 steps × 1.2 = **120,000 time units**
-**SGD:** 200,000 steps × 1.0 = **200,000 time units**
+**Adam:** 100,000 steps x 1.2 = **{glue:text}`q2_adam_time` time units**
+**SGD:** 200,000 steps x 1.0 = **{glue:text}`q2_sgd_time` time units**
 
-**Adam finishes 1.67x faster** despite higher per-step cost. The convergence advantage (2x fewer steps) outweighs the computational overhead (1.2x slower steps).
+**Adam finishes {glue:text}`q2_speedup` faster** despite higher per-step cost. The convergence advantage (2x fewer steps) outweighs the computational overhead (1.2x slower steps).
 
 This illustrates why Adam is popular despite higher memory and compute: wall-clock time to convergence often matters more than per-step efficiency.
 ```
 
 **Q3: Bias Correction Impact**
 
-In Adam, bias correction divides first moment by (1 - β₁^t). At step 1 with β₁=0.9, this correction factor is 0.1. At step 10, it's 0.651. How does this affect early vs late training?
+In Adam, bias correction divides first moment by (1 - β₁^t). At step 1 with β₁=0.9, this correction factor is {glue:text}`q3_corr_step1`. At step 10, it's {glue:text}`q3_corr_step10`. How does this affect early vs late training?
 
 ```{admonition} Answer
 :class: dropdown
 
-**Step 1:** Divide by 0.1 = multiply by **10x** (huge correction)
-**Step 10:** Divide by 0.651 = multiply by **1.54x** (moderate correction)
-**Step 100:** Divide by 0.9999 ≈ multiply by **1.0x** (negligible correction)
+**Step 1:** Divide by {glue:text}`q3_corr_step1` = multiply by **{glue:text}`q3_mult_step1`** (huge correction)
+**Step 10:** Divide by {glue:text}`q3_corr_step10` = multiply by **{glue:text}`q3_mult_step10`** (moderate correction)
+**Step 100:** Divide by {glue:text}`q3_corr_step100` ≈ multiply by **{glue:text}`q3_mult_step100`** (negligible correction)
 
 **Early training:** Large corrections amplify small moment estimates to reasonable magnitudes, enabling effective learning from the first step.
 

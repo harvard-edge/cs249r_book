@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 03: Layers
 
 :::{admonition} Module Info
@@ -637,20 +643,56 @@ The forward pass chains computations, and `parameters()` collects all trainable 
 
 Understanding the memory and computational costs of layers is essential for building efficient networks. Linear layers dominate both parameter memory and computation time in fully connected architectures.
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Parameter memory for Linear(784, 256)
+mem_weight_bytes = 784 * 256 * 4
+mem_weight_kb = mem_weight_bytes / 1024
+glue("mem_weight_bytes", f"{mem_weight_bytes:,}")
+glue("mem_weight_kb", f"{mem_weight_kb:.0f}")
+
+mem_bias_bytes = 256 * 4
+mem_bias_kb = mem_bias_bytes / 1024
+glue("mem_bias_bytes", f"{mem_bias_bytes:,}")
+glue("mem_bias_kb", f"{mem_bias_kb:.0f}")
+
+mem_total_kb = (mem_weight_bytes + mem_bias_bytes) / 1024
+glue("mem_total_kb", f"{mem_total_kb:.0f}")
+
+# Activation memory for batch=32
+mem_input_bytes = 32 * 784 * 4
+mem_input_kb = mem_input_bytes / 1024
+glue("mem_input_bytes", f"{mem_input_bytes:,}")
+glue("mem_input_kb", f"{mem_input_kb:.0f}")
+
+mem_output_bytes = 32 * 256 * 4
+mem_output_kb = mem_output_bytes / 1024
+glue("mem_output_bytes", f"{mem_output_bytes:,}")
+glue("mem_output_kb", f"{mem_output_kb:.0f}")
+
+# 3-layer FLOPs
+flops_l1 = 32 * 784 * 256
+flops_l2 = 32 * 256 * 128
+flops_l3 = 32 * 128 * 10
+flops_total = flops_l1 + flops_l2 + flops_l3
+glue("flops_l1", f"{flops_l1:,}")
+glue("flops_l2", f"{flops_l2:,}")
+glue("flops_l3", f"{flops_l3:,}")
+glue("flops_total", f"{flops_total / 1e6:.1f}")
+```
+
 Parameter memory for a Linear layer is straightforward: `in_features × out_features × 4 bytes` for weights, plus `out_features × 4 bytes` for bias (assuming float32). For Linear(784, 256):
 
-```
-Weights: 784 × 256 × 4 = 802,816 bytes ≈ 803 KB
-Bias:    256 × 4 = 1,024 bytes ≈ 1 KB
-Total:   ≈ 804 KB
-```
+Weights: 784 × 256 × 4 = {glue:text}`mem_weight_bytes` bytes ≈ {glue:text}`mem_weight_kb` KB
+Bias:    256 × 4 = {glue:text}`mem_bias_bytes` bytes ≈ {glue:text}`mem_bias_kb` KB
+Total:   ≈ {glue:text}`mem_total_kb` KB
 
 Activation memory depends on batch size. For batch size 32 and the same layer:
 
-```
-Input:   32 × 784 × 4 = 100,352 bytes ≈ 100 KB
-Output:  32 × 256 × 4 = 32,768 bytes ≈ 33 KB
-```
+Input:   32 × 784 × 4 = {glue:text}`mem_input_bytes` bytes ≈ {glue:text}`mem_input_kb` KB
+Output:  32 × 256 × 4 = {glue:text}`mem_output_bytes` bytes ≈ {glue:text}`mem_output_kb` KB
 
 The computational cost of the forward pass is dominated by matrix multiplication. For input shape `(batch, in_features)` and weight shape `(in_features, out_features)`, the operation requires `batch × in_features × out_features` multiplications and the same number of additions. Bias addition is just `batch × out_features` additions, negligible compared to matrix multiplication.
 
@@ -662,12 +704,10 @@ The computational cost of the forward pass is dominated by matrix multiplication
 
 For a 3-layer network (784→256→128→10) with batch size 32:
 
-```
-Layer 1: 32 × 784 × 256 = 6,422,528 FLOPs
-Layer 2: 32 × 256 × 128 = 1,048,576 FLOPs
-Layer 3: 32 × 128 × 10  = 40,960 FLOPs
-Total:   ≈ 7.5 million FLOPs per forward pass
-```
+Layer 1: 32 × 784 × 256 = {glue:text}`flops_l1` FLOPs
+Layer 2: 32 × 256 × 128 = {glue:text}`flops_l2` FLOPs
+Layer 3: 32 × 128 × 10  = {glue:text}`flops_l3` FLOPs
+Total:   ≈ {glue:text}`flops_total` million FLOPs per forward pass
 
 The first layer dominates because it has the largest input dimension. This is why production networks often use dimension reduction early to save computation in later layers.
 
@@ -843,34 +883,85 @@ Test yourself with these systems thinking questions. They're designed to build i
 
 A Linear layer has `in_features=784` and `out_features=256`. How many parameters does it have? If you double `out_features` to 512, how many parameters now?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Parameter Scaling
+q1_orig_params = 784 * 256 + 256
+q1_doubled_params = 784 * 512 + 512
+glue("q1_orig_params", f"{q1_orig_params:,}")
+glue("q1_doubled_params", f"{q1_doubled_params:,}")
+
+q1_orig_weights = 784 * 256
+q1_doubled_weights = 784 * 512
+glue("q1_orig_weights", f"{q1_orig_weights:,}")
+glue("q1_doubled_weights", f"{q1_doubled_weights:,}")
+
+q1_orig_bytes = q1_orig_params * 4
+q1_orig_kb = q1_orig_bytes / 1024
+glue("q1_orig_bytes", f"{q1_orig_bytes:,}")
+glue("q1_orig_kb", f"{q1_orig_kb:.0f}")
+
+q1_doubled_bytes = q1_doubled_params * 4
+q1_doubled_mb = q1_doubled_bytes / 1024**2
+glue("q1_doubled_bytes", f"{q1_doubled_bytes:,}")
+glue("q1_doubled_mb", f"{q1_doubled_mb:.2f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-**Original**: 784 × 256 + 256 = 200,960 parameters
+**Original**: 784 × 256 + 256 = {glue:text}`q1_orig_params` parameters
 
-**Doubled**: 784 × 512 + 512 = 401,920 parameters
+**Doubled**: 784 × 512 + 512 = {glue:text}`q1_doubled_params` parameters
 
-Doubling `out_features` approximately doubles the parameter count because weights dominate (200,704 vs 401,408 for weights alone). This shows parameter count scales linearly with layer width.
+Doubling `out_features` approximately doubles the parameter count because weights dominate ({glue:text}`q1_orig_weights` vs {glue:text}`q1_doubled_weights` for weights alone). This shows parameter count scales linearly with layer width.
 
-**Memory**: 200,960 × 4 = 803,840 bytes ≈ 804 KB (original) vs 401,920 × 4 = 1,607,680 bytes ≈ 1.6 MB (doubled)
+**Memory**: {glue:text}`q1_orig_params` × 4 = {glue:text}`q1_orig_bytes` bytes ≈ {glue:text}`q1_orig_kb` KB (original) vs {glue:text}`q1_doubled_params` × 4 = {glue:text}`q1_doubled_bytes` bytes ≈ {glue:text}`q1_doubled_mb` MB (doubled)
 ```
 
 **Q2: Multi-layer Memory**
 
 A 3-layer network has architecture 784→256→128→10. Calculate total parameter count and memory usage (assume float32).
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q2: Multi-layer Memory
+q2_l1 = 784 * 256 + 256
+q2_l2 = 256 * 128 + 128
+q2_l3 = 128 * 10 + 10
+q2_total = q2_l1 + q2_l2 + q2_l3
+glue("q2_l1", f"{q2_l1:,}")
+glue("q2_l2", f"{q2_l2:,}")
+glue("q2_l3", f"{q2_l3:,}")
+glue("q2_total", f"{q2_total:,}")
+
+q2_mem_bytes = q2_total * 4
+q2_mem_kb = q2_mem_bytes / 1024
+glue("q2_mem_bytes", f"{q2_mem_bytes:,}")
+glue("q2_mem_kb", f"{q2_mem_kb:.0f}")
+
+# Activation memory for batch size 32
+q2_act_bytes = 32 * (784 + 256 + 128 + 10) * 4
+q2_act_kb = q2_act_bytes / 1024
+glue("q2_act_kb", f"{q2_act_kb:.0f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-**Layer 1**: 784 × 256 + 256 = 200,960 parameters
-**Layer 2**: 256 × 128 + 128 = 32,896 parameters
-**Layer 3**: 128 × 10 + 10 = 1,290 parameters
+**Layer 1**: 784 × 256 + 256 = {glue:text}`q2_l1` parameters
+**Layer 2**: 256 × 128 + 128 = {glue:text}`q2_l2` parameters
+**Layer 3**: 128 × 10 + 10 = {glue:text}`q2_l3` parameters
 
-**Total**: 235,146 parameters
+**Total**: {glue:text}`q2_total` parameters
 
-**Memory**: 235,146 × 4 = 940,584 bytes ≈ 940 KB
+**Memory**: {glue:text}`q2_total` × 4 = {glue:text}`q2_mem_bytes` bytes ≈ {glue:text}`q2_mem_kb` KB
 
-This is parameter memory only. Add activation memory for batch processing: for batch size 32, you need space for intermediate tensors at each layer (32×784, 32×256, 32×128, 32×10 = approximately 260 KB more).
+This is parameter memory only. Add activation memory for batch processing: for batch size 32, you need space for intermediate tensors at each layer (32×784, 32×256, 32×128, 32×10 = approximately {glue:text}`q2_act_kb` KB more).
 ```
 
 **Q3: Dropout Scaling**
@@ -891,6 +982,19 @@ Why do we scale surviving values by `1/(1-p)` during training? What happens if w
 
 For Linear layer forward pass `y = xW + b`, which operation dominates: matrix multiply or bias addition?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q4: Computational Bottleneck
+q4_matmul = 32 * 784 * 256
+q4_bias = 32 * 256
+q4_ratio = q4_matmul / q4_bias
+glue("q4_matmul", f"{q4_matmul:,}")
+glue("q4_bias", f"{q4_bias:,}")
+glue("q4_ratio", f"{q4_ratio:.0f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
@@ -898,10 +1002,10 @@ For Linear layer forward pass `y = xW + b`, which operation dominates: matrix mu
 **Bias addition**: O(batch × out_features) operations
 
 For Linear(784, 256) with batch size 32:
-- **Matmul**: 32 × 784 × 256 = 6,422,528 operations
-- **Bias**: 32 × 256 = 8,192 operations
+- **Matmul**: 32 × 784 × 256 = {glue:text}`q4_matmul` operations
+- **Bias**: 32 × 256 = {glue:text}`q4_bias` operations
 
-Matrix multiply dominates by ~783x. This is why optimizing matmul (using BLAS, GPU kernels) is critical for neural network performance.
+Matrix multiply dominates by ~{glue:text}`q4_ratio`x. This is why optimizing matmul (using BLAS, GPU kernels) is critical for neural network performance.
 ```
 
 **Q5: Initialization Impact**

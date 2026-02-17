@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 04: Losses
 
 :::{admonition} Module Info
@@ -671,13 +677,32 @@ The mathematical formulas, numerical stability techniques (log-sum-exp trick), a
 
 ### Why Loss Functions Matter at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Scale section: exponential operations for language model loss
+scale_exp_ops = 50_000 * 128
+glue("scale_exp_ops", f"{scale_exp_ops / 1e6:.1f}M")
+
+# Cross-entropy memory: 3 tensors (logits, softmax, log-softmax)
+scale_ce_bytes = 128 * 50_000 * 4 * 3
+scale_ce_mb = scale_ce_bytes / 1024**2
+glue("scale_ce_mb", f"{scale_ce_mb:.1f} MB")
+
+# FP16 cross-entropy memory
+scale_fp16_bytes = 128 * 50_000 * 2 * 3
+scale_fp16_mb = scale_fp16_bytes / 1024**2
+glue("scale_fp16_mb", f"{scale_fp16_mb:.1f} MB")
+```
+
 To appreciate why loss functions matter in production, consider the scale of modern ML systems:
 
-- **Language models**: 50,000 token vocabulary × 128 batch size = **6.4M exponential operations per loss computation**. With sampled softmax, this reduces to ~128K operations (50× speedup).
+- **Language models**: 50,000 token vocabulary × 128 batch size = **{glue:text}`scale_exp_ops` exponential operations per loss computation**. With sampled softmax, this reduces to ~128K operations (50× speedup).
 - **Computer vision**: ImageNet with 1,000 classes processes **256,000 softmax computations** per batch. Fused CUDA kernels reduce this from 15ms to 0.5ms.
 - **Recommendation systems**: Billions of items require specialized loss functions. YouTube's recommendation system uses **sampled softmax over 1M+ videos**, making loss computation the primary bottleneck.
 
-Memory pressure is equally significant. A language model forward pass might consume 8GB for activations, 2GB for parameters, but **768MB just for the cross-entropy loss computation** (B=128, C=50000, float32). Using FP16 cuts this to 384MB. Using hierarchical softmax eliminates the materialization entirely.
+Memory pressure is equally significant. A language model forward pass might consume 8GB for activations, 2GB for parameters, but **{glue:text}`scale_ce_mb` just for the cross-entropy loss computation** (B=128, C=50000, float32). Using FP16 cuts this to {glue:text}`scale_fp16_mb`. Using hierarchical softmax eliminates the materialization entirely.
 
 The loss computation typically accounts for **5-10% of total training time** in well-optimized systems, but can dominate (30-50%) for large vocabularies without optimization. This is why production frameworks invest heavily in fused kernels, specialized data structures, and algorithmic improvements like hierarchical softmax.
 
@@ -689,31 +714,60 @@ Test yourself with these systems thinking questions. They're designed to build i
 
 A language model with 50,000 token vocabulary uses CrossEntropyLoss with batch size 128. Using float32, how much memory does the loss computation require for logits, softmax probabilities, and log-probabilities?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Per-tensor memory (B × C × 4 bytes, binary MB)
+q1_per_tensor_bytes = 128 * 50_000 * 4
+q1_per_tensor_mb = q1_per_tensor_bytes / 1024**2
+glue("q1_per_tensor_mb", f"{q1_per_tensor_mb:.1f} MB")
+
+# Q1: Total for 3 tensors
+q1_total_bytes = q1_per_tensor_bytes * 3
+q1_total_mb = q1_total_bytes / 1024**2
+glue("q1_total_mb", f"{q1_total_mb:.1f} MB")
+
+# Q1: FP16 total
+q1_fp16_bytes = 128 * 50_000 * 2 * 3
+q1_fp16_mb = q1_fp16_bytes / 1024**2
+glue("q1_fp16_mb", f"{q1_fp16_mb:.1f} MB")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
 **Calculation:**
-- Logits: 128 × 50,000 × 4 bytes = 25.6 MB
-- Softmax probabilities: 128 × 50,000 × 4 bytes = 25.6 MB
-- Log-softmax: 128 × 50,000 × 4 bytes = 25.6 MB
+- Logits: 128 × 50,000 × 4 bytes = {glue:text}`q1_per_tensor_mb`
+- Softmax probabilities: 128 × 50,000 × 4 bytes = {glue:text}`q1_per_tensor_mb`
+- Log-softmax: 128 × 50,000 × 4 bytes = {glue:text}`q1_per_tensor_mb`
 
-**Total: 76.8 MB** just for loss computation (before model activations!)
+**Total: {glue:text}`q1_total_mb`** just for loss computation (before model activations!)
 
 **Key insight**: Memory scales as B×C. Doubling vocabulary doubles loss computation memory. This is why large language models use techniques like sampled softmax - they literally can't afford to materialize the full vocabulary every forward pass.
 
-**Production solution**: Switch to FP16 (cuts to 38.4 MB) or use hierarchical/sampled softmax (reduces C from 50,000 to ~1,000).
+**Production solution**: Switch to FP16 (cuts to {glue:text}`q1_fp16_mb`) or use hierarchical/sampled softmax (reduces C from 50,000 to ~1,000).
 ```
 
 **Q2: Complexity Analysis - Softmax Bottleneck**
 
 Your training profile shows: Forward pass 80ms, Loss computation 120ms, Backward pass 150ms. Your model has 1,000 output classes and batch size 64. Why is loss computation so expensive, and what's the fix?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q2: exp/log operations
+q2_ops = 64 * 1_000
+glue("q2_ops", f"{q2_ops:,}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
 **Problem**: Loss taking 120ms (34% of iteration time) is unusually high. Normal ratio is 5-10%.
 
-**Root cause**: CrossEntropyLoss is O(B×C). With B=64 and C=1,000, that's 64,000 exp/log operations. If implemented naively in Python loops (not vectorized), this becomes a bottleneck.
+**Root cause**: CrossEntropyLoss is O(B×C). With B=64 and C=1,000, that's {glue:text}`q2_ops` exp/log operations. If implemented naively in Python loops (not vectorized), this becomes a bottleneck.
 
 **Diagnosis steps**:
 1. Profile within loss: Is `log_softmax` the bottleneck? (Likely yes)

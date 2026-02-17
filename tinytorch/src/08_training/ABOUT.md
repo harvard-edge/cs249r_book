@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 08: Training
 
 :::{admonition} Module Info
@@ -515,11 +521,30 @@ The `accumulation_steps` parameter enables a clever memory trick: if you want an
 
 ### Epochs and Iterations
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# Iterations per epoch: 10,000 samples / batch size 32
+epoch_iters_10k = math.ceil(10_000 / 32)
+glue("epoch_iters_10k", f"{epoch_iters_10k:,}")
+
+# ImageNet iterations: 1.2M images / batch 256 * 90 epochs
+imagenet_iters_per_epoch = math.ceil(1_200_000 / 256)
+imagenet_total_iters = imagenet_iters_per_epoch * 90
+glue("imagenet_total_iters", f"{imagenet_total_iters:,}")
+
+# ImageNet wall-clock time at 250ms/iter
+imagenet_hours = imagenet_total_iters * 0.250 / 3600
+glue("imagenet_hours", f"{imagenet_hours:.0f}")
+```
+
 Training operates on two timescales: iterations (single batch updates) and epochs (complete passes through the dataset). Understanding this hierarchy helps you reason about training progress and resource requirements.
 
-An iteration processes one batch: forward pass, backward pass, optimizer step. If your dataset has 10,000 samples and batch size is 32, one epoch requires 313 iterations (10,000 ÷ 32, rounded up). Training a model to convergence typically requires dozens or hundreds of epochs, meaning tens of thousands of iterations.
+An iteration processes one batch: forward pass, backward pass, optimizer step. If your dataset has 10,000 samples and batch size is 32, one epoch requires {glue:text}`epoch_iters_10k` iterations (10,000 ÷ 32, rounded up). Training a model to convergence typically requires dozens or hundreds of epochs, meaning tens of thousands of iterations.
 
-The mathematics is straightforward but the implications are significant. Training ImageNet with 1.2 million images, batch size 256, for 90 epochs requires 421,875 iterations (1,200,000 ÷ 256 × 90). At 250ms per iteration, that's 29 hours of compute. Understanding this arithmetic helps you estimate training costs and debug slow convergence.
+The mathematics is straightforward but the implications are significant. Training ImageNet with 1.2 million images, batch size 256, for 90 epochs requires {glue:text}`imagenet_total_iters` iterations (1,200,000 ÷ 256 × 90). At 250ms per iteration, that's {glue:text}`imagenet_hours` hours of compute. Understanding this arithmetic helps you estimate training costs and debug slow convergence.
 
 Your Trainer tracks both: `self.step` counts total iterations across all epochs, while `self.epoch` counts how many complete dataset passes you've completed. Schedulers typically operate on epoch boundaries (learning rate changes each epoch), while monitoring systems track loss per iteration.
 
@@ -584,15 +609,42 @@ def get_lr(self, epoch: int) -> float:
 
 The mathematics creates a smooth curve. At epoch 0, `np.cos(0) = 1`, so `cosine_factor = (1+1)/2 = 1.0`, giving `max_lr`. At the final epoch, `np.cos(π) = -1`, so `cosine_factor = (1-1)/2 = 0.0`, giving `min_lr`. Between these extremes, the cosine function creates a smooth descent.
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# Cosine annealing schedule: max_lr=0.1, min_lr=0.01, total_epochs=100
+max_lr = 0.1
+min_lr = 0.01
+total_epochs = 100
+
+def cosine_lr(epoch):
+    if epoch >= total_epochs:
+        return min_lr
+    cosine_factor = (1 + math.cos(math.pi * epoch / total_epochs)) / 2
+    return min_lr + (max_lr - min_lr) * cosine_factor
+
+lr_epoch_0 = cosine_lr(0)
+lr_epoch_25 = cosine_lr(25)
+lr_epoch_50 = cosine_lr(50)
+lr_epoch_75 = cosine_lr(75)
+lr_epoch_100 = cosine_lr(100)
+
+glue("cosine_lr_0", f"{lr_epoch_0:.3f}")
+glue("cosine_lr_25", f"{lr_epoch_25:.3f}")
+glue("cosine_lr_50", f"{lr_epoch_50:.3f}")
+glue("cosine_lr_75", f"{lr_epoch_75:.3f}")
+glue("cosine_lr_100", f"{lr_epoch_100:.3f}")
+```
+
 Visualizing the schedule for `max_lr=0.1`, `min_lr=0.01`, `total_epochs=100`:
 
-```
-Epoch   0:  0.100 (aggressive learning)
-Epoch  25:  0.085 (still fast)
-Epoch  50:  0.055 (slowing down)
-Epoch  75:  0.025 (fine-tuning)
-Epoch 100:  0.010 (stable convergence)
-```
+Epoch   0:  {glue:text}`cosine_lr_0` (aggressive learning)
+Epoch  25:  {glue:text}`cosine_lr_25` (still fast)
+Epoch  50:  {glue:text}`cosine_lr_50` (slowing down)
+Epoch  75:  {glue:text}`cosine_lr_75` (fine-tuning)
+Epoch 100:  {glue:text}`cosine_lr_100` (stable convergence)
 
 Your Trainer applies the schedule automatically after each epoch:
 
@@ -605,6 +657,24 @@ if self.scheduler is not None:
 This updates the optimizer's learning rate before the next epoch begins, creating adaptive training speed without manual intervention.
 
 ### Gradient Clipping
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# Gradient clipping example: gradients [100, 200, 50]
+grads = [100, 200, 50]
+clip_norm_prose = math.sqrt(sum(g**2 for g in grads))
+clip_coef_prose = 1.0 / clip_norm_prose
+clipped_prose = [g * clip_coef_prose for g in grads]
+
+glue("clip_norm_prose", f"{clip_norm_prose:.0f}")
+glue("clip_coef_prose", f"{clip_coef_prose:.5f}")
+glue("clip_g1_prose", f"{clipped_prose[0]:.3f}")
+glue("clip_g2_prose", f"{clipped_prose[1]:.3f}")
+glue("clip_g3_prose", f"{clipped_prose[2]:.3f}")
+```
 
 Gradient clipping prevents exploding gradients that destroy training progress. During backpropagation, gradients sometimes become extremely large (thousands or even infinity), causing parameter updates that jump far from the optimal solution or create numerical overflow (NaN values). Clipping rescales large gradients to a safe maximum while preserving their direction.
 
@@ -635,7 +705,7 @@ def clip_grad_norm(parameters: List, max_norm: float = 1.0) -> float:
     return float(total_norm)
 ```
 
-Consider gradients `[100, 200, 50]` with global norm `√(100² + 200² + 50²) = 230`. With `max_norm=1.0`, we compute `clip_coef = 1.0 / 230 = 0.00435` and scale all gradients: `[0.435, 0.870, 0.217]`. The new norm is exactly 1.0, but the relative magnitudes are preserved (the second gradient is still twice the first).
+Consider gradients [100, 200, 50] with global norm √(100² + 200² + 50²) = {glue:text}`clip_norm_prose`. With max_norm=1.0, we compute clip_coef = 1.0 / {glue:text}`clip_norm_prose` = {glue:text}`clip_coef_prose` and scale all gradients: [{glue:text}`clip_g1_prose`, {glue:text}`clip_g2_prose`, {glue:text}`clip_g3_prose`]. The new norm is exactly 1.0, but the relative magnitudes are preserved (the second gradient is still twice the first).
 
 This uniform scaling is crucial. If we clipped each gradient independently to 1.0, we'd get `[1.0, 1.0, 1.0]`, destroying the information that the second parameter needs larger updates than the first. Global norm clipping prevents explosions while respecting the gradient's message about relative importance.
 
@@ -691,6 +761,44 @@ After loading, training resumes as if the interruption never happened. The next 
 
 ### Computational Complexity
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# Computational complexity: 2-layer network (d=512), 10k samples, batch 32, 100 epochs
+d = 512
+L = 2
+N = 10_000
+B = 32
+E = 100
+
+d_sq_L = d**2 * L
+glue("comp_d_sq_L", f"{d_sq_L:,}")
+
+batch_ops = d_sq_L * B
+batch_ops_M = batch_ops / 1e6
+glue("comp_batch_ops", f"{batch_ops_M:.1f}")
+
+iters_per_epoch = math.ceil(N / B)
+glue("comp_iters_per_epoch", f"{iters_per_epoch:,}")
+
+total_iters = iters_per_epoch * E
+glue("comp_total_iters", f"{total_iters:,}")
+
+total_ops = total_iters * batch_ops
+total_ops_B = total_ops / 1e9
+glue("comp_total_ops_B", f"{total_ops_B:.0f}")
+
+cpu_seconds = total_ops / 1e9
+cpu_minutes = cpu_seconds / 60
+glue("comp_cpu_seconds", f"{cpu_seconds:.0f}")
+glue("comp_cpu_minutes", f"{cpu_minutes:.0f}")
+
+gpu_seconds = total_ops / 1e12
+glue("comp_gpu_seconds", f"{gpu_seconds:.1f}")
+```
+
 Training complexity depends on model architecture and dataset size. For a simple fully connected network with L layers of size d, each forward pass is O(d² × L) (matrix multiplications dominate). Backward pass has the same complexity (automatic differentiation revisits each operation). With N training samples and batch size B, one epoch requires N/B iterations.
 
 Total training cost for E epochs:
@@ -704,15 +812,13 @@ Total complexity:      O((N × E × d² × L) / B)
 
 Real numbers make this concrete. Training a 2-layer network (d=512) on 10,000 samples (batch size 32) for 100 epochs:
 
-```
-d² × L = 512² × 2 = 524,288 operations per sample
-Batch operations = 524,288 × 32 = 16.8 million ops
-Iterations per epoch = 10,000 / 32 = 313
-Total iterations = 313 × 100 = 31,300
-Total operations = 31,300 × 16.8M = 525 billion operations
-```
+d² × L = 512² × 2 = {glue:text}`comp_d_sq_L` operations per sample
+Batch operations = {glue:text}`comp_d_sq_L` × 32 = {glue:text}`comp_batch_ops` million ops
+Iterations per epoch = 10,000 / 32 = {glue:text}`comp_iters_per_epoch`
+Total iterations = {glue:text}`comp_iters_per_epoch` × 100 = {glue:text}`comp_total_iters`
+Total operations = {glue:text}`comp_total_iters` × {glue:text}`comp_batch_ops`M = {glue:text}`comp_total_ops_B` billion operations
 
-At 1 billion operations per second (typical CPU), that's 525 seconds (9 minutes). This arithmetic explains why GPUs matter: a GPU at 1 trillion ops/second (1000× faster) completes this in 0.5 seconds.
+At 1 billion operations per second (typical CPU), that's {glue:text}`comp_cpu_seconds` seconds ({glue:text}`comp_cpu_minutes` minutes). This arithmetic explains why GPUs matter: a GPU at 1 trillion ops/second (1000× faster) completes this in {glue:text}`comp_gpu_seconds` seconds.
 
 Memory complexity is simpler but just as important:
 
@@ -801,11 +907,23 @@ The core training loop pattern: forward pass → loss → backward → gradient 
 
 ### Why Training Infrastructure Matters at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# ImageNet training time: 1.2M images, batch 256, 90 epochs, 250ms/iter
+imagenet_iters_per_epoch = math.ceil(1_200_000 / 256)
+imagenet_total_iters = imagenet_iters_per_epoch * 90
+imagenet_hours = imagenet_total_iters * 0.250 / 3600
+glue("prod_imagenet_hours", f"{imagenet_hours:.0f}")
+```
+
 To appreciate the engineering behind training systems, consider production scale:
 
 - **GPT-3 training**: 175 billion parameters, trained on 300 billion tokens, cost ~$4.6 million in compute time. A single checkpoint is **350 GB** (larger than most hard drives). Checkpoint frequency must balance fault tolerance against storage costs.
 
-- **ImageNet training**: 1.2 million images, 90 epochs standard. At 250ms per iteration (batch size 256), that's **29 hours** on one GPU. Learning rate scheduling is the difference between 75% accuracy (poor) and 76.5% accuracy (state-of-the-art).
+- **ImageNet training**: 1.2 million images, 90 epochs standard. At 250ms per iteration (batch size 256), that's **{glue:text}`prod_imagenet_hours` hours** on one GPU. Learning rate scheduling is the difference between 75% accuracy (poor) and 76.5% accuracy (state-of-the-art).
 
 - **Training instability**: Without gradient clipping, 1 in 50 training runs randomly diverges (gradients explode, model outputs NaN, all progress lost). Production systems can't tolerate 2% failure rates when runs cost thousands of dollars.
 
@@ -819,22 +937,47 @@ Test yourself with these systems thinking questions. They build intuition for th
 
 You have a model with 10 million parameters (float32) and use Adam optimizer. Estimate total training memory required: parameters + gradients + optimizer state. Then compare with SGD optimizer.
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Training memory for 10M param model
+num_params = 10_000_000
+bytes_per_param = 4  # float32
+
+param_mb = num_params * bytes_per_param / 1e6
+glue("q1_param_mb", f"{param_mb:.0f}")
+
+adam_moments_mb = num_params * 2 * bytes_per_param / 1e6
+glue("q1_adam_moments_mb", f"{adam_moments_mb:.0f}")
+
+adam_total_mb = param_mb + param_mb + adam_moments_mb  # params + grads + 2 moments
+glue("q1_adam_total_mb", f"{adam_total_mb:.0f}")
+
+sgd_momentum_mb = param_mb  # one momentum buffer
+sgd_total_mb = param_mb + param_mb + sgd_momentum_mb  # params + grads + momentum
+glue("q1_sgd_total_mb", f"{sgd_total_mb:.0f}")
+
+mem_diff_pct = (adam_total_mb - sgd_total_mb) / sgd_total_mb * 100
+glue("q1_mem_diff_pct", f"{mem_diff_pct:.0f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
 **Adam optimizer:**
-- Parameters: 10M × 4 bytes = **40 MB**
-- Gradients: 10M × 4 bytes = **40 MB**
-- Adam state (two moments): 10M × 2 × 4 bytes = **80 MB**
-- **Total: 160 MB** (4× parameter size)
+- Parameters: 10M × 4 bytes = **{glue:text}`q1_param_mb` MB**
+- Gradients: 10M × 4 bytes = **{glue:text}`q1_param_mb` MB**
+- Adam state (two moments): 10M × 2 × 4 bytes = **{glue:text}`q1_adam_moments_mb` MB**
+- **Total: {glue:text}`q1_adam_total_mb` MB** (4× parameter size)
 
 **SGD with momentum:**
-- Parameters: 10M × 4 bytes = **40 MB**
-- Gradients: 10M × 4 bytes = **40 MB**
-- Momentum buffer: 10M × 4 bytes = **40 MB**
-- **Total: 120 MB** (3× parameter size)
+- Parameters: 10M × 4 bytes = **{glue:text}`q1_param_mb` MB**
+- Gradients: 10M × 4 bytes = **{glue:text}`q1_param_mb` MB**
+- Momentum buffer: 10M × 4 bytes = **{glue:text}`q1_param_mb` MB**
+- **Total: {glue:text}`q1_sgd_total_mb` MB** (3× parameter size)
 
-**Key insight:** Optimizer choice affects memory by 33%. For large models near GPU memory limits, SGD may be the only option.
+**Key insight:** Optimizer choice affects memory by {glue:text}`q1_mem_diff_pct`%. For large models near GPU memory limits, SGD may be the only option.
 ```
 
 **Q2: Gradient Accumulation Trade-off**
@@ -879,7 +1022,24 @@ Starting high (0.1) provides fast early progress. Gradual decay (0.1 → 0.01) a
 
 **Q4: Checkpoint Storage Strategy**
 
-You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epoch creates 100 GB of storage. Checkpointing every 10 epochs risks losing 10 epochs of work if training crashes. Design a checkpointing strategy that balances fault tolerance and storage costs.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q4: Checkpoint storage strategy
+epochs = 100
+ckpt_size_gb = 1
+total_every_epoch_gb = epochs * ckpt_size_gb
+glue("q4_total_every_epoch_gb", f"{total_every_epoch_gb:,}")
+
+last_n = 3
+best = 1
+milestones = 3  # every 25 epochs: 25, 50, 75
+smart_total_gb = (last_n + best + milestones) * ckpt_size_gb
+glue("q4_smart_total_gb", f"{smart_total_gb:,}")
+```
+
+You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epoch creates {glue:text}`q4_total_every_epoch_gb` GB of storage. Checkpointing every 10 epochs risks losing 10 epochs of work if training crashes. Design a checkpointing strategy that balances fault tolerance and storage costs.
 
 ````{admonition} Answer
 :class: dropdown
@@ -890,7 +1050,7 @@ You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epo
 2. **Keep best checkpoint** (lowest validation loss): `best_epoch_72.pkl` (1 GB)
 3. **Keep milestone checkpoints** (every 25 epochs): `epoch_25.pkl`, `epoch_50.pkl`, `epoch_75.pkl` (3 GB)
 
-**Total storage: 7 GB** (vs 100 GB for every epoch)
+**Total storage: {glue:text}`q4_smart_total_gb` GB** (vs {glue:text}`q4_total_every_epoch_gb` GB for every epoch)
 
 **Fault tolerance:**
 - Last 3 checkpoints: Lose at most 1 epoch of work
@@ -912,7 +1072,29 @@ if is_best_validation:  # Best
 
 **Q5: Global Norm Clipping Analysis**
 
-Two training runs: (A) clips each gradient individually to max 1.0, (B) clips by global norm (max_norm=1.0). Both encounter gradients `[50, 100, 5]` with global norm `√(50² + 100² + 5²) ≈ 112`. What are the clipped gradients in each case? Which preserves gradient direction better?
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+import math
+from myst_nb import glue
+
+# Q5: Global norm clipping analysis with gradients [50, 100, 5]
+grads_q5 = [50, 100, 5]
+global_norm_q5 = math.sqrt(sum(g**2 for g in grads_q5))
+glue("q5_global_norm", f"{global_norm_q5:.0f}")
+
+scale_factor_q5 = 1.0 / global_norm_q5
+glue("q5_scale_factor", f"{scale_factor_q5:.4f}")
+
+clipped_q5 = [g * scale_factor_q5 for g in grads_q5]
+glue("q5_clipped_g1", f"{clipped_q5[0]:.2f}")
+glue("q5_clipped_g2", f"{clipped_q5[1]:.2f}")
+glue("q5_clipped_g3", f"{clipped_q5[2]:.2f}")
+
+verify_norm_q5 = math.sqrt(sum(g**2 for g in clipped_q5))
+glue("q5_verify_norm", f"{verify_norm_q5:.1f}")
+```
+
+Two training runs: (A) clips each gradient individually to max 1.0, (B) clips by global norm (max_norm=1.0). Both encounter gradients [50, 100, 5] with global norm √(50² + 100² + 5²) ≈ {glue:text}`q5_global_norm`. What are the clipped gradients in each case? Which preserves gradient direction better?
 
 ```{admonition} Answer
 :class: dropdown
@@ -923,16 +1105,16 @@ Two training runs: (A) clips each gradient individually to max 1.0, (B) clips by
 - **Result:** All parameters get equal updates (destroys relative importance information)
 
 **(B) Global norm clipping** (scale uniformly):
-- Original: `[50, 100, 5]`, global norm ≈ 112
-- Scale factor: `1.0 / 112 ≈ 0.0089`
-- Clipped: `[0.45, 0.89, 0.04]`
-- New global norm: **1.0** (exactly max_norm)
+- Original: [50, 100, 5], global norm ≈ {glue:text}`q5_global_norm`
+- Scale factor: 1.0 / {glue:text}`q5_global_norm` ≈ {glue:text}`q5_scale_factor`
+- Clipped: [{glue:text}`q5_clipped_g1`, {glue:text}`q5_clipped_g2`, {glue:text}`q5_clipped_g3`]
+- New global norm: **{glue:text}`q5_verify_norm`** (exactly max_norm)
 - **Result:** Relative magnitudes preserved (second parameter still gets 2× update of first)
 
 **Why (B) is better:**
 Gradients encode relative importance: parameter 2 needs larger updates than parameter 1. Global norm clipping prevents explosion while respecting this information. Individual clipping destroys it, effectively treating all parameters as equally important.
 
-**Verification:** `√(0.45² + 0.89² + 0.04²) ≈ 1.0` ✓
+**Verification:** √({glue:text}`q5_clipped_g1`² + {glue:text}`q5_clipped_g2`² + {glue:text}`q5_clipped_g3`²) ≈ {glue:text}`q5_verify_norm` ✓
 ```
 
 ## Further Reading

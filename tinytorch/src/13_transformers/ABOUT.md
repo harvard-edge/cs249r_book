@@ -1,3 +1,121 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# --- MLP section: embed_dim=512, hidden_dim=2048 ---
+mlp_linear1 = 512 * 2048 + 2048
+mlp_linear2 = 2048 * 512 + 512
+mlp_total = mlp_linear1 + mlp_linear2
+mlp_total_12layers = 12 * mlp_total
+
+glue("mlp_linear1", f"{mlp_linear1:,}")
+glue("mlp_linear1_approx", f"{mlp_linear1 / 1e6:.2f}M")
+glue("mlp_linear2", f"{mlp_linear2:,}")
+glue("mlp_linear2_approx", f"{mlp_linear2 / 1e6:.2f}M")
+glue("mlp_total", f"{mlp_total:,}")
+glue("mlp_total_approx", f"{mlp_total / 1e6:.1f}M")
+glue("mlp_12layer_approx", f"{mlp_total_12layers / 1e6:.1f}M")
+
+# --- Parameter table: embed_dim=512, num_heads=8 ---
+attn_params_512 = 4 * (512 * 512)
+ln_params_512 = 2 * 512
+mlp_params_512 = (512 * 2048 + 2048) + (2048 * 512 + 512)
+block_total_512 = attn_params_512 + ln_params_512 + mlp_params_512 + ln_params_512
+
+glue("attn_params_512", f"~{attn_params_512 / 1e6:.2f}M")
+glue("attn_params_512_raw", f"{attn_params_512:,}")
+glue("ln_params_512", f"{ln_params_512:,}")
+glue("ln_params_512_approx", f"{ln_params_512 / 1e3:.0f}K")
+glue("mlp_params_512", f"~{mlp_params_512 / 1e6:.1f}M")
+glue("block_total_512", f"~{block_total_512 / 1e6:.1f}M")
+
+# --- GPT model totals: vocab=50000, embed_dim=512, seq=2048, layers=12 ---
+tok_emb_512 = 50000 * 512
+pos_emb_512 = 2048 * 512
+blocks_total_512 = 12 * block_total_512
+gpt_total_512 = tok_emb_512 + pos_emb_512 + blocks_total_512
+
+glue("tok_emb_512", f"{tok_emb_512 / 1e6:.1f}M")
+glue("tok_emb_512_raw", f"{tok_emb_512:,}")
+glue("pos_emb_512", f"{pos_emb_512 / 1e6:.1f}M")
+glue("pos_emb_512_raw", f"{pos_emb_512:,}")
+glue("blocks_total_512", f"{blocks_total_512 / 1e6:.1f}M")
+glue("blocks_total_512_formula", f"12 x {block_total_512 / 1e6:.1f}M = {blocks_total_512 / 1e6:.1f}M")
+glue("gpt_total_512", f"~{gpt_total_512 / 1e6:.0f}M")
+
+# --- Attention memory table: batch=4, heads=8, float32 ---
+KB = 1024
+MB = 1024 ** 2
+GB = 1024 ** 3
+
+def attn_mem_mb(batch, heads, seq):
+    return batch * heads * seq * seq * 4 / MB
+
+attn_512 = attn_mem_mb(4, 8, 512)
+attn_1024 = attn_mem_mb(4, 8, 1024)
+attn_2048 = attn_mem_mb(4, 8, 2048)
+attn_4096 = attn_mem_mb(4, 8, 4096)
+
+glue("attn_mem_512", f"{attn_512:.1f}")
+glue("attn_mem_1024", f"{attn_1024:.1f}")
+glue("attn_mem_2048", f"{attn_2048:.1f}")
+glue("attn_mem_4096", f"{attn_4096:.1f}")
+
+# --- Q1: Attention memory calc: batch=8, heads=16, seq=2048/4096 ---
+q1_elements_2048 = 8 * 16 * 2048 * 2048
+q1_bytes_2048 = q1_elements_2048 * 4
+q1_gb_2048 = q1_bytes_2048 / GB
+
+q1_elements_4096 = 8 * 16 * 4096 * 4096
+q1_bytes_4096 = q1_elements_4096 * 4
+q1_gb_4096 = q1_bytes_4096 / GB
+
+glue("q1_elements_2048", f"{q1_elements_2048:,}")
+glue("q1_bytes_2048", f"{q1_bytes_2048:,}")
+glue("q1_gb_2048", f"{q1_gb_2048:.1f}")
+glue("q1_elements_4096", f"{q1_elements_4096:,}")
+glue("q1_gb_4096", f"{q1_gb_4096:.1f}")
+
+# --- Q2: Parameter distribution: vocab=50000, embed=768, layers=12, heads=12 ---
+q2_tok_emb = 50000 * 768
+q2_pos_emb = 2048 * 768
+q2_attn_per_block = 4 * (768 * 768)
+q2_mlp_per_block = (768 * 3072 + 3072) + (3072 * 768 + 768)
+q2_per_block = q2_attn_per_block + q2_mlp_per_block
+q2_total_blocks = 12 * q2_per_block
+q2_total_emb = q2_tok_emb + q2_pos_emb
+q2_grand_total = q2_tok_emb + q2_pos_emb + q2_total_blocks
+
+glue("q2_tok_emb", f"{q2_tok_emb / 1e6:.1f}M")
+glue("q2_tok_emb_raw", f"{q2_tok_emb:,}")
+glue("q2_pos_emb", f"{q2_pos_emb / 1e6:.1f}M")
+glue("q2_pos_emb_raw", f"{q2_pos_emb:,}")
+glue("q2_attn_per_block", f"~{q2_attn_per_block / 1e6:.1f}M")
+glue("q2_attn_per_block_raw", f"{q2_attn_per_block:,}")
+glue("q2_mlp_per_block", f"~{q2_mlp_per_block / 1e6:.1f}M")
+glue("q2_mlp_per_block_raw", f"{q2_mlp_per_block:,}")
+glue("q2_per_block", f"{q2_per_block / 1e6:.1f}M")
+glue("q2_total_blocks", f"{q2_total_blocks / 1e6:.0f}M")
+glue("q2_total_blocks_raw", f"{q2_total_blocks:,}")
+glue("q2_total_emb", f"{q2_total_emb / 1e6:.0f}M")
+glue("q2_grand_total", f"~{q2_grand_total / 1e6:.0f}M")
+
+# --- Q4: Generation efficiency: prompt=50, gen=100 ---
+q4_total_processings = sum(range(50, 150))
+q4_optimized = 50 + 100
+q4_speedup = q4_total_processings / q4_optimized
+
+glue("q4_total_processings", f"{q4_total_processings:,}")
+glue("q4_optimized", f"{q4_optimized:,}")
+glue("q4_speedup", f"{q4_speedup:.0f}")
+```
+
 # Module 13: Transformers
 
 :::{admonition} Module Info
@@ -556,7 +674,7 @@ class MLP:
 
 GELU (Gaussian Error Linear Unit) activation replaced ReLU in transformer models because it provides smoother gradients. Where ReLU has a hard cutoff at zero, GELU smoothly gates values based on their magnitude, creating better training dynamics for language modeling.
 
-The parameter count in the MLP is substantial. For `embed_dim = 512`, the first layer has `512 × 2048 + 2048 ≈ 1.05M` parameters, and the second has `2048 × 512 + 512 ≈ 1.05M`, totaling 2.1M parameters per block. In a 12-layer model, MLPs alone contribute 25M parameters.
+The parameter count in the MLP is substantial. For `embed_dim = 512`, the first layer has `512 x 2048 + 2048 =` {glue:text}`mlp_linear1` ({glue:text}`mlp_linear1_approx`) parameters, and the second has `2048 x 512 + 512 =` {glue:text}`mlp_linear2` ({glue:text}`mlp_linear2_approx`) parameters, totaling {glue:text}`mlp_total_approx` parameters per block. In a 12-layer model, MLPs alone contribute {glue:text}`mlp_12layer_approx` parameters.
 
 ### Causal Masking for Autoregressive Generation
 
@@ -620,22 +738,20 @@ For a single transformer block with `embed_dim = 512` and `num_heads = 8`:
 
 | Component | Parameters | Calculation |
 |-----------|------------|-------------|
-| Multi-Head Attention | ~1.5M | 4 × (512 × 512) for Q, K, V, O projections |
-| Layer Norm 1 | 1K | 2 × 512 for gamma, beta |
-| MLP | ~2.1M | (512 × 2048 + 2048) + (2048 × 512 + 512) |
-| Layer Norm 2 | 1K | 2 × 512 for gamma, beta |
-| **Total per block** | **~3.6M** | Dominated by MLP and attention |
+| Multi-Head Attention | {glue:text}`attn_params_512` | 4 x (512 x 512) for Q, K, V, O projections |
+| Layer Norm 1 | {glue:text}`ln_params_512_approx` | 2 x 512 for gamma, beta |
+| MLP | {glue:text}`mlp_params_512` | (512 x 2048 + 2048) + (2048 x 512 + 512) |
+| Layer Norm 2 | {glue:text}`ln_params_512_approx` | 2 x 512 for gamma, beta |
+| **Total per block** | **{glue:text}`block_total_512`** | Dominated by MLP and attention |
 
 For a complete GPT model, add embeddings and output projection:
 
-```
-Embeddings: vocab_size × embed_dim (e.g., 50000 × 512 = 25.6M)
-Position Embeddings: max_seq_len × embed_dim (e.g., 2048 × 512 = 1M)
-Transformer Blocks: num_layers × 3.6M (e.g., 12 × 3.6M = 43.2M)
-Output Projection: embed_dim × vocab_size (often tied to embeddings)
+Embeddings: vocab_size x embed_dim (e.g., 50000 x 512 = {glue:text}`tok_emb_512`)
+Position Embeddings: max_seq_len x embed_dim (e.g., 2048 x 512 = {glue:text}`pos_emb_512`)
+Transformer Blocks: num_layers x {glue:text}`block_total_512` (e.g., {glue:text}`blocks_total_512_formula`)
+Output Projection: embed_dim x vocab_size (often tied to embeddings)
 
-Total: ~70M parameters for this configuration
-```
+Total: {glue:text}`gpt_total_512` parameters for this configuration
 
 Memory requirements have three components:
 
@@ -647,10 +763,10 @@ The attention memory wall explains why extending context length is expensive. Fo
 
 | Sequence Length | Attention Matrix Size | Memory (MB) |
 |-----------------|----------------------|-------------|
-| 512 | 4 × 8 × 512 × 512 | 33.6 |
-| 1024 | 4 × 8 × 1024 × 1024 | 134.2 |
-| 2048 | 4 × 8 × 2048 × 2048 | 536.9 |
-| 4096 | 4 × 8 × 4096 × 4096 | 2147.5 |
+| 512 | 4 x 8 x 512 x 512 | {glue:text}`attn_mem_512` |
+| 1024 | 4 x 8 x 1024 x 1024 | {glue:text}`attn_mem_1024` |
+| 2048 | 4 x 8 x 2048 x 2048 | {glue:text}`attn_mem_2048` |
+| 4096 | 4 x 8 x 4096 x 4096 | {glue:text}`attn_mem_4096` |
 
 Doubling sequence length quadruples attention memory. This quadratic scaling drove innovations like sparse attention, linear attention, and FlashAttention that make long context tractable.
 
@@ -739,15 +855,15 @@ A transformer with `batch_size=8`, `num_heads=16`, `seq_len=2048` computes atten
 ```{admonition} Answer
 :class: dropdown
 
-Attention matrix size: `batch_size × num_heads × seq_len × seq_len`
-= `8 × 16 × 2048 × 2048 = 536,870,912 elements`
+Attention matrix size: `batch_size x num_heads x seq_len x seq_len`
+= `8 x 16 x 2048 x 2048 = ` {glue:text}`q1_elements_2048` elements
 
-Memory: `536,870,912 × 4 bytes (float32) = 2,147,483,648 bytes ≈ 2.15 GB`
+Memory: {glue:text}`q1_elements_2048` ` x 4 bytes (float32) = ` {glue:text}`q1_bytes_2048` ` bytes =` {glue:text}`q1_gb_2048` GB
 
 Doubling sequence length to 4096:
-= `8 × 16 × 4096 × 4096 = 2,147,483,648 elements ≈ 8.6 GB`
+= `8 x 16 x 4096 x 4096 = ` {glue:text}`q1_elements_4096` ` elements =` {glue:text}`q1_gb_4096` GB
 
-**Scaling**: Doubling sequence length quadruples memory (4× increase). This quadratic scaling is why long context is expensive and drove innovations like sparse attention.
+**Scaling**: Doubling sequence length quadruples memory (4x increase). This quadratic scaling is why long context is expensive and drove innovations like sparse attention.
 ```
 
 **Q2: Parameter Distribution Analysis**
@@ -757,22 +873,22 @@ For a GPT model with `vocab_size=50000`, `embed_dim=768`, `num_layers=12`, `num_
 ```{admonition} Answer
 :class: dropdown
 
-**Token Embeddings**: `50000 × 768 = 38.4M`
+**Token Embeddings**: `50000 x 768 = ` {glue:text}`q2_tok_emb`
 
-**Position Embeddings**: `2048 × 768 = 1.6M` (assuming max_seq_len=2048)
+**Position Embeddings**: `2048 x 768 = ` {glue:text}`q2_pos_emb` (assuming max_seq_len=2048)
 
-**Transformer Blocks**: Each block has approximately 3.6M parameters with embed_dim=768
-- Attention: `4 × (768 × 768) ≈ 2.4M`
-- MLP: `(768 × 3072 + 3072) + (3072 × 768 + 768) ≈ 4.7M`
+**Transformer Blocks**: Each block has approximately {glue:text}`q2_per_block` parameters with embed_dim=768
+- Attention: `4 x (768 x 768) = ` {glue:text}`q2_attn_per_block`
+- MLP: `(768 x 3072 + 3072) + (3072 x 768 + 768) = ` {glue:text}`q2_mlp_per_block`
 - Layer norms: negligible
-- **Per block**: approximately 7.1M
-- **Total blocks**: `12 × 7.1M ≈ 85M`
+- **Per block**: approximately {glue:text}`q2_per_block`
+- **Total blocks**: `12 x ` {glue:text}`q2_per_block` ` = ` {glue:text}`q2_total_blocks`
 
 **Output Projection**: Usually tied to embeddings (0 additional)
 
-**Total**: `38.4M + 1.6M + 85M ≈ 125M parameters`
+**Total**: {glue:text}`q2_tok_emb` ` + ` {glue:text}`q2_pos_emb` ` + ` {glue:text}`q2_total_blocks` ` = ` {glue:text}`q2_grand_total` parameters
 
-**Dominant component**: Transformer blocks (85M) > Embeddings (40M). As models scale, transformer blocks dominate because they scale with `embed_dim²` while embeddings scale linearly.
+**Dominant component**: Transformer blocks ({glue:text}`q2_total_blocks`) > Embeddings ({glue:text}`q2_total_emb`). As models scale, transformer blocks dominate because they scale with `embed_dim²` while embeddings scale linearly.
 ```
 
 **Q3: Residual Connection Benefits**
@@ -810,16 +926,16 @@ Your `generate()` method processes the entire sequence for each new token. For g
 - ...
 - Token 100: Process 149 tokens
 
-**Total forward passes**: `50 + 51 + 52 + ... + 149 = Σ(50 to 149) = 9,950 token processings`
+**Total forward passes**: `50 + 51 + 52 + ... + 149 = ` {glue:text}`q4_total_processings` token processings
 
 **Why inefficient**: Attention recomputes key/value projections for all previous tokens every step, even though they don't change. For position 50, we recompute the same key/value vectors 100 times.
 
 **KV Caching optimization**: Store computed key/value projections for previous tokens
 - Each new token only computes its own key/value
 - Attention uses cached keys/values from previous tokens
-- Total computation: `50 (initial) + 100 (new tokens) = 150 token processings`
+- Total computation: `50 (initial) + 100 (new tokens) = ` {glue:text}`q4_optimized` token processings
 
-**Speedup**: `9,950 / 150 ≈ 66× faster` for this example. The speedup increases with generation length, making KV caching essential for production systems.
+**Speedup**: {glue:text}`q4_total_processings` ` / ` {glue:text}`q4_optimized` ` = ` {glue:text}`q4_speedup` `x faster` for this example. The speedup increases with generation length, making KV caching essential for production systems.
 ```
 
 **Q5: Layer Normalization vs Batch Normalization**
@@ -842,8 +958,8 @@ Why do transformers use layer normalization instead of batch normalization? Cons
 - Works naturally with variable-length sequences
 
 **Example**: For a tensor `(batch=3, seq=10, features=768)`:
-- Batch norm: Compute 10 × 768 statistics across batch dimension (problematic)
-- Layer norm: Compute 3 × 10 statistics across feature dimension (independent)
+- Batch norm: Compute 10 x 768 statistics across batch dimension (problematic)
+- Layer norm: Compute 3 x 10 statistics across feature dimension (independent)
 
 **Why it matters**: Transformers process variable-length sequences. Layer norm treats each position independently, making it robust to sequence length variation and batch composition.
 ```

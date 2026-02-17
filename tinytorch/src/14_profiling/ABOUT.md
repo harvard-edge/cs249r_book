@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 14: Profiling
 
 :::{admonition} Module Info
@@ -337,8 +343,17 @@ Profiling (14) → Model-Level (15-16) → Runtime (17-18) → Benchmarking (19)
  "What's slow?"   "Shrink the model"   "Speed up execution"  "Did it work?"
 ```
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Quantization compression ratio: FP32 (32 bits) -> INT8 (8 bits)
+quant_compression = 32 // 8
+glue("tier_quant_compression", f"{quant_compression}")
+```
+
 **Model-Level Optimizations (15-16)**: Change the model itself
-- Quantization: FP32 → INT8 for 4× compression
+- Quantization: FP32 → INT8 for {glue:text}`tier_quant_compression`× compression
 - Compression: Prune unnecessary weights
 
 **Runtime Optimizations (17-18)**: Change how execution happens
@@ -538,11 +553,23 @@ def measure_memory(self, model, input_shape: Tuple[int, ...]) -> Dict[str, float
     }
 ```
 
-Parameter memory is persistent and constant regardless of batch size. A model with 125 million parameters uses 500 MB (125M × 4 bytes per float32) whether you're processing one sample or a thousand.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# 125M parameter model memory: 125,000,000 params * 4 bytes/float32
+mem_125m_params = 125_000_000
+mem_125m_bytes = mem_125m_params * 4
+mem_125m_mb = mem_125m_bytes / (1024 ** 2)
+glue("mem_125m_params", f"{mem_125m_params // 1_000_000}")
+glue("mem_125m_mb", f"{round(mem_125m_mb)}")
+```
+
+Parameter memory is persistent and constant regardless of batch size. A model with {glue:text}`mem_125m_params` million parameters uses {glue:text}`mem_125m_mb` MB ({glue:text}`mem_125m_params`M × 4 bytes per float32) whether you're processing one sample or a thousand.
 
 Activation memory scales with batch size. Doubling the batch doubles activation memory. This is why large batch training requires more GPU memory than inference.
 
-Gradient memory matches parameter memory exactly. Every parameter needs a gradient during training, adding another 500 MB for a 125M parameter model.
+Gradient memory matches parameter memory exactly. Every parameter needs a gradient during training, adding another {glue:text}`mem_125m_mb` MB for a {glue:text}`mem_125m_params`M parameter model.
 
 ### Bottleneck Identification
 
@@ -642,9 +669,21 @@ The profiling workflow: measure parameters, FLOPs, memory, and latency to identi
 
 ### Why Profiling Matters at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# GPT-3: 175B parameters at FP32 (4 bytes each)
+gpt3_params_b = 175
+gpt3_bytes = gpt3_params_b * 1_000_000_000 * 4
+gpt3_gb = gpt3_bytes / (1024 ** 3)
+glue("scale_gpt3_params", f"{gpt3_params_b}")
+glue("scale_gpt3_gb", f"{round(gpt3_gb)}")
+```
+
 To appreciate profiling's importance, consider production ML systems:
 
-- **GPT-3 (175B parameters)**: 700 GB model size at FP32. Profiling reveals which layers to quantize for deployment.
+- **GPT-3 ({glue:text}`scale_gpt3_params`B parameters)**: {glue:text}`scale_gpt3_gb` GB model size at FP32. Profiling reveals which layers to quantize for deployment.
 - **BERT training**: 80% of time in self-attention. Profiling identifies FlashAttention as the optimization to implement.
 - **Image classification**: Batch size 256 uses 12 GB GPU memory. Profiling shows 10 GB is activations, suggesting gradient checkpointing.
 
@@ -658,17 +697,49 @@ Test yourself with these systems thinking questions about profiling and performa
 
 A transformer model has 12 layers, each with a feed-forward network containing two Linear layers: Linear(768, 3072) and Linear(3072, 768). How much memory do the feed-forward network parameters consume across all layers?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Feed-forward network parameter memory calculation
+q1_first_weights = 768 * 3072
+q1_first_bias = 3072
+q1_first_total = q1_first_weights + q1_first_bias
+
+q1_second_weights = 3072 * 768
+q1_second_bias = 768
+q1_second_total = q1_second_weights + q1_second_bias
+
+q1_per_layer = q1_first_total + q1_second_total
+q1_num_layers = 12
+q1_all_layers = q1_num_layers * q1_per_layer
+
+q1_bytes = q1_all_layers * 4
+q1_mb = round(q1_bytes / (1024 ** 2))
+
+glue("q1_first_weights", f"{q1_first_weights:,}")
+glue("q1_first_bias", f"{q1_first_bias:,}")
+glue("q1_first_total", f"{q1_first_total:,}")
+glue("q1_second_weights", f"{q1_second_weights:,}")
+glue("q1_second_bias", f"{q1_second_bias:,}")
+glue("q1_second_total", f"{q1_second_total:,}")
+glue("q1_per_layer", f"{q1_per_layer:,}")
+glue("q1_all_layers", f"{q1_all_layers:,}")
+glue("q1_bytes", f"{q1_bytes:,}")
+glue("q1_mb", f"{q1_mb}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
 Each feed-forward network:
-- First layer: (768 × 3072) + 3072 = 2,362,368 parameters
-- Second layer: (3072 × 768) + 768 = 2,360,064 parameters
-- Total per layer: 4,722,432 parameters
+- First layer: (768 × 3072) + 3072 = {glue:text}`q1_first_total` parameters
+- Second layer: (3072 × 768) + 768 = {glue:text}`q1_second_total` parameters
+- Total per layer: {glue:text}`q1_per_layer` parameters
 
-Across 12 layers: 12 × 4,722,432 = 56,669,184 parameters
+Across 12 layers: 12 × {glue:text}`q1_per_layer` = {glue:text}`q1_all_layers` parameters
 
-Memory: 56,669,184 × 4 bytes = 226,676,736 bytes ≈ **227 MB**
+Memory: {glue:text}`q1_all_layers` × 4 bytes = {glue:text}`q1_bytes` bytes ≈ **{glue:text}`q1_mb` MB**
 
 This is just the feed-forward networks. Attention adds more parameters.
 ```
@@ -677,16 +748,37 @@ This is just the feed-forward networks. Attention adds more parameters.
 
 A Linear(512, 512) layer processes a batch of 64 samples. Your profiler's `count_flops()` method returns FLOPs per sample (batch-size independent). How many FLOPs are required for one sample? For the whole batch, if each sample is processed independently?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q2: FLOP counting for Linear(512, 512)
+q2_in_features = 512
+q2_out_features = 512
+q2_per_sample = q2_in_features * q2_out_features * 2
+q2_batch_size = 64
+q2_batch_total = q2_batch_size * q2_per_sample
+
+# Latency at 50 GFLOP/s
+q2_gflops = 50
+q2_latency_s = q2_batch_total / (q2_gflops * 1e9)
+q2_latency_ms = q2_latency_s * 1000
+
+glue("q2_per_sample", f"{q2_per_sample:,}")
+glue("q2_batch_total", f"{q2_batch_total:,}")
+glue("q2_latency_ms", f"{q2_latency_ms:.2f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-Per-sample FLOPs (what `count_flops()` returns): 512 × 512 × 2 = **524,288 FLOPs**
+Per-sample FLOPs (what `count_flops()` returns): 512 × 512 × 2 = **{glue:text}`q2_per_sample` FLOPs**
 
 Note: The `count_flops()` method is batch-size independent. It returns per-sample FLOPs whether you pass input_shape=(1, 512) or (64, 512).
 
-If processing a batch of 64 samples: 64 × 524,288 = 33,554,432 total FLOPs
+If processing a batch of 64 samples: 64 × {glue:text}`q2_per_sample` = {glue:text}`q2_batch_total` total FLOPs
 
-Minimum latency at 50 GFLOP/s: 33,554,432 FLOPs ÷ 50 GFLOP/s = **0.67 ms** for the full batch
+Minimum latency at 50 GFLOP/s: {glue:text}`q2_batch_total` FLOPs ÷ 50 GFLOP/s = **{glue:text}`q2_latency_ms` ms** for the full batch
 
 This assumes perfect computational efficiency (100%). Real latency is higher due to memory bandwidth and overhead.
 ```
@@ -695,10 +787,22 @@ This assumes perfect computational efficiency (100%). Real latency is higher due
 
 A model achieves 5 GFLOP/s on hardware with 100 GFLOP/s peak compute. The memory bandwidth is 50 GB/s. Is this workload compute-bound or memory-bound?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q3: Computational efficiency
+q3_achieved = 5
+q3_peak = 100
+q3_efficiency_pct = (q3_achieved / q3_peak) * 100
+
+glue("q3_efficiency_pct", f"{q3_efficiency_pct:.0f}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-Computational efficiency: 5 GFLOP/s ÷ 100 GFLOP/s = **5% efficiency**
+Computational efficiency: 5 GFLOP/s ÷ 100 GFLOP/s = **{glue:text}`q3_efficiency_pct`% efficiency**
 
 This extremely low efficiency suggests the workload is **memory-bound**. The hardware can compute 100 GFLOP/s but only achieves 5 GFLOP/s because it spends most of the time waiting for data transfers.
 
@@ -707,17 +811,38 @@ Optimization strategy: Focus on reducing memory transfers, improving cache local
 
 **Q4: Training Memory Estimation**
 
-A model has 125M parameters (500 MB). You're training with Adam optimizer. What's the total memory requirement during training, including gradients and optimizer state?
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q4: Training memory with Adam optimizer
+# 125M params at FP32 = 500 MB for parameters
+q4_param_mb = 500
+q4_grad_mb = q4_param_mb        # gradients match parameters
+q4_adam_m_mb = q4_param_mb      # first moment (momentum)
+q4_adam_v_mb = q4_param_mb      # second moment (velocity)
+q4_total_mb = q4_param_mb + q4_grad_mb + q4_adam_m_mb + q4_adam_v_mb
+q4_total_gb = q4_total_mb / 1000
+
+glue("q4_param_mb", f"{q4_param_mb}")
+glue("q4_grad_mb", f"{q4_grad_mb}")
+glue("q4_adam_m_mb", f"{q4_adam_m_mb}")
+glue("q4_adam_v_mb", f"{q4_adam_v_mb}")
+glue("q4_total_mb", f"{q4_total_mb:,}")
+glue("q4_total_gb", f"{q4_total_gb:.0f}")
+```
+
+A model has 125M parameters ({glue:text}`q4_param_mb` MB). You're training with Adam optimizer. What's the total memory requirement during training, including gradients and optimizer state?
 
 ```{admonition} Answer
 :class: dropdown
 
-- Parameters: 500 MB
-- Gradients: 500 MB (same as parameters)
-- Adam momentum: 500 MB (first moment estimates)
-- Adam velocity: 500 MB (second moment estimates)
+- Parameters: {glue:text}`q4_param_mb` MB
+- Gradients: {glue:text}`q4_grad_mb` MB (same as parameters)
+- Adam momentum: {glue:text}`q4_adam_m_mb` MB (first moment estimates)
+- Adam velocity: {glue:text}`q4_adam_v_mb` MB (second moment estimates)
 
-Total: 500 + 500 + 500 + 500 = **2,000 MB (2 GB)**
+Total: {glue:text}`q4_param_mb` + {glue:text}`q4_grad_mb` + {glue:text}`q4_adam_m_mb` + {glue:text}`q4_adam_v_mb` = **{glue:text}`q4_total_mb` MB ({glue:text}`q4_total_gb` GB)**
 
 This is just model state. Activations add more memory that scales with batch size. A typical training run might use 4-8 GB total including activations.
 ```

@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 01: Tensor
 
 :::{admonition} Module Info
@@ -502,7 +508,20 @@ The rules are simpler than they look. Compare shapes from right to left. At each
 | `(3, 4)` | `(3,)` | Error | ✗ (3 ≠ 4) |
 | `(2, 3, 4)` | `(3, 4)` | `(2, 3, 4)` | ✓ |
 
-The memory savings are dramatic. Adding a `(768,)` vector to a `(32, 512, 768)` tensor would require copying the vector 32×512 times without broadcasting, allocating 50 MB of redundant data (12.5 million float32 numbers). With broadcasting, you store just the original 3 KB vector.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Broadcasting memory comparison
+broadcast_full_elements = 32 * 512 * 768
+broadcast_full_bytes = broadcast_full_elements * 4
+broadcast_vec_bytes = 768 * 4
+glue("bcast_mb", f"{broadcast_full_bytes / 1024**2:.0f} MB")
+glue("bcast_elements", f"{broadcast_full_elements / 1e6:.1f} million")
+glue("bcast_vec_kb", f"{broadcast_vec_bytes / 1024:.0f} KB")
+```
+
+The memory savings are dramatic. Adding a `(768,)` vector to a `(32, 512, 768)` tensor would require copying the vector 32×512 times without broadcasting, allocating {glue:text}`bcast_mb` of redundant data ({glue:text}`bcast_elements` float32 numbers). With broadcasting, you store just the original {glue:text}`bcast_vec_kb` vector.
 
 ### Views vs. Copies
 
@@ -803,15 +822,44 @@ Broadcasting rules, shape semantics, and API design patterns. When you debug PyT
 
 ### Why Tensors Matter at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+
+# LLM parameter storage (fp16 = 2 bytes per param)
+llm_params = 175_000_000_000
+llm_bytes = llm_params * 2
+glue("llm_gb", f"{llm_bytes / 1024**3:.0f} GB")
+
+# Batch of images (float32)
+batch_128_bytes = 128 * 3 * 224 * 224 * 4
+glue("batch128_mb", f"{batch_128_bytes / 1024**2:.1f} MB")
+```
+
 To appreciate why tensor operations matter, consider the scale of modern ML systems:
 
-- **Large language models**: 175 billion numbers stored as tensors = **350 GB** (like storing 70,000 full-resolution photos)
-- **Image processing**: A batch of 128 images = **77 MB** of tensor data
+- **Large language models**: 175 billion numbers stored as tensors = **{glue:text}`llm_gb`** (like storing 70,000 full-resolution photos)
+- **Image processing**: A batch of 128 images = **{glue:text}`batch128_mb`** of tensor data
 - **Self-driving cars**: Process tensor operations at **36 FPS** across multiple cameras (each frame = millions of operations in 28 milliseconds)
 
 A single matrix multiplication can consume **90% of computation time** in neural networks. Understanding tensor operations isn't just academic; it's essential for building and debugging real ML systems.
 
 ## Check Your Understanding
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+
+# Q1: Batch memory
+q1_bytes = 32 * 3 * 224 * 224 * 4
+glue("q1_bytes", f"{q1_bytes:,}")
+glue("q1_mb", f"{q1_bytes / 1024**2:.1f} MB")
+
+# Q2: Broadcasting
+q2_full_bytes = 32 * 512 * 768 * 4
+q2_vec_bytes = 768 * 4
+glue("q2_full_mb", f"{q2_full_bytes / 1024**2:.1f} MB")
+glue("q2_vec_kb", f"{q2_vec_bytes / 1024:.0f} KB")
+glue("q2_savings_mb", f"~{q2_full_bytes / 1024**2:.0f} MB")
+```
 
 Test yourself with these systems thinking questions. They're designed to build intuition for the performance characteristics you'll encounter in production ML.
 
@@ -822,7 +870,7 @@ A batch of 32 RGB images (224×224 pixels) stored as float32. How much memory?
 ```{admonition} Answer
 :class: dropdown
 
-32 × 3 × 224 × 224 × 4 = **19,267,584 bytes ≈ 19.3 MB**
+32 × 3 × 224 × 224 × 4 = **{glue:text}`q1_bytes` bytes ≈ {glue:text}`q1_mb`**
 
 This is why batch size matters - double the batch, double the memory!
 ```
@@ -834,11 +882,11 @@ Adding a vector `(768,)` to a 3D tensor `(32, 512, 768)`. How much memory does b
 ```{admonition} Answer
 :class: dropdown
 
-Without broadcasting: 32 × 512 × 768 × 4 = **50.3 MB**
+Without broadcasting: 32 × 512 × 768 × 4 = **{glue:text}`q2_full_mb`**
 
-With broadcasting: 768 × 4 = **3 KB**
+With broadcasting: 768 × 4 = **{glue:text}`q2_vec_kb`**
 
-Savings: **~50 MB per operation** - this adds up across hundreds of operations in a neural network!
+Savings: **{glue:text}`q2_savings_mb` per operation** - this adds up across hundreds of operations in a neural network!
 ```
 
 **Q3: Matmul Scaling**

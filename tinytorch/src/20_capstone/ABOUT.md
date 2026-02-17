@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 20: Capstone
 
 :::{admonition} Module Info
@@ -543,13 +549,28 @@ latency_ms = (time.time() - start) * 1000
 
 A model with 10ms latency processes one input in 10 milliseconds. If a user submits a query, they wait 10ms for a response. This directly impacts user experience.
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Latency vs Throughput: derived metrics
+lt_latency_ms = 10
+lt_throughput = 1000 / lt_latency_ms
+glue("lt_throughput", f"{lt_throughput:.0f}")
+
+lt_batch_size = 32
+lt_batch_time_ms = 50
+lt_batch_throughput = lt_batch_size * 1000 / lt_batch_time_ms
+glue("lt_batch_throughput", f"{lt_batch_throughput:.0f}")
+```
+
 **Throughput** measures batch capacity: how many inputs can you process per second? This matters for offline batch jobs processing millions of examples. Your implementation derives throughput from latency:
 
 ```python
 throughput_samples_per_sec = 1000 / avg_latency
 ```
 
-If latency is 10ms per sample, throughput is 1000ms / 10ms = 100 samples/second. But this assumes processing samples one at a time. In practice, batching increases throughput significantly while adding latency. Processing a batch of 32 samples might take 50ms total, giving 640 samples/second throughput but 50ms per-request latency.
+If latency is 10ms per sample, throughput is 1000ms / 10ms = {glue:text}`lt_throughput` samples/second. But this assumes processing samples one at a time. In practice, batching increases throughput significantly while adding latency. Processing a batch of 32 samples might take 50ms total, giving {glue:text}`lt_batch_throughput` samples/second throughput but 50ms per-request latency.
 
 The trade-off: **Batching increases throughput but hurts latency.** A production API serving individual user requests optimizes for latency. A batch processing pipeline optimizes for throughput.
 
@@ -759,10 +780,35 @@ The workflow pattern: baseline → optimize → benchmark → compare → decide
 
 ### Why Benchmarking Matters at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Model serving cost calculation
+scale_requests_per_day = 10_000_000
+scale_latency_before_ms = 20
+scale_latency_after_ms = 10
+scale_saved_ms = scale_latency_before_ms - scale_latency_after_ms
+scale_seconds_saved = scale_requests_per_day * scale_saved_ms / 1000
+scale_days_saved = scale_seconds_saved / 86400
+scale_cost_reduction_pct = (scale_saved_ms / scale_latency_before_ms) * 100
+
+glue("scale_seconds_saved", f"{scale_seconds_saved:,.0f}")
+glue("scale_days_saved", f"{scale_days_saved:.2f}")
+glue("scale_cost_reduction", f"{scale_cost_reduction_pct:.0f}%")
+
+# Training pipeline savings
+scale_training_cost = 1_000_000
+scale_data_loading_pct = 60
+scale_pipeline_savings = scale_training_cost * scale_data_loading_pct / 100
+
+glue("scale_pipeline_savings", f"${scale_pipeline_savings:,.0f}")
+```
+
 To appreciate why professional benchmarking matters, consider the scale of production ML systems:
 
-- **Model serving**: A recommendation system handles 10 million requests/day. If you reduce latency from 20ms to 10ms, you save 100,000 seconds of compute daily = 1.16 days of compute per day = 42% cost reduction.
-- **Training efficiency**: Training a large language model costs $1 million in GPU time. Profiling reveals 60% of time is spent in data loading. Optimizing the data pipeline saves $600,000.
+- **Model serving**: A recommendation system handles 10 million requests/day. If you reduce latency from 20ms to 10ms, you save {glue:text}`scale_seconds_saved` seconds of compute daily = {glue:text}`scale_days_saved` days of compute per day = {glue:text}`scale_cost_reduction` cost reduction.
+- **Training efficiency**: Training a large language model costs $1 million in GPU time. Profiling reveals 60% of time is spent in data loading. Optimizing the data pipeline saves {glue:text}`scale_pipeline_savings`.
 - **Deployment constraints**: A mobile app's model must fit in 50MB. Quantization compresses a 200MB model to 50MB with 1% accuracy loss. The app ships; without benchmarking, you wouldn't know the trade-off was acceptable.
 
 Systematic benchmarking with reproducible results isn't academic exercise—it's how engineers justify technical decisions and demonstrate business impact.
@@ -775,33 +821,82 @@ Test yourself with these systems thinking questions about benchmarking and perfo
 
 A model has 5 million parameters stored as FP32. After INT8 quantization, how much memory is saved?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Memory calculation (FP32 vs INT8 quantization)
+# Using binary units: 1 MB = 1024^2 = 1,048,576 bytes
+q1_params = 5_000_000
+q1_fp32_bytes_per_param = 4
+q1_int8_bytes_per_param = 1
+q1_bytes_per_mb = 1024 ** 2
+
+q1_fp32_bytes = q1_params * q1_fp32_bytes_per_param
+q1_int8_bytes = q1_params * q1_int8_bytes_per_param
+q1_fp32_mb = q1_fp32_bytes / q1_bytes_per_mb
+q1_int8_mb = q1_int8_bytes / q1_bytes_per_mb
+q1_savings_mb = q1_fp32_mb - q1_int8_mb
+q1_reduction_pct = q1_savings_mb / q1_fp32_mb * 100
+q1_compression = q1_fp32_mb / q1_int8_mb
+
+glue("q1_fp32_bytes", f"{q1_fp32_bytes:,}")
+glue("q1_fp32_mb", f"{q1_fp32_mb:.2f}")
+glue("q1_int8_bytes", f"{q1_int8_bytes:,}")
+glue("q1_int8_mb", f"{q1_int8_mb:.2f}")
+glue("q1_savings_mb", f"{q1_savings_mb:.2f}")
+glue("q1_reduction_pct", f"{q1_reduction_pct:.0f}%")
+glue("q1_compression", f"{q1_compression:.1f}x")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-FP32: 5,000,000 parameters × 4 bytes = 20,000,000 bytes = **20 MB**
+FP32: 5,000,000 parameters x 4 bytes = {glue:text}`q1_fp32_bytes` bytes = **{glue:text}`q1_fp32_mb` MB**
 
-INT8: 5,000,000 parameters × 1 byte = 5,000,000 bytes = **5 MB**
+INT8: 5,000,000 parameters x 1 byte = {glue:text}`q1_int8_bytes` bytes = **{glue:text}`q1_int8_mb` MB**
 
-Savings: 20 MB - 5 MB = **15 MB** (75% reduction)
+Savings: {glue:text}`q1_fp32_mb` MB - {glue:text}`q1_int8_mb` MB = **{glue:text}`q1_savings_mb` MB** ({glue:text}`q1_reduction_pct` reduction)
 
-Compression ratio: 20 MB / 5 MB = **4.0x**
+Compression ratio: {glue:text}`q1_fp32_mb` MB / {glue:text}`q1_int8_mb` MB = **{glue:text}`q1_compression`**
 
 This is why quantization is standard in mobile deployment—models must fit in tight memory budgets.
 ```
 
 **Q2: Latency Variance Analysis**
 
-Model A: 10.0ms ± 0.3ms latency. Model B: 10.0ms ± 3.0ms latency. Both have same accuracy. Which do you deploy and why?
+Model A: 10.0ms +/- 0.3ms latency. Model B: 10.0ms +/- 3.0ms latency. Both have same accuracy. Which do you deploy and why?
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q2: Latency variance analysis (95% confidence = +/- 2 std)
+q2_mean = 10.0
+q2_std_a = 0.3
+q2_std_b = 3.0
+q2_variance_ratio = q2_std_b / q2_std_a
+q2_a_lo = q2_mean - 2 * q2_std_a
+q2_a_hi = q2_mean + 2 * q2_std_a
+q2_b_lo = q2_mean - 2 * q2_std_b
+q2_b_hi = q2_mean + 2 * q2_std_b
+
+glue("q2_variance_ratio", f"{q2_variance_ratio:.0f}x")
+glue("q2_a_lo", f"{q2_a_lo:.1f}")
+glue("q2_a_hi", f"{q2_a_hi:.1f}")
+glue("q2_b_lo", f"{q2_b_lo:.1f}")
+glue("q2_b_hi", f"{q2_b_hi:.1f}")
+```
 
 ```{admonition} Answer
 :class: dropdown
 
 **Deploy Model A.**
 
-Same mean latency (10.0ms) but Model A has 10x lower variance (0.3ms vs 3.0ms std).
+Same mean latency (10.0ms) but Model A has {glue:text}`q2_variance_ratio` lower variance (0.3ms vs 3.0ms std).
 
-Model A's latency range: ~9.4-10.6ms (95% confidence: ± 2 std)
-Model B's latency range: ~4.0-16.0ms (95% confidence: ± 2 std)
+Model A's latency range: ~{glue:text}`q2_a_lo`-{glue:text}`q2_a_hi`ms (95% confidence: +/- 2 std)
+Model B's latency range: ~{glue:text}`q2_b_lo`-{glue:text}`q2_b_hi`ms (95% confidence: +/- 2 std)
 
 **Why consistency matters:**
 - Users prefer predictable performance over erratic speed
@@ -813,7 +908,34 @@ In production, **reliability > mean performance**. A consistently decent experie
 
 **Q3: Batch Size Trade-off**
 
-Measuring latency with batch_size=32 gives 100ms total. Can you claim 100ms / 32 = 3.1ms per-sample latency?
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q3: Batch size trade-off — why amortized != actual per-sample latency
+# Given: batch=32 takes 100ms total, batch=1 takes 8ms actual
+# Solve system of equations:
+#   batch_total = fixed + batch_size * variable_per_sample
+#   batch1_total = fixed + 1 * variable_per_sample
+# => fixed = (batch_total - batch_size * batch1) / (1 - batch_size)
+q3_batch_size = 32
+q3_batch_total_ms = 100
+q3_batch1_actual_ms = 8.0
+
+q3_amortized = q3_batch_total_ms / q3_batch_size
+q3_fixed = (q3_batch_total_ms - q3_batch_size * q3_batch1_actual_ms) / (1 - q3_batch_size)
+q3_var_total = q3_batch_total_ms - q3_fixed
+q3_var_per_sample = q3_var_total / q3_batch_size
+q3_batch1_check = q3_fixed + q3_var_per_sample
+
+glue("q3_amortized", f"{q3_amortized:.1f}")
+glue("q3_fixed", f"{q3_fixed:.1f}")
+glue("q3_var_total", f"{q3_var_total:.1f}")
+glue("q3_var_per_sample", f"{q3_var_per_sample:.1f}")
+glue("q3_batch1_check", f"{q3_batch1_check:.1f}")
+```
+
+Measuring latency with batch_size=32 gives 100ms total. Can you claim 100ms / 32 = {glue:text}`q3_amortized`ms per-sample latency?
 
 ```{admonition} Answer
 :class: dropdown
@@ -823,35 +945,60 @@ Measuring latency with batch_size=32 gives 100ms total. Can you claim 100ms / 32
 Batching amortizes fixed overhead (data transfer, kernel launch). Per-sample latency at batch=1 is higher than batch=32 divided by 32.
 
 Example reality:
-- Batch=32: 100ms total → 3.1ms per sample (amortized)
+- Batch=32: 100ms total → {glue:text}`q3_amortized`ms per sample (amortized)
 - Batch=1: 8ms total → 8ms per sample (actual)
 
 **Why the discrepancy?**
-- Fixed overhead: 10ms (data transfer, setup)
-- Variable cost: 90ms / 32 = 2.8ms per sample
-- At batch=1: 10ms fixed + 2.8ms variable = 12.8ms
+- Fixed overhead: {glue:text}`q3_fixed`ms (data transfer, setup)
+- Variable cost: {glue:text}`q3_var_total`ms / 32 = {glue:text}`q3_var_per_sample`ms per sample
+- At batch=1: {glue:text}`q3_fixed`ms fixed + {glue:text}`q3_var_per_sample`ms variable = {glue:text}`q3_batch1_check`ms
 
 **Always benchmark at deployment batch size.** If production serves single requests, measure with batch=1.
 ```
 
 **Q4: Speedup Calculation**
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q4: Speedup and real-world impact
+q4_baseline_ms = 20
+q4_optimized_ms = 5
+q4_speedup = q4_baseline_ms / q4_optimized_ms
+
+q4_baseline_rps = 100  # requests/sec (given scenario)
+q4_optimized_rps = q4_baseline_rps * q4_speedup
+q4_baseline_cost = 1000  # $/month (given scenario)
+q4_optimized_cost = q4_baseline_cost / q4_speedup
+
+q4_baseline_util = 60  # % utilization (given scenario)
+q4_optimized_util = q4_baseline_util / q4_speedup
+q4_headroom = 100 - q4_optimized_util
+
+glue("q4_speedup", f"{q4_speedup:.1f}x")
+glue("q4_times_faster", f"{q4_speedup:.0f}")
+glue("q4_optimized_rps", f"{q4_optimized_rps:.0f}")
+glue("q4_optimized_cost", f"${q4_optimized_cost:.0f}")
+glue("q4_headroom", f"{q4_headroom:.0f}%")
+```
+
 Baseline: 20ms latency. Optimized: 5ms latency. What is the speedup and what does it mean?
 
 ```{admonition} Answer
 :class: dropdown
 
-Speedup = baseline_latency / optimized_latency = 20ms / 5ms = **4.0x**
+Speedup = baseline_latency / optimized_latency = 20ms / 5ms = **{glue:text}`q4_speedup`**
 
 **What it means:**
-- Optimized model is **4 times faster**
-- Processes same input in 1/4 the time
-- Can handle 4x more traffic with same hardware
+- Optimized model is **{glue:text}`q4_times_faster` times faster**
+- Processes same input in 1/{glue:text}`q4_times_faster` the time
+- Can handle {glue:text}`q4_times_faster`x more traffic with same hardware
 
 **Real-world impact:**
-- If baseline served 100 requests/sec, optimized serves 400 requests/sec
-- If baseline cost $1000/month in compute, optimized costs $250/month
-- If baseline met latency SLA at 60% utilization, optimized has 85% headroom
+- If baseline served 100 requests/sec, optimized serves {glue:text}`q4_optimized_rps` requests/sec
+- If baseline cost $1000/month in compute, optimized costs {glue:text}`q4_optimized_cost`/month
+- If baseline met latency SLA at 60% utilization, optimized has {glue:text}`q4_headroom` headroom
 
 **Note:** Speedup alone doesn't tell the full story. Check accuracy_delta and compression_ratio to understand trade-offs.
 ```
