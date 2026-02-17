@@ -193,7 +193,7 @@ TinyTorch/
 │
 ├── modules/                    # 📓 Generated notebooks (learners work here)
 │   ├── 01_tensor/              # Auto-generated from src/
-│   │   ├── 01_tensor.ipynb     # Jupyter notebook for learning
+│   │   ├── tensor.ipynb         # Jupyter notebook for learning
 │   │   ├── README.md           # Practical implementation guide
 │   │   └── tensor.py           # Your implementation
 │   └── ...                     # (20 module directories)

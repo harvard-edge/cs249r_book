@@ -455,19 +455,19 @@ File → Save File (or Cmd/Ctrl + S)
 
 **Step 2: Check file permissions**:
 ```bash
-ls -la modules/01_tensor/01_tensor.ipynb
+ls -la modules/01_tensor/tensor.ipynb
 # Should be writable (not read-only)
 ```
 
 **Step 3: If read-only, fix permissions**:
 ```bash
-chmod u+w modules/01_tensor/01_tensor.ipynb
+chmod u+w modules/01_tensor/tensor.ipynb
 ```
 
 **Step 4: Verify changes saved**:
 ```bash
 # Check the notebook was updated
-ls -l modules/01_tensor/01_tensor.ipynb
+ls -l modules/01_tensor/tensor.ipynb
 ```
 
 </div>
