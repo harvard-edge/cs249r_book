@@ -29,6 +29,9 @@ serve: clean html
 pdf:
 	@echo "🔥 Building Tiny🔥Torch PDF via XeLaTeX..."
 	@echo ""
+	@# PDF build needs Mermaid CLI (for diagrams). Config uses npx; Node.js must be installed.
+	@command -v npx >/dev/null 2>&1 || { echo "❌ Error: npx not found. PDF build requires Node.js (for Mermaid diagrams). Install from https://nodejs.org/ or run: brew install node"; exit 1; }
+	@echo "✅ Mermaid CLI (via npx) available"
 	@# Step 1: Generate LaTeX (matches CI workflow)
 	@echo "📚 Generating LaTeX files..."
 	jupyter-book build . --builder latex --config _config_pdf.yml --toc _toc_pdf.yml
