@@ -1,3 +1,102 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# --- Embedding Dimension Trade-offs section ---
+
+# Prose: 50,000 vocab x 512 embed_dim memory (approximate)
+tradeoffs_50k_512_bytes = 50000 * 512 * 4
+tradeoffs_50k_512_mb = tradeoffs_50k_512_bytes / 1024**2
+glue("tradeoffs_50k_512_mb", f"{tradeoffs_50k_512_mb:.0f} MB")
+
+# Prose: doubled to 1024 embed_dim
+tradeoffs_50k_1024_bytes = 50000 * 1024 * 4
+tradeoffs_50k_1024_mb = tradeoffs_50k_1024_bytes / 1024**2
+glue("tradeoffs_50k_1024_mb", f"{tradeoffs_50k_1024_mb:.0f} MB")
+
+# GPT-3 embedding memory in prose
+gpt3_embed_bytes = 50257 * 12288 * 4
+gpt3_embed_gb = gpt3_embed_bytes / 1024**3
+glue("tradeoffs_gpt3_embed_gb", f"{gpt3_embed_gb:.1f} GB")
+
+# --- Production table ---
+
+# Small BERT: 30,000 x 768
+table_bert_bytes = 30000 * 768 * 4
+table_bert_mb = table_bert_bytes / 1024**2
+glue("table_bert_mb", f"{table_bert_mb:.0f} MB")
+
+# GPT-2: 50,257 x 1,024
+table_gpt2_bytes = 50257 * 1024 * 4
+table_gpt2_mb = table_gpt2_bytes / 1024**2
+glue("table_gpt2_mb", f"{table_gpt2_mb:.0f} MB")
+
+# GPT-3: 50,257 x 12,288
+table_gpt3_bytes = 50257 * 12288 * 4
+table_gpt3_mb = table_gpt3_bytes / 1024**2
+glue("table_gpt3_mb", f"{table_gpt3_mb:,.0f} MB")
+
+# Large Transformer: 100,000 x 1,024
+table_large_bytes = 100000 * 1024 * 4
+table_large_mb = table_large_bytes / 1024**2
+glue("table_large_mb", f"{table_large_mb:.0f} MB")
+
+# --- Scale section ---
+
+# GPT-3 parameter count
+gpt3_params = 50257 * 12288
+glue("scale_gpt3_params", f"{gpt3_params / 1e6:.0f} million parameters")
+glue("scale_gpt3_gb", f"{gpt3_embed_gb:.1f} GB")
+
+# Batch lookups: 32 sequences x 2048 tokens
+batch_lookups = 32 * 2048
+glue("scale_batch_lookups", f"{batch_lookups:,}")
+
+# --- Q1: Memory Calculation ---
+
+q1_params = 50000 * 512
+q1_bytes = q1_params * 4
+q1_mb = q1_bytes / 1024**2
+glue("q1_total_bytes", f"{q1_bytes:,} bytes")
+glue("q1_mb", f"{q1_mb:.1f} MB")
+glue("q1_params", f"{q1_params:,}")
+glue("q1_bytes_full", f"{q1_bytes:,}")
+
+# --- Q2: Positional Encoding Memory ---
+
+q2_params = 2048 * 512
+q2_bytes = q2_params * 4
+q2_mb = q2_bytes / 1024**2
+glue("q2_bytes", f"{q2_bytes:,} bytes")
+glue("q2_mb", f"{q2_mb:.1f} MB")
+glue("q2_params", f"{q2_params:,}")
+
+# GPT-3 learned PE memory
+q2_gpt3_bytes = 2048 * 12288 * 4
+q2_gpt3_mb = q2_gpt3_bytes / 1024**2
+glue("q2_gpt3_pe_mb", f"{q2_gpt3_mb:.0f} MB")
+
+# --- Q3: Lookup Complexity ---
+
+q3_total = 32 * 128
+glue("q3_total_lookups", f"{q3_total:,}")
+
+# --- Q4: Embedding Dimension Scaling ---
+
+q4_original_bytes = 50000 * 512 * 4
+q4_original_mb = q4_original_bytes / 1024**2
+q4_doubled_bytes = 50000 * 1024 * 4
+q4_doubled_mb = q4_doubled_bytes / 1024**2
+glue("q4_original_mb", f"{q4_original_mb:.0f} MB")
+glue("q4_doubled_mb", f"{q4_doubled_mb:.0f} MB")
+```
+
 # Module 11: Embeddings
 
 :::{admonition} Module Info
@@ -30,7 +129,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F11_embeddings%2F11_embeddings.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F11_embeddings%2Fembeddings.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -613,7 +712,7 @@ The trigonometric identity enables learning relative positions: `PE(pos+k)` can 
 
 The embedding dimension D controls the capacity of your learned representations. Larger D provides more expressiveness but costs memory and compute. The choice involves several interacting factors.
 
-**Memory scaling**: Embedding tables scale as `vocab_size × embed_dim × 4 bytes` (for float32). A vocabulary of 50,000 tokens with 512-dimensional embeddings requires 100 MB. Double the dimension to 1024, and memory doubles to 200 MB. For large vocabularies, the embedding table often dominates total model memory. GPT-3's 50,257 token vocabulary with 12,288-dimensional embeddings uses approximately 2.4 GB just for token embeddings.
+**Memory scaling**: Embedding tables scale as `vocab_size × embed_dim × 4 bytes` (for float32). A vocabulary of 50,000 tokens with 512-dimensional embeddings requires {glue:text}`tradeoffs_50k_512_mb`. Double the dimension to 1024, and memory doubles to {glue:text}`tradeoffs_50k_1024_mb`. For large vocabularies, the embedding table often dominates total model memory. GPT-3's 50,257 token vocabulary with 12,288-dimensional embeddings uses approximately {glue:text}`tradeoffs_gpt3_embed_gb` just for token embeddings.
 
 **Semantic capacity**: Higher dimensions allow finer-grained semantic distinctions. With 64 dimensions, you might capture basic categories (animals, actions, objects). With 512 dimensions, you can encode subtle relationships (synonyms, antonyms, part-of-speech, contextual variations). With 1024+ dimensions, you have capacity for highly nuanced semantic features discovered through training.
 
@@ -623,10 +722,10 @@ The embedding dimension D controls the capacity of your learned representations.
 
 | Model | Vocabulary | Embed Dim | Embedding Memory |
 |-------|-----------|-----------|------------------|
-| Small BERT | 30,000 | 768 | 92 MB |
-| GPT-2 | 50,257 | 1,024 | 206 MB |
-| GPT-3 | 50,257 | 12,288 | 2,471 MB |
-| Large Transformer | 100,000 | 1,024 | 410 MB |
+| Small BERT | 30,000 | 768 | {glue:text}`table_bert_mb` |
+| GPT-2 | 50,257 | 1,024 | {glue:text}`table_gpt2_mb` |
+| GPT-3 | 50,257 | 12,288 | {glue:text}`table_gpt3_mb` |
+| Large Transformer | 100,000 | 1,024 | {glue:text}`table_large_mb` |
 
 The embedding dimension typically matches the model's hidden dimension since embeddings feed directly into the first transformer layer. You rarely see models with embedding dimension different from hidden dimension (though it's technically possible with a projection layer).
 
@@ -795,10 +894,10 @@ Embedding lookup semantics, gradient flow patterns, and the addition of position
 
 To appreciate embedding systems, consider the scale of modern language models:
 
-- **GPT-3 embeddings**: 50,257 token vocabulary × 12,288 dimensions = **618 million parameters** = 2.4 GB of memory (just for token embeddings, not counting position embeddings)
-- **Lookup throughput**: Processing 32 sequences of 2048 tokens requires **65,536 embedding lookups** per batch. At 1000 batches per second (typical training), that's 65 million lookups per second.
+- **GPT-3 embeddings**: 50,257 token vocabulary × 12,288 dimensions = **{glue:text}`scale_gpt3_params`** = {glue:text}`scale_gpt3_gb` of memory (just for token embeddings, not counting position embeddings)
+- **Lookup throughput**: Processing 32 sequences of 2048 tokens requires **{glue:text}`scale_batch_lookups` embedding lookups** per batch. At 1000 batches per second (typical training), that's 65 million lookups per second.
 - **Memory bandwidth**: Each lookup transfers 512-1024 dimensions × 4 bytes = **2-4 KB from RAM to cache**. At scale, memory bandwidth (not compute) becomes the bottleneck.
-- **Gradient sparsity**: In a batch with 65,536 tokens, only a small fraction of the 50,257 vocabulary is accessed. Efficient training exploits this sparsity, updating only the accessed embeddings' gradients.
+- **Gradient sparsity**: In a batch with {glue:text}`scale_batch_lookups` tokens, only a small fraction of the 50,257 vocabulary is accessed. Efficient training exploits this sparsity, updating only the accessed embeddings' gradients.
 
 Modern transformer training spends approximately **10-15% of total time** in embedding operations (lookup + position encoding). The remaining 85-90% goes to attention and feedforward layers. However, embeddings consume **30-40% of model memory** for models with large vocabularies, making them critical for deployment.
 
@@ -813,12 +912,12 @@ An embedding layer has `vocab_size=50000` and `embed_dim=512`. How much memory d
 ```{admonition} Answer
 :class: dropdown
 
-50,000 × 512 × 4 bytes = **102,400,000 bytes = 97.7 MB**
+50,000 × 512 × 4 bytes = **{glue:text}`q1_total_bytes` = {glue:text}`q1_mb`**
 
 Calculation breakdown:
-- Parameters: 50,000 × 512 = 25,600,000
-- Memory: 25,600,000 × 4 bytes (float32) = 102,400,000 bytes
-- In MB: 102,400,000 / (1024 × 1024) = 97.7 MB
+- Parameters: 50,000 × 512 = {glue:text}`q1_params`
+- Memory: {glue:text}`q1_params` × 4 bytes (float32) = {glue:text}`q1_bytes_full` bytes
+- In MB: {glue:text}`q1_bytes_full` / (1024 × 1024) = {glue:text}`q1_mb`
 
 This is why vocabulary size matters for model deployment!
 ```
@@ -830,11 +929,11 @@ Compare memory requirements for learned vs sinusoidal positional encoding with `
 ```{admonition} Answer
 :class: dropdown
 
-**Learned PE**: 2,048 × 512 × 4 = **4,194,304 bytes = 4.0 MB** (1,048,576 parameters)
+**Learned PE**: 2,048 × 512 × 4 = **{glue:text}`q2_bytes` = {glue:text}`q2_mb`** ({glue:text}`q2_params` parameters)
 
 **Sinusoidal PE**: **0 bytes** (0 parameters - computed mathematically)
 
-For large models, learned PE adds significant memory. GPT-3 uses learned PE with 2048 positions × 12,288 dimensions = 100 MB additional memory. Some models use sinusoidal to save this memory.
+For large models, learned PE adds significant memory. GPT-3 uses learned PE with 2048 positions × 12,288 dimensions = {glue:text}`q2_gpt3_pe_mb` additional memory. Some models use sinusoidal to save this memory.
 ```
 
 **Q3: Lookup Complexity**
@@ -844,25 +943,25 @@ What is the time complexity of looking up embeddings for a batch of 32 sequences
 ```{admonition} Answer
 :class: dropdown
 
-**O(1) per token**, or **O(batch_size × seq_len)** = O(32 × 128) = O(4096) total
+**O(1) per token**, or **O(batch_size × seq_len)** = O(32 × 128) = O({glue:text}`q3_total_lookups`) total
 
-The lookup operation is constant time per token because it's just array indexing: `weight[token_id]`. For 4,096 tokens, you perform 4,096 constant-time lookups.
+The lookup operation is constant time per token because it's just array indexing: `weight[token_id]`. For {glue:text}`q3_total_lookups` tokens, you perform {glue:text}`q3_total_lookups` constant-time lookups.
 
 Importantly, vocabulary size does NOT affect lookup time. Looking up tokens from a 1,000 word vocabulary is the same speed as from a 100,000 word vocabulary (assuming cache effects are comparable). The memory access is direct indexing, not search.
 ```
 
 **Q4: Embedding Dimension Scaling**
 
-You have an embedding layer with `vocab_size=50000, embed_dim=512` using 100 MB. If you double `embed_dim` to 1024, what happens to memory?
+You have an embedding layer with `vocab_size=50000, embed_dim=512` using {glue:text}`q4_original_mb`. If you double `embed_dim` to 1024, what happens to memory?
 
 ```{admonition} Answer
 :class: dropdown
 
-Memory **doubles to 200 MB**
+Memory **doubles to {glue:text}`q4_doubled_mb`**
 
 Embedding memory scales linearly with embedding dimension:
-- Original: 50,000 × 512 × 4 = 100 MB
-- Doubled: 50,000 × 1,024 × 4 = 200 MB
+- Original: 50,000 × 512 × 4 = {glue:text}`q4_original_mb`
+- Doubled: 50,000 × 1,024 × 4 = {glue:text}`q4_doubled_mb`
 
 This is why you can't arbitrarily increase embedding dimensions. Each doubling doubles memory and memory bandwidth requirements. Large models carefully balance embedding dimension against available memory.
 ```
@@ -871,7 +970,7 @@ This is why you can't arbitrarily increase embedding dimensions. Each doubling d
 
 You trained a model with sinusoidal positional encoding and `max_seq_len=512`. Can you process sequences of length 1024 at inference time? What about with learned positional encoding?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Sinusoidal PE: Yes** - can extrapolate to length 1024 (or any length)
@@ -889,7 +988,7 @@ Learned PE creates a fixed embedding table of shape `(max_seq_len, embed_dim)`. 
 - Truncate sequences to 512 tokens
 
 This is why many production models use sinusoidal or relative positional encodings that can handle variable lengths.
-```
+````
 
 ## Further Reading
 
@@ -927,7 +1026,7 @@ Implement attention mechanisms that let embeddings interact with each other. You
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/11_embeddings/11_embeddings.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/11_embeddings/embeddings.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/11_embeddings/11_embeddings.py)** - Browse the implementation code
 ```
 

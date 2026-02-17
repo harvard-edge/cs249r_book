@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 10: Tokenization
 
 :::{admonition} Module Info
@@ -30,7 +36,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F10_tokenization%2F10_tokenization.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F10_tokenization%2Ftokenization.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -512,7 +518,18 @@ def build_vocab(self, corpus: List[str]) -> None:
 
 The special `<UNK>` token at position 0 handles characters not in the vocabulary. When encoding text with unknown characters, they all map to ID 0. This graceful degradation prevents crashes while signaling that information was lost.
 
-Character vocabularies are tiny (typically 50-200 tokens depending on language), which means small embedding tables. A 100-character vocabulary with 512-dimensional embeddings requires only 51,200 parameters, about 200 KB of memory. This is dramatically smaller than word-level vocabularies with 100,000+ entries.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Vocabulary building: 100 chars * 512 dim
+vocab_params = 100 * 512
+vocab_bytes = vocab_params * 4
+glue("vocab_char_params", f"{vocab_params:,}")
+glue("vocab_char_mem", f"{vocab_bytes / 1024:.0f} KB")
+```
+
+Character vocabularies are tiny (typically 50-200 tokens depending on language), which means small embedding tables. A 100-character vocabulary with 512-dimensional embeddings requires only {glue:text}`vocab_char_params` parameters, about {glue:text}`vocab_char_mem` of memory. This is dramatically smaller than word-level vocabularies with 100,000+ entries.
 
 ### Byte Pair Encoding (BPE)
 
@@ -657,11 +674,30 @@ Memory and computation scale oppositely:
 **Embedding table memory** = vocabulary size × embedding dimension × bytes per parameter
 **Sequence processing cost** = sequence length² × embedding dimension (for attention)
 
-A character tokenizer with vocabulary 100 and embedding dimension 512 needs 100 × 512 × 4 = 204 KB for embeddings. But a 50-word sentence produces roughly 250 character tokens, requiring 250² = 62,500 attention computations per layer.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
 
-A BPE tokenizer with vocabulary 50,000 and embedding dimension 512 needs 50,000 × 512 × 4 = 102 MB for embeddings. But that same 50-word sentence might produce only 75 BPE tokens, requiring 75² = 5,625 attention computations per layer.
+# Character tokenizer: vocab 100, dim 512, float32
+char_embed_bytes = 100 * 512 * 4
+char_seq_len = 250
+char_attn = char_seq_len ** 2
+glue("tradeoff_char_embed", f"{char_embed_bytes / 1024:.0f} KB")
+glue("tradeoff_char_attn", f"{char_attn:,}")
 
-The attention cost savings (62,500 vs 5,625) dwarf the embedding memory cost (204 KB vs 102 MB) for models with multiple layers. This is why production language models use large vocabularies: the embedding table fits easily in memory, while shorter sequences dramatically reduce training and inference time.
+# BPE tokenizer: vocab 50,000, dim 512, float32
+bpe_embed_bytes = 50_000 * 512 * 4
+bpe_seq_len = 75
+bpe_attn = bpe_seq_len ** 2
+glue("tradeoff_bpe_embed", f"{bpe_embed_bytes / 1024**2:.1f} MB")
+glue("tradeoff_bpe_attn", f"{bpe_attn:,}")
+```
+
+A character tokenizer with vocabulary 100 and embedding dimension 512 needs 100 × 512 × 4 = {glue:text}`tradeoff_char_embed` for embeddings. But a 50-word sentence produces roughly 250 character tokens, requiring 250² = {glue:text}`tradeoff_char_attn` attention computations per layer.
+
+A BPE tokenizer with vocabulary 50,000 and embedding dimension 512 needs 50,000 × 512 × 4 = {glue:text}`tradeoff_bpe_embed` for embeddings. But that same 50-word sentence might produce only 75 BPE tokens, requiring 75² = {glue:text}`tradeoff_bpe_attn` attention computations per layer.
+
+The attention cost savings ({glue:text}`tradeoff_char_attn` vs {glue:text}`tradeoff_bpe_attn`) dwarf the embedding memory cost ({glue:text}`tradeoff_char_embed` vs {glue:text}`tradeoff_bpe_embed`) for models with multiple layers. This is why production language models use large vocabularies: the embedding table fits easily in memory, while shorter sequences dramatically reduce training and inference time.
 
 Modern language models balance these factors:
 
@@ -748,11 +784,25 @@ The BPE algorithm, merge rule learning, vocabulary structure, and encode/decode 
 
 ### Why Tokenization Matters at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# GPT-3 embedding table: 50,000 vocab * 12,288 dim * 4 bytes
+gpt3_embed_bytes = 50_000 * 12_288 * 4
+gpt3_embed_gb = gpt3_embed_bytes / 1024**3
+gpt3_total_params = 175_000_000_000
+gpt3_embed_params = 50_000 * 12_288
+gpt3_pct = gpt3_embed_params / gpt3_total_params * 100
+glue("gpt3_embed_gb", f"{gpt3_embed_gb:.2f} GB")
+glue("gpt3_embed_pct", f"{gpt3_pct:.2f}%")
+```
+
 To appreciate why tokenization choices matter, consider the scale of modern systems:
 
 - **GPT-3 training**: Processing 300 billion tokens required careful vocabulary selection. Using character tokenization would have increased sequence lengths by 3-4×, multiplying training time by 9-16× (quadratic attention cost).
 
-- **Embedding table memory**: A 50,000 token vocabulary with 12,288-dimensional embeddings (GPT-3 size) requires 50,000 × 12,288 × 4 bytes = **2.4 GB** just for the embedding layer. This is ~0.14% of GPT-3's 175 billion total parameters, a reasonable fraction.
+- **Embedding table memory**: A 50,000 token vocabulary with 12,288-dimensional embeddings (GPT-3 size) requires 50,000 × 12,288 × 4 bytes = **{glue:text}`gpt3_embed_gb`** just for the embedding layer. This is ~{glue:text}`gpt3_embed_pct` of GPT-3's 175 billion total parameters, a reasonable fraction.
 
 - **Real-time inference**: Chatbots must tokenize user input in milliseconds. Python tokenizers take 5-20 ms per sentence; Rust tokenizers take 0.05-0.2 ms. At 1 million requests per day, this saves ~5 hours of compute time daily.
 
@@ -764,19 +814,42 @@ Test yourself with these systems thinking questions. They're designed to build i
 
 You train a BPE tokenizer with `vocab_size=30,000` for a production model. If using 768-dimensional embeddings with float32 precision, how much memory does the embedding table require?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: 30,000 vocab * 768 dim * 4 bytes
+q1_bytes = 30_000 * 768 * 4
+q1_mb = q1_bytes / 1024**2
+q1_params = 30_000 * 768
+q1_params_m = q1_params / 1e6
+q1_mem_mb = q1_params * 4 / 1024**2
+
+# Doubling to 60K
+q1_double_bytes = 60_000 * 768 * 4
+q1_double_mb = q1_double_bytes / 1024**2
+
+glue("q1_bytes", f"{q1_bytes:,}")
+glue("q1_mb", f"{q1_mb:.2f} MB")
+glue("q1_params", f"{q1_params:,}")
+glue("q1_params_m", f"{q1_params_m:.2f}M")
+glue("q1_mem_mb", f"{q1_mem_mb:.2f} MB")
+glue("q1_double_mb", f"~{q1_double_mb:.0f} MB")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-30,000 × 768 × 4 bytes = **92,160,000 bytes ≈ 92.16 MB**
+30,000 × 768 × 4 bytes = **{glue:text}`q1_bytes` bytes ≈ {glue:text}`q1_mb`**
 
 Breakdown:
 - Vocabulary size: 30,000 tokens
 - Embedding dimension: 768 (BERT-base size)
 - Float32: 4 bytes per parameter
-- Total parameters: 30,000 × 768 = 23,040,000
-- Memory: 23.04M × 4 = 92.16 MB
+- Total parameters: 30,000 × 768 = {glue:text}`q1_params`
+- Memory: {glue:text}`q1_params_m` × 4 = {glue:text}`q1_mem_mb`
 
-This is why vocabulary size matters! Doubling to 60K vocab would double embedding memory to ~184 MB.
+This is why vocabulary size matters! Doubling to 60K vocab would double embedding memory to {glue:text}`q1_double_mb`.
 ```
 
 **Q2: Sequence Length Trade-offs**
@@ -786,37 +859,80 @@ A sentence contains 200 characters. With character tokenization it produces 200 
 - How many attention computations for character tokenization per batch?
 - How many for BPE tokenization per batch?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q2: attention computations
+q2_char_seq = 200
+q2_char_attn = q2_char_seq ** 2
+q2_batch = 32
+q2_char_total = q2_batch * q2_char_attn
+
+q2_bpe_seq = 50
+q2_bpe_attn = q2_bpe_seq ** 2
+q2_bpe_total = q2_batch * q2_bpe_attn
+
+q2_speedup = q2_char_attn // q2_bpe_attn
+
+glue("q2_char_attn", f"{q2_char_attn:,}")
+glue("q2_char_total", f"{q2_char_total:,}")
+glue("q2_bpe_attn", f"{q2_bpe_attn:,}")
+glue("q2_bpe_total", f"{q2_bpe_total:,}")
+glue("q2_speedup", f"{q2_speedup}×")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
 **Character tokenization:**
 - Sequence length: 200 tokens
-- Attention per sequence: 200² = 40,000 operations
+- Attention per sequence: 200² = {glue:text}`q2_char_attn` operations
 - Batch size: 32
-- Total: 32 × 40,000 = **1,280,000 attention operations**
+- Total: 32 × {glue:text}`q2_char_attn` = **{glue:text}`q2_char_total` attention operations**
 
 **BPE tokenization:**
 - Sequence length: 50 tokens (200 chars ÷ 4)
-- Attention per sequence: 50² = 2,500 operations
+- Attention per sequence: 50² = {glue:text}`q2_bpe_attn` operations
 - Batch size: 32
-- Total: 32 × 2,500 = **80,000 attention operations**
+- Total: 32 × {glue:text}`q2_bpe_attn` = **{glue:text}`q2_bpe_total` attention operations**
 
-BPE is **16× faster** for attention! This is why modern models use subword tokenization despite larger embedding tables.
+BPE is **{glue:text}`q2_speedup` faster** for attention! This is why modern models use subword tokenization despite larger embedding tables.
 ```
 
 **Q3: Unknown Token Handling**
 
-Your BPE tokenizer encounters the word "supercalifragilistic" (not in training corpus). Character tokenizer maps it to 22 known tokens. BPE tokenizer decomposes it into subwords like `['super', 'cal', 'ifr', 'ag', 'il', 'istic']` (6 tokens). Which is better?
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q3: 'supercalifragilistic' character analysis
+q3_word = "supercalifragilistic"
+q3_char_count = len(q3_word)
+q3_bpe_tokens = 6
+q3_compression = q3_char_count / q3_bpe_tokens
+q3_char_attn = q3_char_count ** 2
+q3_bpe_attn = q3_bpe_tokens ** 2
+q3_attn_ratio = q3_char_attn / q3_bpe_attn
+
+glue("q3_char_count", f"{q3_char_count}")
+glue("q3_compression", f"{q3_compression:.1f}×")
+glue("q3_char_attn", f"{q3_char_attn}")
+glue("q3_bpe_attn", f"{q3_bpe_attn}")
+glue("q3_attn_ratio", f"{q3_attn_ratio:.0f}×")
+```
+
+Your BPE tokenizer encounters the word "supercalifragilistic" (not in training corpus). Character tokenizer maps it to {glue:text}`q3_char_count` known tokens. BPE tokenizer decomposes it into subwords like `['super', 'cal', 'ifr', 'ag', 'il', 'istic']` (6 tokens). Which is better?
 
 ```{admonition} Answer
 :class: dropdown
 
 **BPE is better for production:**
 
-- **Efficiency**: 6 tokens vs 22 tokens = 3.7× shorter sequence
+- **Efficiency**: 6 tokens vs {glue:text}`q3_char_count` tokens = {glue:text}`q3_compression` shorter sequence
 - **Semantics**: Subwords like "super" and "istic" carry meaning; individual characters don't
 - **Generalization**: Model learns that "super" prefix modifies meaning (superman, supermarket)
-- **Memory**: 6² = 36 attention computations vs 22² = 484 (13× faster)
+- **Memory**: {glue:text}`q3_bpe_attn` attention computations vs {glue:text}`q3_char_attn` ({glue:text}`q3_attn_ratio` faster)
 
 **Character tokenization advantages:**
 - **Perfect coverage**: Never maps to `<UNK>`, always recovers original text
@@ -833,16 +949,35 @@ You analyze two tokenizers on a 10,000 character corpus:
 
 What's the compression ratio, and what does it tell you about efficiency?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q4: compression ratio
+q4_char_tokens = 10_000
+q4_bpe_tokens = 2_500
+q4_ratio = q4_char_tokens / q4_bpe_tokens
+q4_attn_speedup = int(q4_ratio ** 2)
+q4_bpe_context_chars = 512 * int(q4_ratio)
+q4_char_context_words = 512  # chars ~= 100 words estimate (reference, not pure arithmetic)
+q4_bpe_context_words = q4_bpe_context_chars  # chars ~= 400 words estimate (reference)
+
+glue("q4_ratio", f"{q4_ratio:.1f}")
+glue("q4_avg_chars", f"{int(q4_ratio)}")
+glue("q4_attn_speedup", f"{q4_attn_speedup}×")
+glue("q4_bpe_context_chars", f"{q4_bpe_context_chars:,}")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
-**Compression ratio: 10,000 ÷ 2,500 = 4.0**
+**Compression ratio: 10,000 ÷ 2,500 = {glue:text}`q4_ratio`**
 
-This means each BPE token represents an average of 4 characters.
+This means each BPE token represents an average of {glue:text}`q4_avg_chars` characters.
 
 **Efficiency implications:**
-- **Sequence processing**: 4× shorter sequences = 16× faster attention (quadratic scaling)
-- **Context window**: With max length 512, character tokenizer handles 512 chars (~100 words); BPE handles 2,048 chars (~400 words)
+- **Sequence processing**: {glue:text}`q4_ratio`× shorter sequences = {glue:text}`q4_attn_speedup` faster attention (quadratic scaling)
+- **Context window**: With max length 512, character tokenizer handles 512 chars (~100 words); BPE handles {glue:text}`q4_bpe_context_chars` chars (~400 words)
 - **Information density**: Each BPE token carries more semantic information (subword vs character)
 
 **Trade-off**: BPE vocabulary is ~100× larger (10K tokens vs 100), increasing embedding memory from ~200 KB to ~20 MB. This trade-off heavily favors BPE for models with multiple transformer layers where attention cost dominates.
@@ -852,14 +987,40 @@ This means each BPE token represents an average of 4 characters.
 
 Training BPE on 1,000 words takes 100ms. How long will 10,000 words take? What about 100,000 words?
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q5: O(n^2) scaling
+q5_base_ms = 100
+q5_base_words = 1_000
+
+q5_10k_scale = (10_000 / q5_base_words) ** 2
+q5_10k_ms = q5_base_ms * q5_10k_scale
+q5_10k_sec = q5_10k_ms / 1000
+
+q5_100k_scale = (100_000 / q5_base_words) ** 2
+q5_100k_ms = q5_base_ms * q5_100k_scale
+q5_100k_sec = q5_100k_ms / 1000
+q5_100k_min = q5_100k_sec / 60
+
+glue("q5_10k_ms", f"{q5_10k_ms:,.0f}")
+glue("q5_10k_sec", f"{q5_10k_sec:.0f}")
+glue("q5_10k_factor", f"{q5_10k_scale:.0f}×")
+glue("q5_100k_ms", f"{q5_100k_ms:,.0f}")
+glue("q5_100k_sec", f"{q5_100k_sec:,.0f}")
+glue("q5_100k_min", f"{q5_100k_min:.1f}")
+glue("q5_100k_factor", f"{q5_100k_scale:,.0f}×")
+```
+
 ```{admonition} Answer
 :class: dropdown
 
 BPE training scales approximately **O(n²)** where n is corpus size (due to repeated pair counting across the corpus).
 
 - **1,000 words**: 100 ms (baseline)
-- **10,000 words**: ~10,000 ms = 10 seconds (100× longer, due to 10² scaling)
-- **100,000 words**: ~1,000,000 ms = 1,000 seconds ≈ **16.7 minutes** (10,000× longer)
+- **10,000 words**: ~{glue:text}`q5_10k_ms` ms = {glue:text}`q5_10k_sec` seconds ({glue:text}`q5_10k_factor` longer, due to 10² scaling)
+- **100,000 words**: ~{glue:text}`q5_100k_ms` ms = {glue:text}`q5_100k_sec` seconds ≈ **{glue:text}`q5_100k_min` minutes** ({glue:text}`q5_100k_factor` longer)
 
 **Production strategies to handle this:**
 - Sample representative subset (~50K-100K sentences is usually sufficient)
@@ -908,7 +1069,7 @@ Convert your token IDs into learnable dense vector representations. You'll imple
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/10_tokenization/10_tokenization.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/10_tokenization/tokenization.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/10_tokenization/10_tokenization.py)** - Browse the implementation code
 ```
 

@@ -66,7 +66,7 @@ clean:
 install:
 	@echo "📦 Installing dependencies..."
 	pip install -U pip
-	pip install "jupyter-book<1.0"
+	pip install "jupyter-book>=1.0.0,<2.0.0"
 	pip install -r requirements.txt
 
 test:

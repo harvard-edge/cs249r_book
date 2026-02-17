@@ -409,11 +409,11 @@ src/ ← Developer source code
 
 modules/ ← Generated notebooks (students use)
 ├── 01_tensor/
-│ └── 01_tensor.ipynb ← AUTO-GENERATED for students
+│ └── tensor.ipynb ← AUTO-GENERATED for students
 ├── 02_activations/
-│ └── 02_activations.ipynb ← AUTO-GENERATED for students
+│ └── activations.ipynb ← AUTO-GENERATED for students
 └── 03_layers/
- └── 03_layers.ipynb ← AUTO-GENERATED for students
+ └── layers.ipynb ← AUTO-GENERATED for students
 ```
 
 ### Where Code Exports
