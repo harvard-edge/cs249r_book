@@ -860,7 +860,7 @@ Speedup = baseline_latency / optimized_latency = 20ms / 5ms = **4.0x**
 
 Why does the submission schema require `accuracy` as float in [0, 1] instead of allowing any format?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Type safety enables automation.**
@@ -889,7 +889,7 @@ With schema:
 4. **APIs** - Other tools can consume submissions without custom parsers
 
 **Real example:** Papers with Code leaderboards require strict schemas. Thousands of submissions from different teams aggregate automatically because everyone follows the same format.
-```
+````
 
 ## Further Reading
 

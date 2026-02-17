@@ -881,7 +881,7 @@ Starting high (0.1) provides fast early progress. Gradual decay (0.1 → 0.01) a
 
 You're training for 100 epochs. Each checkpoint is 1 GB. Checkpointing every epoch creates 100 GB of storage. Checkpointing every 10 epochs risks losing 10 epochs of work if training crashes. Design a checkpointing strategy that balances fault tolerance and storage costs.
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Strategy: Keep last N + best + milestones**
@@ -908,7 +908,7 @@ if is_best_validation:  # Best
 ```
 
 **Production systems** use this strategy plus cloud storage for off-site backup.
-```
+````
 
 **Q5: Global Norm Clipping Analysis**
 

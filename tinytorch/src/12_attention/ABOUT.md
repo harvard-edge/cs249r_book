@@ -815,7 +815,7 @@ Why use 8 heads of 64 dimensions instead of 1 head of 512 dimensions? Parameters
 
 Causal masking zeros out the upper triangle (roughly half the attention matrix). Do we save computation, or just ensure correctness?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **In your implementation: NO computation saved**
@@ -842,7 +842,7 @@ scores = scores + adder_mask_tensor  # Masking happens after
 - Sparse attention (BigBird, Longformer): Actually skips computation for sparse patterns
 
 **Memory could be saved:** Store only lower triangle (n²/2 elements), but requires custom indexing
-```
+````
 
 **Q5: Gradient Memory**
 

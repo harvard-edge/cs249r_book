@@ -732,7 +732,7 @@ Your training profile shows: Forward pass 80ms, Loss computation 120ms, Backward
 
 Your model outputs logits `[50, 100, 150]`. Without the log-sum-exp trick, what happens when you compute softmax? With the trick, what values are actually computed?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Without the trick (naive softmax):**
@@ -756,13 +756,13 @@ log_softmax = shifted - log_sum_exp = [-100, -50, 0]
 **Result**: Valid log-probabilities, stable training.
 
 **Key insight**: Subtracting max makes largest value 0, so `exp(0) = 1.0` is always safe. Smaller values underflow to 0, but that's fine - they contribute negligibly anyway. This is why **you must use log-sum-exp for any softmax computation**.
-```
+````
 
 **Q4: Loss Function Selection - Classification Problem**
 
 You're building a medical diagnosis system with 5 disease categories. Should you use BinaryCrossEntropyLoss or CrossEntropyLoss? What if the categories aren't mutually exclusive (patient can have multiple diseases)?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Case 1: Mutually exclusive diseases** (patient has exactly one)
@@ -789,13 +789,13 @@ loss = BinaryCrossEntropyLoss()(probs, targets)
 ```
 
 **Critical medical consideration**: Multi-label is more realistic - patients often have comorbidities!
-```
+````
 
 **Q5: Batch Size Impact - Memory and Gradients**
 
 You train with batch size 32, using 4GB GPU memory. You want to increase to batch size 128. Will memory usage be 16GB? What happens to the loss value and gradient quality?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Memory usage**: Yes, approximately **16GB** (4× increase)
@@ -828,7 +828,7 @@ optimizer.step()  # Update once with accumulated gradients (4×32 = 128 effectiv
 ```
 
 This gives you the gradient quality of batch 128 with only the memory cost of batch 32!
-```
+````
 
 ## Further Reading
 

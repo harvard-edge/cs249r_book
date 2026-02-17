@@ -871,7 +871,7 @@ This is why you can't arbitrarily increase embedding dimensions. Each doubling d
 
 You trained a model with sinusoidal positional encoding and `max_seq_len=512`. Can you process sequences of length 1024 at inference time? What about with learned positional encoding?
 
-```{admonition} Answer
+````{admonition} Answer
 :class: dropdown
 
 **Sinusoidal PE: Yes** - can extrapolate to length 1024 (or any length)
@@ -889,7 +889,7 @@ Learned PE creates a fixed embedding table of shape `(max_seq_len, embed_dim)`. 
 - Truncate sequences to 512 tokens
 
 This is why many production models use sinusoidal or relative positional encodings that can handle variable lengths.
-```
+````
 
 ## Further Reading
 
