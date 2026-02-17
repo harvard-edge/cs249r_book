@@ -1,23 +1,15 @@
 import * as vscode from 'vscode';
 import { CommandRunRecord } from '../types';
+import { log } from './tito';
 
 const TERMINAL_NAME = 'TinyTorch';
-const OUTPUT_CHANNEL_NAME = 'TinyTorch';
 const STATE_HISTORY_KEY = 'tinytorch.commandHistory';
 const MAX_HISTORY = 30;
 
 let extensionContext: vscode.ExtensionContext | undefined;
-let outputChannel: vscode.OutputChannel | undefined;
 const commandRuns: CommandRunRecord[] = [];
 const commandRunsEmitter = new vscode.EventEmitter<void>();
 export const onCommandRunsChanged = commandRunsEmitter.event;
-
-function getOutputChannel(): vscode.OutputChannel {
-  if (!outputChannel) {
-    outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
-  }
-  return outputChannel;
-}
 
 function getOrCreateTerminal(cwd: string): vscode.Terminal {
   let terminal = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
@@ -35,6 +27,35 @@ export function initializeRunManager(context: vscode.ExtensionContext): void {
     commandRuns.splice(0, commandRuns.length, ...saved.slice(0, MAX_HISTORY));
   }
   context.subscriptions.push(commandRunsEmitter);
+
+  // Track terminal close events to mark running commands as failed
+  context.subscriptions.push(
+    vscode.window.onDidCloseTerminal(closed => {
+      if (closed.name !== TERMINAL_NAME) { return; }
+      const exitCode = closed.exitStatus?.code;
+      const running = commandRuns.find(r => r.status === 'started');
+      if (running) {
+        running.status = exitCode === 0 ? 'succeeded' : 'failed';
+        persist();
+        commandRunsEmitter.fire();
+      }
+    }),
+  );
+
+  // Track shell execution completion for exit code tracking
+  context.subscriptions.push(
+    vscode.window.onDidEndTerminalShellExecution(event => {
+      if (event.terminal.name !== TERMINAL_NAME) { return; }
+      const exitCode = event.exitCode;
+      const running = commandRuns.find(r => r.status === 'started');
+      if (running) {
+        running.status = exitCode === 0 ? 'succeeded' : 'failed';
+        log(`${running.label}: ${running.status} (exit code ${exitCode})`);
+        persist();
+        commandRunsEmitter.fire();
+      }
+    }),
+  );
 }
 
 function persist(): void {
@@ -65,9 +86,7 @@ export function runInTerminal(command: string, cwd: string, label: string): void
   terminal.sendText(`cd "${cwd}" && ${command}`);
 
   recordStart(command, cwd, label);
-  const channel = getOutputChannel();
-  channel.appendLine(`[${new Date().toLocaleTimeString()}] ${label}`);
-  channel.appendLine(`  $ ${command}`);
+  log(`${label}: $ ${command}`);
 }
 
 /** Get recent command runs for the history view */

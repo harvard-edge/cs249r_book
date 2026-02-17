@@ -1,8 +1,25 @@
 import * as vscode from 'vscode';
-import { execSync } from 'child_process';
+import { callTitoJson, log, titoTerminalCommand } from '../utils/tito';
 import { InfoTreeItem, ActionTreeItem } from '../models/treeItems';
 
 type TreeNode = InfoTreeItem | ActionTreeItem;
+
+/** System info returned by `tito system info --json` */
+interface SystemInfo {
+  python_version: string;
+  tinytorch_version: string;
+  numpy_version: string;
+  venv_active: boolean;
+  platform: string;
+}
+
+const UNKNOWN_INFO: SystemInfo = {
+  python_version: 'error',
+  tinytorch_version: 'error',
+  numpy_version: 'error',
+  venv_active: false,
+  platform: 'error',
+};
 
 export class InfoTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private _onDidChange = new vscode.EventEmitter<TreeNode | undefined>();
@@ -26,54 +43,48 @@ export class InfoTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     if (element) { return []; }
 
     const items: TreeNode[] = [];
+    const info = this.getSystemInfo();
+    const isError = info.python_version === 'error';
 
-    // Environment info
-    const pythonVersion = this.runQuiet('python3 --version');
-    items.push(new InfoTreeItem('Python', pythonVersion.replace('Python ', ''), 'symbol-misc'));
-
-    const tinyTorchVersion = this.readVersion();
-    items.push(new InfoTreeItem('TinyTorch', tinyTorchVersion, 'flame'));
-
-    const numpyVersion = this.runQuiet('python3 -c "import numpy; print(numpy.__version__)"');
-    items.push(new InfoTreeItem('NumPy', numpyVersion || 'not installed', 'symbol-array'));
-
-    const inVenv = this.runQuiet('python3 -c "import sys; print(sys.prefix != sys.base_prefix)"');
-    const venvStatus = inVenv.trim() === 'True' ? 'active' : 'not active';
-    items.push(new InfoTreeItem('Virtual Env', venvStatus, venvStatus === 'active' ? 'pass' : 'warning'));
+    if (isError) {
+      items.push(new InfoTreeItem('Tito CLI unavailable', 'check output', 'error'));
+    } else {
+      items.push(new InfoTreeItem('Python', info.python_version, 'symbol-misc'));
+      items.push(new InfoTreeItem('TinyTorch', info.tinytorch_version, 'flame'));
+      items.push(new InfoTreeItem('NumPy', info.numpy_version, 'symbol-array'));
+      items.push(new InfoTreeItem(
+        'Virtual Env',
+        info.venv_active ? 'active' : 'not active',
+        info.venv_active ? 'pass' : 'warning',
+      ));
+    }
 
     // Separator (empty label)
     items.push(new InfoTreeItem(''));
 
     // Actions
-    items.push(new ActionTreeItem('Run Health Check', 'tinytorch.runAction', ['python3 -m tito.main system health', 'Health Check'], 'heart'));
-    items.push(new ActionTreeItem('Run Setup', 'tinytorch.runAction', ['python3 -m tito.main setup', 'Setup'], 'tools'));
+    items.push(new ActionTreeItem('Open Notebook', 'tinytorch.openNotebook', [], 'notebook'));
+    items.push(new ActionTreeItem('Run Health Check', 'tinytorch.runAction', [titoTerminalCommand('system health'), 'Health Check'], 'heart'));
+    items.push(new ActionTreeItem('Run Setup', 'tinytorch.runAction', [titoTerminalCommand('setup'), 'Setup'], 'tools'));
+    items.push(new ActionTreeItem('Clean Artifacts', 'tinytorch.runAction', [titoTerminalCommand('dev clean'), 'Clean'], 'trash'));
 
     return items;
   }
 
-  /** Run a shell command quietly, returning stdout or a fallback */
-  private runQuiet(command: string): string {
-    try {
-      return execSync(command, {
-        cwd: this.projectRoot,
-        timeout: 5000,
-        encoding: 'utf-8',
-      }).trim();
-    } catch {
-      return 'unknown';
-    }
-  }
+  /** Get system info from Tito CLI (single call instead of 4 separate ones) */
+  private getSystemInfo(): SystemInfo {
+    const info = callTitoJson<SystemInfo>(
+      this.projectRoot,
+      'system info --json',
+      'system info',
+      10_000,
+    );
 
-  /** Read version from pyproject.toml */
-  private readVersion(): string {
-    try {
-      const fs = require('fs');
-      const path = require('path');
-      const content = fs.readFileSync(path.join(this.projectRoot, 'pyproject.toml'), 'utf-8');
-      const match = content.match(/version\s*=\s*"([^"]+)"/);
-      return match ? match[1] : 'unknown';
-    } catch {
-      return 'unknown';
+    if (!info) {
+      log('System info unavailable — Tito CLI may not be installed.');
+      return UNKNOWN_INFO;
     }
+
+    return info;
   }
 }

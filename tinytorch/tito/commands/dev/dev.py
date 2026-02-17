@@ -11,6 +11,8 @@ from rich.panel import Panel
 from ..base import BaseCommand
 from .test import DevTestCommand
 from .export import DevExportCommand
+from .build import DevBuildCommand
+from .clean import DevCleanCommand
 
 
 class DevCommand(BaseCommand):
@@ -22,7 +24,7 @@ class DevCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Developer tools: test, export"
+        return "Developer tools: test, export, build, clean"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         subparsers = parser.add_subparsers(
@@ -47,6 +49,22 @@ class DevCommand(BaseCommand):
         export_cmd = DevExportCommand(self.config)
         export_cmd.add_arguments(export_parser)
 
+        # Build subcommand (site, PDF, paper)
+        build_parser = subparsers.add_parser(
+            'build',
+            help='Build site, PDF, or paper'
+        )
+        build_cmd = DevBuildCommand(self.config)
+        build_cmd.add_arguments(build_parser)
+
+        # Clean subcommand (remove build artifacts)
+        clean_parser = subparsers.add_parser(
+            'clean',
+            help='Clean build artifacts'
+        )
+        clean_cmd = DevCleanCommand(self.config)
+        clean_cmd.add_arguments(clean_parser)
+
     def run(self, args: Namespace) -> int:
         console = self.console
 
@@ -69,6 +87,14 @@ class DevCommand(BaseCommand):
                 "  [dim]tito dev export --all[/dim]       Export all modules\n"
                 "  [dim]tito dev export 01[/dim]          Export specific module\n"
                 "  [bold red]⚠️  This OVERWRITES student notebooks![/bold red]\n\n"
+                "[bold cyan]Build (Site & Paper):[/bold cyan]\n"
+                "  [dim]tito dev build html[/dim]         Build HTML site\n"
+                "  [dim]tito dev build serve[/dim]        Build and serve locally\n"
+                "  [dim]tito dev build pdf[/dim]          Build PDF course guide\n"
+                "  [dim]tito dev build paper[/dim]        Build research paper\n\n"
+                "[bold cyan]Clean:[/bold cyan]\n"
+                "  [dim]tito dev clean[/dim]              Clean all generated files\n"
+                "  [dim]tito dev clean site[/dim]         Clean site build artifacts\n\n"
                 "[bold cyan]CI/CD Integration:[/bold cyan]\n"
                 "  [dim]tito dev test --ci[/dim]          JSON output for automation",
                 title="🛠️ Developer Tools",
@@ -82,6 +108,12 @@ class DevCommand(BaseCommand):
             return cmd.run(args)
         elif args.dev_command == 'export':
             cmd = DevExportCommand(self.config)
+            return cmd.run(args)
+        elif args.dev_command == 'build':
+            cmd = DevBuildCommand(self.config)
+            return cmd.run(args)
+        elif args.dev_command == 'clean':
+            cmd = DevCleanCommand(self.config)
             return cmd.run(args)
         else:
             console.print(Panel(

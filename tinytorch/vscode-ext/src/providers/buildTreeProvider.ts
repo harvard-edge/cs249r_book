@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { CategoryTreeItem, ActionTreeItem } from '../models/treeItems';
+import { titoTerminalCommand } from '../utils/tito';
+import { BUILD_OUTPUTS } from '../commands/buildCommands';
 
 type TreeNode = CategoryTreeItem | ActionTreeItem;
 
@@ -17,7 +19,6 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<TreeNode> {
         new CategoryTreeItem('Site (HTML)', 'site', 'globe'),
         new CategoryTreeItem('PDF Course Guide', 'pdf', 'file-pdf'),
         new CategoryTreeItem('Research Paper', 'paper', 'book'),
-        new CategoryTreeItem('Utilities', 'utilities', 'tools'),
       ];
     }
 
@@ -25,29 +26,22 @@ export class BuildTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       switch (element.categoryId) {
         case 'site':
           return [
-            new ActionTreeItem('Build HTML', 'tinytorch.runSiteAction', ['cd site && make html', 'Build HTML'], 'globe'),
-            new ActionTreeItem('Build & Serve (localhost:8000)', 'tinytorch.runSiteAction', ['cd site && make serve', 'Serve Site'], 'play'),
+            new ActionTreeItem('Build HTML', 'tinytorch.runSiteAction', [titoTerminalCommand('dev build html'), 'Build HTML'], 'globe'),
+            new ActionTreeItem('Build & Serve (localhost:8000)', 'tinytorch.runSiteAction', [titoTerminalCommand('dev build serve'), 'Serve Site'], 'play'),
             new ActionTreeItem('Open in Browser', 'tinytorch.openSiteInBrowser', [], 'link-external'),
-            new ActionTreeItem('Clean Build', 'tinytorch.runSiteAction', ['cd site && make clean', 'Clean Site'], 'trash'),
+            new ActionTreeItem('Clean Build', 'tinytorch.runSiteAction', [titoTerminalCommand('dev clean site'), 'Clean Site'], 'trash'),
           ];
 
         case 'pdf':
           return [
-            new ActionTreeItem('Build PDF', 'tinytorch.runSiteAction', ['cd site && make pdf', 'Build PDF'], 'file-pdf'),
-            new ActionTreeItem('Open PDF', 'tinytorch.openPdf', ['site/_build/latex/tinytorch-course.pdf'], 'eye'),
+            new ActionTreeItem('Build PDF', 'tinytorch.runSiteAction', [titoTerminalCommand('dev build pdf'), 'Build PDF'], 'file-pdf'),
+            new ActionTreeItem('Open PDF', 'tinytorch.openPdf', [BUILD_OUTPUTS.coursePdf], 'eye'),
           ];
 
         case 'paper':
           return [
-            new ActionTreeItem('Build Paper (Full)', 'tinytorch.runSiteAction', ['cd site && make paper', 'Build Paper'], 'file-pdf'),
-            new ActionTreeItem('Build Paper (Quick)', 'tinytorch.runPaperAction', ['cd paper && make quick', 'Paper Quick'], 'zap'),
-            new ActionTreeItem('Open Paper PDF', 'tinytorch.openPdf', ['paper/paper.pdf'], 'eye'),
-          ];
-
-        case 'utilities':
-          return [
-            new ActionTreeItem('Health Check', 'tinytorch.runAction', ['python3 -m tito.main system health', 'Health Check'], 'heart'),
-            new ActionTreeItem('Clean Artifacts', 'tinytorch.runAction', ['make clean', 'Clean'], 'trash'),
+            new ActionTreeItem('Build Paper', 'tinytorch.runSiteAction', [titoTerminalCommand('dev build paper'), 'Build Paper'], 'file-pdf'),
+            new ActionTreeItem('Open Paper PDF', 'tinytorch.openPdf', [BUILD_OUTPUTS.paperPdf], 'eye'),
           ];
       }
     }
