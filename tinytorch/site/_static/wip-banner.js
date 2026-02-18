@@ -4,8 +4,8 @@
  */
 
 // ── Release info (auto-updated by CI on publish) ──────────────
-const TINYTORCH_VERSION = '0.1.8';
-const TINYTORCH_RELEASE_DATE = 'Feb 7, 2026';
+const TINYTORCH_VERSION = '0.1.9';
+const TINYTORCH_RELEASE_DATE = 'Feb 18, 2026';
 // ───────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', function() {

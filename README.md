@@ -467,6 +467,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
     </tr>
     <tr>
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/harishb00a"><img src="https://avatars.githubusercontent.com/harishb00a?v=4?s=50" width="50px;" alt="harishb00a"/><br /><sub><b>harishb00a</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=50" width="50px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>

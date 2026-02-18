@@ -290,6 +290,7 @@ Thanks to these wonderful people who helped improve TinyTorch!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/lalalostcode"><img src="https://avatars.githubusercontent.com/u/149884766?v=4?v=4?s=80" width="80px;" alt="Ilham Rafiqin"/><br /><sub><b>Ilham Rafiqin</b></sub></a><br />🪲</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/oscarf189"><img src="https://avatars.githubusercontent.com/u/28113740?v=4?v=4?s=80" width="80px;" alt="Oscar Flores"/><br /><sub><b>Oscar Flores</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/harishb00a"><img src="https://avatars.githubusercontent.com/harishb00a?v=4?s=80" width="80px;" alt="harishb00a"/><br /><sub><b>harishb00a</b></sub></a><br />✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=80" width="80px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
