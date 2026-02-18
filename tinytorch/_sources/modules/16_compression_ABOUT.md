@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 16: Compression
 
 :::{admonition} Module Info
@@ -30,7 +36,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F16_compression%2F16_compression.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F16_compression%2Fcompression.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -494,7 +500,20 @@ Result: Keep only weights >= 0.087 (top 10%)
 
 The critical insight is that weight distributions in trained networks are heavily skewed toward zero. Most weights contribute minimally, so removing them preserves the essential computation while dramatically reducing storage and compute.
 
-The memory impact is immediate. A model with 10 million parameters at 90% sparsity has only 1 million active weights. With sparse storage formats (like scipy's CSR matrix), this translates directly to 90% memory reduction. The compute savings come from skipping zero multiplications, though realizing this speedup requires sparse computation libraries.
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Pruning fundamentals: 10M parameter model at 90% sparsity
+prune_total = 10_000_000
+prune_sparsity = 0.9
+prune_active = int(prune_total * (1 - prune_sparsity))
+glue("prune_total", f"{prune_total / 1_000_000:.0f} million")
+glue("prune_active", f"{prune_active / 1_000_000:.0f} million")
+glue("prune_pct", f"{prune_sparsity * 100:.0f}%")
+```
+
+The memory impact is immediate. A model with {glue:text}`prune_total` parameters at {glue:text}`prune_pct` sparsity has only {glue:text}`prune_active` active weights. With sparse storage formats (like scipy's CSR matrix), this translates directly to 90% memory reduction. The compute savings come from skipping zero multiplications, though realizing this speedup requires sparse computation libraries.
 
 ### Structured vs Unstructured Pruning
 
@@ -602,9 +621,48 @@ The combined loss balances two objectives. The soft loss (with `alpha=0.7`) teac
 
 ### Low-Rank Approximation Theory
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Low-rank example 1: (512, 256) matrix with rank_ratio=0.5
+lr1_m, lr1_n = 512, 256
+lr1_original = lr1_m * lr1_n
+lr1_rank_ratio = 0.5
+lr1_k = int(lr1_rank_ratio * min(lr1_m, lr1_n))
+lr1_compressed = (lr1_m * lr1_k) + lr1_k + (lr1_k * lr1_n)
+lr1_ratio = lr1_original / lr1_compressed
+lr1_reduction_pct = (1 - lr1_compressed / lr1_original) * 100
+glue("lr1_original", f"{lr1_original:,}")
+glue("lr1_k", f"{lr1_k}")
+glue("lr1_u", f"{lr1_m * lr1_k:,}")
+glue("lr1_s", f"{lr1_k:,}")
+glue("lr1_v", f"{lr1_k * lr1_n:,}")
+glue("lr1_compressed", f"{lr1_compressed:,}")
+glue("lr1_ratio", f"{lr1_ratio:.2f}x")
+glue("lr1_reduction_pct", f"{lr1_reduction_pct:.0f}%")
+
+# Low-rank example 2: (1024, 1024) matrix with rank_ratio=0.1
+lr2_m, lr2_n = 1024, 1024
+lr2_original = lr2_m * lr2_n
+lr2_rank_ratio = 0.1
+lr2_k = int(lr2_rank_ratio * min(lr2_m, lr2_n))
+lr2_compressed = (lr2_m * lr2_k) + lr2_k + (lr2_k * lr2_n)
+lr2_ratio = lr2_original / lr2_compressed
+lr2_reduction_pct = (1 - lr2_compressed / lr2_original) * 100
+glue("lr2_original", f"{lr2_original:,}")
+glue("lr2_k", f"{lr2_k}")
+glue("lr2_u", f"{lr2_m * lr2_k:,}")
+glue("lr2_s", f"{lr2_k:,}")
+glue("lr2_v", f"{lr2_k * lr2_n:,}")
+glue("lr2_compressed", f"{lr2_compressed:,}")
+glue("lr2_ratio", f"{lr2_ratio:.1f}x")
+glue("lr2_reduction_pct", f"{lr2_reduction_pct:.0f}%")
+```
+
 Weight matrices in neural networks often contain redundancy that can be captured through low-rank approximations. Singular Value Decomposition (SVD) provides the mathematically optimal way to approximate a matrix with fewer parameters while minimizing reconstruction error.
 
-The core idea is matrix factorization. Instead of storing a full (512, 256) weight matrix with 131,072 parameters, you decompose it into smaller factors that capture the essential structure:
+The core idea is matrix factorization. Instead of storing a full (512, 256) weight matrix with {glue:text}`lr1_original` parameters, you decompose it into smaller factors that capture the essential structure:
 
 ```python
 def low_rank_approximate(weight_matrix, rank_ratio=0.5):
@@ -629,14 +687,14 @@ def low_rank_approximate(weight_matrix, rank_ratio=0.5):
 SVD identifies the most important "directions" in the weight matrix through singular values. Larger singular values capture more variance, so keeping only the top k values preserves most of the matrix's information while dramatically reducing parameters.
 
 For a (512, 256) matrix with rank_ratio=0.5:
-- Original: 512 × 256 = 131,072 parameters
-- Compressed: (512 × 128) + 128 + (128 × 256) = 98,432 parameters
-- Compression ratio: 1.33x (25% reduction)
+- Original: 512 × 256 = {glue:text}`lr1_original` parameters
+- Compressed: (512 × {glue:text}`lr1_k`) + {glue:text}`lr1_s` + ({glue:text}`lr1_k` × 256) = {glue:text}`lr1_compressed` parameters
+- Compression ratio: {glue:text}`lr1_ratio` ({glue:text}`lr1_reduction_pct` reduction)
 
 The compression ratio improves with larger matrices. For a (1024, 1024) matrix at rank_ratio=0.1:
-- Original: 1,048,576 parameters
-- Compressed: (1024 × 102) + 102 + (102 × 1024) = 209,046 parameters
-- Compression ratio: 5.0x (80% reduction)
+- Original: {glue:text}`lr2_original` parameters
+- Compressed: (1024 × {glue:text}`lr2_k`) + {glue:text}`lr2_s` + ({glue:text}`lr2_k` × 1024) = {glue:text}`lr2_compressed` parameters
+- Compression ratio: {glue:text}`lr2_ratio` ({glue:text}`lr2_reduction_pct` reduction)
 
 Low-rank approximation trades accuracy for size. The reconstruction error depends on the discarded singular values. Choosing the right rank_ratio balances compression and accuracy preservation.
 
@@ -731,6 +789,18 @@ The core algorithms for magnitude thresholding, L2 norm channel ranking, and kno
 
 ### Why Compression Matters at Scale
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Deployment example: 100MB model pruned to 90% sparsity
+deploy_model_mb = 100
+deploy_sparsity = 0.9
+deploy_sparse_mb = deploy_model_mb * (1 - deploy_sparsity)
+glue("deploy_model_mb", f"{deploy_model_mb} MB")
+glue("deploy_sparse_mb", f"{deploy_sparse_mb:.0f} MB")
+```
+
 To appreciate compression's impact, consider real deployment constraints:
 
 - **Mobile apps**: Models must fit in <10MB for reasonable download sizes and <50MB runtime memory
@@ -739,9 +809,65 @@ To appreciate compression's impact, consider real deployment constraints:
 - **Latency targets**: Self-driving cars need <100ms inference time; compression enables real-time decisions
 - **Energy efficiency**: Smartphones have ~3000mAh batteries; model size directly impacts battery life
 
-A 100MB model pruned to 90% sparsity becomes 10MB with sparse storage, fitting mobile constraints. The same model distilled to a 1MB student runs 10x faster, meeting latency requirements. These aren't theoretical gains; they're necessary for deployment.
+A {glue:text}`deploy_model_mb` model pruned to 90% sparsity becomes {glue:text}`deploy_sparse_mb` with sparse storage, fitting mobile constraints. The same model distilled to a 1MB student runs 10x faster, meeting latency requirements. These aren't theoretical gains; they're necessary for deployment.
 
 ## Check Your Understanding
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Sparsity calculation for (512, 256) layer at 80% pruning
+q1_rows, q1_cols = 512, 256
+q1_total = q1_rows * q1_cols
+q1_sparsity = 0.8
+q1_active = int(q1_total * (1 - q1_sparsity))
+q1_zeroed = int(q1_total * q1_sparsity)
+glue("q1_total", f"{q1_total:,}")
+glue("q1_active", f"{q1_active:,}")
+glue("q1_zeroed", f"{q1_zeroed:,}")
+
+# Q2: Sequential pruning (magnitude 90% then structured 50%)
+q2_after_mag = 0.10  # 10% active after 90% magnitude
+q2_after_struct = 0.50  # 50% channels remain
+q2_final_active_pct = q2_after_mag * q2_after_struct * 100
+q2_final_sparse_pct = 100 - q2_final_active_pct
+glue("q2_final_active", f"{q2_final_active_pct:.0f}%")
+glue("q2_final_sparse", f"{q2_final_sparse_pct:.0f}%")
+
+# Q3: Knowledge distillation efficiency
+q3_teacher_params = 100_000_000
+q3_student_params = 10_000_000
+q3_teacher_acc = 95
+q3_student_acc = 92
+q3_teacher_ms = 500
+q3_student_ms = 50
+q3_compression = q3_teacher_params / q3_student_params
+q3_speedup = q3_teacher_ms / q3_student_ms
+q3_acc_loss = q3_teacher_acc - q3_student_acc
+glue("q3_compression", f"{q3_compression:.0f}x")
+glue("q3_speedup", f"{q3_speedup:.0f}x")
+glue("q3_acc_loss", f"{q3_acc_loss:.0f}%")
+
+# Q4: Low-rank decomposition for (1000, 1000) with rank=100
+q4_m, q4_n = 1000, 1000
+q4_original = q4_m * q4_n
+q4_rank = 100
+q4_u_params = q4_m * q4_rank
+q4_s_params = q4_rank
+q4_v_params = q4_rank * q4_n
+q4_compressed = q4_u_params + q4_s_params + q4_v_params
+q4_ratio = q4_original / q4_compressed
+q4_savings_bytes = (q4_original - q4_compressed) * 4
+q4_savings_mb = q4_savings_bytes / 1024**2
+glue("q4_original", f"{q4_original:,}")
+glue("q4_u_params", f"{q4_u_params:,}")
+glue("q4_s_params", f"{q4_s_params:,}")
+glue("q4_v_params", f"{q4_v_params:,}")
+glue("q4_compressed", f"{q4_compressed:,}")
+glue("q4_ratio", f"~{q4_ratio:.0f}x")
+glue("q4_savings_mb", f"{q4_savings_mb:.1f} MB")
+```
 
 Test yourself with these systems thinking questions. They're designed to build intuition for compression trade-offs you'll encounter in production.
 
@@ -752,11 +878,11 @@ A Linear layer with shape (512, 256) undergoes 80% magnitude pruning. How many w
 ```{admonition} Answer
 :class: dropdown
 
-Total parameters: 512 × 256 = **131,072**
+Total parameters: 512 × 256 = **{glue:text}`q1_total`**
 
-After 80% pruning: 20% remain active = 131,072 × 0.2 = **26,214 active weights**
+After 80% pruning: 20% remain active = {glue:text}`q1_total` × 0.2 = **{glue:text}`q1_active` active weights**
 
-Zeroed weights: 131,072 × 0.8 = **104,858 zeros**
+Zeroed weights: {glue:text}`q1_total` × 0.8 = **{glue:text}`q1_zeroed` zeros**
 
 This is why sparsity creates memory savings - 80% of parameters are literally zero!
 ```
@@ -773,7 +899,7 @@ You apply magnitude pruning (90% sparsity) and structured pruning (50% channels)
 Approximation:
 - After magnitude: 90% sparse → 10% active weights
 - Structured removes 50% of channels → removes 50% of rows/columns
-- Final active weights ≈ 10% × 50% = **5% active → 95% sparse**
+- Final active weights ≈ 10% × 50% = **{glue:text}`q2_final_active` active → {glue:text}`q2_final_sparse` sparse**
 
 Actual result depends on which channels structured pruning removes. If it removes already-sparse channels, sparsity increases less.
 ```
@@ -788,15 +914,15 @@ What's the compression ratio and speedup?
 ```{admonition} Answer
 :class: dropdown
 
-**Compression ratio**: 100M / 10M = **10x smaller**
+**Compression ratio**: 100M / 10M = **{glue:text}`q3_compression` smaller**
 
-**Speedup**: 500ms / 50ms = **10x faster**
+**Speedup**: 500ms / 50ms = **{glue:text}`q3_speedup` faster**
 
-**Accuracy loss**: 95% - 92% = **3% degradation**
+**Accuracy loss**: 95% - 92% = **{glue:text}`q3_acc_loss` degradation**
 
 Why speedup matches compression: Student has 10x fewer parameters, so 10x fewer operations. Linear scaling!
 
-Is this good? **Yes** - 10x compression with only 3% accuracy loss is excellent for mobile deployment.
+Is this good? **Yes** - {glue:text}`q3_compression` compression with only {glue:text}`q3_acc_loss` accuracy loss is excellent for mobile deployment.
 ```
 
 **Q4: Low-Rank Decomposition Math**
@@ -806,18 +932,18 @@ A (1000, 1000) weight matrix gets low-rank approximation with rank=100. Calculat
 ```{admonition} Answer
 :class: dropdown
 
-Original: 1000 × 1000 = **1,000,000 parameters**
+Original: 1000 × 1000 = **{glue:text}`q4_original` parameters**
 
 SVD decomposition: W ≈ U @ S @ V
-- U: (1000, 100) = 100,000 parameters
-- S: (100,) = 100 parameters (diagonal)
-- V: (100, 1000) = 100,000 parameters
+- U: (1000, 100) = {glue:text}`q4_u_params` parameters
+- S: (100,) = {glue:text}`q4_s_params` parameters (diagonal)
+- V: (100, 1000) = {glue:text}`q4_v_params` parameters
 
-Compressed: 100,000 + 100 + 100,000 = **200,100 parameters**
+Compressed: {glue:text}`q4_u_params` + {glue:text}`q4_s_params` + {glue:text}`q4_v_params` = **{glue:text}`q4_compressed` parameters**
 
-Compression ratio: 1,000,000 / 200,100 = **~5x reduction**
+Compression ratio: {glue:text}`q4_original` / {glue:text}`q4_compressed` = **{glue:text}`q4_ratio` reduction**
 
-Memory savings: (1,000,000 - 200,100) × 4 bytes = **3.2 MB saved** (float32)
+Memory savings: ({glue:text}`q4_original` - {glue:text}`q4_compressed`) × 4 bytes = **{glue:text}`q4_savings_mb` saved** (float32)
 ```
 
 **Q5: Structured vs Unstructured Trade-offs**
@@ -846,7 +972,7 @@ For students who want to understand the academic foundations and explore compres
 
 - **Learning both Weights and Connections for Efficient Neural Networks** - Han et al. (2015). Introduced magnitude-based pruning and demonstrated 90% sparsity with minimal accuracy loss. Foundation for modern pruning research. [arXiv:1506.02626](https://arxiv.org/abs/1506.02626)
 
-- **The Lottery Ticket Hypothesis** - Frankle & Carbin (2019). Showed that dense networks contain sparse subnetworks trainable to full accuracy from initialization. Changed how we think about pruning and network over-parameterization. [arXiv:1803.03635](https://arxiv.org/abs/1803.03635)
+- **The Lottery Ticket Hypothesis** - Frankle & Carlin (2019). Showed that dense networks contain sparse subnetworks trainable to full accuracy from initialization. Changed how we think about pruning and network over-parameterization. [arXiv:1803.03635](https://arxiv.org/abs/1803.03635)
 
 - **Distilling the Knowledge in a Neural Network** - Hinton et al. (2015). Introduced knowledge distillation with temperature scaling. Enables training compact models that match large model accuracy. [arXiv:1503.02531](https://arxiv.org/abs/1503.02531)
 
@@ -862,7 +988,7 @@ For students who want to understand the academic foundations and explore compres
 
 ```{seealso} Coming Up: Module 17 - Acceleration
 
-Implement caching and memoization strategies to eliminate redundant computations. You'll cache repeated forward passes, attention patterns, and embedding lookups for dramatic speedups in production inference.
+Implement hardware-aware optimization techniques including vectorized matrix operations, fused kernels, and cache-friendly tiling. You'll combine multiple operations to reduce memory bandwidth bottlenecks and maximize hardware utilization.
 ```
 
 **Preview - How Your Compression Gets Used in Future Modules:**
@@ -877,7 +1003,7 @@ Implement caching and memoization strategies to eliminate redundant computations
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/16_compression/16_compression.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/16_compression/compression.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/16_compression/16_compression.py)** - Browse the implementation code
 ```
 

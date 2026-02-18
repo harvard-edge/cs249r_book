@@ -15,8 +15,8 @@
 **First step for ANY issue**:
 
 ```bash
-cd TinyTorch
-source activate.sh
+cd tinytorch
+source .venv/bin/activate
 tito system health
 ```
 
@@ -51,11 +51,11 @@ $ tito module start 01
 **Solution**:
 ```bash
 # 1. Activate environment
-cd TinyTorch
-source activate.sh
+cd tinytorch
+source .venv/bin/activate
 
 # 2. Verify activation
-which python # Should show TinyTorch/venv/bin/python
+which python # Should show tinytorch/.venv/bin/python
 
 # 3. Re-install TinyTorch in development mode
 pip install -e .
@@ -64,7 +64,7 @@ pip install -e .
 tito --help
 ```
 
-**Prevention**: Always run `source activate.sh` before working.
+**Prevention**: Always run `source .venv/bin/activate` before working.
 
 </div>
 
@@ -83,10 +83,10 @@ ModuleNotFoundError: No module named 'tinytorch'
 **Solution**:
 ```bash
 # 1. Verify you're in the right directory
-pwd # Should end with /TinyTorch
+pwd # Should end with /tinytorch
 
 # 2. Activate environment
-source activate.sh
+source .venv/bin/activate
 
 # 3. Install in development mode
 pip install -e .
@@ -109,7 +109,7 @@ python -c "import tinytorch; print(tinytorch.__file__)"
 
 **Symptom**:
 ```bash
-$ source activate.sh
+$ source .venv/bin/activate
 # No (venv) prefix appears, or wrong Python version
 ```
 
@@ -118,17 +118,17 @@ $ source activate.sh
 **Solution**:
 ```bash
 # 1. Remove old virtual environment
-rm -rf venv/
+rm -rf .venv/
 
 # 2. Re-run setup
-./setup-environment.sh
+tito setup
 
 # 3. Activate
-source activate.sh
+source .venv/bin/activate
 
 # 4. Verify
 python --version # Should be 3.8+
-which pip # Should show TinyTorch/venv/bin/pip
+which pip # Should show tinytorch/.venv/bin/pip
 ```
 
 **Expected**: `(venv)` prefix appears in terminal prompt.
@@ -224,7 +224,7 @@ tito system update
 
 **Step 1: Check environment**:
 ```bash
-source activate.sh
+source .venv/bin/activate
 tito system health
 ```
 
@@ -455,19 +455,19 @@ File → Save File (or Cmd/Ctrl + S)
 
 **Step 2: Check file permissions**:
 ```bash
-ls -la modules/01_tensor/01_tensor.ipynb
+ls -la modules/01_tensor/tensor.ipynb
 # Should be writable (not read-only)
 ```
 
 **Step 3: If read-only, fix permissions**:
 ```bash
-chmod u+w modules/01_tensor/01_tensor.ipynb
+chmod u+w modules/01_tensor/tensor.ipynb
 ```
 
 **Step 4: Verify changes saved**:
 ```bash
 # Check the notebook was updated
-ls -l modules/01_tensor/01_tensor.ipynb
+ls -l modules/01_tensor/tensor.ipynb
 ```
 
 </div>
@@ -772,7 +772,7 @@ ImportError: No module named 'numpy'
 **Solution**:
 ```bash
 # Activate environment
-source activate.sh
+source .venv/bin/activate
 
 # Install dependencies
 pip install numpy jupyter jupyterlab jupytext rich
@@ -877,14 +877,14 @@ top
 
 **Symptom**:
 ```bash
-$ ./setup-environment.sh
+$ tito setup
 Permission denied
 ```
 
 **Solution**:
 ```bash
-chmod +x setup-environment.sh activate.sh
-./setup-environment.sh
+pip install -e .
+tito setup
 ```
 
 </div>
@@ -920,11 +920,11 @@ tito setup
 
 </div>
 
-### Windows: "activate.sh not working"
+### Windows: Virtual Environment Activation
 
 <div style="background: #fff5f5; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #e74c3c; margin: 1.5rem 0;">
 
-**Solution**: Use the correct activation path for Git Bash on Windows:
+**Solution**: Use the correct activation path for your shell on Windows:
 ```bash
 # Git Bash (recommended)
 source .venv/Scripts/activate
@@ -950,7 +950,7 @@ source .venv/Scripts/activate
 **Solution**: Specify Python 3.8+ explicitly:
 ```bash
 python3.8 -m venv venv
-source activate.sh
+source .venv/bin/activate
 python --version # Verify
 ```
 
@@ -1017,7 +1017,7 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 
 1. **Always activate environment first**:
  ```bash
- source activate.sh
+ source .venv/bin/activate
  ```
 
 2. **Run `tito system health` regularly**:
@@ -1053,13 +1053,13 @@ python -c "from tinytorch import Tensor" 2>&1 | less
 
 | Error Message | Quick Fix |
 |--------------|-----------|
-| `tito: command not found` | `source activate.sh` |
+| `tito: command not found` | `source .venv/bin/activate` |
 | `ModuleNotFoundError: tinytorch` | `pip install -e .` |
 | `SyntaxError` in export | Fix Python syntax, test in Jupyter first |
 | `ImportError` in milestone | Re-export required modules |
 | `.tito/progress.json not found` | `tito system health` to recreate |
 | `Jupyter Lab won't start` | `pkill -f jupyter && tito module start XX` |
-| `Permission denied` | `chmod +x setup-environment.sh activate.sh` |
+| `Permission denied` | `pip install -e .` then `tito setup` |
 | `Tests fail` during export | Debug in Jupyter, check test assertions |
 | `Prerequisites not met` | `tito milestone info XX` to see requirements |
 

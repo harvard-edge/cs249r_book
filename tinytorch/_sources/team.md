@@ -288,6 +288,16 @@ TinyTorch is built by a passionate community dedicated to making ML systems educ
     <span class="name">Oscar Flores</span>
     <span class="roles">✍️</span>
   </a>
+  <a href="https://github.com/harishb00a" class="team-member">
+    <img src="https://avatars.githubusercontent.com/harishb00a?v=4&s=160" alt="harishb00a" />
+    <span class="name">harishb00a</span>
+    <span class="roles">✍️</span>
+  </a>
+  <a href="https://github.com/sotoblanco" class="team-member">
+    <img src="https://avatars.githubusercontent.com/u/46135649?v=4" alt="Pastor Soto" />
+    <span class="name">Pastor Soto</span>
+    <span class="roles">✍️</span>
+  </a>
 </div>
 ```
 

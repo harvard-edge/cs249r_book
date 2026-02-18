@@ -9,17 +9,67 @@ const supabase = createClient(SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY);
 export { supabase };
 
 export async function signInWithSocial(provider) {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: provider,
-        options: {
-            redirectTo: window.location.href
+    const isIframe = window.self !== window.top;
+    const basePath = getBasePath();
+    const redirectTo = window.location.origin + basePath + (isIframe ? '/auth_callback.html' : '/index.html');
+
+    if (isIframe) {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+            provider: provider,
+            options: {
+                redirectTo: redirectTo,
+                skipBrowserRedirect: true
+            }
+        });
+        if (error) {
+            console.error('Social login error:', error);
+            alert('Login failed: ' + error.message);
+            return;
         }
-    });
-    if (error) {
-        console.error('Social login error:', error);
-        alert('Login failed: ' + error.message);
+        if (data && data.url) {
+            const width = 600, height = 700;
+            const left = (window.screen.width - width) / 2;
+            const top = (window.screen.height - height) / 2;
+            window.open(data.url, 'tinytorch_auth', `width=${width},height=${height},left=${left},top=${top}`);
+        }
+    } else {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+            provider: provider,
+            options: {
+                redirectTo: redirectTo
+            }
+        });
+        if (error) {
+            console.error('Social login error:', error);
+            alert('Login failed: ' + error.message);
+        }
     }
 }
+
+// Listen for popup auth messages
+window.addEventListener('message', async (event) => {
+    if (event.origin !== window.location.origin) return;
+
+    if (event.data && event.data.type === 'TINY_TORCH_AUTH_SUCCESS') {
+        const session = event.data.session;
+        if (session) {
+            console.log("Auth success message received in iframe, syncing session...");
+            const { error } = await supabase.auth.setSession({
+                access_token: session.access_token,
+                refresh_token: session.refresh_token
+            });
+            if (error) {
+                console.error("Error setting session from popup:", error);
+            } else {
+                // If we are on community page, just close the modal.
+                // onAuthStateChange in app.js will handle the rest.
+                if (window.location.pathname.includes('community.html')) {
+                    closeModal();
+                }
+            }
+        }
+    }
+});
 
 let currentMode = 'signup';
 

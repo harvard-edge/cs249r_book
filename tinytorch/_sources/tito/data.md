@@ -49,9 +49,9 @@ graph LR
 <p style="margin: 0.5rem 0; font-size: 0.95rem; color: #37474f;">What you ACHIEVE (01-06)</p>
 <ul style="margin: 0.5rem 0 0 0; padding-left: 1.5rem; font-size: 0.9rem; color: #546e7a;">
 <li>Perceptron (1958)</li>
+<li>XOR Crisis (1969)</li>
 <li>MLP Revival (1986)</li>
 <li>CNN Revolution (1998)</li>
-<li>AlexNet Era (2012)</li>
 <li>Transformer Era (2017)</li>
 <li>MLPerf (2018)</li>
 </ul>
@@ -170,7 +170,7 @@ Module Progress:
  07 Optimizers
  08 Training
  09 Convolutions
- 10 Normalization
+ 10 Tokenization
  ...
 
 Milestone Achievements:

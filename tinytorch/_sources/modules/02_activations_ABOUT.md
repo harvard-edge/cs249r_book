@@ -1,3 +1,9 @@
+---
+file_format: mystnb
+kernelspec:
+  name: python3
+---
+
 # Module 02: Activations
 
 :::{admonition} Module Info
@@ -30,7 +36,7 @@ Listen to an AI-generated overview.
 
 Run interactively in your browser.
 
-<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F02_activations%2F02_activations.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
+<a href="https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?labpath=tinytorch%2Fmodules%2F02_activations%2Factivations.ipynb" target="_blank" style="display: flex; align-items: center; justify-content: center; width: 100%; height: 54px; margin-top: auto; background: #f97316; color: white; text-align: center; text-decoration: none; border-radius: 27px; font-size: 14px; box-sizing: border-box;">Open in Binder →</a>
 ```
 
 ```{grid-item-card} 📄 View Source
@@ -395,12 +401,12 @@ probabilities = softmax(logits)  # Converts to probability distribution (sums to
 
 To keep this module focused, you will **not** implement:
 
-- Gradient computation (that's Module 06: Autograd - `backward()` methods are stubs for now)
+- Gradient computation (`backward()` methods are stubs for now — automatic differentiation is a later module)
 - Learnable parameters (activations are fixed mathematical functions)
 - Advanced variants (LeakyReLU, ELU, Swish - PyTorch has dozens, you'll build the core five)
 - GPU acceleration (your NumPy implementation runs on CPU)
 
-**You are building the nonlinear transformations.** Automatic differentiation comes in Module 06.
+**You are building the nonlinear transformations.** Automatic differentiation comes later.
 
 ## API Reference
 
@@ -420,7 +426,7 @@ class ActivationName:
         return self.forward(x)
 
     def backward(self, grad: Tensor) -> Tensor:
-        # Stub for Module 06
+        # Stub — autograd adds gradient computation later
         pass
 ```
 
@@ -506,7 +512,7 @@ This simplicity is ReLU's greatest strength. The operation is a single compariso
 
 ReLU creates **sparsity**. When half of your activations are exactly zero, computations become faster (multiplying by zero is free) and models generalize better (sparse representations are less prone to overfitting). In a 1000-neuron layer, ReLU typically activates 300-500 neurons, effectively creating a smaller, specialized network for each input.
 
-The discontinuity at zero is both a feature and a bug. During training (Module 08), you'll discover that ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
+The discontinuity at zero is both a feature and a bug. During training, ReLU's gradient is exactly 1 for positive inputs and exactly 0 for negative inputs. This prevents the vanishing gradient problem that plagued sigmoid-based networks. But it creates a new problem: **dying ReLU**. If a neuron's weights shift such that it always receives negative inputs, it will output zero forever, and the zero gradient means it can never recover.
 
 Despite this limitation, ReLU remains the default choice for hidden layers in CNNs and feedforward networks. Its speed and effectiveness at preventing vanishing gradients make it hard to beat.
 
@@ -582,7 +588,7 @@ exp(x - max) / Σ exp(x - max) = exp(x) / Σ exp(x)
 
 Softmax amplifies differences. If the input is `[1, 2, 3]`, the output is approximately `[0.09, 0.24, 0.67]`. The largest input gets 67% of the probability mass, even though it's only 3× larger than the smallest input. This is because exponentials grow superlinearly. In classification, this is desirable: you want the network to be confident when it's confident.
 
-But softmax's coupling is a gotcha. When you change one input, all outputs change because they're normalized by the same sum. This means the gradient involves a Jacobian matrix, not just element-wise derivatives. You'll see this complexity when you implement `backward()` in Module 06.
+But softmax's coupling is a gotcha. When you change one input, all outputs change because they're normalized by the same sum. This means the gradient involves a Jacobian matrix, not just element-wise derivatives — a complexity you'll encounter when implementing backpropagation.
 
 ### Choosing Activations
 
@@ -633,7 +639,7 @@ Your TinyTorch activations and PyTorch's `torch.nn.functional` activations imple
 | **Backend** | NumPy (Python/C) | C++/CUDA kernels |
 | **Speed** | 1× (CPU baseline) | 10-100× faster (GPU) |
 | **Numerical Stability** | ✓ Max subtraction (Softmax), clipping (Sigmoid) | ✓ Same techniques |
-| **Autograd** | Stubs (Module 06) | Full gradient computation |
+| **Autograd** | Stubs (added later) | Full gradient computation |
 | **Variants** | 5 core activations | 30+ variants (LeakyReLU, PReLU, Mish, etc.) |
 
 ### Code Comparison
@@ -693,15 +699,46 @@ Let's walk through the key similarities and differences:
 Mathematical functions, numerical stability techniques (max subtraction in softmax), and the concept of element-wise transformations. When you debug PyTorch activation issues, you'll understand exactly what's happening because you implemented the same logic.
 ```
 
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Prose: "Why Activations Matter at Scale"
+prose_gelu_ops = 96 * 2
+glue("prose_gelu_ops", f"{prose_gelu_ops:,}")
+
+prose_daily_activations = 1000 * 86400
+glue("prose_daily_activations", f"{prose_daily_activations / 1e6:.0f} million")
+```
+
 ### Why Activations Matter at Scale
 
 To appreciate why activation choice matters, consider the scale of modern ML systems:
 
-- **Large language models**: GPT-3 has 96 transformer layers, each with 2 GELU activations. That's **192 GELU operations per forward pass** on billions of parameters.
+- **Large language models**: GPT-3 has 96 transformer layers, each with 2 GELU activations. That's **{glue:text}`prose_gelu_ops` GELU operations per forward pass** on billions of parameters.
 - **Image classification**: ResNet-50 has 49 convolutional layers, each followed by ReLU. Processing a batch of 256 images at 224×224 resolution means **12 billion ReLU operations** per batch.
-- **Production serving**: A model serving 1000 requests per second performs **86 million activation computations per day**. A 20% speedup from ReLU vs GELU saves hours of compute time.
+- **Production serving**: A model serving 1000 requests per second performs **{glue:text}`prose_daily_activations` activation computations per day**. A 20% speedup from ReLU vs GELU saves hours of compute time.
 
 Activation functions account for **5-15% of total training time** in typical networks (the rest is matrix multiplication). But in transformer models with many layers and small matrix sizes, activations can account for **20-30% of compute time**. This is why GELU vs ReLU is a real trade-off: slower computation but potentially better accuracy.
+
+```{code-cell} python3
+:tags: [remove-input, remove-output]
+from myst_nb import glue
+
+# Q1: Memory calculation
+q1_bytes = 32 * 4096 * 4
+glue("q1_bytes", f"{q1_bytes:,}")
+glue("q1_kb", f"{q1_bytes / 1024:.0f} KB")
+
+q1_100layer_kb = 100 * (q1_bytes / 1024)
+glue("q1_100layer_mb", f"{q1_100layer_kb / 1024:.0f} MB")
+
+# Q4: Sparsity analysis
+q4_total = 128 * 1024
+q4_zeros = q4_total // 2
+glue("q4_total", f"{q4_total:,}")
+glue("q4_zeros", f"≈ {q4_zeros:,}")
+```
 
 ## Check Your Understanding
 
@@ -714,9 +751,9 @@ A batch of 32 samples passes through a hidden layer with 4096 neurons and ReLU a
 ```{admonition} Answer
 :class: dropdown
 
-32 × 4096 × 4 bytes = **524,288 bytes ≈ 512 KB**
+32 × 4096 × 4 bytes = **{glue:text}`q1_bytes` bytes ≈ {glue:text}`q1_kb`**
 
-This is the activation memory for ONE layer. A 100-layer network needs 50 MB just to store activations for one forward pass. This is why activation memory dominates training memory usage (you'll see this in Module 06 when you cache activations for backpropagation).
+This is the activation memory for ONE layer. A 100-layer network needs {glue:text}`q1_100layer_mb` just to store activations for one forward pass. This is why activation memory dominates training memory usage — activations must be cached for backpropagation.
 ```
 
 **Q2: Computational Cost**
@@ -764,8 +801,8 @@ For a standard normal distribution N(0, 1), approximately **50% of values are ne
 
 ReLU zeros all negative values, so approximately **50% of outputs will be exactly zero**.
 
-Total elements: 128 × 1024 = 131,072
-Zeros: ≈ 65,536
+Total elements: 128 × 1024 = {glue:text}`q4_total`
+Zeros: {glue:text}`q4_zeros`
 
 This sparsity has major implications:
 - **Speed**: Multiplying by zero is free, so downstream computations can skip ~50% of operations
@@ -839,7 +876,7 @@ Implement Linear layers that combine your Tensor operations with your activation
 
 ```{tip} Interactive Options
 
-- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/02_activations/02_activations.ipynb)** - Run interactively in browser, no setup required
+- **[Launch Binder](https://mybinder.org/v2/gh/harvard-edge/cs249r_book/main?urlpath=lab/tree/tinytorch/modules/02_activations/activations.ipynb)** - Run interactively in browser, no setup required
 - **[View Source](https://github.com/harvard-edge/cs249r_book/blob/main/tinytorch/src/02_activations/02_activations.py)** - Browse the implementation code
 ```
 
