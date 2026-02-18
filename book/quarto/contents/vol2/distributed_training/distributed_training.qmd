@@ -42,9 +42,9 @@ _Gemini Pro 3 Prompt: A technical illustration of distributed training with mult
 
 ## Purpose {.unnumbered}
 
-_Why does adding more machines to training eventually make it slower rather than faster?_
+_Why does the linear logic of "more hardware = faster training" collapse at the Bisection Bandwidth Wall?_
 
-Distributed training appears simple: split the work across machines and combine the results. But communication costs grow with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware provides no benefit or actively degrades performance. This scaling ceiling is not a bug to be fixed but a fundamental property of distributed systems: coordinating independent machines requires moving data between them, and data movement across networks is orders of magnitude slower than data movement within a chip. The art of distributed training is managing this tension—partitioning work to minimize communication, overlapping communication with computation to hide latency, choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
+Distributed training appears simple: split the work across machines and combine the results. But as the Machine Learning Fleet grows, a new physics emerges. Communication costs scale with the number of machines while computation per machine shrinks, until synchronization overhead dominates and adding hardware actively degrades performance. *When* you train on a single GPU, you optimize for arithmetic intensity; *when* you train on 10,000 GPUs, you optimize for communication intensity. The scaling ceiling is not a bug to be fixed but a fundamental property of the **Reliability Gap** and **Communication-Computation Ratio**: coordinating independent machines requires moving terabytes of state across networks that are orders of magnitude slower than on-chip memory. The art of distributed training is managing this tension—partitioning work to minimize the **Coordination Tax**, overlapping communication with computation to hide latency, and choosing synchronization strategies that balance consistency against throughput. Without this understanding, organizations waste millions on hardware that sits idle waiting for gradients to arrive, or produce models that never converge because stale updates corrupted the optimization.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -52,13 +52,13 @@ Distributed training appears simple: split the work across machines and combine 
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Implement data parallel training using gradient synchronization and AllReduce algorithms to achieve 85-95% parallel efficiency in the linear scaling regime (2-32 GPUs)
-- Apply memory-efficient data parallelism techniques (ZeRO stages, FSDP) to reduce per-GPU memory requirements while quantifying communication trade-offs
-- Design tensor parallelism strategies for transformer layers by partitioning matrix operations and placing AllReduce operations to minimize communication overhead
-- Construct pipeline parallelism schedules with microbatching to reduce bubble overhead, calculating the trade-off between pipeline depth and memory requirements
-- Select synchronization models (BSP, SSP, asynchronous) based on cluster heterogeneity and convergence requirements, quantifying staleness impacts
-- Combine data, tensor, and pipeline parallelism in hybrid configurations for specific model architectures, balancing memory distribution and communication efficiency
-- Measure distributed training efficiency using scaling metrics, communication-computation ratios, and bandwidth utilization to identify bottlenecks
+- Apply the **Law of Distributed Efficiency** to diagnose when a workload is compute-bound, memory-bound, or communication-bound
+- Implement **Data Parallelism** using gradient synchronization and AllReduce to achieve 85-95% efficiency in the linear scaling regime
+- Apply **Memory-Efficient Data Parallelism** (ZeRO, FSDP) to shard optimizer states and parameters, quantifying the communication trade-off
+- Design **Tensor Parallelism** strategies for transformer layers by partitioning matrix operations to exploit high-bandwidth intra-node interconnects
+- Construct **Pipeline Parallelism** schedules with microbatching to minimize bubble overhead and maximize fleet utilization
+- Select **Synchronization Models** (BSP, SSP, Asynchronous) based on the CAP theorem trade-offs for cluster heterogeneity and convergence
+- Architect **Hybrid 3D Parallelism** configurations that combine Data, Tensor, and Pipeline strategies to train **Archetype A** (LLM) models
 
 :::
 
@@ -72,11 +72,19 @@ Distributed training appears simple: split the work across machines and combine 
 # │
 # │ Goal: Provide foundational specs for multi-node scaling analysis.
 # │ Show: GPU memory limits and interconnect bandwidth for distributed clusters.
-# │ How: Centralize A100/H100 specs and GPT-3 parameter counts.
+# │ How: Centralize A100/H100 specs and GPT-3/4 parameter counts.
 # │
 # │ Imports: mlsys.constants, mlsys.formatting
-# │ Exports: a100_mem, h100_mem, nvlink_*, gpt3_params_b
+# │ Exports: a100_mem, h100_mem, nvlink_*, gpt3_params_b, gpt4_est_params_t
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    A100_MEM_CAPACITY, H100_MEM_CAPACITY,
+    NVLINK_A100_BW, NVLINK_H100_BW,
+    GPT3_PARAMS, GPT4_EST_PARAMS,
+    GiB, GB, second, Mparam, Tparam, THOUSAND,
+    SEC_PER_HOUR, SEC_PER_DAY, MILLION, TRILLION, BITS_PER_BYTE
+)
+from mlsys.formatting import fmt, sci, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class DistTrainSetup:
@@ -96,12 +104,15 @@ class DistTrainSetup:
 
     # Models
     gpt3_params_raw = GPT3_PARAMS
+    gpt4_params_raw = GPT4_EST_PARAMS
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     gpt3_params_b_val = gpt3_params_raw.to(Mparam).magnitude / THOUSAND
+    gpt4_params_t_val = gpt4_params_raw.to(Tparam).magnitude
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(gpt3_params_b_val == 175, f"GPT-3 should be 175B params, got {gpt3_params_b_val}")
+    check(gpt4_params_t_val >= 1.0, f"GPT-4 should be >= 1T params, got {gpt4_params_t_val}")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     a100_mem = f"{a100_cap.to(GiB).magnitude:.0f}"
@@ -109,6 +120,7 @@ class DistTrainSetup:
     nvlink_a100 = f"{nvlink_a100_raw.to(GB/second).magnitude:.0f}"
     nvlink_h100 = f"{nvlink_h100_raw.to(GB/second).magnitude:.0f}"
     gpt3_params_b = f"{gpt3_params_b_val:.0f}"
+    gpt4_est_params_t = f"{gpt4_params_t_val:.1f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 a100_mem = DistTrainSetup.a100_mem
@@ -116,43 +128,47 @@ h100_mem = DistTrainSetup.h100_mem
 nvlink_a100 = DistTrainSetup.nvlink_a100
 nvlink_h100 = DistTrainSetup.nvlink_h100
 gpt3_params_b = DistTrainSetup.gpt3_params_b
+gpt4_est_params_t = DistTrainSetup.gpt4_est_params_t
 ```
 
 ## Multi-Machine Scaling Fundamentals {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
 
-In the **Systems Sandwich** framework (@sec-vol2-introduction), Distributed Training represents the **Operational Layer**—the logic that partitions the mathematical workload across the physical fleet. While Volume 1 optimized the execution on a single device, Volume 2 solves the constraint satisfaction problem of mapping a model larger than any single memory bank onto a cluster with finite bandwidth. This *connection to the Systems Sandwich* clarifies how the chapter's algorithms relate to the physical and service layers.
+In the **Systems Sandwich** framework (@sec-vol2-introduction), Distributed Training represents the **Operational Layer**—the logic that partitions the mathematical workload across the physical fleet. While Volume 1 optimized the execution on a single device, Volume 2 solves the constraint satisfaction problem of mapping a model larger than any single memory bank onto a cluster with finite bandwidth.
 
-Training frontier models requires computational resources that exceed any single machine, placing distributed training squarely within the *Systems Sandwich* framework.
+### The Physics of the Cluster
+
+Before optimizing algorithms, we must understand the physical constraints of the **Machine Learning Fleet**. The performance of any distributed training job is governed by the **Law of Distributed Efficiency** introduced in @sec-vol2-law-distributed-efficiency:
+
+$$ \text{Throughput}_{\text{fleet}} = (N \times \text{Peak}) \times \left( 1 - \frac{T_{\text{sync}}}{T_{\text{compute}}} \right) $$
+
+The critical term here is the **Communication-Computation Ratio** ($T_{\text{sync}}/T_{\text{compute}}$). This ratio determines whether your cluster behaves as a supercomputer or a collection of idling heaters.
+
+*   **Compute-Bound (Low Ratio)**: $T_{\text{compute}} \gg T_{\text{sync}}$. The GPUs spend most of their time multiplying matrices. This is the ideal state, typical for large batch sizes on dense models (like ResNet).
+*   **Bandwidth-Bound (High Ratio)**: $T_{\text{sync}} \approx T_{\text{compute}}$. The GPUs spend significant time waiting for gradients to arrive. This is the common state for Large Language Models (LLMs) and Recommendation Systems (DLRMs), where parameter synchronization saturates the network.
 
 ::: {.callout-note title="Connection: The Systems Sandwich"}
-In the **Systems Sandwich** framework (@fig-systems-sandwich in @sec-vol2-introduction), Distributed Training represents the **Operational Layer (Logic)**. We are defining *how* to split the math. The actual execution of these split workloads happens on the **Physical Layer (Infrastructure)**, which we will build in Part II. The algorithms defined here (Ring AllReduce, Tensor Parallelism) dictate the bandwidth requirements for the physical interconnects (NVLink, InfiniBand) discussed later. Throughout this chapter, we apply the Systems Sandwich methodology to diagnose distributed training bottlenecks by systematically examining Physical constraints, Operational choices, and Service metrics.
+In the **Systems Sandwich** framework (@fig-systems-sandwich in @sec-vol2-introduction), Distributed Training represents the **Operational Layer (Logic)**. We are defining *how* to split the math. The actual execution of these split workloads happens on the **Physical Layer (Infrastructure)**, which we will build in Part II. The algorithms defined here (Ring AllReduce, Tensor Parallelism) dictate the bandwidth requirements for the physical interconnects (NVLink, InfiniBand) discussed later.
 :::
-
-The transition from single-machine to distributed training fundamentally changes optimization strategy and system complexity. Single-machine optimization focuses on efficiently utilizing available resources through techniques such as prefetching, mixed precision, and gradient accumulation. Distributed training extends systematic optimization to multiple machines, introducing coordination challenges that require new conceptual frameworks.
 
 ### Multi-Machine Training Requirements {#sec-distributed-training-systems-systems-multimachine-training-requirements-0277}
 
-Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. We must distinguish between static memory, which includes parameters and optimizer states and remains constant per batch, and dynamic memory for activations, which scales with batch size and sequence length.
+Three concrete signals indicate when distributed training becomes necessary rather than merely beneficial. First, **memory exhaustion** occurs when model parameters, optimizer states, and activation storage exceed single-device capacity. For transformer models, this threshold typically occurs around 10-20 billion parameters on current generation GPUs with 40-80GB memory [@rajbhandari2020zero].
 
-Before examining the mechanisms of distributed training, we formalize the empirical relationships that justify the investment in scale, known as *scaling laws*.
+Second, **unacceptable training duration** emerges when single-device training would require weeks or months to converge. Training GPT-3 on a single V100 GPU would require approximately 355 years [@brown2020language], making distributed approaches not optional but essential.
 
-::: {.callout-definition title="Scaling Laws"}
-**Scaling Laws** describe the predictable, power-law relationship between a model's performance (loss) and the scale of its compute, dataset size, and parameter count. These empirical laws provide the "physics" of deep learning, allowing engineers to extrapolate the resources required to achieve a target performance level before training begins.
-:::
-
-For long-context LLMs, activation memory often dominates. Techniques like **gradient checkpointing**[^fn-gradient-checkpointing] address this by discarding intermediate activations during the forward pass and recomputing them during the backward pass, trading 30% more compute for O(sqrt(n)) memory reduction. Even with these optimizations, models beyond 10-20 billion parameters typically exceed the 40-80GB HBM capacity of modern GPUs.
-
-[^fn-gradient-checkpointing]: Gradient checkpointing trades approximately 30% additional compute for reduced activation memory, from O(n) to O(sqrt(n)) for n layers.
-
-For transformer models, this threshold typically occurs around 10-20 billion parameters on current generation GPUs with 40-80GB memory [@rajbhandari2020zero]. Second, unacceptable training duration emerges when single-device training would require weeks or months to converge, making iteration impossible. Training GPT-3 on a single V100 GPU would require approximately 355 years [@brown2020language], making distributed approaches not optional but essential. Third, dataset scale exceeds single-machine storage when training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks.
+Third, **dataset scale** exceeds single-machine storage when training data reaches multiple terabytes, as occurs in large-scale vision or language modeling tasks.
 
 ### Distributed Training Complexity Trade-offs {#sec-distributed-training-systems-systems-distributed-training-complexity-tradeoffs-0138}
 
-Distributed training introduces three primary complexity dimensions not present in single-machine scenarios. Communication overhead arises from gradient synchronization, where each training step must aggregate gradients across all devices. For a model with $N$ parameters distributed across $D$ devices, all-reduce operations must transfer approximately $2N(D-1)/D$ bytes per step. On commodity network infrastructure with 10-100 Gbps bandwidth, this communication can dominate computation time for models under 1 billion parameters [@sergeev2018horovod]. Fault tolerance requirements increase exponentially with cluster size. A 100-node cluster with 99.9% per-node reliability experiences failures every few hours on average, necessitating checkpoint and recovery mechanisms. Algorithmic considerations change because distributed training alters optimization dynamics. Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
+Distributed training introduces three primary complexity dimensions not present in single-machine scenarios:
+
+1.  **Communication Overhead**: The cost of synchronizing gradients. For a model with $N$ parameters distributed across $D$ devices, all-reduce operations must transfer approximately $2N(D-1)/D$ bytes per step. On commodity networks, this can dominate computation time.
+2.  **Fault Tolerance**: Requirements increase exponentially with cluster size. A 100-node cluster with 99.9% per-node reliability experiences failures every few hours.
+3.  **Algorithmic Stability**: Large batch sizes from data parallelism affect convergence behavior, requiring learning rate scaling and warmup strategies that single-machine training does not require [@goyal2017accurate].
 
 ### Single-Machine to Distributed Transition {#sec-distributed-training-systems-systems-singlemachine-distributed-transition-1ee4}
 
-The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. Tools like NVIDIA Nsight Systems and PyTorch's distributed profiler reveal whether training is communication-bound or computation-bound, guiding the choice between parallelization strategies. The solution space expands from single-machine techniques to include data parallelism for distributing training examples, model parallelism for distributing model parameters, pipeline parallelism for distributing model layers, and hybrid approaches that combine multiple strategies. The principles remain consistent in identifying bottlenecks, selecting appropriate techniques, and composing solutions, but the implementation complexity increases substantially as we navigate three orthogonal scaling dimensions. @fig-3d-parallelism-cube visualizes this three-dimensional configuration space: data parallelism scales replica count, tensor parallelism partitions layer width, and pipeline parallelism segments model depth.
+The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. The solution space expands to include data parallelism, model parallelism, pipeline parallelism, and hybrid approaches. @fig-3d-parallelism-cube visualizes this three-dimensional configuration space.
 
 ::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead." fig-alt="3D coordinate system with three axes: Data Parallelism (replica count d), Pipeline Parallelism (depth p), and Tensor Parallelism (width t). Dashed cube marks a configuration point with Total Accelerators equals d times p times t."}
 ```{.tikz}
