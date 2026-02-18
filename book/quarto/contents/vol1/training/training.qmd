@@ -572,7 +572,7 @@ Where:
 
 #### Matrix Operations {#sec-model-training-matrix-operations-1f21}
 
-The DL Primer established that forward propagation reduces to chains of matrix multiplications (@sec-neural-computation-matrix-multiplication-formulation-417c), and the Architectures chapter catalogued the computational primitives---GEMM, convolution, and dynamic attention---that every architecture shares (@sec-network-architectures-core-computational-primitives-b853). Training amplifies these patterns: each operation executes not once but billions of times, and each forward pass is paired with a backward pass that roughly doubles the computational cost. Understanding which matrix operations dominate---and how their shapes change between forward and backward passes---reveals *why* specific system designs and optimizations emerged for training.
+@sec-neural-computation-matrix-multiplication-formulation-417c established that forward propagation reduces to chains of matrix multiplications, and @sec-network-architectures-core-computational-primitives-b853 catalogued the computational primitives---GEMM, convolution, and dynamic attention---that every architecture shares. Training amplifies these patterns: each operation executes not once but billions of times, and each forward pass is paired with a backward pass that roughly doubles the computational cost. Understanding which matrix operations dominate---and how their shapes change between forward and backward passes---reveals *why* specific system designs and optimizations emerged for training.
 
 \index{Matrix Multiplication!training operations}\index{Strassen's Algorithm!matrix multiplication}\index{cuBLAS!hardware-accelerated linear algebra}
 Matrix multiplication dominance has driven both algorithmic and hardware innovations. Early neural network implementations relied on standard CPU-based linear algebra libraries, but the scale of modern training demanded specialized optimizations. Strassen's algorithm[^fn-strassen-algorithm] reduced the naive $O(n^3)$ complexity to approximately $O(n^{2.81})$ [@strassen1969gauss], and contemporary hardware-accelerated libraries like cuBLAS [@nvidia_cublas] continue pushing computational efficiency limits.
@@ -2698,6 +2698,16 @@ Training bottlenecks fall into three categories, which map directly to the **D·
 : **D·A·M Taxonomy Applied to Training Bottlenecks.** Each axis of the D·A·M taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which axis is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks}
 
 Profiling tools reveal which bottleneck dominates your workload. @fig-tf-bottleneck-trace captures a data-bound pathology through TensorFlow's profiler: the gaps in GPU activity (white regions between compute blocks) reveal that the device frequently waits for input data, with utilization dropping to zero during data loading phases.
+
+::: {.callout-war-story title="The GIL-Locked GPU"}
+**The Context**: A research lab purchased a \$100,000 GPU cluster to accelerate training. They wrote their data loading pipeline in standard Python, using a simple loop to read images, augment them, and feed the GPU.
+
+**The Failure**: Python expert David Beazley demonstrated that the Global Interpreter Lock (GIL) ensures only one thread executes Python bytecode at a time. The data loader, running on the CPU, processed one image, then the GPU processed it instantly, then waited for the next. The CPU was pinned at 100% (on one core), while the massive GPU cluster sat at 0% utilization for 90% of the time.
+
+**The Consequence**: The expensive cluster trained *slower* than a laptop because the single-threaded CPU pipeline became the bottleneck. The team had optimized the "AI" (the GPU code) but ignored the "System" (the data loader).
+
+**The Systems Lesson**: Amdahl's Law is brutal. If your data pipeline is serial, your parallel accelerator is useless. High-performance training requires multiprocessing (to bypass the GIL) or offloading preprocessing to the GPU (like NVIDIA DALI) to keep the beast fed [@beazley2010understanding].
+:::
 
 ![**Data-Bound Profiler Trace**: TensorFlow profiler output capturing a data loading bottleneck during training. The gaps in GPU activity (white regions between compute blocks) indicate periods where the device idles while waiting for input data, with utilization dropping to zero during data loading phases.](images/png/tf_profiler.png){#fig-tf-bottleneck-trace fig-alt="TensorFlow profiler screenshot showing GPU activity timeline. Colored blocks indicate computation periods with white gaps revealing idle time when GPU waits for data loading to complete."}
 
