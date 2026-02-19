@@ -28,7 +28,7 @@ _Why do the models that win benchmarks rarely become the models that run in prod
 
 Training produced a capable model, yet capability alone does not guarantee deployability. Cloud, Edge, Mobile, and TinyML each impose constraints that research benchmarks ignore: memory budgets measured in megabytes rather than gigabytes, latency targets measured in milliseconds rather than seconds, power envelopes measured in milliwatts rather than kilowatts. Research optimizes for accuracy on held-out test sets; production optimizes for accuracy per dollar, accuracy per watt, accuracy per millisecond. The model that achieves state-of-the-art performance typically does so by being larger, slower, and more resource-intensive than any production constraint permits. This gap between research achievement and deployment viability is not a failure of either community but a reflection of different optimization targets.
 
-Bridging that gap requires a systematic discipline of *compression*: trading capabilities the deployment does not need for constraints the deployment cannot violate. The key insight is that trained models are vastly over-specified for most production tasks — they carry more precision, more connections, and more capacity than the deployment context demands, and that surplus can be systematically removed. The techniques differ in what they trade away, but they share a common principle: find what the model has learned that the deployment does not need, and remove it without destroying what the deployment requires. When applied well, compression can reduce model size by one to two orders of magnitude, transforming a research artifact that runs only in a datacenter into a production asset that meets the physics of a phone, a sensor, or a microcontroller. The discipline is not about making models smaller but about *making the right models possible*.
+Bridging that gap requires a systematic discipline of *compression*: trading capabilities the deployment does not need for constraints the deployment cannot violate. The key insight is that trained models are vastly over-specified for most production tasks — they carry more precision, more connections, and more capacity than the deployment context demands, and that surplus can be systematically removed. The techniques differ in what they trade away, but they share a common principle: find what the model has learned that the deployment does not need, and remove it without destroying what the deployment requires. When applied well, compression can reduce model size by one to two orders of magnitude, transforming a research artifact that runs only in a datacenter into a production asset that meets the physics of a phone, a sensor, or a microcontroller. Concretely, the discipline is not about making models smaller but about *making the right models possible* for their physical environment.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -315,6 +315,24 @@ These physics-level savings translate directly into deployment capabilities. A m
 from mlsys.formatting import fmt, check
 from mlsys.constants import KIB_TO_BYTES
 from mlsys.constants import BYTES_FP16, BYTES_INT4, byte, MS_PER_SEC
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MobileNetCompressionAnchor:
+    """
+    Namespace for MobileNet pruning anchor.
+    """
+    pruning_pct = 85
+    original_size_mb = 14
+    pruned_size_mb = 2
+    
+    pruning_pct_str = f"{pruning_pct}%"
+    original_size_mb_str = f"{original_size_mb}MB"
+    pruned_size_mb_str = f"{pruned_size_mb}MB"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mobilenet_pruning_pct_str = MobileNetCompressionAnchor.pruning_pct_str
+mobilenet_original_size_str = MobileNetCompressionAnchor.original_size_mb_str
+mobilenet_pruned_size_str = MobileNetCompressionAnchor.pruned_size_mb_str
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class QuantizationSpeedup:
@@ -1974,7 +1992,8 @@ Modern machine learning frameworks provide dedicated APIs to automate the prunin
 TensorFlow takes a different approach through the TensorFlow Model Optimization Toolkit (TF-MOT). Unlike PyTorch's post-training workflow, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
 
 \index{BERT!compression techniques}
-These trade-offs become concrete when examining real-world deployments. Several high-profile models have successfully integrated pruning to optimize performance. MobileNet, designed for mobile and embedded applications, has been pruned to reduce inference latency while preserving accuracy [@howard2017mobilenets]. BERT[^fn-bert-compression], a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert]. In computer vision, EfficientNet[^fn-efficientnet-pruning] has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].
+These trade-offs become concrete when examining real-world deployments. Several high-profile models have successfully integrated pruning to optimize performance. MobileNet, designed for mobile and embedded applications, has been pruned to reduce inference latency while preserving accuracy [@howard2017mobilenets]. Concretely, removing `{python} mobilenet_pruning_pct_str` of near-zero weights in a MobileNet can reduce its size from `{python} mobilenet_original_size_str` to `{python} mobilenet_pruned_size_str` with less than 1% accuracy loss. BERT[^fn-bert-compression], a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert].
+ In computer vision, EfficientNet[^fn-efficientnet-pruning] has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].
 
 [^fn-bert-compression]: **BERT Compression**: BERT-Base (110M params) can be compressed to 67M params (39% reduction) with only 1.2% GLUE score drop. Attention head pruning removes 144 of 192 heads with minimal impact, while layer pruning reduces 12 layers to 6 layers maintaining 97.8% performance.
 
@@ -4366,21 +4385,9 @@ $$
 
 In contrast, DenseNet reuses feature maps from earlier layers, reducing the number of feature maps stored. This leads to improved parameter efficiency and a reduced memory footprint, which is important for hardware with limited memory resources.
 
-Another technique is activation checkpointing\index{Activation Checkpointing}\index{Memory Optimization!activation checkpointing}[^fn-activation-checkpointing-compression], especially beneficial during training. Standard backpropagation requires storing all forward activations for the backward pass, which creates significant memory overhead for large models. Activation checkpointing reduces memory consumption by storing only a subset of activations and recomputing the remainder when needed.
+Activation checkpointing\index{Activation Checkpointing}\index{Memory Optimization!activation checkpointing}[^fn-activation-checkpointing-compression] complements feature reuse by trading computation for memory during training. As established in @sec-model-training, this technique stores only a subset of forward-pass activations and recomputes the rest during backpropagation, reducing peak memory from $\mathcal{O}(A_{\text{total}})$ to $\mathcal{O}\big(\sqrt{A_{\text{total}}}\big)$. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
 
 [^fn-activation-checkpointing-compression]: **Activation Checkpointing**: Also called gradient checkpointing. Reduces memory usage by 20--50% in large transformers with only 15--20% training time overhead by recomputing activations instead of storing them. See @sec-model-training for the full etymology and systems analysis.
-
-If an architecture requires storing $A_{\text{total}}$ activations, the standard backpropagation method requires the full storage:
-$$
-\mathcal{O}(A_{\text{total}})
-$$
-
-With activation checkpointing, however, only a fraction of activations is stored, and the remaining ones are recomputed on-the-fly, reducing storage requirements to:
-$$
-\mathcal{O}\Big(\sqrt{A_{\text{total}}}\Big)
-$$
-
-Activation checkpointing can significantly reduce peak memory consumption, making it useful for training large models on hardware with limited memory.
 
 Parameter reduction is another important technique. SqueezeNet, for instance, applies $1\times 1$ convolutions to reduce the number of input channels before applying standard convolutions, significantly reducing model size without compromising expressive power. The number of parameters in a standard convolutional layer is:
 $$
@@ -4572,99 +4579,8 @@ conv_bn_relu_mem_md = md_math(f"2 \\times 256 \\times 28 \\times 28 \\times 4 \\
 
 The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} transfer_reduction_str` $\times$ reduction). For a ResNet-50 layer with 256 channels and spatial size $28 \times 28$, this eliminates `{python} conv_bn_relu_mem_md` of intermediate memory traffic per layer.
 
-##### Element-wise Operation Fusion {.unnumbered}
-
-\index{Operator Fusion!element-wise}Element-wise operations (addition, multiplication, activation functions) have extremely low arithmetic intensity, making them severely memory-bound. @lst-elementwise-fusion demonstrates how combining these operations reduces memory traffic:
-
-::: {#lst-elementwise-fusion lst-cap="**Element-wise Fusion**: Combining multiple memory-bound operations into a single kernel reduces memory traffic from 8 transfers to 3."}
-```{.python}
-# Unfused: 4 kernel launches, 8 memory transfers
-t1 = x + y
-t2 = t1 * scale
-t3 = relu(t2)
-t4 = t3 + bias
-
-# Fused: 1 kernel launch, 3 memory transfers
-output = relu((x + y) * scale) + bias
-```
-:::
-
-```{python}
-#| label: elementwise-fusion-calc
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ ELEMENT-WISE FUSION CALCULATION
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Element-wise fusion performance discussion, after
-# │          @lst-elementwise-fusion
-# │
-# │ Goal: Demonstrate the bandwidth benefits of fusing element-wise operations.
-# │ Show: A 2.67× memory traffic reduction (8 MB to 3 MB) for fused ops.
-# │ How: Model memory transfers for four element-wise operations on V100 hardware.
-# │
-# │ Imports: mlsys.formatting (fmt, md_math)
-# │ Exports: ew_reduction_str, saved_us_str, gemm_mem_md
-# │ Depends: v100_bw_gbs_value (from compression-setup),
-# │          gemm_intermediate_mb_str (from fusion-calc)
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt, check, md_math
-
-# --- Inputs (element-wise fusion scenario) ---
-tensor_mb_value = 1
-unfused_traffic_mb_value = 8  # 8 memory transfers × 1 MB
-fused_traffic_mb_value = 3    # 3 memory transfers × 1 MB
-
-# --- Process ---
-ew_reduction_value = unfused_traffic_mb_value / fused_traffic_mb_value
-saved_traffic_mb_value = unfused_traffic_mb_value - fused_traffic_mb_value
-saved_us_value = saved_traffic_mb_value / (v100_bw_gbs_value * 1000) * MILLION
-
-# --- Outputs (formatted strings for prose) ---
-ew_reduction_str = fmt(ew_reduction_value, precision=2, commas=False)
-saved_us_str = fmt(saved_us_value, precision=0, commas=False)
-gemm_mem_md = md_math(f"768 \\times 512 \\times 4 \\text{{ bytes}} = \\text{{{gemm_intermediate_mb_str} MB}}")
-```
-
-For tensors of size 1 MB, unfused execution performs 8 MB of memory traffic. Fused execution reduces this to 3 MB (`{python} ew_reduction_str` $\times$ reduction). On a GPU with `{python} v100_bw_gbs_str` GB/s memory bandwidth, this saves approximately `{python} saved_us_str` microseconds per operation, accumulating to milliseconds of latency reduction over thousands of operations in a full model.
-
-##### Matrix Multiply-Add Fusion {.unnumbered}
-
-Linear layers followed by bias addition and activation appear throughout transformers and MLPs. @lst-gemm-fusion illustrates the fusion pattern:
-
-::: {#lst-gemm-fusion lst-cap="**GEMM Fusion**: Fusing bias addition and activation into matrix multiplication eliminates intermediate memory writes by computing element-wise operations in registers."}
-```{.python}
-# Unfused: 3 operations
-linear = matmul(input, weight)
-biased = linear + bias
-output = gelu(biased)
-
-# Fused: 1 operation
-output = gelu(matmul(input, weight) + bias)
-```
-:::
-
-\index{BERT!operator fusion benefits}
-This fusion is particularly effective because matrix multiplication is compute-bound (high arithmetic intensity), while bias addition and activation are memory-bound (low arithmetic intensity). Fusing them allows the GPU to perform element-wise operations in registers immediately after computing each output element, before writing to memory. For BERT-Base with hidden size 768, this eliminates `{python} gemm_mem_md` of intermediate activation memory per linear layer.
-
-##### Attention Pattern Fusion {.unnumbered}
-
-\index{Operator Fusion!attention (FlashAttention)}Transformer attention mechanisms involve multiple operations that benefit from fusion. @lst-attention-fusion compares unfused attention with FlashAttention's tile-based approach:
-
-::: {#lst-attention-fusion lst-cap="**Attention Fusion**: FlashAttention reorganizes attention computation to process in tiles that fit in SRAM, reducing HBM traffic from O(n²) to O(n)."}
-```{.python}
-# Unfused attention (6+ kernel launches)
-scores = matmul(Q, K.T) / sqrt(d_k)
-attn_weights = softmax(scores)
-attn_output = matmul(attn_weights, V)
-output = linear(attn_output)
-
-# FlashAttention: fused attention in blocks
-# Processes attention in tiles that fit in SRAM
-# Reduces HBM traffic from O(n^2) to O(n)
-```
-:::
-
-This fusion pattern[^fn-flashattention-compression] achieves 2–4 $\times$ speedup on long sequences by dramatically reducing memory bandwidth requirements—a technique central to enabling long-context transformers, as detailed in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
+\index{Operator Fusion!attention (FlashAttention)}
+The same principle extends beyond CNNs. GEMM-bias-activation fusion eliminates intermediate writes in transformer linear layers by computing element-wise operations in registers immediately after each matrix multiplication output element. Attention tiling, as in FlashAttention[^fn-flashattention-compression], reduces HBM traffic from $O(n^2)$ to $O(n)$ for long-context transformers by processing attention in SRAM-sized tiles rather than materializing the full $n \times n$ attention matrix, as detailed in @sec-model-training-flash-attention-ioaware-attention-optimization-3da0.
 
 [^fn-flashattention-compression]: FlashAttention\index{FlashAttention} (introduced in @sec-network-architectures) demonstrates fusion's power for memory-bound attention: tiling to SRAM yields 2–4 $\times$ speedup and enables 64K context windows by reducing memory traffic from O(n^2) to O(n). This exemplifies how operator fusion can transform memory-bound bottlenecks into compute-bound operations.
 
@@ -4672,38 +4588,7 @@ Memory bandwidth analysis quantifies these fusion benefits concretely. Consider 
 
 On a V100 GPU with `{python} v100_bw_gbs_str` GB/s HBM bandwidth and `{python} v100_tflops_fp32_str` TFLOPS FP32 compute, the unfused sequence takes approximately `{python} unfused_time_us_str` microseconds (memory-bound), while the fused version takes approximately `{python} fused_time_us_str` microseconds (`{python} fusion_speedup_str` $\times$ speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
 
-Operator fusion implementation occurs at multiple levels in the software stack:
-
-\index{ML Compiler!framework-level fusion}
-1. **Framework-level fusion**: TensorFlow's Grappler and PyTorch's TorchScript identify fusible patterns in the computational graph and apply transformations automatically.
-
-\index{ML Compiler!graph-level fusion}
-2. **Compiler-level fusion**: TVM, XLA, and TensorRT perform more aggressive fusion using polyhedral optimization and code generation.
-
-3. **Runtime-level fusion**: ONNX Runtime and TensorRT apply runtime fusion based on input shapes and hardware characteristics.
-
-@lst-graph-pattern-matching demonstrates how graph pattern matching identifies fusible operation sequences:
-
-::: {#lst-graph-pattern-matching lst-cap="**Graph Pattern Matching**: Compilers identify fusible operation sequences and generate specialized fused kernels for common patterns."}
-```{.python}
-# Graph pattern matching
-def identify_fusible_patterns(graph):
-    patterns = [
-        ("Conv2D", "BatchNorm", "ReLU"),
-        ("MatMul", "BiasAdd", "GELU"),
-        ("Add", "Multiply", "ReLU"),
-    ]
-
-    fused_ops = []
-    for pattern in patterns:
-        matches = find_pattern(graph, pattern)
-        fused_ops.extend(create_fused_kernel(m) for m in matches)
-
-    return fused_ops
-```
-:::
-
-Fusion effectiveness varies by workload characteristics. Memory-bound operations benefit most from fusion, while compute-bound operations see minimal improvement. Quantitative analysis shows:
+Fusion effectiveness varies by workload characteristics. Memory-bound operations benefit most, while compute-bound operations see minimal improvement:
 
 - **Element-wise operations**: 2–4 $\times$ speedup (highly memory-bound, low arithmetic intensity)
 - **Conv-BN-Act patterns**: 1.5–2 $\times$ speedup (mixed memory/compute characteristics)
@@ -4712,9 +4597,8 @@ Fusion effectiveness varies by workload characteristics. Memory-bound operations
 
 Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs approximately 5-10 microseconds of latency. For a ResNet-50 with 53 convolutional layers, unfused execution launches `{python} kernels_unfused_str` kernels (Conv + BN + ReLU), while fused execution launches `{python} kernels_fused_str` kernels, saving approximately `{python} saved_latency_ms_str` millisecond from launch overhead alone.
 
-Hardware considerations affect fusion strategies. GPUs with large register files and shared memory benefit most from fusion, as intermediate results remain on-chip. TPUs with software-managed memory hierarchies perform fusion at the compiler level. Edge accelerators with limited memory make fusion critical for fitting models within constrained memory budgets.
-
-Fusion trade-offs include increased compilation time, reduced flexibility for dynamic shapes, and potential code bloat from specialized kernels. Advanced inference frameworks balance these trade-offs by selectively fusing hot paths while maintaining flexibility for dynamic workloads.
+\index{ML Compiler!framework-level fusion}\index{ML Compiler!graph-level fusion}
+Fusion implementation spans the software stack, from framework-level pattern matching (PyTorch's TorchScript, TensorFlow's Grappler) through compiler-level optimization (XLA, TVM, TensorRT) to runtime fusion that adapts to input shapes and hardware characteristics. @sec-hardware-acceleration examines the compiler and hardware dimensions of fusion in detail, including register pressure constraints, graph pattern matching strategies, and platform-specific trade-offs across GPU, TPU, and edge accelerators.
 
 Operator fusion optimizes how operations execute by reducing memory traffic between fixed computational steps. A complementary approach asks a different question: must we execute all computational steps at all? This leads to adaptive computation methods that vary the amount of work performed based on input characteristics.
 

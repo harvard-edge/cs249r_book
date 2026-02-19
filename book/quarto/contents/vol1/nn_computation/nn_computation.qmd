@@ -75,7 +75,7 @@ The preceding chapters established the surrounding infrastructure: the ML workfl
 
 The **Silicon Contract** (@sec-introduction-iron-law-ml-systems-c32a) established that every model architecture makes a computational bargain with the hardware it runs on. The architecture's mathematical operators set the terms of that bargain: they determine how much memory the model consumes, how long each computation takes, and how much energy the system expends. To honor the contract, a systems engineer must understand those operators.
 
-This chapter examines those operators not as abstract theory but as a specification for computational workloads. Neural computation represents a qualitative shift in how we process information: instead of executing a sequence of explicit logical instructions (if-then-else), we execute a massive sequence of continuous mathematical transformations (multiply-add-accumulate). This shift from *Logic* to *Arithmetic* changes everything for the systems engineer, creating the **Compute-Bound** workloads characterized in the **Iron Law** (@sec-introduction-iron-law-ml-systems-c32a). It implies that the "bug" in your system is rarely a syntax error; it is a numerical instability, a vanishing gradient, or a saturated activation function.
+This chapter examines those operators not as abstract theory but as a specification for computational workloads. Neural computation represents a qualitative shift in how we process information: instead of executing a sequence of explicit logical instructions (if-then-else), we execute a massive sequence of continuous mathematical transformations (multiply-add-accumulate). This shift from *Logic* to *Arithmetic* changes everything for the systems engineer, creating the **Compute-Bound** workloads characterized in the **Iron Law** (@sec-introduction-iron-law-ml-systems-c32a). It implies that the "bug" in your system is rarely a syntax error; it is a numerical instability, a vanishing gradient, or a saturated activation function. Concretely, recognizing a single handwritten digit in the MNIST network we use throughout this chapter requires `{python} inf_madd_total_str` MAC operations—not one of which is a logical branch.
 
 ::: {.callout-definition title="Deep Learning"}
 
@@ -2870,6 +2870,46 @@ Consider the final layer where the network outputs digit probabilities. If the n
 1. Start with the error in these probabilities
 2. Compute how weight adjustments would affect this error
 3. Propagate these gradients backward to help adjust earlier layer weights
+
+To ground these equations in concrete arithmetic, the following example traces actual gradient values through a minimal network.
+
+::: {.callout-example title="Tracing Gradients: A Worked Backpropagation Example"}
+
+**Setup**: Consider a network with 2 inputs, a hidden layer of 2 neurons (ReLU activation), and 1 output neuron (no activation, for simplicity). Suppose the current weights and biases are:
+
+- **Hidden layer**: $\mathbf{W}^{(1)} = \begin{bmatrix} 0.5 & -0.3 \\ 0.8 & 0.2 \end{bmatrix}$, $\mathbf{b}^{(1)} = \begin{bmatrix} 0 \\ 0 \end{bmatrix}$
+- **Output layer**: $\mathbf{W}^{(2)} = \begin{bmatrix} 0.6 \\ -0.4 \end{bmatrix}$, $\mathbf{b}^{(2)} = 0$
+
+Given input $\mathbf{x} = [1.0,\; 0.5]$ and target $y = 1.0$, we use mean squared error: $\mathcal{L} = \frac{1}{2}(\hat{y} - y)^2$.
+
+**Forward pass** (to establish the values backpropagation needs):
+
+- Hidden pre-activation: $\mathbf{z}^{(1)} = \mathbf{x}\mathbf{W}^{(1)} + \mathbf{b}^{(1)} = [1.0 \cdot 0.5 + 0.5 \cdot 0.8,\; 1.0 \cdot (-0.3) + 0.5 \cdot 0.2] = [0.9,\; -0.2]$
+- Hidden activation (ReLU): $\mathbf{a}^{(1)} = [\max(0, 0.9),\; \max(0, -0.2)] = [0.9,\; 0.0]$
+- Output: $\hat{y} = \mathbf{a}^{(1)}\mathbf{W}^{(2)} + b^{(2)} = 0.9 \cdot 0.6 + 0.0 \cdot (-0.4) = 0.54$
+- Loss: $\mathcal{L} = \frac{1}{2}(0.54 - 1.0)^2 = 0.1058$
+
+**Backward pass** (applying the chain rule layer by layer):
+
+*Step 1: Output layer gradient.* The loss gradient with respect to the output is $\frac{\partial \mathcal{L}}{\partial \hat{y}} = \hat{y} - y = 0.54 - 1.0 = -0.46$.
+
+*Step 2: Output weight gradients* (applying @eq-weight-gradient). Since the output layer has no activation function, $\frac{\partial \mathcal{L}}{\partial \mathbf{Z}^{(2)}} = -0.46$, and:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(2)}} = {\mathbf{a}^{(1)}}^T \cdot (-0.46) = \begin{bmatrix} 0.9 \\ 0.0 \end{bmatrix} \cdot (-0.46) = \begin{bmatrix} -0.414 \\ 0.0 \end{bmatrix}$$
+
+*Step 3: Propagate to hidden layer* (applying @eq-activation-gradient). The error signal sent backward is:
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{a}^{(1)}} = (-0.46) \cdot {\mathbf{W}^{(2)}}^T = (-0.46) \cdot [0.6,\; -0.4] = [-0.276,\; 0.184]$$
+
+*Step 4: Pass through ReLU.* The ReLU derivative is 1 where $z > 0$ and 0 otherwise, so $\frac{\partial \mathcal{L}}{\partial \mathbf{z}^{(1)}} = [-0.276 \cdot 1,\; 0.184 \cdot 0] = [-0.276,\; 0.0]$. The second neuron's gradient is zeroed because ReLU blocked its forward signal.
+
+*Step 5: Hidden weight gradients* (applying @eq-weight-gradient):
+
+$$\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(1)}} = \mathbf{x}^T \cdot \frac{\partial \mathcal{L}}{\partial \mathbf{z}^{(1)}} = \begin{bmatrix} 1.0 \\ 0.5 \end{bmatrix} \cdot [-0.276,\; 0.0] = \begin{bmatrix} -0.276 & 0.0 \\ -0.138 & 0.0 \end{bmatrix}$$
+
+**Weight updates** (with learning rate $\eta = 0.1$): Each weight moves opposite to its gradient. For example, $W^{(1)}_{11}$ updates from $0.5$ to $0.5 - 0.1 \cdot (-0.276) = 0.5276$, nudging the network toward the correct output. The second hidden neuron's weights receive zero updates because ReLU blocked its activation, illustrating how dead neurons temporarily stop learning.
+
+:::
 
 While understanding these mathematical details is essential for debugging and optimization, modern practitioners rarely implement gradients manually. The systems breakthrough lies in how frameworks automatically implement these calculations. Consider a simple operation like matrix multiplication followed by ReLU activation: `output = torch.relu(input @ weight)`. The mathematical gradient involves computing the derivative of ReLU (0 for negative inputs, 1 for positive) and applying the chain rule for matrix multiplication. The framework handles this automatically by:
 

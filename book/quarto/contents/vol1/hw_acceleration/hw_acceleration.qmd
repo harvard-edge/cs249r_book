@@ -25,7 +25,7 @@ engine: jupyter
 
 _Why does moving data cost more than computing it?_
 
-The central surprise of modern computing is that *arithmetic is nearly free while memory access is expensive*. In the time it takes to fetch a single value from main memory, a processor could perform thousands of calculations. This inversion, the "Memory Wall," is not an engineering limitation awaiting a fix; it is a physical consequence of the speed of light and the energy cost of moving electrons across silicon. It explains why specialized accelerators exist: GPUs, TPUs, and neural processing units are not merely faster at math but architected specifically to hide, amortize, and minimize the crushing cost of moving data through deep memory hierarchies, massive parallelism, and specialized data paths. It explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory-bound, computing less changes nothing because the bottleneck was never computation. And it explains why hardware selection cannot be reduced to comparing peak FLOPS—what matters is whether a workload's data movement patterns align with what the hardware was actually designed to accelerate. For the engineer choosing hardware, this means the question is never "which chip is fastest?" but "which chip's memory system best matches my model's access patterns?" A model with large embedding tables and irregular lookups needs a very different accelerator than one performing dense matrix multiplications over compact weight tensors. Getting this match right is the difference between running at 10% of theoretical peak and running at 80%.
+The central surprise of modern computing is that *arithmetic is nearly free while memory access is expensive*. In the time it takes to fetch a single value from main memory, a processor could perform thousands of calculations. This inversion, the "Memory Wall," is not an engineering limitation awaiting a fix; it is a physical consequence of the speed of light and the energy cost of moving electrons across silicon. It explains why specialized accelerators exist: GPUs, TPUs, and neural processing units are not merely faster at math but architected specifically to hide, amortize, and minimize the crushing cost of moving data through deep memory hierarchies, massive parallelism, and specialized data paths. Concretely, hardware acceleration is the only way to sustain the exponential growth required by modern AI models, as general-purpose CPU scaling alone is no longer sufficient. It explains why some optimizations that reduce theoretical computation fail to improve actual runtime: if the operation was already memory-bound, computing less changes nothing because the bottleneck was never computation. And it explains why hardware selection cannot be reduced to comparing peak FLOPS—what matters is whether a workload's data movement patterns align with what the hardware was actually designed to accelerate. For the engineer choosing hardware, this means the question is never "which chip is fastest?" but "which chip's memory system best matches my model's access patterns?" A model with large embedding tables and irregular lookups needs a very different accelerator than one performing dense matrix multiplications over compact weight tensors. Getting this match right is the difference between running at 10% of theoretical peak and running at 80%.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -1672,6 +1672,22 @@ from mlsys.formatting import fmt
 from mlsys.constants import ENERGY_DRAM_ACCESS_PJ, SYSTOLIC_ARRAY_DIM
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AcceleratorEfficiencyAnchor:
+    """
+    Namespace for systolic array efficiency anchor.
+    """
+    systolic_dim = 128
+    systolic_macs_cycle = systolic_dim * systolic_dim
+    energy_dividend = 200
+    
+    systolic_macs_cycle_str = f"{systolic_macs_cycle:,}"
+    energy_dividend_str = f"{energy_dividend}x"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+systolic_macs_cycle_str = AcceleratorEfficiencyAnchor.systolic_macs_cycle_str
+accelerator_energy_dividend_str = AcceleratorEfficiencyAnchor.energy_dividend_str
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class SystolicEnergy:
     """
     Namespace for Systolic Array Energy calculation.
@@ -1739,6 +1755,7 @@ The "Systolic" (heartbeat) metaphor is not just about timing; it reflects a deci
     - **Energy**: ≈ `{python} systolic_access_str` $\times$ `{python} dram_access_str` pJ + `{python} compute_energy_str` pJ (compute) ≈ **`{python} systolic_energy_str` pJ/OP**.
 
 **The Systems Conclusion**: A systolic array is **`{python} energy_ratio_str` $\times$ more energy-efficient** than a naive vector unit for large matrix multiplications.
+- Concretely, a 128x128 array can achieve over `{python} systolic_macs_cycle_str` MACs per cycle with `{python} accelerator_energy_dividend_str` better energy efficiency than a standard vector unit by pulsing data through processing elements instead of repeatedly loading it from DRAM.
 - This efficiency is what allows a Google TPU to pack 100,000+ MAC units into a single chip without melting.
 - **The Limitation**: This "Energy Dividend" only pays out if the matrix is large enough to fill the array. For small matrices (common in real-time inference), the array is under-utilized, and the energy efficiency drops back toward the vector unit baseline.
 :::
@@ -3585,6 +3602,20 @@ where:
 - $l$ is the number of memory hierarchy levels.
 
 This equation illustrates the exponential growth of the search space, making brute-force search infeasible for all but the simplest cases.
+
+A concrete example makes the impact of these choices tangible.
+
+::: {.callout-example title="Loop Ordering in a Small Convolution"}
+
+Consider a convolution applying 16 filters of size $3 \times 3$ to an $8 \times 8$ single-channel input. The computation can be expressed as five nested loops iterating over output rows ($H_{out}$), output columns ($W_{out}$), filter count ($K$), filter height ($R$), and filter width ($S$). The $5! = 120$ possible orderings of these loops all produce the same numerical result, but they generate dramatically different memory traffic.
+
+**Ordering A (weight-stationary):** Place the filter loops ($K$, $R$, $S$) outermost and the spatial loops ($H_{out}$, $W_{out}$) innermost. Each $3 \times 3$ filter is loaded into registers once and then applied across all 36 output positions before the next filter is loaded. Total weight loads: $16 \times 9 = 144$ values, each loaded exactly once.
+
+**Ordering B (output-stationary):** Place the spatial loops outermost and the filter loops innermost. For every output position, all 16 filters must be loaded, applied, and their partial sums accumulated before advancing to the next position. If the register file cannot hold all 16 filters simultaneously, filters are repeatedly fetched from cache or DRAM. In the worst case, each of the 36 output positions reloads all 144 filter weights, producing $36 \times 144 = 5{,}184$ weight reads.
+
+Ordering A reduces weight traffic by $36 \times$ compared to Ordering B by matching the loop structure to a weight-stationary dataflow. This single reordering decision, one of the 120 possibilities predicted by the $d! = 5! = 120$ formula, determines whether the accelerator spends its memory bandwidth loading fresh data or redundantly re-fetching weights it has already seen.
+
+:::
 
 The combinatorial explosion revealed by this analysis — potentially billions of valid configurations for a single neural network layer — poses a practical question: how do practitioners routinely achieve near-optimal performance despite this vast search space? Exhaustive enumeration is clearly impossible, yet production systems consistently achieve 60–80% of theoretical peak performance. The answer lies in a small set of principled dataflow patterns that reduce this intractable configuration space to a manageable set of strategic choices.
 
