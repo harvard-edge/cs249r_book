@@ -3,9 +3,8 @@
 # =============================================================================
 # Automatically adds contributors when someone comments with @all-contributors.
 #
-# Uses Ollama LLM to parse natural language and extract:
-#   - GitHub username (with or without @)
-#   - Contribution type(s)
+# Username is extracted DETERMINISTICALLY via regex from @mentions.
+# Uses Ollama LLM ONLY to classify contribution type(s) from natural language.
 #
 # Project detection is DETERMINISTIC (not LLM-guessed):
 #   - PR file paths:  tinytorch/ → tinytorch, book/ → book, kits/ → kits, labs/ → labs
@@ -61,7 +60,7 @@ jobs:
       # =====================================================================
       # STEP 1: Extract trigger line + detect project from PR files
       # =====================================================================
-      - name: Extract trigger line and detect project
+      - name: Extract trigger line, username, and detect project
         id: extract
         uses: actions/github-script@v7
         env:
@@ -171,23 +170,39 @@ jobs:
             // If still null → projectSource stays 'unknown', handled downstream
             console.log(`Final project: ${project || 'NONE'} (source: ${projectSource})`);
 
+            // =============================================================
+            // USERNAME EXTRACTION (deterministic — regex, not LLM)
+            // =============================================================
+            const mentions = triggerLine.match(/@([\w][\w-]*)/g);
+            const cleanMentions = mentions
+              ? mentions.map(m => m.replace(/^@/, '')).filter(m => m !== 'all-contributors')
+              : [];
+
+            const username = cleanMentions.length > 0 ? cleanMentions[0] : '';
+            console.log(`Username from @mention: "${username}"`);
+
+            if (!username) {
+              console.log('No username @mention found in trigger line');
+            }
+
             core.setOutput('should_run', 'true');
             core.setOutput('trigger_line', triggerLine);
+            core.setOutput('username', username);
             core.setOutput('issue_context', issueContext);
             core.setOutput('project', project || '');
             core.setOutput('project_source', projectSource);
 
       # =====================================================================
-      # STEP 2: LLM parses username + contribution types (NOT project)
+      # STEP 2: LLM classifies contribution types ONLY (username is from regex)
       # =====================================================================
-      - name: Parse with LLM
-        if: steps.extract.outputs.should_run == 'true'
+      - name: Classify contribution types with LLM
+        if: steps.extract.outputs.should_run == 'true' && steps.extract.outputs.username != ''
         uses: ai-action/ollama-action@v2
         id: llm
         with:
           model: ${{ env.LLM_MODEL }}
           prompt: |
-            Parse this contributor recognition comment. Extract ONLY the username and contribution types.
+            Classify the contribution type(s) from this comment.
 
             COMMENT: ${{ steps.extract.outputs.trigger_line }}
 
@@ -201,41 +216,40 @@ jobs:
             - test: Tested features, verified fixes, QA testing
             - tool: Built tools, scripts, automation, CLI utilities
 
-            Return ONLY a JSON object with exactly these 2 fields:
+            Return ONLY a JSON object with exactly this field:
             {
-              "username": "<github-username-without-@>",
               "types": ["<contribution-type>"]
             }
 
             RULES:
-            - username: The GitHub username WITHOUT the @ symbol. Ignore @all-contributors itself.
             - types: Array of one or more contribution types from the list above.
-            - Do NOT include a "project" field. Project is detected separately.
+            - Do NOT include username or project fields. Those are detected separately.
 
             EXAMPLES:
             Input: "@all-contributors @jane-doe fixed typos in the documentation"
-            Output: {"username": "jane-doe", "types": ["doc"]}
-
-            Input: "@all-contributors please add @ngbolin for Doc in Tinytorch"
-            Output: {"username": "ngbolin", "types": ["doc"]}
+            Output: {"types": ["doc"]}
 
             Input: "@all-contributors @dev42 implemented the new feature and wrote tests"
-            Output: {"username": "dev42", "types": ["code", "test"]}
+            Output: {"types": ["code", "test"]}
 
             Input: "@all-contributors please add @user123 for code"
-            Output: {"username": "user123", "types": ["code"]}
+            Output: {"types": ["code"]}
+
+            Input: "@all-contributors @reviewer99 gave feedback on the PR"
+            Output: {"types": ["review"]}
 
             Return ONLY the JSON object, no explanation or other text.
 
       # =====================================================================
-      # STEP 3: Parse LLM JSON + combine with deterministic project
+      # STEP 3: Parse LLM types + combine with deterministic username & project
       # =====================================================================
-      - name: Parse LLM response and validate
+      - name: Validate and combine results
         if: steps.extract.outputs.should_run == 'true'
         id: parse
         uses: actions/github-script@v7
         env:
-          LLM_RESPONSE: ${{ steps.llm.outputs.response }}
+          LLM_RESPONSE: ${{ steps.llm.outputs.response || '' }}
+          USERNAME: ${{ steps.extract.outputs.username }}
           TRIGGER_LINE: ${{ steps.extract.outputs.trigger_line }}
           PROJECT: ${{ steps.extract.outputs.project }}
           PROJECT_SOURCE: ${{ steps.extract.outputs.project_source }}
@@ -244,28 +258,30 @@ jobs:
         with:
           script: |
             const response = process.env.LLM_RESPONSE || '';
+            const username = process.env.USERNAME || '';
             const triggerLine = process.env.TRIGGER_LINE || '';
             const project = process.env.PROJECT || '';
             const projectSource = process.env.PROJECT_SOURCE || '';
             const validTypes = process.env.CONTRIBUTION_TYPES.split(',');
             const validProjects = process.env.PROJECTS.split(',');
 
+            console.log('Username (from regex):', username);
             console.log('LLM response:', response);
             console.log('Deterministic project:', project || 'NONE', `(source: ${projectSource})`);
 
-            let username = null;
-            let types = [];
+            // --- Validate username (extracted deterministically in Step 1) ---
+            if (!username) {
+              core.setOutput('success', 'false');
+              core.setOutput('error', 'no_username');
+              return;
+            }
 
-            // --- Parse LLM JSON response ---
+            // --- Parse contribution types from LLM response ---
+            let types = [];
             try {
               const jsonMatch = response.match(/\{[\s\S]*?\}/);
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-
-                if (parsed.username && typeof parsed.username === 'string') {
-                  username = parsed.username.replace(/^@/, '');
-                }
-
                 if (parsed.types && Array.isArray(parsed.types)) {
                   types = parsed.types
                     .map(t => t.toLowerCase().trim())
@@ -274,22 +290,6 @@ jobs:
               }
             } catch (e) {
               console.log('Failed to parse LLM JSON:', e.message);
-            }
-
-            // --- Fallback: extract username from @mentions ---
-            if (!username) {
-              const mentions = triggerLine.match(/@([\w][\w-]*)/g);
-              if (mentions && mentions.length > 1) {
-                username = mentions[1].replace(/^@/, '');
-                console.log('Username from @mention fallback:', username);
-              }
-            }
-
-            // --- Validate username ---
-            if (!username) {
-              core.setOutput('success', 'false');
-              core.setOutput('error', 'no_username');
-              return;
             }
 
             // --- Validate types ---
@@ -312,7 +312,7 @@ jobs:
             }
 
             // --- All good ---
-            console.log('✅ Final result:', { username, types, project, projectSource });
+            console.log('Final result:', { username, types, project, projectSource });
 
             core.setOutput('success', 'true');
             core.setOutput('username', username);
