@@ -67,7 +67,7 @@ gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / BILLION:.0f}"   # "175"
 
 ## Scaling Inference Beyond Single Machines {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
 
-In the **Systems Sandwich** (@sec-vol2-introduction), Inference is the **Service Layer**—the interface where the model meets the user. While the **Operational Layer** (training) optimizes for throughput over weeks, the Service Layer must deliver predictions in milliseconds. If the **Iron Law** defines the speed limit of training, it defines the **deadline** of inference: $L_{inference} \le \text{SLO}$.
+In the **Fleet Stack** (@sec-vol2-introduction), Inference is the **Serving Layer**—the interface where the model meets the user. While the **Distribution Layer** (training) optimizes for throughput over weeks, the Serving Layer must deliver predictions in milliseconds. If the **Iron Law** defines the speed limit of training, it defines the **deadline** of inference: $L_{inference} \le \text{SLO}$.
 
 Single-machine model serving establishes foundational principles that this chapter extends to distributed systems. Single-machine inference optimization, including batching, caching, model optimization, and hardware acceleration, provides the building blocks. This chapter addresses when those techniques reach their limits and distributed approaches become necessary.
 
@@ -936,7 +936,7 @@ This notation reflects a long tradition of *queuing theory and performance* anal
 Queuing theory, developed by Agner Krarup Erlang in 1909 for telephone network analysis, remains foundational to systems performance engineering. The same mathematical framework that sized telephone exchanges now determines GPU cluster capacity. The M/G/c/K model is standard in systems textbooks, appearing in Jain's *The Art of Computer Systems Performance Analysis* [@jain1991art] and Kleinrock's *Queueing Systems* [@kleinrock1975queueing].
 :::
 
-For a batched inference system with batch size $B$, service time becomes a function of batch size. Let $S(B)$ denote the time to process a batch of $B$ requests. From the physics of batching (@sec-inference-scale-batching-strategies-scale-6733-differences), we model this as:
+For a batched inference system with batch size $B$, service time becomes a function of batch size. Let $S(B)$ denote the time to process a batch of $B$ requests. From the physics of batching (@sec-inference-scale-batching-strategies-scale-6733), we model this as:
 
 $$S(B) = \alpha + \beta \cdot B$$ {#eq-service-time-batch}
 
@@ -1606,17 +1606,17 @@ Continuous batching's performance benefits come with implementation complexity t
 
 **Practical recommendation**: For new LLM serving deployments, continuous batching frameworks like vLLM, TensorRT-LLM, or TGI provide the implementation complexity as a solved problem. The decision becomes whether to adopt these frameworks versus building custom serving infrastructure. For organizations with existing traditional batching systems, the migration cost must be weighed against the workload's output length variance using @tbl-continuous-batching-benefit.
 
-Even with modern frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following case study applies the Systems Sandwich methodology to a real-world P99 latency regression.
+Even with modern frameworks, diagnosing tail latency anomalies requires systematic investigation across the system stack. The following case study applies the Fleet Stack methodology to a real-world P99 latency regression.
 
 ::: {.callout-tip title="Debugging High P99 Latency"}
 
 **Problem**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is 100ms and P95 is 180ms, both within SLO, but P99 spikes to 500ms against a 200ms target. GPU utilization appears healthy at 85%. Where is the bottleneck?
 
-**Physical Layer Analysis** (Hardware Constraints):
+**Infrastructure Layer Analysis** (Hardware Constraints):
 
 The system runs on 4 A100-`{python} a100_mem_gb`GB GPUs connected via PCIe Gen4 (`{python} pcie_gen5_gbs` GB/s per GPU) rather than NVLink. The server has a dual-socket CPU with NUMA topology. Memory bandwidth per GPU is `{python} a100_mem_bw_tbs` TB/s (HBM2e), adequate for decode operations. However, PCIe bandwidth limits tensor parallelism communication to `{python} pcie_gen5_gbs` GB/s versus NVLink's `{python} nvlink_a100_gbs` GB/s. For a batch requiring 100MB activation transfers between GPUs, PCIe adds approximately 1.5ms per synchronization point versus 0.17ms for NVLink.
 
-**Operational Layer Analysis** (Algorithmic Behavior):
+**Distribution Layer Analysis** (Algorithmic Behavior):
 
 Dynamic batching is configured with max batch size 32 and timeout 50ms. Examining the batch size distribution reveals the problem: 90% of batches contain 4 to 8 requests (explaining good P50/P95), but 5% of batches reach the full 32 requests. These large batches occur during traffic bursts and experience head-of-line blocking: short requests that would complete quickly must wait for long-sequence requests in the same batch to finish all their decode iterations.
 
@@ -1624,7 +1624,7 @@ With continuous batching enabled, why does this occur? Further investigation rev
 
 **Diagnosis**:
 
-The root cause is not the hardware (Physical Layer) but the scheduling policy (Operational Layer). Head-of-line blocking occurs when the scheduler forms large batches from bursty arrivals without considering request heterogeneity. The 500ms P99 corresponds to large batches where short requests wait for long-sequence completions.
+The root cause is not the hardware (Infrastructure Layer) but the scheduling policy (Distribution Layer). Head-of-line blocking occurs when the scheduler forms large batches from bursty arrivals without considering request heterogeneity. The 500ms P99 corresponds to large batches where short requests wait for long-sequence completions.
 
 **Solution**:
 
@@ -1634,9 +1634,9 @@ Implement priority-aware scheduling with separate batch size limits by request t
 2. **Differentiated batching**: Limit short-request batches to 8, medium to 16, long to 32
 3. **Priority preemption**: Allow short requests to preempt long-running sequences when P99 approaches SLO
 
-After implementing these changes, P99 dropped to 185ms. The Physical Layer was adequate; the problem was entirely in the Operational Layer's scheduling logic.
+After implementing these changes, P99 dropped to 185ms. The Infrastructure Layer was adequate; the problem was entirely in the Distribution Layer's scheduling logic.
 
-**Lesson**: When tail latency exceeds expectations despite healthy utilization, examine the batching and scheduling policies. High average GPU utilization can mask head-of-line blocking that only affects a small percentage of requests but drives P99. The Systems Sandwich methodology systematically isolates whether bottlenecks arise from hardware constraints or algorithmic decisions. See @sec-vol2-introduction for the complete Systems Sandwich framework.
+**Lesson**: When tail latency exceeds expectations despite healthy utilization, examine the batching and scheduling policies. High average GPU utilization can mask head-of-line blocking that only affects a small percentage of requests but drives P99. The Fleet Stack methodology systematically isolates whether bottlenecks arise from hardware constraints or algorithmic decisions. See @sec-vol2-introduction for the complete Fleet Stack framework.
 
 :::
 
@@ -2515,7 +2515,7 @@ Tensor parallelism [@shoeybi2019megatron] distributes individual layers across m
 
 $$\text{Attention}_i = \text{softmax}\left(\frac{Q_i K_i^T}{\sqrt{d_k}}\right) V_i \text{ for heads } i \in \{1, ..., H/P\}$$
 
-After computing local attention, an AllReduce operation (covered in @sec-communication-collective-operations) combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
+After computing local attention, an AllReduce operation (covered in @sec-collective-communication) combines results across devices, adding communication overhead proportional to the activation size divided by the interconnect bandwidth.
 
 **Feed-forward layer parallelism**: The feed-forward layer (typically two linear transformations with activation) partitions along the hidden dimension. For the first linear layer, columns are distributed; for the second, rows are distributed. This column-row partitioning requires only one all-reduce per feed-forward block.
 
@@ -4623,9 +4623,9 @@ With chunk size chosen to match decode iteration time, prefill and decode can sh
 **Prefill-decode disaggregation** takes this further by running prefill and decode on separate GPU pools:
 
 - **Prefill pool**: Optimized for compute intensity (e.g., H100 nodes with high TFLOPS) using large batch sizes to maximize throughput.
-- **Decode pool**: Optimized for memory bandwidth (e.g., nodes with maximum HBM capacity or specialized High Bandwidth Flash as discussed in @sec-storage) to handle thousands of concurrent autoregressive streams.
+- **Decode pool**: Optimized for memory bandwidth (e.g., nodes with maximum HBM capacity or specialized High Bandwidth Flash as discussed in @sec-data-systems) to handle thousands of concurrent autoregressive streams.
 
-This separation enables independent scaling: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-networking. When a prefill finishes, the resulting KV cache—often megabytes of data—must be migrated to a decode node within the inter-token latency budget (typically <10 ms). InfiniBand's sub-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation.
+This separation enables independent scaling: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache—often megabytes of data—must be migrated to a decode node within the inter-token latency budget (typically <10 ms). InfiniBand's sub-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation.
 
 The *Sarathi* system formalizes *chunked prefill* into a practical scheduling algorithm that bounds decode latency regardless of incoming prompt length.
 
@@ -5290,7 +5290,7 @@ Inference at scale is the final realization of the Machine Learning Fleet. Throu
 
 The serving hierarchy provides our organizing framework for these optimizations, from request-level batching and caching to replica-level GPU memory management, up to service-level load balancing and platform-level multi-tenancy. We established that the inversion from training (throughput-bound) to inference (latency-bound) necessitates a different engineering mindset, where "the tail" (P99 latency) is the primary determinant of success.
 
-We analyzed why different model architectures require distinct batching strategies: static/dynamic for vision, feature-parallel for recommendation, and continuous batching for LLMs. We explored how model sharding techniques like tensor and expert parallelism reduce latency for frontier models, provided the underlying networking fabric discussed in @sec-communication-collective-operations can sustain the synchronization overhead. Finally, we examined the critical memory management challenges of autoregressive generation, where techniques like PagedAttention and speculative decoding break the sequential bottlenecks of modern AI.
+We analyzed why different model architectures require distinct batching strategies: static/dynamic for vision, feature-parallel for recommendation, and continuous batching for LLMs. We explored how model sharding techniques like tensor and expert parallelism reduce latency for frontier models, provided the underlying networking fabric discussed in @sec-collective-communication can sustain the synchronization overhead. Finally, we examined the critical memory management challenges of autoregressive generation, where techniques like PagedAttention and speculative decoding break the sequential bottlenecks of modern AI.
 
 ::: {.callout-takeaways}
 
@@ -5303,7 +5303,13 @@ We analyzed why different model architectures require distinct batching strategi
 
 :::
 
-We also saw that efficient serving requires specialized hardware. The "Decode" phase of LLM inference is memory-bandwidth bound, motivating the specialized inference accelerators we examined in @sec-compute.
+::: {.callout-chapter-connection title="From Serving to Squeezing"}
+
+We have established the architectural foundations for inference at scale: continuous batching, PagedAttention, model sharding, and load balancing across distributed serving fleets. These techniques manage the resources; the next question is how to use them more efficiently. @sec-performance-engineering examines the optimization techniques, from FlashAttention and kernel fusion to mixed-precision arithmetic and speculative decoding, that push the efficiency frontier of every GPU-hour and every watt spent on inference and training.
+
+:::
+
+We also saw that efficient serving requires specialized hardware. The "Decode" phase of LLM inference is memory-bandwidth bound, motivating the specialized inference accelerators we examined in @sec-compute-infrastructure.
 
 The serving architectures examined here—load balancers, model sharding, and batching strategies—provide the backbone for production inference. However, at extreme scale, even perfectly balanced clusters hit the "Memory Wall" and the physical limits of sequential token generation.
 

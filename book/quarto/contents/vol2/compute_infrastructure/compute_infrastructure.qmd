@@ -1,0 +1,1332 @@
+---
+engine: jupyter
+---
+
+# Compute Infrastructure {#sec-compute-infrastructure}
+
+::: {layout-narrow}
+::: {.column-margin}
+_Gemini Pro 3 Prompt: A sweeping architectural visualization of a modern AI datacenter infrastructure. The scene reveals a massive facility with rows of GPU clusters arranged in pods, connected by high-bandwidth networking fabric depicted as glowing fiber optic pathways. Cooling systems appear as flowing blue currents between server racks. The visualization includes multiple layers: physical infrastructure at the bottom with power and cooling, compute infrastructure in the middle with thousands of interconnected accelerators, and orchestration software at the top represented as an abstract control plane. Visual elements include resource managers allocating workloads, capacity graphs showing utilization, and geographic connections to other datacenters. The color scheme uses industrial grays and silvers with accent colors of electric blue for networking and amber for active computation. Photorealistic technical illustration style suitable for infrastructure engineering documentation. Rendered in the style of Nanobanana._
+:::
+
+\noindent
+![](images/png/cover_infrastructure.png){fig-alt="Isometric datacenter visualization with rows of server racks connected by glowing blue network paths, cooling infrastructure below, and monitoring dashboards displaying utilization graphs above."}
+
+:::
+
+## Purpose {.unnumbered}
+
+_Why does infrastructure—not algorithms—increasingly determine who can participate in advancing machine learning?_
+
+The algorithms for training large models are published in papers anyone can read. The datasets are increasingly public or synthetically generated. The frameworks are open source. Yet only a handful of organizations can actually train frontier models, and that bottleneck is infrastructure: the ability to acquire thousands of accelerators, power them, cool them, connect them with sufficient bandwidth, and keep them running reliably for months. This concentration reflects a shift in what limits machine learning progress. When algorithms were the scarce resource, a clever idea in a garage could change the field. Now that scale dominates, the constraint is who can build and operate the physical systems that make scale possible. The economics are unforgiving: a 10,000-GPU cluster represents hundreds of millions in capital, megawatts of continuous power draw, and operational complexity that compounds with every added node. Infrastructure has become the moat that separates organizations that can pursue ambitious goals from those that can only follow where others lead.
+
+::: {.content-visible when-format="pdf"}
+\newpage
+:::
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Calculate datacenter power requirements using PUE and thermal dissipation metrics
+- Evaluate cooling architectures for high-density GPU clusters using thermal capacity constraints
+- Apply the roofline model to identify compute-bound versus memory-bound workloads
+- Analyze accelerator selection by matching workload characteristics to hardware capabilities
+- Compute total cost of ownership by combining amortized CapEx and OpEx
+- Evaluate the trade-offs between GPU, TPU, and custom ASIC architectures for specific workloads
+
+:::
+
+```{python}
+#| label: infra-setup
+#| echo: false
+
+from mlsys.constants import *
+from mlsys.formatting import fmt, sci
+
+# GPU specs
+a100_tflops_fp16 = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+a100_bw_tbs = f"{A100_MEM_BW.to(TB/second).magnitude:.1f}"
+a100_mem = f"{A100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+a100_tdp = f"{A100_TDP.to(watt).magnitude:.0f}"
+
+h100_tflops_fp16 = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+h100_bw_tbs = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+h100_tdp = f"{H100_TDP.to(watt).magnitude:.0f}"
+
+b200_tflops_fp16 = f"{B200_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
+b200_bw_tbs = f"{B200_MEM_BW.to(TB/second).magnitude:.1f}"
+b200_mem = f"{B200_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+b200_tdp = f"{B200_TDP.to(watt).magnitude:,.0f}"
+
+v100_tflops_fp16 = f"{V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+v100_tdp = f"{V100_TDP.to(watt).magnitude:.0f}"
+
+# Interconnects
+nvlink_a100 = f"{NVLINK_A100_BW.to(GB/second).magnitude:.0f}"
+nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
+ib_hdr = f"{INFINIBAND_HDR_BW.to(Gbps).magnitude:.0f}"
+ib_ndr = f"{INFINIBAND_NDR_BW.to(Gbps).magnitude:.0f}"
+
+# Models
+gpt3_params_b = f"{GPT3_PARAMS.to(Mparam).magnitude/1000:.0f}"
+
+# TPUv4
+tpuv4_bf16_tflops = f"{TPUV4_FLOPS_BF16.to(TFLOPs/second).magnitude:.0f}"
+
+# Derived values for prose
+a100_tflops_per_watt = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude / A100_TDP.to(watt).magnitude:.2f}"
+h100_tflops_per_watt = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude / H100_TDP.to(watt).magnitude:.2f}"
+
+# Ridge points
+a100_ridge = f"{(A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude:.0f}"
+h100_ridge = f"{(H100_FLOPS_FP16_TENSOR / H100_MEM_BW).to(flop/byte).magnitude:.0f}"
+tpuv4_ridge = f"{(TPUV4_FLOPS_BF16 / TPUV4_MEM_BW).to(flop/byte).magnitude:.0f}"
+
+# Additional derived values for accelerator comparison
+v100_bw_tbs = f"{V100_MEM_BW.to(TB/second).magnitude:.1f}"
+v100_mem = f"{V100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
+b200_tflops_per_watt = f"{B200_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude / B200_TDP.to(watt).magnitude:.2f}"
+v100_tflops_per_watt = f"{V100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude / V100_TDP.to(watt).magnitude:.2f}"
+b200_ridge = f"{(B200_FLOPS_FP16_TENSOR / B200_MEM_BW).to(flop/byte).magnitude:.0f}"
+```
+
+## The Warehouse-Scale Computer {#sec-compute-warehousescale-computer-384e}
+
+We are now building the **Infrastructure Layer** of the **Fleet Stack** (@sec-vol2-introduction). This layer provides the raw capabilities, FLOPS, Watts, and Bandwidth, that the **Distribution Layer** (Part II) demands. The physics of cooling and power density here set the hard limits on how large our logical clusters can scale.
+
+::: {.callout-fleet-stack title="Infrastructure Layer: The Physical Foundation"}
+This chapter establishes the **Infrastructure Layer** of the Fleet Stack. Every decision made here, from power delivery architecture to cooling system selection to accelerator placement, propagates upward as hard constraints on the Distribution, Serving, and Governance layers. A cluster that cannot sustain its power envelope cannot train; a facility that cannot cool its racks must throttle computation. The Infrastructure Layer does not merely support the fleet. It *defines* what the fleet can achieve.
+:::
+
+The datacenter can be understood as a computer that executes learning workloads. If datasets are the programs driving ML computation, then infrastructure provides the execution engine. This perspective transforms how we reason about facility design: every watt of power capacity, every degree of cooling headroom, and every meter of cable length translates directly into achievable model scale and training throughput.
+
+We must move beyond viewing the datacenter as mere housing for servers and instead understand it as a carefully engineered system where power, cooling, and interconnects determine what computations are possible. A single training run for a frontier language model may consume more electricity than a small town uses in a month, sustain thermal loads that would overwhelm conventional building systems, and require network bandwidth equivalent to hundreds of simultaneous video streams between every pair of nodes. These physical realities, not algorithmic innovations, increasingly determine who can participate in advancing the field.
+
+### Physical Infrastructure Fundamentals {#sec-compute-physical-infrastructure-fundamentals-4d8a}
+
+ML datacenters differ from traditional cloud facilities in three critical dimensions, each driven by the unique characteristics of accelerator-based computation. First, power density per rack reaches 5 to 10 times higher than conventional levels because modern GPUs pack orders of magnitude more transistors per unit area than general-purpose servers, all switching simultaneously during matrix operations. A single rack of DGX H100 systems draws more power than an entire row of traditional web servers.
+
+Second, cooling requirements demand liquid rather than air-based solutions (@fig-cooling-topology contrasts traditional air-cooled architectures with direct-to-chip liquid systems capable of managing `{python} h100_tdp` W per GPU). The heat generated by GPU clusters is not merely more intense but fundamentally different in character: it is concentrated on small silicon surfaces rather than distributed across large circuit boards, creating heat flux densities that air convection physically cannot remove.
+
+Third, physical layout must optimize for high-bandwidth interconnects rather than flexible networking. Traditional datacenters can place servers anywhere because web requests are independent and network latency between servers matters little. ML training creates tightly coupled communication patterns where every node must exchange data with specific peers at rates measured in hundreds of gigabits per second, making physical proximity between communicating nodes a first-order performance determinant.
+
+::: {#fig-cooling-topology fig-env="figure" fig-pos="htb" fig-cap="**Datacenter Cooling Architectures**: Comparison of traditional hot-aisle/cold-aisle air cooling versus modern direct-to-chip liquid cooling. The air cooling diagram shows airflow management separating intake and exhaust streams, while the liquid cooling diagram illustrates coolant loops directly contacting high-power components to manage extreme heat density." fig-alt="Two-panel diagram. Panel A: Two server racks with cold aisle between, blue arrows showing airflow in, red arrows for hot exhaust, CRAC unit below. Panel B: GPU tray with cold plates, blue coolant in, red coolant out, CDU below."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{BlueLine}{RGB}{0,80,180}
+  \definecolor{BlueL}{RGB}{225,240,255}
+  \definecolor{RedLine}{RGB}{200,30,30}
+  \definecolor{RedL}{RGB}{255,235,235}
+
+  \tikzset{
+    rack/.style={draw=black!60, thick, fill=gray!5, minimum width=2cm, minimum height=3.5cm},
+    server/.style={draw=black!40, fill=white, minimum width=1.8cm, minimum height=0.3cm},
+    arrowCold/.style={->, >=stealth, thick, text=BlueLine, color=BlueLine},
+    arrowHot/.style={->, >=stealth, thick, text=RedLine, color=RedLine}
+  }
+
+  % Left Panel: Air Cooling (Hot/Cold Aisle)
+  \begin{scope}[local bounding box=Air]
+    \node[anchor=south] at (0,4) {\textbf{A. Air Cooling (Hot/Cold Aisle)}};
+
+    % Racks
+    \node[rack] (r1) at (-1.5, 2) {};
+    \node[rack] (r2) at (1.5, 2) {};
+
+    % Servers inside
+    \foreach \y in {0.5, 1.0, ..., 3.0} {
+        \node[server] at (-1.5, \y) {};
+        \node[server] at (1.5, \y) {};
+    }
+
+    % Cold Aisle (Middle)
+    \node[text=BlueLine, font=\footnotesize] at (0, 0.5) {Cold Aisle};
+    \draw[arrowCold] (0, 3.5) -- (0, 1.5);
+    \draw[arrowCold] (0, 1.5) -- (-1, 1.5);
+    \draw[arrowCold] (0, 1.5) -- (1, 1.5);
+
+    % Hot Aisles (Sides)
+    \draw[arrowHot] (-2, 1.5) -- (-3, 1.5);
+    \draw[arrowHot] (2, 1.5) -- (3, 1.5);
+    \node[text=RedLine, font=\footnotesize, rotate=90] at (-3.2, 2) {Hot Exhaust};
+    \node[text=RedLine, font=\footnotesize, rotate=90] at (3.2, 2) {Hot Exhaust};
+
+    % CRAC Unit Symbol
+    \node[draw=black, fill=BlueL, minimum width=4cm, minimum height=0.5cm] at (0, -0.5) {CRAC / CRAH Unit};
+  \end{scope}
+
+  % Right Panel: Liquid Cooling
+  \begin{scope}[shift={(6.5,0)}, local bounding box=Liquid]
+    \node[anchor=south] at (0,4) {\textbf{B. Direct-to-Chip Liquid Cooling}};
+
+    % Board
+    \node[draw=black!50, fill=green!5, minimum width=4cm, minimum height=3cm] (board) at (0,2) {};
+    \node[anchor=north] at (0, 3.4) {Server Blade / GPU Tray};
+
+    % Chips
+    \node[draw=black, fill=gray!30, minimum size=1cm] (c1) at (-1, 2) {GPU};
+    \node[draw=black, fill=gray!30, minimum size=1cm] (c2) at (1, 2) {GPU};
+
+    % Cold Plates (on top)
+    \node[draw=BlueLine, fill=BlueL!50, minimum size=0.6cm, circle] (p1) at (-1, 2) {};
+    \node[draw=BlueLine, fill=BlueL!50, minimum size=0.6cm, circle] (p2) at (1, 2) {};
+
+    % Piping
+    \draw[ultra thick, BlueLine, ->] (-2.5, 1.5) -- (-1.3, 1.8) node[midway, below, font=\scriptsize] {Cool In};
+    \draw[ultra thick, BlueLine] (-1.3, 1.8) -- (p1);
+    \draw[ultra thick, BlueLine] (p1) -- (p2);
+    \draw[ultra thick, RedLine, ->] (p2) -- (2.5, 1.8) node[midway, below, font=\scriptsize] {Warm Out};
+
+    % CDU
+    \node[draw=black, fill=gray!20, minimum width=3cm, minimum height=0.8cm] at (0, -0.5) {Coolant Dist. Unit (CDU)};
+    \draw[dashed, thick, black!50] (0, 0) -- (0, 1.5);
+  \end{scope}
+
+\end{tikzpicture}
+```
+:::
+
+#### Power Delivery and Distribution {#sec-compute-power-delivery-distribution-90e2}
+
+A single NVIDIA DGX H100 system consumes 10.2 kW at peak load. A rack containing four such systems requires over 40 kW, compared to 5 to 10 kW for traditional server racks. This power density[^fn-power-density] changes power infrastructure design.
+
+[^fn-power-density]: **Power density**: The power consumption per unit of datacenter floor space, typically measured in kW per rack or kW per square meter. Traditional enterprise datacenters design for 5-10 kW per rack. Modern GPU clusters require 40-100+ kW per rack, demanding specialized power distribution and cooling infrastructure. Power density directly limits how many GPUs can be deployed in existing facilities.
+
+**Utility and Backup Power.** Production ML facilities require redundant power feeds, typically N+1 or 2N configurations[^fn-redundancy] where N represents the load requirement. Uninterruptible power supplies (UPS) bridge the gap during utility failures, though the massive power draw of GPU clusters limits battery backup duration to minutes rather than hours. A traditional enterprise UPS system designed for 10 kW per rack can provide 15 to 30 minutes of runtime; the same battery capacity supporting a 40 kW GPU rack provides only 4 to 8 minutes. This reduced backup window has operational implications: training jobs must save checkpoint state within the UPS runtime window, or risk losing hours of training progress during power events. Diesel generators provide extended backup, while automatic transfer switches complete failover within 10 to 15 seconds. The gap between UPS engagement and generator activation is the critical vulnerability window during which GPU clusters must either ride through on battery or gracefully suspend operations.
+
+The reliability requirements for ML training power are more stringent than for typical web serving workloads. A web server that reboots after a 30-second power interruption resumes serving requests immediately. A distributed training job interrupted by a power event loses all progress since the last checkpoint and must spend additional time reloading model state, rebuilding communication rings, and warming up the data pipeline before productive computation resumes. For large-scale training runs, a single power event can waste 30 to 60 minutes of wall-clock time, translating to thousands of dollars in lost GPU-hours. This cost justifies the premium investment in 2N power redundancy for ML-dedicated facilities.
+
+[^fn-redundancy]: **N+1 and 2N redundancy**: Power redundancy configurations where N is the capacity required to serve the load. N+1 provides one backup component (e.g., 3 UPS units where 2 are required), allowing single-failure tolerance. 2N provides complete duplication (e.g., 4 UPS units), allowing maintenance on one path while maintaining failure protection on the other. ML training runs spanning weeks justify 2N redundancy to prevent catastrophic job loss.
+
+**Power Distribution Architecture.** Modern ML datacenters use a tiered distribution model:
+
+| **Distribution Level**      | **Typical Voltage** | **Purpose**             |
+|:----------------------------|--------------------:|:------------------------|
+| **Utility feed**            |          13.8-69 kV | Grid connection         |
+| **Substation transformer**  |           480V (US) | Building distribution   |
+| **PDU (Power Distribution** |                208V | Rack-level distribution |
+| **Unit)**                   |                     |                         |
+| **Server PSU**              |              12V DC | Component-level power   |
+
+@fig-power-hierarchy traces power from grid connection at 13.8 kV through four voltage step-downs to the 12V DC rails that feed individual GPU components:
+
+::: {#fig-power-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**Datacenter Power Distribution**: Hierarchical power delivery for ML infrastructure. Voltage steps down from utility-level 13.8 kV through 480V building distribution to 208V rack distribution and finally 12V DC at the component level. The 2N redundancy pattern at UPS and PDU tiers ensures training jobs survive single-component failures during multi-week runs. Each DGX H100 system draws 10.2 kW, requiring robust power infrastructure to support racks exceeding 40 kW total load." fig-alt="Vertical flowchart with 4 boxes showing power step-down: Utility Feed at 13.8 kV to Substation at 480V to PDU at 208V to Server PSU at 12V DC. Dashed arrows show backup generator and UPS battery connections."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{GreenLine}{RGB}{34,139,34}
+  \definecolor{GreenL}{RGB}{220,245,220}
+  \definecolor{BlueLine}{RGB}{0,80,180}
+  \definecolor{BlueL}{RGB}{225,240,255}
+  \definecolor{RedLine}{RGB}{200,30,30}
+  \definecolor{RedL}{RGB}{255,235,235}
+  \definecolor{VioletLine}{RGB}{138,43,226}
+  \definecolor{VioletL2}{RGB}{240,230,255}
+
+  \tikzset{
+    Box/.style={
+      draw=GreenLine,
+      fill=GreenL,
+      line width=0.75pt,
+      rounded corners=2pt,
+      align=center,
+      minimum width=3.5cm,
+      minimum height=1.0cm,
+      inner sep=4pt
+    },
+    BoxBlue/.style={Box, draw=BlueLine, fill=BlueL},
+    BoxRed/.style={Box, draw=RedLine, fill=RedL},
+    Arrow/.style={->, >=stealth, thick, color=black!70},
+    Label/.style={font=\footnotesize\sffamily, color=black!70}
+  }
+
+  % Nodes
+  \node[Box] (utility) {\textbf{Utility Feed}\\High Voltage (13.8kV)};
+  \node[Box, below=1.0cm of utility] (substation) {\textbf{Substation}\\Step-down to 480V};
+  \node[BoxBlue, below=1.0cm of substation] (pdu) {\textbf{PDU}\\Rack Dist. (208V)};
+  \node[BoxRed, below=1.0cm of pdu] (psu) {\textbf{Server PSU}\\Component (12V DC)};
+
+  % Edges
+  \draw[Arrow] (utility) -- node[right, font=\footnotesize, xshift=2mm] {Grid Input} (substation);
+  \draw[Arrow] (substation) -- node[right, font=\footnotesize, xshift=2mm] {Building Power} (pdu);
+  \draw[Arrow] (pdu) -- node[right, font=\footnotesize, xshift=2mm] {Rack Power} (psu);
+
+  % Annotations
+  \node[right=2cm of utility, align=left, font=\footnotesize] (gen) {Backup Generator\\(Diesel/Gas)};
+  \draw[dashed, ->] (gen) -- (utility);
+
+  \node[right=2cm of pdu, align=left, font=\footnotesize] (ups) {UPS Battery\\Backup};
+  \draw[dashed, ->] (ups) -- (pdu);
+
+\end{tikzpicture}
+```
+:::
+
+Each voltage conversion step in this hierarchy introduces conversion losses, typically 2 to 5% per stage. For a four-stage conversion from utility to component level, cumulative losses reach 8 to 18% of total power draw. These losses generate heat that must also be removed by the cooling system, creating a compounding effect: inefficient power distribution increases both electrical waste and cooling demand. For ML workloads, where power draw is sustained at near-maximum levels for weeks or months during training runs, these losses accumulate to significant costs. A 1,024-GPU cluster drawing 700 kW of compute power may lose 60 to 130 kW to power conversion alone, equivalent to the heat output of 90 to 185 additional H100 GPUs.
+
+The relationship between power infrastructure and ML training also manifests in a subtler constraint: *power ramp rate*. GPU clusters can transition from idle to full load in seconds when a training job launches. If the electrical infrastructure cannot ramp power delivery fast enough, voltage sags cause GPU power supplies to trigger protective shutdowns. Production facilities mitigate this through UPS systems that buffer rapid load changes and power management software that staggers GPU initialization across nodes.
+
+**Power Usage Effectiveness.** The PUE metric[^fn-pue], developed by The Green Grid consortium in 2007 [@thegreengrid2007pue], quantifies datacenter energy efficiency:
+
+[^fn-pue]: **Power Usage Effectiveness (PUE)**: An industry-standard metric where values closer to 1.0 indicate greater efficiency. A PUE of 2.0 means half the power goes to overhead (cooling, lighting, power distribution), while 1.1 means only 10% goes to overhead. Google's most efficient datacenters achieve PUE of 1.06, while typical enterprise facilities operate at 1.5-2.0.
+
+Every watt spent on cooling is a watt not spent on computation, an overhead we call the *cooling tax*. The following worked example quantifies this tax for a realistic GPU cluster.
+
+::: {.callout-notebook title="The Cooling Tax"}
+**Problem**: You operate a **10 MW** GPU cluster. Electricity costs **$0.10/kWh**. How much money do you waste with inefficient cooling (PUE 1.5) vs. efficient liquid cooling (PUE 1.1)?
+
+**The Math**:
+
+1.  **Compute Power**: 10 MW.
+2.  **Scenario A (Air Cooled, PUE 1.5)**: Total Power = $10 \times 1.5 = 15 \text{ MW}$. Cooling uses 5 MW.
+3.  **Scenario B (Liquid Cooled, PUE 1.1)**: Total Power = $10 \times 1.1 = 11 \text{ MW}$. Cooling uses 1 MW.
+4.  **Difference**: $15 - 11 = 4 \text{ MW}$ of wasted power.
+5.  **Annual Cost**: $4 \text{ MW} \times 24 \text{ h/day} \times 365 \text{ days} \times \$0.10/\text{kWh} = \mathbf{\$3.5 \text{ Million/year}}$.
+
+**The Systems Conclusion**: PUE is not just an environmental metric; it is a massive OpEx lever. Improving PUE from 1.5 to 1.1 saves enough money to buy ~100 H100 GPUs every year.
+:::
+
+A PUE of 1.0 represents perfect efficiency where all power goes to computing. Traditional datacenters achieve PUE values of 1.5 to 2.0, while hyperscale facilities target 1.1 to 1.2. ML datacenters face a challenge. The extreme heat density of GPU clusters increases cooling overhead, pushing PUE higher unless advanced cooling technologies are deployed.
+
+These power realities become concrete when we estimate the electricity cost of a single large-scale training run. The following calculation demonstrates how power infrastructure directly constrains the economics of frontier model development.
+
+::: {.callout-napkin-math title="Power Cost of Training a 70B Model"}
+**Problem**: Estimate the electricity cost of training a 70 billion parameter language model for 30 days on a 1,024-GPU H100 cluster.
+
+**Parameters**:
+
+- **GPUs**: 1,024 $\times$ H100 at `{python} h100_tdp` W TDP each
+- **PUE**: 1.15 (liquid-cooled facility)
+- **GPU utilization**: 70% average (accounting for data loading, checkpointing, communication)
+- **Electricity rate**: \$0.08/kWh (industrial rate)
+- **Training duration**: 30 days
+
+**The Math**:
+
+1. **GPU power draw**: 1,024 $\times$ `{python} h100_tdp` W $\times$ 0.70 = 501 kW (effective GPU load)
+2. **Total facility power**: 501 kW $\times$ 1.15 (PUE) = 576 kW
+3. **Energy consumed**: 576 kW $\times$ 24 h/day $\times$ 30 days = 414,720 kWh
+4. **Electricity cost**: 414,720 kWh $\times$ \$0.08/kWh = **\$33,178**
+
+**The Systems Conclusion**: Electricity alone costs approximately \$33,000 for one training run, but this represents only the marginal cost. Amortized hardware costs for 1,024 H100s at \$300,000 per 8-GPU node add approximately \$1.3M per month (assuming 3-year amortization), making power roughly 2.5% of the total. However, at hyperscale (10,000+ GPUs running continuously), power becomes the dominant OpEx component and the primary lever for long-term cost optimization.
+:::
+
+The relationship between power infrastructure and training capability extends beyond simple cost accounting. Power delivery architecture determines the maximum cluster density achievable at a given site, which in turn constrains the network topology options available for connecting accelerators. A facility rated for 5 MW of IT load can support approximately 500 DGX H100 systems (4,000 GPUs), enough for moderate-scale training. Frontier model training at the 10,000+ GPU scale requires 50+ MW facilities, a class of infrastructure that takes 18 to 36 months to construct and represents capital investments exceeding \$500 million.
+
+#### Dynamic Power Management {#sec-compute-dynamic-power-management}
+
+GPU power consumption varies dramatically with workload phase. During compute-intensive matrix multiplication, an H100 draws near its `{python} h100_tdp` W TDP. During memory-bound operations like attention score computation, power drops to 60 to 70% of peak. During checkpointing, when GPUs write model state to storage, power consumption falls further as compute units idle while the storage subsystem becomes the bottleneck.
+
+These power fluctuations create challenges for both the electrical infrastructure and the cooling system. Power fluctuations of 20 to 40% across a 1,000-GPU cluster translate to megawatt-scale swings in facility power draw, occurring on timescales of seconds. Power delivery infrastructure must handle these transients without voltage droop that could trigger GPU power supply protection circuits.
+
+NVIDIA's GPU Boost technology dynamically adjusts clock frequencies based on power and thermal headroom. When workloads consume less than the TDP limit, Boost clocks increase, extracting additional performance from the available power budget. Conversely, when thermal limits are approached, Boost clocks decrease to maintain safe operating temperatures. This dynamic behavior means that measured training throughput depends on the cooling system's ability to maintain low GPU junction temperatures, creating a direct link between facility infrastructure quality and computational performance.
+
+Modern power management strategies exploit these dynamics to increase effective cluster density. *Power capping* limits the maximum power draw of each GPU below its rated TDP, reducing peak power demand at the cost of slightly lower peak performance. A cluster power-capped to 80% of rated TDP can accommodate 25% more GPUs within the same power envelope, often yielding higher aggregate throughput despite the per-GPU performance reduction. The optimal power cap depends on workload characteristics: memory-bound workloads (which already operate below peak power) suffer minimal performance loss, while compute-bound workloads see proportional throughput reduction.
+
+#### Cooling Systems at Scale {#sec-compute-cooling-systems-scale-2ccb}
+
+At extreme rack densities, cooling ceases to be a facilities concern and becomes a fundamental bound on computation, what we might call *the thermodynamic limit of intelligence*.
+
+::: {.callout-perspective title="The Thermodynamic Limit of Intelligence"}
+**The Hardest Constraint:** We often think of intelligence as abstract information processing, but in the warehouse-scale computer, it is a **heat engine**.
+Training a model is thermodynamically equivalent to reversing entropy by organizing weights. By the Second Law of Thermodynamics, this requires generating massive amounts of waste heat.
+The density of intelligence ($\text{Tokens}/\text{sec}/\text{m}^2$) is strictly limited by the density of heat removal ($\text{Watts}/\text{m}^2$). **Power density is not just a facility spec; it is the physical speed limit of learning.**
+:::
+
+Heat dissipation represents the primary constraint on ML cluster density. An H100 GPU generates `{python} h100_tdp`W of thermal output from a surface area smaller than a dinner plate, producing heat flux comparable to a nuclear reactor's fuel rod surface.
+
+**Air Cooling Limitations.** Traditional air cooling becomes impractical above 30 to 40 kW per rack. The physics are straightforward: air's low heat capacity of approximately 1 kJ/kg-K requires massive airflow to remove heat. The fundamental equation governing convective air cooling is $Q = \dot{m} \cdot c_p \cdot \Delta T$, where $Q$ is heat removed, $\dot{m}$ is mass flow rate, $c_p$ is specific heat capacity, and $\Delta T$ is temperature rise. For a 40 kW rack with a 15C allowable temperature rise, the required mass flow rate is approximately 2.7 kg/s, translating to roughly 10,000 CFM of airflow. This volume of air creates acoustic levels exceeding 80 dB, comparable to standing beside a busy highway. The fan power required to move this air adds 3 to 5 kW of electrical overhead per rack, directly increasing PUE.
+
+At the 80 to 120 kW per rack densities required for GPU clusters, air cooling would require proportionally more airflow, roughly 30,000 CFM per rack, an impractical volume that would generate tornado-force winds within the server room and consume 10 to 15 kW of fan power alone. This thermodynamic impossibility of air cooling at GPU-class power densities is what drives the industry transition to liquid cooling.
+
+**Hot Aisle/Cold Aisle Containment.** This architectural pattern separates cold supply air from hot exhaust air using physical barriers. Cold air enters through raised floor vents or overhead ducts, passes through servers front-to-back, and exhausts into a contained hot aisle. Containment improves cooling efficiency by preventing mixing, but cannot solve the fundamental heat density challenge of modern GPU clusters. Examine @fig-cooling-topology to see how containment manages airflow separation in panel A, while panel B illustrates the direct-to-chip liquid loops that bypass air entirely.
+
+**Direct-to-Chip Liquid Cooling.** Liquid cooling addresses heat density through water's superior heat capacity of 4.2 kJ/kg-K, roughly four times that of air. Cold plates mounted directly on GPUs and CPUs transfer heat to circulating coolant, which flows to facility-level heat exchangers. This approach enables rack densities exceeding 100 kW while reducing cooling power consumption by 30 to 40 percent compared to air cooling.
+
+The cold plate design itself involves significant engineering trade-offs. Microchannel cold plates maximize heat transfer surface area through hundreds of parallel fluid channels etched into the copper contact surface, achieving thermal resistances below 0.05 C/W. However, the small channel dimensions (typically 0.2 to 0.5 mm) increase pressure drop, requiring more powerful pumps and creating reliability concerns from particulate clogging. Macro-channel designs sacrifice some thermal performance for robustness and lower maintenance requirements, making them preferred for production deployments where uptime outweighs raw cooling efficiency.
+
+Coolant distribution within a rack follows a manifold architecture where a primary supply and return header feeds individual cold plates through flexible hoses. Each cold plate requires approximately 1 to 2 liters per minute of flow rate to maintain GPU junction temperatures below 83C under sustained load. A rack of 4 DGX H100 systems (32 GPUs) therefore requires 32 to 64 liters per minute of coolant flow, managed by a Coolant Distribution Unit (CDU) that exchanges heat with the facility water loop. The CDU represents a single point of failure for the rack; production deployments use N+1 CDU configurations to maintain cooling during maintenance.
+
+::: {.callout-note title="Liquid Cooling Adoption"}
+As of 2024, liquid cooling has transitioned from specialty option to requirement for large-scale ML clusters. NVIDIA's GB200 NVL72 systems require liquid cooling with no air-cooled option available. Facilities planning for next-generation hardware must include liquid cooling infrastructure from initial design.
+:::
+
+**Immersion Cooling.** The most aggressive thermal solution submerges entire servers in dielectric fluid, eliminating the thermal interface between component and coolant entirely. Two variants exist with fundamentally different operating principles. Single-phase immersion uses non-conductive oils (such as mineral oil or engineered fluids like 3M Novec) that remain liquid throughout the heat transfer process. The fluid circulates through external heat exchangers, returning to the tank at a controlled temperature. Single-phase systems achieve uniform cooling across all components simultaneously, eliminating hot spots that plague cold plate approaches where only primary heat sources receive direct cooling.
+
+Two-phase immersion systems use fluids engineered to boil at low temperatures (typically 34 to 61C), leveraging the latent heat of vaporization for dramatically more efficient heat transfer. When fluid boils at a component's surface, each gram of fluid absorbs roughly 100 times more energy than the same mass absorbing sensible heat alone. The vapor rises to condensers at the top of the tank, releases its heat, and drips back down as liquid, creating a self-regulating cycle that requires no pumps for the primary cooling loop.
+
+The trade-offs between cold plate and immersion approaches center on operational complexity versus thermal performance. Cold plate systems integrate with conventional server designs, allow standard component replacement procedures, and require minimal staff retraining. Immersion systems demand specialized fluid management (dielectric fluids cost \$10 to \$50 per liter and require monitoring for contamination), modified server designs without fans, and maintenance procedures that involve draining and refilling tanks. For these reasons, cold plate liquid cooling dominates current production deployments, while immersion cooling sees adoption primarily in new-build facilities designed around its requirements from the ground up.
+
+#### Physical Layout Optimization {#sec-compute-physical-layout-optimization-54f7}
+
+ML cluster performance depends critically on physical topology. Unlike web serving workloads where any server can handle any request, distributed training requires specific communication patterns between specific nodes. This dependency exists because, at warehouse scale, the network fabric functions as the computer's system bus, making physical distance a first-order performance constraint. We call this the *gradient bus perspective*.
+
+::: {.callout-perspective title="The Gradient Bus Perspective"}
+**The Network is the Bus:** In a warehouse-scale computer, the InfiniBand/Ethernet fabric is not networking in the traditional sense; it is the **System Bus** (like PCIe or NVLink) writ large. Packet loss equals data corruption, latency equals memory access time, and bandwidth equals memory throughput.
+
+When we optimize physical layout, we are placing memory closer to compute to minimize the speed-of-light latency of the Gradient Bus.
+:::
+
+**Rack Density Considerations.** Higher density reduces cable lengths and switch hops but concentrates power and cooling requirements. The relationship between density and performance is not linear. Doubling rack density halves the cable distances between nodes, reducing signal propagation delay and enabling passive copper connections where active optical cables would otherwise be required. For InfiniBand NDR at `{python} ib_ndr` Gbps, passive copper cables support distances up to 2 meters with lower latency and power than active optical alternatives, providing a measurable performance advantage for densely packed racks. Production deployments balance these factors based on workload characteristics:
+
+| **Workload Type**   | **Typical Density** | **Limiting Factor** |
+|:--------------------|--------------------:|:--------------------|
+| **LLM training**    |      80-120 kW/rack | Cooling capacity    |
+| **Recommendation**  |       30-50 kW/rack | CPU/memory balance  |
+| **inference**       |                     |                     |
+| **Vision training** |       60-80 kW/rack | Network bandwidth   |
+
+**Cable Management.** High-bandwidth interconnects like InfiniBand use copper cables for distances under 3 meters and fiber optics beyond. Cable routing must maintain bend radius requirements (typically 10 times cable diameter) while enabling airflow for any air-cooled components. Active optical cables simplify routing but add latency and power consumption compared to passive copper.
+
+The physical infrastructure constraints examined in this section, power density, cooling capacity, and physical topology, establish the envelope within which compute infrastructure must operate. These constraints are not merely practical concerns to be handled by facilities teams; they are first-order determinants of what ML computations a given facility can support. A facility rated for 30 kW per rack cannot accommodate DGX H100 systems, regardless of budget. A layout optimized for web serving cannot support the tightly coupled communication patterns of distributed training without recabling. Understanding these physical foundations is prerequisite to the compute infrastructure design decisions that follow.
+
+### Compute Infrastructure Design {#sec-compute-compute-infrastructure-design-1353}
+
+ML clusters combine multiple node types, each optimized for different phases of the training and inference pipeline. Understanding these roles clarifies infrastructure design decisions, but first we must understand the memory hierarchy that governs data movement within and between nodes. Every operation in a training step, from reading model weights to synchronizing gradients, traverses multiple levels of this hierarchy, and the bandwidth and latency at each level determine where bottlenecks form.
+
+#### The Memory Hierarchy for ML Workloads {#sec-compute-memory-hierarchy-ml}
+
+A modern GPU node presents a deep memory hierarchy spanning six orders of magnitude in both bandwidth and latency. Understanding this hierarchy is essential because the dominant cost in most ML workloads is *moving data*, not computing on it. Each level trades capacity for speed, and the boundaries between levels correspond to physical boundaries: on-chip versus off-chip, within-node versus across-node, within-rack versus across-rack.
+
+| **Level**          |           **Capacity** |               **Bandwidth** | **Latency** | **Physical Boundary** |
+|:-------------------|-----------------------:|----------------------------:|------------:|:----------------------|
+| **Registers/SRAM** |          ~20 MB per SM |                    ~20 TB/s |       ~1 ns | On-chip               |
+| **L2 Cache**       |           50 MB (H100) |                    ~12 TB/s |       ~4 ns | On-chip               |
+| **HBM3**           | `{python} h100_mem` GB | `{python} h100_bw_tbs` TB/s |     ~300 ns | On-package (stacked)  |
+| **NVLink**         |        640 GB (8 GPUs) | `{python} nvlink_h100` GB/s |     ~500 ns | Intra-node            |
+| **PCIe Gen5**      |      TBs (system DRAM) |                     64 GB/s |   ~1,000 ns | Intra-node (CPU-GPU)  |
+| **InfiniBand NDR** |           Cluster-wide |      `{python} ib_ndr` Gbps |   ~5,000 ns | Inter-node            |
+
+The bandwidth ratios between adjacent levels reveal the cost of crossing each boundary. Moving from HBM to NVLink reduces available bandwidth by approximately 4 $\times$ (from `{python} h100_bw_tbs` TB/s to `{python} nvlink_h100` GB/s). Crossing from NVLink to InfiniBand imposes another roughly 14 $\times$ reduction. These step functions in bandwidth directly shape the parallelism strategies examined in @sec-distributed-training-systems: tensor parallelism keeps communication within the high-bandwidth NVLink domain, while data parallelism accepts the lower InfiniBand bandwidth because gradient synchronization is less frequent.
+
+The latency dimension tells a complementary story. Register access at 1 ns versus InfiniBand at 5,000 ns represents a 5,000 $\times$ gap. For latency-sensitive operations like pipeline parallelism micro-batches, where GPUs idle while waiting for activations from the previous stage, this gap determines the minimum practical micro-batch size. Too small, and the pipeline spends more time waiting for network transfers than computing.
+
+::: {.callout-checkpoint title="Identifying the Memory Bottleneck"}
+Consider two workloads running on a DGX H100 node (8 GPUs, NVLink interconnect):
+
+1. **Workload A**: Training a 7B parameter model with data parallelism across 8 GPUs. Each GPU holds a full model copy and synchronizes gradients after each step.
+2. **Workload B**: Training a 70B parameter model with tensor parallelism across 8 GPUs. Each GPU holds 1/8 of every layer and synchronizes activations at every layer boundary.
+
+Using the memory hierarchy table above, identify the bandwidth-limiting level for each workload. Which workload is more sensitive to NVLink bandwidth, and why?
+
+*Hint*: Consider how frequently each workload crosses the NVLink boundary relative to the HBM boundary. Workload A crosses NVLink once per training step (gradient AllReduce), while Workload B crosses NVLink at every layer boundary (activation synchronization).
+:::
+
+#### GPU Cluster Architectures {#sec-compute-gpu-cluster-architectures-e70f}
+
+Modern GPU clusters are built from dense multi-GPU nodes connected via high-bandwidth fabrics. The fundamental unit of design is the *node*, a server containing multiple GPUs with intra-node interconnects (NVLink) providing order-of-magnitude higher bandwidth than inter-node links (InfiniBand). This bandwidth asymmetry between intra-node and inter-node communication creates a natural partitioning of parallelism strategies: operations requiring frequent, high-bandwidth communication are confined within a node, while operations tolerating lower bandwidth are distributed across nodes.
+
+Two reference architectures dominate production deployments, differing primarily in the degree of integration between GPU, networking, and storage components.
+
+**DGX-Style Dense Nodes.** NVIDIA's DGX systems package 8 GPUs with NVLink[^fn-nvlink] interconnects, high-bandwidth networking, and substantial local storage in a single chassis. The DGX H100 provides 8 H100 GPUs with 640 GB total HBM3[^fn-hbm] memory, an NVSwitch fabric enabling `{python} nvlink_h100` GB/s GPU-to-GPU bandwidth, 8 ports at `{python} ib_ndr` Gbps for InfiniBand or Ethernet, 2 Intel Xeon CPUs for preprocessing, and 30 TB of NVMe storage for dataset staging. This dense packaging illustrates *the need for scale-up* when training trillion-parameter models.
+
+[^fn-nvlink]: **NVLink**: NVIDIA's proprietary high-bandwidth interconnect for GPU-to-GPU communication, providing `{python} nvlink_h100` GB/s bidirectional bandwidth in NVLink 4.0 (H100), compared to 64 GB/s for PCIe Gen5. NVLink enables efficient tensor parallelism by allowing GPUs to share memory across the interconnect with near-local-memory latency.
+
+[^fn-hbm]: **High Bandwidth Memory (HBM)**: A 3D-stacked DRAM technology that places memory dies vertically atop the GPU die, connected via thousands of through-silicon vias (TSVs). HBM3 provides `{python} h100_bw_tbs` TB/s bandwidth per GPU compared to 400 GB/s for DDR5. This bandwidth is essential for memory-bound ML workloads where data movement, not computation, limits performance.
+
+::: {.callout-note title="Archetype A: The Need for Scale-Up"}
+**Archetype A (The Trillion-Parameter LLM)** critically depends on architectures like the DGX. The `{python} nvlink_h100` GB/s NVLink bandwidth is not a luxury but a requirement for **Tensor Parallelism**. When a single model layer is split across 8 GPUs, every forward and backward pass requires synchronizing activations. Standard PCIe Gen5 (64 GB/s) would bottleneck these operations, stalling the training of Archetype A models.
+:::
+
+This integrated design simplifies deployment but limits flexibility. Each DGX H100 costs approximately $300,000 (pricing reflects 2024 market conditions and fluctuates significantly based on supply, demand, and generation transitions). This cost makes component-level upgrades economically impractical.
+
+**HGX Baseboard Designs.** For organizations building custom infrastructure, NVIDIA's HGX baseboards provide the GPU and interconnect components for integration into custom server designs. Cloud providers and large enterprises use HGX to optimize for their specific power, cooling, and networking requirements while maintaining compatibility with NVIDIA's software stack. The HGX approach offers important advantages: organizations can design cooling solutions tailored to their specific facility constraints, select CPU and memory configurations optimized for their workload mix, and integrate with their preferred storage and networking infrastructure. Major cloud providers (AWS, Azure, GCP, Oracle) all build their GPU instances around HGX baseboards customized for their datacenter architectures.
+
+The cost differential between DGX and HGX approaches reflects the trade-off between integration convenience and design flexibility. DGX systems arrive as tested, certified platforms with guaranteed component compatibility and a single support contract, reducing deployment risk at a premium price. HGX-based custom builds require more engineering effort for system integration, thermal validation, and firmware configuration, but enable 10 to 20% cost savings on hardware and allow optimizations specific to the deploying organization's infrastructure.
+
+**PCIe vs. NVLink Configurations.** The choice between PCIe and NVLink connectivity involves fundamental trade-offs that @fig-interconnect-topology visualizes by contrasting host-centric PCIe trees with peer-to-peer NVLink meshes:
+
+::: {#fig-interconnect-topology fig-env="figure" fig-pos="htb" fig-cap="**Node Interconnect Topologies**: Contrast between PCIe-based commodity servers and NVLink-based dense nodes. The PCIe topology shows CPU-centric communication with higher latency and shared bandwidth bottlenecks, while the NVLink topology demonstrates a high-bandwidth mesh allowing direct peer-to-peer GPU communication essential for tensor parallelism." fig-alt="Two-panel diagram. Panel A: PCIe tree with CPU root connecting to 4 GPUs via switches, dashed line showing cross-switch latency. Panel B: NVLink mesh with 4 GPUs fully connected by thick purple lines, CPU peripheral with thin connections."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{GreenLine}{RGB}{34,139,34}
+  \definecolor{GreenL}{RGB}{230,250,230}
+  \definecolor{VioletLine}{RGB}{138,43,226}
+  \definecolor{VioletL}{RGB}{240,230,255}
+
+  \tikzset{
+    component/.style={draw=black!60, fill=white, rounded corners=1pt, minimum width=1.0cm, minimum height=0.6cm, font=\scriptsize},
+    root/.style={component, fill=GreenL, draw=GreenLine, font=\footnotesize\bfseries},
+    gpu/.style={component, fill=VioletL, draw=VioletLine, font=\scriptsize\bfseries}
+  }
+
+  % Left: PCIe Tree
+  \begin{scope}
+    \node[anchor=south] at (0,3.5) {\textbf{A. PCIe Tree (Host-Centric)}};
+
+    \node[root] (cpu) at (0, 3) {CPU / Root};
+
+    \node[component] (sw1) at (-1.5, 2) {PCIe Sw};
+    \node[component] (sw2) at (1.5, 2) {PCIe Sw};
+
+    \node[gpu] (g1) at (-2.2, 0.5) {GPU 0};
+    \node[gpu] (g2) at (-0.8, 0.5) {GPU 1};
+    \node[gpu] (g3) at (0.8, 0.5) {GPU 2};
+    \node[gpu] (g4) at (2.2, 0.5) {GPU 3};
+
+    \draw[thick] (cpu) -- (sw1);
+    \draw[thick] (cpu) -- (sw2);
+    \draw[thick] (sw1) -- (g1);
+    \draw[thick] (sw1) -- (g2);
+    \draw[thick] (sw2) -- (g3);
+    \draw[thick] (sw2) -- (g4);
+
+    % Communication bottleneck annotation
+    \draw[<->, dashed, red] (g1) to[bend right=20] node[below, font=\tiny] {Long Path} (g3);
+  \end{scope}
+
+  % Right: NVLink Mesh
+  \begin{scope}[shift={(6,0)}]
+    \node[anchor=south] at (0,3.5) {\textbf{B. NVLink Mesh (Peer-to-Peer)}};
+
+    % GPU Ring/Mesh
+    \node[gpu] (ng1) at (-1.5, 2) {GPU 0};
+    \node[gpu] (ng2) at (1.5, 2) {GPU 1};
+    \node[gpu] (ng3) at (1.5, 0.5) {GPU 2};
+    \node[gpu] (ng4) at (-1.5, 0.5) {GPU 3};
+
+    \node[root, anchor=center] (ncpu) at (0, 1.25) {CPU};
+
+    % PCIe Links (thinner)
+    \draw[thin, gray] (ncpu) -- (ng1);
+    \draw[thin, gray] (ncpu) -- (ng2);
+    \draw[thin, gray] (ncpu) -- (ng3);
+    \draw[thin, gray] (ncpu) -- (ng4);
+
+    % NVLink Links (thicker, colored)
+    \draw[ultra thick, VioletLine, <->] (ng1) -- (ng2);
+    \draw[ultra thick, VioletLine, <->] (ng2) -- (ng3);
+    \draw[ultra thick, VioletLine, <->] (ng3) -- (ng4);
+    \draw[ultra thick, VioletLine, <->] (ng4) -- (ng1);
+    \draw[ultra thick, VioletLine, <->] (ng1) -- (ng3);
+    \draw[ultra thick, VioletLine, <->] (ng2) -- (ng4);
+
+    \node[text=VioletLine, font=\scriptsize, align=center] at (0, 2.5) {High BW Die-to-Die};
+  \end{scope}
+
+\end{tikzpicture}
+```
+:::
+
+| **Interconnect**    | **Bandwidth** |      **Latency** | **Use Case**            |
+|:--------------------|--------------:|-----------------:|:------------------------|
+| **PCIe Gen5 x16**   |       64 GB/s |   ~1 microsecond | Inference, small models |
+| **NVLink 4.0**      |      900 GB/s | ~0.5 microsecond | Large model training    |
+| **(bidirectional)** |               |                  |                         |
+
+For models requiring tensor parallelism across GPUs, NVLink's 14 $\times$ bandwidth advantage directly translates to training throughput. Consider a transformer layer with hidden dimension 12,288 split across 8 GPUs using tensor parallelism. Each layer boundary requires an AllReduce over activation tensors of size $\text{batch} \times \text{sequence} \times \text{hidden} \times 2$ bytes (FP16). For a batch of 4 sequences of length 2,048, each AllReduce transfers approximately 200 MB. With NVLink at 900 GB/s, this transfer completes in 0.22 ms. With PCIe at 64 GB/s, the same transfer requires 3.1 ms. Since a model with 80 layers performs 80 such transfers per forward pass and 160 per backward pass, the cumulative communication overhead is 53 ms over NVLink versus 744 ms over PCIe. For a compute phase of approximately 200 ms, NVLink achieves 79% compute efficiency while PCIe achieves only 21%, a 3.7 $\times$ throughput difference that far exceeds the hardware cost premium of NVLink systems.
+
+@sec-distributed-training-systems examines how tensor parallelism splits individual layers across GPUs, creating these tight synchronization requirements that make NVLink essential. PCIe-based systems suffice for data-parallel workloads where gradient synchronization occurs once per step rather than at every layer boundary.
+
+**NVSwitch and Non-Blocking Topologies.** Within an 8-GPU DGX node, NVSwitch provides non-blocking all-to-all connectivity. Without NVSwitch, NVLink connections between GPUs would form a ring or partial mesh, where communication between non-adjacent GPUs would require multi-hop traversal. NVSwitch acts as a crossbar switch that enables any GPU to communicate with any other at the full NVLink bandwidth simultaneously, eliminating the topology-dependent performance variations that complicate programming models.
+
+The DGX H100 employs four third-generation NVSwitches, each providing 900 GB/s of switching bandwidth. The aggregate bisection bandwidth across all NVSwitches ensures that an 8-way AllReduce can proceed at the full per-link rate without contention. This non-blocking property is critical for tensor parallelism efficiency: if any communication path were congested, the slowest GPU-to-GPU transfer would determine the completion time of the entire collective operation, creating stragglers that idle all other GPUs.
+
+The NVSwitch architecture also enables GH200 Grace Hopper Superchip configurations, where CPU and GPU memory can be accessed in a unified address space across the NVLink fabric. This unified memory model simplifies programming for workloads that require dynamic partitioning of data between CPU and GPU memory, though the bandwidth asymmetry between local HBM access (`{python} h100_bw_tbs` TB/s) and remote NVLink access (`{python} nvlink_h100` GB/s) means that placement optimization remains important for performance-sensitive applications.
+
+#### CPU Infrastructure Roles {#sec-compute-cpu-infrastructure-roles-e47f}
+
+While GPUs dominate ML computation, CPUs perform essential supporting functions that bottleneck overall system performance if under-provisioned.
+
+**Preprocessing and Data Preparation.** Training data pipelines involve decompression, augmentation, tokenization, and batching. These operations execute on CPUs, which must supply data fast enough to keep GPUs utilized. A common rule of thumb allocates 4 to 8 CPU cores per GPU for training workloads, though data-intensive pipelines handling video or large images require more. When the CPU pipeline cannot keep pace with GPU consumption, GPUs stall waiting for data, a condition observable as low GPU utilization despite high GPU allocation. In production training runs, CPU-bound data loading is one of the most common sources of underutilization, often contributing 5 to 15% throughput loss. Solutions include NVIDIA DALI for GPU-accelerated data preprocessing, larger CPU-to-GPU ratios, and prefetching strategies that overlap data preparation with computation.
+
+**Feature Serving for Recommendation Systems.** Recommendation models present a distinct infrastructure pattern. These systems combine deep learning components with massive embedding tables that may exceed 1 TB. The embedding lookups are memory-bound CPU operations, while neural network components benefit from GPU acceleration. Production recommendation systems often use CPU-heavy nodes for embedding serving alongside GPU nodes for model computation, connected via low-latency networks.
+
+**Control Plane and Orchestration.** Cluster management, job scheduling, and monitoring run on dedicated CPU nodes separate from the training cluster. This isolation prevents resource contention and enables management operations even when the training cluster is fully utilized. The control plane must remain responsive during peak load conditions when every GPU is committed to training jobs, as this is precisely when scheduling decisions (handling failures, managing preemptions, processing new job submissions) are most critical. A control plane that shares resources with the training cluster risks becoming unresponsive during GPU contention, creating a dangerous feedback loop where the management system cannot respond to the very failures it is designed to handle.
+
+Control plane sizing follows different scaling laws than compute infrastructure. While GPU compute scales linearly with workload size, control plane requirements scale with the number of nodes, jobs, and monitoring telemetry points. A 1,000-GPU cluster generating per-GPU metrics at 10-second intervals produces roughly 6,000 metric data points per minute, requiring modest compute but substantial storage and indexing capacity for historical analysis.
+
+#### Hybrid Architectures {#sec-compute-hybrid-architectures-1266}
+
+Real production systems rarely use homogeneous hardware throughout. The diversity of ML workloads, from compute-bound transformer training to memory-bound embedding lookups to latency-sensitive serving, means that no single hardware configuration optimizes for all use cases. Workload-aware placement matches job characteristics to appropriate resources, creating heterogeneous clusters that allocate different node types to different pipeline stages.
+
+**Embedding Table Placement.** For recommendation systems with embedding tables exceeding GPU memory, hybrid architectures place embeddings in CPU DRAM while compute-intensive layers execute on GPUs. Facebook's DLRM architecture [@naumov2019dlrm] pioneered this pattern, with embeddings distributed across CPU nodes communicating with GPU nodes via high-bandwidth networks. The placement decision is governed by a simple economic analysis: GPU HBM costs approximately 10 $\times$ more per gigabyte than CPU DRAM, and embedding lookups, which are essentially random-access reads with minimal arithmetic, achieve higher throughput on CPU systems with large DRAM capacity than on GPUs with limited but expensive HBM. The crossover point where GPU placement becomes advantageous occurs when the embedding table fits in GPU memory and the lookup operation can be fused with subsequent neural network computation, eliminating the CPU-to-GPU data transfer that otherwise dominates latency.
+
+**Heterogeneous Scheduling.** Modern orchestration systems support mixed node types within a single cluster. Kubernetes with GPU support and Slurm with Generic Resource Scheduling enable jobs to request specific hardware combinations. A training job might request 64 GPU nodes for model computation plus 16 high-memory CPU nodes for embedding tables as a coordinated allocation. The scheduling complexity grows combinatorially with hardware diversity, as the scheduler must simultaneously optimize for GPU utilization, CPU utilization, network locality, and memory capacity across job types with different resource profiles. @sec-fleet-orchestration examines the algorithms and policies that address this scheduling challenge.
+
+**Multi-Tenancy and Resource Isolation.** Production clusters typically serve multiple teams with different workload priorities. Hardware-level isolation through MIG partitioning (for GPU resources) and SR-IOV (for network resources) prevents resource contention between tenants. However, shared storage systems and network fabrics remain contention points where one tenant's large checkpoint write can impact another tenant's training throughput. Production environments implement quality-of-service policies at the storage and network layers to bound this interference, typically allocating guaranteed minimum bandwidth to each tenant while allowing burst usage of idle capacity.
+
+### Accelerator Selection by Workload Type {#sec-compute-accelerator-selection-workload-type-93ab}
+
+Having examined how different compute resources combine within a cluster, we now turn to a more fundamental question: which accelerator technologies should comprise that infrastructure? The accelerator landscape has expanded beyond NVIDIA GPUs to include Google TPUs, custom ASICs, and emerging architectures. Selection requires matching accelerator characteristics to workload requirements.
+
+This matching process involves more than comparing specification sheets. An accelerator that delivers impressive peak FLOPS may underperform in practice if its memory bandwidth cannot feed data to those compute units fast enough, if its interconnect bandwidth limits the parallelism strategies available, or if its software ecosystem lacks the libraries and tools required for a given workload. The following sections examine three major accelerator ecosystems, NVIDIA GPUs, Google TPUs, and custom ASICs, through the lens of architectural trade-offs rather than marketing specifications.
+
+#### NVIDIA GPU Ecosystem {#sec-compute-nvidia-gpu-ecosystem-a3a5}
+
+NVIDIA maintains market dominance through an integrated hardware-software ecosystem that spans silicon design, interconnect technology, system software, and application frameworks. The CUDA programming model, introduced in 2007, has accumulated nearly two decades of software investment including optimized libraries (cuBLAS, cuDNN, cuSOLVER), communication frameworks (NCCL), and deep integration with ML frameworks (PyTorch, TensorFlow, JAX). This software ecosystem creates substantial switching costs that competitors must overcome not by matching hardware specifications alone but by replicating or replacing the entire software stack. Understanding the architecture evolution clarifies both the capability differences and the compounding advantages that sustain NVIDIA's market position.
+
+**Architecture Progression.** Each generation brings substantial improvements in compute density and memory bandwidth, driven by advances in semiconductor process technology and architectural innovation:
+
+| **GPU**   | **FP16** **Tensor** **TFLOPS** |         **HBM** **Capacity** |    **Memory** **Bandwidth** |              **TDP** |
+|:----------|-------------------------------:|-----------------------------:|----------------------------:|---------------------:|
+| **A100**  |    `{python} a100_tflops_fp16` | `{python} a100_mem` GB HBM2e | `{python} a100_bw_tbs` TB/s | `{python} a100_tdp`W |
+| **H100**  |    `{python} h100_tflops_fp16` |  `{python} h100_mem` GB HBM3 | `{python} h100_bw_tbs` TB/s | `{python} h100_tdp`W |
+| **B100*** |                         ~1,800 |                 192 GB HBM3e |                    8.0 TB/s |                ~700W |
+
+*B100 specifications are preliminary estimates based on NVIDIA announcements. Verify against official specifications for production planning.
+
+To put these generational improvements in perspective, the following table compares the complete accelerator landscape including Google's TPU v4, providing a unified view of the design space that infrastructure architects must navigate.
+
+| **Accelerator** |              **FP16 TFLOPS** |             **Memory** |          **BW (TB/s)** |         **TDP (W)** |                    **TFLOPS/W** |     **Ridge (FLOP/B)** |
+|:----------------|-----------------------------:|-----------------------:|-----------------------:|--------------------:|--------------------------------:|-----------------------:|
+| **V100**        |  `{python} v100_tflops_fp16` | `{python} v100_mem` GB | `{python} v100_bw_tbs` | `{python} v100_tdp` | `{python} v100_tflops_per_watt` |                    N/A |
+| **A100**        |  `{python} a100_tflops_fp16` | `{python} a100_mem` GB | `{python} a100_bw_tbs` | `{python} a100_tdp` | `{python} a100_tflops_per_watt` |  `{python} a100_ridge` |
+| **H100**        |  `{python} h100_tflops_fp16` | `{python} h100_mem` GB | `{python} h100_bw_tbs` | `{python} h100_tdp` | `{python} h100_tflops_per_watt` |  `{python} h100_ridge` |
+| **B200**        |  `{python} b200_tflops_fp16` | `{python} b200_mem` GB | `{python} b200_bw_tbs` | `{python} b200_tdp` | `{python} b200_tflops_per_watt` |  `{python} b200_ridge` |
+| **TPU v4**      | `{python} tpuv4_bf16_tflops` |                  32 GB |                    1.2 |                ~250 |                           ~1.10 | `{python} tpuv4_ridge` |
+
+: **Accelerator Landscape Comparison**: Comprehensive comparison of major ML accelerators across compute, memory, power, and efficiency dimensions. The TFLOPS/Watt column reveals generational efficiency gains, while the ridge point column indicates where each accelerator transitions from memory-bound to compute-bound operation. Higher ridge points mean the accelerator requires more arithmetic intensity to saturate its compute capacity. {#tbl-accel-comparison}
+
+Several trends emerge from @tbl-accel-comparison. First, TFLOPS/Watt improves with each generation, but the gains are decelerating as we approach the limits of transistor scaling. Second, memory bandwidth grows more slowly than compute, causing ridge points to increase across generations. This widening gap means that a larger fraction of workloads become memory-bound on newer hardware, making memory bandwidth the increasingly scarce resource. Third, the TPU v4's lower ridge point reflects its architectural specialization for matrix operations, where the systolic array design achieves higher effective utilization at lower arithmetic intensity.
+
+The TFLOPS figures above assume reduced-precision formats, which raises a natural question: which floating-point format should training use? The answer increasingly points to *the case for bfloat16*.
+
+::: {.callout-perspective title="The Case for Bfloat16"}
+Deep learning training is resilient to low precision but sensitive to dynamic range. Standard FP16 (IEEE 754) uses 5 bits for the exponent and 10 bits for the mantissa. This limited exponent range often causes gradients to underflow to zero or overflow to infinity during training, requiring complex loss scaling techniques to maintain stability.
+
+**Bfloat16 (Brain Floating Point)**, developed by Google, reallocates bits to use 8 bits for the exponent (matching FP32) and 7 bits for the mantissa. This matches the dynamic range of FP32, meaning numbers that fit in FP32 also fit in BF16. This eliminates the need for loss scaling and stabilizes training for large transformers. The trade-off is lower precision from fewer mantissa bits, but neural networks typically do not need high precision for individual weights, only for aggregate accumulation (which is usually done in FP32). Virtually all modern large language models, including GPT-4, PaLM, and Llama, are trained using BF16.
+:::
+
+The H100 delivers approximately 3 $\times$ the tensor TFLOPS of A100 at 1.75 $\times$ the power. To derive the efficiency improvement, A100 achieves `{python} a100_tflops_fp16` TF / `{python} a100_tdp` W = `{python} a100_tflops_per_watt` TF/W, while H100 achieves `{python} h100_tflops_fp16` TF / `{python} h100_tdp` W = `{python} h100_tflops_per_watt` TF/W, yielding approximately 80% improvement in FLOPS/watt. Memory bandwidth increases proportionally, maintaining the compute-to-memory ratio critical for transformer models.
+
+**Tensor Core Utilization.** Tensor Cores[^fn-tensor-cores] accelerate matrix operations but require specific data layouts and sizes for full utilization. Dimensions should be multiples of 8 for FP16 or 16 for INT8 for optimal performance. The alignment requirement stems from the hardware's 4 $\times$ 4 matrix operation granularity: when matrix dimensions are not multiples of the tile size, the hardware must pad inputs to fill complete tiles, wasting computation on zero-valued elements. For a model with hidden dimension 4,097 (off by one from a multiple of 8), the effective utilization drops by approximately 12% compared to hidden dimension 4,096.
+
+Underutilized Tensor Cores represent the most common source of poor GPU efficiency in production, with many workloads achieving only 30 to 50 percent of theoretical peak FLOPS. The gap between theoretical and achieved performance has multiple causes. First, not all operations in a training step are Tensor Core-eligible: activation functions, normalization layers, and communication operations use general-purpose CUDA cores. Second, data movement between HBM and on-chip SRAM introduces pipeline bubbles where Tensor Cores wait for operands. Third, kernel launch overhead and synchronization barriers add latency that cannot be hidden by computation. Profiling tools like NVIDIA Nsight Compute reveal the breakdown, showing what fraction of time is spent in Tensor Core computation versus memory access versus overhead, guiding optimization efforts.
+
+[^fn-tensor-cores]: **Tensor Cores**: Specialized matrix-multiply-accumulate units introduced in NVIDIA Volta (2017) that perform 4 $\times$ 4 matrix operations in a single clock cycle. Unlike general-purpose CUDA cores, Tensor Cores are optimized for the fused multiply-add pattern $D = A \times B + C$ that dominates neural network computation. H100 Tensor Cores support FP8, FP16, BF16, TF32, and INT8 formats.
+
+**Multi-Instance GPU (MIG).** Starting with the A100, NVIDIA introduced Multi-Instance GPU[^fn-mig] technology that partitions a single physical GPU into up to seven isolated instances. Each MIG instance receives a dedicated fraction of the GPU's streaming multiprocessors, L2 cache, and HBM memory, with hardware-level isolation that prevents one instance from affecting another's performance or accessing its memory. An H100 can be partitioned into seven instances of approximately 10 GB memory and 134 TFLOPS each, or into fewer, larger instances with proportionally more resources.
+
+[^fn-mig]: **Multi-Instance GPU (MIG)**: Hardware partitioning technology that divides a single GPU into isolated instances, each with dedicated compute, memory, and bandwidth resources. Unlike software-based GPU sharing (time-slicing or MPS), MIG provides hardware-level isolation with separate error-correcting code regions, ensuring that a faulty workload in one instance cannot corrupt another. MIG is particularly valuable for inference workloads where individual requests do not require the full GPU's resources.
+
+MIG proves particularly valuable for inference serving, where individual model serving instances rarely require the full resources of an H100. Rather than dedicating a `{python} h100_tdp` W GPU to serve a model that utilizes only 20% of its compute capacity, MIG enables seven smaller models or seven replicas of the same model to share the hardware with guaranteed Quality of Service. For organizations operating mixed training and inference clusters, MIG provides a mechanism to carve inference capacity from GPUs during periods of low training demand, improving overall fleet utilization. @sec-fleet-orchestration examines how schedulers leverage MIG partitioning to achieve higher utilization targets.
+
+**NVLink Topology.** Within a node, NVSwitch provides full-bandwidth connectivity between all GPUs. Across nodes, NVLink Network, available in H100 and later, extends high-bandwidth connectivity, though at reduced bandwidth compared to intra-node links. @sec-collective-communication examines how topology-aware job placement exploits these bandwidth asymmetries to minimize communication overhead in multi-node training.
+
+#### Google TPU Infrastructure {#sec-compute-google-tpu-infrastructure-f7cb}
+
+Google's Tensor Processing Units represent a fundamentally different approach to ML acceleration: a vertically integrated system designed from the silicon up for a specific class of operations (dense matrix multiplication) rather than adapted from general-purpose graphics hardware. This specialization yields efficiency advantages for regular computation patterns but sacrifices the flexibility that makes GPUs suitable for diverse workloads.
+
+**TPU Pod Architecture.** TPUs connect via proprietary Inter-Chip Interconnect[^fn-ici] forming 2D or 3D torus[^fn-torus] topologies. A TPU v4 pod contains 4,096 chips with 1.1 exaFLOPS of aggregate compute. Unlike GPU clusters where networking is separate from compute nodes, TPU pods integrate the interconnect directly into the chip design. This integration eliminates the network interface card (NIC) as a separate component, reducing per-chip power consumption and latency while providing deterministic communication behavior that simplifies the compiler's scheduling problem.
+
+[^fn-ici]: **Inter-Chip Interconnect (ICI)**: Google's proprietary chip-to-chip communication fabric integrated directly into TPU silicon. ICI provides 6 links per chip at 100 GB/s each, enabling the torus topology without external switches. This integration reduces latency and power compared to discrete networking but limits flexibility in topology configuration.
+
+[^fn-torus]: **Torus topology**: A network topology where nodes connect in a ring structure along each dimension, with the last node wrapping around to connect to the first. A 3D torus creates a cube-like structure where each node connects to 6 neighbors. This topology provides consistent latency for nearest-neighbor communication patterns common in model parallelism, though AllReduce operations require O(sqrt(N)) hops compared to O(log(N)) for fat-tree.
+
+#### The Systolic Array Advantage {#sec-compute-systolic-array-advantage-bbf6}
+
+To understand why TPUs achieve such high efficiency for matrix operations, we must examine their distinctive hardware design. The defining feature of the TPU architecture is the **systolic array**. Unlike CPUs or GPUs that function as general-purpose instruction processors, a systolic array is a specialized grid of arithmetic units designed for massive matrix multiplication.
+
+The name "systolic" refers to the way data flows through the chip in rhythmic waves, analogous to blood pumped by a heart. The architecture employs a weight-stationary design where weights from matrix $B$ are loaded into the array and held stationary in local registers. Data from matrix $A$ flows in from the left, and partial sums flow down.
+
+This design drastically reduces energy consumption. In a standard architecture, every operation requires reading operands from registers or memory, incurring high energy cost. In a systolic array, operands are passed directly to the next neighbor unit, incurring very low energy cost. A single memory access effectively amortizes over hundreds of operations. Quantitatively, reading a 32-bit value from DRAM costs approximately 200 picojoules, while passing a value between adjacent processing elements in a systolic array costs approximately 1 picojoule, a 200 $\times$ energy reduction per data movement. Since matrix multiplication in a $128 \times 128$ systolic array requires $128$ multiply-accumulate operations per data element loaded, the systolic approach amortizes each memory access across 128 operations, achieving energy efficiency impossible with general-purpose architectures.
+
+This architecture explains why TPUs achieve extremely high FLOPS/watt for dense matrix operations but struggle with sparse or irregular computations that break the rhythmic data flow. Operations like sparse attention, dynamic routing in Mixture-of-Experts models, or tree-structured computations create irregular data access patterns that cannot be efficiently mapped to the fixed grid topology. For these workloads, the flexibility of GPU CUDA cores, which can execute arbitrary instruction sequences, outperforms the TPU's specialized but rigid systolic design.
+
+**TPU Slices and Multislice.** Users allocate TPU slices, contiguous subsets of a pod that provide a guaranteed block of compute with known topology properties. A slice maintains the torus connectivity of the full pod within its boundaries, ensuring that communication patterns optimized for the torus topology perform consistently regardless of slice size. Slice sizes typically follow powers of two, from 8 chips (a single tray) to 4,096 chips (a full pod), with each size doubling the available compute and memory.
+
+Multislice training connects multiple slices via datacenter network for jobs exceeding single-slice capacity. This creates a two-tier communication hierarchy: intra-slice communication uses the high-bandwidth ICI (600 GB/s aggregate per chip), while inter-slice communication uses datacenter Ethernet at 100 to 400 Gbps. The bandwidth ratio between these tiers (roughly 15 to 60 $\times$) mirrors the NVLink-to-InfiniBand ratio in GPU clusters and motivates similar parallelism mapping strategies: keep the most communication-intensive dimensions (tensor parallelism) within a slice and place less communication-intensive dimensions (data parallelism) across slices. The programming model using JAX with pjit abstracts the physical topology, enabling code portability across slice sizes, though optimal performance requires awareness of the communication hierarchy.
+
+**TPU vs. GPU Trade-offs.** TPUs excel for large-scale training with regular computation patterns:
+
+| **Factor**             | **TPU Advantage**       | **GPU Advantage**                     |
+|:-----------------------|:------------------------|:--------------------------------------|
+| **Large transformer**  | Optimized matrix units, | Broader operator support              |
+| **training**           | integrated interconnect |                                       |
+| **Custom operations**  | Limited flexibility     | CUDA extensibility                    |
+| **Software ecosystem** | JAX-centric             | PyTorch, TensorFlow, many frameworks  |
+| **Availability**       | Google Cloud only       | Multiple cloud and on-premise options |
+
+#### Custom ASICs and Specialized Accelerators {#sec-compute-custom-asics-specialized-accelerators-034b}
+
+The ML accelerator landscape continues to diversify as organizations optimize for specific workloads.
+
+**Inference-Optimized Accelerators.** Training and inference present fundamentally different requirements that motivate distinct hardware designs. Training needs high-precision arithmetic, large memory for activations and optimizer state, and high interconnect bandwidth for gradient synchronization. Inference prioritizes low latency for individual requests, high throughput for concurrent requests, and power efficiency since inference costs accumulate over the model's entire serving lifetime.
+Recent analysis by Ma and Patterson [@ma2024challenges] further refines this distinction by separating the *prefill* phase (compute-bound processing of input tokens) from the *decode* phase (memory-bandwidth-bound generation of output tokens). During prefill, the model processes the entire input prompt in a single forward pass, performing large matrix multiplications with high arithmetic intensity. During decode, the model generates tokens one at a time, reading the entire model weight set for every token generated. This asymmetry means that prefill performance scales with FLOPS while decode performance scales with memory bandwidth.
+
+For a 70B parameter model in FP16, each decode step reads approximately 140 GB of model weights to generate a single token. On an H100 with `{python} h100_bw_tbs` TB/s bandwidth, this read takes approximately 41 ms, yielding a theoretical maximum decode rate of only 24 tokens per second per GPU, regardless of the `{python} h100_tflops_fp16` TFLOPS of available compute. This "memory wall" drives the design of inference-specialized chips that sacrifice raw compute density for massive memory bandwidth and capacity, optimizing for the unique token-by-token access pattern of large language models.
+
+Accelerators like Google's TPU Inference chips and AWS Inferentia optimize for these characteristics, achieving 2 to 4 $\times$ better performance per watt than training-focused hardware for appropriate workloads. AWS Inferentia2 provides 190 TFLOPS of BF16 compute at 60 W, yielding 3.2 TFLOPS/W compared to H100's `{python} h100_tflops_per_watt` TFLOPS/W. While Inferentia's lower absolute FLOPS limits its training applicability, the efficiency advantage makes it cost-competitive for large-scale inference serving where power consumption dominates operating costs.
+
+**Emerging Architectures.** Several companies offer alternative approaches that challenge the GPU and TPU duopoly by exploiting architectural niches underserved by general-purpose designs. Cerebras WSE uses wafer-scale integration[^fn-wafer-scale] to place an entire ML accelerator on a single silicon wafer, eliminating chip-to-chip communication for models that fit on-chip. The WSE-2 provides 40 GB of on-chip SRAM with aggregate bandwidth exceeding 20 PB/s, effectively solving the memory bandwidth bottleneck that limits GPU performance for memory-bound workloads. For models that fit entirely in on-chip memory (up to approximately 20 billion parameters in BF16), the WSE achieves near-theoretical-peak utilization because data never needs to traverse off-chip interfaces.
+
+Graphcore IPU employs a Bulk Synchronous Parallel[^fn-bsp] execution model with distributed on-chip memory targeting sparse and dynamic workloads. The IPU's Exchange Memory architecture provides each processing element with its own local SRAM, avoiding the shared memory contention that limits GPU scaling for irregular access patterns. SambaNova provides reconfigurable dataflow architecture for enterprise AI applications, using a spatial computing model where data flows through fixed-function processing stages mapped onto a reconfigurable fabric.
+
+[^fn-wafer-scale]: **Wafer-scale integration**: Building an entire processor on a full silicon wafer (850 cm^2^) rather than dicing it into individual chips. Cerebras's WSE-2 contains 850,000 cores and 40 GB of on-chip SRAM, eliminating off-chip memory bandwidth bottlenecks. The approach requires novel solutions for defect tolerance and power delivery, as traditional packaging assumes perfect dies.
+
+[^fn-bsp]: **Bulk Synchronous Parallel (BSP)**: An execution model where computation proceeds in supersteps: parallel computation, global communication, then barrier synchronization. Graphcore's IPU implements BSP at the hardware level, with all 1,472 cores executing the same phase simultaneously. This deterministic execution simplifies debugging but requires all operations to complete within time bounds.
+
+These alternatives find niches where their architectural trade-offs align with workload requirements, though NVIDIA and Google maintain dominant market positions for general ML training.
+
+::: {.callout-checkpoint title="Accelerator Selection Exercise"}
+Your organization needs to deploy infrastructure for three workloads:
+
+1. **Training a 13B parameter language model** with a 6-month training schedule
+2. **Serving a recommendation model** with 500 GB of embedding tables and strict 50 ms latency SLOs
+3. **Running 200 independent hyperparameter search experiments** in parallel, each on a small (300M parameter) model
+
+For each workload, recommend an accelerator strategy from the options in @tbl-accel-comparison. Consider: Is the workload compute-bound or memory-bound? Does it require high inter-accelerator bandwidth? Would MIG partitioning improve utilization? Is a specialized accelerator (TPU, custom ASIC) appropriate?
+:::
+
+### Quantitative Infrastructure Analysis {#sec-compute-quantitative-infrastructure-analysis-aabb}
+
+Effective infrastructure decisions require quantitative comparison across accelerator options and workload types. The accelerator landscape described in the previous section offers diverse options, but comparing them demands a common analytical framework. Raw specification comparisons, while necessary, are insufficient because different accelerator architectures utilize their theoretical capabilities with different efficiency depending on the workload. This section develops three complementary analytical tools: FLOPS-per-watt comparison for energy efficiency, the roofline model for identifying performance bottlenecks, and Model FLOPS Utilization for measuring real-world efficiency.
+
+**FLOPS per Watt Comparison.** Energy efficiency varies significantly across accelerator types and precision levels:
+
+| **Accelerator**      |             **FP16 TFLOPS** |     **TDP (Watts)** |                 **TFLOPS/Watt** |
+|:---------------------|----------------------------:|--------------------:|--------------------------------:|
+| **NVIDIA H100 SXM**  | `{python} h100_tflops_fp16` | `{python} h100_tdp` | `{python} h100_tflops_per_watt` |
+| **NVIDIA H100 PCIe** |                         756 |                 350 |                            2.16 |
+| **Google TPU v5p**   |                         459 |            250-400* |                         1.1-1.8 |
+| **AWS Trainium**     |                         210 |     150 (estimated) |                            1.40 |
+
+*TPU power varies significantly by deployment configuration and is not officially published. Direct TFLOPS/Watt comparisons across architectures are problematic because utilization profiles differ. These figures should be treated as approximate.
+
+The PCIe variant's higher efficiency reflects reduced interconnect power, acceptable for inference but limiting for distributed training.
+
+**Memory Bandwidth Utilization.** Different model types exhibit distinct memory access patterns that determine which hardware resource limits their performance. LLM training during the attention phase achieves 70 to 85 percent bandwidth utilization because each attention head must read key and value tensors from HBM, compute scores, and write results back, creating a memory-traffic-dominated operation. The feed-forward network (FFN) layers within the same model, by contrast, perform large matrix multiplications with high data reuse, achieving only 30 to 50 percent bandwidth utilization because the compute units, not the memory bus, become the bottleneck.
+
+CNN training with large batch sizes is compute-bound for convolutions because the same filter weights are reused across all spatial positions in the input feature map, creating high arithmetic intensity. Recommendation inference is memory-bound for embeddings because each lookup accesses a unique row of the embedding table with minimal computation per access, often operating at arithmetic intensities below 1 FLOP/byte.
+
+Understanding these patterns guides accelerator selection. Memory-bound workloads benefit disproportionately from HBM3's bandwidth improvements (from `{python} a100_bw_tbs` TB/s on A100 to `{python} h100_bw_tbs` TB/s on H100, a 1.7 $\times$ improvement), while compute-bound workloads prioritize FLOPS per dollar (where the H100 delivers approximately 3 $\times$ the TFLOPS of A100). Procurement decisions that ignore this distinction, treating all ML workloads as compute-bound, systematically overpay for memory-bound tasks.
+
+**The Roofline Model.** The roofline model[^fn-roofline] [@williams2009roofline] provides a systematic framework for understanding whether workloads are compute-bound or memory-bound. Achievable performance is limited by the minimum of peak compute and memory bandwidth:
+
+[^fn-roofline]: **Roofline model**: A visual performance model developed at Berkeley that plots achievable FLOPS against arithmetic intensity (FLOPS per byte of memory traffic). The "roofline" consists of a sloped region (memory-bound, limited by bandwidth) and a flat region (compute-bound, limited by peak FLOPS). The intersection point, called the ridge point, indicates where workloads transition between these regimes. This model helps identify whether to optimize for compute or memory access.
+
+The roofline model hinges on a single metric, *arithmetic intensity*, that determines which resource constrains a given workload.
+
+::: {.callout-definition title="Arithmetic Intensity"}
+**Arithmetic Intensity** is the ratio of floating-point operations (FLOPs) performed to bytes of memory accessed (Bytes) during a computation. It determines whether a workload is _compute-bound_ (limited by processor speed) or _memory-bound_ (limited by bandwidth).
+:::
+
+When general-purpose processors cannot deliver sufficient arithmetic intensity, architects turn to *domain-specific architectures (DSAs)* that trade generality for efficiency.
+
+::: {.callout-definition title="Domain-Specific Architecture (DSA)"}
+***Domain-Specific Architecture (DSA)*** is a class of processors tailored to a specific domain of workloads (like deep learning) rather than general-purpose computation. DSAs (such as TPUs) trade flexibility for performance per watt by optimizing memory hierarchies and arithmetic units specifically for the domain's dominant operations (e.g., matrix multiplication).
+:::
+
+$$
+\text{Achievable FLOPS} = \min\left(\text{Peak Compute}, \text{Memory Bandwidth} \times \text{Arithmetic Intensity}\right)
+$$
+
+Arithmetic intensity measures FLOPS per byte of memory traffic. @fig-roofline-model reveals that workloads fall into two distinct regimes:
+
+::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**Roofline Performance Model**: A visual representation of performance limits plotting achievable FLOPS against arithmetic intensity (FLOPS/Byte). The slanted \"roof\" represents the memory-bound region where bandwidth constrains performance, while the flat \"roof\" represents the compute-bound region limited by peak processor throughput. Operational points for LLMs typically fall under the slanted roof, indicating memory bandwidth dependence." fig-alt="Log-log plot of performance versus arithmetic intensity. Blue diagonal line labeled memory bound meets red horizontal line labeled compute bound at ridge point. Orange dot for LLM in memory-bound region, green dot for ConvNet near ridge."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, every node/.style={transform shape}]
+    % Define standard colors locally for now
+    \definecolor{BlueLine}{RGB}{0,80,180}
+    \definecolor{RedLine}{RGB}{200,30,30}
+
+    % Axes
+    \draw[->, thick] (0,0) -- (7,0) node[below, midway, yshift=-0.3cm] {Arithmetic Intensity (FLOP/Byte)};
+    \draw[->, thick] (0,0) -- (0,5.0) node[above, rotate=90, midway, yshift=0.3cm] {Performance (OPS)};
+
+    % Ticks
+    \node[below] at (0,0) {$10^{-1}$};
+    \node[below] at (2,0) {$10^{1}$};
+    \node[below] at (4,0) {$10^{2}$};
+    \node[below] at (6,0) {$10^{3}$}; % Log scale approximation
+
+    \node[left] at (0,1) {$10^{12}$};
+    \node[left] at (0,3) {$10^{14}$};
+    \node[left] at (0,4.5) {$10^{15}$};
+
+    % Coordinates for Roofline
+    \coordinate (ridge) at (4.0, 4.0);
+    \coordinate (start) at (0,0);
+    \coordinate (end) at (7.0, 4.0);
+
+    % Regions
+    \fill[BlueLine!10] (start) -- (ridge) -- (4.0, 0) -- cycle;
+    \node[BlueLine, rotate=45, font=\bfseries] at (2.5, 1.5) {Memory Bound};
+
+    \fill[RedLine!10] (4.0, 0) -- (ridge) -- (end) -- (7.0, 0) -- cycle;
+    \node[RedLine, font=\bfseries] at (5.5, 2.0) {Compute Bound};
+
+    % Roofline Plot
+    \draw[ultra thick, BlueLine] (start) -- (ridge) node[midway, above, rotate=45] {Bandwidth Limited};
+    \draw[ultra thick, RedLine] (ridge) -- (end) node[midway, above] {Compute Limited};
+
+    % Ridge Point
+    \fill[black] (ridge) circle (2pt);
+    \node[above right] at (ridge) {Ridge Point};
+    \draw[dashed, thin] (ridge) -- (4.0, 0);
+
+    % Workload dots
+    \node[circle, fill=orange, inner sep=2pt, label={right:LLM (Attention)}] at (2.5, 2.5) {};
+    \node[circle, fill=green!60!black, inner sep=2pt, label={below:ConvNet}] at (5.5, 3.5) {};
+
+\end{tikzpicture}
+```
+:::
+
+The sloped region shows where memory bandwidth limits performance (LLM attention at 50-100 FLOP/byte) and the flat region shows where peak compute limits performance (convolutions at 200+ FLOP/byte). The "ridge point" where these limits intersect is the most informative metric for comparing accelerators. A workload operating below the ridge point gains more from increased memory bandwidth than from additional compute units. Conversely, a workload above the ridge point benefits from additional FLOPS. The ridge point therefore determines which hardware investment yields the greatest return for a given workload profile.
+
+The following table computes ridge points for three major accelerators, revealing how architectural choices shift the boundary between memory-bound and compute-bound regimes:
+
+| **Accelerator** | **Peak Compute** **(TF FP16)** | **Memory BW** **(TB/s)** | **Ridge Point** **(FLOP/byte)** |
+|:----------------|-------------------------------:|-------------------------:|--------------------------------:|
+| **H100 SXM**    |    `{python} h100_tflops_fp16` |   `{python} h100_bw_tbs` |           `{python} h100_ridge` |
+| **A100 80GB**   |    `{python} a100_tflops_fp16` |   `{python} a100_bw_tbs` |           `{python} a100_ridge` |
+| **TPU v4**      |                            275 |                      1.2 |          `{python} tpuv4_ridge` |
+
+Most LLM training operates at 50 to 100 FLOP/byte arithmetic intensity, well below the ridge point, making these workloads memory-bound. At 75 FLOP/byte on H100, achievable performance is $3.4 \times 75 = 255$ TF, only 26 percent of peak compute. This explains why production training achieves 30 to 50 percent of theoretical FLOPS. The bottleneck is memory bandwidth, not compute capacity.
+
+CNN training with large batch sizes operates near 200 FLOP/byte, approaching the ridge point where both resources limit performance. Recommendation inference with random embedding lookups operates at extremely low arithmetic intensity of 1 to 10 FLOP/byte, memory-bound regardless of accelerator choice.
+
+To make this analysis concrete, the following Napkin Math exercise computes the arithmetic intensity for the three dominant operations inside a transformer, revealing why different parts of the same model land in different roofline regions.
+
+::: {.callout-napkin-math title="Operational Intensity Across Transformer Operations"}
+**Problem**: Compute the arithmetic intensity (FLOP/byte) for the three dominant operations in a transformer forward pass and determine which are compute-bound versus memory-bound on an H100.
+
+**Setup**: Consider a transformer layer with hidden dimension $d = 4096$, sequence length $s = 2048$, and batch size $b = 1$ (single-request inference).
+
+**1. Self-Attention (QKV Projection)**:
+
+- **FLOPs**: Three projections of size $(s, d) \times (d, d)$ = $3 \times 2 \times s \times d^2 = 3 \times 2 \times 2048 \times 4096^2 \approx 2.1 \times 10^{11}$
+- **Memory**: Read weight matrices ($3 \times d^2 \times 2$ bytes in FP16) + read/write activations $\approx 3 \times 4096^2 \times 2 = 100$ MB
+- **Arithmetic Intensity**: $2.1 \times 10^{11} / 1.0 \times 10^{8} \approx 2{,}100$ FLOP/byte. **Compute-bound.**
+
+**2. Attention Score Computation** ($QK^T$ at batch=1):
+
+- **FLOPs**: $2 \times s \times s \times d = 2 \times 2048 \times 2048 \times 4096 \approx 3.4 \times 10^{10}$
+- **Memory**: Read Q, K matrices ($2 \times s \times d \times 2$ bytes) + write scores ($s^2 \times 2$ bytes) $\approx 42$ MB
+- **Arithmetic Intensity**: $3.4 \times 10^{10} / 4.2 \times 10^{7} \approx 810$ FLOP/byte. **Compute-bound**, but closer to the ridge.
+
+**3. Attention-Weighted Value** (at decode, $s_q = 1$):
+
+- **FLOPs**: $2 \times 1 \times s \times d = 2 \times 1 \times 2048 \times 4096 \approx 1.7 \times 10^{7}$
+- **Memory**: Read KV-cache ($2 \times s \times d \times 2$ bytes) $\approx 33$ MB
+- **Arithmetic Intensity**: $1.7 \times 10^{7} / 3.3 \times 10^{7} \approx 0.5$ FLOP/byte. **Severely memory-bound.**
+
+**The Systems Conclusion**: The same model contains operations spanning three orders of magnitude in arithmetic intensity. During prefill (processing the full prompt), most operations are compute-bound due to large matrix multiplications. During decode (generating tokens one at a time), the effective sequence length drops to 1, collapsing arithmetic intensity and making the workload memory-bandwidth-bound. This fundamental asymmetry between prefill and decode drives the architectural separation discussed in @sec-inference-scale.
+:::
+
+This prefill-decode asymmetry has profound infrastructure implications. Prefill benefits from raw FLOPS (favoring high-compute accelerators), while decode benefits from memory bandwidth (favoring HBM3's `{python} h100_bw_tbs` TB/s over HBM2e's `{python} a100_bw_tbs` TB/s). Some organizations deploy separate prefill and decode clusters, each optimized for its dominant bottleneck, a strategy that @sec-inference-scale examines in detail.
+
+These roofline gaps motivate a practical efficiency metric, *Model FLOPs Utilization (MFU)*, that measures what fraction of theoretical peak a workload actually achieves.
+
+::: {.callout-notebook title="Model FLOPs Utilization (MFU)"}
+**The Problem**: You buy an H100 GPU advertised at `{python} h100_tflops_fp16` TFLOPS (FP16). Your training logs show it's only processing data at a rate equivalent to 350 TFLOPS. Where did the performance go?
+
+**Definition**:
+$$ \text{MFU} = \frac{\text{Achieved FLOPS}}{\text{Peak Theoretical FLOPS}} $$
+
+**Calculation for Transformer Training**:
+For a model with $P$ parameters trained on $D$ tokens in $T$ seconds:
+$$ \text{Achieved FLOPS} \approx \frac{6 \cdot P \cdot D}{T} $$
+*(Factor of 6 accounts for forward + backward pass operations per parameter)*.
+
+**Worked Example**:
+
+*   **Model**: 70B parameters ($70 \times 10^9$)
+*   **Data**: 100B tokens
+*   **Time**: 14 days ($1.2 \times 10^6$ seconds) on 512 H100s.
+1.  **Total FLOPs Required**: $6 \cdot (70 \times 10^9) \cdot (100 \times 10^9) = 4.2 \times 10^{22}$ FLOPs.
+2.  **Achieved System Throughput**: $\frac{4.2 \times 10^{22}}{1.2 \times 10^6} = 3.5 \times 10^{16}$ FLOPS ($35$ PFLOPS).
+3.  **Per-GPU Throughput**: $35 \text{ PFLOPS} / 512 = 68 \text{ TFLOPS}$.
+4.  **MFU**: 68 / `{python} h100_tflops_fp16` ≈ **6.8%**.
+
+**Conclusion**: This low MFU indicates severe bottlenecks: likely memory bandwidth (waiting for weights) or communication overhead (waiting for AllReduce). Good MFU for LLMs is 40-50%.
+:::
+
+MFU serves as the single most diagnostic metric for infrastructure efficiency. An organization reporting 45% MFU on a well-tuned training run is extracting nearly optimal value from its hardware investment, while an organization achieving 10% MFU is effectively paying 4.5 $\times$ more per computation. The gap between these extremes, driven by communication overhead, memory bandwidth limitations, and software inefficiency, represents the primary optimization target for infrastructure engineering teams. @sec-performance-engineering develops the techniques for closing this gap, including communication-computation overlap, kernel fusion, and memory-efficient attention implementations.
+
+**Cost per PFLOP.** Infrastructure economics depend on utilization and workload fit:
+
+$$
+\text{Effective Cost per PFLOP} = \frac{\text{Hardware Cost} + \text{3-year OpEx}}{\text{Peak PFLOPS} \times \text{Average Utilization} \times 3 \text{ years}}
+$$
+
+For a DGX H100 at $300,000 with $50,000 annual power and cooling costs, achieving 50 percent average utilization yields an effective cost of approximately $0.35 per PFLOP-hour. Cloud instances at $30 per hour for equivalent hardware cost $0.15 per PFLOP-hour at 100 percent utilization, but on-premises becomes favorable above 40 percent sustained utilization over three years. However, this utilization assumption warrants careful examination:
+
+::: {.callout-warning title="Utilization Reality"}
+Quoted peak FLOPS numbers assume perfect utilization. Production training jobs typically achieve 30 to 50 percent of peak [@mattson2020mlperf] due to communication overhead, data pipeline stalls, and suboptimal kernel efficiency. Infrastructure planning must account for realistic utilization rates rather than theoretical peaks.
+:::
+
+This infrastructure foundation enables the distributed training strategies examined in subsequent chapters. @sec-distributed-training-systems builds on these physical capabilities to develop data, tensor, and pipeline parallelism strategies, while @sec-collective-communication analyzes the collective operations that these networks must support. The physical constraints examined here, particularly power delivery, cooling capacity, and interconnect topology, ultimately determine what scale of training is achievable.
+
+However, understanding what is *technically* achievable is only half the infrastructure design problem. The other half is understanding what is *economically* viable. The next section develops a comprehensive Total Cost of Ownership framework that transforms the physical and performance metrics examined above into financial models suitable for infrastructure investment decisions.
+
+## Total Cost of Ownership Analysis {#sec-compute-total-cost-ownership-analysis-0be4}
+
+Understanding the complete financial picture of ML infrastructure requires moving beyond simple hardware acquisition costs to comprehensive Total Cost of Ownership (TCO) analysis. This section provides quantitative frameworks for evaluating infrastructure investments, comparing deployment strategies, and optimizing long-term operational efficiency.
+
+### Capital Expenditure Components {#sec-compute-capital-expenditure-components-2d8e}
+
+Capital expenditure[^fn-capex-opex] encompasses all upfront investments required to establish ML infrastructure. These costs are typically amortized over 3 to 5 years, though the rapid pace of GPU advancement often compresses effective useful life to shorter periods.
+
+[^fn-capex-opex]: **CapEx vs OpEx**: Capital expenditure (CapEx) covers upfront asset purchases (hardware, construction) that are depreciated over time, while operational expenditure (OpEx) covers ongoing costs (power, staff, cloud fees) that are expensed immediately. Cloud computing shifts costs from CapEx to OpEx, which affects financial planning, tax treatment, and budget approval processes differently across organizations.
+
+#### Hardware Costs {#sec-compute-hardware-costs-5bef}
+
+GPU and accelerator acquisition represents the dominant CapEx component for ML infrastructure. Current market pricing reflects both performance capabilities and supply constraints.
+
+| **System**           | **Base Cost** | **Memory Config** | **Cost per PFLOP** |
+|:---------------------|--------------:|------------------:|-------------------:|
+| **DGX H100**         |     ~$300,000 |       640 GB HBM3 |           ~$75,000 |
+| **DGX B100***        |     ~$450,000 |      1.4 TB HBM3e |           ~$25,000 |
+| **HGX H100 (8-way)** |     ~$250,000 |       640 GB HBM3 |           ~$62,500 |
+| **TPU v5p Pod**      |      Variable |         95 GB HBM |           ~$30,000 |
+
+*B100 pricing is estimated. All prices reflect approximate 2024 market conditions and should be verified for current planning. GPU pricing fluctuates 20 to 40 percent based on supply constraints and generation transitions.
+
+Server and storage costs add substantial overhead beyond accelerators. A complete DGX H100 deployment requires NVMe storage at $15,000 to $30,000 per node, high-speed networking cards at $8,000 to $15,000, and rack infrastructure at $5,000 to $10,000. Storage architecture for large-scale training demands parallel file systems capable of sustaining the I/O bandwidth required by hundreds of GPUs, with enterprise solutions like Lustre or GPFS adding $500 to $1,000 per terabyte of high-performance capacity.
+
+Networking equipment costs scale superlinearly with cluster size due to the hierarchical nature of high-bandwidth fabrics. In a fat-tree topology, the number of spine switches grows with the square root of cluster size, creating a cost curve that increases faster than the number of GPUs. A 256-GPU cluster using InfiniBand HDR requires approximately $800,000 to $1,200,000 in networking equipment, while scaling to 1,024 GPUs requires approximately $5 to $8 million, a 5 to 7 $\times$ cost increase for a 4 $\times$ compute increase.
+
+$$C_{\text{network}} = N_{\text{switches}} \cdot P_{\text{switch}} + N_{\text{cables}} \cdot P_{\text{cable}} + N_{\text{adapters}} \cdot P_{\text{adapter}}$$
+
+For a 256-GPU deployment with 2:1 oversubscription:
+
+$$C_{\text{network}} \approx 32 \times \$15,000 + 512 \times \$800 + 256 \times \$3,000 \approx \$1,660,000$$
+
+Refresh cycle planning significantly impacts TCO calculations. GPU generations advance every 2 to 3 years with typical performance improvements of 2–3 $\times$ per generation. Organizations must balance the benefits of newer hardware against the disruption costs of migration. A common strategy employs staggered refresh cycles, replacing 25 to 33% of infrastructure annually to maintain competitive capability while avoiding wholesale replacement costs.
+
+The power efficiency trajectory across GPU generations provides a quantitative framework for refresh decisions. Each generation delivers more computation per watt, meaning that replacing older hardware reduces both electricity costs and cooling requirements for the same workload.
+
+| **Generation**  |             **FP16 TFLOPS** |         **TDP (W)** |                    **TFLOPS/W** | **Relative Efficiency** |
+|:----------------|----------------------------:|--------------------:|--------------------------------:|------------------------:|
+| **V100 (2017)** | `{python} v100_tflops_fp16` | `{python} v100_tdp` | `{python} v100_tflops_per_watt` | 1.0 $\times$ (baseline) |
+| **A100 (2020)** | `{python} a100_tflops_fp16` | `{python} a100_tdp` | `{python} a100_tflops_per_watt` |           ~2.3 $\times$ |
+| **H100 (2022)** | `{python} h100_tflops_fp16` | `{python} h100_tdp` | `{python} h100_tflops_per_watt` |           ~3.7 $\times$ |
+| **B200 (2024)** | `{python} b200_tflops_fp16` | `{python} b200_tdp` | `{python} b200_tflops_per_watt` |          ~10.3 $\times$ |
+
+: **Power Efficiency Across GPU Generations**: TFLOPS per watt improves with each generation, but TDP also increases, meaning absolute power consumption per GPU rises. The efficiency gains compound with fleet size: replacing 1,000 V100s with ~100 B200s (equivalent aggregate compute) reduces total power consumption by roughly 70%, translating to millions in annual electricity savings. {#tbl-power-efficiency}
+
+The implications of @tbl-power-efficiency extend beyond simple electricity savings. Higher efficiency per GPU means fewer GPUs required for a given workload, which reduces networking costs (fewer nodes to interconnect), floor space requirements, and operational complexity. However, the rising TDP per GPU (from `{python} v100_tdp` W for V100 to `{python} b200_tdp` W for B200) concentrates more heat per device, demanding the liquid cooling infrastructure examined earlier in this chapter. The refresh decision therefore involves not just GPU procurement but potentially facility upgrades to accommodate higher per-device power density.
+
+#### Facility Costs {#sec-compute-facility-costs-f185}
+
+Datacenter construction costs range from $7 to $12 million per megawatt of IT capacity for purpose-built facilities. ML workloads, with their high power density requirements (30 to 50 kW per rack versus 5 to 10 kW for traditional compute), demand specialized cooling infrastructure that increases construction costs by 20 to 40%.
+
+Power infrastructure represents a substantial portion of facility investment. Electrical distribution systems including transformers, switchgear, uninterruptible power supplies (UPS), and power distribution units (PDUs) typically cost $2 to $4 million per megawatt. Redundancy requirements (N+1 or 2N configurations) can double these costs for mission-critical deployments.
+
+Cooling systems for high-density ML infrastructure increasingly require liquid cooling solutions. Direct-to-chip liquid cooling adds $50,000 to $100,000 per rack in capital costs but enables the power densities required for modern GPU configurations. The DGX H100 systems referenced in our datacenter architecture discussion require liquid cooling for sustained operation, representing a non-optional facility cost. Next-generation B200 systems increase the cooling requirement further, with per-GPU TDP rising from `{python} h100_tdp` W to `{python} b200_tdp` W. Organizations planning facilities for B200-class hardware must provision cooling capacity at roughly 40% above current H100 requirements, adding another $2 to $4 million per megawatt of IT capacity to the facility investment.
+
+The distinction between retrofitting existing facilities and building purpose-designed ML datacenters significantly impacts facility costs. Retrofitting a conventional datacenter for ML workloads typically costs 30 to 60% more than new construction per unit of ML capacity, because existing power distribution and cooling systems require expensive modifications. Purpose-built facilities designed around high-density liquid cooling from the ground up avoid these retrofit costs but require longer lead times (24 to 36 months versus 6 to 12 months for retrofit) and larger minimum investments.
+
+### Operational Expenditure Components {#sec-compute-operational-expenditure-components-3e68}
+
+Operational expenditure (OpEx) captures ongoing costs that accumulate throughout infrastructure lifetime. For ML systems, power costs and specialized staffing dominate this category.
+
+#### Power Costs {#sec-compute-power-costs-de49}
+
+Electricity represents the largest operational cost for ML infrastructure. Power costs vary dramatically by geography, with industrial rates ranging from $0.04/kWh in regions with abundant hydroelectric power to $0.20/kWh in constrained markets. The following worked example demonstrates how these costs accumulate for a typical system:
+
+::: {.callout-notebook title="Annual Power Costs" collapse="true"}
+**Scenario**: Calculating the electricity bill for a single DGX H100 system.
+**Parameters**:
+
+- **Power**: 10.2 kW (max load)
+- **PUE**: 1.15 (efficient liquid cooling)
+- **Utilization**: 80% (high sustained load)
+- **Rate**: $0.08/kWh (industrial rate)
+
+**Calculation**:
+$$ \text{Annual Cost} = P_{\text{system}} \times \text{PUE} \times H_{\text{hours}} \times R_{\text{rate}} \times U_{\text{util}} $$
+$$ = 10.2 \times 1.15 \times 8760 \times 0.08 \times 0.8 $$
+$$ \approx \mathbf{\$6,575 \text{ per year}} $$
+
+**Total 3-Year OpEx**: $\approx \$20,000$ (just for power). Start-up CapEx is ~$300k.
+:::
+
+Electricity pricing models significantly impact operational costs and create optimization opportunities unique to ML workloads. Time-of-use pricing, which charges higher rates during peak demand hours (typically 2 PM to 7 PM on weekdays), creates opportunities for training workload scheduling during off-peak hours. Since training jobs are generally time-flexible, meaning a 30-day training run can accept a 10% extension without business impact, scheduling training to prefer off-peak hours can reduce power costs by 20 to 40%. @sec-sustainable-ai develops this concept further under the framework of carbon-aware scheduling, where both cost and carbon intensity guide workload timing.
+
+Demand charges, which price peak power consumption rather than total consumption, incentivize workload smoothing to avoid utilization spikes. A cluster that draws 5 MW continuously pays less in demand charges than one that oscillates between 2 MW and 8 MW, even if total consumption is identical. This pricing structure penalizes the bursty workload patterns common in experimentation-heavy environments where multiple teams simultaneously launch large training runs.
+
+Renewable energy considerations extend beyond environmental responsibility to economic optimization. Power Purchase Agreements (PPAs) for renewable energy often provide long-term price stability, hedging against electricity market volatility. Many organizations target 100% renewable energy matching through a combination of on-site generation, PPAs, and Renewable Energy Certificates (RECs). @sec-sustainable-ai develops the comprehensive framework for quantifying environmental impact, including lifecycle carbon assessment and the geographic optimization strategies that can reduce emissions by 50 to 80% through thoughtful infrastructure placement.
+
+#### Staffing and Operations {#sec-compute-staffing-operations-69aa}
+
+ML infrastructure requires specialized operational expertise across multiple domains. Staffing costs often represent 15 to 25% of total operational expenditure for well-run facilities.
+
+Hardware operations teams manage physical infrastructure including installation, maintenance, and failure response. For clusters of 500+ GPUs, dedicated hardware technicians are essential, with typical ratios of 1 technician per 200 to 400 GPUs depending on hardware heterogeneity and SLA requirements.
+
+Software platform teams maintain the scheduling systems, container infrastructure, and ML frameworks that enable productive use of hardware resources. These roles command premium compensation due to the specialized intersection of systems engineering and ML expertise required.
+
+Utilization monitoring represents both a staffing function and a key lever for TCO optimization. Continuous monitoring of GPU utilization, memory bandwidth, and job efficiency enables identification of optimization opportunities. Organizations achieving 70%+ sustained GPU utilization versus the more common 30 to 50% effectively halve their per-computation infrastructure costs.
+
+The staffing cost structure for ML infrastructure differs from traditional IT operations in important ways. The ratio of engineering to operations staff is typically inverted: traditional datacenters employ mostly operations staff with a small engineering team, while ML infrastructure organizations employ mostly infrastructure engineers (developing scheduling algorithms, optimizing distributed training, and building monitoring systems) with a smaller operations team handling physical hardware. This engineering-heavy staffing model increases per-employee costs but generates compounding returns through efficiency improvements that reduce the total infrastructure required for a given compute workload.
+
+### Build vs. Buy Analysis {#sec-compute-build-vs-buy-analysis-44c2}
+
+The fundamental infrastructure decision is whether to operate private infrastructure or consume cloud capacity. This choice, more than any individual hardware selection, determines an organization's long-term competitive position in ML. Building on-premises infrastructure commits capital upfront but creates a depreciating asset with decreasing marginal cost over time. Consuming cloud capacity preserves financial flexibility but exposes the organization to pricing changes, capacity constraints, and vendor dependencies. Most large-scale ML organizations ultimately adopt hybrid strategies, but the optimal split between on-premises and cloud depends on workload characteristics, scale, organizational capabilities, and strategic objectives that vary dramatically across organizations.
+
+#### Cloud vs. On-Premises Trade-offs {#sec-compute-cloud-vs-onpremises-tradeoffs-9be4}
+
+Cloud computing offers compelling advantages for specific use cases. Variable workloads with unpredictable demand benefit from cloud elasticity, avoiding stranded capacity during low-demand periods. Experimentation and research phases, where hardware requirements remain uncertain, benefit from the ability to test different configurations without capital commitment. Geographic distribution requirements for inference serving often favor cloud deployment due to the substantial investment required for multi-region presence. Cloud platforms also provide access to the latest hardware generations without the procurement lead times (often 6 to 12 months for large GPU orders) that constrain on-premises deployments.
+
+However, cloud computing introduces dependencies that become increasingly significant at scale. Network bandwidth between cloud instances, while improving, still lags behind the dedicated InfiniBand fabrics available in on-premises deployments. Data gravity, the tendency for large datasets to accumulate in a specific location due to transfer costs and latency, creates switching costs that increase over time. Cloud provider GPU availability is subject to capacity constraints that can delay or prevent training runs during high-demand periods. Organizations that experience these constraints often describe the transition from cloud as a strategic imperative rather than a cost optimization.
+
+On-premises infrastructure wins economically under sustained high utilization. The break-even analysis requires comparing amortized CapEx plus OpEx against equivalent cloud costs:
+
+$$\text{Break-even utilization} = \frac{C_{\text{cloud}} \times H_{\text{annual}}}{\frac{C_{\text{capex}}}{Y_{\text{amortization}}} + C_{\text{opex}}}$$
+
+Consider a DGX H100 system with $300,000 CapEx, 3-year amortization, and $25,000 annual OpEx (power, maintenance, proportional staff). Cloud equivalent (8x H100 instance at ~$25/hour):
+
+$$\text{Break-even} = \frac{25 \times 8,760}{\frac{300,000}{3} + 25,000} = \frac{219,000}{125,000} \approx 1.75$$
+
+This calculation suggests on-premises becomes favorable when utilization exceeds approximately 57% (1/1.75). In practice, organizations report break-even utilization thresholds of 40 to 60% depending on specific cloud pricing, operational efficiency, and local electricity costs. Several factors complicate this simple model. First, the cloud hourly rate includes amortized networking, storage, and management overhead that must be separately accounted in on-premises TCO. Second, on-premises maintenance costs escalate over time as hardware ages, with failure rates typically doubling between years 2 and 4. Third, the implicit cost of operational expertise, having staff capable of managing bare-metal GPU clusters, is substantial but often overlooked in break-even analyses.
+
+The break-even calculation also assumes static cloud pricing, but major providers have reduced GPU instance pricing by 20 to 40% over 2022 to 2024 in response to competitive pressure and improved utilization of their own fleets. This trend reduces the on-premises cost advantage over time, though it also reduces the absolute cost of hybrid strategies that combine both approaches.
+
+| **Factor**           | **Favors Cloud**  | **Favors On-Premises** |
+|:---------------------|:------------------|:-----------------------|
+| **Utilization**      | &lt;40% average   | &gt;60% sustained      |
+| **Workload pattern** | Variable, bursty  | Steady, predictable    |
+| **Data volume**      | Moderate          | Petabyte-scale         |
+| **Time horizon**     | &lt;2 years       | &gt;3 years            |
+| **Team capability**  | Limited ops staff | Strong infrastructure  |
+
+To make this comparison concrete, the following side-by-side analysis traces the 3-year costs for a 64-GPU H100 deployment under both strategies.
+
+| **Cost Component**        | **On-Premises (3 yr)** | **Cloud Reserved (3 yr)** | **Cloud On-Demand (3 yr)** |
+|:--------------------------|-----------------------:|--------------------------:|---------------------------:|
+| **Hardware (8 DGX H100)** |            \$2,400,000 |                       \$0 |                        \$0 |
+| **Networking**            |              \$400,000 |            \$0 (included) |             \$0 (included) |
+| **Facility (allocated)**  |              \$300,000 |                       \$0 |                        \$0 |
+| **Compute hours**         |                    \$0 |               \$4,730,000 |                \$7,884,000 |
+| **Power (at \$0.08/kWh)** |              \$530,000 |            \$0 (included) |             \$0 (included) |
+| **Staff (allocated)**     |              \$600,000 |                 \$150,000 |                  \$150,000 |
+| **Data egress**           |                    \$0 |                 \$120,000 |                  \$120,000 |
+| **3-Year Total**          |        **\$4,230,000** |           **\$5,000,000** |            **\$8,154,000** |
+| **Effective \$/GPU-hr**   |             **\$2.52** |                **\$2.98** |                 **\$4.86** |
+
+: **Three-Year TCO Comparison**: On-premises deployment versus cloud alternatives for a 64-GPU H100 cluster at 75% sustained utilization. On-premises achieves the lowest cost per GPU-hour but requires upfront capital and operational expertise. Cloud reserved instances offer comparable economics with lower risk. On-demand pricing provides maximum flexibility at roughly 2 $\times$ the on-premises cost. All figures assume 2024 pricing and 75% utilization. {#tbl-tco-comparison}
+
+The \$/GPU-hour metric in @tbl-tco-comparison assumes 75% sustained utilization over three years. At lower utilization, the on-premises advantage erodes rapidly: at 40% utilization, on-premises costs rise to \$4.73/GPU-hour, exceeding cloud reserved pricing. This utilization sensitivity explains why organizations with variable workloads often prefer cloud infrastructure despite the higher nominal cost, since they avoid paying for idle capacity.
+
+Hybrid strategies combine cloud burst capacity with on-premises baseline infrastructure. Organizations maintain on-premises systems sized for typical load (e.g., 60th percentile demand) while using cloud for peak periods. This approach captures most on-premises economic benefits while retaining cloud flexibility.
+
+#### Reserved Capacity vs. Spot Instances {#sec-compute-reserved-capacity-vs-spot-instances-8c44}
+
+Cloud providers offer commitment discount programs that substantially reduce effective pricing. Reserved instances with 1-year commitments typically offer 30 to 40% discounts, while 3-year commitments reach 50 to 60% discounts relative to on-demand pricing. These discounts shift cloud economics but introduce utilization risk similar to on-premises ownership.
+
+Spot instance strategies enable dramatic cost reduction (60 to 80% below on-demand) for fault-tolerant training workloads. Effective spot utilization requires:
+
+1. **Checkpoint integration**: Training frameworks must save state frequently enough that spot interruption costs remain acceptable. Modern distributed training checkpoints every 10 to 30 minutes, limiting maximum lost computation.
+
+2. **Fallback mechanisms**: Automated job migration to alternative instance types or regions when spot capacity becomes unavailable.
+
+3. **Heterogeneous training**: Frameworks capable of operating across mixed instance types to maximize spot availability.
+
+The effective spot discount must account for interruption overhead:
+
+$$C_{\text{effective}} = C_{\text{spot}} \times (1 + R_{\text{interrupt}} \times T_{\text{recovery}})$$
+
+where $R_{\text{interrupt}}$ is the hourly interruption rate and $T_{\text{recovery}}$ is recovery time as a fraction of checkpoint interval. With 5% hourly interruption rate and 10-minute recovery on 30-minute checkpoints:
+
+$$C_{\text{effective}} = 0.30 \times C_{\text{ondemand}} \times (1 + 0.05 \times 0.33) \approx 0.31 \times C_{\text{ondemand}}$$
+
+Even accounting for interruption overhead, spot instances provide compelling economics for training workloads with proper checkpoint infrastructure. The combination of checkpointing every 10 to 30 minutes with automated fallback to reserved instances during spot shortages enables organizations to run 70 to 80% of training compute on spot pricing while maintaining consistent progress toward training completion targets.
+
+The interaction between spot strategy and training framework design deserves attention. Frameworks that support elastic training, dynamically adjusting the number of workers without restarting the job, achieve higher spot utilization by expanding into available capacity and contracting when spots are reclaimed. The overhead of elastic scaling (model re-sharding, learning rate adjustment, gradient accumulation changes) must be weighed against the cost savings from higher spot utilization. For data-parallel training where adding workers is straightforward, elastic strategies are highly effective. For model-parallel training where the parallelism topology is fixed at launch, spot interruptions require full job restart from the latest checkpoint, reducing the effective cost advantage.
+
+### Comprehensive TCO Model {#sec-compute-comprehensive-tco-model-e13d}
+
+A complete TCO model integrates capital and operational components across the infrastructure lifetime, discounting future costs to present value to enable comparison across deployment strategies with different cash flow profiles. The net present value formulation accounts for the time value of money: a dollar spent on cloud computing three years from now costs less in present terms than a dollar spent on hardware today.
+
+$$\text{TCO} = \sum_{t=1}^{Y} \frac{C_{\text{capex}}^{(t)} + C_{\text{opex}}^{(t)}}{(1+r)^t}$$
+
+where $r$ is the discount rate reflecting cost of capital (typically 8 to 12% for technology investments). The discount rate significantly impacts the comparison between CapEx-heavy on-premises deployments and OpEx-heavy cloud deployments. Higher discount rates favor cloud because they reduce the present value of future cloud payments relative to the upfront on-premises investment. Lower discount rates favor on-premises because the upfront cost is less penalized relative to the stream of cloud payments. For a 256-GPU cluster over 4 years:
+
+| **Component**           |  **Year 1** | **Year 2** | **Year 3** | **Year 4** |
+|:------------------------|------------:|-----------:|-----------:|-----------:|
+| **Hardware CapEx**      |  $9,600,000 |         $0 |         $0 | $3,200,000 |
+| **Network CapEx**       |  $1,660,000 |         $0 |         $0 |         $0 |
+| **Power (at 70% util)** |  $1,690,000 | $1,690,000 | $1,690,000 | $1,690,000 |
+| **Maintenance**         |    $480,000 |   $576,000 |   $691,000 |   $829,000 |
+| **Staff (allocated)**   |    $800,000 |   $840,000 |   $882,000 |   $926,000 |
+| **Annual Total**        | $14,230,000 | $3,106,000 | $3,263,000 | $6,645,000 |
+
+@fig-tco-breakdown reveals the cost structure's evolution over a four-year lifecycle: hardware CapEx dominates Year 1, but accumulated operational expenses (power and staffing) eventually exceed the initial capital investment, making sustained utilization the critical economic lever:
+
+::: {#fig-tco-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Total Cost of Ownership Breakdown**. Analysis of infrastructure costs over a 4-year lifecycle. While hardware CapEx is the largest initial outlay, operational costs (Power and Staffing) accumulate to exceed hardware costs over the system's life. High utilization is key to amortizing these fixed and ongoing costs." fig-alt="Stacked bar chart over 4 years. Year 1 shows hardware CapEx only in blue. Years 2-4 add accumulated OpEx layers in red shades. Annotation indicates operational costs eventually exceed initial capital expenditure by Year 4."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{CapExColor}{RGB}{70,130,180}
+  \definecolor{OpExColor}{RGB}{205,92,92}
+  \definecolor{OpExColor2}{RGB}{240,128,128}
+
+  % Axes
+  \draw[->, thick, black!70] (0,0) -- (6.5,0) node[right, font=\footnotesize] {Year};
+  \draw[->, thick, black!70] (0,0) -- (0,5.5) node[above, font=\footnotesize, rotate=90, anchor=south, xshift=-0.5cm] {Cumulative Cost (\$M)};
+
+  % Ticks
+  \foreach \y in {1,2,3,4,5} \draw[gray!30] (0,\y) -- (6,\y);
+  \node[left, font=\scriptsize] at (0,1) {2M};
+  \node[left, font=\scriptsize] at (0,2) {4M};
+  \node[left, font=\scriptsize] at (0,3) {6M};
+  \node[left, font=\scriptsize] at (0,4) {8M};
+  \node[left, font=\scriptsize] at (0,5) {10M};
+
+  % Stacked Bar Data
+  % Y1: HW(4M/2=2.0) + Power(0)
+  % Y2: + Power(1.0)
+  % Y3: + Power(1.0)
+  % Y4: + Power(1.0)
+  % Wait, CapEx is typically upfront.
+  % Let's visualize cumulative.
+
+  % Bar 1 (Year 1)
+  \draw[fill=CapExColor] (1,0) rectangle (1.8, 2.0); % 4M HW
+  \node[below, font=\scriptsize] at (1.4,0) {Y1};
+
+  % Bar 2 (Year 2)
+  \draw[fill=CapExColor] (2.5,0) rectangle (3.3, 2.0);
+  \draw[fill=OpExColor] (2.5, 2.0) rectangle (3.3, 2.6); % +1.2M Power/Ops
+  \node[below, font=\scriptsize] at (2.9,0) {Y2};
+
+  % Bar 3
+  \draw[fill=CapExColor] (4.0,0) rectangle (4.8, 2.0);
+  \draw[fill=OpExColor] (4.0, 2.0) rectangle (4.8, 2.6);
+  \draw[fill=OpExColor2] (4.0, 2.6) rectangle (4.8, 3.2); % + 1.2M more
+  \node[below, font=\scriptsize] at (4.4,0) {Y3};
+
+  % Bar 4
+  \draw[fill=CapExColor] (5.5,0) rectangle (6.3, 2.0);
+  \draw[fill=OpExColor] (5.5, 2.0) rectangle (6.3, 2.6);
+  \draw[fill=OpExColor2] (5.5, 2.6) rectangle (6.3, 3.2);
+  \draw[fill=OpExColor!80!black] (5.5, 3.2) rectangle (6.3, 3.8); % + 1.2M more
+  \node[below, font=\scriptsize] at (5.9,0) {Y4};
+
+  % Legend
+  \node[anchor=west, font=\scriptsize] at (7, 4) {\textbf{Legend}};
+  \node[fill=CapExColor, minimum size=0.2cm, label={right:\scriptsize Hardware (CapEx)}] at (7.1, 3.5) {};
+  \node[fill=OpExColor, minimum size=0.2cm, label={right:\scriptsize Power \& Ops (Accum.)}] at (7.1, 3.0) {};
+
+  % Annotation
+  \draw[<-, thick, black!80] (6.4, 3.5) to[bend left] (8.5, 4.5) node[right, align=left, font=\scriptsize, text width=2.5cm] {OpEx eventually\\exceeds CapEx};
+
+\end{tikzpicture}
+```
+:::
+
+The NPV at 8% discount rate equals approximately $24.1 million, yielding a 4-year cost per GPU-hour of $4.30 at 70% utilization. This compares favorably to cloud A100 pricing of $3-4/hour only when accounting for the H100's 3 $\times$ performance advantage, yielding effective cost per computation approximately 40% below cloud alternatives at this utilization level.
+
+Power cost sensitivity analysis reveals the importance of electricity pricing in deployment decisions. A $0.04/kWh difference in electricity rates shifts the 4-year TCO by approximately $2.7 million for a 256-GPU cluster, potentially changing the optimal deployment strategy. Organizations with access to low-cost renewable energy enjoy structural cost advantages that compound over multi-year infrastructure investments.
+
+The sensitivity to utilization warrants particular attention because it creates a feedback loop between infrastructure economics and organizational capability. Organizations with sophisticated scheduling systems (@sec-fleet-orchestration) achieve 65 to 75% utilization, reducing their per-computation costs and enabling more aggressive infrastructure investments. Organizations with immature scheduling practices achieve 30 to 45% utilization, making their infrastructure more expensive per computation and reducing their willingness to invest in infrastructure improvements. This self-reinforcing dynamic explains why infrastructure advantages compound over time and why organizations that invest in operational excellence alongside hardware procurement consistently achieve lower effective costs.
+
+The TCO framework also reveals a frequently overlooked cost category: *stranded capacity*. When organizations purchase GPU clusters sized for peak demand but operate at average loads well below peak, the gap between purchased capacity and average utilization represents stranded capital. For a 256-GPU cluster operating at 50% average utilization, 128 GPU-equivalents of capacity sit idle at any given time, representing roughly \$4.8 million in stranded hardware investment over three years.
+
+Strategies to reduce stranded capacity include workload sharing across teams, spot-based burst to cloud during peak demand, and fractional GPU allocation through MIG partitioning. Each strategy introduces its own complexity costs, creating a secondary optimization problem that sophisticated organizations solve through fleet-level capacity planning. The most effective approach combines multiple strategies simultaneously: MIG partitioning for inference workloads during off-peak training hours, cross-team workload sharing with priority-based preemption, and cloud burst for demand peaks that exceed on-premises capacity. Organizations that implement all three strategies report utilization improvements of 15 to 25 percentage points relative to organizations using only basic scheduling, translating directly to lower effective cost per computation.
+
+## Case Studies {#sec-compute-case-studies-8da7}
+
+The infrastructure patterns examined in previous sections, power delivery, cooling architectures, memory hierarchies, accelerator selection, and TCO optimization, combine in different configurations depending on workload characteristics and organizational constraints. The theoretical frameworks become concrete when applied to real deployments, where engineering teams must navigate trade-offs that resist simple optimization.
+
+Four production deployments illustrate how datacenter architecture, networking, and resource management decisions interact to enable distinct ML workloads. Each case study represents a different point in the design space: GPU-centric dense training, TPU-based transformer optimization, hybrid CPU-GPU recommendation serving, and custom silicon for domain-specific acceleration. Together, they demonstrate that infrastructure architecture is not merely a procurement decision but a system design problem where physical constraints, software requirements, and economic objectives must be jointly optimized.
+
+### NVIDIA DGX SuperPOD Architecture {#sec-compute-nvidia-dgx-superpod-architecture-d2cc}
+
+The DGX SuperPOD represents NVIDIA's reference architecture for large-scale training, combining the dense GPU packaging of DGX systems with purpose-built networking. While @sec-network-fabrics examines the SuperPOD's networking topology, this case study addresses the complete system architecture including physical deployment, management infrastructure, and operational characteristics.
+
+#### Physical Layout and Cooling Integration {#sec-compute-physical-layout-cooling-integration-7ac8}
+
+A production SuperPOD deployment with 512 DGX H100 systems (4096 GPUs) occupies approximately 2000 square meters of datacenter floor space. The layout follows a pod-based organization where groups of 32 DGX systems share common power and cooling infrastructure. Each pod dissipates over 300 kW, requiring direct liquid cooling loops with facility-level heat exchangers.
+
+The cooling architecture uses a closed-loop system with water temperature maintained at 35 to 45C entering the cold plates. Unlike traditional datacenter cooling that targets low air temperatures, warm-water cooling improves efficiency by enabling free cooling in moderate climates. Heat removed from GPU cold plates transfers to building cooling towers without mechanical refrigeration for ambient temperatures below 25C.
+
+Power distribution follows the N+1 redundancy model at the pod level, with each DGX system receiving dual power feeds. A complete SuperPOD installation requires 5 to 7 MW of utility power including cooling overhead, corresponding to PUE values of 1.2 to 1.3 for liquid-cooled deployments.
+
+#### Management Plane Architecture {#sec-compute-management-plane-architecture-adeb}
+
+SuperPOD management integrates multiple control systems spanning hardware, networking, and workload orchestration, forming a layered management stack that mirrors the layered hardware architecture. Each layer operates independently but must coordinate with adjacent layers for effective cluster operation.
+
+Base Controller Manager (BCM) provides hardware-level management including firmware updates, health monitoring, and out-of-band access via Baseboard Management Controller (BMC) interfaces. The BMC enables remote power cycling, BIOS configuration, and serial console access independent of the GPU software stack, critical for diagnosing failures in systems where the OS has become unresponsive. In a 4,096-GPU deployment, hardware failures occur with statistical regularity: at typical annualized failure rates of 5 to 8% per GPU, a SuperPOD experiences roughly 200 to 330 GPU failures per year, or approximately one failure every 1 to 2 days. Rapid detection and isolation of failed GPUs, without disrupting active training jobs on healthy nodes, requires the automation that BCM provides.
+
+The Unified Fabric Manager (UFM) coordinates InfiniBand network configuration, adaptive routing policies, and link health monitoring. UFM's role extends beyond configuration management to real-time traffic engineering: adaptive routing algorithms detect congested links and redistribute traffic across alternative paths, maintaining bandwidth utilization above 85% even under imbalanced workload patterns. Link health monitoring enables preemptive replacement of degrading cables before they cause training job failures, reducing unplanned downtime by 30 to 50% compared to reactive maintenance strategies.
+
+At the workload level, SuperPOD deployments typically integrate with either Slurm or Kubernetes for job scheduling. The NVIDIA GPU Operator handles GPU driver installation, monitoring integration, and device plugin management for Kubernetes environments. Slurm configurations use GRES scheduling with topology-aware placement to ensure jobs receive contiguous GPU allocations that minimize inter-node communication. @sec-fleet-orchestration develops these scheduling strategies in detail, examining how topology-aware placement interacts with job preemption policies and multi-tenant resource sharing.
+
+Storage integration varies by deployment, but reference architectures include NVIDIA's GPUDirect Storage for direct data paths between NVMe storage and GPU memory, bypassing the CPU entirely and reducing data loading latency by 3 to 5 $\times$ compared to traditional paths through CPU DRAM. A typical SuperPOD includes 30 to 50 PB of high-performance storage providing 200+ GB/s aggregate throughput, staging training data close to compute. For checkpointing, the storage system must absorb burst writes from all 4,096 GPUs simultaneously, requiring parallel file system configurations that sustain 100+ GB/s write throughput with consistent latency.
+
+#### SuperPOD TCO Characteristics {#sec-compute-superpod-tco}
+
+Connecting this architecture back to the TCO framework, a 512-DGX SuperPOD represents a total investment on the order of \$200 million when accounting for hardware (\$150M for the DGX systems), networking (\$25M for the InfiniBand fabric), and facility infrastructure (\$25M for power and cooling at this density). At 75% sustained utilization with \$0.08/kWh electricity, the annual power bill reaches approximately \$3.5 million. Over a three-year lifecycle, operational costs (power, maintenance, staff) accumulate to roughly \$15 million, bringing total three-year TCO to approximately \$215 million, or \$2.00 per GPU-hour.
+
+This per-GPU-hour cost compares favorably to equivalent cloud pricing, but the comparison assumes sustained high utilization. Organizations that cannot maintain 60%+ utilization, whether due to insufficient workload volume, lengthy model compilation times, or checkpointing overhead, see their effective cost per GPU-hour rise proportionally. The capital commitment also carries technology risk: if a next-generation accelerator delivers 3 $\times$ better performance-per-watt within 18 months of deployment, the remaining useful life of the investment diminishes significantly.
+
+The SuperPOD's integrated design creates a trade-off between operational simplicity and vendor lock-in. NVIDIA's software stack (CUDA, NCCL, NVLink protocols) is tightly coupled to the hardware. Migrating workloads to alternative accelerators requires rewriting communication kernels, adjusting parallelism strategies, and potentially modifying model architectures. This coupling provides performance benefits, as the tight hardware-software integration enables optimizations that cross-vendor solutions cannot match, but it limits competitive leverage in hardware procurement.
+
+### Google TPU Pod Infrastructure {#sec-compute-google-tpu-pod-infrastructure-4a00}
+
+Google's TPU pods represent an alternative architectural philosophy: vertically integrated accelerators designed specifically for transformer training, with interconnect capabilities built into the chip rather than added as external networking.
+
+#### TPU v4 Pod Architecture {#sec-compute-tpu-v4-pod-architecture-f7f0}
+
+A TPU v4 pod contains 4096 TPU chips arranged in a 3D torus topology. Each chip provides approximately `{python} tpuv4_bf16_tflops` TFLOPS of bfloat16 compute with 32 GB of HBM2e memory, yielding aggregate pod capacity of 1.1 exaFLOPS and 128 TB of memory. The power envelope for a complete pod is approximately 4 to 5 MW, competitive with GPU-based systems at similar compute density.
+
+The physical packaging differs from GPU systems in ways that reflect the architectural philosophy of tight vertical integration. TPU chips mount in trays of 4, with trays assembled into racks of 64 chips each. Sixty-four racks form the complete pod, arranged in a cube topology that matches the 3D torus interconnect structure. This physical arrangement is not arbitrary: the 3D torus network topology maps directly onto the three-dimensional physical layout, minimizing cable lengths for nearest-neighbor communication and reducing the variance in inter-chip latency.
+
+Cooling uses rear-door heat exchangers with facility water, maintaining chip temperatures below 85C under sustained load. The TPU thermal design benefits from the chip's lower power density compared to high-end NVIDIA GPUs: each TPU v4 chip consumes approximately 250 to 300 W compared to `{python} h100_tdp` W for an H100. This lower per-chip power enables air-assisted cooling approaches that would be inadequate for GPU systems, simplifying the facility requirements and reducing the cooling infrastructure investment per unit of compute.
+
+#### Inter-Chip Interconnect Topology {#sec-compute-interchip-interconnect-topology-9533}
+
+The ICI (Inter-Chip Interconnect) fabric provides direct chip-to-chip connectivity without external switches. Each TPU v4 chip has six ICI links at 100 GB/s each, enabling 3D torus connectivity:
+
+$$
+\text{Bisection Bandwidth} = 2 \times \sqrt[3]{N} \times B_{\text{link}} \times N/2
+$$
+
+For N=4096 chips with 100 GB/s links, the torus bisection bandwidth reaches approximately 32 TB/s. While lower than fat-tree alternatives, the consistent latency characteristics of torus topology benefit the regular communication patterns of transformer training.
+
+The topology choice optimizes for AllReduce patterns where each chip communicates with neighbors rather than arbitrary endpoints. For a model using 3D parallelism with 4 tensor-parallel chips, 16 pipeline stages, and 64-way data parallelism, the workload maps naturally onto a 4x16x64 slice of the pod topology. This mapping exploits the torus structure: tensor parallelism uses the fastest (intra-tray) links, pipeline parallelism uses the medium-speed (intra-rack) links, and data parallelism uses the slower (inter-rack) links. The communication volume at each level of the hierarchy inversely correlates with the available bandwidth, a design property that maximizes aggregate throughput.
+
+The torus topology also provides natural fault isolation properties. A failed chip affects only its immediate neighbors in the mesh, and the wrapping connections provide alternative routing paths around the failure. This contrasts with hierarchical (fat-tree) topologies where a failed switch can disconnect an entire subtree. However, the torus provides lower bisection bandwidth for global operations compared to fat-tree topologies of equal cost, creating a trade-off between fault resilience and global communication performance that influences the choice of parallelism strategy.
+
+#### Software Stack Integration {#sec-compute-software-stack-integration-cf4e}
+
+TPU software centers on JAX and XLA[^fn-xla], with pjit (partitioned JIT compilation) managing distributed execution. XLA compiles high-level model descriptions to TPU-specific operations, automatically inserting communication collectives based on partition specifications. This approach differs from the explicit communication programming required for GPU clusters.
+
+[^fn-xla]: **XLA (Accelerated Linear Algebra)**: A domain-specific compiler for linear algebra operations that optimizes entire computation graphs rather than individual operations. XLA performs operator fusion (combining multiple ops into single kernels), buffer reuse optimization, and automatic layout transformation. Originally developed for TPUs, XLA now supports GPUs and CPUs, enabling framework-agnostic optimization of ML computations.
+
+Multislice training extends beyond single pods by connecting multiple TPU slices via datacenter network. A PaLM-scale training run might utilize four TPU v4 pods (16,384 chips) with cross-slice communication at lower bandwidth than intra-slice ICI. The software stack handles this hierarchy transparently, using different collective algorithms for intra-slice versus inter-slice operations.
+
+#### TPU Pod TCO and Operational Characteristics {#sec-compute-tpu-pod-tco}
+
+Google does not sell TPU pods as hardware products; access comes exclusively through Google Cloud, making TCO analysis fundamentally different from on-premises GPU deployments. TPU v4 Pod slices are priced per chip-hour, with committed use discounts reducing costs by 30 to 50% relative to on-demand pricing. For large training runs, Google offers custom pricing through Cloud ML partnerships that can further reduce costs for sustained commitments.
+
+The cloud-only access model shifts the TCO calculation from CapEx-heavy to OpEx-dominant. An organization training on a 1024-chip TPU v4 slice at \$1.10 per chip-hour (committed pricing) accumulates costs of \$1,126 per hour, or approximately \$27,000 per day. A 30-day training run therefore costs roughly \$810,000 in compute alone, competitive with equivalent GPU cloud pricing but without the option of amortizing capital investment over multiple runs.
+
+The vertical integration of TPU infrastructure creates distinct operational trade-offs relative to GPU clusters. On the advantage side, Google manages all hardware operations: chip replacement, network configuration, cooling, and firmware updates are invisible to the user. This eliminates the operational staff costs that constitute 15 to 25% of on-premises TCO. The XLA compiler's automatic optimization also reduces the software engineering effort required to achieve high utilization, as partitioning and communication insertion happen at the compiler level rather than requiring manual NCCL configuration.
+
+On the disadvantage side, the JAX/XLA software ecosystem is narrower than CUDA's, and models developed on TPUs may require significant porting effort to run on alternative hardware. Debugging distributed training failures is also more challenging, as the abstraction layer between user code and hardware is thicker. Organizations must weigh these ecosystem considerations against the operational simplicity and competitive pricing that Google's vertical integration enables.
+
+### Meta Recommendation Infrastructure {#sec-compute-meta-recommendation-infrastructure-ff88}
+
+Meta's recommendation systems illustrate infrastructure optimized for a different workload pattern: models combining massive embedding tables with relatively modest dense computation. This architecture serves billions of daily recommendation queries across products including Facebook Feed, Instagram, and Reels. Unlike the compute-bound LLM workloads examined above, recommendation models hit a *memory capacity wall* where embedding tables exceed any single accelerator's memory.
+
+::: {.callout-note title="Archetype B: Memory Capacity Wall"}
+**Archetype B (The Global Real-Time Recommendation Engine)** defines this architectural split. Unlike Archetype A (which is compute-bound), Archetype B is **memory-capacity bound**. The embedding tables representing billions of users and items can exceed 10TB. Since this cannot fit in GPU HBM, the system must adopt a hybrid design: storing embeddings in massive CPU DRAM tiers while using GPUs only for the dense compute layers.
+:::
+
+#### CPU-GPU Hybrid Architecture {#sec-compute-cpugpu-hybrid-architecture-6f4a}
+
+Recommendation models like DLRM[^fn-dlrm] (Deep Learning Recommendation Model) partition naturally between embedding operations and dense neural network computation. Embedding tables for production systems can exceed 10 TB, far exceeding GPU memory capacity. The hybrid architecture addresses this by placing embeddings in CPU DRAM while dense layers execute on GPUs.
+
+[^fn-dlrm]: **DLRM (Deep Learning Recommendation Model)**: Meta's open-source recommendation model architecture that became the reference design for industry recommendation systems. DLRM processes both dense features (through MLPs) and sparse features (through embedding tables), combining them via a factorization machine-inspired interaction layer. The architecture explicitly acknowledges the embedding-memory bottleneck, making it a natural fit for hybrid CPU-GPU deployment.
+
+A production recommendation training node combines multiple CPUs totaling 2 to 4 TB of DRAM with 8 GPUs for dense computation. The CPUs handle embedding lookups, concatenation, and feature preprocessing. Resulting feature vectors transfer to GPUs via PCIe for the dense forward and backward passes. Gradient updates for embeddings return to CPU memory via the same path.
+
+This architecture requires careful balancing. The ratio of embedding lookups to dense computation determines optimal CPU-to-GPU allocation. For Meta's workloads, approximately 4:1 CPU socket to GPU ratios provide balanced utilization, though this varies by model architecture.
+
+#### Embedding Table Serving at Scale {#sec-compute-embedding-table-serving-scale-e014}
+
+Inference architecture differs from training by emphasizing latency over throughput. Production serving distributes embedding tables across a fleet of CPU-based servers using consistent hashing for shard assignment. A single recommendation query may access hundreds of embedding shards, requiring parallel lookups that complete within the 50 to 100 ms latency budget.
+
+The embedding serving tier operates separately from the dense model serving tier. This separation enables independent scaling: embedding servers scale with table size and query rate, while dense model servers scale with compute requirements. Cross-tier communication uses low-latency RPC, typically completing in under 5 ms for local datacenter deployments.
+
+Feature stores cache frequently accessed embeddings and precomputed features, reducing embedding server load for popular items. A tiered caching architecture places hot embeddings in GPU memory (microsecond access), warm embeddings in CPU DRAM (sub-millisecond), and cold embeddings in distributed storage (milliseconds). Cache hit rates above 90% are typical for recommendation workloads due to power-law popularity distributions: a small fraction of items (viral content, popular products) accounts for the majority of lookups.
+
+The effectiveness of this caching hierarchy depends on the temporal locality of access patterns. Recommendation workloads exhibit strong temporal locality because trending items generate concentrated access bursts, enabling high cache hit rates with relatively small cache sizes. By contrast, personalization models that access long-tail user profiles exhibit weaker locality, requiring larger caches or accepting higher latency from distributed storage lookups. The cache sizing decision directly impacts inference latency percentiles: P50 latency depends on cache hit performance, while P99 latency depends on cache miss performance, creating a trade-off between average and tail latency that SLO definitions must explicitly address.
+
+#### Training and Serving Coordination {#sec-compute-training-serving-coordination-3cf1}
+
+The separation between training and serving infrastructure creates coordination challenges for model updates. Meta's approach uses a staged rollout pipeline: models train on dedicated GPU clusters, export to serving format, deploy to staging clusters for validation, then gradually roll out to production serving. The complete pipeline from training completion to full production deployment spans hours to days depending on model criticality.
+
+Training clusters optimize for throughput using large batch sizes and aggressive gradient accumulation. Serving clusters optimize for latency using quantized models, batched inference, and result caching. The different optimization targets justify separate infrastructure rather than shared clusters.
+
+From a TCO perspective, the hybrid CPU-GPU architecture achieves approximately 3 $\times$ better cost efficiency than a GPU-only approach for recommendation workloads. The cost advantage stems from the price differential between CPU DRAM (\$5 to \$10 per GB) and GPU HBM (\$50 to \$100 per GB equivalent). For a 10 TB embedding table, CPU DRAM storage costs \$50,000 to \$100,000, while the equivalent GPU HBM capacity, even if it could be aggregated, would cost \$500,000 to \$1,000,000. This 10 $\times$ memory cost differential, combined with the fact that embedding lookups are memory-bandwidth-bound operations that underutilize GPU compute units, makes the hybrid architecture economically compelling despite the additional system complexity.
+
+### Tesla Dojo for Vision Training {#sec-compute-tesla-dojo-vision-training-3369}
+
+Tesla's Dojo system represents the custom silicon approach to ML infrastructure: building purpose-designed chips and packaging for a specific workload rather than using general-purpose accelerators.
+
+#### Custom Silicon Architecture {#sec-compute-custom-silicon-architecture-9d2a}
+
+The Dojo D1 chip provides 1024 custom-designed cores in a 645 mm^2^ die. Each core combines an 8-wide vector unit, 64-bit scalar unit, and 1.25 MB of SRAM, yielding approximately 22.6 TFLOPS of BF16[^fn-bf16] compute per chip. The design optimizes for convolutional and attention operations typical of vision models, with dataflow execution patterns that minimize memory traffic.
+
+[^fn-bf16]: **BF16 (Brain Floating Point)**: A 16-bit floating point format with the same 8-bit exponent as FP32 but only 7 mantissa bits (versus 23 in FP32). Developed by Google for TPUs, BF16 matches FP32's dynamic range, avoiding the overflow/underflow issues of FP16 that require loss scaling. BF16 has become the default training precision for transformers, offering 2 $\times$ memory savings with minimal accuracy impact.
+
+Twenty-five D1 chips mount on a single training tile, connected via a 2D mesh interconnect providing 4 TB/s aggregate bandwidth. Six tiles combine into a system tray, and multiple trays assemble into a complete ExaPOD delivering over 1 exaFLOP of aggregate compute. The modular architecture enables deployments from single tiles (0.5 PFLOPS) to multi-ExaPOD installations.
+
+#### Wafer-Scale Considerations {#sec-compute-waferscale-considerations-0768}
+
+While Dojo uses conventional chip packaging, the architecture addresses similar challenges to wafer-scale integration: maximizing on-chip bandwidth while managing thermal and yield constraints. The 2D mesh topology within each tile provides nearest-neighbor bandwidth of 18 GB/s between chips, avoiding the bottlenecks of hierarchical topologies for spatially-local operations common in vision processing.
+
+Power density presents the primary challenge: a fully populated system tray dissipates over 100 kW in a compact form factor. Tesla's thermal solution uses direct liquid cooling with custom manifolds delivering coolant to each training tile. The aggressive cooling enables sustained operation at power densities exceeding traditional datacenter limits.
+
+Yield management for custom silicon requires careful attention. Unlike commodity GPU purchases where defective units return to the vendor, custom chip production creates internal yield loss. At the 645 mm^2^ die size of the D1, typical TSMC yields at 7nm process technology produce approximately 60 to 70% functional dies from each wafer, meaning 30 to 40% of fabricated chips may contain defects. Dojo's design includes redundant cores and interconnect paths, enabling graceful degradation when manufacturing defects occur. A chip with 2 to 5% defective cores can still operate at reduced capacity, improving the effective yield to 85 to 90% at the cost of heterogeneous per-chip performance. Production testing identifies defective units, and the software stack maps computation around unavailable resources, a capability that requires compiler-level awareness of the physical hardware map, adding significant software complexity absent from commodity accelerator deployments.
+
+#### Training Video Data at Scale {#sec-compute-training-video-data-scale-4e1a}
+
+Dojo's primary workload is training vision models on Tesla's fleet data: over 1 million video clips per day from vehicles worldwide. The data pipeline presents distinct challenges from text or image training. Video requires decompression, temporal alignment, sensor calibration, and often 3D scene reconstruction before training.
+
+The preprocessing pipeline runs on CPU clusters adjacent to Dojo compute, staging prepared batches to high-speed storage. The preprocessing compute requirements for video data are substantial: a single frame from a vehicle camera requires demosaicing, geometric correction, temporal alignment with other sensors (radar, ultrasonic, GPS), and projection into a 3D coordinate system. These operations are inherently sequential per frame but parallelizable across the million-plus daily clips, creating a massively parallel CPU workload that dwarfs the preprocessing requirements of text or image training. Storage bandwidth of 10+ GB/s per training tile ensures compute utilization despite the data-intensive nature of video processing. The complete system integrates 10 PB of flash storage providing over 100 GB/s aggregate throughput, a storage investment that exceeds the cost of many organizations' entire ML compute infrastructure.
+
+This infrastructure supports auto-labeling workflows where preliminary models identify scenarios of interest in raw video, generating training data for improved models. The closed-loop between deployment, data collection, and training enables rapid iteration cycles measured in days rather than weeks.
+
+The TCO calculus for custom silicon like Dojo differs fundamentally from commodity accelerator deployments. The upfront investment includes not just chip fabrication costs but years of hardware engineering, compiler development, and software stack construction, an investment measured in hundreds of millions of dollars. This investment is justified only at scales where the per-computation cost advantage of custom silicon, typically 2 to 5 $\times$ better than commodity hardware for the target workload, compounds over enough total computation to recoup the development cost. Tesla's fleet of millions of vehicles generating continuous training data provides the sustained, homogeneous workload volume necessary to amortize these costs. For organizations without such workload scale or specialization, commodity GPU or TPU infrastructure remains the economically rational choice despite the higher per-operation cost.
+
+---
+
+These case studies demonstrate that production ML infrastructure defies one-size-fits-all solutions. DGX SuperPOD optimizes for flexible general-purpose training with emphasis on GPU density and high-bandwidth networking, achieving the lowest per-GPU-hour costs at sustained high utilization. TPU pods sacrifice flexibility for vertical integration that excels at transformer workloads, offering competitive cloud pricing with minimal operational overhead. Meta's hybrid architecture addresses the embedding-heavy patterns unique to recommendation systems, where GPU-only deployment would waste 40 to 60% of capacity. Tesla's Dojo pursues custom silicon for domain-specific acceleration where scale justifies the significant development costs.
+
+A common thread across all four deployments is that TCO optimization requires matching infrastructure architecture to workload characteristics. Organizations that select infrastructure based solely on peak FLOPS or acquisition cost, without analyzing arithmetic intensity, memory bandwidth requirements, and expected utilization, consistently achieve 2 to 3 $\times$ worse cost efficiency than those who perform the quantitative analyses introduced in this chapter. The choice among these approaches depends on workload characteristics, scale requirements, and organizational capabilities rather than any universal optimum.
+
+Understanding these trade-offs enables informed infrastructure decisions as models and training requirements continue to evolve. @sec-distributed-training-systems provides the implementation details for the parallelism strategies that leverage these infrastructure platforms, while @sec-collective-communication examines the collective operations and algorithms that govern network-level performance.
+
+## Fallacies and Pitfalls {#sec-compute-fallacies-pitfalls-383c}
+
+Infrastructure for distributed ML systems involves counterintuitive interactions between compute, networking, power, and cooling that lead to costly miscalculations. These fallacies and pitfalls capture errors that waste millions in infrastructure investment, delay projects by months, or cause production systems to achieve only 30 to 50% of planned capacity.
+
+**Fallacy:** ***More GPUs always means faster training.***
+
+Engineers assume training time scales linearly with GPU count. In production, communication overhead dominates beyond modest cluster sizes. Amdahl's Law establishes the hard limit: gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds. For a `{python} gpt3_params_b`B parameter model (350 GB gradients) on 64 GPUs with `{python} ib_ndr` Gbps InfiniBand, AllReduce requires 14 seconds while compute takes 1 second, yielding 6.7% efficiency. Organizations frequently discover that 512-GPU clusters train slower than optimized 128-GPU deployments. At $30 per hour per H100, a 512-GPU cluster achieving 25% efficiency wastes $11,520 per hour in idle capacity.
+
+**Fallacy:** ***Peak FLOPS determines training throughput.***
+
+Procurement teams select accelerators by comparing peak FLOPS: H100 delivers `{python} h100_tflops_fp16` TF of FP16 compute. In production workloads, memory bandwidth limits performance. The roofline model in @sec-compute-warehousescale-computer-384e shows that arithmetic intensity below the ridge point (~290 FLOP/byte for H100) makes accelerators memory-bound. Most LLM training operates at 50 to 100 FLOP/byte, achieving only 168 to 335 TF effective throughput (17 to 34% of peak). Organizations that compare accelerators by peak FLOPS alone make purchasing decisions that cost 1.5 to 2 $\times$ more per actual training FLOP delivered. For attention-dominated workloads, lower-FLOPS accelerators with higher memory bandwidth often outperform higher-FLOPS alternatives.
+
+**Fallacy:** ***All ML infrastructure should be GPU-based.***
+
+Teams assume GPUs optimize every ML workload. At scale, hybrid architectures deliver superior economics for embedding-heavy workloads. Recommendation systems, which constitute 80 to 90% of inference volume at Meta and Google, require random access to terabytes of embedding tables that cannot fit in GPU HBM. These memory-bound lookups perform poorly on GPUs optimized for dense compute. Meta's production infrastructure uses CPU clusters for embedding lookups while GPU clusters process dense neural network layers, achieving 3 $\times$ better cost efficiency than GPU-only deployments. Organizations that deploy GPU-only infrastructure for diverse workloads waste 40 to 60% of capacity on tasks CPUs handle more efficiently.
+
+**Pitfall:** ***Ignoring power and cooling constraints during infrastructure planning.***
+
+Teams plan GPU purchases based on compute requirements without verifying datacenter capacity. Power and cooling represent hard physical limits that cannot be resolved through software optimization. A single rack of 4 DGX H100 systems requires 40 kW of power and generates equivalent thermal load, compared to 5 to 10 kW for traditional server racks. Organizations discover their facility cannot support the power density only after hardware arrives. Thermal throttling causes GPUs to reduce clock speeds when cooling is inadequate. A cluster designed for 100% utilization may achieve only 70% sustained throughput due to thermal constraints, costing $9,000 per hour in lost productivity for a 1000-GPU cluster at $30 per hour per H100.
+
+**Pitfall:** ***Underestimating network requirements for distributed training.***
+
+Operators calculate network bandwidth but ignore latency, topology, and software overhead. As shown in @sec-network-fabrics-topology, a cluster with `{python} ib_ndr` Gbps InfiniBand achieves only 300 Gbps effective throughput due to NCCL protocol overhead, suboptimal job placement, and contention from concurrent jobs. Topology choice critically impacts performance: fat-tree topologies provide full bisection bandwidth at significant switch cost ($800K to $1.2M for 256 GPUs), while rail-optimized topologies reduce hardware cost but constrain job placement. NCCL introduces 5 to 20 microseconds of software latency per collective operation; for small message sizes common in pipeline parallelism, this overhead dominates transfer time. The crossover where bandwidth dominates latency occurs at approximately 250 KB message size.
+
+**Fallacy:** ***Cloud computing costs scale linearly with usage.***
+
+Organizations assume cloud expenses grow proportionally with compute consumption. In production, data egress fees and storage costs create nonlinear scaling. Training a 70B parameter model generates 200 to 400 GB of checkpoints every few hours; with 5 checkpoint retention, storage reaches 1 to 2 TB per experiment. Cloud storage at $0.023 per GB-month costs $23 to $46 per month per experiment, but egress fees for downloading checkpoints cost $0.09 per GB ($18 to $36 per full checkpoint download). Organizations running 100 concurrent experiments accumulate $2,300 to $4,600 per month in storage costs alone. The break-even point where on-premises infrastructure becomes more economical occurs at 40 to 60% sustained utilization. Teams that migrate to cloud assuming linear scaling discover total costs 1.5 to 2.5 $\times$ higher than projected.
+
+**Pitfall:** ***Underestimating operational complexity of distributed schedulers.***
+
+Teams deploy Kubernetes or Slurm expecting resource management to be solved. In production, achieving 60%+ GPU utilization requires continuous tuning of gang scheduling policies, preemption strategies, and job bin-packing algorithms. Naive first-come-first-served scheduling fragments nodes: with 8-GPU nodes and 6-GPU jobs, each job wastes 2 GPUs per node, reducing effective capacity to 75%. The CAP theorem established in @sec-vol2-introduction forces schedulers to trade off consistency versus availability. At 4096 GPUs with 99.9% annual reliability per GPU, clusters experience approximately 4 failures per year, requiring robust fault tolerance mechanisms. Organizations that treat scheduling as solved discover their $50M GPU cluster achieves only 35 to 45% utilization versus the 65 to 75% possible with dedicated tuning, wasting $5 to $9M annually.
+
+## Summary {#sec-compute-summary-fb77}
+
+Compute infrastructure represents the physical foundation upon which all distributed training and serving systems operate. The constraints examined in this chapter, from power delivery and cooling capacity to accelerator selection, ultimately determine what scale of ML systems an organization can build and operate effectively.
+
+We examined how power density and cooling represent hard physical limits that constrain cluster design independent of budget. The transition from air-cooled 10 kW racks to liquid-cooled 100 kW racks is not just an upgrade but a fundamental architectural shift required by modern accelerators.
+
+We analyzed the trade-offs between different accelerator architectures, GPUs, TPUs, and custom ASICs, and how they map to specific workloads. The roofline model provided the quantitative framework for this analysis: memory-bound workloads (most LLM training) benefit from memory bandwidth improvements, while compute-bound workloads (large-batch CNN training) benefit from additional FLOPS. The distinction between training-optimized (high precision, bandwidth) and inference-optimized (low latency, efficiency) hardware is driving specialized fleet designs, with MIG partitioning enabling more flexible resource allocation within GPU-based clusters.
+
+We introduced the memory hierarchy as a unifying framework for understanding performance bottlenecks, from on-chip registers at 20 TB/s and 1 ns to inter-node InfiniBand at `{python} ib_ndr` Gbps and 5,000 ns. The six-order-of-magnitude span of this hierarchy shapes every parallelism decision in distributed training.
+
+Finally, we established that Total Cost of Ownership extends far beyond hardware acquisition. Power consumption, cooling infrastructure, operational staffing, and realistic utilization rates determine the true cost per computation. The 3-year TCO comparison demonstrated that on-premises deployment achieves the lowest cost per GPU-hour at sustained high utilization, but the utilization threshold at which on-premises becomes favorable (40 to 60%) is difficult to sustain without the scheduling sophistication examined in @sec-fleet-orchestration. The core lessons from this chapter can be summarized as follows:
+
+::: {.callout-takeaways}
+
+* Power density and cooling capacity represent hard physical limits that constrain cluster design independent of budget
+* Hybrid CPU-GPU architectures outperform GPU-only configurations for recommendation systems and other embedding-heavy workloads
+* Total cost of ownership must include power, cooling, operations, and realistic utilization rates rather than theoretical peak performance
+* Accelerator selection requires matching hardware characteristics (memory bandwidth vs. FLOPS) to workload bottlenecks (decode vs. prefill)
+
+:::
+
+::: {.callout-chapter-connection title="From Silicon to Wires"}
+
+We have defined the compute nodes of the fleet: their accelerators, power envelopes, and cooling constraints. But isolated nodes, no matter how powerful, cannot train trillion-parameter models alone. They must communicate gradients, activations, and checkpoints at rates that match their computational throughput. @sec-network-fabrics examines the high-bandwidth networking fabrics, from InfiniBand and RoCE to fat-tree and rail-optimized topologies, that bind these nodes into a unified supercomputer.
+
+:::
