@@ -27,7 +27,7 @@
   <!-- Reader Navigation -->
   **[📖 Read Online](https://mlsysbook.ai)** •
   **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch)** •
-  **[📄 Download PDF](https://mlsysbook.ai/assets/downloads/Machine-Learning-Systems.pdf)** •
+  **[📄 Download PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)** •
   **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
   **[🌐 Explore Ecosystem](https://mlsysbook.org)**
 
@@ -426,6 +426,7 @@ Thanks goes to these wonderful people who have contributed to making this resour
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/harvard-edge/cs249r_book/graphs/contributors"><img src="https://www.gravatar.com/avatar/43b1feff77c8a95fd581774fb8ec891f?d=identicon&s=100?v=4?s=50" width="50px;" alt="Zishen"/><br /><sub><b>Zishen</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/BunningsWarehouseOfficial"><img src="https://avatars.githubusercontent.com/u/49220945?v=4?v=4?s=50" width="50px;" alt="Kristian Radoš"/><br /><sub><b>Kristian Radoš</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="11.11%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/u/86156224?v=4?v=4?s=50" width="50px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🧑‍💻</td>
+      <td align="center" valign="top" width="11.11%"><a href="https://github.com/pipme"><img src="https://avatars.githubusercontent.com/pipme?v=4?s=50" width="50px;" alt="pipme"/><br /><sub><b>pipme</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>
