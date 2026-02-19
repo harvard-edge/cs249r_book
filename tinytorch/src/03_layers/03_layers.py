@@ -12,6 +12,8 @@
 #     name: python3
 # ---
 
+from __future__ import annotations
+
 # %% [markdown]
 """
 # Module 03: Layers - Building Blocks of Neural Networks
@@ -62,6 +64,7 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| export
 
 import numpy as np
+from typing import Union, Any
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -196,7 +199,7 @@ class Layer:
     The __call__ method is provided to make layers callable.
     """
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through the layer.
 
@@ -216,11 +219,11 @@ class Layer:
             f"         return transformed_x"
         )
 
-    def __call__(self, x, *args, **kwargs):
+    def __call__(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """Allow layer to be called like a function."""
         return self.forward(x, *args, **kwargs)
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """
         Return list of trainable parameters.
 
@@ -229,7 +232,7 @@ class Layer:
         """
         return []  # Base class has no parameters
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation of the layer."""
         return f"{self.__class__.__name__}()"
 
@@ -287,7 +290,7 @@ class Linear(Layer):
     Applies a linear transformation to incoming data.
     """
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         """
         Initialize linear layer with proper weight initialization.
 
@@ -327,7 +330,7 @@ class Linear(Layer):
             self.bias = None
         ### END SOLUTION
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through linear layer.
 
@@ -361,7 +364,7 @@ class Linear(Layer):
         return output
         ### END SOLUTION
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """
         Return list of trainable parameters.
 
@@ -393,7 +396,7 @@ class Linear(Layer):
         return params
         ### END SOLUTION
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation for debugging."""
         bias_str = f", bias={self.bias is not None}"
         return f"Linear(in_features={self.in_features}, out_features={self.out_features}{bias_str})"
@@ -592,7 +595,7 @@ class Dropout(Layer):
     This prevents overfitting by forcing the network to not rely on specific neurons.
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p: float = 0.5) -> None:
         """
         Initialize dropout layer.
 
@@ -700,7 +703,7 @@ class Dropout(Layer):
         return Tensor(binary_mask * scale)
         ### END SOLUTION
 
-    def forward(self, x, training=True):
+    def forward(self, x: Tensor, training: bool = True) -> Tensor:
         """
         Forward pass through dropout layer.
 
@@ -737,15 +740,15 @@ class Dropout(Layer):
         return x * mask
         ### END SOLUTION
 
-    def __call__(self, x, training=True):
+    def __call__(self, x: Tensor, training: bool = True) -> Tensor:
         """Allows the layer to be called like a function."""
         return self.forward(x, training)
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Dropout has no parameters."""
         return []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Dropout(p={self.p})"
 
 # %% [markdown]
@@ -899,7 +902,7 @@ class Sequential:
         >>> params = model.parameters()  # All parameters from all layers
     """
 
-    def __init__(self, *layers):
+    def __init__(self, *layers: Union[Layer, list[Layer], tuple[Layer, ...]]) -> None:
         """Initialize with layers to chain together."""
         # Accept both Sequential(layer1, layer2) and Sequential([layer1, layer2])
         if len(layers) == 1 and isinstance(layers[0], (list, tuple)):
@@ -907,24 +910,24 @@ class Sequential:
         else:
             self.layers = list(layers)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """Forward pass through all layers sequentially."""
         for layer in self.layers:
             x = layer.forward(x)
         return x
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Allow model to be called like a function."""
         return self.forward(x)
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Collect all parameters from all layers."""
         params = []
         for layer in self.layers:
             params.extend(layer.parameters())
         return params
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         layer_reprs = ", ".join(repr(layer) for layer in self.layers)
         return f"Sequential({layer_reprs})"
 
