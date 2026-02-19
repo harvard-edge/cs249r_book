@@ -95,6 +95,61 @@ The system failure rate becomes $N\lambda$, and @eq-system-mtbf expresses how th
 
 $$ MTBF_{system} = \frac{1}{N\lambda} = \frac{MTBF_{component}}{N} $$ {#eq-system-mtbf}
 
+### The Young-Daly Law: Optimal Checkpointing {#sec-fault-tolerance-young-daly}
+
+*When* failure is inevitable, the key engineering decision is how often to save progress. Checkpointing too frequently wastes time on I/O; checkpointing too rarely wastes time re-computing work after a failure.
+
+The **Young-Daly formula**[^fn-young-daly] identifies the "sweet spot" that minimizes total wasted work.
+
+[^fn-young-daly]: **The Young-Daly Law**: Independently derived by Young (1974) and Daly (2006). It provides the first-order approximation for the optimal checkpoint interval in a system with constant failure rates and significant checkpointing overhead.
+
+::: {#fig-young-daly fig-env="figure" fig-pos="htb" fig-cap="**The Young-Daly Optimal Checkpoint**. Total wasted work is the sum of *checkpointing overhead* (which decreases with interval $\tau$) and *rework cost* (which increases with $\tau$). The minimum point defines the optimal interval $\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}}$. For a cluster with 5-hour MTBF and 15-minute write time, the optimal interval is ~1.2 hours." fig-alt="Plot of Overhead vs Checkpoint Interval. A red curve for Rework Cost increases linearly. A blue curve for Checkpoint Overhead decreases hyperbolically. Their sum (green curve) shows a clear minimum point labeled Optimal Interval."}
+``` {python}
+#| label: fig-young-daly
+#| echo: false
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsys import viz
+
+viz.set_book_style()
+COLORS = viz.COLORS
+
+# Parameters for visualization
+mtbf = 5.0 # hours
+t_write = 0.25 # hours (15 mins)
+
+tau = np.linspace(0.1, 5.0, 100)
+over_ckpt = t_write / tau
+over_rework = tau / (2 * mtbf)
+total_waste = over_ckpt + over_rework
+
+tau_opt = np.sqrt(2 * t_write * mtbf)
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+ax.plot(tau, over_ckpt, label='Checkpoint Overhead ($T_{write}/\\tau$)', color=COLORS['BlueLine'], linestyle='--')
+ax.plot(tau, over_rework, label='Expected Rework ($\\tau/2\\text{MTBF}$)', color=COLORS['RedLine'], linestyle='--')
+ax.plot(tau, total_waste, label='Total Wasted Work', color=COLORS['GreenLine'], linewidth=2.5)
+
+# Optimal point
+ax.scatter([tau_opt], [np.sqrt(2*t_write/mtbf)], color='black', zorder=5)
+ax.annotate(f'$\\tau_{{opt}} \\approx {tau_opt:.1f}$h', 
+            xy=(tau_opt, np.sqrt(2*t_write/mtbf)), 
+            xytext=(tau_opt + 0.2, 0.6),
+            arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5))
+
+ax.set_xlabel('Checkpoint Interval $\\tau$ (Hours)')
+ax.set_ylabel('Fraction of Total Time Wasted')
+ax.set_ylim(0, 1.0)
+ax.legend()
+ax.grid(True, alpha=0.3)
+
+plt.show()
+```
+:::
+
+The formula $ \tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}} $ reveals a critical scaling property: as clusters grow larger ($MTBF \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-systems) to keep $T_{write}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity.
+
 ::: {.callout-notebook title="The 9s of Reliability"}
 **Problem**: You have a cluster of **10,000 GPUs**. Each GPU is incredibly reliable, with **99.99%** availability (only 52 minutes of downtime per year). What is the probability that the **entire cluster** is up for **1 hour**?
 

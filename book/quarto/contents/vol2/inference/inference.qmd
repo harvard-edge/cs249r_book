@@ -1893,6 +1893,60 @@ The cache size grows with context as calculated by @eq-kv-cache-size:
 
 $$\text{KV cache size} = 2 \times L \times H \times S \times B \times P$$ {#eq-kv-cache-size}
 
+### The KV Cache Wall: Memory-Bound Capacity {#sec-inference-scale-kv-cache-wall}
+
+*Why* can't we simply increase the batch size to maximize throughput in LLM serving? We hit the **KV Cache Wall**. Model weights represent a fixed "Static Tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
+
+::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**. Total GPU memory usage for a 4-bit quantized 70B model (35GB weights) on an 80GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU ($35 \text{GB} + 82 \text{GB} > 80 \text{GB}$), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80GB shows capacity. Solid blue region at bottom is 35GB weights. Sloped lines for Batch 1, 4, 8 show memory rising with sequence length. Batch 8 hits the 80GB line very early (~16K tokens)."}
+``` {python}
+#| label: fig-kv-cache-wall
+#| echo: false
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsys import viz
+
+viz.set_book_style()
+COLORS = viz.COLORS
+
+# Parameters for Llama-70B GQA
+weights_gb = 35.0 # 4-bit
+hbm_cap_gb = 80.0
+# KV cache: 2 * layers * kv_heads * head_dim * precision
+# 2 * 80 * 8 * 128 * 2 bytes = 327,680 bytes/token
+mb_per_token = 0.32768 / 1024 # GB per 1k tokens
+
+seq_len_k = np.linspace(0, 128, 100) # up to 128k tokens
+
+fig, ax = plt.subplots(figsize=(8, 5))
+
+# Plot base weights
+ax.fill_between(seq_len_k, 0, weights_gb, color=COLORS['BlueLine'], alpha=0.3, label='Weights (4-bit 70B)')
+ax.axhline(y=weights_gb, color=COLORS['BlueLine'], linestyle='-', linewidth=1)
+
+# Plot Batch Sizes
+for b in [1, 2, 4, 8]:
+    total_mem = weights_gb + (b * seq_len_k * mb_per_token)
+    # Only plot where it fits
+    # mask = total_mem <= hbm_cap_gb * 1.1
+    ax.plot(seq_len_k, total_mem, label=f'Batch {b}')
+
+# HBM Limit
+ax.axhline(y=hbm_cap_gb, color=COLORS['RedLine'], linestyle='--', linewidth=2)
+ax.text(5, hbm_cap_gb + 2, 'HBM Capacity (80GB)', color=COLORS['RedLine'], fontweight='bold')
+
+ax.set_xlabel('Sequence Length (1,000s of Tokens)')
+ax.set_ylabel('Total GPU Memory (GB)')
+ax.set_ylim(0, 100)
+ax.set_xlim(0, 128)
+ax.legend(loc='upper left', fontsize=9)
+ax.grid(True, alpha=0.2)
+
+plt.show()
+```
+:::
+
+This visualization reveals why the **Distribution Layer** must sometimes shard models that would otherwise fit on a single GPU. Sharding doesn't just reduce compute time; it provides the **Memory Headroom** needed to maintain high batch sizes for long-context requests. Without sharding, a 128K context request effectively "evicts" all other users from the GPU.
+
 where:
 
 - $L$ = number of layers

@@ -38,78 +38,133 @@ A single GPU can perform trillions of operations per second, but distributed tra
 ```{python}
 #| label: network-fabrics-setup
 #| echo: false
-# ┌─────────────────────────────────────────────────────────────────────
-# │ NETWORK FABRICS CHAPTER SETUP
-# ├─────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide constants for network fabrics
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NETWORK FABRICS: CHAPTER-WIDE CONSTANTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter-wide setup for Network Fabrics.
 # │
-# │ Goal: Import hardware specs and formatting tools for inline use.
-# │ Show: Networking bandwidth, latency, and derived values in prose.
-# │ How: Pull from mlsys.constants, compute derived metrics.
+# │ Goal: Provide hardware specs and performance parameters for network analysis.
+# │ Show: Bandwidth, latency, and topology scaling for modern fabrics.
+# │ How: Centralize NDR/HDR InfiniBand, NVLink, and PCIe specs.
 # │
-# │ Imports: mlsys.constants (*), mlsys.formatting (fmt, sci, check)
-# │ Exports: Various formatted strings for inline Python references
-# └─────────────────────────────────────────────────────────────────────
-
-from mlsys.constants import *
+# │ Imports: mlsys.constants, mlsys.formatting
+# │ Exports: ib_ndr_*, nvlink_*, pcie_*, h100_*, fat_tree_hosts
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    INFINIBAND_NDR_BW, INFINIBAND_HDR_BW,
+    NVLINK_H100_BW, NVLINK_A100_BW,
+    PCIE_GEN5_BW, PCIE_GEN4_BW,
+    H100_FLOPS_FP16_TENSOR, H100_TDP, H100_MEM_CAPACITY, H100_MEM_BW,
+    A100_FLOPS_FP16_TENSOR,
+    B200_FLOPS_FP16_TENSOR, B200_MEM_BW,
+    Gbps, GB, TB, second, watt, GiB, TFLOPs, flop, byte, NS
+)
 from mlsys.formatting import fmt, sci, check
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────
-# Interconnect bandwidths
-ib_ndr_gbps = f"{INFINIBAND_NDR_BW.to(Gbps).magnitude:.0f}"
-ib_hdr_gbps = f"{INFINIBAND_HDR_BW.to(Gbps).magnitude:.0f}"
-ib_ndr_gbs = f"{(INFINIBAND_NDR_BW / 8).to(GB/second).magnitude:.0f}"
-ib_hdr_gbs = f"{(INFINIBAND_HDR_BW / 8).to(GB/second).magnitude:.0f}"
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class NetworkFabricsSetup:
+    """
+    Namespace for Network Fabrics reference parameters.
+    Scenario: Mapping interconnect performance for distributed clusters.
+    """
 
-# Intra-node interconnects
-nvlink_h100_gbs = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
-nvlink_a100_gbs = f"{NVLINK_A100_BW.to(GB/second).magnitude:.0f}"
-pcie5_gbs = f"{PCIE_GEN5_BW.to(GB/second).magnitude:.0f}"
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Interconnects
+    ib_ndr_raw = INFINIBAND_NDR_BW
+    ib_hdr_raw = INFINIBAND_HDR_BW
+    nvlink_h100_raw = NVLINK_H100_BW
+    nvlink_a100_raw = NVLINK_A100_BW
+    pcie5_raw = PCIE_GEN5_BW
 
-# GPU specs for context
-h100_tflops = f"{H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
-h100_tdp = f"{H100_TDP.to(watt).magnitude:.0f}"
-h100_mem = f"{H100_MEM_CAPACITY.to(GiB).magnitude:.0f}"
-h100_mem_bw = f"{H100_MEM_BW.to(TB/second).magnitude:.2f}"
+    # GPU specs
+    h100_flops_raw = H100_FLOPS_FP16_TENSOR
+    h100_mem_raw = H100_MEM_CAPACITY
+    h100_mem_bw_raw = H100_MEM_BW
+    h100_tdp_raw = H100_TDP
 
-a100_tflops = f"{A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:.0f}"
+    a100_flops_raw = A100_FLOPS_FP16_TENSOR
+    b200_flops_raw = B200_FLOPS_FP16_TENSOR
+    b200_mem_bw_raw = B200_MEM_BW
 
-b200_tflops = f"{B200_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude:,.0f}"
-b200_mem_bw = f"{B200_MEM_BW.to(TB/second).magnitude:.0f}"
+    # Topology parameters
+    fat_tree_k = 64
+    ib_ndr_hop_ns = 500
+    alpha_ib_us_val = 1.5
 
-# ┌── 2. CALCULATIONS (Derived) ───────────────────────────────────────
-# NDR InfiniBand latency (typical switch hop)
-ib_ndr_latency_ns = 500  # nanoseconds per switch hop
-ib_ndr_latency_us = f"{ib_ndr_latency_ns / 1000:.1f}"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    ib_ndr_gbps_val = ib_ndr_raw.to(Gbps).magnitude
+    ib_ndr_gbs_val = (ib_ndr_raw / 8).to(GB/second).magnitude
+    nvlink_to_ib_ratio_val = nvlink_h100_raw.to(GB/second).magnitude / ib_ndr_gbs_val
 
-# FEC latency contribution
+    # Fat-tree hosts for radix k: (k^3)/4
+    fat_tree_hosts_val = (fat_tree_k ** 3) // 4
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(ib_ndr_gbps_val == 400, f"NDR InfiniBand should be 400 Gbps, got {ib_ndr_gbps_val}")
+    check(nvlink_to_ib_ratio_val > 15, f"NVLink/IB ratio should be > 15x, got {nvlink_to_ib_ratio_val:.1f}")
+    check(fat_tree_hosts_val == 65536, f"Fat-tree hosts for k=64 should be 65536, got {fat_tree_hosts_val}")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    ib_ndr_gbps = f"{ib_ndr_gbps_val:.0f}"
+    ib_hdr_gbps = f"{ib_hdr_raw.to(Gbps).magnitude:.0f}"
+    ib_ndr_gbs = f"{ib_ndr_gbs_val:.0f}"
+    ib_hdr_gbs = f"{(ib_hdr_raw / 8).to(GB/second).magnitude:.0f}"
+
+    nvlink_h100_gbs = f"{nvlink_h100_raw.to(GB/second).magnitude:.0f}"
+    nvlink_a100_gbs = f"{nvlink_a100_raw.to(GB/second).magnitude:.0f}"
+    pcie5_gbs = f"{pcie5_raw.to(GB/second).magnitude:.0f}"
+
+    h100_tflops = f"{h100_flops_raw.to(TFLOPs/second).magnitude:.0f}"
+    h100_tdp = f"{h100_tdp_raw.to(watt).magnitude:.0f}"
+    h100_mem = f"{h100_mem_raw.to(GiB).magnitude:.0f}"
+    h100_mem_bw = f"{h100_mem_bw_raw.to(TB/second).magnitude:.2f}"
+    a100_tflops = f"{a100_flops_raw.to(TFLOPs/second).magnitude:.0f}"
+    b200_tflops = f"{b200_flops_raw.to(TFLOPs/second).magnitude:,.0f}"
+    b200_mem_bw = f"{b200_mem_bw_raw.to(TB/second).magnitude:.0f}"
+
+    ib_ndr_latency_us = f"{ib_ndr_hop_ns / 1000:.1f}"
+    nvlink_to_ib_ratio = f"{nvlink_to_ib_ratio_val:.0f}"
+    fat_tree_hosts = fmt(fat_tree_hosts_val, precision=0)
+
+    # Performance model defaults
+    alpha_ib_us = f"{alpha_ib_us_val:.1f}"
+    beta_ib_gbs = f"{ib_ndr_gbs_val:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ib_ndr_gbps = NetworkFabricsSetup.ib_ndr_gbps
+ib_hdr_gbps = NetworkFabricsSetup.ib_hdr_gbps
+ib_ndr_gbs = NetworkFabricsSetup.ib_ndr_gbs
+ib_hdr_gbs = NetworkFabricsSetup.ib_hdr_gbs
+nvlink_h100_gbs = NetworkFabricsSetup.nvlink_h100_gbs
+nvlink_a100_gbs = NetworkFabricsSetup.nvlink_a100_gbs
+pcie5_gbs = NetworkFabricsSetup.pcie5_gbs
+h100_tflops = NetworkFabricsSetup.h100_tflops
+h100_tdp = NetworkFabricsSetup.h100_tdp
+h100_mem = NetworkFabricsSetup.h100_mem
+h100_mem_bw = NetworkFabricsSetup.h100_mem_bw
+a100_tflops = NetworkFabricsSetup.a100_tflops
+b200_tflops = NetworkFabricsSetup.b200_tflops
+b200_mem_bw = NetworkFabricsSetup.b200_mem_bw
+ib_ndr_latency_us = NetworkFabricsSetup.ib_ndr_latency_us
+nvlink_to_ib_ratio = NetworkFabricsSetup.nvlink_to_ib_ratio
+fat_tree_hosts = NetworkFabricsSetup.fat_tree_hosts
+alpha_ib_us = NetworkFabricsSetup.alpha_ib_us
+beta_ib_gbs = NetworkFabricsSetup.beta_ib_gbs
+
+# Static FEC latency references
 fec_latency_ns_low = 100
 fec_latency_ns_high = 200
-
-# Bandwidth ratio: NVLink vs IB NDR
-nvlink_to_ib_ratio = f"{NVLINK_H100_BW.to(GB/second).magnitude / (INFINIBAND_NDR_BW / 8).to(GB/second).magnitude:.0f}"
-
-# 8-GPU DGX node total NVLink bandwidth
-dgx_nvlink_total_gbs = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
-
-# Alpha-beta model reference values
-alpha_ib_us = 1.5  # microseconds typical IB latency
-beta_ib_gbs = (INFINIBAND_NDR_BW / 8).to(GB/second).magnitude  # GB/s per link
-
-# Fat-tree host calculation for radix-64
-fat_tree_k = 64
-fat_tree_hosts = f"{(fat_tree_k ** 3) // 4:,}"
-
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────
-check(INFINIBAND_NDR_BW.to(Gbps).magnitude == 400,
-      "NDR InfiniBand should be 400 Gbps")
-check(NVLINK_H100_BW.to(GB/second).magnitude == 900,
-      "H100 NVLink should be 900 GB/s")
-check(int(nvlink_to_ib_ratio) == 18,
-      "NVLink/IB ratio should be ~18x")
 ```
 
 In the **Fleet Stack** (@sec-vol2-introduction), network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation. This chapter examines how those nodes communicate, because at scale, communication cost dominates computation cost. The **Law of Distributed Efficiency** (@eq-distributed-efficiency) makes this explicit: the $T_{\text{sync}} / T_{\text{compute}}$ ratio in the Scaling Factor is determined almost entirely by the network fabric.
+
+::: {.callout-note title="Bridge: Collective Communication"}
+The physical network fabric exists to support **Collective Communication**—mathematical operations that involve every GPU in the fleet.
+*   **AllReduce**: Summing gradients from 10,000 GPUs so every GPU has the identical average. This is the "Heartbeat" of synchronous training.
+*   **AllGather**: Collecting different model portions so every GPU can see the full model state.
+*   **AllToAll**: The most demanding pattern, where every GPU sends unique data to every other GPU (critical for **Expert Parallelism**).
+While @sec-collective-communication covers the *algorithms* for these patterns, this chapter covers the *physics* of the wires and switches that make them possible.
+:::
 
 ::: {.callout-note title="Fleet Stack Connection"}
 
@@ -119,11 +174,11 @@ This chapter builds the **Network Layer** of the Fleet Stack. @sec-compute-infra
 
 @sec-compute-infrastructure established that a single H100 delivers `{python} h100_tflops` TFLOPS of FP16 throughput with `{python} h100_mem_bw` TB/s of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} nvlink_h100_gbs` GB/s. But the moment computation crosses a node boundary, the available bandwidth drops by a factor of `{python} nvlink_to_ib_ratio` $\times$, from `{python} nvlink_h100_gbs` GB/s (NVLink) to `{python} ib_ndr_gbs` GB/s (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design.
 
-The remainder of this chapter proceeds from physics to systems. We begin with the physical medium itself, examining why signal integrity at `{python} ib_ndr_gbps` Gbps demands PAM4 encoding and optical interconnects. We then analyze the two dominant RDMA transport protocols, InfiniBand and RoCE, before studying how topology design shapes communication efficiency for ML workloads. The $\alpha$-$\beta$ performance model provides the quantitative framework for reasoning about these design choices. We conclude with congestion control, multi-tenancy, monitoring, and a case study of production-scale network architectures.
+The remainder of this chapter proceeds from physics to systems. We begin with the physical medium itself, examining *why* signal integrity at `{python} ib_ndr_gbps` Gbps demands PAM4 encoding and optical interconnects. We then analyze the two dominant RDMA transport protocols, InfiniBand and RoCE, before studying *how* topology design shapes communication efficiency for ML workloads. The $\alpha$-$\beta$ performance model provides the quantitative framework for reasoning about these design choices. We conclude with congestion control, multi-tenancy, monitoring, and a case study of production-scale network architectures.
 
 ## Physics of the Wire {#sec-network-fabrics-physics}
 
-Before analyzing protocols and topologies, we must understand the physical medium. Every network design decision is ultimately constrained by what the wire can carry. At `{python} ib_ndr_gbps` Gbps and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. These are not engineering inconveniences to be solved with better technology; they are fundamental constraints that shape cluster geometry.
+Before analyzing protocols and topologies, we must understand the physical medium. Every network design decision is ultimately constrained by *what* the wire can carry. At `{python} ib_ndr_gbps` Gbps and beyond, the physics of signal transmission imposes hard limits on cable length, power consumption, and error rates. These are not engineering inconveniences to be solved with better technology; they are fundamental constraints that shape cluster geometry.
 
 ### Signal Integrity and PAM4 {#sec-network-fabrics-pam4}
 
@@ -164,9 +219,9 @@ This physics dictates **cluster geometry**. We pack accelerators as densely as p
 
 Every high-speed port depends on a **Serializer/Deserializer (SerDes)** circuit that converts parallel data from the switch ASIC into a serial stream for transmission over the wire. The SerDes must compensate for signal degradation through equalization, a process that consumes significant power. A modern `{python} ib_ndr_gbps` Gbps port operates four lanes at 100 Gbps each (using PAM4 at approximately 53 GBaud per lane). Each lane's SerDes consumes 5 to 8 W, so a single `{python} ib_ndr_gbps` Gbps port requires 20 to 32 W just for signal processing.
 
-The **link budget** quantifies how much signal loss a link can tolerate while maintaining acceptable error rates. It accounts for cable attenuation (which increases with frequency and length), connector losses, crosstalk from adjacent lanes, and the equalization capability of the SerDes. When the link budget is exceeded, the FEC cannot recover enough errors, and the effective throughput drops or the link fails entirely. This is why ML cluster designers carefully track cable lengths and connector counts: an extra connector or a slightly longer cable can push a link beyond its budget.
+The **link budget** quantifies how much signal loss a link can tolerate while maintaining acceptable error rates. It accounts for cable attenuation (which increases with frequency and length), connector losses, crosstalk from adjacent lanes, and the equalization capability of the SerDes. When the link budget is exceeded, the FEC cannot recover enough errors, and the effective throughput drops or the link fails entirely. This is *why* ML cluster designers carefully track cable lengths and connector counts: an extra connector or a slightly longer cable can push a link beyond its budget.
 
-The physical layer constraints established in this section, PAM4 encoding, FEC latency, and the economics of copper versus optics, set hard boundaries on what the protocol and topology layers above can achieve. We now turn to those protocol choices.
+The physical layer constraints established in this section—PAM4 encoding, FEC latency, and the economics of copper versus optics—set hard boundaries on *what* the protocol and topology layers above can achieve. We now turn to those protocol choices.
 
 ## RDMA and Transport Protocols {#sec-network-fabrics-protocols}
 
@@ -182,7 +237,7 @@ Standard TCP/IP networking is CPU-intensive. Processing a `{python} ib_ndr_gbps`
 
 [^fn-rdma]: **RDMA**: Remote Direct Memory Access. First developed for InfiniBand in the early 2000s by the InfiniBand Trade Association. The term "remote" distinguishes it from local DMA (used by PCIe devices), emphasizing that the target memory resides on a different machine.
 
-For ML workloads, RDMA enables a critical optimization: **GPUDirect RDMA**[^fn-gpudirect], where the NIC transfers data directly between GPU memory on different nodes without staging through CPU memory. This eliminates two additional memory copies per transfer (GPU to CPU on the sender, CPU to GPU on the receiver), roughly halving the effective latency for gradient exchanges.
+For ML workloads, RDMA enables a critical optimization: **GPUDirect RDMA**[^fn-gpudirect], *where* the NIC transfers data directly between GPU memory on different nodes without staging through CPU memory. This eliminates two additional memory copies per transfer (GPU to CPU on the sender, CPU to GPU on the receiver), roughly halving the effective latency for gradient exchanges.
 
 [^fn-gpudirect]: **GPUDirect RDMA**: An NVIDIA technology that allows third-party PCIe devices (such as network adapters) to directly access GPU memory. Requires compatible hardware (ConnectX NICs) and driver support.
 
@@ -224,39 +279,39 @@ Making Ethernet behave as a lossless fabric requires two mechanisms working in c
 ::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**High-Performance Networking Stacks**. Comparison of InfiniBand and RoCE protocol stacks. InfiniBand uses a native lossless fabric, while RoCE encapsulates RDMA traffic within UDP/IP packets. Both expose the same Verbs API to applications, but RoCE relies on Priority Flow Control (PFC) in the Ethernet layer to approximate InfiniBand's lossless guarantees." fig-alt="Two protocol stacks side by side. Left: InfiniBand with 5 native layers. Right: RoCEv2 with IB transport over UDP/IP and Ethernet. Orange arrows show kernel bypass path on both. Dashed lines connect shared Verbs API and IB Transport layers."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \definecolor{Orchid}{RGB}{218,112,214}
-  \definecolor{Slate}{RGB}{112,128,144}
-  \definecolor{OrangeLine}{RGB}{255,140,0}
+  \definecolor{OrchidL}{HTML}{F4E7F8}
+  \definecolor{SlateL}{HTML}{E5E7E9}
+  \definecolor{OrangeLine}{HTML}{CC5500}
 
   \tikzset{
-    layer/.style={draw=black!70, fill=white, minimum width=3cm, minimum height=0.7cm, font=\sffamily\footnotesize},
-    header/.style={font=\bfseries\sffamily, align=center}
+    layer/.style={draw=black!70, fill=white, minimum width=3.2cm, minimum height=0.7cm, font=\sffamily\footnotesize},
+    header/.style={font=\bfseries\sffamily, align=center, crimson}
   }
 
   % InfiniBand Stack
   \begin{scope}[local bounding box=IB]
     \node[header] at (0, 5) {InfiniBand};
-    \node[layer, fill=Orchid!20] (ib_verbs) at (0, 4) {Verbs API};
-    \node[layer, fill=Orchid!10] (ib_trans) at (0, 3) {IB Transport};
-    \node[layer, fill=Orchid!10] (ib_net) at (0, 2) {IB Network};
-    \node[layer, fill=Orchid!10] (ib_link) at (0, 1) {IB Link};
-    \node[layer, fill=Orchid!10] (ib_phy) at (0, 0) {IB Physical};
+    \node[layer, fill=OrchidL] (ib_verbs) at (0, 4) {Verbs API};
+    \node[layer, fill=OrchidL!50] (ib_trans) at (0, 3) {IB Transport};
+    \node[layer, fill=OrchidL!50] (ib_net) at (0, 2) {IB Network};
+    \node[layer, fill=OrchidL!50] (ib_link) at (0, 1) {IB Link};
+    \node[layer, fill=OrchidL!50] (ib_phy) at (0, 0) {IB Physical};
 
     % RDMA bypass arrow
-    \draw[->, thick, OrangeLine] (-1.8, 4.3) -- (-1.8, 0.5) node[midway, left, align=center, font=\scriptsize] {Kernel\\Bypass};
+    \draw[->, thick, OrangeLine] (-1.9, 4.3) -- (-1.9, 0.5) node[midway, left, align=center, font=\scriptsize\bfseries] {Kernel\\Bypass};
   \end{scope}
 
   % RoCE Stack
-  \begin{scope}[shift={(5,0)}, local bounding box=RoCE]
+  \begin{scope}[shift={(5.5,0)}, local bounding box=RoCE]
     \node[header] at (0, 5) {RoCEv2};
-    \node[layer, fill=Orchid!20] (roce_verbs) at (0, 4) {Verbs API};
-    \node[layer, fill=Orchid!10] (roce_trans) at (0, 3) {IB Transport};
-    \node[layer, fill=Slate!10] (roce_udp) at (0, 2) {UDP / IP};
-    \node[layer, fill=Slate!10] (roce_eth) at (0, 1) {Ethernet Link (PFC)};
-    \node[layer, fill=Slate!10] (roce_phy) at (0, 0) {Ethernet Physical};
+    \node[layer, fill=OrchidL] (roce_verbs) at (0, 4) {Verbs API};
+    \node[layer, fill=OrchidL!50] (roce_trans) at (0, 3) {IB Transport};
+    \node[layer, fill=SlateL] (roce_udp) at (0, 2) {UDP / IP};
+    \node[layer, fill=SlateL] (roce_eth) at (0, 1) {Ethernet Link (PFC)};
+    \node[layer, fill=SlateL] (roce_phy) at (0, 0) {Ethernet Physical};
 
     % RDMA bypass arrow
-    \draw[->, thick, OrangeLine] (1.8, 4.3) -- (1.8, 0.5) node[midway, right, align=center, font=\scriptsize] {Kernel\\Bypass};
+    \draw[->, thick, OrangeLine] (1.9, 4.3) -- (1.9, 0.5) node[midway, right, align=center, font=\scriptsize\bfseries] {Kernel\\Bypass};
   \end{scope}
 
   % Connectors
@@ -334,17 +389,19 @@ For ML training, dragonfly topologies are most effective when job placement can 
 ::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network Topologies for ML**. (A) Fat-Tree provides full bisection bandwidth through hierarchical switch layers. (B) Torus connects neighbors, optimizing for local communication patterns such as those in TPU pods. (C) Rail-Optimized designs dedicate switch infrastructure to corresponding accelerator positions across nodes, minimizing hop count for tensor parallelism." fig-alt="Three network topology diagrams. A shows hierarchical fat-tree with switch layers. B shows 2D torus grid with wraparound connections. C shows rail-optimized with direct GPU-to-GPU paths across nodes."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \definecolor{NodeColor}{RGB}{200,200,200}
-  \definecolor{SwitchColor}{RGB}{100,150,200}
+  \definecolor{NodeColor}{HTML}{D1E6F3}
+  \definecolor{SwitchColor}{HTML}{006395}
+  \definecolor{RailColor}{HTML}{CC5500}
+  \definecolor{GPUColor}{HTML}{F5D2D5}
 
   \tikzset{
-    switch/.style={circle, fill=SwitchColor, draw=black!50, inner sep=2pt, minimum size=0.4cm},
-    node/.style={rectangle, fill=NodeColor, draw=black!50, inner sep=2pt, minimum size=0.4cm}
+    switch/.style={circle, fill=SwitchColor, draw=black!70, inner sep=2pt, minimum size=0.45cm, text=white, font=\tiny\bfseries},
+    node/.style={rectangle, fill=NodeColor, draw=black!70, inner sep=2pt, minimum size=0.4cm}
   }
 
   % Fat Tree
   \begin{scope}
-    \node[anchor=south] at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
+    \node[anchor=south, crimson] at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
     % Spine
     \foreach \x in {0.5, 1.5, 2.5, 3.5} \node[switch] (s\x) at (\x, 3) {};
     % Leaf
@@ -355,36 +412,36 @@ For ML training, dragonfly topologies are most effective when job placement can 
 
     % Connections
     \foreach \s in {0.5, 1.5, 2.5, 3.5} {
-        \draw[gray, thin] (s\s) -- (l0);
-        \draw[gray, thin] (s\s) -- (l1);
-        \draw[gray, thin] (s\s) -- (l3);
-        \draw[gray, thin] (s\s) -- (l4);
+        \draw[black!40, thin] (s\s) -- (l0);
+        \draw[black!40, thin] (s\s) -- (l1);
+        \draw[black!40, thin] (s\s) -- (l3);
+        \draw[black!40, thin] (s\s) -- (l4);
     }
-    \draw[gray] (l0) -- (n0); \draw[gray] (l0) -- (n0.5);
-    \draw[gray] (l1) -- (n1); \draw[gray] (l1) -- (n1.5);
+    \draw[black!60] (l0) -- (n0); \draw[black!60] (l0) -- (n0.5);
+    \draw[black!60] (l1) -- (n1); \draw[black!60] (l1) -- (n1.5);
   \end{scope}
 
   % Rail Optimized
   \begin{scope}[shift={(6,0)}]
-    \node[anchor=south] at (1.5, 3.5) {\textbf{C. Rail-Optimized}};
+    \node[anchor=south, crimson] at (1.5, 3.5) {\textbf{C. Rail-Optimized}};
 
     % Rail Switches
-    \foreach \x in {0, 1, 2, 3} \node[switch, fill=orange!50] (rs\x) at (\x, 3) {R\x};
+    \foreach \x in {0, 1, 2, 3} \node[switch, fill=RailColor] (rs\x) at (\x, 3) {R\x};
 
     % Nodes
-    \node[draw, fit={(0,-0.5) (3, 0.5)}, inner sep=4pt] (host1) {};
-    \node[anchor=west] at (host1.west) {Node 1};
+    \node[draw=black!50, rounded corners=2pt, fit={(0,-0.5) (3, 0.5)}, inner sep=4pt, fill=black!5] (host1) {};
+    \node[anchor=west, font=\tiny\bfseries] at (host1.west) {Node 1};
 
-    \node[draw, fit={(0,-2.0) (3, -1.0)}, inner sep=4pt] (host2) {};
-    \node[anchor=west] at (host2.west) {Node 2};
+    \node[draw=black!50, rounded corners=2pt, fit={(0,-2.0) (3, -1.0)}, inner sep=4pt, fill=black!5] (host2) {};
+    \node[anchor=west, font=\tiny\bfseries] at (host2.west) {Node 2};
 
     % GPUs
     \foreach \x in {0, 1, 2, 3} {
-        \node[node, fill=violet!30] (g1\x) at (\x, 0) {};
-        \node[node, fill=violet!30] (g2\x) at (\x, -1.5) {};
+        \node[node, fill=GPUColor] (g1\x) at (\x, 0) {};
+        \node[node, fill=GPUColor] (g2\x) at (\x, -1.5) {};
 
-        \draw[thick, orange] (g1\x) -- (rs\x);
-        \draw[thick, orange] (g2\x) -- (rs\x);
+        \draw[thick, RailColor] (g1\x) -- (rs\x);
+        \draw[thick, RailColor] (g2\x) -- (rs\x);
     }
   \end{scope}
 \end{tikzpicture}
@@ -394,6 +451,70 @@ For ML training, dragonfly topologies are most effective when job placement can 
 The topology choice has quantitative consequences. To see why oversubscription is dangerous for ML workloads, consider what happens when bisection bandwidth is constrained.
 
 ::: {.callout-notebook title="Napkin Math: The Bisection Bottleneck"}
+
+```{python}
+#| echo: false
+#| label: bisection-bottleneck
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BISECTION BOTTLENECK ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Network Topology - Bisection Bandwidth impact.
+# │
+# │ Goal: Quantify the slowdown from network oversubscription.
+# │ Show: That cost-optimized (oversubscribed) networks throttle training.
+# │ How: Calculate AllReduce time for 1:1 vs 4:1 oversubscription.
+# │
+# │ Imports: mlsys.constants, NetworkFabricsSetup.ib_ndr_gbs_val
+# │ Exports: bisec_time_a_ms, bisec_time_b_ms, waste_millions
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class BisectionBottleneck:
+    """
+    Scenario: 1024 accelerators (128 nodes) running AllReduce.
+    Comparison of non-blocking (1:1) vs oversubscribed (4:1) fabric.
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    num_nodes = 128
+    injection_bw_gbs = NetworkFabricsSetup.ib_ndr_gbs_val
+    gradient_size_gb = 100
+    oversub_ratio_b = 4
+    cluster_cost_m = 300
+    comm_fraction = 0.30
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Bisection bandwidth (aggregate across the cut)
+    total_bisec_bw_a = num_nodes * injection_bw_gbs
+    total_bisec_bw_b = total_bisec_bw_a / oversub_ratio_b
+
+    # Time = Data / Bandwidth
+    time_a_s = gradient_size_gb / total_bisec_bw_a
+    time_b_s = gradient_size_gb / total_bisec_bw_b
+
+    # Economic impact
+    # If comm was 30%, and comm slows by 4x, total time increases.
+    # New total = (1 - comm_frac) + (comm_frac * 4) = 0.7 + 1.2 = 1.9x
+    # Utilization drop = (1 - 1/1.9) = 47%? No, let's be more precise.
+    # Relative throughput = 1 / (0.7 + 0.3 * 4) = 1 / 1.9 = 0.526
+    # Waste = (1 - 0.526) * Cost
+    rel_throughput = 1 / ((1 - comm_fraction) + (comm_fraction * oversub_ratio_b))
+    waste_val = (1 - rel_throughput) * cluster_cost_m
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(time_b_s == time_a_s * 4, "Scenario B must be 4x slower than Scenario A")
+    check(waste_val > 10, f"Waste should be significant, got ${waste_val:.1f}M")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    time_a_ms = f"{time_a_s * 1000:.0f}"
+    time_b_ms = f"{time_b_s * 1000:.0f}"
+    waste_m = f"{waste_val:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+bisec_time_a_ms = BisectionBottleneck.time_a_ms
+bisec_time_b_ms = BisectionBottleneck.time_b_ms
+waste_millions = BisectionBottleneck.waste_m
+```
 
 **Problem**: You have 1,024 accelerators across 128 nodes. Each node has `{python} ib_ndr_gbps` Gb/s (`{python} ib_ndr_gbs` GB/s) injection bandwidth. You run an AllReduce job that requires full bisection bandwidth.
 
@@ -405,10 +526,10 @@ The topology choice has quantitative consequences. To see why oversubscription i
 
 Suppose the AllReduce must exchange 100 GB of gradient data (approximately 25 billion FP32 parameters).
 
-- Time on Scenario A: $100 \text{ GB} / 6{,}400 \text{ GB/s} \approx 16 \text{ ms}$
-- Time on Scenario B: $100 \text{ GB} / 1{,}600 \text{ GB/s} \approx 63 \text{ ms}$
+- Time on Scenario A: `{python} bisec_time_a_ms` ms
+- Time on Scenario B: `{python} bisec_time_b_ms` ms
 
-**The systems conclusion**: Saving money on spine switches (Scenario B) slows every synchronization step of the entire cluster by approximately 4 $\times$. If AllReduce accounts for 30% of each training iteration, the cluster's effective throughput drops by roughly 23%. For a \$300 million supercomputer, this amounts to wasting \$69 million worth of accelerator time waiting for the network. Network oversubscription is false economy for training workloads.
+**The systems conclusion**: Saving money on spine switches (Scenario B) slows every synchronization step of the entire cluster by approximately 4 $\times$. If AllReduce accounts for 30% of each training iteration, the cluster's effective throughput drops significantly. For a \$300 million supercomputer, this amounts to wasting approximately **\${python} waste_millions` million** worth of accelerator time waiting for the network. Network oversubscription is false economy for training workloads.
 
 :::
 
@@ -460,31 +581,96 @@ This equation makes the critical insight visible: the bandwidth term is nearly i
 
 ::: {.callout-notebook title="Napkin Math: When Does AllReduce Become the Bottleneck?"}
 
-**Setup**: A cluster of 1,024 H100 GPUs training a model with 1 billion parameters (4 GB of FP32 gradients). Each GPU computes at `{python} h100_tflops` TFLOPS. The network uses NDR InfiniBand ($\alpha = 1.5\;\mu\text{s}$, $\beta = 50\;\text{GB/s}$ per link).
+```{python}
+#| echo: false
+#| label: allreduce-bottleneck
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ALLREDUCE BOTTLENECK ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Network Performance Modeling - Alpha-Beta Model.
+# │
+# │ Goal: Identify when communication intensity overwhelms computation.
+# │ Show: Growth of comm overhead from 1B to 70B parameter models.
+# │ How: Calculate T_compute vs T_ring_allreduce using Alpha-Beta parameters.
+# │
+# │ Imports: mlsys.constants, NetworkFabricsSetup.*
+# │ Exports: t_comp_ms, t_comm_1b_ms, t_comm_70b_ms, comm_frac_1b
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AllReduceBottleneck:
+    """
+    Scenario: Cluster of 1024 H100 GPUs training models of varying scale.
+    Alpha-Beta parameters for NDR InfiniBand.
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    num_gpus = 1024
+    peak_tflops = float(NetworkFabricsSetup.h100_tflops)
+    gpu_util = 0.50
+    flops_per_sample_base = 2e18 # Rough estimate for 1B model iteration
+    
+    alpha_s = float(NetworkFabricsSetup.alpha_ib_us) * 1e-6
+    beta_gbs = float(NetworkFabricsSetup.beta_ib_gbs)
+    
+    params_small = 1e9
+    params_large = 70e9
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Compute time
+    t_comp_s = flops_per_sample_base / (peak_tflops * 1e12 * gpu_util)
+    
+    # AllReduce time: 2(p-1)alpha + 2(p-1)/p * m/beta
+    def calc_allreduce(m_bytes):
+        latency_term = 2 * (num_gpus - 1) * alpha_s
+        bandwidth_term = (2 * (num_gpus - 1) / num_gpus) * (m_bytes / (beta_gbs * 1e9))
+        return latency_term + bandwidth_term
+
+    t_comm_small_s = calc_allreduce(params_small * 4) # FP32 gradients
+    t_comm_large_s = calc_allreduce(params_large * 4)
+    
+    comm_frac_small = t_comm_small_small = t_comm_small_s / (t_comp_s + t_comm_small_s)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(t_comp_s > 1.0, f"Compute time should be significant (>1s), got {t_comp_s:.1f}s")
+    check(t_comm_large_s > t_comm_small_s * 50, "70B comm should be >50x 1B comm")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    t_comp_ms = f"{t_comp_s * 1000:.0f}"
+    t_comm_1b_ms = f"{t_comm_small_s * 1000:.0f}"
+    t_comm_70b_ms = f"{t_comm_large_s * 1000:.0f}"
+    comm_frac_1b_pct = f"{comm_frac_small * 100:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+t_comp_ms = AllReduceBottleneck.t_comp_ms
+t_comm_1b_ms = AllReduceBottleneck.t_comm_1b_ms
+t_comm_70b_ms = AllReduceBottleneck.t_comm_70b_ms
+comm_frac_1b = AllReduceBottleneck.comm_frac_1b_pct
+```
+
+**Setup**: A cluster of 1,024 H100 GPUs training a model with 1 billion parameters (4 GB of FP32 gradients). Each GPU computes at `{python} h100_tflops` TFLOPS. The network uses NDR InfiniBand ($\alpha = `{python} alpha_ib_us` \;\mu\text{s}$, $\beta = `{python} beta_ib_gbs` \;\text{GB/s}$ per link).
 
 **Step 1: Compute time per iteration.**
 
 Assume each GPU processes a microbatch requiring $2 \times 10^{18}$ FLOPs (a rough estimate for a forward plus backward pass on a large batch). At `{python} h100_tflops` TFLOPS with 50% utilization:
 
-$$ T_{\text{compute}} = \frac{2 \times 10^{18}}{989 \times 10^{12} \times 0.5} \approx 4{,}049 \text{ ms} $$
+$$ T_{\text{compute}} = `{python} t_comp_ms` \text{ ms} $$
 
 **Step 2: Communication time (Ring AllReduce).**
 
 With $p = 1{,}024$ and $m = 4 \times 10^9$ bytes:
 
-- Latency term: $2 \times 1{,}023 \times 1.5 \times 10^{-6} \approx 3.1 \text{ ms}$
-- Bandwidth term: $\frac{2 \times 1{,}023}{1{,}024} \times \frac{4 \times 10^9}{50 \times 10^9} \approx 160 \text{ ms}$
-- Total: $T_{\text{ring}} \approx 163 \text{ ms}$
+- Total Communication: $T_{\text{ring}} \approx `{python} t_comm_1b_ms` \text{ ms}$
 
 **Step 3: Communication fraction.**
 
-$$ \text{Comm. fraction} = \frac{163}{4{,}049 + 163} \approx 3.9\% $$
+$$ \text{Comm. fraction} = `{python} comm_frac_1b` \% $$
 
 With overlap between communication and computation (possible because the backward pass produces gradients layer by layer), the effective overhead can be reduced further. The network is not the bottleneck for this configuration.
 
 **When does it become the bottleneck?** If we scale to 70 billion parameters (280 GB of gradients) and the per-GPU computation stays similar (through batch size scaling), the bandwidth term alone becomes:
 
-$$ \frac{2 \times 1{,}023}{1{,}024} \times \frac{280 \times 10^9}{50 \times 10^9} \approx 11{,}200 \text{ ms} $$
+$$ T_{\text{ring}} \approx `{python} t_comm_70b_ms` \text{ ms} $$
 
 Now communication dominates computation by nearly 3 $\times$. This is precisely why models beyond a few billion parameters require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
 
