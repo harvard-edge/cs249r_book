@@ -302,6 +302,9 @@ Thanks to these wonderful people who helped improve the book!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/u/86156224?v=4?v=4?s=80" width="80px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/pipmea"><img src="https://avatars.githubusercontent.com/pipmea?v=4?s=80" width="80px;" alt="pipmea"/><br /><sub><b>pipmea</b></sub></a><br />✍️</td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/ngbolin"><img src="https://avatars.githubusercontent.com/u/9389997?v=4?v=4?s=80" width="80px;" alt="Ng Bo Lin"/><br /><sub><b>Ng Bo Lin</b></sub></a><br />✍️</td>
+    </tr>
   </tbody>
 </table>
 
