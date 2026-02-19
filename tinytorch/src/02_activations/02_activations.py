@@ -192,12 +192,16 @@ Output: [0.05, 0.27, 0.5, 0.73, 0.95]
 ### ASCII Visualization
 ```
 Sigmoid Curve:
-    1.0 ┤     ╭─────
+
+    1.0 ┤          ╭───────
+        │        ╱
+        │      ╱
+    0.5 ┤─────●──────────
         │    ╱
-    0.5 ┤   ╱
         │  ╱
-    0.0 ┤─╱─────────
-       -3  0  3
+    0.0 ┤╱────────────────
+       -3      0       3
+
 ```
 
 **Why Sigmoid matters**: In binary classification, we need outputs between 0 and 1 to represent probabilities. Sigmoid gives us exactly that!
