@@ -237,7 +237,8 @@ Step n: n K,V computations
 Total: 1 + 2 + 3 + ... + n = n(n+1)/2 = O(n²) complexity!
 ```
 
-For a 100-token sequence, this means **5,050 redundant computations**!
+For a 100-token sequence, this means **5,050 total K,V computations** — but only 100 are
+actually necessary (one per token). That's **4,950 redundant computations**!
 
 ### Real-World Impact
 
