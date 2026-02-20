@@ -721,15 +721,12 @@ class LighthouseModels:
     m_gpt2 = Models.GPT2
     m_llama = Models.Language.Llama2_70B
     m_dlrm = Models.DLRM
+    m_mobilenet = Models.MobileNetV2
+    m_kws = Models.Tiny.DS_CNN
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    resnet_flops_g = m_resnet.parameters.magnitude * 160 # Approx multiplier if ops not in twin, or use constant
-    # Wait, resnet50_flops is in constants.
-    from mlsys.constants import RESNET50_FLOPs
     resnet_flops_g = RESNET50_FLOPs.to(GFLOPs).magnitude
-
     resnet_params_m = m_resnet.parameters.to(Mparam).magnitude
-    # ResNet50 FP32 size
     resnet_fp32_mb = m_resnet.size_in_bytes(4 * byte).to(MB).magnitude
 
     gpt2_params_b = m_gpt2.parameters.to(Bparam).magnitude
@@ -737,8 +734,17 @@ class LighthouseModels:
     # DLRM Embedding Size
     dlrm_embedding_gb = m_dlrm.model_size.to(GB).magnitude
 
+    # MobileNet
+    # ResNet-50 ~4.1 GFLOPs, MobileNetV2 ~300 MFLOPs
+    mobilenet_flops_reduction = 4100 / 300 
+
+    # KWS
+    kws_params = m_kws.parameters.to(Kparam).magnitude
+    kws_size_kb = m_kws.size_in_bytes(4 * byte).to(KB).magnitude
+
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(resnet_fp32_mb >= 90, f"ResNet50 size should be ~98MB, got {resnet_fp32_mb:.0f}MB")
+    check(mobilenet_flops_reduction > 10, "MobileNet reduction should be >10x vs ResNet.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     resnet_gflops_str = fmt(resnet_flops_g, precision=1)
@@ -750,6 +756,12 @@ class LighthouseModels:
 
     dlrm_embedding_str = fmt(dlrm_embedding_gb, precision=0)
 
+    mobilenet_flops_reduction_str = fmt(mobilenet_flops_reduction, precision=0)
+    mobile_tdp_range_str = "2 to 5" # Standard mobile envelope
+
+    kws_params_str = f"{int(kws_params)}K"
+    kws_size_kb_str = fmt(kws_size_kb, precision=0)
+
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 resnet_gflops_str = LighthouseModels.resnet_gflops_str
 resnet_params_m_str = LighthouseModels.resnet_params_m_str
@@ -757,6 +769,10 @@ resnet_fp32_mb_str = LighthouseModels.resnet_fp32_mb_str
 gpt2_params_b_str = LighthouseModels.gpt2_params_b_str
 llama_range_str = LighthouseModels.llama_range_str
 dlrm_embedding_str = LighthouseModels.dlrm_embedding_str
+mobilenet_flops_reduction_str = LighthouseModels.mobilenet_flops_reduction_str
+mobile_tdp_range_str = LighthouseModels.mobile_tdp_range_str
+kws_params_str = LighthouseModels.kws_params_str
+kws_size_kb_str = LighthouseModels.kws_size_kb_str
 ```
 
 ::: {.callout-lighthouse title="Five Reference Workloads"}
@@ -940,6 +956,7 @@ resnet_int8_mb_str = fmt(resnet_int8_bytes_value.to(MB).magnitude, precision=0, 
 # │ Imports: mlsys.constants (A100_*, RESNET50_*), mlsys.formulas (calc_bottleneck)
 # │ Exports: a100_*_str, cloud_*_str, cloud_*_frac (Markdown fractions)
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys import Hardware
 from mlsys.constants import (
     RESNET50_FLOPs, A100_FLOPS_FP16_TENSOR, A100_MEM_BW,
     TFLOPs, second, TB, byte, flop,
@@ -996,6 +1013,7 @@ cloud_bottleneck_str = cloud_bottleneck_value                              # "Me
 # │ Imports: mlsys.constants (MOBILE_NPU_*, A100_MEM_BW), mlsys.formulas
 # │ Exports: mobile_*_str, bw_advantage_x_str, inference_speed_x_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys import Hardware, Models
 from mlsys.constants import (
     RESNET50_FLOPs, MOBILE_NPU_TOPS_INT8, MOBILE_NPU_MEM_BW, A100_MEM_BW,
     TFLOPs, second, GB, byte, flop,
