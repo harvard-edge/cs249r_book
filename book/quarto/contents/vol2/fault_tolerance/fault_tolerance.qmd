@@ -6,7 +6,7 @@ engine: jupyter
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_Gemini Pro 3 Prompt: A dramatic visualization of fault tolerance mechanisms protecting a distributed ML system. The scene shows a cluster of compute nodes with several nodes experiencing failures depicted as red warning indicators and disconnected links. Protective mechanisms spring into action: checkpoint systems shown as periodic snapshots being saved to persistent storage, redundant replicas activating to replace failed nodes, and graceful degradation paths routing around damaged components. A central reliability monitor displays system health metrics with some indicators in warning states but the overall system remaining operational. Visual elements include recovery timelines, failover arrows, and heartbeat signals between nodes. The composition contrasts the chaos of failures with the order of recovery mechanisms. Color scheme uses stable greens and blues for healthy components, red and orange for failures, and gold for active recovery processes. Technical yet dramatic style suitable for a reliability engineering textbook. Rendered in the style of Nanobanana._
+\chapterminitoc
 :::
 
 \noindent
@@ -30,11 +30,11 @@ A single GPU fails perhaps once per year. A thousand GPUs experience failures da
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Calculate system-level MTBF from component failure rates and derive optimal checkpoint intervals using the Young-Daly formula to minimize wasted work
-- Design distributed checkpoint and recovery strategies that coordinate state across thousands of GPUs while managing multi-terabyte checkpoint sizes
-- Implement serving redundancy, replication, and failover mechanisms that maintain availability within millisecond latency requirements under partial failures
-- Apply graceful degradation strategies including model fallback, feature fallback, and load shedding to maintain partial service when full capability is unavailable
-- Construct observability infrastructure using metrics, logs, and distributed traces to diagnose non-deterministic failures and silent accuracy degradation
+- Calculate system-level **MTBF** from component failure rates and derive optimal checkpoint intervals using the **Young-Daly formula** to minimize wasted work
+- Design distributed **checkpoint and recovery** strategies that coordinate state across thousands of GPUs while managing multi-terabyte checkpoint sizes
+- Implement serving **redundancy**, **replication**, and **failover** mechanisms that maintain availability within millisecond latency requirements under partial failures
+- Apply **graceful degradation** strategies including **model fallback**, **feature fallback**, and **load shedding** to maintain partial service when full capability is unavailable
+- Construct **observability infrastructure** using metrics, logs, and distributed traces to diagnose non-deterministic failures and **silent accuracy degradation**
 - Evaluate fault tolerance trade-offs across training and serving workloads by analyzing their distinct latency tolerances, state requirements, and recovery strategies
 
 :::
@@ -65,7 +65,7 @@ gpt3_shard_gb = f"{gpt3_ckpt_bytes.to(GB).magnitude / 1000:.1f}"
 
 Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. Statistically, a GPU will fail every few hours. If the system is not designed to absorb these continuous physical failures, the training process will halt entirely, wasting millions of dollars in compute time. In the **Fleet Stack** (@sec-vol2-introduction), Fault Tolerance acts as this necessary **Immune System** of the Infrastructure Layer.
 
-The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices. However, this coordination creates fragility: a failure in any single device can stall the entire synchronous fleet. This chapter builds the resilience layer necessary to keep that fleet running.
+The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication — AllReduce, AllGather, AllToAll — sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer necessary to keep that fleet running.
 
 The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU might experience hardware failure once per year. That same researcher scaling to a 1,000 GPU cluster will experience failures multiple times per day. This shift from rare exception to routine occurrence demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
 
@@ -179,8 +179,8 @@ ax.plot(tau, total_waste, label='Total Wasted Work', color=COLORS['GreenLine'], 
 
 # Optimal point
 ax.scatter([tau_opt], [np.sqrt(2*t_write/mtbf)], color='black', zorder=5)
-ax.annotate(f'$\\tau_{{opt}} \\approx {tau_opt:.1f}$h', 
-            xy=(tau_opt, np.sqrt(2*t_write/mtbf)), 
+ax.annotate(f'$\\tau_{{opt}} \\approx {tau_opt:.1f}$h',
+            xy=(tau_opt, np.sqrt(2*t_write/mtbf)),
             xytext=(tau_opt + 0.2, 0.6),
             arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5))
 
@@ -292,6 +292,81 @@ $$ MTBF_{cluster} = \frac{1}{0.2708} = 3.69 \text{ hours} $$
 | 25,000                  |              50,000 hrs |                2 hrs |                          12.0 |
 
 : **Cluster MTBF Scaling**: System-level mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. A training cluster sized for modern LLM development (10,000+ GPUs) experiences multiple failures daily. {#tbl-cluster-mtbf-scaling}
+
+The theoretical 1/N scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @fig-published-failure-rates overlays published empirical measurements from Meta's production clusters against the theoretical curve, confirming that the mathematics accurately predict real-world failure rates. The Kokolis et al. (2025) study of Meta's Research SuperCluster measured MTTF values from 8-GPU allocations through 16,384-GPU jobs, and Meta's Llama 3 training report independently documented 419 failures across 54 days on 16,384 H100 GPUs. Both datasets converge on the same conclusion: at 16,384 GPUs, the cluster experiences a failure every 2 to 3 hours. This empirical validation transforms the theoretical argument from an abstract scaling law into a measured engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
+
+```{python}
+#| label: fig-published-failure-rates
+#| fig-cap: "**Published Failure Rates from Production Clusters**. Measured MTTF values from Meta's RSC clusters (Kokolis et al., 2025) and Llama 3 training (Meta, 2024) plotted against the theoretical 1/N curve. At 16,384 GPUs, both empirical measurements and theory predict failures every 2 to 3 hours, confirming that fault tolerance is a mathematical necessity, not an edge case. Data sources: Kokolis et al., arXiv:2410.21680; Meta, arXiv:2407.21783."
+#| fig-alt: "Log-log scatter plot of MTTF in hours versus GPU count with theoretical 1 over N curve and labeled data points from Meta RSC and Llama 3 training."
+#| echo: false
+
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsys import viz
+from mlsys.constants import GPU_MTTF_HOURS
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5.5))
+
+# Theoretical curve: MTBF_cluster = GPU_MTTF / N
+n_theoretical = np.logspace(0.5, 5.3, 200)
+mtbf_theoretical = GPU_MTTF_HOURS / n_theoretical
+
+ax.plot(n_theoretical, mtbf_theoretical, color=COLORS['grid'], linestyle='--',
+        linewidth=1.5, label=f'Theoretical: {GPU_MTTF_HOURS:,}h / N', zorder=1)
+
+# VERIFIED DATA: Kokolis et al. (arXiv:2410.21680, HPCA 2025)
+kokolis_gpus = [8, 1024, 16384, 131072]
+kokolis_mttf = [1144.8, 7.9, 1.8, 0.23]  # hours
+kokolis_labels = ['8 GPUs\n(47.7 days)', '1,024 GPUs\n(7.9 hrs)', '16,384 GPUs\n(1.8 hrs)', '131K GPUs\n(projected, 14 min)']
+
+ax.scatter(kokolis_gpus, kokolis_mttf, color=COLORS['BlueLine'], s=80, zorder=3,
+           marker='o', edgecolors='white', linewidth=0.8, label='Meta RSC (Kokolis et al. 2025)')
+
+# Label Kokolis points
+for i, (x, y, lbl) in enumerate(zip(kokolis_gpus, kokolis_mttf, kokolis_labels)):
+    offset_x = 1.5 if i < 3 else 0.4
+    offset_y = 1.3 if i < 2 else (1.3 if i == 2 else 1.3)
+    ax.annotate(lbl, xy=(x, y), fontsize=7,
+                xytext=(x * offset_x, y * offset_y),
+                color=COLORS['BlueLine'],
+                arrowprops=dict(arrowstyle='->', color=COLORS['BlueLine'], lw=0.8))
+
+# VERIFIED DATA: Meta Llama 3 (arXiv:2407.21783)
+# 419 failures in 54 days = MTTF ~3.1 hours
+llama_gpus = [16384]
+llama_mttf = [3.1]
+
+ax.scatter(llama_gpus, llama_mttf, color=COLORS['RedLine'], s=120, zorder=4,
+           marker='*', edgecolors='white', linewidth=0.8, label='Llama 3 (Meta 2024)')
+ax.annotate('Llama 3\n(16K H100s,\n419 failures\nin 54 days)', xy=(16384, 3.1),
+            xytext=(40000, 8), fontsize=7, fontweight='bold', color=COLORS['RedLine'],
+            arrowprops=dict(arrowstyle='->', color=COLORS['RedLine'], lw=1.0))
+
+# Training duration reference lines
+durations = [(24, '1 day'), (168, '1 week'), (2160, '3 months')]
+for hrs, lbl in durations:
+    ax.axhline(y=hrs, color=COLORS['GreenLine'], linestyle=':', linewidth=0.8, alpha=0.5)
+    ax.text(4, hrs * 1.15, lbl, fontsize=7, color=COLORS['GreenLine'], alpha=0.7)
+
+# Key annotation
+ax.annotate('At 16K GPUs:\none failure every\n~2-3 hours',
+            xy=(16384, 2.0), xytext=(2500, 0.15),
+            fontsize=8, fontweight='bold', color='crimson',
+            bbox=dict(facecolor=COLORS['RedL'], edgecolor='none', alpha=0.8, pad=3),
+            arrowprops=dict(arrowstyle='->', color='crimson', lw=1.2))
+
+ax.set_xscale('log')
+ax.set_yscale('log')
+ax.set_xlabel('GPU Count (N)')
+ax.set_ylabel('Mean Time to Failure (hours)')
+ax.set_xlim(3, 300000)
+ax.set_ylim(0.1, 5000)
+ax.legend(loc='upper right', fontsize=8)
+
+plt.tight_layout()
+plt.show()
+```
 
 ### Failure Taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
 
@@ -1781,7 +1856,6 @@ While hardware faults represent one dimension of system vulnerability, they rare
 
 : **Fault Characteristics**: Transient, permanent, and intermittent faults differ by duration, persistence, and recurrence, impacting system reliability and requiring distinct mitigation strategies for robust AI deployments. Understanding these distinctions guides the design of fault-tolerant systems capable of handling diverse hardware failures during operation. {#tbl-fault_types}
 
-
 **Transition:** With this taxonomy of hardware faults established, we now turn to the practical question: how do distributed training systems detect these faults and recover from them without losing days of computation?
 
 ## Training Fault Tolerance {#sec-fault-tolerance-reliability-reliability-training-fault-tolerance-7f22}
@@ -1791,6 +1865,12 @@ When a top-of-rack switch dies two weeks into a 175-billion parameter model trai
 To survive these inevitable hardware failures without catastrophic loss of compute time, the training system must periodically save its state. We will now examine the primary mechanism for this state preservation: checkpointing.
 
 ## Checkpointing: Preserving Progress {#sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2}
+
+::: {.callout-definition title="Checkpointing"}
+
+***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of complete training state, including **model parameters**, **optimizer state**, data loader position, and learning rate schedule, to persistent storage so that training can resume from a recorded point after failure. Checkpoint frequency presents a fundamental trade-off: more frequent checkpoints reduce the expected lost computation per failure but impose **I/O overhead** that directly reduces training throughput, with the optimal interval governed by the Young-Daly formula $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$.
+
+:::
 
 If a training cluster loses power, how do we avoid losing the millions of dollars worth of gradient updates computed over the last month? We must periodically write the model's brain to durable storage. Checkpointing captures sufficient state to resume training from a recorded point: model parameters, optimizer state, training progress indicators, and random state for reproducibility.
 
@@ -2177,7 +2257,7 @@ Once a failure is classified, the recovery procedure executes a rigid sequence t
 
 **Recovery validation** is the final and often overlooked step. After loading a checkpoint, validation confirms successful recovery by verifying model parameters match expected shapes and dtypes, running a few training steps and checking that the loss is consistent with pre-failure values, and confirming gradient computations produce expected statistics. If the loss diverges immediately after recovery, the checkpoint itself may be corrupted, requiring fallback to an earlier snapshot.
 
-::: {.callout-notebook title="Napkin Math: The Recovery Time Budget"}
+::: {.callout-notebook title="The Recovery Time Budget"}
 
 Consider our 175B parameter model training on 1,000 GPUs. The checkpoint size is approximately `{python} gpt3_ckpt_tb` TB (weights + Adam optimizer state). How much does a single failure event actually cost?
 
@@ -2203,13 +2283,13 @@ Warm restarts can reduce $T_{load}$ and $T_{warmup}$ to near-zero for 99.9% of t
 
 The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself—a crash during communicator rebuild, for instance—must be handled by falling back to cold restart. Production systems implement warm restart as the fast path with cold restart as the safety net.
 
-| **Aspect**            | **Cold Restart**                  | **Warm Restart**                       |
-|:----------------------|:----------------------------------|:---------------------------------------|
-| **Recovery time**     | 4–10 minutes (full reload)        | 30–90 seconds (single node reload)     |
-| **State guarantee**   | Clean: all state from checkpoint  | Assumes surviving state is valid        |
-| **Implementation**    | Simple: kill all, reload all      | Complex: dynamic membership management |
-| **Failure during recovery** | Retry cold restart          | Fall back to cold restart              |
-| **Best for**          | Correlated failures, SDC events   | Single-node failures, GPU errors       |
+| **Aspect**                  | **Cold Restart**                 | **Warm Restart**                       |
+|:----------------------------|:---------------------------------|:---------------------------------------|
+| **Recovery time**           | 4–10 minutes (full reload)       | 30–90 seconds (single node reload)     |
+| **State guarantee**         | Clean: all state from checkpoint | Assumes surviving state is valid       |
+| **Implementation**          | Simple: kill all, reload all     | Complex: dynamic membership management |
+| **Failure during recovery** | Retry cold restart               | Fall back to cold restart              |
+| **Best for**                | Correlated failures, SDC events  | Single-node failures, GPU errors       |
 
 #### Recovery Automation Pipeline {#sec-fault-tolerance-reliability-recovery-automation-pipeline}
 
@@ -2221,6 +2301,12 @@ This automation reduces Mean Time To Recovery (MTTR) from the 30–60 minutes ty
 
 #### Distinguishing Stragglers from Failures {#sec-fault-tolerance-reliability-reliability-distinguishing-stragglers-failures-285d}
 
+::: {.callout-definition title="Straggler"}
+
+***Straggler***\index{Straggler!definition} is a worker in a distributed training job whose gradient computation is significantly slower than its peers, creating a synchronization bottleneck at the **AllReduce** barrier that bounds cluster throughput to the speed of the slowest rank. The core trade-off is between waiting for the straggler, which preserves **gradient consistency** but wastes idle compute across all other workers, and proceeding without it, which recovers throughput but introduces **gradient staleness** that can degrade model convergence.
+
+:::
+
 A **straggler** is a worker that remains functionally correct but performs significantly slower than its peers. In synchronous training, stragglers are performance poison: the speed of the entire cluster is determined by its slowest component, because AllReduce cannot complete until every rank has submitted its gradients.
 
 $$ T_{step} = \max(T_{rank_0}, T_{rank_1}, \dots, T_{rank_{N-1}}) + T_{comm} $$
@@ -2231,7 +2317,7 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 
 **Straggler mitigation strategies** span a spectrum of aggressiveness. **Backup workers** replicate work assigned to slow workers and use the first result, trading compute for latency. **Bounded staleness** allows training to proceed with stale gradients from slow workers, accepting a small convergence penalty. **Dynamic load balancing** redistributes data shards away from slow workers, reducing their per-step workload. **Proactive replacement** uses GPU telemetry trends (rising temperature, increasing ECC error counts) to detect degrading workers and replace them before they become stragglers.
 
-::: {.callout-notebook title="Napkin Math: The Straggler Tax"}
+::: {.callout-notebook title="The Straggler Tax"}
 
 Consider our 1,000-GPU cluster where a normal training iteration takes **1.0 second**. A single GPU enters a thermally throttled state, clocking down to 50% speed, and now takes **2.0 seconds** to complete its computation.
 
@@ -2600,6 +2686,12 @@ Vision models deployed on edge devices face different fault tolerance challenges
 When full redundancy fails—such as when an edge device loses connectivity, or a massive traffic spike overwhelms the available datacenter replicas—the system cannot simply crash. Instead, it must actively trade output quality for continued availability, a strategy known as graceful degradation.
 
 ## Graceful Degradation {#sec-fault-tolerance-reliability-reliability-graceful-degradation-9122}
+
+::: {.callout-definition title="Graceful Degradation"}
+
+***Graceful Degradation***\index{Graceful Degradation!definition} is the systematic reduction of model quality, latency, or coverage to maintain system **availability** under failure conditions that exceed the capacity of primary fault tolerance mechanisms. Unlike traditional systems where degradation means reduced functionality, ML serving systems can degrade along continuous quality dimensions, such as falling back to smaller models, using fewer features, or serving cached predictions, while preserving the same external interface and avoiding total service loss.
+
+:::
 
 During a major regional network outage, an e-commerce site suddenly loses access to its heavy, GPU-accelerated recommendation cluster. Rather than showing users empty pages or crashing, the site instantly switches to serving pre-computed, generic popular items. The serving fault tolerance mechanisms developed above aim to maintain full service, but graceful degradation dictates what happens when those defenses are overwhelmed.
 
@@ -3094,22 +3186,27 @@ Recognizing these fallacies—from underestimating silent data corruption to mis
 
 ## Summary {#sec-fault-tolerance-reliability-reliability-summary-48b0}
 
-Fault tolerance transforms the statistical certainty of hardware failure from a project-ending catastrophe into a manageable operational routine. We explored how checkpointing mechanisms (synchronous and asynchronous) preserve months of work by periodically capturing the state of massive models. We analyzed how elastic training and redundancy allow systems to continue operating even as individual nodes disappear from the cluster.
+Fault tolerance transforms the statistical certainty of hardware failure from a project-ending catastrophe into a manageable operational routine. The mathematics are unforgiving: individual component reliability compounds multiplicatively across thousands of devices, driving system-level MTBF from years down to hours. At frontier scale, failure is not an exceptional event to be debugged but a continuous background condition that systems must absorb without losing forward progress. The engineering challenge, therefore, is not to prevent failures but to build systems where recovery is automatic, fast, and invisible to the training or serving workload.
 
-::: {.callout-takeaways}
+Checkpointing provides the foundational mechanism for preserving training progress across failures. Synchronous checkpointing offers simplicity but imposes I/O overhead that scales with model size, while asynchronous approaches overlap checkpoint writes with computation at the cost of additional consistency complexity. The Young-Daly formula, $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$, gives engineers a principled way to balance checkpoint frequency against overhead, typically yielding intervals of 20 to 30 minutes for large clusters. Beyond basic checkpointing, elastic training breaks the rigid assumption that worker count must remain fixed: when nodes fail, the system redistributes data and model shards across the surviving workers, adjusts batch size and learning rate, and resumes training with reduced throughput rather than halting entirely.
+
+Serving fault tolerance presents a fundamentally different challenge from training. Training tolerates minutes of recovery latency and benefits from SGD's mathematical tolerance of approximate restarts, while serving demands millisecond-level responsiveness and must preserve per-session state such as KV caches and conversation histories. Stateless serving achieves fault tolerance through straightforward replica redundancy and load balancing, but stateful serving for LLMs requires active state replication, session-affine routing, and graceful degradation hierarchies that fall back to lighter models when primary systems are unavailable. The case studies examined in this chapter, from Meta's OPT-175B training through over 35 hardware failures to Netflix's chaos engineering for ML serving, demonstrate that these principles are not theoretical but operational necessities at production scale.
+
+::: {.callout-takeaways title="Failure Is Normal Operation"}
 
 * **Scale Guarantees Failure**: A 10,000-GPU cluster will encounter hardware failures every few hours; software must treat failure as a normal state.
 * **Checkpointing is the Baseline**: Synchronous checkpointing is simple but incurs high overhead; asynchronous approaches hide I/O latency at the cost of consistency complexity.
+* **The Young-Daly Formula Governs Checkpoint Intervals**: The optimal checkpoint interval $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$ balances the cost of saving state against the cost of lost work, typically yielding intervals of 20 to 30 minutes for large-scale training clusters.
 * **Elasticity enables Persistence**: Designing training jobs to be "elastic" (reconfiguring around lost or added nodes as shown in @fig-elastic-flow) is superior to simple restart-from-scratch strategies.
 * **Stateful Serving is the Frontier**: For LLMs, the KV cache represents a massive serving state that must be replicated or migrated to prevent high-latency session restarts, with strategies illustrated in @fig-serving-redundancy.
+* **Training and Serving Require Different Strategies**: Training fault tolerance is checkpoint-centric and tolerates minutes of recovery, while serving fault tolerance is state-migration-centric and demands sub-second failover.
+* **Production Scale Validates the Theory**: Meta's OPT-175B experienced over 35 significant hardware failures during training, Google's TPU Pods encounter 1 to 2 failures daily, and Netflix's chaos engineering uncovered 12 previously unknown failure modes, confirming that fault tolerance must be continuously exercised rather than assumed.
 :::
+
+Engineers who internalize these principles gain a diagnostic framework for reasoning about resilience at any scale. When a training run stalls, they can immediately assess whether the bottleneck is checkpoint I/O overhead, insufficient detection speed, or a failure mode that elastic training cannot absorb. When a serving system drops requests, they can trace the fault through the redundancy hierarchy to determine whether the root cause is replica health, state replication lag, or an inadequate fallback strategy. This systematic reasoning distinguishes organizations that treat fault tolerance as an afterthought from those that engineer it as a first-class system property. As ML systems continue to scale, the cost of unplanned downtime grows proportionally: a 10,000-GPU cluster idled for an hour represents tens of thousands of dollars in wasted compute, making the techniques developed in this chapter not merely best practices but economic necessities.
 
 ::: {.callout-chapter-connection title="From Resilience to Resource Management"}
 
 We have established how to keep the fleet running despite inevitable hardware failures: checkpointing preserves progress, elasticity absorbs node losses, and redundancy protects stateful serving sessions. But a fault-tolerant cluster still needs a "brain" to decide which jobs run where, when to preempt, and how to share resources fairly among competing workloads. @sec-fleet-orchestration examines the orchestration layer, from Slurm and Kubernetes scheduling to gang scheduling, multi-tenancy, and capacity planning, that transforms a collection of fault-tolerant nodes into a managed production system.
 
 :::
-
-With the algorithmic foundations of distributed training established—parallelism strategies, communication patterns, and fault tolerance mechanisms—we have defined the *workload* of modern AI. But algorithms cannot run on air. They require a physical machine capable of sustaining these massive throughputs and communication patterns.
-
-We now turn from the logical to the physical. **Part II: Building the Machine Learning Fleet** begins with **Compute Infrastructure** (@sec-compute-infrastructure), where we examine the silicon, power, and cooling systems required to build the supercomputers that power these algorithms. We will see how the logical AllReduce rings we designed in Part I physically materialize as kilometers of fiber optic cabling and megawatts of power delivery.

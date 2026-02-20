@@ -26,6 +26,14 @@ from mlsys.constants import (
     A100_FLOPS_FP16_TENSOR, A100_MEM_BW, A100_TDP,
     B200_FLOPS_FP16_TENSOR, B200_MEM_BW, B200_TDP,
     V100_FLOPS_FP16_TENSOR, V100_MEM_BW, V100_TDP,
+    TPUV1_FLOPS_INT8, TPUV1_TDP,
+    TPUV2_FLOPS_BF16, TPUV2_MEM_BW, TPUV2_MEM_CAPACITY,
+    TPUV3_FLOPS_BF16, TPUV3_MEM_BW, TPUV3_MEM_CAPACITY,
+    TPUV4_FLOPS_BF16, TPUV4_MEM_BW,
+    TPUV5P_FLOPS_BF16, TPUV5P_MEM_BW, TPUV5P_MEM_CAPACITY,
+    WSE1_CORES, WSE1_MEM_CAPACITY, WSE1_MEM_BW, WSE1_TDP,
+    WSE2_CORES, WSE2_MEM_CAPACITY, WSE2_MEM_BW, WSE2_TDP,
+    WSE3_CORES, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP,
     TPUV5P_MEM_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW, SYSTEM_MEMORY_BW,
     CLOUD_ELECTRICITY_PER_KWH, USD, GPT3_PARAMS,
     Mparam, TFLOPs, flop, param, MFLOPs, GFLOPs
@@ -92,53 +100,67 @@ class InfraSetup:
     h100_bw = H100_MEM_BW
     h100_cap = H100_MEM_CAPACITY
     h100_tdp = H100_TDP
-    
+
     a100_flops = A100_FLOPS_FP16_TENSOR
     a100_bw = A100_MEM_BW
     a100_tdp = A100_TDP
-    
+
     b200_flops = B200_FLOPS_FP16_TENSOR
     b200_bw = B200_MEM_BW
     b200_tdp = B200_TDP
-    
+
     v100_flops = V100_FLOPS_FP16_TENSOR
     v100_bw = V100_MEM_BW
     v100_tdp = V100_TDP
-    
+
+    # TPU Specs
+    tpuv3_flops = TPUV3_FLOPS_BF16
+    tpuv3_bw = TPUV3_MEM_BW
+    tpuv4_flops = TPUV4_FLOPS_BF16
+    tpuv4_bw = TPUV4_MEM_BW
+    tpuv5p_flops = TPUV5P_FLOPS_BF16
+    tpuv5p_bw = TPUV5P_MEM_BW
+
+    # Wafer-Scale Specs (WSE-3)
+    wse3_cores = WSE3_CORES
+    wse3_mem = WSE3_MEM_CAPACITY
+    wse3_bw = WSE3_MEM_BW
+    wse3_tdp = WSE3_TDP
+
     ddr_bw = SYSTEM_MEMORY_BW # ~50 GB/s
-    
+
     # Ridge points
     h100_ridge_val = (h100_flops / h100_bw).to(flop/byte).magnitude
-    
+
     # Level 2: Node
     gpus_per_node = 8
     node_hbm_capacity = h100_cap * gpus_per_node
     nvlink_bw = NVLINK_H100_BW
     pcie_bw = PCIE_GEN5_BW
     ib_bw = INFINIBAND_NDR_BW
-    
+
     # Level 3: Rack
     nodes_per_rack = 4
-    rack_power_kw = (h100_tdp * gpus_per_node * nodes_per_rack).to(kilowatt).magnitude * 1.2 
+    rack_power_kw = (h100_tdp * gpus_per_node * nodes_per_rack).to(kilowatt).magnitude * 1.2
     pue_efficient = 1.10
-    
+
     # Economics
     dgx_h100_price = 350000 # USD
-    electricity_rate = CLOUD_ELECTRICITY_PER_KWH.to(USD/(kilowatt*hour)).magnitude 
+    electricity_rate = CLOUD_ELECTRICITY_PER_KWH.to(USD/(kilowatt*hour)).magnitude
     utilization = 0.80
     amortization_years = 3
-    
+
     # Annual OpEx for 1 Node
     node_power_kw = (h100_tdp * gpus_per_node).to(kilowatt).magnitude * 1.2
     annual_elec_cost = node_power_kw * 8760 * utilization * electricity_rate * pue_efficient
-    
+
     # Break-even build vs buy
     cloud_h100_hourly = 4.0 # USD/hr/GPU
     cloud_node_annual = cloud_h100_hourly * 8 * 8760 * utilization
-    
+
     onprem_node_annual_capex = dgx_h100_price / amortization_years
     onprem_node_total_annual = onprem_node_annual_capex + annual_elec_cost
-    
+
     # Efficiency
     h100_tflops_per_watt = h100_flops.to(TFLOPs/second).magnitude / h100_tdp.to(watt).magnitude
     a100_tflops_per_watt = a100_flops.to(TFLOPs/second).magnitude / a100_tdp.to(watt).magnitude
@@ -156,16 +178,16 @@ class TokenLatency:
     weight_bytes = 2 # FP16
     hbm_bw = 3.35 * (TB/second)
     peak_tflops = 1979 * (TFLOPs/second)
-    
+
     # CALCULATION
     weight_vol = p_params * weight_bytes
     ops_per_token = 2 * p_params
-    
+
     t_mem_ms = (weight_vol / hbm_bw.to(byte/second)).to('millisecond').magnitude
     t_comp_ms = (ops_per_token / peak_tflops.to(flop/second)).to('millisecond').magnitude
-    
+
     mem_dominance = (t_mem_ms / (t_mem_ms + t_comp_ms)) * 100
-    
+
     # OUTPUTS handled in EXPORTS
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
@@ -194,7 +216,7 @@ t_comp_str = f"{TokenLatency.t_comp_ms:.2f}"
 dominance_str = f"{TokenLatency.mem_dominance:.1f}"
 ```
 
-## Introduction: The Physics of Scale {#sec-compute-introduction}
+## The Physics of Scale {#sec-compute-introduction}
 
 In the Introduction to this volume (@sec-vol2-introduction), we defined the Machine Learning Fleet not merely as a collection of servers, but as a holistic warehouse-scale computer. This chapter explores the physical foundation of that machine: the **Compute Infrastructure**. While algorithms define *how* a model learns, infrastructure determines *if* it can learn at all. The transition from academic prototypes to frontier systems is fundamentally a transition from software constraints to physical ones -- where the limitations of silicon, electricity, and heat become the primary obstacles to progress.
 
@@ -217,6 +239,29 @@ Even for machine learning engineers who will never crimp an Ethernet cable or de
 
 We begin our exploration at the center of this hierarchy, where the struggle to bridge the gap between CPU capability and AI demand first began: the accelerator.
 
+## How ML Workloads Invert Compute Assumptions {#sec-compute-workload-inversion}
+
+A computer architect from the era of general-purpose supercomputing would find the design of a modern ML cluster both familiar and deeply strange. While both systems are built for high-performance parallel processing, the underlying assumptions about the workload are fundamentally different. Traditional High-Performance Computing (HPC) for scientific simulation often requires high-precision floating-point arithmetic (FP64), deals with irregular data access patterns (e.g., sparse matrix solvers, graph traversals), and balances computation with significant I/O for loading initial conditions and saving simulation state.
+
+ML workloads, particularly for training large neural networks, systematically invert these assumptions. This inversion is not a minor difference in emphasis; it is a profound shift in the computational paradigm that has driven the design of every successful ML accelerator, from GPUs to TPUs to custom ASICs.
+
+| **Workload Pattern**    | **Traditional HPC Assumption**    | **ML Reality**                              |
+|:------------------------|:----------------------------------|:--------------------------------------------|
+| **Numerical Precision** | FP64 for accuracy                 | FP16/BF16/FP8 tolerated, even preferred     |
+| **Instruction Mix**     | Diverse, complex instruction set  | Dominated by one operation: matrix multiply |
+| **Control Flow**        | Branch-heavy, data-dependent      | Uniform, predictable (data-parallel)        |
+| **Data Reuse**          | Varies; often limited by locality | Extreme (weights reused for every sample)   |
+| **Fault Tolerance**     | Must be perfect or restart        | Checkpoint/resume is part of the workflow   |
+
+: **ML Workloads Invert Traditional Compute Assumptions**: Where HPC prioritizes precision and generality, ML training sacrifices both for massive throughput on a narrow set of operations. {#tbl-compute-assumptions}
+
+**The Precision Inversion**: Traditional scientific computing demands 64-bit precision (FP64) to accurately simulate physical phenomena where small errors can compound over time. ML training, by contrast, has demonstrated remarkable tolerance for lower precision. The stochastic nature of the training process means that the "noise" introduced by 16-bit (FP16/BF16) or even 8-bit (FP8) arithmetic is often absorbed by the optimization algorithm. This tolerance is the single most important economic and architectural feature of ML compute. It allows architects to build hardware (like Tensor Cores) that performs four FP16 operations or eight FP8 operations in the same silicon area and power budget as a single FP32 operation, yielding a 4-8x improvement in throughput for free.
+
+**The Instruction Mix Inversion**: General-purpose CPUs and HPC systems are designed to execute a vast and complex instruction set, from integer arithmetic to floating-point division to complex conditional branching. Profiling a large neural network training run reveals a starkly different picture: over 90% of the computation is spent on a single operation—the matrix-multiply-accumulate (GEMM). This extreme regularity allows for radical hardware specialization. Instead of building flexible, general-purpose ALUs, architects can dedicate silicon to hyper-optimized matrix engines (Tensor Cores, Systolic Arrays), achieving 100-1000x the throughput of a CPU for that specific operation.
+
+**The Control Flow Inversion**: Traditional parallel programs often involve complex, data-dependent control flow, where different processing elements take different paths through the code. ML training, particularly data-parallel training, is the opposite: every accelerator executes the exact same sequence of operations on different data. This "Single Program, Multiple Data" (SPMD) model is a hardware architect's dream, as it eliminates the need for complex branch prediction and reordering logic, freeing up silicon and power for more arithmetic units.
+
+These inversions explain why CPUs are poorly suited for large-scale ML and why a specialized ecosystem of accelerators has emerged. The "generality tax" paid by CPUs—the silicon dedicated to handling a wide range of tasks—is a price that ML workloads do not need to pay.
 
 ## The Accelerator {#sec-compute-accelerator-core}
 
@@ -269,7 +314,6 @@ The transition from general-purpose to specialized silicon follows a logical pro
 
 Understanding *where* each architecture falls on this spectrum, and *why*, is essential for selecting hardware that matches a given workload. The spectrum is not a ranking from "bad" (general-purpose CPU) to "good" (custom ASIC), but a continuum of trade-offs where each position offers the best match for a different combination of workload characteristics and deployment constraints.
 
-
 *How can we gain massive parallelism while retaining programmability?*
 
 **GPUs** represent the first major step away from general-purpose computing. An NVIDIA H100, for example, contains 16,896 CUDA cores organized into 132 Streaming Multiprocessors (SMs). Each SM can execute thousands of threads simultaneously using the **Single Instruction, Multiple Thread (SIMT)**[^fn-simt] execution model. Unlike a CPU, which optimizes for single-thread latency, a GPU hides memory latency by maintaining thousands of threads in flight and switching between them when one stalls on a memory access.
@@ -310,18 +354,87 @@ Custom silicon is therefore a bet on workload stability, and the organizations t
 
 The bet pays off handsomely when workloads are stable: a purpose-built ASIC can deliver 5--10 $\times$ the energy efficiency of a general-purpose GPU for its target operation. But the consequences of a wrong bet are severe, as the chip's fixed dataflow cannot be reprogrammed to accommodate a fundamentally new computational pattern.
 
-| **Feature** | **CPU** | **GPU** (H100) | **TPU** (v5p) | **Custom ASIC** |
-|:---|:---:|:---:|:---:|:---:|
-| **Arithmetic Core** | Scalar/Vector | Tensor Core | Systolic Array | Fixed Dataflow |
-| **Execution** | Instruction | SIMT | Data-Driven | Hardwired |
-| **Memory Control** | Cache Hierarchy | L1/L2 + HBM | Managed Scratchpad | Explicit Mesh |
-| **Flexibility** | **Extreme** | High (CUDA) | Moderate (XLA) | Low |
-| **Efficiency** | Low | High | Very High | **Extreme** |
+*Can we scale the silicon die to the size of the entire wafer?*
 
-: **The Accelerator Spectrum**. As we move from left to right, we trade general-purpose programmability for compute density and power efficiency. The optimal choice depends on the workload's regularity, expected lifetime, and scale of deployment. {#tbl-accelerator-comparison}
+### Wafer-Scale Engines {#sec-compute-wafer-scale}
+
+\index{Wafer-Scale Engine}
+\index{Cerebras}
+
+**Wafer-Scale Engines (WSE)** represent the ultimate pursuit of data locality. While every other architecture on the spectrum relies on chiplets or discrete dies connected by relatively slow PCB-level or package-level interconnects, a wafer-scale engine (like the Cerebras WSE-3) is a single, continuous piece of silicon the size of a dinner plate. By avoiding the need to "dice" the wafer into individual chips, a WSE can maintain a single, massive on-chip interconnect across its entire surface.
+
+The WSE-3 contains 900,000 AI-optimized cores and 44 GB of on-chip SRAM, all connected by a silicon fabric that delivers 21 PB/s of memory bandwidth. To put this in perspective, a single WSE-3 has roughly the same compute and memory bandwidth as a cluster of hundreds of H100 GPUs, but because the entire system resides on a single piece of silicon, the communication latency between any two cores is measured in nanoseconds rather than microseconds.
+
+The challenge of wafer-scale integration is physical: manufacturing yield, power delivery, and thermal expansion. A single defect on a standard chip might render it useless, but on a wafer-scale engine, the software must be "defect-aware," routing around local manufacturing flaws in the silicon fabric. Delivering 23 kW of power to a single piece of silicon and cooling it requires specialized manifold-level liquid cooling that is closer to industrial plumbing than traditional computer engineering.
+
+Wafer-scale engines sit at a unique point on the spectrum: they are highly specialized in their *physical* architecture but flexible in their *computational* model, as the underlying cores are often general-purpose enough to execute diverse ML kernels. They represent a "Scale Up" philosophy that attempts to eliminate the Communication Wall by making the cluster the chip.
+
+::: {#fig-wafer-scale-engine fig-env="figure" fig-pos="htb" fig-cap="**Wafer-Scale Engine (WSE) Architecture**: Unlike traditional processors, a WSE uses the entire 300mm silicon wafer as a single continuous compute fabric. This eliminates the 'Dicing' process and replaces PCB-level interconnects with a high-bandwidth on-chip mesh. The software must be defect-aware, routing data through a unified fabric that treats the entire wafer as a single logical processor with uniform memory access (UMA) characteristics across 900,000 cores." fig-alt="Diagram showing a large circular silicon wafer covered in a grid of hundreds of thousands of small compute cores. A red line shows a data path routing around a black 'defect' node in the grid. Inset shows a magnifying glass over a 4x4 grid of cores connected by high-speed local links."}
+```{.tikz}
+\begin{tikzpicture}[line join=round, font=\usefont{T1}{phv}{m}{n}\small, scale=0.8]
+\tikzset{
+  core/.style={rectangle, draw=BlueLine, fill=BlueL!40, minimum size=3.5mm, line width=0.4pt, rounded corners=0.5pt},
+  defect/.style={rectangle, draw=RedLine, fill=RedL, minimum size=3.5mm, line width=0.4pt, rounded corners=0.5pt},
+  link/.style={line width=0.6pt, black!30},
+  route/.style={line width=1.2pt, OrangeLine, -{Triangle[length=3pt, width=4pt]}}
+}
+
+% Draw the Wafer (circular boundary)
+\draw[line width=1.5pt, black!10, fill=black!2] (0,0) circle (4.2);
+\draw[line width=0.8pt, black!20] (0,0) circle (4.15);
+
+% Draw Grid of Cores (subset for visualization)
+\foreach \x in {-8,-7,...,8} {
+  \foreach \y in {-8,-7,...,8} {
+    \pgfmathsetmacro{\dist}{sqrt(\x*\x + \y*\y)*0.45}
+    \ifdim \dist pt < 4.0pt
+      \node[core] (c\x\y) at (\x*0.45, \y*0.45) {};
+    \fi
+  }
+}
+
+% Simulate a couple of defects
+\node[defect] at (0.45*2, 0.45*1) {};
+\node[defect] at (0.45*-3, 0.45*-4) {};
+
+% Example routing path
+\draw[route] (c-2-2) -- (c-2-1) -- (c-1-1) -- (c0-1) -- (c1-1) -- (c1-2) -- (c2-2) -- (c3-2);
+
+% Zoom inset
+\begin{scope}[shift={(5.5, 1.5)}, scale=1.2]
+  \draw[black!20, fill=white, rounded corners=3pt] (-1.2,-1.2) rectangle (1.2,1.2);
+  \foreach \x in {-1,0,1} {
+    \foreach \y in {-1,0,1} {
+      \node[core, minimum size=6mm] (z\x\y) at (\x*0.7, \y*0.7) {};
+    }
+  }
+  % Links in zoom
+  \foreach \x in {-1,0,1} {
+    \draw[link] (\x*0.7, -0.9) -- (\x*0.7, 0.9);
+    \draw[link] (-0.9, \x*0.7) -- (0.9, \x*0.7);
+  }
+  \node[font=\fontsize{6pt}{6}\selectfont] at (0,-1.05) {Inter-core Links (PB/s)};
+\end{scope}
+
+% Labels
+\node[below=0.2 of (0,-4.2)] {\textbf{300mm Silicon Wafer}};
+\node[above right=0.1 and 0.1 of (5.5, 2.7)] {\textbf{Unified Compute Fabric}};
+
+\end{tikzpicture}
+```
+:::
+
+| **Feature**         |    **CPU**    | **GPU** (H100) | **TPU** (v5p)  | **Wafer-Scale** | **Custom ASIC** |
+|:--------------------|:-------------:|:--------------:|:--------------:|:---------------:|:---------------:|
+| **Arithmetic Core** | Scalar/Vector |  Tensor Core   | Systolic Array | RISC-style Core |  Fixed Dataflow |
+| **Execution**       |  Instruction  |      SIMT      |  Data-Driven   |     Dataflow    |    Hardwired    |
+| **Memory Control**  |     Cache     |  L1/L2 + HBM   |   Scratchpad   |   On-Chip SRAM  |  Explicit Mesh  |
+| **Flexibility**     |  **Extreme**  |      High      |    Moderate    |       High      |       Low       |
+| **Efficiency**      |      Low      |      High      |   Very High    |       High      |   **Extreme**   |
+
+: **The Accelerator Spectrum**. As we move from left to right, we trade general-purpose programmability for compute density and power efficiency. Wafer-scale engines occupy a distinct niche, providing cluster-scale performance on a single piece of silicon. {#tbl-accelerator-comparison}
 
 For our `{python} gpt3_params_b`B model, the choice is not purely about peak FLOPS. If we are a research lab experimenting with novel architectures weekly, the GPU's flexibility justifies its generality tax. If we are deploying a fixed Transformer at scale for years, the TPU's dataflow efficiency or a custom ASIC's power advantage may dominate total cost. The accelerator spectrum is ultimately an economic question: *how much flexibility can we afford to surrender, given the stability of our workload?*
-
 
 An emerging trend in accelerator design is the **chiplet** architecture, exemplified by NVIDIA's Blackwell and AMD's Instinct MI300 series. Rather than fabricating a single monolithic die, chiplet-based designs partition the processor into multiple smaller dies connected by a high-bandwidth die-to-die interconnect on a common package substrate. This approach addresses two physical limitations that constrain monolithic designs.
 
@@ -359,14 +472,112 @@ This accelerating cadence means that the hardware a team deploys today will be t
 
 A subtlety that affects fleet consistency is the **silicon lottery** -- the manufacturing reality where microscopic variance in 4nm lithography produces a distribution of chip quality across each wafer. NVIDIA manages this yield curve through aggressive binning: dies capable of sustaining high clock frequencies at strictly controlled voltages under the full TDP are designated as premium H100 SXM modules, while those with higher leakage currents or minor defects become H100 PCIe cards or are fused down to lower-tier products. Even within the top-tier SXM bin, the achievable boost clock varies based on silicon characteristics. In a synchronous training cluster, the collective communication primitives are blocked by the slowest participant. A single chip running 50 MHz below the fleet average can degrade the effective throughput of the entire cluster by 5--10%, which is why sophisticated fleet management systems track per-GPU performance metrics and quarantine underperforming silicon to inference pools where the impact of individual chip variance is less pronounced.
 
-| **Architecture** | **Year** | **Key Innovation** | **FP16 Tensor** | **TDP** | **NVLink BW** |
-|:---|:---:|:---|:---:|:---:|:---:|
-| **Volta** (V100) | 2017 | First Tensor Core | 125 TFLOPS | 300 W | 300 GB/s |
-| **Ampere** (A100) | 2020 | Multi-precision, MIG | 312 TFLOPS | 400 W | 600 GB/s |
-| **Hopper** (H100) | 2022 | Transformer Engine, FP8 | 1,979 TFLOPS | 700 W | 900 GB/s |
-| **Blackwell** (B200) | 2024 | Dual-die, NVLink 5 | 4,500 TFLOPS | 1,000 W | 1,800 GB/s |
+| **Architecture**     | **Year** | **Key Innovation**      | **FP16 Tensor** | **TDP** | **NVLink BW** |
+|:---------------------|:--------:|:------------------------|:---------------:|:-------:|:-------------:|
+| **Volta** (V100)     |   2017   | First Tensor Core       |    125 TFLOPS   |  300 W  |    300 GB/s   |
+| **Ampere** (A100)    |   2020   | Multi-precision, MIG    |    312 TFLOPS   |  400 W  |    600 GB/s   |
+| **Hopper** (H100)    |   2022   | Transformer Engine, FP8 |   1,979 TFLOPS  |  700 W  |    900 GB/s   |
+| **Blackwell** (B200) |   2024   | Dual-die, NVLink 5      |   4,500 TFLOPS  | 1,000 W |   1,800 GB/s  |
 
 : **NVIDIA GPU Architecture Evolution**. Each generation approximately doubles efficiency (TFLOPS/W) while introducing architectural features targeted at the dominant ML workload pattern of its era. The NVLink bandwidth doubles each generation, tracking the growth in model sizes that require increasingly aggressive tensor parallelism. {#tbl-gpu-evolution}
+
+The table above compresses four hardware generations into a few columns. @fig-accelerator-efficiency-wall unpacks two of those columns, raw throughput and power efficiency, to reveal a divergence that shapes every infrastructure decision in this volume.
+
+```{python}
+#| label: fig-accelerator-efficiency-wall
+#| fig-cap: "**The Accelerator Efficiency Wall**. FP16 throughput (blue, left axis) and power efficiency (green, right axis) for six generations of NVIDIA datacenter GPUs, both on logarithmic scales. Raw throughput has grown 236$\\times$ from the P100 to the B200, but efficiency (TFLOPS per watt) has grown only 70$\\times$ over the same period. The shaded region highlights the widening gap that the power grid, cooling systems, and datacenter infrastructure must absorb."
+#| fig-alt: "Dual-axis log-scale plot showing GPU FP16 TFLOPS and TFLOPS per watt from 2016 to 2024 across six NVIDIA GPU generations."
+#| echo: false
+import numpy as np
+from mlsys import viz
+
+fig, ax1, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+
+# --- Verified data (NVIDIA datacenter GPUs, official datasheets) ---
+gpus    = ["P100\nSXM2", "V100\nSXM2", "A100\nSXM4", "H100\nSXM5", "B100", "B200"]
+years   = [2016,          2017,          2020,          2022,          2024,   2024  ]
+tflops  = [21.2,          125,           312,           989,           1750,   5000  ]
+tdp_w   = [300,           300,           400,           700,           700,    1000  ]
+eff     = [t / w for t, w in zip(tflops, tdp_w)]  # TFLOPS/W
+
+years_arr = np.array(years, dtype=float)
+
+# --- Left axis: FP16 TFLOPS ---
+ax1.semilogy(years_arr, tflops, "o-", color=COLORS["BlueLine"], markersize=8,
+             linewidth=2, label="FP16 TFLOPS", zorder=5)
+ax1.set_ylabel("FP16 TFLOPS (log scale)", color=COLORS["BlueLine"])
+ax1.tick_params(axis="y", labelcolor=COLORS["BlueLine"])
+ax1.set_ylim(10, 10000)
+
+# --- Right axis: TFLOPS/Watt ---
+ax2 = ax1.twinx()
+ax2.semilogy(years_arr, eff, "s-", color=COLORS["GreenLine"], markersize=8,
+             linewidth=2, label="TFLOPS / Watt", zorder=5)
+ax2.set_ylabel("TFLOPS / Watt (log scale)", color=COLORS["GreenLine"])
+ax2.tick_params(axis="y", labelcolor=COLORS["GreenLine"])
+ax2.set_ylim(0.01, 10)
+ax2.spines["right"].set_visible(True)
+ax2.spines["right"].set_color(COLORS["GreenLine"])
+
+# --- Shade the divergence gap ---
+ax1.fill_between(years_arr, tflops, [e * tflops[0] / eff[0] for e in eff],
+                 alpha=0.08, color=COLORS["OrangeLine"])
+
+# --- Label each GPU ---
+for i, g in enumerate(gpus):
+    ax1.annotate(g, (years[i], tflops[i]), textcoords="offset points",
+                 xytext=(10, -5), fontsize=7.5, color=COLORS["BlueLine"])
+
+# --- Growth annotations ---
+ax1.annotate("236$\\times$ raw TFLOPS",
+             xy=(2023.2, 3500), fontsize=9, color=COLORS["BlueLine"],
+             fontstyle="italic",
+             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS["BlueLine"], alpha=0.7))
+ax2.annotate("70$\\times$ efficiency",
+             xy=(2022.7, 0.035), fontsize=9, color=COLORS["GreenLine"],
+             fontstyle="italic",
+             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS["GreenLine"], alpha=0.7))
+
+ax1.set_xlabel("Release Year")
+ax1.set_xlim(2015, 2025)
+
+# --- Combined legend ---
+lines1, labels1 = ax1.get_legend_handles_labels()
+lines2, labels2 = ax2.get_legend_handles_labels()
+ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left",
+           frameon=True, fancybox=True, framealpha=0.9)
+ax1.set_title("")
+plt.show()
+```
+
+@fig-accelerator-efficiency-wall quantifies a critical asymmetry: while each GPU generation delivers dramatically more raw throughput, the power required to sustain that throughput grows nearly as fast. The 236 $\times$ increase in FP16 TFLOPS from P100 to B200 is accompanied by only a 70 $\times$ increase in TFLOPS per watt, which means that the datacenter's power grid and cooling infrastructure must absorb the difference. This divergence is the physical root of the Power Wall discussed in the next sections and explains why liquid cooling, megawatt-scale power delivery, and thermal management dominate modern datacenter design.
+
+#### Evolution of TPU Architectures {#sec-compute-tpu-evolution}
+
+\index{TPU}
+\index{Google Cloud TPU}
+
+Google's TPU trajectory follows a different path, focusing on **distributed efficiency** and **XLA compiler integration**. While GPUs emphasize peak per-chip throughput and software flexibility (CUDA), the TPU is designed from the beginning as a "Pod-scale" resource. Every TPU chip is born as part of a larger cluster, with dedicated inter-chip interconnect (ICI) links that bypass the host CPU entirely.
+
+The **TPU v1** (2015) was a dedicated inference chip with a 256 $\times$ 256 systolic array, delivering 92 TOPS (INT8) for the matrix operations that dominated Google's production inference workloads.
+
+The **TPU v2** (2017) and **TPU v3** (2018) transitioned to training, introducing bfloat16 (BF16) precision to eliminate the dynamic range issues of standard FP16. These generations pioneered the TPU Pod, with v3 pods scaling to 1,024 chips and 100+ PFLOPS of aggregate compute.
+
+The **TPU v4** (2021) introduced an optical circuit switch (OCS) in the pod-scale network, allowing the physical topology of the pod to be reconfigured for different workloads. This generation also brought significant per-chip improvements, delivering 275 TFLOPS of BF16 compute.
+
+The **TPU v5p** (2023) is the current state-of-the-art for large-scale training. It features 459 TFLOPS of BF16 compute and 95 GB of HBM, but its true advantage lies in its interconnect: 1,600 GB/s of ICI bandwidth, optimized for the massive AllReduce operations required by billion-parameter models.
+
+| **Generation** | **Year** | **Key Innovation**         | **Peak BF16** | **HBM** | **ICI BW** |
+|:---------------|:--------:|:---------------------------|:-------------:|:-------:|:----------:|
+| **TPU v1**     |   2015   | Systolic Array (Inference) |    92 TOPS*   |   ---   |    ---     |
+| **TPU v2**     |   2017   | High-Bandwidth Memory      |   45 TFLOPS   |  16 GB  |  600 GB/s  |
+| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |   105 TFLOPS  |  32 GB  |  650 GB/s  |
+| **TPU v4**     |   2021   | Optical Circuit Switching  |   275 TFLOPS  |  32 GB  | 1,200 GB/s |
+| **TPU v5p**    |   2023   | SparseCore, HBM3           |   459 TFLOPS  |  95 GB  | 1,600 GB/s |
+
+: **Google TPU Architecture Evolution**. The TPU's development highlights a "Pod-first" design philosophy where inter-chip interconnect bandwidth and compiler-level optimization (XLA) are as important as peak per-chip arithmetic. *Note: TPU v1 was INT8 only.* {#tbl-tpu-evolution}
+
+This comparison reveals a divergence in philosophy. GPU evolution is a race to pack more arithmetic and higher-precision Tensor Cores onto a single package, using chiplets (Blackwell) to overcome physical die-size limits. TPU evolution is a race to build more efficient warehouse-scale computers, where the individual chip's performance is secondary to the pod's collective bandwidth and reconfigurability.
 
 The accelerator's arithmetic engine is now extraordinarily powerful -- capable of nearly 2,000 TFLOPS on the H100. But raw arithmetic throughput is meaningless if the data cannot reach the compute units fast enough. The next section examines the fundamental bottleneck that limits every accelerator's effective performance: the Memory Wall.
 
@@ -390,7 +601,7 @@ The memory hierarchy within a single accelerator spans orders of magnitude in bo
 
 ::: {.callout-definition title="High Bandwidth Memory (HBM)"}
 
-**High Bandwidth Memory (HBM)** is a specialized DRAM architecture that uses 3D stacking of memory dies connected via **Through-Silicon Vias (TSVs)**. By placing the memory stack on the same silicon substrate as the processor, HBM minimizes the physical distance data must travel and maximizes the number of parallel data paths, achieving bandwidths 50 $\times$ greater than conventional DRAM.
+***High Bandwidth Memory (HBM)***\index{High Bandwidth Memory!definition} is a specialized DRAM architecture that uses 3D stacking of memory dies connected via **Through-Silicon Vias (TSVs)**. By placing the memory stack on the same silicon substrate as the processor, HBM minimizes the physical distance data must travel and maximizes the number of parallel data paths, achieving bandwidths 50 $\times$ greater than conventional DRAM.
 
 :::
 
@@ -414,13 +625,13 @@ The entire HBM assembly sits on the same silicon interposer as the processor die
 
 The interposer itself is a passive silicon substrate with etched wiring layers that connect the HBM stacks to the processor, forming what is effectively a miniature PCB made of silicon rather than fiberglass. The interposer's silicon construction allows much finer trace widths and tighter pitches than a fiberglass PCB, enabling thousands of parallel connections between the HBM stacks and the processor die in a physical area of just a few hundred square millimeters.
 
-| **Metric** | **Host DRAM** (DDR5) | **Accelerator HBM** (HBM3e) | **Scaling Factor** |
-|:---|:---:|:---:|:---:|
-| **Mechanism** | 2D PCB Traces | **3D Die Stacking** | - |
-| **Placement** | Socketed DIMMs | **On-package (Substrate)** | **Physical Proximity** |
-| **Bandwidth** | ~`{python} ddr_bw_str` GB/s | **~`{python} h100_bw` TB/s** | **~50 $\times$ Faster** |
-| **Interface Width** | 64-bit | **1024-bit per stack** | **16 $\times$ Wider** |
-| **Energy** | ~20 pJ/bit | **~2 pJ/bit** | **10 $\times$ Efficiency** |
+| **Metric**          |     **Host DRAM** (DDR5)    | **Accelerator HBM** (HBM3e)  |     **Scaling Factor**     |
+|:--------------------|:---------------------------:|:----------------------------:|:--------------------------:|
+| **Mechanism**       |        2D PCB Traces        |     **3D Die Stacking**      |             -              |
+| **Placement**       |        Socketed DIMMs       |  **On-package (Substrate)**  |   **Physical Proximity**   |
+| **Bandwidth**       | ~`{python} ddr_bw_str` GB/s | **~`{python} h100_bw` TB/s** |  **~50 $\times$ Faster**   |
+| **Interface Width** |            64-bit           |    **1024-bit per stack**    |   **16 $\times$ Wider**    |
+| **Energy**          |          ~20 pJ/bit         |        **~2 pJ/bit**         | **10 $\times$ Efficiency** |
 
 : **HBM vs. Standard DRAM Comparison**. HBM achieves its bandwidth advantage through three simultaneous innovations: 3D die stacking (more bits per package), TSV interconnects (shorter signal paths), and on-package placement (proximity to the processor). {#tbl-hbm-comparison}
 
@@ -440,12 +651,12 @@ The boundary between what resides in HBM and what resides in DDR is a critical d
 
 The evolution of HBM tracks the growth of model sizes with remarkable correspondence. Each generation increases the number of stacked dies, the signaling rate per pin, and the total capacity per stack, driven by the relentless growth in model parameters.
 
-| **Metric** | **HBM2e (A100)** | **HBM3 (H100)** | **HBM3e (B200)** | **HBM4 (Future)** |
-|:---|:---:|:---:|:---:|:---:|
-| **Peak Bandwidth** | ~2.0 TB/s | ~3.3 TB/s | **>4.8 TB/s** | **>6.0 TB/s** |
-| **Typical Capacity** | 40--80 GB | 80--96 GB | **192 GB** | **288 GB+** |
-| **Interface Width** | 1024-bit | 1024-bit | 1024-bit | **2048-bit** |
-| **Stack Height** | 8 dies | 8--12 dies | 12 dies | 16 dies |
+| **Metric**           | **HBM2e (A100)** | **HBM3 (H100)** | **HBM3e (B200)** | **HBM4 (Future)** |
+|:---------------------|:----------------:|:---------------:|:----------------:|:-----------------:|
+| **Peak Bandwidth**   |    ~2.0 TB/s     |    ~3.3 TB/s    |  **>4.8 TB/s**   |   **>6.0 TB/s**   |
+| **Typical Capacity** |    40--80 GB     |    80--96 GB    |    **192 GB**    |    **288 GB+**    |
+| **Interface Width**  |     1024-bit     |     1024-bit    |     1024-bit     |    **2048-bit**   |
+| **Stack Height**     |      8 dies      |    8--12 dies   |     12 dies      |      16 dies      |
 
 : **Evolution of High Bandwidth Memory**. Each generation roughly doubles bandwidth, tracking the doubling of frontier model sizes every 12--18 months. The jump to HBM4 doubles the interface width for the first time since HBM's introduction, signaling that pin-rate increases alone can no longer sustain the required bandwidth growth. {#tbl-hbm-evolution}
 
@@ -467,7 +678,7 @@ This interposer area constraint creates an interesting design tension. Making th
 
 The distinction between memory *capacity* (how many gigabytes the HBM can store) and memory *bandwidth* (how many terabytes per second it can deliver) is one of the most practically important concepts in ML infrastructure. Capacity determines whether a model's weights *fit*. Bandwidth determines how fast the model can *run*. For autoregressive text generation, where each token requires a full pass through the model's weights, bandwidth is almost always the binding constraint.
 
-::: {#nb-token-latency .callout-notebook title="Napkin Math: The Physics of Token Latency"}
+::: {#nb-token-latency .callout-notebook title="The Physics of Token Latency"}
 
 **Scenario**: Generating one token for Llama-3 70B (140 GB weights in FP16) on an NVIDIA H100.
 
@@ -567,7 +778,7 @@ The token latency calculation above demonstrated that a 70B model on an H100 is 
 
 ::: {.callout-definition title="Arithmetic Intensity"}
 
-**Arithmetic Intensity** ($I$) is the ratio of floating-point operations performed to the number of bytes transferred from memory:
+***Arithmetic Intensity***\index{Arithmetic Intensity!definition} ($I$) is the ratio of floating-point operations performed to the number of bytes transferred from memory:
 
 $$I = \frac{\text{FLOPs}}{\text{Bytes Transferred}}$$
 
@@ -583,7 +794,7 @@ This equation has an intuitive physical interpretation. If the workload's arithm
 
 ::: {.callout-definition title="Ridge Point"}
 
-The **Ridge Point** is the arithmetic intensity at which the memory bandwidth ceiling meets the compute ceiling:
+***Ridge Point***\index{Ridge Point!definition} is the arithmetic intensity at which the memory bandwidth ceiling meets the compute ceiling:
 
 $$I_{\text{ridge}} = \frac{\text{Peak Compute (FLOP/s)}}{\text{Memory BW (byte/s)}}$$
 
@@ -729,7 +940,7 @@ The hardware dictates the software abstraction, which in turn shapes what archit
 
 ::: {.callout-definition title="Tensor Core"}
 
-A **Tensor Core** is a specialized hardware unit within an NVIDIA GPU that performs a fused matrix-multiply-accumulate (MMA) operation on small tile matrices in a single clock cycle: $D = A \times B + C$. Each Tensor Core computes the result for a small tile (e.g., 16 $\times$ 16 $\times$ 16 for FP16 on H100), producing thousands of multiply-accumulate results simultaneously. The key distinction from traditional SIMD/SIMT execution is that Tensor Cores operate on *matrices*, not individual elements or vectors, enabling significantly higher throughput for structured mathematical operations.
+***Tensor Core***\index{Tensor Core!definition} is a specialized hardware unit within an NVIDIA GPU that performs a fused matrix-multiply-accumulate (MMA) operation on small tile matrices in a single clock cycle: $D = A \times B + C$. Each Tensor Core computes the result for a small tile (e.g., 16 $\times$ 16 $\times$ 16 for FP16 on H100), producing thousands of multiply-accumulate results simultaneously. The key distinction from traditional SIMD/SIMT execution is that Tensor Cores operate on *matrices*, not individual elements or vectors, enabling significantly higher throughput for structured mathematical operations.
 
 :::\index{Tensor Core}
 
@@ -759,7 +970,7 @@ The gap between peak and sustained throughput arises from several sources, each 
 
 ::: {.callout-definition title="Pipeline Bubble"}
 
-A **Pipeline Bubble** is the idle time in pipeline-parallel training caused by stages waiting for inputs from upstream stages during the fill and drain phases of each micro-batch cycle. When a model is divided into $p$ pipeline stages processing $m$ micro-batches, the bubble fraction is approximately $(p-1)/m$, representing the fraction of total compute time wasted on stage idle periods. Reducing the bubble requires increasing the micro-batch count $m$, which in turn increases peak memory consumption because more intermediate activations must be stored simultaneously. This memory-efficiency trade-off is a central design tension in pipeline-parallel systems, examined in detail in @sec-distributed-training-systems.
+***Pipeline Bubble***\index{Pipeline Bubble!definition} is the idle time in pipeline-parallel training caused by stages waiting for inputs from upstream stages during the fill and drain phases of each micro-batch cycle. When a model is divided into $p$ pipeline stages processing $m$ micro-batches, the bubble fraction is approximately $(p-1)/m$, representing the fraction of total compute time wasted on stage idle periods. Reducing the bubble requires increasing the micro-batch count $m$, which in turn increases peak memory consumption because more intermediate activations must be stored simultaneously. This memory-efficiency trade-off is a central design tension in pipeline-parallel systems, examined in detail in @sec-distributed-training-systems.
 
 :::
 
@@ -773,7 +984,7 @@ For capacity planning, the sustained throughput rate, not the peak rate, should 
 
 ::: {.callout-definition title="Model FLOPS Utilization (MFU)"}
 
-**Model FLOPS Utilization (MFU)** is the ratio of the floating-point operations actually performed on useful model computation to the hardware's theoretical peak throughput:
+***Model FLOPS Utilization (MFU)***\index{Model FLOPS Utilization!definition} is the ratio of the floating-point operations actually performed on useful model computation to the hardware's theoretical peak throughput:
 
 $$\text{MFU} = \frac{\text{Achieved FLOPS}}{\text{Peak FLOPS}}$$
 
@@ -794,7 +1005,7 @@ Every floating-point operation dissipates energy as heat. A Tensor Core performi
 
 ::: {.callout-definition title="Thermal Design Power (TDP)"}
 
-**Thermal Design Power (TDP)** is the maximum sustained thermal load (in watts) that a processor's cooling solution must be designed to remove. TDP is *not* the same as peak power consumption: an accelerator can briefly exceed its TDP rating during transient spikes (a phenomenon called power overshoot), and it may consume less than its TDP under lighter workloads. TDP establishes the steady-state thermal contract between the chip and the cooling system.
+***Thermal Design Power (TDP)***\index{Thermal Design Power!definition} is the maximum sustained thermal load (in watts) that a processor's cooling solution must be designed to remove. TDP is *not* the same as peak power consumption: an accelerator can briefly exceed its TDP rating during transient spikes (a phenomenon called power overshoot), and it may consume less than its TDP under lighter workloads. TDP establishes the steady-state thermal contract between the chip and the cooling system.
 
 :::
 
@@ -890,16 +1101,16 @@ The relationship between numerical precision and hardware throughput is one of t
 
 The precision landscape for ML has evolved rapidly. The following table summarizes the available precisions on modern accelerators and their typical use cases:
 
-| **Format** | **Bits** | **Exponent** | **Mantissa** | **H100 TFLOPS** | **Typical Use** |
-|:---|:---:|:---:|:---:|:---:|:---|
-| **FP32** | 32 | 8 | 23 | 989 | Master weights, loss computation |
-| **TF32** | 19 | 8 | 10 | 989 | Training (NVIDIA default) |
-| **BF16** | 16 | 8 | 7 | 1,979 | Training, fine-tuning |
-| **FP16** | 16 | 5 | 10 | 1,979 | Training with loss scaling |
-| **FP8 (E4M3)** | 8 | 4 | 3 | 3,958 | Forward pass, weights |
-| **FP8 (E5M2)** | 8 | 5 | 2 | 3,958 | Backward pass, gradients |
-| **INT8** | 8 | N/A | N/A | 3,958 | Post-training quantization |
-| **INT4** | 4 | N/A | N/A | 7,916 | Weight-only quantization |
+| **Format**     | **Bits** | **Exponent** | **Mantissa** | **H100 TFLOPS** | **Typical Use**                  |
+|:---------------|:--------:|:------------:|:------------:|:---------------:|:---------------------------------|
+| **FP32**       |    32    |      8       |      23      |       989       | Master weights, loss computation |
+| **TF32**       |    19    |      8       |      10      |       989       | Training (NVIDIA default)        |
+| **BF16**       |    16    |      8       |      7       |      1,979      | Training, fine-tuning            |
+| **FP16**       |    16    |      5       |      10      |      1,979      | Training with loss scaling       |
+| **FP8 (E4M3)** |    8     |      4       |      3       |      3,958      | Forward pass, weights            |
+| **FP8 (E5M2)** |    8     |      5       |      2       |      3,958      | Backward pass, gradients         |
+| **INT8**       |    8     |     N/A      |     N/A      |      3,958      | Post-training quantization       |
+| **INT4**       |    4     |     N/A      |     N/A      |      7,916      | Weight-only quantization         |
 
 : **Precision Formats and Hardware Throughput on H100**. Each halving of precision approximately doubles the hardware throughput. The choice of precision affects both the training dynamics (convergence, numerical stability) and the infrastructure requirements (memory capacity, bandwidth utilization). Note that FP32 and TF32 share the same Tensor Core throughput because TF32 uses the same exponent width as FP32, differing only in mantissa precision. {#tbl-precision-throughput}
 
@@ -923,7 +1134,7 @@ At fleet scale, the energy cost of data movement determines the electricity bill
 
 This energy perspective also provides a physical foundation for understanding why different parallelism strategies have different efficiencies. Tensor parallelism requires data movement over NVLink (approximately 5 pJ per bit at the link level, plus the energy of the NVSwitch chips). Data parallelism requires data movement over InfiniBand (approximately 15--20 pJ per bit, including the energy of the HCA and switch). Pipeline parallelism moves less data but requires more complex scheduling. Each parallelism strategy represents a different point in the trade-off between communication energy and computation efficiency.
 
-::: {.callout-notebook title="Napkin Math: The Energy Cost of Data Movement"}
+::: {.callout-notebook title="The Energy Cost of Data Movement"}
 
 The iron law of modern computing is that moving data costs significantly more energy than manipulating it. We can prove this by analyzing the energy hierarchy of a single operation at the 4nm process node.
 
@@ -979,11 +1190,8 @@ Serving infrastructure is optimized for *latency* and *cost per query*: minimizi
 These different requirements drive different hardware and architecture choices:
 
 - **GPU utilization**: Training clusters achieve 30--50% MFU because large batch sizes push workloads into the compute-bound regime. Serving clusters at low batch sizes achieve less than 5% MFU because single-request inference is deeply memory-bound. Serving systems therefore aggressively batch requests to improve utilization, which introduces a trade-off between latency (requests must wait to be batched) and throughput (larger batches achieve higher utilization).
-
 - **Model replication**: Training distributes a single model across many GPUs using tensor and pipeline parallelism. Serving replicates the entire model (or a significant portion of it) across many GPUs, with each replica handling independent requests. This replication approach means that the total GPU memory required for serving is proportional to the number of concurrent requests the system must support, not just the model size.
-
 - **Network requirements**: Training requires high-bandwidth, low-latency inter-GPU communication for gradient synchronization. Serving requires minimal inter-GPU communication (each request is independent) but substantial client-facing network bandwidth to handle millions of API requests per second.
-
 - **Cost metric**: Training cost is measured in dollars per training run (a fixed, one-time cost). Serving cost is measured in dollars per 1,000 tokens generated (a variable, ongoing cost that accumulates over the model's operational lifetime). For popular models served at scale, the cumulative serving cost can exceed the training cost within weeks.
 
 These differences mean that the optimal serving infrastructure often uses different hardware, different software, and different facility designs than the training infrastructure. Some organizations use previous-generation GPUs (A100s) for serving because the memory bandwidth per dollar is competitive with current-generation GPUs, and the lower TDP (400 W vs. 700 W) allows higher rack density and lower cooling costs.
@@ -994,15 +1202,15 @@ The inference workload itself bifurcates into two distinct phases with opposing 
 
 The preceding sections have established the physical characteristics, analytical tools, and workload-specific considerations that govern accelerator selection. Synthesizing these into a practical decision framework requires mapping each workload archetype to the hardware characteristic that dominates its performance and cost.
 
-| **Workload** | **Binding Constraint** | **Key Metric** | **Recommended Class** |
-|:---|:---|:---|:---|
-| **LLM Training (>100B)** | Compute (high batch size) | Peak TFLOPS, NVLink BW | H100/B200, TPU v5p |
-| **LLM Inference (batch=1)** | Memory bandwidth | GB/s per dollar | A100, H100 (bandwidth/\$) |
-| **LLM Inference (batched)** | Compute + bandwidth | TFLOPS and GB/s | H100, B200 |
-| **Vision Model Training** | Compute (large spatial dims) | Peak TFLOPS | H100/B200, GPU preferred |
-| **Recommendation (embeddings)** | Memory capacity | GB per dollar | CPU DRAM + GPU hybrid |
-| **Fine-tuning (<13B)** | Memory capacity | HBM capacity | A100 (cost-effective) |
-| **Research / Prototyping** | Flexibility | Software ecosystem | GPU (CUDA), avoid ASICs |
+| **Workload**                    | **Binding Constraint**       | **Key Metric**         | **Recommended Class**     |
+|:--------------------------------|:-----------------------------|:-----------------------|:--------------------------|
+| **LLM Training (>100B)**        | Compute (high batch size)    | Peak TFLOPS, NVLink BW | H100/B200, TPU v5p        |
+| **LLM Inference (batch=1)**     | Memory bandwidth             | GB/s per dollar        | A100, H100 (bandwidth/\$) |
+| **LLM Inference (batched)**     | Compute + bandwidth          | TFLOPS and GB/s        | H100, B200                |
+| **Vision Model Training**       | Compute (large spatial dims) | Peak TFLOPS            | H100/B200, GPU preferred  |
+| **Recommendation (embeddings)** | Memory capacity              | GB per dollar          | CPU DRAM + GPU hybrid     |
+| **Fine-tuning (<13B)**          | Memory capacity              | HBM capacity           | A100 (cost-effective)     |
+| **Research / Prototyping**      | Flexibility                  | Software ecosystem     | GPU (CUDA), avoid ASICs   |
 
 : **The Accelerator Decision Matrix**. The optimal accelerator depends not on peak specifications but on which physical resource -- compute, bandwidth, or capacity -- is the binding constraint for the target workload. The Roofline Model provides the diagnostic: compute the arithmetic intensity, locate the workload relative to the ridge point, and select hardware that maximizes the binding resource per dollar. {#tbl-accelerator-decision}
 
@@ -1028,7 +1236,7 @@ Our `{python} gpt3_params_b`B model needs 350 GB for its FP16 weights alone. Wit
 
 ::: {.callout-definition title="Node"}
 
-A **Node** is a single physical server chassis containing multiple accelerators (typically 8), connected by a high-speed intra-node interconnect, and backed by substantial host memory. The node is the fundamental failure domain (if one component fails, the entire node is typically lost) and the basic scheduling unit for fleet orchestrators.
+***Node***\index{Node!definition} is a single physical server chassis containing multiple accelerators (typically 8), connected by a high-speed intra-node interconnect, and backed by substantial host memory. The node is the fundamental failure domain (if one component fails, the entire node is typically lost) and the basic scheduling unit for fleet orchestrators.
 
 :::
 
@@ -1052,18 +1260,18 @@ The defining characteristic of multi-accelerator systems is not the number of ch
 
 The bandwidth hierarchy is best understood as a series of concentric zones around each accelerator. The innermost zone is the HBM on the same package, with terabytes per second of bandwidth and sub-microsecond latency. The next zone encompasses the other accelerators within the same node, reachable over NVLink at hundreds of gigabytes per second with microsecond-scale latency. The outermost zone spans all other nodes in the cluster, connected by InfiniBand at tens of gigabytes per second with latency measured in single-digit microseconds. At each zone boundary, the bandwidth drops by roughly an order of magnitude while the latency increases by roughly an order of magnitude.
 
-| **Domain** | **Interconnect** | **Bandwidth** | **Latency** | **Scaling Limit** |
-|:---|:---|:---:|:---:|:---|
-| **Intra-Package** | Silicon Interposer | **~3.3 TB/s** | <100 ns | Single Chip |
-| **Intra-Node** | NVLink / ICI | **~`{python} nvlink_bw_str` GB/s** | ~1 μs | Node (8--16 Chips) |
-| **Intra-Node (IO)** | PCIe Gen5 x16 | **~`{python} pcie_bw_str` GB/s** | ~2 μs | CPU-GPU, NIC-GPU |
-| **Inter-Node** | InfiniBand NDR | **~`{python} ib_bw_gbs` GB/s** | ~5--10 μs | Pod (Thousands) |
+| **Domain**          | **Interconnect**   |           **Bandwidth**            | **Latency** | **Scaling Limit**  |
+|:--------------------|:-------------------|:----------------------------------:|:-----------:|:-------------------|
+| **Intra-Package**   | Silicon Interposer |           **~3.3 TB/s**            |   <100 ns   | Single Chip        |
+| **Intra-Node**      | NVLink / ICI       | **~`{python} nvlink_bw_str` GB/s** |    ~1 μs    | Node (8--16 Chips) |
+| **Intra-Node (IO)** | PCIe Gen5 x16      |  **~`{python} pcie_bw_str` GB/s**  |    ~2 μs    | CPU-GPU, NIC-GPU   |
+| **Inter-Node**      | InfiniBand NDR     |   **~`{python} ib_bw_gbs` GB/s**   |  ~5--10 μs  | Pod (Thousands)    |
 
 : **The Bandwidth Hierarchy**. Each physical boundary introduces an order-of-magnitude bandwidth cliff. These cliffs are not engineering failures to be optimized away; they reflect fundamental differences in the physics of each interconnect medium. The cliffs dictate model partitioning: Tensor Parallelism, which requires AllReduce after every layer, is strictly confined to the intra-node domain. {#tbl-bandwidth-hierarchy}
 
 ::: {.callout-definition title="The Bandwidth Hierarchy"}
 
-The **Bandwidth Hierarchy** is the physical ordering of interconnect bandwidths from fastest to slowest: on-chip SRAM (tens of TB/s), device memory such as HBM (single-digit TB/s), intra-node links such as NVLink (hundreds of GB/s), inter-node fabric such as InfiniBand or RoCE (tens of GB/s), and wide-area network (single-digit GB/s). Each tier drops by roughly one order of magnitude. This hierarchy is a consequence of immutable physics: shorter signal paths over denser wiring achieve higher bandwidth at lower energy per bit, and each physical boundary (die edge, package edge, chassis boundary, rack boundary) introduces a step change in distance, medium, and protocol overhead. System design must respect this hierarchy; parallelism strategies that place high-bandwidth communication on slow tiers will idle the arithmetic units.
+***Bandwidth Hierarchy***\index{Bandwidth Hierarchy!definition} is the physical ordering of interconnect bandwidths from fastest to slowest: on-chip SRAM (tens of TB/s), device memory such as HBM (single-digit TB/s), intra-node links such as NVLink (hundreds of GB/s), inter-node fabric such as InfiniBand or RoCE (tens of GB/s), and wide-area network (single-digit GB/s). Each tier drops by roughly one order of magnitude. This hierarchy is a consequence of immutable physics: shorter signal paths over denser wiring achieve higher bandwidth at lower energy per bit, and each physical boundary (die edge, package edge, chassis boundary, rack boundary) introduces a step change in distance, medium, and protocol overhead. System design must respect this hierarchy; parallelism strategies that place high-bandwidth communication on slow tiers will idle the arithmetic units.
 
 :::
 
@@ -1192,14 +1400,14 @@ Understanding how a large model's memory footprint maps onto a node's physical r
 
 For our `{python} gpt3_params_b`B model, the training memory breaks down as follows:
 
-| **Component** | **Precision** | **Memory per Parameter** | **Total for `{python} gpt3_params_b`B Model** |
-|:---|:---:|:---:|:---:|
-| **Model Weights** | FP16 | 2 bytes | 350 GB |
-| **Gradients** | FP16 | 2 bytes | 350 GB |
-| **Optimizer (Adam $m$)** | FP32 | 4 bytes | 700 GB |
-| **Optimizer (Adam $v$)** | FP32 | 4 bytes | 700 GB |
-| **Activations** | Mixed | Variable | 100--400 GB |
-| **Total** | | | **2.2--2.5 TB** |
+| **Component**            | **Precision** | **Memory per Parameter** | **Total for `{python} gpt3_params_b`B Model** |
+|:-------------------------|:-------------:|:------------------------:|:---------------------------------------------:|
+| **Model Weights**        |      FP16     |         2 bytes          |                     350 GB                    |
+| **Gradients**            |      FP16     |         2 bytes          |                     350 GB                    |
+| **Optimizer (Adam $m$)** |      FP32     |         4 bytes          |                     700 GB                    |
+| **Optimizer (Adam $v$)** |      FP32     |         4 bytes          |                     700 GB                    |
+| **Activations**          |     Mixed     |         Variable         |                  100--400 GB                  |
+| **Total**                |               |                          |                **2.2--2.5 TB**                |
 
 : **Training Memory Breakdown for a `{python} gpt3_params_b`B-Parameter Model**. The optimizer state alone (first and second moments in FP32) consumes 4 $\times$ the memory of the model weights, making optimizer memory the dominant component of training memory. This is why memory optimization techniques focus heavily on optimizer state sharding and offloading. {#tbl-memory-breakdown}
 
@@ -1222,11 +1430,11 @@ This pipelining ensures that each layer's computation can proceed without waitin
 
 The following table summarizes the memory tiers available within a DGX H100 node:
 
-| **Memory Tier** | **Capacity** | **Bandwidth** | **Latency** | **Role** |
-|:---|:---:|:---:|:---:|:---|
-| **GPU HBM3** | 80 GB $\times$ 8 = 640 GB | 3.35 TB/s per GPU | <1 μs | Active computation |
-| **Host DDR5** | 2 TB | ~50 GB/s | ~100 ns | Optimizer state |
-| **NVMe SSD** | 8--30 TB | 5--7 GB/s | ~10 μs | Overflow, checkpoints |
+| **Memory Tier** |        **Capacity**       |   **Bandwidth**   | **Latency** | **Role**              |
+|:----------------|:-------------------------:|:-----------------:|:-----------:|:----------------------|
+| **GPU HBM3**    | 80 GB $\times$ 8 = 640 GB | 3.35 TB/s per GPU |    <1 μs    | Active computation    |
+| **Host DDR5**   |            2 TB           |      ~50 GB/s     |   ~100 ns   | Optimizer state       |
+| **NVMe SSD**    |          8--30 TB         |     5--7 GB/s     |    ~10 μs   | Overflow, checkpoints |
 
 : **Node Memory Hierarchy**. Each tier trades capacity for bandwidth. The training framework's memory manager must orchestrate data flow across these tiers to fit models whose total state exceeds the aggregate HBM capacity. {#tbl-node-memory}
 
@@ -1278,7 +1486,7 @@ Gradients match the weight size: 43.75 GB per GPU in FP16.
 
 This example illustrates why memory planning for frontier models is a careful engineering exercise rather than a simple capacity calculation. Every component of the training state must be assigned to a specific memory tier (HBM, DDR5, or NVMe), and the timing of transfers between tiers must be coordinated with the computation schedule to avoid stalls.
 
-::: {#nb-comm-overhead .callout-notebook title="Napkin Math: The Cost of Crossing the Cliff"}
+::: {#nb-comm-overhead .callout-notebook title="The Cost of Crossing the Cliff"}
 
 **Scenario**: Synchronizing a 1 GB gradient buffer during a training step.
 
@@ -1338,7 +1546,7 @@ For our `{python} gpt3_params_b`B model, training across 1,024 GPUs requires app
 
 ::: {.callout-definition title="Rack"}
 
-A **Rack** is a standard 42U (1.9 m) enclosure that physically concentrates multiple compute nodes, along with their power distribution, cooling infrastructure, and network switches. In ML infrastructure, the rack is the fundamental unit of power delivery (served by a Power Distribution Unit, or PDU) and the boundary at which cooling technology transitions from air to liquid.
+***Rack***\index{Rack!definition} is a standard 42U (1.9 m) enclosure that physically concentrates multiple compute nodes, along with their power distribution, cooling infrastructure, and network switches. In ML infrastructure, the rack is the fundamental unit of power delivery (served by a Power Distribution Unit, or PDU) and the boundary at which cooling technology transitions from air to liquid.
 
 :::
 
@@ -1369,15 +1577,15 @@ The cumulative efficiency across all five stages is typically 85--90%, meaning t
 
 To make this concrete, consider the power budget for a single rack containing four DGX H100 nodes:
 
-| **Component** | **Power (kW)** | **% of Rack Total** |
-|:---|:---:|:---:|
-| **GPU compute (32 $\times$ 700 W)** | 22.4 | 67% |
-| **Host CPUs and DRAM** | 3.2 | 10% |
-| **NVSwitch fabric** | 1.6 | 5% |
-| **InfiniBand HCAs** | 0.8 | 2% |
-| **Power conversion losses** | 2.8 | 8% |
-| **Cooling overhead (PUE 1.1)** | 2.7 | 8% |
-| **Total** | **33.5** | **100%** |
+| **Component**                       | **Power (kW)** | **% of Rack Total** |
+|:------------------------------------|:--------------:|:-------------------:|
+| **GPU compute (32 $\times$ 700 W)** |      22.4      |         67%         |
+| **Host CPUs and DRAM**              |      3.2       |         10%         |
+| **NVSwitch fabric**                 |      1.6       |          5%         |
+| **InfiniBand HCAs**                 |      0.8       |          2%         |
+| **Power conversion losses**         |      2.8       |          8%         |
+| **Cooling overhead (PUE 1.1)**      |      2.7       |          8%         |
+| **Total**                           |    **33.5**    |       **100%**      |
 
 : **Power Budget for a Four-Node DGX H100 Rack**. GPUs consume two thirds of total rack power, but the remaining one third (host systems, networking, power conversion, and cooling) cannot be eliminated and must be budgeted for when sizing the facility's electrical infrastructure. The power conversion losses (8%) represent the cumulative inefficiency of the five-stage delivery chain. {#tbl-rack-power}
 
@@ -1392,7 +1600,6 @@ In a training cluster, the picture is radically different. All accelerators exec
 In one of the early large-scale training deployments, a 512-GPU cluster experienced intermittent node failures during the first week of operation. The failures occurred at random intervals, with no apparent correlation to the model or software. Hardware diagnostics showed no component defects. The root cause turned out to be the datacenter's power infrastructure: the cluster's synchronous training steps created 2 MW power ramps that exceeded the response time of the facility's UPS battery inverters. The resulting voltage sags (drops of 5--8% lasting 10--50 ms) triggered the GPUs' undervoltage protection circuits, forcing hard resets. The fix required installing supercapacitor banks capable of delivering 500 kW for 100 ms, smoothing the transient until the UPS could respond. The lesson was that ML clusters do not behave like traditional datacenter workloads: the *temporal correlation* of power demand across thousands of chips creates a qualitatively different electrical engineering challenge.
 
 :::
-
 
 Modern ML datacenters address power transients through a layered defense strategy, with each layer covering a different timescale.
 
@@ -1444,7 +1651,7 @@ Reducing PUE is a primary engineering objective for ML datacenters because the c
 
 ::: {.callout-definition title="Power Usage Effectiveness (PUE)"}
 
-**Power Usage Effectiveness (PUE)** is the ratio of total facility power consumption to the power consumed by IT equipment:
+***Power Usage Effectiveness (PUE)***\index{Power Usage Effectiveness!definition} is the ratio of total facility power consumption to the power consumed by IT equipment:
 
 $$\text{PUE} = \frac{P_{\text{facility}}}{P_{\text{IT}}}$$
 
@@ -1470,19 +1677,19 @@ The trade-off is serviceability: accessing a failed component requires draining 
 
 The operational procedures for immersion-cooled facilities differ fundamentally from air-cooled ones, requiring specialized training for technicians and different approaches to cable management, since all connectors must be compatible with prolonged fluid exposure. Standard copper cables and connectors can corrode or swell when exposed to some dielectric fluids, necessitating the use of specialized fluid-resistant materials that add cost and reduce the available supply chain options.
 
-| **Metric** | **Air Cooling (Legacy)** | **Liquid Cooling (Modern)** |
-|:---|:---|:---|
-| **Max Power Density** | ~20--30 kW / Rack | **>120 kW / Rack** |
-| **Cooling Efficiency** | PUE ~1.5--2.0 | **PUE ~1.05--1.10** |
-| **Mechanism** | Forced-Air Fans | **Direct-to-Chip Coolant** |
-| **Heat Carrier** | Air (1.0 kJ/kg/K) | **Water (4.18 kJ/kg/K)** |
-| **Fan Power** | 30--40% of IT load | **<5% of IT load** |
+| **Metric**             | **Air Cooling (Legacy)** | **Liquid Cooling (Modern)** |
+|:-----------------------|:-------------------------|:----------------------------|
+| **Max Power Density**  | ~20--30 kW / Rack        | **>120 kW / Rack**          |
+| **Cooling Efficiency** | PUE ~1.5--2.0            | **PUE ~1.05--1.10**         |
+| **Mechanism**          | Forced-Air Fans          | **Direct-to-Chip Coolant**  |
+| **Heat Carrier**       | Air (1.0 kJ/kg/K)        | **Water (4.18 kJ/kg/K)**    |
+| **Fan Power**          | 30--40% of IT load       | **<5% of IT load**          |
 
 : **The Shift to Liquid Cooling**. At rack power densities above 30 kW, air cooling requires fan power that approaches the power consumed by the GPUs themselves. Liquid cooling is not a premium option; it is a thermodynamic requirement for modern ML racks. {#tbl-cooling-limits}
 
 The capital cost of these cooling technologies spans an order of magnitude. Standard air cooling infrastructure costs $2,000--5,000 per rack (fans, CRAC units, raised floor tiles). Direct-to-chip liquid cooling costs $15,000--25,000 per rack (cold plates, manifolds, CDUs, piping). Full immersion cooling costs $30,000--50,000 per tank (dielectric fluid, sealed tanks, specialized heat exchangers). The break-even analysis between air and liquid cooling depends on rack power density: at 20 kW per rack, air cooling's lower CapEx wins over a 3-year lifecycle. At 40 kW per rack, the electricity savings from liquid cooling's lower PUE (1.08 vs. 1.5) offset the higher CapEx within 18--24 months. At 60+ kW per rack -- the regime of modern ML infrastructure -- air cooling is physically impossible, making the comparison moot. For our `{python} gpt3_params_b`B model's 128-rack training cluster at `{python} rack_power_str` kW per rack, direct-to-chip liquid cooling is the standard choice, balancing density, serviceability, and cost. Immersion cooling offers marginal PUE improvement (1.03 vs. 1.08) but introduces operational complexity that most organizations find unjustified at current rack densities.
 
-::: {.callout-notebook title="Napkin Math: The Cooling Tax"}
+::: {.callout-notebook title="The Cooling Tax"}
 
 Consider a 1,000-GPU cluster of H100s at 700 W TDP each.
 
@@ -1582,7 +1789,7 @@ Training a `{python} gpt3_params_b`B model on this cluster produces approximatel
 
 In practice, communication overhead, pipeline bubbles, and maintenance windows extend this to 2--4 weeks. The gap between the idealized 67 hours and the practical 2--4 weeks is a factor of 5--10 $\times$, which illustrates the central theme of this section: at pod scale, the infrastructure's imperfections dominate over the raw capability of the silicon. Recovering this lost factor is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
-::: {.callout-notebook title="Napkin Math: Training Time for 175B"}
+::: {.callout-notebook title="Training Time for 175B"}
 
 We can derive the training time for our `{python} gpt3_params_b`B model from first principles.
 
@@ -1608,7 +1815,7 @@ We can derive the training time for our `{python} gpt3_params_b`B model from fir
 
 ::: {.callout-definition title="Warehouse-Scale Computer (WSC)"}
 
-A **Warehouse-Scale Computer (WSC)**[^fn-wsc] is a cluster of thousands of compute nodes designed and operated as a single computing entity. In a WSC, the network fabric replaces the system bus, distributed storage replaces the local disk, and a fleet orchestrator replaces the operating system. The term was introduced by Barroso, Clidaras, and Holzle to describe the shift from treating a datacenter as a collection of independent servers to treating it as a *single machine* whose components happen to be connected by wires rather than traces on a PCB [@barroso2018datacenter].
+***Warehouse-Scale Computer (WSC)***[^fn-wsc]\index{Warehouse-Scale Computer!definition} is a cluster of thousands of compute nodes designed and operated as a single computing entity. In a WSC, the network fabric replaces the system bus, distributed storage replaces the local disk, and a fleet orchestrator replaces the operating system. The term was introduced by Barroso, Clidaras, and Holzle to describe the shift from treating a datacenter as a collection of independent servers to treating it as a *single machine* whose components happen to be connected by wires rather than traces on a PCB [@barroso2018datacenter].
 
 :::
 
@@ -1687,7 +1894,7 @@ where $T_N$ is the training time on $N$ nodes. An efficiency of 1.0 means perfec
 
 ::: {.callout-definition title="Scaling Efficiency"}
 
-**Scaling Efficiency** ($\eta$) measures whether adding compute nodes produces proportional speedup. Given a baseline training time $T_1$ on a single node and an observed training time $T_N$ on $N$ nodes, scaling efficiency is $\eta = T_1 / (N \times T_N)$. A value of $\eta = 1.0$ represents perfect linear scaling; real distributed training systems typically achieve $\eta = 0.70\text{--}0.95$ due to communication overhead, pipeline bubbles, and load imbalances. Scaling efficiency is the single most important diagnostic for cluster productivity: a 10,000-GPU cluster at $\eta = 0.4$ delivers the same useful throughput as a 4,000-GPU cluster at $\eta = 1.0$, wasting 60% of the hardware investment.
+***Scaling Efficiency***\index{Scaling Efficiency!definition} ($\eta$) is a measure of whether adding compute nodes produces proportional speedup. Given a baseline training time $T_1$ on a single node and an observed training time $T_N$ on $N$ nodes, scaling efficiency is $\eta = T_1 / (N \times T_N)$. A value of $\eta = 1.0$ represents perfect linear scaling; real distributed training systems typically achieve $\eta = 0.70\text{--}0.95$ due to communication overhead, pipeline bubbles, and load imbalances. Scaling efficiency is the single most important diagnostic for cluster productivity: a 10,000-GPU cluster at $\eta = 0.4$ delivers the same useful throughput as a 4,000-GPU cluster at $\eta = 1.0$, wasting 60% of the hardware investment.
 
 :::
 
@@ -1705,7 +1912,7 @@ These three factors interact in important ways. Larger models with larger batch 
 
 However, even for large models, scaling does not continue indefinitely. There exists a **scaling cliff** beyond which adding more GPUs actually reduces cost-efficiency. For our `{python} gpt3_params_b`B model, the optimal cluster size is approximately 1,024--4,096 GPUs, where the communication-to-compute ratio remains favorable and scaling efficiency stays above 70%. Beyond 8,192 GPUs, the AllReduce communication time begins to dominate the backward pass computation time, and the efficiency drops below 50%. While the wall-clock training time may still decrease slightly with more GPUs, the *cost per useful FLOP* increases -- the organization is paying for 8,000 GPUs to do the work of 4,000. This non-linear relationship dictates that the economic viability of training frontier models is bounded not just by hardware availability but by the physics of interconnect latency. The cluster must be sized to operate in the linear regime of the scaling curve, and the model architecture (batch size, sequence length, parallelism dimensions) must be co-designed with the cluster size to maintain this balance.
 
-::: {.callout-notebook title="Napkin Math: Scaling Efficiency for a 175B Model"}
+::: {.callout-notebook title="Scaling Efficiency for a 175B Model"}
 
 **Setup**: Training a `{python} gpt3_params_b`B model on a DGX H100 cluster with `{python} ib_bw_str` Gbps InfiniBand per GPU.
 
@@ -1742,7 +1949,7 @@ This three-way comparison reveals a clear pattern: configurations that keep high
 
 ::: {.callout-definition title="Hierarchy-Aware Parallelism"}
 
-**Hierarchy-Aware Parallelism** is the practice of mapping different parallelism strategies to the bandwidth tiers in the cluster hierarchy so that the most communication-intensive strategies operate over the fastest links. In the standard configuration, tensor parallelism (which requires AllReduce after every layer) is confined to NVLink-connected accelerators within a single node; pipeline parallelism (which exchanges activations between stages once per micro-batch) spans nodes within a rack or pod over InfiniBand; and data parallelism (which synchronizes gradients once per training step) extends across the full cluster. The optimal parallelism mapping mirrors the physical bandwidth hierarchy, and deviating from this mapping wastes accelerator time on communication stalls.
+***Hierarchy-Aware Parallelism***\index{Hierarchy-Aware Parallelism!definition} is the practice of mapping different parallelism strategies to the bandwidth tiers in the cluster hierarchy so that the most communication-intensive strategies operate over the fastest links. In the standard configuration, tensor parallelism (which requires AllReduce after every layer) is confined to NVLink-connected accelerators within a single node; pipeline parallelism (which exchanges activations between stages once per micro-batch) spans nodes within a rack or pod over InfiniBand; and data parallelism (which synchronizes gradients once per training step) extends across the full cluster. The optimal parallelism mapping mirrors the physical bandwidth hierarchy, and deviating from this mapping wastes accelerator time on communication stalls.
 
 :::
 
@@ -1811,13 +2018,13 @@ The architectural bet is clear: Google optimizes for the predictable, nearest-ne
 
 A TPU v5p pod can scale to 8,960 chips in a single torus, providing an aggregate of approximately 459 PFLOPS of BF16 throughput. The torus topology's key advantage is its *constant bisection bandwidth per chip* as the pod scales: adding more chips to the torus extends the mesh without creating bottleneck layers (unlike a fat-tree, where the spine switches must scale with the number of endpoints). This property makes the torus economically attractive at very large scale, where the switch cost of a fat-tree becomes a significant fraction of total system cost. The trade-off is that non-local communication patterns (where data must traverse many hops across the torus) experience higher latency than in a fat-tree, which is why Google's XLA compiler includes topology-aware placement algorithms that map the model's communication graph onto the physical torus to minimize hop count for the most bandwidth-intensive operations.
 
-| **System** | **NVIDIA SuperPOD** | **Google TPU Pod** | **Meta Grand Teton** |
-|:---|:---|:---|:---|
-| **Interconnect** | InfiniBand Fat-Tree | **3D Torus ICI** | RoCE (RDMA over Ethernet) |
-| **Switching** | External Switches | **Direct Chip-to-Chip** | Leaf/Spine Ethernet |
-| **Topology** | Any-to-any | Nearest-Neighbor Mesh | Hierarchical Rail |
-| **Optimization** | Flexibility | **Dataflow Throughput** | Embedding Memory |
-| **Dominant Workload** | Diverse Research | **LLM Training** | Recommendation |
+| **System**            | **NVIDIA SuperPOD** | **Google TPU Pod**      | **Meta Grand Teton**      |
+|:----------------------|:--------------------|:------------------------|:--------------------------|
+| **Interconnect**      | InfiniBand Fat-Tree | **3D Torus ICI**        | RoCE (RDMA over Ethernet) |
+| **Switching**         | External Switches   | **Direct Chip-to-Chip** | Leaf/Spine Ethernet       |
+| **Topology**          | Any-to-any          | Nearest-Neighbor Mesh   | Hierarchical Rail         |
+| **Optimization**      | Flexibility         | **Dataflow Throughput** | Embedding Memory          |
+| **Dominant Workload** | Diverse Research    | **LLM Training**        | Recommendation            |
 
 : **WSC Architecture Comparison**. The choice of pod architecture is not a matter of preference but of workload economics. NVIDIA prioritizes generality because their customers run diverse workloads. Google prioritizes Transformer efficiency because that is their dominant workload. Meta prioritizes embedding capacity because recommendation models are their primary revenue driver. {#tbl-pod-comparison}
 
@@ -1956,7 +2163,7 @@ This value-oriented perspective often changes the optimal infrastructure decisio
 
 The inference dimension of TVO deserves particular emphasis because it often dominates the total economic picture. Training our `{python} gpt3_params_b`B model is a one-time cost -- even at $5 million per training run, it is a bounded expenditure. Serving the trained model, however, is an ongoing operational cost that accumulates indefinitely. A popular LLM serving 10 million queries per day, with each query generating an average of 500 tokens, processes 5 billion tokens daily. At an inference cost of $2.00 per million tokens on H100 hardware, the daily serving cost is $10,000, or approximately $3.6 million per year. The cumulative inference cost exceeds the training cost within 6 months. This inversion means that infrastructure decisions optimized for training (maximizing TFLOPS per dollar) may be suboptimal for the model's total lifecycle cost. An organization that spends an additional $2 million on training infrastructure to produce a model that is 20% more efficient at inference (through better architecture search enabled by faster experimentation) can recover that investment within months of deployment at scale.
 
-::: {.callout-notebook title="Napkin Math: The 10,000-GPU Cluster"}
+::: {.callout-notebook title="The 10,000-GPU Cluster"}
 
 Consider a cluster of 1,250 DGX H100 nodes (10,000 GPUs) for training our `{python} gpt3_params_b`B model.
 
@@ -1995,11 +2202,8 @@ The economic impact of this depreciation is significant. A V100 GPU that cost $1
 This rapid depreciation has several implications for fleet management:
 
 - **Accelerated write-off**: Most organizations depreciate ML accelerators over 3 years for accounting purposes, even if the hardware physically functions for longer. After 3 years, the residual value of the hardware is near zero because the secondary market is flooded with previous-generation equipment.
-
 - **Staggered refresh**: Rather than replacing the entire fleet simultaneously (which requires enormous CapEx outlays), some organizations refresh one third of their fleet each year, maintaining a mixed-generation cluster. This approach reduces peak CapEx but complicates software optimization, as training frameworks must handle heterogeneous hardware with different compute capabilities, memory capacities, and communication bandwidths.
-
 - **Resale and repurposing**: Older accelerators that are inefficient for training may still be cost-effective for inference, where memory bandwidth (which improves more slowly across generations) is the binding constraint. Some organizations sell their training-retired GPUs to smaller companies or repurpose them for less compute-intensive tasks like fine-tuning or small-model serving.
-
 - **Lease-back arrangements**: Some GPU-as-a-service providers offer lease-back programs where an organization purchases GPUs, leases them back to the provider when not in use, and receives the GPUs on demand when needed. This reduces the effective cost of ownership by generating revenue during idle periods.
 
 The depreciation challenge is particularly acute for organizations that train models infrequently. If a team trains one frontier model per year, the GPUs sit idle for months between training runs. The depreciation during those idle months represents pure loss, as the hardware's value decreases with calendar time regardless of whether it is being used.
@@ -2016,12 +2220,12 @@ For our `{python} gpt3_params_b`B model, the depreciation calculus is stark. A 1
 
 The trajectory of power efficiency across accelerator generations provides a quantitative framework for making cluster refresh decisions. Replacing an older cluster with a newer generation can pay for itself through electricity savings alone, particularly at scale.
 
-| **Generation**  | **TFLOPS (FP16)** | **TDP (W)** | **TFLOPS/W** | **Relative Efficiency** |
-|:---|---:|---:|:---:|:---:|
-| **V100 (2017)** | 125 | 300 | `{python} v100_ef` | 1.0 $\times$ |
-| **A100 (2020)** | 312 | 400 | `{python} a100_ef` | 1.9 $\times$ |
-| **H100 (2022)** | 1979 | 700 | `{python} h100_ef` | 6.8 $\times$ |
-| **B200 (2024)** | 4500 | 1000 | `{python} b200_ef` | 10.8 $\times$ |
+| **Generation**  | **TFLOPS (FP16)** | **TDP (W)** |    **TFLOPS/W**    | **Relative Efficiency** |
+|:----------------|------------------:|------------:|:------------------:|:-----------------------:|
+| **V100 (2017)** |               125 |         300 | `{python} v100_ef` |       1.0 $\times$      |
+| **A100 (2020)** |               312 |         400 | `{python} a100_ef` |       1.9 $\times$      |
+| **H100 (2022)** |              1979 |         700 | `{python} h100_ef` |       6.8 $\times$      |
+| **B200 (2024)** |              4500 |        1000 | `{python} b200_ef` |      10.8 $\times$      |
 
 : **Power Efficiency Across GPU Generations**. Each generation delivers substantially more computation per watt, meaning that for a fixed power budget, newer hardware provides multiplicatively more throughput. A facility that draws 10 MW can train models roughly 10 $\times$ faster with B200s than with V100s, without any increase in electricity cost. {#tbl-power-efficiency}
 
@@ -2126,7 +2330,6 @@ Determine: (a) the minimum number of GPUs needed, (b) whether the 2 MW power bud
 
 The economics of infrastructure complete our tour of the physical stack. From the transistors in a Tensor Core to the transformers in a datacenter's electrical substation, every level of the ML fleet exists because a physical constraint made the previous level insufficient. Before examining common misconceptions, we consider emerging technologies that may reshape the infrastructure landscape in the coming years.
 
-
 ## Emerging Infrastructure Technologies {#sec-compute-emerging}
 
 \index{CXL}
@@ -2208,7 +2411,6 @@ Underpinning all of these technologies is the evolution of **advanced packaging*
 These emerging technologies share a common theme: they all seek to flatten one or more of the bandwidth cliffs that define the current infrastructure hierarchy. CXL blurs the boundary between HBM and DRAM. Optical interconnects narrow the gap between intra-node and inter-node bandwidth. Disaggregated architectures decouple the fixed ratios that current node designs impose. Wafer-scale integration eliminates the off-chip memory boundary entirely. None of these technologies will eliminate the fundamental physics of data movement (signals travel at a finite speed, and moving data over longer distances consumes more energy), but each promises to shift the location and magnitude of the bottlenecks, which in turn will reshape the optimal fleet architecture.
 
 The next section examines common misconceptions that arise when the physical realities described in this chapter are overlooked.
-
 
 ## Fallacies and Pitfalls {#sec-compute-fallacies-pitfalls}
 
@@ -2302,7 +2504,7 @@ For our `{python} gpt3_params_b`B model, the chapter has shown that infrastructu
 
 The TCO analysis determines whether the entire enterprise makes financial sense. Each choice constrains the next, creating a system where no component can be optimized in isolation. Selecting the fastest accelerator is counterproductive if the cooling infrastructure cannot remove its heat. Building the densest rack is futile if the power grid cannot supply its demand. Deploying the widest network is wasteful if the workload's communication pattern does not utilize the bandwidth. Infrastructure engineering is systems engineering in its purest form: every component exists in a web of physical, economic, and operational constraints that must be satisfied simultaneously.
 
-::: {.callout-takeaways title="Key Takeaways"}
+::: {.callout-takeaways title="The Datacenter Is the Computer"}
 
 - **The Generality Tax**: Accelerators achieve 10--100 $\times$ higher throughput than CPUs by dedicating silicon area to matrix arithmetic rather than branch prediction and out-of-order execution. The trade-off is reduced flexibility. Each step along the spectrum from GPU to TPU to custom ASIC reclaims more die area for arithmetic.
 - **Memory Wall Dominance**: For single-request LLM inference, memory bandwidth determines latency because the arithmetic completes in microseconds while data transfer takes milliseconds. HBM costs 3--5 $\times$ more per GB than DDR but provides 50 $\times$ the bandwidth. The energy cost of moving data (20 pJ/byte) exceeds the energy cost of computing on it (1 pJ/MAC) by 20 $\times$.
@@ -2315,6 +2517,10 @@ The TCO analysis determines whether the entire enterprise makes financial sense.
 - **WSC Mindset**: At pod scale, the datacenter is the computer. Network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 
 :::
+
+The practitioner's central takeaway from this infrastructure stack is that no component exists in isolation. The `{python} gpt3_params_b`B-parameter running example was chosen precisely because its scale forces engagement with every level of the hierarchy: a model that fit comfortably on a single chip would never expose the cooling constraints, network topology trade-offs, or failure-rate arithmetic that dominate real production systems. By tracing a single model from the arithmetic unit through HBM, NVLink, the rack power envelope, and the datacenter fabric, the chapter demonstrates a mode of reasoning that transfers to any model at any scale. The specific numbers will change as hardware generations advance, but the method of analysis remains: identify the binding constraint at each level, quantify its impact, and propagate its consequences upward through the stack.
+
+This systems-level perspective is what separates infrastructure engineering from hardware shopping. An engineer who understands only accelerator FLOPS will over-provision compute and under-provision cooling. An engineer who understands only network bandwidth will design a topology that exceeds the facility's power budget. The discipline this chapter cultivates is the ability to hold the entire constraint graph in mind simultaneously, reasoning about how a change in numerical precision at the chip level alters the power draw at the rack level, the cooling load at the facility level, and the TCO at the business level. That integrative judgment, grounded in quantitative analysis rather than intuition, is the foundation on which every subsequent chapter in this volume builds.
 
 ::: {.callout-chapter-connection title="From Silicon to Wires"}
 

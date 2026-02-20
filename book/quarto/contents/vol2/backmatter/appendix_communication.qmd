@@ -1,0 +1,578 @@
+---
+engine: jupyter
+---
+
+# Communication Foundations {#sec-communication-foundations}
+
+## Purpose {.unnumbered}
+
+_What communication primitives bind the fleet together, and how do we predict their cost before running a single experiment?_
+
+Distributed ML training spends a surprising fraction of wall time not computing, but communicating. A 1,000-GPU training run may dedicate 30--50% of every iteration to synchronizing gradients, redistributing activations, or shuffling expert tokens. When that communication overhead is the bottleneck, no amount of faster arithmetic will help. The question shifts from "how many FLOPs?" to "how many bytes, across what topology, at what latency?"
+
+This appendix collects the communication cost models that let you answer those questions quantitatively. It starts with the foundational $\alpha$-$\beta$ model---the "Roofline for networks"---then derives the cost of every collective operation used in distributed training, analyzes pipeline bubble overhead, and closes with the economics of gradient compression. These models support the distributed strategies in @sec-distributed-training-systems, the collective algorithms in @sec-collective-communication, the fault tolerance mechanisms in @sec-fault-tolerance-reliability, and the performance analysis in @sec-performance-engineering.
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Apply the **$\alpha$-$\beta$ communication model** to predict transfer time for any message size and interconnect
+- Derive the **bandwidth and latency terms** for AllReduce, AllGather, ReduceScatter, AllToAll, and Broadcast
+- Select the correct **collective algorithm** (ring, tree, or recursive halving-doubling) based on message size and GPU count
+- Calculate **pipeline bubble fraction** for GPipe and interleaved schedules and determine the minimum microbatch count
+- Evaluate **gradient compression** proposals using break-even analysis
+
+:::
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix is designed as a reference. Use it when you need to translate a distributed training symptom ("AllReduce is slow," "pipeline bubbles are killing throughput," "should we compress gradients?") into a quantitative diagnosis.
+
+Conventions used here follow the book-wide notation. We use $\alpha$ for per-message startup latency, $\beta$ for link bandwidth in bytes per second, $N$ for the number of participating GPUs, and $M$ for total message size in bytes.
+
+- **When AllReduce is slow**: Use @sec-comm-foundations-collective-complexity to compute the expected time and compare ring vs. tree costs.
+- **When choosing ring vs. tree**: Use @sec-comm-foundations-algorithm-selection and the crossover analysis to match algorithm to message size.
+- **When pipeline bubbles dominate**: Use @sec-comm-foundations-pipeline-arithmetic to compute bubble fraction and determine how many microbatches you need.
+- **When gradient compression is proposed**: Use @sec-comm-foundations-compression to run the break-even calculation before committing engineering effort.
+
+```{python}
+#| label: appendix-comm-setup
+#| echo: false
+
+import math
+from mlsys.constants import (
+    INFINIBAND_NDR_BW_GBS, INFINIBAND_HDR_BW_GBS, ROCE_100G_BW_GBS,
+    IB_NDR_LATENCY_US, IB_HDR_LATENCY_US, ROCE_LATENCY_US, TCP_LATENCY_US,
+    NVLINK_H100_BW, PCIE_GEN5_BW,
+    LATENCY_NVLINK, LATENCY_PCIE_GEN5, LATENCY_INFINIBAND,
+    ALLREDUCE_FACTOR, GPUS_PER_HOST,
+    GB, second, NS, BILLION, MILLION,
+    BYTES_FP32, BYTES_FP16,
+)
+from mlsys.formatting import fmt, check, md_math
+from mlsys.formulas import (
+    calc_ring_allreduce_time,
+    calc_tree_allreduce_time,
+    calc_pipeline_bubble,
+)
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# Scenarios: alpha-beta model, collective costs, pipeline bubbles, compression
+
+class CommFoundations:
+    """Namespace for communication cost calculations."""
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # α-β values for each interconnect (convert to consistent units)
+    ib_ndr_alpha_us = IB_NDR_LATENCY_US          # μs
+    ib_ndr_beta_gbs = INFINIBAND_NDR_BW_GBS      # GB/s
+    ib_hdr_alpha_us = IB_HDR_LATENCY_US
+    ib_hdr_beta_gbs = INFINIBAND_HDR_BW_GBS
+    roce_alpha_us = ROCE_LATENCY_US
+    roce_beta_gbs = ROCE_100G_BW_GBS
+    tcp_alpha_us = TCP_LATENCY_US
+
+    nvlink_h100_bw_gbs = int(NVLINK_H100_BW.to(GB / second).magnitude)
+    pcie_gen5_bw_gbs = int(PCIE_GEN5_BW.to(GB / second).magnitude)
+    nvlink_latency_ns = int(LATENCY_NVLINK.to(NS).magnitude)
+    pcie_latency_ns = int(LATENCY_PCIE_GEN5.to(NS).magnitude)
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Crossover message size: M_cross = α × β
+    ib_ndr_alpha_s = ib_ndr_alpha_us * 1e-6      # seconds
+    ib_ndr_beta_bs = ib_ndr_beta_gbs * 1e9       # bytes/s
+    crossover_bytes = ib_ndr_alpha_s * ib_ndr_beta_bs
+    crossover_kb = crossover_bytes / 1e3
+
+    # Worked example: Ring AllReduce, 256 GPUs, 1 GB gradient, IB NDR
+    ring_n_gpus = 256
+    ring_msg_bytes = 1e9                          # 1 GB (1 billion bytes)
+    ring_time_s = calc_ring_allreduce_time(
+        ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s
+    )
+    ring_time_ms = ring_time_s * 1e3
+
+    # Tree AllReduce same scenario
+    tree_time_s = calc_tree_allreduce_time(
+        ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s
+    )
+    tree_time_ms = tree_time_s * 1e3
+
+    # Pipeline bubble examples
+    bubble_4_16 = calc_pipeline_bubble(4, 16)
+    bubble_4_8 = calc_pipeline_bubble(4, 8)
+    bubble_8_16 = calc_pipeline_bubble(8, 16)
+    bubble_8_32 = calc_pipeline_bubble(8, 32)
+    bubble_8_64 = calc_pipeline_bubble(8, 64)
+
+    # Interleaved: bubble = (P-1)/(P-1 + M×V)
+    interleaved_p = 8
+    interleaved_m = 16
+    interleaved_v = 4
+    bubble_interleaved = (interleaved_p - 1) / (
+        interleaved_p - 1 + interleaved_m * interleaved_v
+    )
+
+    # Compression break-even
+    compress_ratio = 64                           # 64× compression
+    compress_overhead_ms = 2.0                    # encode + decode overhead
+    uncompressed_time_ms = ring_time_ms           # use ring AllReduce baseline
+    compressed_comm_ms = ring_time_ms / compress_ratio
+    compressed_total_ms = compressed_comm_ms + compress_overhead_ms
+    compress_speedup = uncompressed_time_ms / compressed_total_ms
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(abs(crossover_bytes - 250_000) < 1,
+          f"IB NDR crossover should be 250 KB, got {crossover_bytes}")
+    check(ring_time_ms > 0, "Ring AllReduce time must be positive")
+    check(0 < bubble_4_16 < 1, "Bubble fraction must be between 0 and 1")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    ib_ndr_alpha_us_str = f"{int(ib_ndr_alpha_us)}"
+    ib_ndr_beta_gbs_str = f"{int(ib_ndr_beta_gbs)}"
+    ib_hdr_alpha_us_str = f"{int(ib_hdr_alpha_us)}"
+    ib_hdr_beta_gbs_str = f"{int(ib_hdr_beta_gbs)}"
+    roce_alpha_us_str = f"{int(roce_alpha_us)}"
+    roce_beta_gbs_str = fmt(roce_beta_gbs, precision=1, commas=False)
+    tcp_alpha_us_str = f"{int(tcp_alpha_us)}"
+    nvlink_bw_str = f"{nvlink_h100_bw_gbs}"
+    pcie_bw_str = f"{pcie_gen5_bw_gbs}"
+    nvlink_lat_str = f"{nvlink_latency_ns}"
+    pcie_lat_str = f"{pcie_latency_ns}"
+
+    crossover_kb_str = f"{round(crossover_kb)}"
+    crossover_bytes_str = f"{round(crossover_bytes):,}"
+
+    ring_n_str = f"{ring_n_gpus}"
+    ring_time_ms_str = fmt(ring_time_ms, precision=1, commas=False)
+    tree_time_ms_str = fmt(tree_time_ms, precision=1, commas=False)
+    ring_msg_gb_str = "1"
+
+    bubble_4_16_pct = f"{bubble_4_16 * 100:.1f}"
+    bubble_4_8_pct = f"{bubble_4_8 * 100:.1f}"
+    bubble_8_16_pct = f"{bubble_8_16 * 100:.1f}"
+    bubble_8_32_pct = f"{bubble_8_32 * 100:.1f}"
+    bubble_8_64_pct = f"{bubble_8_64 * 100:.1f}"
+    bubble_interleaved_pct = f"{bubble_interleaved * 100:.1f}"
+
+    compress_ratio_str = f"{int(compress_ratio)}"
+    compress_overhead_ms_str = fmt(compress_overhead_ms, precision=1, commas=False)
+    uncompressed_ms_str = fmt(uncompressed_time_ms, precision=1, commas=False)
+    compressed_comm_ms_str = fmt(compressed_comm_ms, precision=1, commas=False)
+    compressed_total_ms_str = fmt(compressed_total_ms, precision=1, commas=False)
+    compress_speedup_str = fmt(compress_speedup, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ib_ndr_alpha_us_str = CommFoundations.ib_ndr_alpha_us_str
+ib_ndr_beta_gbs_str = CommFoundations.ib_ndr_beta_gbs_str
+ib_hdr_alpha_us_str = CommFoundations.ib_hdr_alpha_us_str
+ib_hdr_beta_gbs_str = CommFoundations.ib_hdr_beta_gbs_str
+roce_alpha_us_str = CommFoundations.roce_alpha_us_str
+roce_beta_gbs_str = CommFoundations.roce_beta_gbs_str
+tcp_alpha_us_str = CommFoundations.tcp_alpha_us_str
+nvlink_bw_str = CommFoundations.nvlink_bw_str
+pcie_bw_str = CommFoundations.pcie_bw_str
+nvlink_lat_str = CommFoundations.nvlink_lat_str
+pcie_lat_str = CommFoundations.pcie_lat_str
+crossover_kb_str = CommFoundations.crossover_kb_str
+crossover_bytes_str = CommFoundations.crossover_bytes_str
+ring_n_str = CommFoundations.ring_n_str
+ring_time_ms_str = CommFoundations.ring_time_ms_str
+tree_time_ms_str = CommFoundations.tree_time_ms_str
+ring_msg_gb_str = CommFoundations.ring_msg_gb_str
+bubble_4_16_pct = CommFoundations.bubble_4_16_pct
+bubble_4_8_pct = CommFoundations.bubble_4_8_pct
+bubble_8_16_pct = CommFoundations.bubble_8_16_pct
+bubble_8_32_pct = CommFoundations.bubble_8_32_pct
+bubble_8_64_pct = CommFoundations.bubble_8_64_pct
+bubble_interleaved_pct = CommFoundations.bubble_interleaved_pct
+compress_ratio_str = CommFoundations.compress_ratio_str
+compress_overhead_ms_str = CommFoundations.compress_overhead_ms_str
+uncompressed_ms_str = CommFoundations.uncompressed_ms_str
+compressed_comm_ms_str = CommFoundations.compressed_comm_ms_str
+compressed_total_ms_str = CommFoundations.compressed_total_ms_str
+compress_speedup_str = CommFoundations.compress_speedup_str
+```
+
+## The $\alpha$-$\beta$ Communication Model {#sec-comm-foundations-alpha-beta}
+
+::: {.callout-perspective title="Why This Matters"}
+You need to estimate how long a gradient synchronization will take across 256 GPUs before you commit to a cluster topology. The $\alpha$-$\beta$ model is the "Roofline for networks": it gives you a first-order prediction of transfer time from just two hardware parameters and the message size.
+:::
+
+Every point-to-point transfer on a network follows the same fundamental pattern: the sender pays a fixed startup cost to initiate the message, then transmits the payload at a rate determined by the link's bandwidth. This two-parameter model captures the essential physics of network communication.
+
+The **$\alpha$-$\beta$ model** predicts the time to transfer a message of $M$ bytes:
+
+$$ T(M) = \alpha + \frac{M}{\beta} $$ {#eq-alpha-beta}
+
+where:
+
+- $\alpha$ is the **startup latency** (seconds)---the fixed cost of initiating a message, including software overhead, NIC processing, and routing setup
+- $\beta$ is the **link bandwidth** (bytes/second)---the sustained data rate after startup
+- $M$ is the **message size** (bytes)
+
+The model decomposes every transfer into exactly two costs: a per-message tax ($\alpha$) that you pay regardless of size, and a per-byte tax ($M/\beta$) that scales linearly with the payload. This decomposition drives all the algorithm selection decisions in @sec-comm-foundations-algorithm-selection.
+
+@tbl-alpha-beta-params lists the $\alpha$ and $\beta$ values for interconnects commonly found in ML training clusters. These numbers are the starting point for every communication cost estimate in this appendix.
+
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+| **Interconnect**    | **$\alpha$ (Latency)**            | **$\beta$ (Bandwidth)**     | **Typical Role**                  |
++:====================+:==================================+:============================+:==================================+
+| **NVLink 4.0**      | `{python} nvlink_lat_str` ns      | `{python} nvlink_bw_str`    | Intra-node GPU-to-GPU             |
+| (H100)              |                                   | GB/s                        |                                   |
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+| **PCIe Gen5**       | `{python} pcie_lat_str` ns        | `{python} pcie_bw_str`      | CPU-GPU, NIC-GPU                  |
+|                     |                                   | GB/s                        |                                   |
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+| **InfiniBand NDR**  | `{python} ib_ndr_alpha_us_str`    | `{python}                   | Inter-node (high-end clusters)    |
+| (400 Gbps)          | $\mu$s                            | ib_ndr_beta_gbs_str` GB/s   |                                   |
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+| **InfiniBand HDR**  | `{python} ib_hdr_alpha_us_str`    | `{python}                   | Inter-node (previous generation)  |
+| (200 Gbps)          | $\mu$s                            | ib_hdr_beta_gbs_str` GB/s   |                                   |
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+| **RoCE v2**         | `{python} roce_alpha_us_str`      | `{python}                   | Inter-node (Ethernet clusters)    |
+| (100 GbE)           | $\mu$s                            | roce_beta_gbs_str` GB/s     |                                   |
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+| **TCP/IP**          | `{python} tcp_alpha_us_str`       | Varies                      | Control plane, non-RDMA fallback  |
+| (Ethernet)          | $\mu$s                            |                             |                                   |
++---------------------+-----------------------------------+-----------------------------+-----------------------------------+
+
+: **$\alpha$-$\beta$ Parameters by Interconnect**: Startup latency and sustained bandwidth for interconnects used in ML clusters. NVLink and PCIe operate within a node; InfiniBand and RoCE operate between nodes. TCP latency is dominated by kernel software stack overhead. {#tbl-alpha-beta-params}
+
+### Latency-Dominated vs. Bandwidth-Dominated Regimes {#sec-comm-foundations-regimes}
+
+The $\alpha$-$\beta$ model reveals two distinct operating regimes. For small messages, the startup latency $\alpha$ dominates---the link spends most of its time *starting* transfers, not *sustaining* them. For large messages, the bandwidth term $M/\beta$ dominates, and the startup cost becomes negligible.
+
+The **crossover message size** $M_{\text{cross}}$ is the point where both terms contribute equally:
+
+$$ M_{\text{cross}} = \alpha \times \beta $$ {#eq-crossover}
+
+Below $M_{\text{cross}}$, communication is **latency-dominated**: sending more small messages wastes time on repeated startups. Above $M_{\text{cross}}$, communication is **bandwidth-dominated**: the link is fully utilized, and the only way to go faster is higher bandwidth.
+
+::: {.callout-notebook title="Worked Example: Crossover on InfiniBand NDR"}
+
+**Setup**: InfiniBand NDR has $\alpha$ = `{python} ib_ndr_alpha_us_str` $\mu$s and $\beta$ = `{python} ib_ndr_beta_gbs_str` GB/s.
+
+**Question**: At what message size does the bandwidth term equal the latency term?
+
+**Calculation**:
+
+$$M_{\text{cross}} = \alpha \times \beta = 5 \times 10^{-6} \text{ s} \times 50 \times 10^{9} \text{ B/s} = 250{,}000 \text{ bytes} = 250 \text{ KB}$$
+
+**Interpretation**: Messages smaller than `{python} crossover_kb_str` KB are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically 10--100 MB---well above this threshold. But control messages, heartbeats, and barrier synchronizations are well below it.
+
+**Implication**: This is why NCCL and Gloo batch small gradient tensors into larger "buckets" before launching AllReduce. Sending each tensor individually would pay the `{python} ib_ndr_alpha_us_str` $\mu$s startup cost hundreds of times per iteration instead of a handful.
+
+:::
+
+### The LogGP Model Extension {#sec-comm-foundations-loggp}
+
+The $\alpha$-$\beta$ model assumes a message is a single, atomic transfer. In practice, networks pipeline messages: a sender can inject a new packet before the previous one has been fully received. The **LogGP model** extends $\alpha$-$\beta$ with two additional parameters:
+
+- **$g$ (gap)**: The minimum interval between consecutive message injections at the sender. This models the NIC's injection rate limit.
+- **$o$ (overhead)**: The CPU time consumed by the processor to initiate or complete a message, during which it cannot do useful compute.
+
+For pipelined transfers of $k$ messages of size $m$, the LogGP model predicts:
+
+$$ T = \alpha + (k - 1) \times g + k \times \frac{m}{\beta} + o $$
+
+In most ML training scenarios, the $\alpha$-$\beta$ model is sufficient because gradient tensors are large enough that pipelining effects are secondary to raw bandwidth. The LogGP model becomes important when analyzing the overhead of many small control messages or when modeling the interaction between communication and computation overlap---situations that arise in fine-grained pipeline parallelism and asynchronous gradient updates.
+
+The $\alpha$-$\beta$ model describes point-to-point transfers. Collective operations---where all GPUs participate---compose multiple point-to-point transfers, and their cost formulas derive directly from the model above.
+
+## Collective Operation Complexity {#sec-comm-foundations-collective-complexity}
+
+::: {.callout-perspective title="Why This Matters"}
+Every distributed training step ends with a collective synchronization. The cost of that collective---not the cost of the matrix multiplies---often determines whether you can scale from 8 GPUs to 256. Understanding the exact complexity of each collective tells you which parallelism strategy (data, tensor, pipeline, expert) will dominate wall time at a given scale.
+:::
+
+Collective operations move data between all $N$ GPUs simultaneously. Each collective has a characteristic bandwidth term (how much data flows) and latency term (how many sequential message steps are required). The formulas below use the **bandwidth-optimal ring algorithm** unless otherwise noted; @sec-comm-foundations-algorithm-selection discusses when other algorithms are preferable.
+
+### AllReduce {#sec-comm-foundations-allreduce}
+
+AllReduce is the workhorse of data-parallel training: every GPU starts with a local gradient tensor of size $M$ bytes and ends with the globally reduced (summed) result. The ring algorithm decomposes AllReduce into a ReduceScatter phase followed by an AllGather phase.
+
+**Ring AllReduce**:
+
+$$ T_{\text{ring}} = 2 \cdot \frac{N - 1}{N} \cdot \frac{M}{\beta} + 2(N - 1) \cdot \alpha $$ {#eq-ring-allreduce}
+
+The factor $2(N-1)/N$ in the bandwidth term approaches 2 as $N$ grows---each byte effectively traverses the ring twice (once for reduce-scatter, once for all-gather). The latency term grows linearly with $N$, which makes the ring algorithm expensive in latency for large GPU counts.
+
+**Tree AllReduce**:
+
+$$ T_{\text{tree}} = 2 \log_2 N \cdot \frac{M}{\beta} + 2 \log_2 N \cdot \alpha $$ {#eq-tree-allreduce}
+
+The tree algorithm trades bandwidth efficiency for latency efficiency: the latency term grows as $\log_2 N$ instead of $N$, but the bandwidth term sends the full message $M$ at each tree level instead of $M/N$ chunks.
+
+::: {.callout-notebook title="Worked Example: Ring vs. Tree AllReduce"}
+
+**Setup**: `{python} ring_n_str` H100 GPUs connected via InfiniBand NDR ($\alpha$ = `{python} ib_ndr_alpha_us_str` $\mu$s, $\beta$ = `{python} ib_ndr_beta_gbs_str` GB/s). The gradient tensor is `{python} ring_msg_gb_str` GB (a 500M-parameter model in FP16).
+
+**Question**: How long does AllReduce take with ring vs. tree?
+
+**Ring AllReduce**:
+
+$$T_{\text{ring}} = 2 \cdot \frac{255}{256} \cdot \frac{10^9}{50 \times 10^9} + 2 \times 255 \times 5 \times 10^{-6} = 39.8 \text{ ms} + 2.6 \text{ ms} = 42.3 \text{ ms}$$
+
+**Tree AllReduce**:
+
+$$T_{\text{tree}} = 2 \times 8 \times \frac{10^9}{50 \times 10^9} + 2 \times 8 \times 5 \times 10^{-6} = 320.0 \text{ ms} + 0.1 \text{ ms} = 320.1 \text{ ms}$$
+
+**Interpretation**: For this 1 GB message, ring AllReduce takes `{python} ring_time_ms_str` ms while tree takes `{python} tree_time_ms_str` ms---the ring is 7.6 $\times$ faster because it distributes the bandwidth load across all links. The tree's logarithmic latency advantage (0.1 ms vs. 2.6 ms) is negligible compared to its bandwidth penalty.
+
+**Implication**: For the large gradient tensors typical of data-parallel training, ring (or ring-based) algorithms dominate. Tree algorithms are useful only for small messages or when latency---not bandwidth---is the bottleneck.
+
+:::
+
+### AllGather {#sec-comm-foundations-allgather}
+
+AllGather is the complement of ReduceScatter: each GPU starts with a $M/N$-sized shard and ends with the complete $M$-byte tensor. It is the core communication primitive in Fully Sharded Data Parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
+
+**Ring AllGather**:
+
+$$ T_{\text{allgather}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-allgather}
+
+AllGather is exactly half the cost of AllReduce (one ring pass instead of two) because it does not include a reduction step.
+
+### ReduceScatter {#sec-comm-foundations-reducescatter}
+
+ReduceScatter is the dual of AllGather: each GPU starts with a full $M$-byte tensor and ends with a $M/N$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
+
+**Ring ReduceScatter**:
+
+$$ T_{\text{reducescatter}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-reducescatter}
+
+The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScatter followed by one AllGather, and the costs add up exactly to @eq-ring-allreduce.
+
+### AllToAll {#sec-comm-foundations-alltoall}
+
+AllToAll is the most general collective: each GPU sends a distinct $M/N$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for Mixture-of-Experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
+
+**Ring AllToAll**:
+
+$$ T_{\text{alltoall}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-alltoall}
+
+Although the formula matches AllGather and ReduceScatter in form, the communication pattern is fundamentally different: AllToAll is a *personalized* exchange (each GPU sends different data to each peer), which makes it harder to overlap with computation and more sensitive to network congestion.
+
+### Broadcast {#sec-comm-foundations-broadcast}
+
+Broadcast sends a single $M$-byte tensor from one root GPU to all $N - 1$ others. It is used for distributing initial model weights, updated learning rates, and configuration changes during training.
+
+**Tree Broadcast**:
+
+$$ T_{\text{broadcast}} = \frac{M}{\beta} + \log_2 N \cdot \alpha $$ {#eq-broadcast}
+
+Broadcast is inherently asymmetric (one sender, many receivers), which makes a tree topology natural. The bandwidth term is just $M/\beta$ because the root only sends the message once to its children, who forward it down the tree. The latency term is $\log_2 N$ tree levels.
+
+### Collective Complexity Summary {.unnumbered}
+
+@tbl-collective-summary provides a compact reference for comparing the cost structure of each collective operation.
+
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+| **Operation**       | **Bandwidth Term**                          | **Latency Term**          | **Primary Use Case**         |
++:====================+:============================================+:==========================+:=============================+
+| **AllReduce**       | $2 \cdot \frac{N-1}{N} \cdot \frac{M}      | $2(N-1) \cdot \alpha$     | Data-parallel gradient sync  |
+| (Ring)              | {\beta}$                                    |                           |                              |
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+| **AllReduce**       | $2\log_2 N \cdot \frac{M}{\beta}$           | $2\log_2 N \cdot \alpha$  | Small-message sync           |
+| (Tree)              |                                             |                           |                              |
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+| **AllGather**       | $\frac{N-1}{N} \cdot \frac{M}{\beta}$       | $(N-1) \cdot \alpha$      | FSDP parameter               |
+| (Ring)              |                                             |                           | reconstruction               |
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+| **ReduceScatter**   | $\frac{N-1}{N} \cdot \frac{M}{\beta}$       | $(N-1) \cdot \alpha$      | FSDP / ZeRO gradient         |
+| (Ring)              |                                             |                           | sharding                     |
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+| **AllToAll**        | $\frac{N-1}{N} \cdot \frac{M}{\beta}$       | $(N-1) \cdot \alpha$      | MoE expert routing           |
+| (Ring)              |                                             |                           |                              |
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+| **Broadcast**       | $\frac{M}{\beta}$                           | $\log_2 N \cdot \alpha$   | Weight distribution,         |
+| (Tree)              |                                             |                           | config sync                  |
++---------------------+---------------------------------------------+---------------------------+------------------------------+
+
+: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring and tree algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $N$ = GPU count, $M$ = total message size in bytes. {#tbl-collective-summary}
+
+Two patterns emerge from this table. First, bandwidth-optimal ring algorithms all share the $(N-1)/N$ factor, which approaches 1 for large $N$---meaning the total data moved is nearly equal to the message size, regardless of GPU count. This is the best achievable bandwidth utilization. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
+
+## Algorithm Selection {#sec-comm-foundations-algorithm-selection}
+
+::: {.callout-perspective title="Why This Matters"}
+NCCL automatically selects a collective algorithm based on message size and GPU topology, but understanding *why* it chooses ring for large messages and tree for small ones lets you diagnose when the auto-selection is suboptimal---and structure your communication to stay in the efficient regime.
+:::
+
+### Ring vs. Tree vs. Recursive Halving-Doubling {#sec-comm-foundations-ring-vs-tree}
+
+The ring algorithm minimizes bandwidth usage but pays a latency cost that grows linearly with $N$. The tree algorithm minimizes latency but wastes bandwidth because it sends the full message at each level. **Recursive halving-doubling** splits the difference: it uses halving (like a tree) for the reduce phase and doubling for the gather phase, achieving near-optimal bandwidth with $O(\log N)$ latency steps.
+
+The decision boundary between ring and tree depends on message size:
+
+- **$M \gg M_{\text{cross}}$** (large gradients): Use **ring**. The bandwidth term dominates, and ring's $(N-1)/N$ factor is optimal.
+- **$M \ll M_{\text{cross}}$** (barriers, scalars): Use **tree**. The latency term dominates, and tree's $\log_2 N$ steps are far fewer than ring's $2(N-1)$.
+- **$M \approx M_{\text{cross}}$** (medium tensors): Use **recursive halving-doubling** for balanced performance, or test empirically.
+
+@tbl-algorithm-selection provides guidance for choosing the right algorithm.
+
++-----------------------------+----------------------------+---------------------------+------------------------------+
+| **Regime**                  | **Ring**                   | **Tree**                  | **Recursive**                |
+|                             |                            |                           | **Halving-Doubling**         |
++:============================+:===========================+:==========================+:=============================+
+| **Large messages**          | Best---optimal             | Poor---sends $M$          | Good---near-optimal          |
+| ($M > 10 \times             | bandwidth utilization      | at every tree level       | bandwidth, $O(\log N)$       |
+| M_{\text{cross}}$)          |                            |                           | latency                      |
++-----------------------------+----------------------------+---------------------------+------------------------------+
+| **Small messages**          | Poor---$2(N-1)$ startup    | Best---$\log_2 N$         | Good---$O(\log N)$           |
+| ($M < M_{\text{cross}}/10$) | costs dominate             | startup costs             | startup costs                |
++-----------------------------+----------------------------+---------------------------+------------------------------+
+| **Medium messages**         | Acceptable                 | Acceptable                | Best---balances              |
+| ($M \approx                 |                            |                           | both terms                   |
+| M_{\text{cross}}$)          |                            |                           |                              |
++-----------------------------+----------------------------+---------------------------+------------------------------+
+| **Power-of-2 $N$**          | Works for any $N$          | Best when $N = 2^k$       | Requires $N = 2^k$           |
++-----------------------------+----------------------------+---------------------------+------------------------------+
+
+: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling for different message sizes and GPU counts. $M_{\text{cross}} = \alpha \times \beta$ is the crossover message size from @eq-crossover. {#tbl-algorithm-selection}
+
+### Hierarchical AllReduce {#sec-comm-foundations-hierarchical}
+
+Modern clusters have a two-level topology: GPUs within a node are connected by NVLink (`{python} nvlink_bw_str` GB/s), while nodes are connected by InfiniBand (`{python} ib_ndr_beta_gbs_str` GB/s). Hierarchical AllReduce exploits this asymmetry in three phases:
+
+1. **Intra-node reduce** (NVLink): Each node reduces its 8 local GPUs to a single result using NVLink's `{python} nvlink_bw_str` GB/s bandwidth. This is fast because NVLink is 18 $\times$ faster than InfiniBand NDR.
+2. **Inter-node AllReduce** (InfiniBand): The per-node results are all-reduced across nodes. Only $N/8$ nodes participate, so the ring has $N/8$ steps instead of $N$.
+3. **Intra-node broadcast** (NVLink): Each node broadcasts the global result to its 8 local GPUs.
+
+The hierarchical approach reduces the inter-node ring size from $N$ to $N/8$, cutting the latency term by 8 $\times$ and confining the bandwidth-hungry phases to the fast intra-node links. NCCL uses hierarchical algorithms by default when it detects a multi-node topology---this is the standard execution path for all large-scale training.
+
+Understanding the cost structure of collectives enables reasoning about data-parallel overhead. But pipeline parallelism introduces a different kind of overhead: idle time caused by the sequential dependency between pipeline stages. The next section quantifies that cost.
+
+## Pipeline Arithmetic {#sec-comm-foundations-pipeline-arithmetic}
+
+::: {.callout-perspective title="Why This Matters"}
+Pipeline parallelism splits a model across multiple GPUs so that each GPU holds only a fraction of the layers. The trade-off is **bubble time**: idle cycles where GPUs wait for activations or gradients from upstream or downstream stages. Quantifying the bubble fraction tells you whether pipeline parallelism is worth the complexity at your scale.
+:::
+
+### Bubble Fraction {#sec-comm-foundations-bubble-fraction}
+
+In a pipeline with $P$ stages and $M$ microbatches, the **bubble fraction** is the proportion of total GPU-time spent idle:
+
+$$ b = \frac{P - 1}{P - 1 + M} $$ {#eq-pipeline-bubble}
+
+This formula applies to both GPipe (where all forward passes complete before any backward pass begins) and 1F1B (one-forward-one-backward interleaving). The 1F1B schedule has the same asymptotic bubble fraction but uses less peak memory because it retires microbatches earlier.
+
+The key insight: the bubble fraction depends on the *ratio* of stages to microbatches. Adding more microbatches (for a fixed number of stages) amortizes the pipeline fill and drain across more useful work.
+
+**Rule of thumb**: To keep bubble overhead below 20%, you need $M \geq 4(P - 1)$, which means $M \geq 4P$ for practical purposes.
+
+@tbl-pipeline-bubble shows how bubble fraction varies with pipeline depth and microbatch count.
+
++-------------------+--------------+--------------+--------------+--------------+
+| **Pipeline**      | **$M$ = 8**  | **$M$ = 16** | **$M$ = 32** | **$M$ = 64** |
+| **Stages ($P$)**  |              |              |              |              |
++:==================+:=============+:=============+:=============+:=============+
+| **$P$ = 4**       | `{python}    | `{python}    | ---          | ---          |
+|                   | bubble_4_8   | bubble_4_16  |              |              |
+|                   | _pct`%       | _pct`%       |              |              |
++-------------------+--------------+--------------+--------------+--------------+
+| **$P$ = 8**       | ---          | `{python}    | `{python}    | `{python}    |
+|                   |              | bubble_8_16  | bubble_8_32  | bubble_8_64  |
+|                   |              | _pct`%       | _pct`%       | _pct`%       |
++-------------------+--------------+--------------+--------------+--------------+
+
+: **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. Values below 20% (the typical target) require $M \geq 4P$. Dashes indicate configurations where the ratio is impractical. {#tbl-pipeline-bubble}
+
+### Interleaved Scheduling {#sec-comm-foundations-interleaved}
+
+Interleaved scheduling (used in Megatron-LM) assigns $V$ **virtual stages** to each physical GPU instead of one. Each GPU processes $V$ non-consecutive chunks of the model, which means the pipeline has $P \times V$ virtual stages but the bubble overhead uses the original $P$:
+
+$$ b_{\text{interleaved}} = \frac{P - 1}{P - 1 + M \times V} $$ {#eq-interleaved-bubble}
+
+The denominator grows by a factor of $V$ compared to @eq-pipeline-bubble. For $P$ = 8, $M$ = 16, and $V$ = 4, the bubble fraction drops from `{python} bubble_8_16_pct`% to `{python} bubble_interleaved_pct`%---a dramatic improvement that comes at the cost of more frequent, smaller communication between stages.
+
+Interleaved scheduling highlights a recurring theme in distributed ML: communication granularity is a tunable knob. Smaller, more frequent transfers improve overlap and reduce idle time, but increase the aggregate latency overhead. The same trade-off appears in gradient compression, which is the final cost model in this appendix.
+
+## Compression Economics {#sec-comm-foundations-compression}
+
+::: {.callout-perspective title="Why This Matters"}
+Gradient compression promises to reduce communication volume by 10--1000 $\times$, making AllReduce nearly free. But compression has overhead (encoding and decoding time), and it only helps if that overhead is smaller than the communication time it saves. A quick break-even analysis prevents wasted effort on compression schemes that will not actually speed up training.
+:::
+
+### The Compression Equation {#sec-comm-foundations-compression-equation}
+
+Gradient compression replaces the original $M$-byte gradient with a compressed representation of size $M/C$, where $C$ is the compression ratio. The total time with compression is:
+
+$$ T_{\text{compressed}} = T_{\text{encode}} + T_{\text{comm}}\!\left(\frac{M}{C}\right) + T_{\text{decode}} $$ {#eq-compression-total}
+
+Compression is beneficial when $T_{\text{compressed}} < T_{\text{comm}}(M)$, which yields the break-even condition:
+
+$$ T_{\text{encode}} + T_{\text{decode}} < T_{\text{comm}}(M) - T_{\text{comm}}\!\left(\frac{M}{C}\right) $$ {#eq-compression-breakeven}
+
+In the bandwidth-dominated regime ($M \gg M_{\text{cross}}$), the communication time scales linearly with message size, and the right-hand side simplifies to approximately $T_{\text{comm}}(M) \times (1 - 1/C)$. For high compression ratios ($C \gg 1$), this approaches $T_{\text{comm}}(M)$---meaning compression is worthwhile as long as the codec overhead is less than the uncompressed communication time.
+
+::: {.callout-notebook title="Worked Example: Is Top-K Compression Worth It?"}
+
+**Setup**: Ring AllReduce of a `{python} ring_msg_gb_str` GB gradient across `{python} ring_n_str` H100 GPUs on InfiniBand NDR, taking `{python} uncompressed_ms_str` ms uncompressed. A Top-K sparsification scheme achieves `{python} compress_ratio_str` $\times$ compression with `{python} compress_overhead_ms_str` ms total encode + decode overhead.
+
+**Question**: Does compression reduce the total AllReduce time?
+
+**Calculation**:
+
+- Uncompressed AllReduce: `{python} uncompressed_ms_str` ms
+- Compressed communication: `{python} uncompressed_ms_str` / `{python} compress_ratio_str` = `{python} compressed_comm_ms_str` ms
+- Total with compression: `{python} compressed_comm_ms_str` + `{python} compress_overhead_ms_str` = `{python} compressed_total_ms_str` ms
+- Speedup: `{python} uncompressed_ms_str` / `{python} compressed_total_ms_str` = `{python} compress_speedup_str` $\times$
+
+**Interpretation**: Compression delivers a `{python} compress_speedup_str` $\times$ speedup in communication time. The `{python} compress_overhead_ms_str` ms codec overhead is a small fraction of the `{python} uncompressed_ms_str` ms saved.
+
+**Implication**: At this scale (256 GPUs, 1 GB gradients), gradient compression is clearly profitable. However, the convergence impact must be validated: Top-K sparsification discards information, and the model may require more iterations to reach the same accuracy, potentially negating the per-iteration speedup.
+
+:::
+
+@tbl-compression-breakeven shows how the break-even codec overhead varies with compression ratio and uncompressed AllReduce time. Higher compression ratios tolerate larger codec overheads.
+
++------------------------+----------------------------+----------------------------+----------------------------+
+| **Compression**        | **AllReduce = 10 ms**      | **AllReduce = 40 ms**      | **AllReduce = 100 ms**     |
+| **Ratio ($C$)**        | (Max Codec Overhead)       | (Max Codec Overhead)       | (Max Codec Overhead)       |
++:=======================+:===========================+:===========================+:===========================+
+| 4 $\times$             | 7.5 ms                     | 30 ms                      | 75 ms                      |
++------------------------+----------------------------+----------------------------+----------------------------+
+| 16 $\times$            | 9.4 ms                     | 37.5 ms                    | 93.8 ms                    |
++------------------------+----------------------------+----------------------------+----------------------------+
+| 64 $\times$            | 9.8 ms                     | 39.4 ms                    | 98.4 ms                    |
++------------------------+----------------------------+----------------------------+----------------------------+
+| 256 $\times$           | 9.96 ms                    | 39.8 ms                    | 99.6 ms                    |
++------------------------+----------------------------+----------------------------+----------------------------+
+
+: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as $T_{\text{comm}}(M) \times (1 - 1/C)$. At high compression ratios, nearly the entire uncompressed AllReduce time is available as codec budget. {#tbl-compression-breakeven}
+
+## Fallacies and Pitfalls {#sec-comm-foundations-fallacies-pitfalls}
+
+**Fallacy:** *Doubling network bandwidth halves AllReduce time.*
+
+For ring AllReduce, the bandwidth term is $2(N-1)/N \cdot M/\beta$, which does scale inversely with $\beta$. But the latency term $2(N-1) \cdot \alpha$ is independent of bandwidth. At 256 GPUs with small messages, the latency term can dominate, and doubling bandwidth yields negligible improvement. Always check which regime you are in before investing in faster interconnects.
+
+**Pitfall:** *Using the ring AllReduce formula for intra-node communication.*
+
+Within a node, GPUs communicate through NVLink or NVSwitch, which provides all-to-all connectivity---not a ring. The actual intra-node AllReduce uses a different algorithm (often a single-step reduce through the NVSwitch crossbar) with much lower latency than the ring formula predicts. The ring formula applies to inter-node communication where the ring topology matches the physical network.
+
+**Fallacy:** *Pipeline parallelism eliminates communication overhead.*
+
+Pipeline parallelism replaces AllReduce with point-to-point activation transfers between adjacent stages, which are indeed cheaper. But it introduces bubble overhead that is mathematically unavoidable: with $P$ stages, at least $(P-1)/(P-1+M)$ of GPU-time is idle. For deep pipelines ($P \geq 8$), this overhead requires $M \geq 32$ microbatches to stay below 20%---a constraint that affects batch size, memory, and convergence.
+
+**Pitfall:** *Evaluating gradient compression by communication speedup alone.*
+
+A compression scheme that achieves 100 $\times$ communication speedup is worthless if it degrades model quality enough to require 2 $\times$ more training iterations. The correct metric is *time-to-accuracy*, not time-per-iteration. Always validate compression on the target convergence benchmark, not just on a communication microbenchmark.
+
+**Fallacy:** *AllReduce, AllGather, and ReduceScatter have the same performance characteristics because they have the same ring complexity.*
+
+While the bandwidth and latency formulas are identical for ring-based implementations, the operations have different memory access patterns and computation requirements. ReduceScatter performs a reduction (addition) on the received data, AllGather only copies, and AllToAll routes distinct chunks to distinct destinations. These differences affect how well each operation overlaps with computation and how sensitive it is to memory bandwidth contention on the GPU.
+
+## Summary {.unnumbered}
+
+::: {.callout-takeaways title="Communication Costs Are Predictable"}
+
+- The **$\alpha$-$\beta$ model** ($T = \alpha + M/\beta$) decomposes every network transfer into a fixed startup cost and a payload-proportional bandwidth cost. The crossover message size $M_{\text{cross}} = \alpha \times \beta$ determines which cost dominates.
+- **Ring-based collectives** (AllReduce, AllGather, ReduceScatter, AllToAll) achieve bandwidth-optimal communication with a $(N-1)/N$ factor, but their latency term grows linearly with GPU count. **Tree-based algorithms** trade bandwidth for logarithmic latency scaling.
+- **Algorithm selection** depends on message size relative to $M_{\text{cross}}$: ring for large messages (gradients), tree for small messages (barriers), and hierarchical two-level schemes for multi-node clusters.
+- **Pipeline bubble fraction** $b = (P-1)/(P-1+M)$ is the fundamental overhead of pipeline parallelism. The practical rule $M \geq 4P$ keeps bubbles below 20%, and interleaved scheduling with $V$ virtual stages reduces bubbles by a factor of $V$.
+- **Gradient compression** is profitable when the codec overhead (encode + decode) is less than the communication time saved. At high compression ratios in the bandwidth-dominated regime, nearly the entire uncompressed AllReduce time is available as overhead budget---but convergence impact must always be validated.
+- Every communication cost model in this appendix derives from two hardware parameters ($\alpha$ and $\beta$) and two workload parameters ($M$ and $N$). Measuring these four numbers for your cluster gives you a complete first-order prediction of distributed training overhead.
+
+:::

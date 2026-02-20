@@ -20,6 +20,7 @@ byte = ureg.byte
 second = ureg.second
 joule = ureg.joule
 watt = ureg.watt
+kilowatt = ureg.kilowatt
 milliwatt = ureg.milliwatt
 meter = ureg.meter
 hour = ureg.hour
@@ -150,6 +151,20 @@ T4_FLOPS_INT8 = 130 * TFLOPs / second
 T4_MEM_BW = 320 * GB / second
 T4_TDP = 70 * watt
 
+# Google TPU v1 — Source: Jouppi et al. (2017)
+TPUV1_FLOPS_INT8 = 92 * TFLOPs / second
+TPUV1_TDP = 75 * watt
+
+# Google TPU v2 — Source: Google Cloud Documentation
+TPUV2_FLOPS_BF16 = 45 * TFLOPs / second
+TPUV2_MEM_BW = 700 * GB / second
+TPUV2_MEM_CAPACITY = 16 * GiB
+
+# Google TPU v3 — Source: Google Cloud Documentation
+TPUV3_FLOPS_BF16 = 105 * TFLOPs / second
+TPUV3_MEM_BW = 900 * GB / second
+TPUV3_MEM_CAPACITY = 32 * GiB
+
 # Google TPU v4 — Source: Google TPUv4 paper (Jouppi et al., 2023)
 TPUV4_FLOPS_BF16 = 275 * TFLOPs / second
 TPUV4_MEM_BW = 1200 * GB / second
@@ -159,6 +174,22 @@ TPUV5P_FLOPS_BF16 = 459 * TFLOPs / second
 TPUV5P_MEM_BW = 2.76 * TB / second
 TPUV5P_MEM_CAPACITY = 95 * GiB
 TPUV5P_ICI_BW = 1600 * GB / second        # Inter-Chip Interconnect
+
+# Cerebras Wafer-Scale Engine (WSE) — Source: Cerebras Whitepapers
+WSE1_CORES = 400000 * count
+WSE1_MEM_CAPACITY = 18 * GB
+WSE1_MEM_BW = 9 * PB / second
+WSE1_TDP = 15000 * watt
+
+WSE2_CORES = 850000 * count
+WSE2_MEM_CAPACITY = 40 * GB
+WSE2_MEM_BW = 20 * PB / second
+WSE2_TDP = 15000 * watt
+
+WSE3_CORES = 900000 * count
+WSE3_MEM_CAPACITY = 44 * GB
+WSE3_MEM_BW = 21 * PB / second
+WSE3_TDP = 23000 * watt
 
 # High-end Desktop CPU (Reference)
 CPU_FLOPS_FP32 = 1 * TFLOPs / second
@@ -285,11 +316,13 @@ ureg.define('param = 1 * count')
 ureg.define('Kparam = 1e3 * param')
 ureg.define('Mparam = 1e6 * param')
 ureg.define('Bparam = 1e9 * param')
+ureg.define('Tparam = 1e12 * param')
 
 param = ureg.param
 Kparam = ureg.Kparam
 Mparam = ureg.Mparam
 Bparam = ureg.Bparam
+Tparam = ureg.Tparam
 
 # GPT-2 (1.5B) — used in training chapter worked examples
 GPT2_PARAMS = 1.5e9 * param
@@ -302,7 +335,8 @@ GPT3_TRAINING_OPS = 3.14e23 * flop
 GPT3_TRAINING_TOKENS = 300e9 * count
 GPT3_TRAINING_DAYS_REF = 25 # Days on 1024 A100s
 
-# GPT-4 (Reference)
+# GPT-4 (Reference) - Note: Unofficial public estimates
+GPT4_EST_PARAMS = 1.76e12 * param
 GPT4_TRAINING_GPU_DAYS = 2.5e6 # A100 days
 
 # BERT-Base
@@ -402,3 +436,94 @@ DGX_PRICE_MAX = 5000 * USD
 TPU_POD_CHIPS = 4096
 TPU_POD_MEM = 131 * TB
 TPU_POD_POWER = 3 * ureg.megawatt
+
+# =============================================================================
+# Fleet-Scale Constants (Volume II)
+# =============================================================================
+# These constants support distributed systems calculations across Volume II.
+# They define the quantitative reference points for cluster-scale reasoning:
+# reliability, communication cost models, sustainability, and capacity planning.
+
+# --- Reliability (Component MTTF) ---
+# Mean Time To Failure for datacenter-grade components.
+# Source: Meta (2024), Google (2024), Barroso et al. (2018)
+GPU_MTTF_HOURS = 50_000            # Single GPU die (datacenter, steady-state)
+NIC_MTTF_HOURS = 150_000           # Network interface card
+PSU_MTTF_HOURS = 100_000           # Power supply unit
+PCIE_SWITCH_MTTF_HOURS = 200_000   # PCIe switch/bridge
+CABLE_MTTF_HOURS = 500_000         # Optical cable / transceiver
+TOR_SWITCH_MTTF_HOURS = 300_000    # Top-of-rack switch
+HBM_MTTF_HOURS = 200_000           # HBM memory module
+
+# Recovery time assumptions (seconds)
+HEARTBEAT_TIMEOUT_S = 30            # Failure detection latency
+RESCHEDULE_TIME_S = 60              # Time to allocate replacement node
+CHECKPOINT_WRITE_BW_GBS = 100       # Aggregate storage write BW for checkpoints (GB/s)
+
+# --- Cluster Scale References ---
+# Canonical cluster sizes used as worked examples throughout Volume II.
+CLUSTER_SMALL_GPUS = 256
+CLUSTER_MEDIUM_GPUS = 2_048
+CLUSTER_LARGE_GPUS = 8_192
+CLUSTER_MEGA_GPUS = 100_000
+
+# --- Inter-Node Network (Fleet-Scale Byte Rates) ---
+# Byte-per-second equivalents for bandwidth calculations.
+# These complement the Gbps values defined above for bit-rate contexts.
+INFINIBAND_NDR_BW_GBS = 50         # 400 Gbps / 8 = 50 GB/s per port
+INFINIBAND_HDR_BW_GBS = 25         # 200 Gbps / 8 = 25 GB/s per port
+INFINIBAND_XDR_BW_GBS = 100        # 800 Gbps / 8 = 100 GB/s per port (2025)
+ETHERNET_400G_BW_GBS = 50          # 400 GbE = 50 GB/s
+ETHERNET_800G_BW_GBS = 100         # 800 GbE = 100 GB/s (2025)
+ROCE_100G_BW_GBS = 12.5            # 100 GbE RoCE = 12.5 GB/s
+
+# Communication model parameters (α-β model)
+IB_NDR_LATENCY_US = 5              # InfiniBand NDR one-way latency (μs)
+IB_HDR_LATENCY_US = 7              # InfiniBand HDR one-way latency (μs)
+ROCE_LATENCY_US = 10               # RoCE v2 one-way latency (μs)
+TCP_LATENCY_US = 50                # TCP/IP over Ethernet one-way latency (μs)
+
+# --- Sustainability ---
+# Power Usage Effectiveness (PUE) — total facility power / IT equipment power
+PUE_LIQUID_COOLED = 1.06           # Best-in-class liquid-cooled AI datacenter
+PUE_BEST_AIR = 1.12                # Best-in-class air-cooled hyperscale
+PUE_TYPICAL = 1.40                 # Industry average traditional datacenter
+PUE_LEGACY = 1.58                  # Older enterprise datacenters
+
+# Water Usage Effectiveness (WUE) — liters per kWh
+WUE_AIR_COOLED = 0.5               # Air-cooled (minimal water)
+WUE_EVAPORATIVE = 1.8              # Evaporative cooling towers
+WUE_LIQUID = 0.0                   # Closed-loop liquid cooling (near zero)
+
+# Regional carbon intensity (gCO2 per kWh) — Source: IEA (2023)
+CARBON_US_AVG_GCO2_KWH = 429       # US national average grid
+CARBON_EU_AVG_GCO2_KWH = 270       # EU average grid
+CARBON_QUEBEC_GCO2_KWH = 20        # Quebec (hydroelectric dominant)
+CARBON_FRANCE_GCO2_KWH = 50        # France (nuclear dominant)
+CARBON_POLAND_GCO2_KWH = 820       # Poland (coal dominant)
+CARBON_NORWAY_GCO2_KWH = 10        # Norway (hydroelectric)
+
+# Power density
+RACK_POWER_TRADITIONAL_KW = 12     # Traditional datacenter rack (kW)
+RACK_POWER_AI_TYPICAL_KW = 70      # AI cluster rack, current generation (kW)
+RACK_POWER_AI_HIGH_KW = 100        # AI cluster rack, high-density (kW)
+AIR_COOLING_LIMIT_KW = 30          # Approximate rack power where air cooling fails (kW)
+
+# --- MFU and Scaling Efficiency References ---
+# Model FLOPS Utilization (MFU) — actual FLOPS / peak FLOPS
+MFU_TRAINING_LOW = 0.30            # Lower bound for well-optimized training
+MFU_TRAINING_HIGH = 0.50           # Upper bound for excellent training MFU
+MFU_INFERENCE_BATCH1 = 0.05        # Inference at batch size 1 (memory-bound)
+MFU_INFERENCE_BATCHED = 0.40       # Inference at large batch size
+
+# Scaling efficiency η = T_1 / (N × T_N)
+SCALING_EFF_32GPU = 0.90           # Near-linear regime
+SCALING_EFF_256GPU = 0.70          # Communication starts to bite
+SCALING_EFF_1024GPU = 0.50         # Significant overhead
+SCALING_EFF_8192GPU = 0.35         # Fleet-scale regime
+
+# Overhead budgets (fraction of wall time)
+OVERHEAD_PIPELINE_BUBBLE = 0.05    # ~5% for well-tuned pipeline parallelism
+OVERHEAD_CHECKPOINT = 0.03         # ~3% for optimized async checkpointing
+OVERHEAD_FAILURE_RECOVERY = 0.10   # ~10% for failure and restart at 10K+ scale
+OVERHEAD_MAINTENANCE = 0.05        # ~5% for rolling upgrades, maintenance windows

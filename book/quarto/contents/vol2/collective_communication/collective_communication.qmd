@@ -6,7 +6,7 @@ engine: jupyter
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_Gemini Pro 3 Prompt: A technical visualization of collective communication patterns in distributed computing. The scene shows multiple compute nodes arranged in various topologies: a ring formation demonstrating ring allreduce with data flowing clockwise, a star pattern showing parameter server architecture with a central aggregator, and a mesh topology with all-to-all connections. Each node is depicted as a stylized GPU with data packets traveling along luminous pathways between them. Visual elements include bandwidth indicators showing throughput on each link, latency clocks measuring communication time, and gradient tensors being reduced and broadcast. The composition uses a dark background with nodes in metallic silver and communication paths in vibrant colors: green for scatter operations, blue for gather, orange for reduce, and purple for broadcast. Technical diagram style with clear labeling, suitable for a networking and systems textbook. Rendered in the style of Nanobanana._
+\chapterminitoc
 :::
 
 \noindent
@@ -30,12 +30,12 @@ Computation scales by adding processors; communication scales by moving data bet
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Apply the $\alpha$-$\beta$ model to quantify when communication becomes the dominant bottleneck by deriving the bandwidth and latency bounds for distributed training at different cluster scales.
-- Compare AllReduce algorithms (ring, tree, hierarchical) by analyzing their time complexity and identifying the crossover points where each becomes optimal based on message size and cluster scale.
-- Select appropriate collective primitives (AllReduce, AlltoAll, AllGather, ReduceScatter) for different model architectures by matching communication patterns to workload requirements.
-- Evaluate gradient compression techniques by analyzing bandwidth reduction versus convergence impact trade-offs for quantization, sparsification, and error feedback mechanisms.
-- Design topology-aware communication strategies by mapping collective operations to network architectures (fat-tree, rail-optimized, torus) to maximize bisection bandwidth utilization.
-- Implement communication-computation overlap using pipelining and asynchronous operations to hide network latency behind gradient computation.
+- Apply the **$\alpha$-$\beta$ model** to quantify when communication becomes the dominant bottleneck by deriving the bandwidth and latency bounds for distributed training at different cluster scales.
+- Compare **AllReduce** algorithms (ring, tree, hierarchical) by analyzing their time complexity and identifying the crossover points where each becomes optimal based on message size and cluster scale.
+- Select appropriate **collective primitives** (**AllReduce**, **AlltoAll**, **AllGather**, **ReduceScatter**) for different model architectures by matching communication patterns to workload requirements.
+- Evaluate **gradient compression** techniques by analyzing bandwidth reduction versus convergence impact trade-offs for quantization, sparsification, and error feedback mechanisms.
+- Design **topology-aware communication** strategies by mapping collective operations to network architectures (**fat-tree**, **rail-optimized**, **torus**) to maximize **bisection bandwidth** utilization.
+- Implement **communication-computation overlap** using pipelining and asynchronous operations to hide network latency behind gradient computation.
 
 :::
 
@@ -60,7 +60,9 @@ The parallelism strategies introduced in @sec-distributed-training-systems—dat
 This transition reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space. The most critical instance of this coordination is *gradient synchronization*.
 
 ::: {.callout-definition title="Gradient Synchronization"}
-***Gradient Synchronization*** is the collective communication phase in distributed training where workers exchange and aggregate their locally computed gradients. This step ensures that all workers update their model parameters with the same global gradient information, maintaining mathematical equivalence to single-device training.
+
+***Gradient Synchronization***\index{Gradient Synchronization!definition} is the collective communication phase in distributed training where workers exchange and aggregate their locally computed gradients. This step ensures that all workers update their model parameters with the same global gradient information, maintaining mathematical equivalence to single-device training.
+
 :::
 
 The requirement for gradient synchronization is not a design choice; it is a mathematical necessity for convergence. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm.[^fn-history-ps]
@@ -111,7 +113,7 @@ class AllReduceCost:
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     gradient_size_gb = llama_params_b * bytes_per_param
-    
+
     # Ring AllReduce bandwidth term: 2 * (N-1)/N * M / beta
     ring_bw_factor = 2 * (n_gpus - 1) / n_gpus
     ring_bw_time_ms = (ring_bw_factor * gradient_size_gb / ib_bw_gbs) * 1000
@@ -180,6 +182,69 @@ Communication algorithms operate at the **Distribution Layer** of the Fleet Stac
 
 :::
 
+@fig-compute-comm-timeline quantifies how this communication overhead compounds as the fleet grows. At 8 GPUs within a single NVLink-connected node, communication consumes roughly 25% of each training step because the 900 GB/s interconnect bandwidth keeps pace with gradient volume. As the cluster expands to 64 GPUs across 8 nodes, the transition to InfiniBand (50 GB/s per port) shifts the balance: communication now dominates at approximately 50% of step time, with an additional 5% lost to synchronization barriers. At frontier scale (4,096 GPUs), communication and synchronization overhead together consume 80% of the training step, leaving only 20% for useful computation. This progression explains why every algorithm in this chapter exists: without hierarchical collectives, gradient compression, and communication-computation overlap, large-scale training would spend the vast majority of its multi-million-dollar compute budget waiting for data to arrive.
+
+```{python}
+#| label: fig-compute-comm-timeline
+#| fig-cap: "**The Compute-Communication Timeline**. As training scales from 8 GPUs (one node) to 4,096 GPUs, communication grows from approximately 25% to over 65% of each training step. This shift from NVLink-dominated to InfiniBand-limited communication drives the design of all collective optimization strategies. Proportions derived from H100 cluster measurements with a 70B parameter model using data parallelism with Ring AllReduce."
+#| fig-alt: "Stacked horizontal bar chart showing compute, communication, and sync fractions at 8, 64, 512, and 4096 GPUs with communication growing from 25 to 65 percent."
+#| echo: false
+
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsys import viz
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 4.5))
+
+# Scenarios: GPU count and time breakdown (compute, communication, sync overhead)
+gpu_counts = ['8 GPUs\n(1 node)', '64 GPUs\n(8 nodes)', '512 GPUs\n(64 nodes)', '4,096 GPUs\n(512 nodes)']
+compute_pct  = [75, 45, 30, 20]
+comm_pct     = [25, 50, 60, 65]
+sync_pct     = [ 0,  5, 10, 15]
+
+y_pos = np.arange(len(gpu_counts))
+bar_height = 0.5
+
+# Stacked horizontal bars
+bars_compute = ax.barh(y_pos, compute_pct, height=bar_height,
+                       color=COLORS['GreenLine'], label='Compute', edgecolor='white', linewidth=0.5)
+bars_comm = ax.barh(y_pos, comm_pct, height=bar_height, left=compute_pct,
+                    color=COLORS['OrangeLine'], label='Communication', edgecolor='white', linewidth=0.5)
+bars_sync = ax.barh(y_pos, sync_pct, height=bar_height,
+                    left=[c + m for c, m in zip(compute_pct, comm_pct)],
+                    color=COLORS['RedLine'], label='Sync/Idle', edgecolor='white', linewidth=0.5)
+
+# Label each segment with percentage
+for i in range(len(gpu_counts)):
+    # Compute label
+    if compute_pct[i] > 10:
+        ax.text(compute_pct[i] / 2, i, f'{compute_pct[i]}%',
+                ha='center', va='center', fontsize=9, fontweight='bold', color='white')
+    # Communication label
+    ax.text(compute_pct[i] + comm_pct[i] / 2, i, f'{comm_pct[i]}%',
+            ha='center', va='center', fontsize=9, fontweight='bold', color='white')
+    # Sync label (only if nonzero)
+    if sync_pct[i] > 0:
+        ax.text(compute_pct[i] + comm_pct[i] + sync_pct[i] / 2, i, f'{sync_pct[i]}%',
+                ha='center', va='center', fontsize=8, fontweight='bold', color='white')
+
+# Annotations
+ax.annotate('NVLink domain\n(900 GB/s)', xy=(88, 0), xytext=(88, 0.5),
+            fontsize=7, ha='center', color=COLORS['GreenLine'], fontweight='bold')
+ax.annotate('InfiniBand-limited\n(50 GB/s per port)', xy=(88, 2.5), xytext=(88, 2.0),
+            fontsize=7, ha='center', color=COLORS['OrangeLine'], fontweight='bold')
+
+ax.set_yticks(y_pos)
+ax.set_yticklabels(gpu_counts, fontsize=9)
+ax.set_xlabel('Fraction of Training Step (%)')
+ax.set_xlim(0, 105)
+ax.invert_yaxis()
+ax.legend(loc='upper right', fontsize=8, ncol=3)
+
+plt.tight_layout()
+plt.show()
+```
+
 ### The Gradient's Travel Manifest {#sec-communication-parallelism-patterns}
 
 The journey begins at the moment the backward pass completes. In Volume 1, this was the end of the story—the weights were updated, and the neuron learned. But at production scale, the gradient is born into isolation. It exists on one GPU, while the "truth" of the model is distributed across thousands. To achieve global convergence, our gradient must find its peers.
@@ -215,8 +280,10 @@ If you ask a datacenter engineer how long it takes to send ten megabytes across 
 
 Every step our gradient takes is governed by the linear cost model $T(n) = \alpha + n/\beta$. This isn't just a formula; it's the "Physics of Failure" for distributed systems.
 
-::: {.callout-definition title="The α-β Model (Hockney Model)"}
-***The α-β Model*** is a linear cost model for network communication where the time to transfer a message of $n$ bytes is $T(n) = \alpha + n/\beta$. The parameter **α** (alpha) represents the fixed startup latency—the cost to send any message regardless of size. The parameter **β** (beta) represents the link bandwidth in bytes per second. This model separates the **latency-bound regime** (small messages dominated by α) from the **bandwidth-bound regime** (large messages dominated by $n/\beta$), enabling architects to identify which bottleneck to optimize for a given workload.
+::: {.callout-definition title="α-β Model (Hockney Model)"}
+
+***α-β Model***\index{Alpha-Beta Model!definition} is a linear cost model for network communication where the time to transfer a message of $n$ bytes is $T(n) = \alpha + n/\beta$. The parameter **α** (alpha) represents the fixed startup latency—the cost to send any message regardless of size. The parameter **β** (beta) represents the link bandwidth in bytes per second. This model separates the **latency-bound regime** (small messages dominated by α) from the **bandwidth-bound regime** (large messages dominated by $n/\beta$), enabling architects to identify which bottleneck to optimize for a given workload.
+
 :::
 
 **Parameter Definitions:**
@@ -411,7 +478,9 @@ This reality gap has practical consequences for algorithm selection. The crossov
 If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, our gradient must now choose its vehicle: strictly choreographed group exchanges known as Collective Operations.
 
 ::: {.callout-definition title="Collective Operation"}
-***Collective Operation*** is a communication primitive where a group of processes (workers) engage in a coordinated data exchange. Unlike point-to-point communication (one sender, one receiver), collective operations (like AllReduce or AllGather) involve all participating processes simultaneously to aggregate, broadcast, or redistribute data.
+
+***Collective Operation***\index{Collective Operation!definition} is a communication primitive where a group of processes (workers) engage in a coordinated data exchange. Unlike point-to-point communication (one sender, one receiver), collective operations (like AllReduce or AllGather) involve all participating processes simultaneously to aggregate, broadcast, or redistribute data.
+
 :::
 
 Understanding these primitives is essential because different model architectures stress different operations.
@@ -1208,12 +1277,14 @@ This is not merely a practical concern; it is a fundamental mathematical obstacl
 We solve the conflict between compression and convergence with **Error Feedback**. Like a traveler who can only carry 10kg but has 100kg of gear, we leave the excess behind but *remember* it. We maintain a local error accumulator $e_t$ that stores the compression residual.
 
 ::: {.callout-definition title="Error Feedback Mechanism"}
-**Error Feedback** maintains a local error accumulator $e_t$ that stores the compression residual. At each step $t$:
+
+***Error Feedback***\index{Error Feedback!definition} is a convergence-preserving technique that maintains a local error accumulator $e_t$ storing the compression residual. At each step $t$:
 
 $$v_t = \text{Compress}(g_t + e_t)$$
 $$e_{t+1} = (g_t + e_t) - v_t$$
 
 where $g_t$ is the true gradient, $v_t$ is the compressed (transmitted) gradient, and $e_t$ is the accumulated error from previous steps.
+
 :::
 
 **Why Error Feedback Guarantees Convergence:**
@@ -1555,7 +1626,7 @@ We followed the gradient's journey through **Ring** and **Tree AllReduce** algor
 
 When even the fastest wires are not enough, **Gradient Compression** provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like **1-bit Adam** reduce communication volume by 4--1000 $\times$. **Error Feedback** ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, **communication-computation overlap** through layer-by-layer pipelining and bucket fusion hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15% of total step time in well-configured systems.
 
-::: {.callout-takeaways}
+::: {.callout-takeaways title="Every Byte Has a Travel Cost"}
 
 * **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether you should optimize software latency (small messages) or hardware bandwidth (large payloads). In practice, NCCL's effective $\alpha$ is 5--10 $\times$ higher than wire-level latency.
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the crossover formula $M_{crossover} \approx N \alpha \beta$ to choose.

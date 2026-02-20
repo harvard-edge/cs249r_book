@@ -6,7 +6,7 @@ engine: jupyter
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_Gemini Pro 3 Prompt: A dynamic illustration of a global inference serving system handling millions of requests. The scene shows a central model representation being replicated across multiple serving nodes arranged in a globe-spanning network. Incoming request streams appear as flowing arrows from users worldwide, processed through load balancers depicted as traffic controllers, then distributed to model replicas. Visual elements include batching queues shown as organized request groups, latency meters displaying millisecond readings, and auto-scaling indicators showing nodes spawning and despawning. The composition emphasizes real-time responsiveness with clock symbols and speed indicators. Color palette features cool silvers and whites for infrastructure, warm oranges for active requests, and green for successful responses. Technical yet accessible style suitable for a production systems textbook. Rendered in the style of Nanobanana. High resolution, rectangular image with golden ratio dimensions._
+\chapterminitoc
 :::
 
 \noindent
@@ -30,13 +30,13 @@ Training a model is a one-time expense; serving it is perpetual. A model trained
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Quantify why serving cost dominates training cost over a model's lifetime using the total cost of serving equation
-- Design batching strategies matched to model architectures, distinguishing static batching for vision models from continuous batching for LLMs and feature-parallel batching for recommendation systems
-- Apply the serving hierarchy framework (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
-- Compare model sharding strategies (tensor parallelism, pipeline parallelism, expert parallelism, embedding sharding) by their communication patterns and latency-memory tradeoffs
-- Analyze load balancing algorithms using queuing theory to explain why power-of-two-choices achieves exponentially better performance than random assignment
-- Recognize KV cache memory challenges in LLM serving and understand how techniques like continuous batching and memory management enable high GPU utilization
-- Design autoscaling policies that account for GPU cold start latency and balance cost optimization with SLO guarantees
+- Quantify why serving cost dominates training cost over a model's lifetime using the **total cost of serving equation**
+- Design batching strategies matched to model architectures, distinguishing **static batching** for vision models from **continuous batching** for LLMs and **feature-parallel batching** for recommendation systems
+- Apply the **serving hierarchy framework** (request, replica, service, platform) to systematically identify and resolve inference bottlenecks at each level
+- Compare model sharding strategies (**tensor parallelism**, **pipeline parallelism**, **expert parallelism**, **embedding sharding**) by their communication patterns and latency-memory tradeoffs
+- Analyze load balancing algorithms using **queuing theory** to explain why **power-of-two-choices** achieves exponentially better performance than random assignment
+- Recognize **KV cache** memory challenges in LLM serving and understand how techniques like continuous batching and memory management enable high GPU utilization
+- Design **autoscaling** policies that account for **GPU cold start** latency and balance cost optimization with SLO guarantees
 
 :::
 
@@ -73,7 +73,7 @@ gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / BILLION:.0f}"   # "175"
 
 Imagine a language model that costs $5 million to train over two months. Once deployed to a global user base serving thousands of queries per second, that same model burns through $5 million in inference compute every single week. The economics of inference force a radical architectural shift: we are no longer optimizing a temporary batch job; we are operating a perpetual, latency-sensitive factory.
 
-Single-machine model serving establishes foundational principles that this chapter extends to distributed systems. Single-machine inference optimization, including batching, caching, model optimization, and hardware acceleration, provides the building blocks. This chapter addresses when those techniques reach their limits and distributed approaches become necessary.
+@sec-performance-engineering established how to maximize throughput on individual forward passes through operator fusion, precision engineering, and graph compilation. This chapter confronts the next challenge: what happens when a single optimized model must serve thousands of concurrent users across a globally distributed fleet? Single-machine model serving establishes foundational principles that this chapter extends to distributed systems. Single-machine inference optimization, including batching, caching, model optimization, and hardware acceleration, provides the building blocks. This chapter addresses when those techniques reach their limits and distributed approaches become necessary.
 
 Distributed inference systems must solve problems that do not exist at single-machine scale. Load balancing[^fn-load-balancing] becomes critical when requests must be distributed across hundreds of GPU instances while maintaining latency guarantees. Request routing must account for model-specific characteristics: recommendation systems with trillion-parameter embedding tables require different placement strategies than large language models that generate responses token by token. Autoscaling must anticipate demand fluctuations that can change request volume by orders of magnitude within minutes while maintaining latency bounds users expect.
 
@@ -148,13 +148,7 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 ### Serving Cost Dominates Training Cost {#sec-inference-scale-serving-cost-dominates-training-cost-576a}
 
-The serving tax quantified above consumes a fraction of the latency budget per request. But the true economic impact of inference emerges when we consider cost over a model's entire operational lifetime.
-
-::: {.callout-perspective title="The Economics of Inference"}
-A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus. While training is a one-time capital expenditure (CapEx), serving is a continuous operational expenditure (OpEx) that scales with user growth.
-:::
-
-To make this cost dominance concrete, consider a worked example that reveals the *serving cost multiplier* in practice.
+The serving tax quantified above consumes a fraction of the latency budget per request. But the true economic impact of inference emerges when we consider cost over a model's entire operational lifetime. A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus. Training is a one-time capital expenditure (CapEx); serving is a continuous operational expenditure (OpEx) that scales with user growth. To make this cost dominance concrete, consider a worked example that reveals the *serving cost multiplier* in practice.
 
 ::: {.callout-notebook title="The Serving Cost Multiplier"}
 **Problem**: You spent **$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
@@ -251,6 +245,97 @@ ax.set_ylabel('Cost per 1000 Tokens ($)', fontsize=11, fontweight='bold')
 ax.set_xlim(1e3, 1e8)
 ax.legend(loc='upper right', fontsize=9)
 ax.grid(True, which='both', alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
+The cost ratios in @tbl-cost-ratios tell a static story, but the *dynamics* of cost accumulation reveal an even more striking pattern. @fig-serving-cost-crossover plots cumulative cost over a 36-month deployment window for three representative scenarios: a small model with low traffic, a 70B LLM serving one million daily active users, and a recommendation system serving 100 million users. The crossover point, where cumulative serving cost overtakes training cost, varies by orders of magnitude across these scenarios. For recommendation systems, serving dominates within days; for high-traffic LLMs, within roughly six weeks. Only small models with expensive training and low traffic see training cost dominate for extended periods. This temporal view reinforces why inference optimization yields the highest return on engineering investment for any model that reaches production scale.
+
+```{python}
+#| label: fig-serving-cost-crossover
+#| fig-cap: "**The Serving Cost Crossover**. Cumulative cost of training versus serving for three deployment scenarios. For high-traffic LLMs, serving cost exceeds training cost within weeks. For recommendation systems at 100M daily active users, serving dominates within days. Only low-traffic, expensive-to-train models see training cost dominate for extended periods."
+#| fig-alt: "Area chart showing cumulative cost over 36 months for three scenarios with crossover points marked"
+#| echo: false
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsys import viz
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 5.5))
+
+months = np.linspace(0, 36, 500)
+
+# Scenario A: Small model, low traffic
+train_a = 0.05  # $50K = $0.05M
+serve_per_month_a = 0.005  # $5K/month = $0.005M
+cum_a_train = np.full_like(months, train_a)
+cum_a_serve = train_a + serve_per_month_a * months
+crossover_a = train_a / serve_per_month_a  # 10 months
+
+# Scenario B: 70B LLM, 1M DAU
+train_b = 2.0  # $2M
+serve_per_month_b = 1.5  # $1.5M/month
+cum_b_train = np.full_like(months, train_b)
+cum_b_serve = train_b + serve_per_month_b * months
+crossover_b = train_b / serve_per_month_b  # ~1.33 months
+
+# Scenario C: RecSys, 100M DAU
+train_c = 0.012  # $12K = $0.012M
+serve_per_month_c = 0.250  # $250K/month = $0.250M
+cum_c_train = np.full_like(months, train_c)
+cum_c_serve = train_c + serve_per_month_c * months
+crossover_c = train_c / serve_per_month_c  # ~0.048 months
+
+# Plot cumulative total cost (training + serving) for each scenario
+ax.plot(months, cum_a_serve, color=COLORS["BlueLine"], linewidth=2.5,
+        label="A: Small model, low traffic ($50K train, $5K/mo serve)")
+ax.plot(months, cum_b_serve, color=COLORS["OrangeLine"], linewidth=2.5,
+        label="B: 70B LLM, 1M DAU ($2M train, $1.5M/mo serve)")
+ax.plot(months, cum_c_serve, color=COLORS["RedLine"], linewidth=2.5,
+        label="C: RecSys, 100M DAU ($12K train, $250K/mo serve)")
+
+# Plot training cost baselines (flat lines)
+ax.axhline(y=train_a, color=COLORS["BlueLine"], linestyle=":", linewidth=1.0, alpha=0.5)
+ax.axhline(y=train_b, color=COLORS["OrangeLine"], linestyle=":", linewidth=1.0, alpha=0.5)
+
+# Fill regions between training baseline and total cost to show serving portion
+ax.fill_between(months, train_a, cum_a_serve, alpha=0.10, color=COLORS["BlueLine"])
+ax.fill_between(months, train_b, cum_b_serve, alpha=0.10, color=COLORS["OrangeLine"])
+ax.fill_between(months, train_c, cum_c_serve, alpha=0.10, color=COLORS["RedLine"])
+
+# Mark crossover points with vertical dashed lines
+ax.axvline(x=crossover_a, color=COLORS["BlueLine"], linestyle="--", linewidth=1.0, alpha=0.6)
+ax.axvline(x=crossover_b, color=COLORS["OrangeLine"], linestyle="--", linewidth=1.0, alpha=0.6)
+
+# Annotations
+ax.annotate("Crossover: month 10",
+            xy=(crossover_a, train_a * 2), fontsize=8,
+            color=COLORS["BlueLine"], fontweight="bold",
+            ha="left", va="bottom",
+            xytext=(crossover_a + 0.5, train_a * 2.5),
+            arrowprops=dict(arrowstyle="->", color=COLORS["BlueLine"], lw=1.0))
+
+ax.annotate("LLM: serving exceeds\ntraining in ~6 weeks",
+            xy=(crossover_b, train_b * 2), fontsize=8,
+            color=COLORS["OrangeLine"], fontweight="bold",
+            ha="left", va="bottom",
+            xytext=(crossover_b + 2, train_b * 1.5),
+            arrowprops=dict(arrowstyle="->", color=COLORS["OrangeLine"], lw=1.0))
+
+ax.annotate("RecSys: serving\ndominates within days",
+            xy=(0.3, cum_c_serve[3]), fontsize=8,
+            color=COLORS["RedLine"], fontweight="bold",
+            ha="left", va="bottom",
+            xytext=(3, 0.15),
+            arrowprops=dict(arrowstyle="->", color=COLORS["RedLine"], lw=1.0))
+
+ax.set_yscale("log")
+ax.set_xlabel("Months Since Deployment")
+ax.set_ylabel("Cumulative Cost ($M)")
+ax.set_xlim(0, 36)
+ax.set_ylim(0.005, 100)
+ax.legend(loc="upper left", fontsize=8, framealpha=0.9)
+ax.set_title("")
+
 plt.tight_layout()
 plt.show()
 ```
@@ -1304,6 +1389,18 @@ Production systems typically use replica-local batching with load balancing that
 
 ### Continuous Batching for LLM Inference {#sec-inference-scale-continuous-batching-llm-inference-f8e6}
 
+::: {.callout-definition title="Autoregressive Generation"}
+
+***Autoregressive Generation***\index{Autoregressive Generation!definition} is the sequential token-by-token decoding process in which each output token is conditioned on all previously generated tokens. This sequential dependency creates a fundamental **memory-bandwidth bottleneck**: every generation step must read the full model weights from HBM to produce a single token of output, leaving compute units severely underutilized and making decode latency proportional to model size divided by memory bandwidth rather than available FLOPs.
+
+:::
+
+::: {.callout-definition title="Continuous Batching"}
+
+***Continuous Batching***\index{Continuous Batching!definition} is a scheduling strategy that decouples batch membership from iteration boundaries, allowing new requests to enter and completed requests to leave at every decode step. Continuous batching eliminates the padding waste and head-of-line blocking inherent in static batching, where all sequences must wait for the longest to finish, at the cost of more complex memory management (particularly for the **KV Cache**) and dynamic batch reshaping at each iteration.
+
+:::
+
 Autoregressive language models present a unique batching challenge that static and dynamic approaches handle poorly. The key insight comes from the Orca system[^fn-orca] [@yu2022orca]: traditional batching forces all sequences in a batch to complete before any new sequences can join, wasting compute when sequences finish at different times.
 
 [^fn-orca]: **Orca**: Named after the killer whale known for highly coordinated group hunting, Orca pioneered iteration-level scheduling for LLM serving at Microsoft in 2022. The system's insight that sequences could enter and exit batches at each decode step, rather than waiting for entire batches to complete, transformed LLM serving economics.
@@ -1930,6 +2027,12 @@ This section examines the memory management techniques that enable efficient LLM
 
 ### KV Cache Fundamentals {#sec-inference-scale-kv-cache-fundamentals-2ccd}
 
+::: {.callout-definition title="KV Cache"}
+
+***KV Cache***\index{KV Cache!definition} is the memory buffer that trades **memory capacity** for **redundant computation** by storing previously computed key and value attention vectors so they need not be recomputed at each **autoregressive generation** step. The cache reduces per-token computation from $O(t^2)$ to $O(t)$ but grows linearly with sequence length and batch size ($2 \times L \times H \times D$ per sequence), making it the dominant memory bottleneck in large language model serving and the primary constraint on concurrent request capacity.
+
+:::
+
 Autoregressive generation without caching requires $O(t^2)$ computation per token because each transformer layer must recompute attention keys and values for all previous tokens.[^fn-transformer-attention] The KV cache stores these computed key and value vectors, reducing generation to $O(t)$ per token. For serving at scale, this memory savings creates a critical management challenge since KV cache memory can exceed model weights for long contexts.
 
 [^fn-transformer-attention]: **Transformer attention mechanics**: In transformer models, the self-attention mechanism computes attention scores between all pairs of tokens using query (Q), key (K), and value (V) projections. For a sequence of length $t$, this requires computing $t \times t$ attention weights. During autoregressive generation, each new token must attend to all previous tokens. Without caching, this means recomputing all previous K and V projections for every generated token. For readers seeking deeper background, see Vaswani et al. [@vaswani2017attention] or standard deep learning references.
@@ -2058,6 +2161,12 @@ Result: 4 free slots but cannot allocate new sequence
 Production systems report 60-80% memory waste from fragmentation under realistic workloads, severely limiting batch sizes and throughput.
 
 ### PagedAttention {#sec-inference-scale-pagedattention-3c94}
+
+::: {.callout-definition title="PagedAttention"}
+
+***PagedAttention***\index{PagedAttention!definition} is a memory management technique that applies virtual memory principles to **KV Cache** allocation, storing attention states in non-contiguous fixed-size physical blocks mapped through a block table. PagedAttention eliminates both internal fragmentation (over-allocated pre-reserved memory) and external fragmentation (unusable gaps between allocations) at the cost of block-table indirection overhead per attention operation, enabling near-optimal memory utilization for variable-length sequences.
+
+:::
 
 PagedAttention [@kwon2023vllm], introduced in vLLM, applies virtual memory[^fn-virtual-memory] concepts to KV cache management. Instead of contiguous allocation, the KV cache is divided into fixed-size pages (typically 16-256 tokens), and sequences are allocated pages on demand.
 
@@ -2372,6 +2481,12 @@ Modern models like Llama 2 [@touvron2023llama2] and Mistral use GQA specifically
 
 ### Speculative Decoding {#sec-inference-scale-speculative-decoding-c438}
 
+::: {.callout-definition title="Speculative Decoding"}
+
+***Speculative Decoding***\index{Speculative Decoding!definition} is a latency optimization that uses a smaller **draft model** to predict multiple tokens speculatively, then verifies the entire draft in parallel with the full target model in a single forward pass. This converts the sequential bottleneck of **autoregressive generation** into a speculation-verification pattern, trading **additional compute** (draft model inference plus parallel verification) for **reduced wall-clock latency**, with the acceptance rate between draft and target models determining the realized speedup.
+
+:::
+
 Autoregressive generation is inherently sequential: each token depends on previous tokens. Speculative decoding[^fn-speculative] [@leviathan2023speculative; @chen2023accelerating] breaks this bottleneck by using a smaller draft model to predict multiple tokens, then verifying them in parallel with the target model.
 
 [^fn-speculative]: **Speculative execution in LLMs**: The concept borrows from CPU speculative execution, where processors predict branch outcomes and execute instructions ahead of confirmation. Similarly, speculative decoding predicts multiple tokens and processes them speculatively, rolling back only when the target model disagrees. Unlike CPU speculation (which is invisible to software), LLM speculation requires explicit acceptance/rejection logic.
@@ -2570,6 +2685,12 @@ async def swap_to_gpu(sequence_id):
 :::
 
 ### Disaggregated Serving: Splitting the Workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
+
+::: {.callout-definition title="Prefill and Decode Phases"}
+
+***Prefill and Decode Phases***\index{Prefill and Decode!definition} are the two distinct computational regimes of LLM inference. The prefill phase processes the entire input prompt in parallel, is compute-bound, and exhibits high **arithmetic intensity** (100+ FLOPs/byte). The decode phase generates output tokens sequentially via **autoregressive generation**, is memory-bandwidth-bound, and exhibits low arithmetic intensity (1--10 FLOPs/byte). These opposing hardware utilization profiles within a single request create a fundamental scheduling challenge: resources optimized for one phase are necessarily underutilized during the other.
+
+:::
 
 LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request. @tbl-prefill-decode contrasts these phases:
 
@@ -5403,7 +5524,7 @@ The serving hierarchy provides our organizing framework for these optimizations,
 
 We analyzed why different model architectures require distinct batching strategies: static/dynamic for vision, feature-parallel for recommendation, and continuous batching for LLMs. We explored how model sharding techniques like tensor and expert parallelism reduce latency for frontier models, provided the underlying networking fabric discussed in @sec-collective-communication can sustain the synchronization overhead. Finally, we examined the critical memory management challenges of autoregressive generation, where techniques like PagedAttention and speculative decoding break the sequential bottlenecks of modern AI.
 
-::: {.callout-takeaways}
+::: {.callout-takeaways title="Serving Inverts Every Assumption"}
 
 * **The Inference Wall**: Serving cost often dominates training cost by 100 $\times$ or more over a model's lifetime, making inference efficiency the primary driver of ML economics.
 * **Prefill vs. Decode**: LLM serving is split into two regimes: compute-bound prefill (input processing) and memory-bandwidth-bound decode (token generation). Optimizing for the "Decode" phase requires high-bandwidth memory (HBM3) or specialized storage-as-memory (HBF).
@@ -5413,6 +5534,10 @@ We analyzed why different model architectures require distinct batching strategi
 * **Distribution is a Tax**: Every step of distribution—network round-trips, serialization, and coordination—adds a "serving tax" that must be explicitly budgeted within the milliseconds allowed for a user response.
 
 :::
+
+Understanding inference at scale matters because serving cost, not training cost, dominates the total economics of machine learning in production. A frontier model may require tens of millions of dollars and several months to train, but that investment is amortized once. Serving that same model to millions of users over its operational lifetime can exceed the original training expenditure by 100 $\times$ or more. This asymmetry means that every optimization discussed in this chapter, from continuous batching to PagedAttention to power-of-two-choices load balancing, translates directly into sustained cost savings that compound over the model's deployment period.
+
+The engineer who internalizes the prefill/decode split, who understands why KV cache fragmentation destroys throughput, and who can reason about the interaction between batching strategy and tail latency holds the leverage to reduce serving costs by orders of magnitude. These are not incremental improvements. Choosing continuous batching over static batching can double GPU utilization; implementing PagedAttention can recover 60-80% of wasted memory; and disaggregating prefill from decode across specialized hardware pools can cut per-token cost in half. In aggregate, the techniques presented in this chapter represent the difference between inference infrastructure that scales economically and one that collapses under the weight of its own serving bill.
 
 ::: {.callout-chapter-connection title="From Datacenter to Edge"}
 

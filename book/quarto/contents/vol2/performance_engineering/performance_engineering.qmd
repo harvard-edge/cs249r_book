@@ -28,7 +28,7 @@ start_chapter("vol2:performance_engineering")
 
 ::: {layout-narrow}
 ::: {.column-margin}
-_Gemini Pro 3 Prompt: A visualization of a "Compiler for Intelligence." The image shows a complex neural network graph entering a glowing, crystalline prism (the compiler) and emerging as a streamlined, highly efficient beam of light (machine code). Inside the prism, gears represent kernel fusion, tiling, and memory management. The background is a circuit board schematic representing the hardware substrate. The style is technical and futuristic._
+\chapterminitoc
 :::
 
 \noindent
@@ -117,7 +117,7 @@ class PerformanceSetup:
     h100_ridge_fp16 = h100_fp16 / h100_hbm_bw
     h100_ridge_fp8 = h100_fp8 / h100_hbm_bw
     a100_ridge_fp16 = a100_fp16 / a100_hbm_bw
-    
+
     # Energy ratio
     energy_ratio_val = energy_dram_pj / energy_sram_pj
 
@@ -157,6 +157,8 @@ energy_ratio_str = f"{PerformanceSetup.energy_ratio_val.magnitude:.0f}"
 ## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}
 
 Why does an H100 GPU capable of 989 teraFLOPS often sit 95% idle while generating text from a large language model? The processor is starving for data. Performance engineering operates within a constrained optimization space defined by the Memory Wall, where the speed of moving bytes from memory to compute units fundamentally caps our operational throughput.
+
+Part II established the distributed logic of the fleet: parallelism strategies (@sec-distributed-training-systems), communication patterns (@sec-collective-communication), fault recovery (@sec-fault-tolerance-reliability), and resource orchestration (@sec-fleet-orchestration). Those chapters ensured that workloads reach the right hardware and survive failures along the way. This chapter ensures that each workload *uses* that hardware efficiently, extracting maximum throughput from every accelerator cycle.
 
 ### The Iron Law of ML Performance {#sec-performance-engineering-efficiency-frontier}
 
@@ -249,9 +251,9 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 
 The **Roofline Model** provides a quantitative framework for diagnosing whether a workload is compute-bound or memory-bound on a specific piece of hardware. Introduced by Williams, Waterman, and Patterson (2009), the model plots achievable performance as a function of **arithmetic intensity**, defined as the ratio of floating-point operations to bytes transferred from memory.
 
-::: {.callout-definition title="Definition of Arithmetic Intensity"}
+::: {.callout-definition title="Arithmetic Intensity"}
 
-**Arithmetic Intensity** (AI) is the ratio of floating-point operations (FLOPs) performed to bytes of data moved from off-chip memory (typically HBM) for a given computation. It is measured in FLOPs per byte (FLOP/byte). A workload with high arithmetic intensity reuses each loaded byte many times; a workload with low arithmetic intensity loads data, uses it once, and discards it.
+***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the ratio of floating-point operations (FLOPs) performed to bytes of data moved from off-chip memory (typically HBM) for a given computation, measured in FLOP/byte. This ratio determines a workload's *regime of operation*: when arithmetic intensity falls below the hardware's ridge point ($P/B$, where $P$ is peak compute and $B$ is peak bandwidth), the workload is *bandwidth-bound* and performance scales with memory throughput; when arithmetic intensity exceeds the ridge point, the workload is *compute-bound* and performance scales with arithmetic throughput. Correctly classifying this regime is the first step in any optimization effort, because optimizing for the wrong bottleneck yields no improvement.
 
 :::
 
@@ -384,6 +386,90 @@ h100_fp8_ridge_str = f"{h100_ridge_fp8_val:.0f}"
 ```
 
 This means that any operation performing fewer than `{python} h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} h100_fp8_str` TFLOPS while bandwidth remains `{python} h100_hbm_bw_str` TB/s, the ridge point rises to approximately `{python} h100_fp8_ridge_str` FLOP/byte. The A100, with `{python} a100_fp16_str` TFLOPS and `{python} a100_hbm_bw_str` TB/s, has a lower ridge point of approximately `{python} a100_ridge_str` FLOP/byte at FP16. Each hardware generation increases compute faster than bandwidth, pushing the ridge point higher and making more workloads memory-bound.
+
+@fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. The ridge point has grown from 139 FLOP/byte on the V100 to 625 FLOP/byte on the B200, a 4.5 $\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, was memory-bound on every generation but falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as large matrix multiplications, transition from compute-bound on V100 to memory-bound on B200. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
+
+```{python}
+#| label: fig-shifting-roofline
+#| fig-cap: "**The Shifting Roofline Across GPU Generations**. Overlaid roofline models for V100 through B200 show the ridge point growing from 139 to 625 FLOP/byte. Operations like naive attention, which were compute-bound on V100, become memory-bound on B200 as the roofline shifts. The same kernel can change performance regime across hardware generations."
+#| fig-alt: "Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked"
+#| echo: false
+import numpy as np
+import matplotlib.pyplot as plt
+from mlsys import viz
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(9, 6))
+
+# GPU specifications: (name, peak FP16 TFLOPS, HBM BW TB/s, color)
+gpus = [
+    ("V100", 125, 0.900, COLORS["VioletLine"]),
+    ("A100", 312, 2.039, COLORS["BlueLine"]),
+    ("H100", 989, 3.350, COLORS["GreenLine"]),
+    ("B200", 5000, 8.000, COLORS["OrangeLine"]),
+]
+
+ai_range = np.logspace(0, 4, 500)  # 1 to 10000 FLOP/byte
+
+for name, peak_tflops, bw_tbs, color in gpus:
+    bw_bytes = bw_tbs * 1e12  # bytes/s
+    peak_flops = peak_tflops * 1e12  # FLOPS
+    ridge = peak_flops / bw_bytes  # FLOP/byte
+
+    # Roofline: min(peak, BW * AI), expressed in TFLOPS
+    attainable = np.minimum(peak_tflops, bw_tbs * 1e3 * ai_range / 1e3)
+    # Simpler: attainable TFLOPS = min(peak_tflops, BW_TB/s * AI * 1e-0)
+    # BW in TB/s * AI in FLOP/byte = TFLOP/s (since TB/s * FLOP/byte = 1e12 * FLOP / (1e12 * byte) * byte/s... )
+    # Let's compute correctly:
+    # attainable FLOPS = min(peak_flops, bw_bytes * AI)
+    # attainable TFLOPS = attainable FLOPS / 1e12
+    attainable_tflops = np.minimum(peak_tflops, (bw_tbs * ai_range))
+
+    ax.plot(ai_range, attainable_tflops, color=color, linewidth=2.0, label=f"{name}")
+
+    # Mark ridge point
+    ax.plot(ridge, peak_tflops, "o", color=color, markersize=8, zorder=5)
+    # Label ridge point
+    offset_y = 1.25 if name != "B200" else 0.75
+    ax.annotate(f"{name} ridge\n{ridge:.0f} FLOP/byte",
+                xy=(ridge, peak_tflops), fontsize=7.5,
+                color=color, fontweight="bold",
+                ha="center", va="bottom" if name != "B200" else "top",
+                xytext=(0, 8 if name != "B200" else -8),
+                textcoords="offset points")
+
+# Example ML operations as vertical dashed lines
+ops = [
+    ("LayerNorm\n(~5 FLOP/byte)", 5, "bottom"),
+    ("Attention (naive)\n(~10 FLOP/byte)", 10, "bottom"),
+    ("MatMul (large)\n(~200 FLOP/byte)", 200, "bottom"),
+]
+
+for label, ai_val, va_pos in ops:
+    ax.axvline(x=ai_val, color=COLORS["primary"], linestyle=":", linewidth=1.0, alpha=0.5)
+    ax.text(ai_val, 0.8, label, fontsize=7, color=COLORS["primary"],
+            ha="center", va="bottom", rotation=0,
+            bbox=dict(boxstyle="round,pad=0.2", facecolor="white", edgecolor="none", alpha=0.8))
+
+# Arrow annotation for ridge shift
+ax.annotate("",
+            xy=(625, 4200), xytext=(139, 160),
+            arrowprops=dict(arrowstyle="->", color="crimson", lw=2.0, linestyle="-"))
+ax.text(90, 500, "Ridge point shifted\n4.5x in 7 years",
+        fontsize=9, color="crimson", fontweight="bold",
+        ha="center", va="center",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor=COLORS["RedL"], edgecolor="crimson", alpha=0.8))
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlabel("Arithmetic Intensity (FLOP/byte)")
+ax.set_ylabel("Attainable Performance (TFLOPS)")
+ax.set_xlim(1, 10000)
+ax.set_ylim(0.5, 10000)
+ax.legend(loc="lower right", fontsize=9, title="GPU Generation")
+
+plt.tight_layout()
+plt.show()
+```
 
 ### Where ML Workloads Fall {#sec-performance-engineering-workload-placement}
 
@@ -808,9 +894,11 @@ The energy implications of reduced precision extend beyond throughput. The Horow
 Post-training quantization to INT8 or INT4 delivers even greater bandwidth savings for inference, but LLMs present a unique challenge: **outlier features**. Dettmers et al. (2022) discovered that large language models develop a small number of hidden dimensions (typically fewer than 1% of all dimensions) with activation magnitudes 10--100 $\times$ larger than the rest. Applying uniform per-tensor INT8 quantization clips these outliers, destroying the information they carry, or expands the quantization range to accommodate them, wasting precision on the majority of near-zero values.
 
 ::: {.callout-definition title="Block-wise Quantization"}
-**Block-wise quantization** partitions a weight tensor into small blocks (typically 32-128 elements) and applies independent quantization parameters (scale and zero-point) to each block. Unlike per-tensor quantization, which uses a single scale factor for the entire tensor, block-wise quantization adapts to local value distributions, preserving outlier information that per-tensor methods destroy. The quantization error for a block of size $B$ with range $[w_{min}, w_{max}]$ mapped to $b$-bit integers is bounded by:
+
+***Block-wise Quantization***\index{Block-wise Quantization!definition} is a precision reduction technique that partitions a weight tensor into small blocks (typically 32-128 elements) and applies independent quantization parameters (scale and zero-point) to each block. Unlike per-tensor quantization, which uses a single scale factor for the entire tensor, block-wise quantization adapts to local value distributions, preserving outlier information that per-tensor methods destroy. The quantization error for a block of size $B$ with range $[w_{min}, w_{max}]$ mapped to $b$-bit integers is bounded by:
 $$\epsilon_{block} = \frac{w_{max} - w_{min}}{2^b - 1}$$
 For a 4-bit scheme with $B=32$, this typically achieves less than 1% accuracy degradation on language modeling tasks compared to FP16, while reducing memory footprint by 4x and memory bandwidth demand proportionally.
+
 :::
 
 **LLM.int8()** solves this by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
@@ -1217,7 +1305,7 @@ While it might seem advantageous to increase the draft length $K$ indefinitely, 
 
 The selection of the draft model size introduces a critical optimization surface. A tiny draft model (e.g., 150M parameters for a 70B target) is computationally negligible but yields a low $\alpha$ (e.g., 0.4), resulting in frequent rollbacks. Conversely, a large draft model (e.g., 7B parameters) achieves high alignment ($\alpha > 0.8$) but its own latency becomes a bottleneck, consuming time that could have been spent on target model decode steps. For a 70B target, empirical results favor a draft model in the 1B--3B range. A 1.1B draft model might achieve $\alpha = 0.6$ with 2 ms latency per draft step, yielding a 2.3 $\times$ speedup. Upgrading to a 7B draft model might boost $\alpha$ to 0.75, but if the draft latency rises to 10 ms, the net wall-clock speedup drops to 1.5 $\times$. The optimal draft model size shifts with the difficulty of the prompt: code generation ($\alpha$ often above 0.8 due to structural predictability) tolerates smaller draft models better than creative writing.
 
-::: {.callout-notebook title="Napkin Math: The Speculation Budget"}
+::: {.callout-notebook title="The Speculation Budget"}
 Is speculative decoding worth the implementation complexity? Consider a draft model that is $10\times$ cheaper per token than the target model, and a verification step that processes a candidate batch for $1.5\times$ the cost of a single target decode step. The break-even acceptance rate $\alpha$ is roughly defined by the ratio of overhead to savings.
 $$ \text{Break-Even } \alpha \approx \frac{\text{Verification Cost}}{\text{Draft Savings Ratio}} \approx \frac{1.5}{10} = 15\% $$
 Since modern draft models (e.g., sheared Llama-2) typically achieve acceptance rates of 60-80% on standard prose, the arbitrage is highly profitable, often yielding $2\text{-}3\times$ end-to-end latency reductions.
@@ -1291,9 +1379,11 @@ If we want the reasoning capabilities of a 1-trillion parameter model, but only 
 In a standard MoE transformer layer, the feed-forward network (FFN) is replaced by multiple parallel "expert" FFNs and a lightweight **router** (also called a gating network) that selects which experts process each token.
 
 ::: {.callout-definition title="Mixture of Experts (MoE)"}
-A **Mixture of Experts** architecture replaces a single dense feed-forward layer with $N$ parallel "expert" sub-networks and a lightweight **gating function** (router) that selects the top-$k$ experts for each input token. For a model with $N$ experts and top-$k$ routing, only $k/N$ of the parameters are activated per token, decoupling model capacity (total parameters) from computational cost (FLOPs per token). The gating function $G(x)$ produces a sparse probability distribution:
+
+***Mixture of Experts (MoE)***\index{Mixture of Experts!definition} is an architecture that replaces a single dense feed-forward layer with $N$ parallel "expert" sub-networks and a lightweight **gating function** (router) that selects the top-$k$ experts for each input token. For a model with $N$ experts and top-$k$ routing, only $k/N$ of the parameters are activated per token, decoupling model capacity (total parameters) from computational cost (FLOPs per token). The gating function $G(x)$ produces a sparse probability distribution:
 $$G(x) = \text{TopK}(\text{Softmax}(W_g \cdot x), k)$$
 where $W_g$ is a learned routing matrix. A model with 8 experts and top-2 routing has 4x the parameters of a dense equivalent but uses only 25% more FLOPs per token (due to the router and load-balancing overhead). The systems challenge is **load balancing**: if the router sends disproportionate traffic to a few experts, those experts become bottlenecks while others sit idle, wasting the parallelism that MoE was designed to exploit.
+
 :::
 
 For a token $x$, the router produces a probability distribution over $E$ experts:
@@ -1631,7 +1721,7 @@ x = np.arange(len(gpus))
 compute_budget = 100.0
 
 comm_scale_factor = np.logspace(0, 1.2, len(gpus))
-total_comm_cost = 35.0 * comm_scale_factor 
+total_comm_cost = 35.0 * comm_scale_factor
 
 target_efficiency = np.linspace(0.92, 0.38, len(gpus))
 
@@ -1895,9 +1985,9 @@ You are handed a raw, unoptimized 70-billion parameter PyTorch model and told it
 
 When approaching a new ML workload for optimization, follow this sequence:
 
-::: {.callout-definition title="Definition of Model FLOPs Utilization"}
+::: {.callout-definition title="Model FLOPs Utilization"}
 
-**Model FLOPs Utilization (MFU)** is the ratio of observed throughput (measured in FLOPs/second based on the model's theoretical FLOP count per sample) to the hardware's peak FLOP/second capacity. Unlike hardware FLOPs utilization, which counts all arithmetic operations including overhead, MFU counts only the FLOPs that directly contribute to the model's computation. MFU therefore captures both hardware efficiency and software overhead in a single metric.
+***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the ratio of observed throughput (measured in FLOPs/second based on the model's theoretical FLOP count per sample) to the hardware's peak FLOP/second capacity. Unlike raw hardware utilization, which counts all arithmetic operations including rematerialization, padding, and communication overhead, MFU counts only the FLOPs that directly contribute to the model's forward and backward passes. This distinction is critical: a system can show 90% hardware utilization while wasting half its compute on algorithmic overhead, a failure mode that only MFU exposes. MFU therefore serves as the single metric that captures both hardware efficiency and software overhead.
 
 $$
 \text{MFU} = \frac{\text{Model FLOPs per sample} \times \text{Samples per second}}{\text{Peak Hardware FLOPS}}
@@ -2158,7 +2248,7 @@ The case study in @sec-performance-engineering-case-study demonstrated how these
 
 The unifying principle is that performance engineering is not about making hardware faster; it is about making software match the physics of the hardware it runs on. The memory wall is a physical constraint that grows wider with each hardware generation. The techniques in this chapter are the engineer's response: not fighting the physics but working within it, keeping data close to compute, reducing precision to the minimum that preserves quality, and restructuring algorithms to avoid unnecessary work. As models grow larger and hardware grows faster but not more bandwidth-rich, these skills become not just valuable but essential.
 
-::: {.callout-takeaways}
+::: {.callout-takeaways title="Match the Software to the Silicon"}
 
 * The **Memory Wall** is the defining constraint of modern ML performance: most transformer operations are memory-bound, with arithmetic intensity far below the hardware ridge point. Performance engineering is primarily about reducing bytes moved, not operations computed.
 * **Operator Fusion** and **Tiling** (FlashAttention) eliminate redundant HBM traffic by keeping intermediate results in on-chip SRAM, reducing attention memory traffic from quadratic to linear in sequence length.
@@ -2169,6 +2259,10 @@ The unifying principle is that performance engineering is not about making hardw
 * **Always profile before optimizing**: the dominant bottleneck is often not where intuition suggests, and applying the wrong optimization wastes engineering effort while leaving the actual bottleneck untouched.
 
 :::
+
+The central lesson of performance engineering is that it is an iterative, measurement-driven discipline, not a one-shot transformation. Every optimization shifts the bottleneck: fusing attention kernels may move the constraint from HBM bandwidth to compute throughput, and reducing precision may free enough memory to increase batch size, which in turn changes the arithmetic intensity and demands a different optimization entirely. The practitioner who masters this profile-optimize-reprofile loop can extract 2 to 10 times more throughput from the same hardware than one who applies optimizations blindly. Profiling is not merely the first step; it is every step.
+
+This iterative mindset also determines which skills endure as hardware evolves. Individual techniques will change as new accelerator generations shift the ridge point of the Roofline Model and as new architectures alter the dominant computational patterns. What will not change is the fundamental discipline: measure the system, identify the binding constraint, apply the optimization that addresses that specific constraint, and then measure again. Engineers who internalize this cycle treat performance engineering as a continuous practice rather than a checklist, and that practice is what separates systems that merely run from systems that run efficiently at scale.
 
 ::: {.callout-chapter-connection title="From Optimization to Serving"}
 

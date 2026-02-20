@@ -66,7 +66,7 @@ Choose a path based on your goal.
 
 **READ** Start with the [textbook](https://mlsysbook.ai/book/):
 - [📘 Volume I: Foundations](https://mlsysbook.ai/vol1/) covers ML basics, training, optimization, and operations
-- [📙 Volume II: Advanced](https://mlsysbook.ai/vol2/) covers distributed systems, production deployment, and responsible AI
+- [📙 Volume II: At Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production deployment, and responsible AI
 
 **BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
@@ -132,8 +132,8 @@ The learning stack below shows how the textbook connects to hands on work and de
 | | Component | What You Do | Link |
 |--|-----------|-------------|------|
 | **READ** | [📖 Textbook](https://mlsysbook.ai/book/) | Understand ML systems concepts | [book/](book/README.md) |
-| | [📘 Volume I](https://mlsysbook.ai/vol1/) | Foundations: Build, Optimize, Operate | |
-| | [📙 Volume II](https://mlsysbook.ai/vol2/) | Advanced: Scale, Distribute, Govern | |
+| | [📘 Volume I](https://mlsysbook.ai/vol1/) | Foundations: Build, Optimize, Deploy | |
+| | [📙 Volume II](https://mlsysbook.ai/vol2/) | At Scale: Scale, Distribute, Govern | |
 | **EXPLORE** | 🔮 Software Co-Labs | Run controlled experiments on latency, memory, energy, cost | *Coming 2026* |
 | **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch/) | Understand frameworks by implementing them | [tinytorch/](tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits/) | Engineer under real constraints: memory, power, timing, safety | [kits/](kits/README.md) |
@@ -168,7 +168,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 | Volume | Theme | Focus | Link |
 |--------|-------|-------|------|
-| **Volume I** | Build, Optimize, Operate | Single-machine ML systems, foundational principles | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
+| **Volume I** | Build, Optimize, Deploy | Single-machine ML systems, foundational principles | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
 | **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale | [mlsysbook.ai/vol2](https://mlsysbook.ai/vol2/) |
 
 **Volume I** teaches you to *understand* ML systems (like "Computer Organization and Design").
@@ -176,7 +176,7 @@ This textbook is organized into **two volumes** following the Hennessy & Patters
 
 The [full textbook](https://mlsysbook.ai/book/) combines both volumes for comprehensive coverage.
 
-#### Volume I: Build, Optimize, Operate
+#### Volume I: Build, Optimize, Deploy
 
 | Part | Focus | Chapters |
 |------|-------|----------|
@@ -283,8 +283,8 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 | Resource | Description |
 |---|---|
 | [📖 **Full Textbook**](https://mlsysbook.ai/book/) | Complete interactive online textbook (both volumes) |
-| [📘 **Volume I**](https://mlsysbook.ai/vol1/) | Foundations: Build, Optimize, Operate |
-| [📙 **Volume II**](https://mlsysbook.ai/vol2/) | Advanced: Scale, Distribute, Govern |
+| [📘 **Volume I**](https://mlsysbook.ai/vol1/) | Foundations: Build, Optimize, Deploy |
+| [📙 **Volume II**](https://mlsysbook.ai/vol2/) | At Scale: Scale, Distribute, Govern |
 | [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch/) | Build ML frameworks from scratch |
 | [🔧 **Hardware Kits**](https://mlsysbook.ai/kits/) | Deploy to Arduino, Raspberry Pi, edge devices |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |

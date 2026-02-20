@@ -38,9 +38,11 @@ class NavigatorSectionItem extends vscode.TreeItem {
     const listingCount = visibleEntries.filter(entry => entry.kind === 'listing').length;
     const figureCount = visibleEntries.filter(entry => entry.kind === 'figure').length;
     const tableCount = visibleEntries.filter(entry => entry.kind === 'table').length;
+    const equationCount = visibleEntries.filter(entry => entry.kind === 'equation').length;
     const counts: string[] = [];
     if (figureCount > 0) { counts.push(`${figureCount} fig`); }
     if (tableCount > 0) { counts.push(`${tableCount} tbl`); }
+    if (equationCount > 0) { counts.push(`${equationCount} eq`); }
     if (listingCount > 0) { counts.push(`${listingCount} code`); }
     const calloutCount = visibleEntries.filter(entry => entry.kind === 'callout').length;
     if (calloutCount > 0) { counts.push(`${calloutCount} callout`); }
@@ -145,14 +147,15 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
   }
 
   private sectionHasVisibleContent(section: NavigatorSection): boolean {
+    // Show all heading levels (## and deeper) so the full outline is visible
+    if (section.level >= 2) {
+      return true;
+    }
     if (section.entries.some(entry => this.isEntryVisible(entry.kind))) {
       return true;
     }
-    for (const childId of section.childSectionIds) {
-      const child = this.sections.get(childId);
-      if (child && this.sectionHasVisibleContent(child)) {
-        return true;
-      }
+    if (section.childSectionIds.length > 0) {
+      return true;
     }
     return false;
   }

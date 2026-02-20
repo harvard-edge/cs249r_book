@@ -5,6 +5,10 @@ engine: jupyter
 # Introduction {#sec-vol2-introduction}
 
 ::: {layout-narrow}
+::: {.column-margin}
+\chapterminitoc
+:::
+
 \noindent
 
 :::
@@ -91,7 +95,7 @@ class Vol2IntroSetup:
     # Cluster configuration
     num_gpus_gpt4 = 25000
     gpu_days_gpt4 = 90
-    fail_rate_annual = 0.02 # 2% failure rate
+    fail_rate_annual = 0.08 # 8% failure rate
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     gpt3_params_b_val = gpt3_params / BILLION
@@ -180,6 +184,80 @@ GPT-3 (2020) consumed an estimated `{python} gpt3_training_ops_sci` FLOPS during
 
 :::
 
+The table above captures the growth in training compute, but an equally important dimension is the growth in *cluster size* itself. @fig-cluster-size-explosion traces this trajectory by plotting the number of accelerators used to train landmark models over the past decade.
+
+```{python}
+#| label: fig-cluster-size-explosion
+#| fig-cap: "**The Cluster Size Explosion**. Number of accelerators used to train landmark models, 2012--2024. Verified counts from published papers are shown as filled circles; the GPT-3 estimate (hollow marker) reflects approximate cluster size from Microsoft infrastructure announcements rather than a precise published count. The dashed trend line indicates approximately 4$\\times$ annual growth in cluster size, a rate that outpaces Moore's Law and drives every infrastructure challenge in this volume."
+#| fig-alt: "Scatter plot with log-scale y-axis showing accelerator count versus year from 2012 to 2025. Points rise from 2 GPUs for AlexNet in 2012 to 16384 for Llama 3 in 2024."
+#| echo: false
+import numpy as np
+from mlsys import viz
+
+fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5))
+
+# --- Verified data points ---
+models    = ["AlexNet", "ResNet",  "Megatron-LM", "GPT-3",   "PaLM",   "LLaMA 1",   "DeepSeek-V3", "Llama 3"]
+years     = [2012,       2015,      2019,           2020,       2022,     2023,         2024,           2024     ]
+gpus      = [2,          8,         512,            10000,      6144,     2048,         2048,           16384    ]
+estimated = [False,      False,     False,          True,       False,    False,        False,          False    ]
+
+years_arr = np.array(years, dtype=float)
+gpus_arr  = np.array(gpus, dtype=float)
+
+# --- Separate verified vs estimated ---
+v_idx = [i for i, e in enumerate(estimated) if not e]
+e_idx = [i for i, e in enumerate(estimated) if e]
+
+ax.scatter([years[i] for i in v_idx], [gpus[i] for i in v_idx],
+           color=COLORS["BlueLine"], s=70, zorder=5, label="Verified")
+ax.scatter([years[i] for i in e_idx], [gpus[i] for i in e_idx],
+           facecolors="none", edgecolors=COLORS["OrangeLine"], s=70,
+           linewidths=2, zorder=5, label="Estimated")
+
+# --- Exponential trend line (log-linear fit on verified points) ---
+v_years = np.array([years[i] for i in v_idx], dtype=float)
+v_gpus  = np.array([gpus[i] for i in v_idx], dtype=float)
+coeffs  = np.polyfit(v_years, np.log10(v_gpus), 1)
+trend_x = np.linspace(2011, 2025.5, 200)
+trend_y = 10 ** np.polyval(coeffs, trend_x)
+ax.plot(trend_x, trend_y, "--", color=COLORS["RedLine"], alpha=0.5, linewidth=1.5, label="Trend")
+
+# --- Annotate each model ---
+offsets = {
+    "AlexNet":     (8, -18),
+    "ResNet":      (8, 10),
+    "Megatron-LM": (-75, 12),
+    "GPT-3":       (8, -18),
+    "PaLM":        (8, 10),
+    "LLaMA 1":     (-70, -18),
+    "DeepSeek-V3": (-90, 10),
+    "Llama 3":     (-55, 12),
+}
+for i, m in enumerate(models):
+    color = COLORS["OrangeLine"] if estimated[i] else COLORS["BlueLine"]
+    ax.annotate(m, (years[i], gpus[i]), textcoords="offset points",
+                xytext=offsets[m], fontsize=8, color=color,
+                arrowprops=dict(arrowstyle="-", color=color, lw=0.5) if abs(offsets[m][0]) > 30 else None)
+
+# --- Growth rate annotation ---
+growth_factor = 10 ** (coeffs[0])  # per year
+ax.text(0.03, 0.92, f"~{growth_factor:.0f}$\\times$ per year",
+        transform=ax.transAxes, fontsize=10, color=COLORS["RedLine"],
+        fontstyle="italic", bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=COLORS["RedLine"], alpha=0.7))
+
+ax.set_yscale("log")
+ax.set_ylim(1, 100_000)
+ax.set_xlim(2011, 2025.5)
+ax.set_xlabel("Year")
+ax.set_ylabel("Accelerators Used for Training")
+ax.legend(loc="lower right", frameon=True, fancybox=True, framealpha=0.9)
+ax.set_title("")
+plt.show()
+```
+
+@fig-cluster-size-explosion reveals that cluster sizes have grown by roughly four orders of magnitude in just over a decade, from two GPUs for AlexNet to over 16,000 H100s for Llama 3. This exponential trajectory is the empirical foundation of the Scale Moment: each generation of frontier models demands not merely better accelerators, but exponentially larger *fleets* of them.
+
 Throughout this book, recurring *lighthouse archetypes* ground abstract principles in concrete, quantifiable workloads. The following callout introduces these canonical examples at fleet scale.
 
 ::: {.callout-note title="Using Lighthouse Archetypes"}
@@ -197,8 +275,10 @@ This exponential growth has transformed ML from a discipline where algorithms do
 
 The transition from single-machine to distributed training introduces qualitative changes in system behavior. The unit of compute is no longer a single server, but a **Machine Learning Fleet**—a massive, interconnected distributed system that must act as a single coherent engine.
 
-::: {.callout-definition title="The Machine Learning Fleet"}
-***The Machine Learning Fleet*** is a distributed system of thousands of interconnected accelerators (GPUs/TPUs), storage arrays, and network fabrics designed to operate as a single coherent computer. Unlike traditional clusters that manage independent jobs, the Fleet coordinates synchronous states across all nodes, where a failure in any single component can stall the entire system.
+::: {.callout-definition title="Machine Learning Fleet"}
+
+***Machine Learning Fleet***\index{Machine Learning Fleet!definition} is a distributed system of thousands of interconnected accelerators (GPUs/TPUs), storage arrays, and network fabrics designed to operate as a single coherent computer. Unlike traditional clusters that manage independent jobs, the Fleet coordinates synchronous states across all nodes, where a failure in any single component can stall the entire system.
+
 :::
 
 As systems scale beyond a single node, a fundamental physical constraint emerges: the *bisection bandwidth wall*, which limits how fast data can cross the network midpoint. This constraint explains why networking, not just compute, often determines the "speed" of your model.
@@ -239,10 +319,9 @@ This textbook adopts the **Warehouse-Scale Computer (WSC)**[^fn-warehouse-scale]
 *   The **Distributed Storage** is the Local Disk.
 *   The **Fleet Orchestrator** is the Operating System.
 
-Mastering Volume II requires making this mental shift: you are no longer writing code for a CPU; you are writing logic for a 100-Megawatt computer spanning thousands of racks.
+Mastering Volume II requires making this mental shift: you are no longer writing code for a CPU; you are writing logic for a 100-Megawatt computer spanning thousands of racks. While the warehouse-scale computer remains the dominant paradigm for frontier models, alternative architectures like **wafer-scale engines**\index{Wafer-Scale Engine} attempt to collapse this entire hierarchy back into a single piece of silicon, trading the modularity of a distributed cluster for the extreme bandwidth of on-chip communication.
 
 [^fn-warehouse-scale]: **The Warehouse-Scale Computer (WSC)**: First formalized by Barroso, Clidaras, and Hölzle at Google [@barroso2019datacenter]. They argued that at scale, the computer is no longer the server, but the entire datacenter facility. This perspective is essential for ML Systems, as it explains why cooling, power ramp rates, and optical network topologies are as important as the neural network architecture itself.
-
 
 These distinctive workload characteristics have two further consequences at scale: communication becomes the dominant cost, and failure becomes a routine event rather than an exception.
 
@@ -272,7 +351,7 @@ As computational demands grow exponentially and data requirements increase, ques
 
 ::: {.callout-definition title="Scaling Laws"}
 
-**Scaling Laws** refer to empirical relationships discovered by OpenAI showing that language model performance follows predictable _power-law relationships_ with _model size (N)_, _dataset size (D)_, and _compute budget (C)_. These laws enable researchers to predict performance and optimal resource allocation before expensive training runs.
+***Scaling Laws***\index{Scaling Laws!definition} are empirical relationships showing that language model performance follows predictable _power-law relationships_ with _model size (N)_, _dataset size (D)_, and _compute budget (C)_. These laws enable researchers to predict performance and optimal resource allocation before expensive training runs.
 
 :::
 
@@ -675,7 +754,6 @@ Scaling laws reveal the walls; efficiency engineering builds the paths around th
 
 Three interconnected dimensions address the specific limitations that scaling analysis revealed, working together to achieve what scaling alone cannot. The efficiency framework that structures the remainder of this chapter builds on this insight.
 
-
 ## Constraints of Scale {#sec-vol2-introduction-constraints-scale}
 
 The transition from single-machine ML to the Machine Learning Fleet introduces constraints that no amount of clever algorithms can eliminate. These constraints are physical (hardware fails, bandwidth saturates), logical (distributed systems face fundamental impossibility results), and societal (scale amplifies impact). Understanding them is a prerequisite for the diagnostic framework that follows.
@@ -801,7 +879,6 @@ When a machine learning system grows from a single accelerator to a fleet of tho
 3.  **Coordination ($C_3$ - The Logic)**\index{C$^3$ Taxonomy!coordination}: The synchronous management of state across thousands of nodes. This is the domain of collective algorithms (All-Reduce), fault tolerance, and distributed consensus. Coordination is the "Software Tax" that determines how efficiently $N$ independent nodes can act as a single computer.
 
 These three dimensions form the **Triad of Distributed Efficiency**. If your fleet spends too much time on *Communication* or *Coordination*, the expensive *Computation* capacity sits idle. The central challenge of Volume II is engineering the fleet to minimize the "C$^3$ Gap"—the difference between theoretical hardware peak and actual distributed throughput.
-
 
 ### The Fleet Law {#sec-vol2-introduction-fleet-law}
 
@@ -1207,7 +1284,7 @@ This volume opened with a fundamental challenge: the principles that enable succ
 
 The transition from building systems that *work* to building systems that *scale* represents the next frontier of engineering. The principles established in Volume I—measure everything, optimize the bottleneck, design for failure—remain essential, but their application changes fundamentally when the "system" spans thousands of nodes. Network topology becomes as important as memory hierarchy, and distributed consensus replaces local synchronization.
 
-::: {.callout-takeaways}
+::: {.callout-takeaways title="Scale Changes the Rules"}
 
 * **Scale creates qualitative change**: Techniques that work for 8 GPUs fail at 8,000 GPUs due to the **Bisection Bandwidth Wall** and the **Reliability Gap**.
 * **Communication is the new bottleneck**: As models scale, network bandwidth replaces FLOPs as the primary system constraint (High CI Ratio).
@@ -1218,9 +1295,11 @@ The transition from building systems that *work* to building systems that *scale
 
 :::
 
-::: {.callout-chapter-connection title="From Requirements to Logic"}
+These principles collectively reshape how engineers reason about system design. When failure is routine rather than exceptional, and when communication cost eclipses computation, the diagnostic instincts developed on single machines must be recalibrated. The engineer who internalizes these constraints stops asking "how do I make this faster?" and starts asking "where is the coordination overhead, what fails when this node disappears, and which consistency guarantee can I relax?" That shift in questioning, from optimizing a component to governing a fleet, is what separates practitioners who can architect at scale from those who can only prototype on one machine.
 
-We have established the *requirements* of scale: we know *why* we must distribute and what the physical costs will be. But how do we actually split the math across thousands of independent processors? In **Distributed Training** (@sec-distributed-training-systems), we move from the "Why" of scale to the "How," examining the specific algorithms that allow a single massive model to live and learn across the Machine Learning Fleet.
+::: {.callout-chapter-connection title="From Requirements to Silicon"}
+
+We have established the *requirements* of scale: we know *why* we must distribute, what physical costs arise, and which principles govern the Machine Learning Fleet. But requirements alone do not compute gradients. The fleet needs a physical foundation — silicon, power, and cooling — capable of sustaining the workloads we have described. @sec-compute-infrastructure begins building that foundation, examining the accelerator architectures, memory hierarchies, and power delivery systems that form the Infrastructure Layer of the Fleet Stack.
 
 :::
 
