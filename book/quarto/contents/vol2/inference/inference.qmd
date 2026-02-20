@@ -16,9 +16,13 @@ _Gemini Pro 3 Prompt: A dynamic illustration of a global inference serving syste
 
 ## Purpose {.unnumbered}
 
+\begin{marginfigure}
+\mlfleetstack{15}{15}{100}{10}
+\end{marginfigure}
+
 _Why does inference cost eventually dwarf training cost, and what does this mean for system design?_
 
-Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, each request incurring compute, memory, and energy costs that accumulate into operational expenses far exceeding the original training investment. This economic inversion—where deployment costs dominate development costs—reshapes every engineering decision. Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into massive savings or costs. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. The architecture that was optimal for training—large batches, high throughput, tolerance for latency variance—becomes the architecture that bankrupts operations or frustrates users at serving time. Inference at scale is where ML systems live or die economically.
+Training a model is a one-time expense; serving it is perpetual. A model trained once for millions of dollars may serve billions of requests over its lifetime, each request incurring compute, memory, and energy costs that accumulate into operational expenses far exceeding the original training investment. This economic inversion—where deployment costs dominate development costs—reshapes every engineering decision. Optimizations that shave milliseconds from inference latency or percentage points from GPU utilization compound across billions of requests into massive savings or costs. Performance Engineering (@sec-performance-engineering) developed the optimization toolkit—fusion, precision, compilation, speculative decoding. This chapter applies those tools to build serving systems that handle millions of requests under strict latency budgets. Reliability requirements intensify because downtime during serving means lost revenue and broken user experiences, not merely delayed experiments. The architecture that was optimal for training—large batches, high throughput, tolerance for latency variance—becomes the architecture that bankrupts operations or frustrates users at serving time. Inference at scale is where ML systems live or die economically.
 
 ::: {.content-visible when-format="pdf"}
 \newpage
@@ -65,9 +69,9 @@ pcie_gen5_gbs = f"{PCIE_GEN5_BW.to(GB / second).magnitude:.0f}"  # "64"
 gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / BILLION:.0f}"   # "175"
 ```
 
-## Scaling Inference Beyond Single Machines {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
+## The Economics and Architecture of Inference {#sec-inference-scale-scaling-inference-beyond-single-machines-54e6}
 
-In the **Fleet Stack** (@sec-vol2-introduction), Inference is the **Serving Layer**—the interface where the model meets the user. While the **Distribution Layer** (training) optimizes for throughput over weeks, the Serving Layer must deliver predictions in milliseconds. If the **Iron Law** defines the speed limit of training, it defines the **deadline** of inference: $L_{inference} \le \text{SLO}$.
+Imagine a language model that costs $5 million to train over two months. Once deployed to a global user base serving thousands of queries per second, that same model burns through $5 million in inference compute every single week. The economics of inference force a radical architectural shift: we are no longer optimizing a temporary batch job; we are operating a perpetual, latency-sensitive factory.
 
 Single-machine model serving establishes foundational principles that this chapter extends to distributed systems. Single-machine inference optimization, including batching, caching, model optimization, and hardware acceleration, provides the building blocks. This chapter addresses when those techniques reach their limits and distributed approaches become necessary.
 
@@ -210,6 +214,47 @@ The cost dominance ratio varies by application. @tbl-cost-ratios quantifies this
 
 This cost structure motivates the optimization techniques throughout this chapter. Every percentage point of serving efficiency improvement yields ongoing cost reduction over the model's operational lifetime.
 
+@fig-serving-cost-curve illustrates why optimization matters: the gap between naive and optimized serving determines whether an inference service is profitable or hemorrhaging money.
+
+```{python}
+#| label: fig-serving-cost-curve
+#| echo: false
+#| fig-cap: "The Serving Cost Curve. Cost per 1000 tokens decreases with scale and optimization. Single-GPU serving never reaches profitability at typical pricing. Multi-GPU batching breaks even at moderate volume. Fully optimized serving (INT4, continuous batching, speculative decoding) achieves profitability at much lower volumes, fundamentally changing the economics of inference."
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.style.use('seaborn-v0_8-whitegrid')
+fig, ax = plt.subplots(figsize=(9, 5))
+
+volume = np.logspace(3, 8, 200)
+typical_pricing = 0.05
+
+cost_single_gpu = 0.15 * (1e6 / volume)**0.3
+cost_multi_gpu = 0.08 * (1e6 / volume)**0.45
+cost_optimized = 0.02 * (1e6 / volume)**0.55
+
+ax.plot(volume, cost_single_gpu, color='#CB202D', linewidth=2.5, label='Single-GPU (naive)')
+ax.plot(volume, cost_multi_gpu, color='#E67817', linewidth=2.5, label='Multi-GPU batching')
+ax.plot(volume, cost_optimized, color='#008F45', linewidth=2.5, label='Fully optimized (INT4, continuous batching)')
+
+ax.axhline(y=typical_pricing, color='#333333', linestyle='--', linewidth=1.5, alpha=0.8)
+ax.text(1.2e7, typical_pricing * 1.05, 'Typical pricing (break-even)', fontsize=9, color='#333333')
+
+ax.fill_between(volume, 0, typical_pricing, where=(cost_single_gpu > typical_pricing), alpha=0.1, color='#CB202D')
+ax.fill_between(volume, 0, typical_pricing, where=(cost_optimized < typical_pricing), alpha=0.1, color='#008F45')
+
+ax.set_xscale('log')
+ax.set_yscale('log')
+ax.set_xlabel('Daily Request Volume', fontsize=11, fontweight='bold')
+ax.set_ylabel('Cost per 1000 Tokens ($)', fontsize=11, fontweight='bold')
+ax.set_xlim(1e3, 1e8)
+ax.legend(loc='upper right', fontsize=9)
+ax.grid(True, which='both', alpha=0.3)
+plt.tight_layout()
+plt.show()
+```
+
 ### The Inference Landscape: Beyond LLMs {#sec-inference-scale-inference-landscape-beyond-llms-9560}
 
 A critical misconception in current discourse frames inference at scale as synonymous with LLM serving. While large language models present distinctive challenges and attract significant attention, they represent a small fraction of production inference volume. Understanding the full inference landscape proves essential for appropriate technique selection. @tbl-inference-landscape breaks down model types, request volumes, and optimization challenges.
@@ -297,9 +342,7 @@ The remainder of this chapter progresses through these levels: batching and cach
 
 ## Serving Framework Selection {#sec-inference-scale-serving-framework-selection-45d3}
 
-The batching, sharding, and load balancing techniques introduced above do not exist in isolation; they are implemented within serving frameworks that constrain and enable different optimizations. Before examining these techniques in depth, practitioners face an immediate practical decision: which serving infrastructure to build upon?
-
-The choice of serving framework determines which optimizations are available, how models are deployed, and what performance characteristics are achievable. Understanding this landscape first provides essential context: when we discuss continuous batching in @sec-inference-scale-continuous-batching-llm-inference-f8e6, we will see how vLLM and TensorRT-LLM implement it differently. This section provides a systematic framework for selecting among the major options.
+If your team wants to deploy a new vision-language model, do you write a custom Flask wrapper around PyTorch, rely on NVIDIA's Triton Inference Server, or adopt an LLM-specific engine like vLLM? The framework you select will dictate your latency ceiling, your memory overhead, and the specific batching algorithms available to you. Understanding this framework landscape is the prerequisite to all further inference scaling.
 
 ### Framework Categories {#sec-inference-scale-framework-categories-172a}
 
@@ -799,9 +842,11 @@ class CustomerSupportLLM:
 
 This configuration handles the 500 QPS peak with 4 replicas, can scale to 8 during unexpected spikes, and scales down to 2 during low-traffic periods to reduce cost.
 
+While selecting the right framework provides the structural foundation, the framework itself is merely a vessel for processing data. To actually achieve high throughput and maximize our GPU investment, we must now configure how this framework groups incoming traffic using advanced batching strategies at scale.
+
 ## Batching Strategies at Scale {#sec-inference-scale-batching-strategies-scale-6733}
 
-Having selected a serving framework, we must now configure how it processes requests. The framework determines which batching implementations are available: vLLM provides continuous batching with PagedAttention, TensorRT-LLM offers in-flight batching with optimized kernels, and Triton supports custom batching policies. Understanding the underlying principles of batching enables effective configuration regardless of framework choice, because where frameworks differ in *how* they batch, the principles we examine here govern *what* batching strategy suits each workload.
+A stream of hundreds of disparate chat requests hits your inference server every second. If the server processes them one by one, the GPU will sit 95% idle, starved for work. If it waits to gather a huge static batch, the first user in line will experience agonizing latency. Batching strategies at scale require sophisticated, dynamic algorithms that fuse requests on the fly without violating strict tail-latency deadlines.
 
 The core insight of batching is that processing multiple requests together amortizes fixed costs, including model loading, kernel launch overhead, and memory transfer latency, across more work. This trades higher per-request latency for dramatically improved throughput. Single-machine serving applies this through dynamic batching, which collects requests within a time window before processing them together.
 
@@ -1875,11 +1920,11 @@ Is the model autoregressive (LLM, speech)?
 
 : **Batching Strategy Parameters**. Each strategy has distinct parameters requiring tuning for the specific deployment. {#tbl-batching-parameters}
 
+Even with the most perfectly tuned continuous batching strategy, large language models will eventually grind to a halt due to a deeper, architecture-specific bottleneck. The context window of every active request must be stored in GPU memory, bringing us to the critical challenge of KV Cache management.
+
 ## KV Cache Management {#sec-inference-scale-kv-cache-management-04ed}
 
-Load balancing distributes requests across replicas at the service level for all model types. Within each replica, we now narrow our focus to a challenge specific to autoregressive language models. While recommendation and vision models have fixed memory footprints during inference, LLMs accumulate state as they generate tokens. This accumulated state, stored in the key-value (KV) cache, represents a distinctive memory management challenge that does not exist for other model types.
-
-Autoregressive language models maintain KV caches that store attention context from previous tokens, enabling efficient generation without recomputing attention over the entire sequence history. As context lengths grow and serving scales, KV cache management becomes a critical bottleneck at the replica level of the serving hierarchy. A 70B parameter model with 128K context can require over 100GB just for KV cache, exceeding the model weights themselves.
+As an LLM generates a 2,000-word essay, it must constantly recall every word it has previously written. It does this by storing intermediate attention states in a rapidly expanding memory buffer known as the KV Cache. Unmanaged, this cache will aggressively fragment GPU memory, causing out-of-memory crashes even when 40% of the VRAM is technically free.
 
 This section examines the memory management techniques that enable efficient LLM serving at scale: PagedAttention for fragmentation-free allocation, prefix caching for common prompt sharing, and speculative decoding for latency reduction.
 
@@ -2524,13 +2569,69 @@ async def swap_to_gpu(sequence_id):
 
 :::
 
+### Disaggregated Serving: Splitting the Workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
+
+LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request. @tbl-prefill-decode contrasts these phases:
+
+**Prefill phase**: Process the entire input prompt in parallel. Computation scales with prompt length. Memory access pattern is compute-bound (high arithmetic intensity[^fn-arithmetic-intensity]).
+
+[^fn-arithmetic-intensity]: **Arithmetic intensity**: The ratio of compute operations to memory accesses, measured in FLOPs per byte. Prefill achieves 100+ FLOPs/byte (compute-bound), while decode achieves 1-10 FLOPs/byte (memory-bound). This 10-100 $\times$ difference explains why prefill and decode require fundamentally different optimization strategies.
+
+**Decode phase**: Generate output tokens one at a time. Each token requires loading entire model weights. Memory access pattern is bandwidth-bound (low arithmetic intensity).
+
+| **Phase**   |   **Computation** | **Memory Access** | **Bottleneck** | **Optimal Batch** |
+|:------------|------------------:|:------------------|:---------------|------------------:|
+| **Prefill** | O(prompt_length²) | Weight loading    | Compute        |       Small (1–8) |
+| **Decode**  |    O(1) per token | Weight loading    | Bandwidth      |      Large (100s) |
+
+: **Prefill vs Decode Characteristics**. The two phases have opposite optimization requirements. {#tbl-prefill-decode}
+
+This dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference. This creates the **Static Power Waste** problem analyzed in @sec-sustainable-ai, where low-utilization decode steps dominate energy consumption.
+
+**Chunked prefill**[^fn-chunked-prefill] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
+
+[^fn-chunked-prefill]: **Chunked prefill motivation**: Without chunking, a 32K-token prompt blocks decode for 5-30 seconds while prefill completes. Chunking divides the prompt into 256–1024 token chunks processed between decode iterations, bounding decode latency at the cost of slightly longer prefill time. This trade-off favors interactive applications where decode responsiveness matters more than total completion time.
+
+$$\text{Chunk latency} = \frac{\text{Chunk size}}{\text{Prefill throughput}}$$
+
+With chunk size chosen to match decode iteration time, prefill and decode can share GPU resources without decode latency spikes.
+
+**Prefill-decode disaggregation** takes this further by running prefill and decode on separate GPU pools:
+
+- **Prefill pool**: Optimized for compute intensity (e.g., H100 nodes with high TFLOPS) using large batch sizes to maximize throughput.
+- **Decode pool**: Optimized for memory bandwidth (e.g., nodes with maximum HBM capacity or specialized High Bandwidth Flash as discussed in @sec-data-storage) to handle thousands of concurrent autoregressive streams.
+
+This separation enables independent scaling: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache—often megabytes of data—must be migrated to a decode node within the inter-token latency budget (typically <10 ms). InfiniBand's sub-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation.
+
+The *Sarathi* system formalizes *chunked prefill* into a practical scheduling algorithm that bounds decode latency regardless of incoming prompt length.
+
+::: {.callout-note title="Sarathi: Chunked Prefill Implementation"}
+
+The Sarathi system [@agrawal2023sarathi] implements chunked prefill with the following design:
+
+**Chunk sizing**: Chunks are sized to complete in approximately the same time as one decode iteration (typically 10–50 ms). For a prefill throughput of 10,000 tokens/second, a 20 ms chunk processes 200 tokens.
+
+**Interleaving schedule**: Each GPU iteration processes either:
+
+- One prefill chunk for a new request, OR
+- One decode step for all active sequences
+
+This ensures decode latency remains bounded regardless of incoming prompt lengths.
+
+**KV cache transfer**: When prefill completes, the generated KV cache transfers to decode slots. With NVLink, this transfer adds <1 ms for typical prompt lengths.
+
+**Performance impact**:
+
+- Without chunking: Long prompts cause decode latency spikes of 100 ms+
+- With chunking: Decode latency bounded to 30 ms P99 regardless of prompt length
+
+:::
+
+KV Cache management enables a single GPU to handle many concurrent requests without crashing. But what happens when the model itself—like a 175-billion parameter foundation model—is simply too large to fit on a single GPU, let alone its KV Cache? We must split the workload across multiple devices using model sharding for inference.
+
 ## Model Sharding for Inference {#sec-inference-scale-model-sharding-inference-82b3}
 
-Batching strategies from the previous section address how to efficiently process requests on a given model replica. But what constitutes a "replica" when models exceed single-GPU memory? And how can we reduce latency when even batch-size-one inference is too slow? Model sharding answers both questions by distributing inference across multiple devices.
-
-The parallelism strategies established for distributed training in @sec-distributed-training-systems, including tensor parallelism, pipeline parallelism, and their communication patterns, apply to inference with an important inversion: training optimizes throughput over hours while inference must minimize per-request latency within milliseconds. This changes how we configure sharding strategies. Unlike training sharding where throughput is the primary concern, inference sharding must carefully balance parallelization benefits against communication overhead within strict latency budgets. This moves us from request-level optimization to replica-level concerns in the serving hierarchy.
-
-This section examines four sharding strategies, each suited to different model architectures and deployment requirements: tensor parallelism for attention-heavy models, pipeline parallelism for sequential architectures, expert parallelism for mixture-of-experts models, and embedding sharding for recommendation systems.
+A 70-billion parameter model requires over 140 GB of VRAM just to hold its weights in 16-bit precision, making it physically impossible to load onto a standard 80 GB A100 GPU. To serve this model, we must slice its architecture across multiple GPUs that act together as a single logical replica. This requires adapting our distributed training parallelism techniques—like tensor and pipeline parallelism—specifically for low-latency inference.
 
 ### When Sharding Becomes Necessary {#sec-inference-scale-sharding-becomes-necessary-81d4}
 
@@ -3123,11 +3224,11 @@ The choice of sharding strategy depends on model architecture and deployment pri
 
 : **Sharding Strategy Selection Guide**. Match strategy to deployment priorities and constraints. {#tbl-sharding-selection}
 
+Once we have constructed these massively sharded, multi-GPU replicas, we inevitably need dozens of them running in parallel to handle global traffic. The challenge now shifts from the internal mechanics of a single replica to the traffic control layer: how do we efficiently route millions of user queries across this vast fleet?
+
 ## Load Balancing and Request Routing {#sec-inference-scale-load-balancing-request-routing-4997}
 
-With models deployed across multiple replicas, the next challenge is distributing requests effectively. This moves us from replica-level concerns (how individual replicas are configured) to service-level optimization in the serving hierarchy: coordinating across replicas to meet aggregate throughput and latency targets.
-
-Load balancing determines which replica handles each request, directly impacting latency, throughput, and resource utilization. Seemingly simple choices, like random assignment versus informed selection, produce dramatically different performance at scale. This section develops the theory and practice of load balancing for inference, from basic algorithms through the power-of-two-choices insight that provides exponentially better performance with minimal overhead.
+If ten model replicas are actively serving traffic, and a new request arrives asking for a 5,000-word document summarization, sending it to a replica that is already overloaded will trigger a massive latency spike for every user assigned to that node. Simple round-robin load balancing fails catastrophically for generative ML. We must employ intelligent request routing that understands the internal memory and queue states of every replica in the fleet.
 
 ::: {.callout-note title="Archetype B: The Tail at Scale"}
 **Archetype B (The Global Real-Time Recommendation Engine)** is the canonical victim of tail latency. Processing 10 million QPS means that a 1-in-10,000 latency spike happens 1,000 times every second. For Archetype B, sophisticated load balancing (like Power-of-Two-Choices) is mandatory to suppress these outliers; simple Round-Robin would allow queues to build up, causing the 99th percentile latency to collapse into unacceptable slowness.
@@ -3628,13 +3729,11 @@ Consider a scenario where one server becomes slow (thermal throttling):
 
 :::
 
+Efficient routing assumes that our inference servers own the underlying hardware. But in enterprise environments, our critical production models are often running on the exact same physical clusters as experimental models and developer endpoints. To prevent a rogue developer query from crashing our flagship service, we must enforce strict multi-tenancy and resource isolation.
+
 ## Multi-Tenancy and Isolation {#sec-inference-scale-multitenancy-isolation-688c}
 
-The optimizations we have examined so far, from batching through load balancing and sharding, focus on individual model deployments. This moves us to the platform level of the serving hierarchy, where the challenge shifts from optimizing a single model to managing multiple models, customers, and workloads on shared infrastructure.
-
-Multi-tenancy enables efficient resource utilization but introduces challenges around isolation, fairness, and quality of service guarantees. A noisy neighbor consuming excessive resources can degrade performance for all other tenants.
-
-This section examines the techniques for sharing inference infrastructure while maintaining isolation between tenants.
+Imagine your company's critical customer-support chatbot running on the same GPU server as an intern's experimental computer vision script. If the intern's script accidentally monopolizes the PCIe bus or memory bandwidth, the customer-facing chatbot will begin timing out, violating SLAs. Multi-tenancy and isolation ensure that we can safely co-locate disparate workloads to save money without sacrificing the predictability of our flagship services.
 
 ### The Multi-Tenancy Challenge {#sec-inference-scale-multitenancy-challenge-8dca}
 
@@ -4045,13 +4144,11 @@ Tenant A monthly report:
   Billed: $X based on consumption
 ```
 
-## Autoscaling {#sec-inference-scale-autoscaling-168d}
+Proper isolation allows us to securely pack workloads onto a fixed set of servers. But traffic on the internet is rarely fixed. To handle viral product launches or deep nocturnal lulls without burning cash, our isolated inference services must dynamically grow and shrink across global data centers through intelligent autoscaling.
 
-Multi-tenancy, examined in the previous section, addresses how to share fixed infrastructure capacity across multiple workloads efficiently. Autoscaling addresses the complementary problem: how to adjust that capacity dynamically as aggregate demand changes.
+## Autoscaling and Global Infrastructure {#sec-inference-scale-autoscaling-168d}
 
-Production inference systems experience traffic fluctuations that make static provisioning inefficient. Autoscaling dynamically adjusts capacity to match demand, reducing costs during low-traffic periods while maintaining SLOs during peaks. Without autoscaling, operators must choose between overprovisioning (paying for idle capacity during quiet periods) or underprovisioning (violating SLOs during traffic spikes). With effective autoscaling, infrastructure follows demand, though the cold start problem unique to GPU-based serving makes this significantly more challenging than traditional web service scaling.
-
-This section examines autoscaling strategies for inference, with particular attention to the cold start problem and techniques for reducing its impact.
+A viral social media post drives a 10x spike in traffic to your generative AI app in under five minutes. If your infrastructure team relies on manual scaling or slow, CPU-based metrics to spin up new GPU instances, the service will collapse before the new replicas even finish downloading the model weights. Autoscaling for ML inference requires predictive, custom-metric strategies to handle these massive load dynamics.
 
 ### Scaling Dimensions {#sec-inference-scale-scaling-dimensions-befc}
 
@@ -4224,6 +4321,10 @@ Consider traffic spike from 1000 to 3000 QPS:
 
 Warm spares provide buffer during cold start period.
 
+:::
+
+::: {.callout-war-story title="The ChatGPT Traffic Spike"}
+When ChatGPT scaled from zero to 100 million users in two months, the engineering challenge shifted from model quality to survival. The system faced an unprecedented "cold start" problem: provisioning thousands of GPUs while managing a KV cache memory footprint that grew quadratically with context length. Early serving infrastructure, built on naive Python web servers, collapsed under the concurrency. The team rapidly iterated toward highly optimized C++ serving layers (precursors to today's TGI and vLLM), implemented aggressive quantization, and deployed geographic load balancing to route traffic to waking data centers, keeping per-token latency under 200ms despite the deluge.
 :::
 
 ### Predictive Scaling {#sec-inference-scale-predictive-scaling-ee73}
@@ -4450,11 +4551,11 @@ Load balancer
 
 Best-effort requests route to spot instances; SLO-critical requests use on-demand.
 
-## Global Inference Infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
+### Global Inference Infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
 Production inference systems serving global user bases must operate across multiple geographic regions. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located. This section examines the architectural patterns for multi-region inference deployment.
 
-### Why Multi-Region Matters {#sec-inference-scale-multiregion-matters-d7d3}
+#### Why Multi-Region Matters {#sec-inference-scale-multiregion-matters-d7d3}
 
 Single-region deployment creates fundamental limitations:
 
@@ -4473,7 +4574,7 @@ For interactive applications (chatbots, autocomplete), these delays compound acr
 
 **Regulatory compliance**: Data residency requirements (GDPR, data sovereignty laws) may require processing user data within specific geographic boundaries.
 
-### Multi-Region Architecture Patterns {#sec-inference-scale-multiregion-architecture-patterns-5c67}
+#### Multi-Region Architecture Patterns {#sec-inference-scale-multiregion-architecture-patterns-5c67}
 
 **Pattern 1: Global load balancing with regional replicas**
 
@@ -4552,7 +4653,7 @@ Request Router
 
 This pattern is rarely practical due to inter-region latency dominating compute time, but may apply for extremely large models where no single region has sufficient GPU capacity.
 
-### Cross-Region Failover {#sec-inference-scale-crossregion-failover-0d67}
+#### Cross-Region Failover {#sec-inference-scale-crossregion-failover-0d67}
 
 When a region becomes unavailable, traffic must reroute to healthy regions:
 
@@ -4579,7 +4680,7 @@ def route_request(user_region, request):
 - **Capacity spike**: The receiving region sees sudden traffic increase. Pre-provision headroom (typically 30-50% over steady-state) or accept degraded latency during failover.
 - **Gradual recovery**: When the failed region recovers, gradually shift traffic back to avoid oscillation.
 
-### Global Model Deployment {#sec-inference-scale-global-model-deployment-11b3}
+#### Global Model Deployment {#sec-inference-scale-global-model-deployment-11b3}
 
 Deploying model updates across regions requires careful coordination:
 
@@ -4621,7 +4722,7 @@ Action: Rollback US-East to v2.0
 | **Throughput**    | Stable         | Stable                        |
 | **Model quality** | Within bounds  | Consistent across regions     |
 
-### Cost Optimization Across Regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
+#### Cost Optimization Across Regions {#sec-inference-scale-cost-optimization-across-regions-c1c2}
 
 GPU pricing varies by region. Optimize placement for cost while meeting latency requirements:
 
@@ -4647,67 +4748,11 @@ def route_batch_request(request):
 
 This can reduce costs by 20-40% for batch workloads while maintaining SLOs for interactive traffic.
 
-## Disaggregated Serving: Splitting the Workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
-
-LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request. @tbl-prefill-decode contrasts these phases:
-
-**Prefill phase**: Process the entire input prompt in parallel. Computation scales with prompt length. Memory access pattern is compute-bound (high arithmetic intensity[^fn-arithmetic-intensity]).
-
-[^fn-arithmetic-intensity]: **Arithmetic intensity**: The ratio of compute operations to memory accesses, measured in FLOPs per byte. Prefill achieves 100+ FLOPs/byte (compute-bound), while decode achieves 1-10 FLOPs/byte (memory-bound). This 10-100 $\times$ difference explains why prefill and decode require fundamentally different optimization strategies.
-
-**Decode phase**: Generate output tokens one at a time. Each token requires loading entire model weights. Memory access pattern is bandwidth-bound (low arithmetic intensity).
-
-| **Phase**   |   **Computation** | **Memory Access** | **Bottleneck** | **Optimal Batch** |
-|:------------|------------------:|:------------------|:---------------|------------------:|
-| **Prefill** | O(prompt_length²) | Weight loading    | Compute        |       Small (1–8) |
-| **Decode**  |    O(1) per token | Weight loading    | Bandwidth      |      Large (100s) |
-
-: **Prefill vs Decode Characteristics**. The two phases have opposite optimization requirements. {#tbl-prefill-decode}
-
-This dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference. This creates the **Static Power Waste** problem analyzed in @sec-sustainable-ai, where low-utilization decode steps dominate energy consumption.
-
-**Chunked prefill**[^fn-chunked-prefill] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
-
-[^fn-chunked-prefill]: **Chunked prefill motivation**: Without chunking, a 32K-token prompt blocks decode for 5-30 seconds while prefill completes. Chunking divides the prompt into 256–1024 token chunks processed between decode iterations, bounding decode latency at the cost of slightly longer prefill time. This trade-off favors interactive applications where decode responsiveness matters more than total completion time.
-
-$$\text{Chunk latency} = \frac{\text{Chunk size}}{\text{Prefill throughput}}$$
-
-With chunk size chosen to match decode iteration time, prefill and decode can share GPU resources without decode latency spikes.
-
-**Prefill-decode disaggregation** takes this further by running prefill and decode on separate GPU pools:
-
-- **Prefill pool**: Optimized for compute intensity (e.g., H100 nodes with high TFLOPS) using large batch sizes to maximize throughput.
-- **Decode pool**: Optimized for memory bandwidth (e.g., nodes with maximum HBM capacity or specialized High Bandwidth Flash as discussed in @sec-data-systems) to handle thousands of concurrent autoregressive streams.
-
-This separation enables independent scaling: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache—often megabytes of data—must be migrated to a decode node within the inter-token latency budget (typically <10 ms). InfiniBand's sub-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation.
-
-The *Sarathi* system formalizes *chunked prefill* into a practical scheduling algorithm that bounds decode latency regardless of incoming prompt length.
-
-::: {.callout-note title="Sarathi: Chunked Prefill Implementation"}
-
-The Sarathi system [@agrawal2023sarathi] implements chunked prefill with the following design:
-
-**Chunk sizing**: Chunks are sized to complete in approximately the same time as one decode iteration (typically 10–50 ms). For a prefill throughput of 10,000 tokens/second, a 20 ms chunk processes 200 tokens.
-
-**Interleaving schedule**: Each GPU iteration processes either:
-
-- One prefill chunk for a new request, OR
-- One decode step for all active sequences
-
-This ensures decode latency remains bounded regardless of incoming prompt lengths.
-
-**KV cache transfer**: When prefill completes, the generated KV cache transfers to decode slots. With NVLink, this transfer adds <1 ms for typical prompt lengths.
-
-**Performance impact**:
-
-- Without chunking: Long prompts cause decode latency spikes of 100 ms+
-- With chunking: Decode latency bounded to 30 ms P99 regardless of prompt length
-
-:::
+Scaling global infrastructure aggressively is highly effective, but it is also exceptionally expensive. To further bend the cost curve of our deployments, we must look inward again at the model itself, altering its fundamental mathematical representation to run faster and cheaper through weight quantization.
 
 ## Weight Quantization for Serving {#sec-inference-scale-weight-quantization-serving-097b}
 
-The KV cache techniques we just examined address dynamic memory allocation during inference. But model weights themselves represent static memory consumption that persists regardless of batch size or sequence length. For a 70B model, weights alone consume 140GB in FP16, leaving limited capacity for KV cache on even the largest GPUs. Quantization offers a complementary approach: reduce the memory footprint of weights themselves.
+What if we could take a 140 GB language model that requires two A100 GPUs to serve, and crush it down to 35 GB so it runs blisteringly fast on a single GPU? Weight quantization for serving achieves this by brutally compressing the precision of the model's neural connections from 16-bit floats to 8-bit or 4-bit integers, trading a negligible fraction of accuracy for massive operational savings.
 
 ::: {.callout-note title="Prior Knowledge: Quantization"}
 This section assumes familiarity with quantization fundamentals including **post-training quantization (PTQ)**, which quantizes a trained model without retraining, and **quantization-aware training (QAT)**, which incorporates quantization effects during training for higher accuracy. Readers should also understand precision formats (FP32, FP16, INT8) and the basic trade-off between numerical precision and memory/compute efficiency. These concepts are covered in standard deep learning optimization references and in Volume I's treatment of model compression.
@@ -4980,9 +5025,15 @@ Choosing the appropriate quantization method depends on deployment constraints:
 
 Quantization can reduce serving costs by 2-4 $\times$ while maintaining acceptable quality, making it essential for cost-effective LLM deployment.
 
+From continuous batching and PagedAttention to global load balancing and extreme quantization, we have covered an immense landscape of serving optimizations. To solidify how these techniques synthesize in reality, we will now examine case studies of production systems operating at global scale.
+
 ## Case Studies {#sec-inference-scale-case-studies-9689}
 
-The techniques presented throughout this chapter come together in production systems serving billions of requests daily. This section examines four case studies that illustrate different points in the inference design space: Meta's recommendation serving (high volume, low latency), OpenAI's API infrastructure (LLM-focused), Google's search ranking (ensemble models), and TikTok's multimodal recommendation (video understanding combined with user modeling).
+How does OpenAI manage the colossal, unpredictable global traffic of ChatGPT? How does TikTok serve hyper-personalized video recommendations to a billion users with hard sub-100-millisecond latency caps? We will now examine how the world's most demanding production systems synthesize the batching, sharding, and caching techniques we have covered into unified, planetary-scale architectures.
+
+::: {.callout-war-story title="The Continuous Batching Revolution"}
+Before late 2022, LLM serving was plagued by the "straggler problem." Frameworks used static batching, meaning the GPU had to wait for the longest sequence in a batch to finish generation before accepting new work, leaving compute units idle during the tail end of decoding. The Orca paper introduced iteration-level scheduling, allowing the serving engine to eject finished sequences and insert new requests into the batch at every token step. This technique, popularized as "continuous batching" by vLLM, improved throughput by $2\text{-}3\times$ without model changes. It transformed serving from a coarse-grained batch process into a fluid, high-utilization stream.
+:::
 
 Each case study demonstrates how the principles of batching, sharding, load balancing, and autoscaling combine to meet specific requirements.
 
@@ -5294,9 +5345,11 @@ Several patterns emerge across these case studies. @tbl-case-studies-summary ide
 
 : **Case Study Summary**: Each system innovates on a core technique matched to its workload characteristics. {#tbl-case-studies-summary}
 
+These case studies reveal how deeply custom engineering is required to serve ML at scale. However, engineers attempting to replicate these architectures often fall victim to conventional wisdom that does not translate to GPU-bound workloads, leading us to the field's most common fallacies and pitfalls.
+
 ## Fallacies and Pitfalls {#sec-inference-scale-fallacies-pitfalls-55f9}
 
-The techniques presented throughout this chapter address real engineering challenges, but misconceptions about inference at scale remain common. Recognizing these fallacies and pitfalls helps practitioners avoid costly mistakes in system design and capacity planning.
+A DevOps team applies their standard web-server load balancing rules to a new fleet of GPU inference nodes, only to watch tail latency explode because they ignored the extreme variance of autoregressive token generation. Inference at scale breaks the rules of traditional microservices, creating dangerous fallacies for engineers transitioning from standard web development to machine learning systems.
 
 **Fallacy: Inference at scale is synonymous with LLM serving.**
 
@@ -5328,7 +5381,11 @@ While larger GPU memory enables larger batches for models that fit in memory, th
 
 **Pitfall: Neglecting multi-tenancy isolation until production.**
 
-In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5 $\times$ normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents. To distill the most important lessons from this chapter, here are the *three things to remember*.
+In development and staging, single-tenant deployments work well. In production, noisy neighbors cause sudden, unpredictable performance degradation that is difficult to diagnose and resolve. A tenant bursting to 5 $\times$ normal traffic can degrade latency for all other tenants on shared infrastructure. As emphasized in @sec-inference-scale-multitenancy-isolation-688c, resource quotas, priority scheduling, and bulkhead isolation must be designed into the system from the start, not retrofitted after production incidents.
+
+Avoiding these pitfalls ensures our serving infrastructure remains robust, cost-effective, and fiercely responsive. We conclude by summarizing the core architectural principles required to successfully deploy and serve machine learning at scale.
+
+To distill the most important lessons from this chapter, here are the *three things to remember*.
 
 ::: {.callout-important title="Three Things to Remember"}
 
@@ -5357,19 +5414,11 @@ We analyzed why different model architectures require distinct batching strategi
 
 :::
 
-::: {.callout-chapter-connection title="From Serving to Squeezing"}
+::: {.callout-chapter-connection title="From Datacenter to Edge"}
 
-We have established the architectural foundations for inference at scale: continuous batching, PagedAttention, model sharding, and load balancing across distributed serving fleets. These techniques manage the resources; the next question is how to use them more efficiently. @sec-performance-engineering examines the optimization techniques, from FlashAttention and kernel fusion to mixed-precision arithmetic and speculative decoding, that push the efficiency frontier of every GPU-hour and every watt spent on inference and training.
+This chapter established the architectural foundations for inference at scale: continuous batching, PagedAttention, model sharding, and load balancing across distributed serving fleets. These techniques assume datacenter-grade hardware—H100 GPUs, NVLink interconnects, terabytes of HBM. But many applications require inference closer to the user: on smartphones, IoT devices, or local gateways where power budgets are measured in milliwatts, memory in megabytes, and connectivity is intermittent. @sec-edge-intelligence examines how we push intelligence to the edge, adapting the serving principles developed here to operate under constraints that invert every datacenter assumption.
 
 :::
-
-We also saw that efficient serving requires specialized hardware. The "Decode" phase of LLM inference is memory-bandwidth bound, motivating the specialized inference accelerators we examined in @sec-compute-infrastructure.
-
-The serving architectures examined here—load balancers, model sharding, and batching strategies—provide the backbone for production inference. However, at extreme scale, even perfectly balanced clusters hit the "Memory Wall" and the physical limits of sequential token generation.
-
-While data center serving provides massive scale, many applications require inference to happen closer to the user—on smartphones, IoT devices, or local gateways. This introduces extreme constraints on power, memory, and connectivity.
-
-The next chapter, @sec-edge-intelligence, examines how we push intelligence to the edge, adapting massive models to run on constrained devices through techniques like federated learning and on-device adaptation.
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
 ::: { .quiz-end }

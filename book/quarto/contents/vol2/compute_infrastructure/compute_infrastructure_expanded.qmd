@@ -1,0 +1,298 @@
+---
+engine: jupyter
+---
+
+```{python}
+#| label: infra-setup
+#| echo: false
+from mlsys.constants import (
+    A100_FLOPS_FP16_TENSOR, A100_MEM_BW, A100_MEM_CAPACITY, A100_TDP,
+    H100_FLOPS_FP16_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY, H100_TDP,
+    B200_FLOPS_FP16_TENSOR, B200_MEM_BW, B200_MEM_CAPACITY, B200_TDP,
+    V100_FLOPS_FP16_TENSOR, V100_MEM_BW, V100_MEM_CAPACITY, V100_TDP,
+    TPUV4_FLOPS_BF16, TPUV4_MEM_BW,
+    NVLINK_H100_BW, INFINIBAND_NDR_BW,
+    TFLOPs, TB, GB, GiB, second, watt, Gbps, flop, byte
+)
+from mlsys.formatting import fmt, sci, check
+
+class InfraSetup:
+    h100_flops = H100_FLOPS_FP16_TENSOR
+    h100_bw = H100_MEM_BW
+    h100_cap = H100_MEM_CAPACITY
+    h100_tdp_raw = H100_TDP
+    
+    a100_flops = A100_FLOPS_FP16_TENSOR
+    a100_bw = A100_MEM_BW
+    a100_tdp = A100_TDP
+    
+    b200_flops = B200_FLOPS_FP16_TENSOR
+    b200_tdp = B200_TDP
+    
+    v100_flops = V100_FLOPS_FP16_TENSOR
+    v100_tdp = V100_TDP
+    
+    # Ridge points
+    h100_r = (h100_flops / h100_bw).to(flop/byte).magnitude
+    a100_r = (A100_FLOPS_FP16_TENSOR / A100_MEM_BW).to(flop/byte).magnitude
+
+    h100_tflops_fp16 = f"{h100_flops.to(TFLOPs/second).magnitude:.0f}"
+    h100_bw_tbs = f"{h100_bw.to(TB/second).magnitude:.2f}"
+    h100_mem = f"{h100_cap.to(GiB).magnitude:.0f}"
+    h100_tdp_str = f"{h100_tdp_raw.to(watt).magnitude:.0f}"
+    h100_ridge = f"{h100_r:.0f}"
+    
+    a100_tflops_fp16 = f"{a100_flops.to(TFLOPs/second).magnitude:.0f}"
+    a100_tdp_str = f"{a100_tdp.to(watt).magnitude:.0f}"
+    
+    b200_tflops_fp16 = f"{b200_flops.to(TFLOPs/second).magnitude:,.0f}"
+    b200_tdp_str = f"{b200_tdp.to(watt).magnitude:,.0f}"
+    
+    v100_tflops_fp16 = f"{v100_flops.to(TFLOPs/second).magnitude:.0f}"
+    v100_tdp_str = f"{v100_tdp.to(watt).magnitude:.0f}"
+    
+    nvlink_h100 = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
+    ib_ndr = f"{INFINIBAND_NDR_BW.to(Gbps).magnitude:.0f}"
+    
+    tpuv4_bf16_tflops = f"{TPUV4_FLOPS_BF16.to(TFLOPs/second).magnitude:.0f}"
+
+    # Efficiency
+    h100_eff = h100_flops.to(TFLOPs/second).magnitude / h100_tdp_raw.to(watt).magnitude
+    a100_eff = a100_flops.to(TFLOPs/second).magnitude / a100_tdp.to(watt).magnitude
+    b200_eff = b200_flops.to(TFLOPs/second).magnitude / b200_tdp.to(watt).magnitude
+    v100_eff = v100_flops.to(TFLOPs/second).magnitude / v100_tdp.to(watt).magnitude
+
+    h100_tflops_per_watt = f"{h100_eff:.2f}"
+    a100_tflops_per_watt = f"{a100_eff:.2f}"
+    b200_tflops_per_watt = f"{b200_eff:.2f}"
+    v100_tflops_per_watt = f"{v100_eff:.2f}"
+
+# Exports
+h100_tflops_fp16 = InfraSetup.h100_tflops_fp16
+h100_bw_tbs = InfraSetup.h100_bw_tbs
+h100_mem = InfraSetup.h100_mem
+h100_tdp = InfraSetup.h100_tdp_str
+h100_ridge = InfraSetup.h100_ridge
+a100_tflops_fp16 = InfraSetup.a100_tflops_fp16
+a100_tdp = InfraSetup.a100_tdp_str
+b200_tflops_fp16 = InfraSetup.b200_tflops_fp16
+b200_tdp = InfraSetup.b200_tdp_str
+v100_tflops_fp16 = InfraSetup.v100_tflops_fp16
+v100_tdp = InfraSetup.v100_tdp_str
+nvlink_h100 = InfraSetup.nvlink_h100
+ib_ndr = InfraSetup.ib_ndr
+tpuv4_bf16_tflops = InfraSetup.tpuv4_bf16_tflops
+h100_tflops_per_watt = InfraSetup.h100_tflops_per_watt
+a100_tflops_per_watt = InfraSetup.a100_tflops_per_watt
+b200_tflops_per_watt = InfraSetup.b200_tflops_per_watt
+v100_tflops_per_watt = InfraSetup.v100_tflops_per_watt
+```
+
+# Compute Infrastructure {#sec-compute-infrastructure}
+
+## Purpose {.unnumbered}
+
+_How do we build a machine capable of learning at the limit of physics?_
+
+In Volume I, we examined the mathematical foundations of machine learning and how they map to the single accelerator. In Volume II, we shift our focus to the **Machine Learning Fleet**. This chapter establishes the physical substrate—the infrastructure of silicon, power, and cooling—that makes hyperscale training and inference possible. We approach this not as a static catalog of hardware specifications, but as a **Progressive Expansion**: starting from the arithmetic core of a single accelerator and building outward through the node and the rack, until the entire datacenter functions as a single, coherent Warehouse-Scale Computer.
+
+::: {.callout-tip title="Learning Objectives"}
+- Apply the **Progressive Expansion** model to analyze ML hardware from silicon to pod
+- Evaluate why specific workload patterns necessitate the shift to **HBM** and **Dense Interconnects**
+- Quantify the **Physical Speed Limits** of learning, specifically power density and thermal transients
+- Compute **Total Cost of Ownership (TCO)** for large-scale clusters factoring in CapEx and OpEx
+- Contrast the **Architecture of the Pod** across industry leaders like NVIDIA, Google, and Tesla
+:::
+
+
+## Level 1: The Accelerator (The Core Engine) {#sec-compute-accelerator-core}
+
+The accelerator is the smallest physical unit of the fleet, a single silicon die designed to solve the fundamental problem of **Arithmetic Density**. While traditional CPUs are designed for the high-branching logic of general-purpose software, machine learning accelerators are specialized engines for the massive parallelism of matrix math.
+
+### The Workload Pattern: GEMM Dominance
+
+Modern deep learning is essentially a sequence of General Matrix Multiplications (**GEMMs**). A single Transformer layer with a hidden dimension $d$ involves weight matrices of size $d \times d$ and activation tensors of $s \times d$, where $s$ is the sequence length. This workload presents a unique physical challenge: it requires high compute density ($O(d^3)$ operations) coupled with massive state ($O(d^2)$ parameters).
+
+To meet this demand, accelerators replace general-purpose pipelines with specialized **Tensor Cores** or **Matrix Multiplication Units (MXUs)**. These are hardwired arrays of multiply-accumulate (MAC) logic that can perform hundreds of 16-bit operations in a single clock cycle. By stripping away the overhead of complex branch prediction and out-of-order execution, the accelerator maximizes the percentage of the silicon die dedicated to pure math.
+
+### The Memory Wall: Why We Need HBM {#sec-compute-hbm}
+
+If the Tensor Core is the engine, memory is the fuel line. In traditional computing, processors use Double Data Rate (DDR) memory, which lives on separate modules connected via long wires on a printed circuit board. In the context of machine learning, this physical distance creates a catastrophic bottleneck known as the **Memory Wall**.
+
+Consider the challenge of serving a model like Llama-3 70B. Generating a single token requires loading the entire 140 GB weight matrix (in FP16) from memory into the processor. If we used standard DDR5 memory with a bandwidth of 60 GB/s, loading the weights once would take $\approx 2.3$ seconds. For the user, the "AI" would be unusable, stuttering at a fraction of a token per second.
+
+::: {.callout-definition title="High Bandwidth Memory (HBM)"}
+
+***High Bandwidth Memory (HBM)*** is a high-speed computer RAM interface for 3D-stacked DRAM. It achieves **Bandwidth Density** by stacking memory dies vertically and connecting them directly to the processor via a **Silicon Interposer**. This physical proximity enables thousands of wide data paths, allowing the system to bridge the **Memory Wall** at the cost of higher manufacturing complexity and thermal concentration.
+
+:::
+
+By integrating HBM on-package, an H100 achieves `{python} h100_bw_tbs` TB/s of bandwidth. This reduces the weight-loading time to $\approx 40$ milliseconds, making real-time interactive AI physically possible. HBM is not simply "faster RAM"; it is a survival strategy for architectures where the model size grows $10\times$ faster than the speed of a single copper wire.
+
+### The Performance Limit: The Roofline Model {#sec-compute-roofline}
+
+To determine whether an accelerator is being utilized effectively, we use a diagnostic framework that relates hardware limits to software requirements.
+
+::: {.callout-definition title="Roofline Model"}
+
+The ***Roofline Model*** is a graphical representation of a processor's performance limits, defining the **Ridge Point** where a workload transitions from being **Memory-Bound** to **Compute-Bound**. It quantifies the **Arithmetic Intensity** required to fully saturate the silicon's math units, providing a target for optimization in both hardware design and software implementation.
+
+:::
+
+We quantify this balance using the following relationship:
+$$ \text{Achievable FLOPS} = \min\left(\text{Peak Compute}, \text{Memory BW} \times \text{Arithmetic Intensity}\right) $$
+
+For an H100, the Ridge Point is `{python} h100_ridge` FLOP/byte. If your operation has low intensity—such as the "Decode" phase of an LLM where you load massive weights but only compute for a single token—the system is memory-bound. If your operation has high intensity—such as the "Prefill" phase or training a CNN—the system is compute-bound.
+
+::: {.callout-napkin-math title="The Physics of Token Latency"}
+
+**Problem**: Why does token generation speed depend on HBM bandwidth, not TFLOPS?
+
+**The Variables**: Llama-3 70B (140 GB weights). Running on H100 (3.35 TB/s HBM, 989 TFLOPS).
+
+**The Calculation**:
+
+1.  **Compute Time**: For 1 token, we compute $2 \times P \approx 1.4 \times 10^{11}$ FLOPs.
+    $T_{comp} = 1.4 \times 10^{11} / 9.89 \times 10^{14} \approx \mathbf{0.14 \text{ ms}}$.
+2.  **Memory Time**: Load 140 GB of weights.
+    $T_{mem} = 140 \text{ GB} / 3350 \text{ GB/s} \approx \mathbf{41.8 \text{ ms}}$.
+
+**The Systems Conclusion**:
+The processor spends **99.7% of its time** waiting for memory. Doubling the TFLOPS would save only 0.07 ms; doubling the HBM bandwidth would save 20 ms. This illustrates why H100's primary advantage over A100 is not just the faster Tensor Cores, but the massive HBM throughput.
+
+:::
+
+While the accelerator provides the raw math density, a single die is limited by its physical dimensions and power delivery. To scale beyond these silicon boundaries, we must aggregate accelerators into a tightly coupled local fleet: the node.
+
+
+## Level 2: The Node (The Local Fleet) {#sec-compute-node}
+
+No single accelerator has enough memory or compute to train a frontier model. To overcome the memory capacity of a single die, we expand outward to the **Node**—a specialized server chassis containing 8 to 16 accelerators sharing a single high-speed backplane.
+
+### The Connectivity Pattern: Bandwidth Asymmetry
+
+The defining characteristic of a node is its **Bandwidth Hierarchy**. As data moves from the silicon die to the board and finally to the network, it incurs a "Bandwidth Tax."
+
+::: {#fig-bandwidth-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Hierarchy**. In a modern ML node, bandwidth drops by orders of magnitude as data crosses physical boundaries. Tensor Parallelism is confined to the NVLink domain to avoid the 'InfiniBand Cliff'." fig-alt="Vertical bar chart showing bandwidth levels: HBM (3.3 TB/s), NVLink (900 GB/s), PCIe/InfiniBand (50-64 GB/s). Each step represents a physical boundary."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{GreenLine}{HTML}{008F45}
+
+  \draw[->, thick] (0,0) -- (0,5) node[above] {Log Bandwidth (GB/s)};
+  
+  % HBM
+  \fill[BlueLine!20] (0.5,0) rectangle (1.5,4.5) node[midway, rotate=90, font=\bfseries] {HBM (3350)};
+  \node[below] at (1,0) {On-Package};
+
+  % NVLink
+  \fill[BlueLine!40] (2.5,0) rectangle (3.5,3.5) node[midway, rotate=90, font=\bfseries] {NVLink (900)};
+  \node[below] at (3,0) {Intra-Node};
+
+  % IB/PCIe
+  \fill[BlueLine!60] (4.5,0) rectangle (5.5,1.5) node[midway, rotate=90, font=\bfseries] {IB/PCIe (50-64)};
+  \node[below] at (5,0) {Inter-Node};
+
+  % Arrows showing the drop
+  \draw[->, ultra thick, RedLine] (1.5, 4.0) -- (2.5, 3.5) node[midway, above, sloped] {~4$\times$ Drop};
+  \draw[->, ultra thick, RedLine] (3.5, 3.0) -- (4.5, 1.5) node[midway, above, sloped] {~15$\times$ Drop};
+
+\end{tikzpicture}
+```
+:::
+
+This tax determines the **Distributed Strategy**. **Tensor Parallelism**, which requires synchronizing partial sums after every matrix multiplication, is physically confined to the high-bandwidth domain (NVLink). If we attempted to run Tensor Parallelism across nodes using standard networking, the GPUs would spend 90% of their time waiting for the "InfiniBand Cliff," rendering the extra compute useless.
+
+### Dense Node Designs: DGX and HGX
+
+To minimize this tax, engineers build "Dense Nodes" like the NVIDIA DGX or HGX. These systems place 8 GPUs on a single board, cross-connected via **NVSwitch** fabric. This enables the 8 GPUs to act as one "Mega-GPU" with a shared memory pool. For a cluster of H100s, this node-level pool provides `{python} h100_mem` GB of HBM, enough to hold the weights of most medium-scale LLMs entirely in resident memory.
+
+The node represents the limit of what can be connected via a single board or chassis. As we move from 8 GPUs to 8,000, we must solve the problem of physical concentration, shifting our focus from signal integrity to the physics of power and heat at the rack level.
+
+
+## Level 3: The Rack (Physical Concentration) {#sec-compute-rack}
+
+As we stack nodes into a vertical rack, the primary engineering constraints shift from bits and bytes to **Watts and Heat**. The rack is the fundamental unit of physical deployment, where power delivery and thermal management define the limits of scale.
+
+### The Power Ramp: Megawatt Transients
+
+Traditional web server racks are "steady state": they draw a relatively constant amount of power as users browse. ML training racks are "bursty" and "synchronous." In a large training step, 10,000 GPUs launch a GEMM at the exact same microsecond. The power draw of the rack can swing from 10 kW at idle to 100 kW at full load in a matter of milliseconds.
+
+This creates a phenomenon known as the **Power Ramp**. If the datacenter's electrical infrastructure is not designed for this **Transient Stability**, the sudden surge can cause a voltage sag, triggering circuit breakers or crashing the servers. To prevent this, ML datacenters utilize massive capacitor banks and high-speed Uninterruptible Power Supplies (UPS) designed to buffer these megawatt swings.
+
+### The Thermodynamic Limit: Liquid Cooling
+
+A single H100 GPU generates 700 W of heat. A rack of four DGX systems generates nearly 40 kW. Next-generation architectures, like the GB200 NVL72, push this density to **120 kW per rack**. At this level, air cooling—the standard for decades—reaches its physical limit.
+
+::: {.callout-definition title="Power Usage Effectiveness (PUE)"}
+
+***Power Usage Effectiveness (PUE)*** is the ratio of total energy used by a datacenter facility to the energy delivered to computing equipment. A PUE of 1.0 is the theoretical ideal where every watt powers a processor; higher values represent energy lost to **Cooling Overheads** and electrical distribution. In high-density ML clusters, PUE is optimized by moving from air to liquid cooling.
+
+:::
+
+Liquid cooling is $1000\times$ more efficient at moving heat than air. By piping coolant directly onto the silicon (**Direct-to-Chip**), we can remove 120 kW of heat silently and efficiently. Without this shift, the fans required to cool a 120 kW rack would consume more power than the GPUs themselves, and the noise would exceed 90 dB, making human maintenance impossible.
+
+With power and cooling established for a single vertical stack, the final expansion requires weaving hundreds of racks together into a unified fabric. This transformation turns a collection of servers into a single, cohesive entity: the Warehouse-Scale Computer.
+
+
+## Level 4: The Pod (The Warehouse-Scale Computer) {#sec-compute-pod}
+
+The final level of expansion is the **Pod**—a collection of hundreds or thousands of GPUs wired together into a single, non-blocking network. This is the physical realization of the **Warehouse-Scale Computer (WSC)** mindset.
+
+::: {.callout-definition title="Warehouse-Scale Computer (WSC)"}
+
+A ***Warehouse-Scale Computer (WSC)*** is a cluster of thousands of nodes designed to function as a single, massive computing entity. In a WSC, the **Network Fabric** replaces the system bus, **Distributed Storage** replaces the local disk, and the **Fleet Orchestrator** replaces the operating system. The design goal is to minimize **Bisection Bandwidth** bottlenecks so that any GPU can communicate with any other GPU as if they were in the same chassis.
+
+:::
+
+### Case Studies in Fleet Architecture
+
+Different industry leaders solve the WSC problem differently based on their specific workload requirements:
+
+*   **NVIDIA DGX SuperPOD**: Optimized for **Flexibility**. Uses a "Fat-Tree" topology with InfiniBand to support any model type, from Transformers to Graph Neural Networks.
+*   **Google TPU Pod**: Optimized for **Transformers**. Uses a 3D-Torus interconnect built directly into the silicon, prioritizing high-speed neighbor communication for the predictable dataflows of LLMs.
+*   **Meta's Hybrid Fleet**: Optimized for **Embeddings**. Uses CPU-heavy nodes for terabyte-scale recommendation tables, with GPUs reserved for the dense neural layers.
+*   **Tesla Dojo**: Optimized for **Video**. Uses a custom silicon die (D1) designed for the massive data ingestion and spatial processing required for autonomous driving vision.
+
+### Economics: Total Cost of Ownership
+
+The decision to build or rent a WSC is driven by the economics of **Total Cost of Ownership (TCO)**. We can calculate the break-even point between renting a cloud GPU and buying a physical fleet using the following relationship:
+
+$$\text{Break-even utilization} = \frac{C_{\text{cloud}} \times H_{\text{annual}}}{\frac{C_{\text{capex}}}{Y_{\text{amortization}}} + C_{\text{opex}}}$$
+
+For a high-performance cluster, if the expected utilization is above 57%, buying on-premises infrastructure typically results in a lower TCO. If utilization is lower, the flexibility of the cloud outweighs the capital expense of ownership.
+
+
+## Fallacies and Pitfalls {#sec-compute-fallacies-pitfalls-383c}
+
+**Fallacy:** *More GPUs always lead to linear training speedup.*
+
+Amdahl's Law establishes a hard limit: as the number of GPUs increases, the percentage of time spent on communication (gradient synchronization) grows. At some point, adding the 1,001st GPU provides zero marginal benefit because the system is entirely bound by the speed of the network fabric.
+
+**Fallacy:** *Peak TFLOPS is the primary metric for model throughput.*
+
+For large language models, the bottleneck is almost never the math units—it is the HBM bandwidth. An accelerator with lower TFLOPS but higher memory throughput will consistently outperform a "faster" processor that is starving for data.
+
+**Pitfall:** *Ignoring power density and cooling during cluster planning.*
+
+Many teams purchase thousands of GPUs only to realize their datacenter cannot provide the megawatt-scale power or liquid cooling required to run them. Power and cooling are not software problems; they are hard physical constraints that must be planned for at the silicon level.
+
+
+## Summary {#sec-compute-summary}
+
+The Machine Learning Fleet is built through a series of **Progressive Responses** to physical and mathematical demands. At the accelerator level, we optimized for matrix math density. At the node level, we overcame the memory capacity of a single die through high-speed local interconnects. At the rack level, we solved for the thermodynamics of density. Finally, at the pod level, we wove these components into a single Warehouse-Scale Computer.
+
+::: {.callout-takeaways}
+
+*   **Density is Destiny**: Pushing rack power to 100 kW+ is a physical requirement to minimize cable lengths and maximize interconnect speed.
+*   **The Memory Wall is the Primary Constraint**: In modern LLM workloads, HBM bandwidth determines the user experience, not the peak math speed of the processor.
+*   **WSC is the New Unit of Compute**: We no longer build servers for models; we build datacenters *as* models.
+
+:::
+
+::: {.callout-chapter-connection title="From Silicon to Wires"}
+
+We have established the compute nodes and the physical limits of the silicon that powers them. But nodes are useless in isolation. @sec-network-fabrics examines the "Gradient Bus"—the high-performance network fabric that binds these expanding levels into a unified, coherent whole.
+
+:::
