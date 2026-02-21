@@ -180,7 +180,7 @@ class StorageEconomics:
     # ImageNet Throughput
     batch_size_mb = (batch_per_gpu * img_size_kb) / 1024
     # Aggregate = n_gpus * img_size * util / iter
-    req_bw_imagenet = (n_gpus * util_target * (img_size_kb / 1024 / 1024)) / iter_time_s # in GB/s
+    req_bw_imagenet = (n_gpus * batch_per_gpu * util_target * (img_size_kb / 1024 / 1024)) / iter_time_s # in GB/s
 
     # HDD Bottleneck
     raw_bw_mbs = (ips_target * img_size_kb) / 1024
@@ -222,10 +222,13 @@ class StorageEconomics:
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 req_bw_imagenet = f"{StorageEconomics.req_bw_imagenet:.1f}"
+raw_bw_str = f"{StorageEconomics.raw_bw_mbs:.0f}"
 hdd_slowdown_factor = f"{StorageEconomics.hdd_slowdown:.0f}"
 t_comp_stall_str = f"{StorageEconomics.t_compute_ms}"
 t_io_stall_str = f"{StorageEconomics.t_io_ms}"
 data_stall_pct_str = f"{StorageEconomics.data_stall_pct:.0f}"
+prefetch_t_io_p99_str = f"{StorageEconomics.t_io_p99_ms}"
+prefetch_t_compute_str = f"{StorageEconomics.t_compute_prefetch_ms}"
 prefetch_min_depth = f"{StorageEconomics.prefetch_min_depth}"
 prefetch_safe_depth = f"{StorageEconomics.prefetch_safe_depth}"
 gds_trad_us = f"{StorageEconomics.gds_trad_us}"
@@ -237,6 +240,8 @@ glacier_annual_cost = f"{StorageEconomics.glacier_annual:,.0f}"
 tier_cost_ratio = f"{StorageEconomics.tier_cost_ratio:,.0f}"
 egress_100tb_cost = f"{StorageEconomics.egress_100tb:,.0f}"
 ckpt_total_gb = f"{StorageEconomics.ckpt_total_gb:,.0f}"
+ckpt_weights_gb_str = f"{StorageEconomics.ckpt_weights_gb:,.0f}"
+ckpt_optimizer_gb_str = f"{StorageEconomics.ckpt_opt_gb:,.0f}"
 ckpt_nvme_s = f"{StorageEconomics.ckpt_nvme_s:.1f}"
 ckpt_pfs_s = f"{StorageEconomics.ckpt_pfs_s:.1f}"
 
@@ -620,7 +625,7 @@ At the NVMe tier, compression represents a critical tradeoff between I/O bandwid
 
 **The Math**:
 
-1.  **Raw Bandwidth**: 1,000 images/s $\times$ 150 KB/image = **`{python} ImageNetBottleneck.raw_bw_str` MB/s**.
+1.  **Raw Bandwidth**: 1,000 images/s $\times$ 150 KB/image = **`{python} raw_bw_str` MB/s**.
 2.  **HDD Reality**: A 7200 RPM HDD delivers 100 random IOPS. For 1,000 images/s, you need **`{python} hdd_slowdown_factor` $\times$ more IOPS** than the disk provides.
 3.  **The Result**: Shuffling individual files on an HDD will starve the GPU, reducing utilization to <5%.
 
@@ -930,7 +935,7 @@ $$D_{min} = \left\lceil \frac{T_{I/O,p99}}{T_{compute}} \right\rceil$$ {#eq-pref
 
 The prefetch depth equation (@eq-prefetch-depth) tells us how many batches must be in flight simultaneously to hide I/O latency behind computation. When the I/O system is slower than the accelerator (the common case in ML training), deeper prefetching is the only way to prevent data stalls. The equation uses P99 I/O latency rather than average latency because a single slow read can drain the buffer and stall the accelerator; sizing for the average guarantees frequent stalls at scale.
 
-If I/O at the 99th percentile takes `{python} PrefetchBuffer.t_io_p99_ms` ms and compute takes `{python} PrefetchBuffer.t_compute_ms` ms, then $D_{min} = $ `{python} prefetch_min_depth` batches, with a safety margin of `{python} prefetch_safe_depth`. In practice, data loaders like PyTorch's `DataLoader` use `prefetch_factor` and `num_workers` parameters to control this depth. Setting `prefetch_factor=2` with 4 workers creates a buffer of 8 batches, which is typically sufficient for NVMe-backed pipelines but may be inadequate for object-storage-backed pipelines where P99 latency can exceed 500 ms.
+If I/O at the 99th percentile takes `{python} prefetch_t_io_p99_str` ms and compute takes `{python} prefetch_t_compute_str` ms, then $D_{min} = $ `{python} prefetch_min_depth` batches, with a safety margin of `{python} prefetch_safe_depth`. In practice, data loaders like PyTorch's `DataLoader` use `prefetch_factor` and `num_workers` parameters to control this depth. Setting `prefetch_factor=2` with 4 workers creates a buffer of 8 batches, which is typically sufficient for NVMe-backed pipelines but may be inadequate for object-storage-backed pipelines where P99 latency can exceed 500 ms.
 
 \index{prefetch buffer!depth calculation}To illustrate with our running example: the 175B model on 256 GPUs processes each batch in roughly 200 ms. Reading from local NVMe, the P99 I/O latency for a batch of tokenized text (roughly 40 MB per GPU) is approximately 50 ms. The minimum prefetch depth is $\lceil 50 / 200 \rceil = 1$ batch, and a safety margin of 2 is adequate. Reading from a parallel file system, the P99 I/O latency rises to roughly 200 ms due to network jitter and contention, requiring a minimum depth of $\lceil 200 / 200 \rceil = 1$, with a safety margin of 3 to account for occasional multi-hundred-millisecond outliers. Reading from object storage, the P99 latency can exceed 500 ms, requiring a depth of at least 3, with a safety margin of 5 or more. These numbers translate directly into host DRAM consumption: at 40 MB per batch, a depth-5 prefetch buffer per GPU consumes 200 MB, and 8 GPUs per node consume 1.6 GB. At 40 MB per batch with a depth of 1, the same node needs only 320 MB. The storage tier directly determines the memory cost of the prefetch buffer.
 
@@ -1190,7 +1195,7 @@ While model serving dictates its own economic calculus, the training phase intro
 
 \index{Checkpoint!storage architecture}When a thousand GPUs have been training for six hours since the last checkpoint and a power supply fails, what determines how much work is lost? The answer is entirely a storage problem: how quickly the most recent checkpoint was saved, and where it resides. Checkpoints are the most demanding write workload in the storage hierarchy. They are also among the most consequential: a lost checkpoint after a hardware failure means repeating hours or days of training. The interaction between checkpoint storage and fault tolerance strategy is covered in depth in @sec-fault-tolerance-reliability, where the Young-Daly formula (@sec-fault-tolerance-young-daly) derives the optimal checkpoint frequency from cluster failure rates and checkpoint write time. Here we focus on the storage architecture that minimizes $T_{save}$, the time the training pipeline pauses to save a checkpoint.
 
-A `{python} gpt3_params_b`B parameter model with Adam optimizer generates checkpoints of approximately `{python} ckpt_total_gb` GB. The checkpoint includes model weights (`{python} CheckpointStorage.weights_gb_str` GB in FP16), optimizer state (momentum and variance, `{python} CheckpointStorage.optimizer_gb_str` GB in FP32), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
+A `{python} gpt3_params_b`B parameter model with Adam optimizer generates checkpoints of approximately `{python} ckpt_total_gb` GB. The checkpoint includes model weights (`{python} ckpt_weights_gb_str` GB in FP16), optimizer state (momentum and variance, `{python} ckpt_optimizer_gb_str` GB in FP32), learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
 ::: {.callout-definition title="Checkpoint Storm"}
 
