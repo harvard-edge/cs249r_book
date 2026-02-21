@@ -84,10 +84,28 @@ Machine learning systems have a physical reality that transcends code. While the
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ INFRASTRUCTURE SPECIFICATIONS AND HIERARCHY
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Used across the chapter for hierarchy tables and TCO analysis.
+# │ Context: @sec-compute-infrastructure — chapter-wide hardware specs and TCO
 # │
-# │ Goal: Provide quantitative specs for hardware generations.
-# │ Show: The scaling of compute density and the shift to liquid cooling.
+# │ Goal: Establish accelerator specs (H100/A100/B200/V100/TPU), bandwidth
+# │       hierarchy (HBM→NVLink→PCIe→InfiniBand), and build-vs-buy TCO for a
+# │       1-node cluster to support all quantitative claims in the chapter.
+# │ Show: H100 ~1979 TFLOPs, ~3.35 TB/s HBM, ridge ~591 FLOP/byte; 8-GPU node
+# │       ~640 GiB HBM; cloud ~$280k/yr vs on-prem ~$166k/yr at 80% utilization.
+# │ How: Pull from mlsys.constants; ridge via (flops/bw).to(flop/byte).m_as(flop/byte);
+# │       TCO from CLOUD_ELECTRICITY_PER_KWH + amortized CapEx vs cloud hourly rate.
+# │
+# │ Imports: mlsys.constants (H100_MEM_BW, H100_FLOPS_FP16_TENSOR,
+# │           H100_MEM_CAPACITY, H100_TDP, A100_FLOPS_FP16_TENSOR, A100_MEM_BW,
+# │           A100_TDP, B200_FLOPS_FP16_TENSOR, B200_MEM_BW, B200_TDP,
+# │           V100_FLOPS_FP16_TENSOR, V100_MEM_BW, V100_TDP,
+# │           NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW, SYSTEM_MEMORY_BW,
+# │           CLOUD_ELECTRICITY_PER_KWH, GPT3_PARAMS, TPUV3_FLOPS_BF16,
+# │           TPUV4_FLOPS_BF16, TPUV5P_FLOPS_BF16, WSE3_CORES, WSE3_MEM_CAPACITY)
+# │ Exports: h100_tflops, h100_bw, h100_ridge, ddr_bw_str, nvlink_bw_str,
+# │          pcie_bw_str, ib_bw_str, ib_bw_gbs, node_hbm_cap, rack_power_str,
+# │          h100_ef, a100_ef, b200_ef, v100_ef, annual_elec_cost_str,
+# │          onprem_node_annual_str, cloud_node_annual_str, gpt3_params_b,
+# │          t_mem_str, t_comp_str, dominance_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -130,7 +148,7 @@ class InfraSetup:
     ddr_bw = SYSTEM_MEMORY_BW # ~50 GB/s
 
     # Ridge points
-    h100_ridge_val = (h100_flops / h100_bw).to(flop/byte).magnitude
+    h100_ridge_val = (h100_flops / h100_bw).m_as(flop/byte)
 
     # Level 2: Node
     gpus_per_node = 8
@@ -141,17 +159,17 @@ class InfraSetup:
 
     # Level 3: Rack
     nodes_per_rack = 4
-    rack_power_kw = (h100_tdp * gpus_per_node * nodes_per_rack).to(kilowatt).magnitude * 1.2
+    rack_power_kw = (h100_tdp * gpus_per_node * nodes_per_rack).m_as(kilowatt) * 1.2
     pue_efficient = 1.10
 
     # Economics
     dgx_h100_price = 350000 # USD
-    electricity_rate = CLOUD_ELECTRICITY_PER_KWH.to(USD/(kilowatt*hour)).magnitude
+    electricity_rate = CLOUD_ELECTRICITY_PER_KWH.m_as(USD/(kilowatt*hour))
     utilization = 0.80
     amortization_years = 3
 
     # Annual OpEx for 1 Node
-    node_power_kw = (h100_tdp * gpus_per_node).to(kilowatt).magnitude * 1.2
+    node_power_kw = (h100_tdp * gpus_per_node).m_as(kilowatt) * 1.2
     annual_elec_cost = node_power_kw * 8760 * utilization * electricity_rate * pue_efficient
 
     # Break-even build vs buy
@@ -162,10 +180,10 @@ class InfraSetup:
     onprem_node_total_annual = onprem_node_annual_capex + annual_elec_cost
 
     # Efficiency
-    h100_tflops_per_watt = h100_flops.to(TFLOPs/second).magnitude / h100_tdp.to(watt).magnitude
-    a100_tflops_per_watt = a100_flops.to(TFLOPs/second).magnitude / a100_tdp.to(watt).magnitude
-    b200_tflops_per_watt = b200_flops.to(TFLOPs/second).magnitude / b200_tdp.to(watt).magnitude
-    v100_tflops_per_watt = v100_flops.to(TFLOPs/second).magnitude / v100_tdp.to(watt).magnitude
+    h100_tflops_per_watt = h100_flops.m_as(TFLOPs/second) / h100_tdp.m_as(watt)
+    a100_tflops_per_watt = a100_flops.m_as(TFLOPs/second) / a100_tdp.m_as(watt)
+    b200_tflops_per_watt = b200_flops.m_as(TFLOPs/second) / b200_tdp.m_as(watt)
+    v100_tflops_per_watt = v100_flops.m_as(TFLOPs/second) / v100_tdp.m_as(watt)
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class TokenLatency:
@@ -183,23 +201,23 @@ class TokenLatency:
     weight_vol = p_params * weight_bytes
     ops_per_token = 2 * p_params
 
-    t_mem_ms = (weight_vol / hbm_bw.to(byte/second)).to('millisecond').magnitude
-    t_comp_ms = (ops_per_token / peak_tflops.to(flop/second)).to('millisecond').magnitude
+    t_mem_ms = (weight_vol / hbm_bw.to(byte/second)).m_as('millisecond')
+    t_comp_ms = (ops_per_token / peak_tflops.to(flop/second)).m_as('millisecond')
 
     mem_dominance = (t_mem_ms / (t_mem_ms + t_comp_ms)) * 100
 
     # OUTPUTS handled in EXPORTS
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-h100_tflops = f"{InfraSetup.h100_flops.to(TFLOPs/second).magnitude:.0f}"
-h100_bw = f"{InfraSetup.h100_bw.to(TB/second).magnitude:.2f}"
+h100_tflops = f"{InfraSetup.h100_flops.m_as(TFLOPs/second):.0f}"
+h100_bw = f"{InfraSetup.h100_bw.m_as(TB/second):.2f}"
 h100_ridge = f"{InfraSetup.h100_ridge_val:.0f}"
-ddr_bw_str = f"{InfraSetup.ddr_bw.to(GB/second).magnitude:.0f}"
-nvlink_bw_str = f"{InfraSetup.nvlink_bw.to(GB/second).magnitude:.0f}"
-pcie_bw_str = f"{InfraSetup.pcie_bw.to(GB/second).magnitude:.0f}"
-ib_bw_str = f"{InfraSetup.ib_bw.to(Gbps).magnitude:.0f}"
-ib_bw_gbs = f"{InfraSetup.ib_bw.to(Gbps).magnitude / 8:.0f}"
-node_hbm_cap = f"{InfraSetup.node_hbm_capacity.to(GiB).magnitude:.0f}"
+ddr_bw_str = f"{InfraSetup.ddr_bw.m_as(GB/second):.0f}"
+nvlink_bw_str = f"{InfraSetup.nvlink_bw.m_as(GB/second):.0f}"
+pcie_bw_str = f"{InfraSetup.pcie_bw.m_as(GB/second):.0f}"
+ib_bw_str = f"{InfraSetup.ib_bw.m_as(Gbps):.0f}"
+ib_bw_gbs = f"{InfraSetup.ib_bw.m_as(Gbps) / 8:.0f}"
+node_hbm_cap = f"{InfraSetup.node_hbm_capacity.m_as(GiB):.0f}"
 rack_power_str = f"{InfraSetup.rack_power_kw:.0f}"
 breakeven_util = f"{int(InfraSetup.utilization * 100)}" # Placeholder logic
 h100_ef = f"{InfraSetup.h100_tflops_per_watt:.2f}"
@@ -209,7 +227,7 @@ v100_ef = f"{InfraSetup.v100_tflops_per_watt:.2f}"
 annual_elec_cost_str = f"{InfraSetup.annual_elec_cost:,.0f}"
 onprem_node_annual_str = f"{InfraSetup.onprem_node_total_annual:,.0f}"
 cloud_node_annual_str = f"{InfraSetup.cloud_node_annual:,.0f}"
-gpt3_params_b = f"{GPT3_PARAMS.to(Bparam).magnitude:.0f}"
+gpt3_params_b = f"{GPT3_PARAMS.m_as(Bparam):.0f}"
 
 t_mem_str = f"{TokenLatency.t_mem_ms:.1f}"
 t_comp_str = f"{TokenLatency.t_comp_ms:.2f}"

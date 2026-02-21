@@ -57,14 +57,23 @@ Neural networks are defined by mathematics (matrix multiplications, gradient com
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ A100 SPECS FOR BLAS FOOTNOTE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: BLAS footnote discussing hardware-optimized implementations
+# │ Context: [^fn-blas] footnote + [^fn-gemm] footnote in Ladder of Abstraction;
+# │          also @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8
+# │          and @sec-ml-frameworks-device-memory-management-9404 prose
 # │
-# │ Goal: Establish the foundation of hardware-optimized BLAS.
-# │ Show: The ~312 TFLOPS dense capability of A100 tensor cores.
-# │ How: Retrieve peak throughput from mlsys.constants.
+# │ Goal: Quantify A100 peak FP16 TFLOPS (dense ~312 and sparse ~624) to ground
+# │       the BLAS-hardware connection and Memory Wall discussion.
+# │ Show: "up to 312 TFLOPS (FP16/BF16/TF32) … or 624 TFLOPS with structured
+# │       sparsity" — in [^fn-blas] footnote and Device Bandwidth Hierarchy prose.
+# │ How: Hardware.Cloud.A100.peak_flops → m_as(TFLOPs/second); sparse = 2×.
 # │
-# │ Imports: mlsys.constants (A100_FLOPS_FP16_TENSOR), mlsys.formatting (fmt)
-# │ Exports: a100_tflops_fp16_str, a100_tflops_sparse_str
+# │ Note: PERSISTENT — A100BLAS.dense_tflops_str used again at line ~284
+# │       (Memory Wall), line ~2627 (Device Bandwidth Hierarchy), line ~3083
+# │       (Kernel Manager subsection). Also feeds GraphOptimizationStats.
+# │
+# │ Imports: mlsys.constants (TFLOPs, second), mlsys.formatting (fmt, check)
+# │ Exports: graph_flop_reduction_str, A100BLAS.dense_tflops_str,
+# │          A100BLAS.sparse_tflops_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware
 from mlsys.formatting import fmt, check
@@ -94,7 +103,7 @@ class A100BLAS:
     gpu = Hardware.Cloud.A100
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    dense_flops = gpu.peak_flops.to(TFLOPs/second).magnitude
+    dense_flops = gpu.peak_flops.m_as(TFLOPs/second)
     sparse_flops = dense_flops * 2
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
@@ -240,17 +249,24 @@ Consider two engineers writing the same neural network. The first debugs interac
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ A100 SPECS FOR MEMORY WALL DISCUSSION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Introducing the Memory Wall concept with A100 hardware numbers
+# │ Context: @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 —
+# │          opening paragraph of "Why Execution Strategy Matters: The Memory Wall"
 # │
-# │ Goal: Demonstrate the fundamental compute-vs-bandwidth imbalance.
-# │ Show: Why memory-bound ops achieve <1% compute utilization on A100.
-# │ How: Calculate the ridge point using peak FLOPS and HBM bandwidth.
+# │ Goal: Quantify the compute-vs-bandwidth gap on the A100 (312 TFLOPS vs 2 TB/s
+# │       = 156 ops/byte ridge point) to show why element-wise ops hit <1% utilization.
+# │ Show: "312 TFLOPS … 2.0 TB/s" — inline in Memory Wall opening paragraph;
+# │       a100_bw_tbs_str also reused in Device Bandwidth Hierarchy (line ~2615).
+# │ How: Hardware.Cloud.A100 attributes → m_as(TFLOPs/second) and m_as(TB/second);
+# │      ridge_point() → m_as(flop/byte) for the invariant check.
 # │
-# │ Imports: mlsys.constants (A100_FLOPS_FP16_TENSOR, A100_MEM_BW)
-# │ Exports: a100_tflops_fp16_str, a100_bw_tbs_str
+# │ Note: PERSISTENT — MemoryWallSpecs.a100_bw_tbs_str reused at line ~2615
+# │       (Device and Memory Management section prose).
+# │
+# │ Imports: mlsys.constants (TFLOPs, TB, second, flop, byte), mlsys.formatting (fmt, check)
+# │ Exports: MemoryWallSpecs.a100_tflops_fp16_str, MemoryWallSpecs.a100_bw_tbs_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware
-from mlsys.constants import TFLOPs, TB, second
+from mlsys.constants import TFLOPs, TB, second, flop, byte
 from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -263,12 +279,12 @@ class MemoryWallSpecs:
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
     gpu = Hardware.Cloud.A100
 
-    flops_fp16 = gpu.peak_flops.to(TFLOPs/second).magnitude
-    bw_tbs = gpu.memory_bw.to(TB/second).magnitude
+    flops_fp16 = gpu.peak_flops.m_as(TFLOPs/second)
+    bw_tbs = gpu.memory_bw.m_as(TB/second)
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Arithmetic Intensity "Ridge Point" (Ops / Byte)
-    ridge_point = gpu.ridge_point().magnitude
+    ridge_point = gpu.ridge_point().m_as(flop/byte)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(ridge_point >= 100, f"A100 ridge point ({ridge_point:.1f}) is too low to claim a 'Memory Wall'.")
@@ -1395,14 +1411,21 @@ This cumulative latency creates what is effectively *a dispatch tax* on executio
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ GPT-3 PARAMETER COUNTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Comparing compilation benefits across model scales
+# │ Context: @sec-ml-frameworks-dispatch-overhead-law-9e0a — Dispatch Tax
+# │          analysis comparing small MLP vs. GPT-3 Layer overhead regimes
 # │
-# │ Goal: Contrast compilation benefits at extreme scale.
-# │ Show: That dispatch overhead is negligible for 175B parameter models.
-# │ How: Retrieve GPT-3 parameter count to establish the compute-bound regime.
+# │ Goal: Quantify GPT-3 parameter count (175 B) to establish the compute-bound
+# │       regime where dispatch overhead is negligible (<0.05%).
+# │ Show: "175 B-parameter model sees only 1.3× speedup" — inline in prose
+# │       after The Dispatch Tax callout.
+# │ How: Models.GPT3.parameters → m_as(Bparam); single scalar extraction.
 # │
-# │ Imports: mlsys.constants (GPT3_PARAMS), mlsys.formatting (fmt)
-# │ Exports: gpt3_params_b_str
+# │ Note: PERSISTENT — GPT3Context.gpt3_params_b_str reused at line ~1634
+# │       (Reverse Mode section), line ~1703 (Memory Management Strategies),
+# │       line ~2905 and ~2922 (Parameter Structures / 3D Parallelism paragraphs).
+# │
+# │ Imports: mlsys.constants (Bparam), mlsys.formatting (fmt, check)
+# │ Exports: GPT3Context.gpt3_params_b_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Models
 from mlsys.constants import Bparam
@@ -1419,7 +1442,7 @@ class GPT3Context:
     model = Models.GPT3
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    params_b = model.parameters.to(Bparam).magnitude
+    params_b = model.parameters.m_as(Bparam)
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     gpt3_params_b_str = fmt(params_b, precision=0, commas=False)
@@ -1655,28 +1678,39 @@ Three implementation requirements emerge from this example. First, the framework
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ GPT-3 MEMORY FOOTPRINT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Memory Management Strategies section discussing AD memory costs
+# │ Context: @sec-ml-frameworks-memory-management-strategies-b008 — opening
+# │          paragraph establishing memory as the binding training constraint
 # │
-# │ Goal: Shows that even storing just weights for a 175B model requires 350 GB
-# │      (FP16), far exceeding any single GPU. Establishes memory as the binding
-# │      constraint on what models frameworks can train.
+# │ Goal: Quantify GPT-3 FP16 weight memory (350 GB) to show that a 175B-param
+# │       model far exceeds any single GPU's capacity.
+# │ Show: "175 B parameters → 350 GB" — inline in opening prose paragraph.
+# │ How: model_memory() formula; m_as(Bparam) for param count extraction.
 # │
-# │ Imports: mlsys.constants (GPT3_PARAMS, BYTES_FP16), mlsys.formulas (model_memory)
+# │ Imports: mlsys.constants (GPT3_PARAMS, BYTES_FP16, GB, Bparam),
+# │          mlsys.formulas (model_memory), mlsys.formatting (fmt)
 # │ Exports: gpt3_params_b_str, gpt3_fp16_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import GPT3_PARAMS, BYTES_FP16, GB, Bparam
 from mlsys.formulas import model_memory
 from mlsys.formatting import fmt, check
 
-# --- Inputs (from model specs) ---
-gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude                         # 175 billion
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GPT3MemoryFootprint:
+    """GPT-3 FP16 weight memory to show single-GPU capacity is exceeded."""
 
-# --- Process ---
-gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)                 # 350 GB
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    params_b = GPT3_PARAMS.m_as(Bparam)                                        # 175 billion
 
-# --- Outputs (formatted strings for prose) ---
-gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)        # e.g. "175"
-gpt3_fp16_gb_str = fmt(gpt3_fp16_gb_value, precision=0, commas=False)          # e.g. "350"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fp16_gb = model_memory(GPT3_PARAMS, BYTES_FP16, GB)                        # 350 GB
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gpt3_params_b_str = fmt(params_b, precision=0, commas=False)               # e.g. "175"
+    gpt3_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False)                 # e.g. "350"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpt3_params_b_str = GPT3MemoryFootprint.gpt3_params_b_str
+gpt3_fp16_gb_str = GPT3MemoryFootprint.gpt3_fp16_gb_str
 ```
 
 #### Memory Management Strategies {#sec-ml-frameworks-memory-management-strategies-b008}
@@ -1770,13 +1804,21 @@ Every activation saved for the backward pass persists in memory until consumed b
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RESNET-50 MEMORY BREAKDOWN
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Memory-Compute Trade-off principle showing training vs inference
+# │ Context: @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2 —
+# │          "Principle 2: The Memory-Compute Trade-off" subsection
 # │
-# │ Goal: Contrast memory requirements for training vs. inference.
-# │ Show: That training requires 100× more memory than inference for ResNet-50.
-# │ How: Sum weights, gradients, optimizer state, and activations.
+# │ Goal: Quantify ResNet-50 training vs. inference memory (25.6 M params,
+# │       ~102 MB FP32 weights, 10–15 GB training footprint) to show the ~100×
+# │       ratio driving the $D_{vol}$ term in the Iron Law.
+# │ Show: "~102 MB inference vs. 10–15 GB training" — inline in Principle 2 prose
+# │       and in "The Administrative Tax" callout (@sec-ml-frameworks-tensor-structure).
+# │ How: model.size_in_bytes() helpers; m_as(MB/Mparam) for unit extraction.
 # │
-# │ Imports: mlsys.constants (RESNET50_PARAMS), mlsys.formulas (model_memory)
+# │ Note: PERSISTENT — ResNetMemory reused at line ~2224 (Abstraction section),
+# │       line ~2324 (Administrative Tax callout), line ~3143 (nn.Module intro).
+# │
+# │ Imports: mlsys.constants (BYTES_FP32, BYTES_ADAM_STATE, MB, Mparam),
+# │          mlsys.formatting (fmt, check)
 # │ Exports: resnet_params_m_str, resnet_fp32_mb_str, resnet_adam_mb_str,
 # │          resnet_training_min_gb_str, resnet_training_max_gb_str, resnet_training_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1797,10 +1839,10 @@ class ResNetMemory:
     training_max_gb = 15
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    params_m = model.parameters.to(Mparam).magnitude
+    params_m = model.parameters.m_as(Mparam)
 
-    fp32_mb = model.size_in_bytes(BYTES_FP32).to(MB).magnitude
-    adam_mb = model.size_in_bytes(BYTES_ADAM_STATE).to(MB).magnitude
+    fp32_mb = model.size_in_bytes(BYTES_FP32).m_as(MB)
+    adam_mb = model.size_in_bytes(BYTES_ADAM_STATE).m_as(MB)
 
     training_ratio = (training_min_gb * KIB_TO_BYTES) / fp32_mb
 
@@ -2029,14 +2071,26 @@ optimizer.step()
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ 7B MODEL OPTIMIZER STATE MEMORY
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Optimizer State and Checkpointing section on memory requirements
+# │ Context: @sec-ml-frameworks-pytorch-autograd-internals-4fa0 Optimizer State
+# │          and Checkpointing subsection discussing Adam memory overhead
 # │
-# │ Goal: Quantify the memory dominance of optimizer state.
-# │ Show: That Adam's state triples the memory footprint of a 7B model.
-# │ How: Sum FP16 weights and FP32 optimizer state bytes.
+# │ Goal: Quantify the memory overhead of Adam optimizer state for a 7B-param
+# │       model: FP16 weights (14 GB) + Adam state (56 GB) = ~98 GB total,
+# │       showing that optimizer state dominates training memory.
+# │ Show: "~98 GB total (14 GB weights + 56 GB optimizer state)" — inline in
+# │       Optimizer State prose; model_7b_fp16_gb_str reused later in nn.Module
+# │       serialization and Fallacies sections.
+# │ How: model_memory() for both BYTES_FP16 and BYTES_ADAM_STATE quantities.
 # │
-# │ Imports: mlsys.constants (BYTES_FP16, BYTES_ADAM_STATE), mlsys.formulas (model_memory)
-# │ Exports: model_7b_fp16_gb_str, model_7b_adam_gb_str, model_7b_total_gb_str
+# │ Note: PERSISTENT — Model7B.model_7b_fp16_gb_str reused at line ~3170
+# │       (System-Level Operations memory manager paragraph), line ~3267
+# │       (nn.Module Principle 3 serialization paragraph), line ~4130
+# │       (Fallacies: batch size Fallacy).
+# │
+# │ Imports: mlsys.constants (BYTES_FP16, BYTES_ADAM_STATE, GB, ureg),
+# │          mlsys.formulas (model_memory), mlsys.formatting (fmt, check)
+# │ Exports: Model7B.model_7b_fp16_gb_str, Model7B.model_7b_adam_gb_str,
+# │          Model7B.model_7b_total_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import BYTES_FP16, BYTES_ADAM_STATE, GB, ureg
 from mlsys.formulas import model_memory
@@ -2211,7 +2265,7 @@ class ResNetAbstraction:
     """
     Namespace for ResNet-50 parameter scale in abstraction section.
     """
-    params_m = RESNET50_PARAMS.to(Mparam).magnitude
+    params_m = RESNET50_PARAMS.m_as(Mparam)
     check(params_m > 20, f"ResNet-50 parameter count too low: {params_m:.1f}M")
     resnet_params_m_str = fmt(params_m, precision=1, commas=False)
 
@@ -2277,13 +2331,13 @@ class AdminTax:
     width = 1024
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    weights_gb = (params_count * BYTES_FP16).to(GB).magnitude
+    weights_gb = (params_count * BYTES_FP16).m_as(GB)
     grads_gb = weights_gb
-    opt_gb = (params_count * BYTES_ADAM_STATE).to(GB).magnitude
+    opt_gb = (params_count * BYTES_ADAM_STATE).m_as(GB)
 
     # Activation approximation: Batch * Layers * Width^2 * FP16
     act_bytes = batch_size * layers * (width ** 2) * BYTES_FP16
-    act_gb = act_bytes.to(GB).magnitude
+    act_gb = act_bytes.m_as(GB)
 
     total_gb = weights_gb + grads_gb + opt_gb + act_gb
     tax_gb = total_gb - weights_gb
@@ -2541,23 +2595,23 @@ class DeviceBandwidthHierarchy:
     tensor_4mb = 4 * MILLION
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    pcie4_gbs = PCIE_GEN4_BW.to(GB/second).magnitude
-    nvlink_a100_gbs = NVLINK_A100_BW.to(GB/second).magnitude
-    a100_bw_gbs = A100_MEM_BW.to(GB/second).magnitude
-    a100_bw_tbs = A100_MEM_BW.to(TB/second).magnitude
-    a100_mem = A100_MEM_CAPACITY.to(GiB).magnitude
-    a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
+    pcie4_gbs = PCIE_GEN4_BW.m_as(GB/second)
+    nvlink_a100_gbs = NVLINK_A100_BW.m_as(GB/second)
+    a100_bw_gbs = A100_MEM_BW.m_as(GB/second)
+    a100_bw_tbs = A100_MEM_BW.m_as(TB/second)
+    a100_mem = A100_MEM_CAPACITY.m_as(GiB)
+    a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
 
     # Transfer times for 4 MB tensor
-    pcie4_4mb_ms = (tensor_4mb / (PCIE_GEN4_BW.to(byte/second).magnitude)) * THOUSAND
-    nvlink_4mb_ms = (tensor_4mb / (NVLINK_A100_BW.to(byte/second).magnitude)) * THOUSAND
-    hbm_4mb_ms = (tensor_4mb / (A100_MEM_BW.to(byte/second).magnitude)) * THOUSAND
+    pcie4_4mb_ms = (tensor_4mb / PCIE_GEN4_BW.m_as(byte/second)) * THOUSAND
+    nvlink_4mb_ms = (tensor_4mb / NVLINK_A100_BW.m_as(byte/second)) * THOUSAND
+    hbm_4mb_ms = (tensor_4mb / A100_MEM_BW.m_as(byte/second)) * THOUSAND
 
     # 1 GB transfer cost analysis
     # 1 GB / BW (B/s) * 1000 ms
-    pcie4_1gb_ms = (BILLION / (PCIE_GEN4_BW.to(byte/second).magnitude)) * THOUSAND
+    pcie4_1gb_ms = (BILLION / PCIE_GEN4_BW.m_as(byte/second)) * THOUSAND
     # Equiv Ops: (ms / 1000) * FLOPS
-    pcie4_1gb_equiv_ops = (pcie4_1gb_ms / THOUSAND) * A100_FLOPS_FP16_TENSOR.to(flop/second).magnitude
+    pcie4_1gb_equiv_ops = (pcie4_1gb_ms / THOUSAND) * A100_FLOPS_FP16_TENSOR.m_as(flop/second)
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     pcie4_gbs_str = fmt(pcie4_gbs, precision=0, commas=False)
@@ -2571,7 +2625,7 @@ class DeviceBandwidthHierarchy:
     nvlink_4mb_ms_str = fmt(nvlink_4mb_ms, precision=3, commas=False)
     hbm_4mb_ms_str = fmt(hbm_4mb_ms, precision=3, commas=False)
     pcie4_1gb_ms_str = fmt(pcie4_1gb_ms, precision=0, commas=False)
-    pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops * flop).to(TFLOPs).magnitude, precision=1, commas=False)
+    pcie4_1gb_equiv_ops_str = fmt((pcie4_1gb_equiv_ops * flop).m_as(TFLOPs), precision=1, commas=False)
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 pcie4_gbs_str = DeviceBandwidthHierarchy.pcie4_gbs_str
@@ -2766,15 +2820,15 @@ class DataloaderThroughput:
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Throughput requirement
     throughput_bytes_sec = img_per_sec * img_res * img_res * img_channels * byte
-    dataloader_mbs = throughput_bytes_sec.to(MB).magnitude
+    dataloader_mbs = throughput_bytes_sec.m_as(MB)
 
     # Batch transfer
-    batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32.magnitude * byte
-    batch_mb = batch_bytes.to(MB).magnitude
-    batch_transfer_ms = (batch_bytes / PCIE_GEN4_BW).to(second).magnitude * MS_PER_SEC
+    batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32
+    batch_mb = batch_bytes.m_as(MB)
+    batch_transfer_ms = (batch_bytes / PCIE_GEN4_BW).m_as(second) * MS_PER_SEC
 
     # PCIe Ref
-    pcie4_gbs = PCIE_GEN4_BW.to(GB/second).magnitude
+    pcie4_gbs = PCIE_GEN4_BW.m_as(GB/second)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(dataloader_mbs > 100, f"Throughput requirement ({dataloader_mbs:.1f} MB/s) too low.")
@@ -2839,28 +2893,44 @@ A final detail is *collation*: the `collate_fn` parameter determines how individ
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ GPT-3 PARAMETER STRUCTURES
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Parameter Structures section discussing parameter management scale
+# │ Context: @sec-ml-frameworks-abstraction-problem-37a5 "Parameter Structures"
+# │          subsection; values used in two prose paragraphs and @fig-3d-parallelism
 # │
-# │ Goal: Demonstrate the scale challenge of modern LLM parameter management.
-# │ Show: That 175B parameters require 350 GB of storage, necessitating distributed systems.
-# │ How: Calculate total weight bytes in FP16 for the GPT-3 architecture.
+# │ Goal: Quantify GPT-3 FP16 storage (350 GB) to motivate parameter sharding
+# │       across multiple devices and multi-GPU parallelism strategies.
+# │ Show: "175 B parameters require 350 GB in FP16" — inline in prose before
+# │       @fig-3d-parallelism and in "Parameter Structures" sub-paragraph.
+# │ How: model_memory() formula; m_as(Bparam) for param count extraction.
 # │
-# │ Imports: mlsys.constants (GPT3_PARAMS, BYTES_FP16), mlsys.formulas (model_memory)
+# │ Note: PERSISTENT — gpt3_params_b_str / gpt3_fp16_gb_str reused again at
+# │       @sec-ml-frameworks-principle-3 (line ~3225) and Fallacies (line ~4082).
+# │       Produces identical values to gpt3-memory-footprint cell (line ~1651).
+# │
+# │ Imports: mlsys.constants (GPT3_PARAMS, BYTES_FP16, GB, Bparam),
+# │          mlsys.formulas (model_memory), mlsys.formatting (fmt)
 # │ Exports: gpt3_params_b_str, gpt3_fp16_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import GPT3_PARAMS, BYTES_FP16, GB, Bparam
 from mlsys.formulas import model_memory
 from mlsys.formatting import fmt, check
 
-# --- Inputs (from model specs) ---
-gpt3_params_b_value = GPT3_PARAMS.to(Bparam).magnitude                         # 175 billion
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GPT3ParameterStructures:
+    """GPT-3 FP16 storage to motivate parameter sharding across devices."""
 
-# --- Process ---
-gpt3_fp16_gb_value = model_memory(GPT3_PARAMS, BYTES_FP16, GB)                 # 350 GB
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    params_b = GPT3_PARAMS.m_as(Bparam)                                        # 175 billion
 
-# --- Outputs (formatted strings for prose) ---
-gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)        # e.g. "175"  # Note: also defined in gpt3-params; produces same value
-gpt3_fp16_gb_str = fmt(gpt3_fp16_gb_value, precision=0, commas=False)          # e.g. "350"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fp16_gb = model_memory(GPT3_PARAMS, BYTES_FP16, GB)                        # 350 GB
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gpt3_params_b_str = fmt(params_b, precision=0, commas=False)               # e.g. "175"
+    gpt3_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False)                 # e.g. "350"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpt3_params_b_str = GPT3ParameterStructures.gpt3_params_b_str
+gpt3_fp16_gb_str = GPT3ParameterStructures.gpt3_fp16_gb_str
 ```
 
 DataLoaders, Datasets, and collation functions answer the third question---*how does data arrive fast enough?*---by sustaining accelerator-rate throughput through parallelism, prefetching, and DMA. But these structures handle *ephemeral* data: samples flow through the pipeline once per epoch and are discarded. The fourth question asks how frameworks manage data that *persists*---the model's own weights---especially when those weights exceed the memory of any single device.
@@ -3101,7 +3171,7 @@ class ResNetGFLOPS:
     flops = RESNET50_FLOPs
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    gflops = flops.to(GFLOPs).magnitude
+    gflops = flops.m_as(GFLOPs)
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     resnet_gflops_str = fmt(gflops, precision=1, commas=False)
@@ -3755,10 +3825,22 @@ optimizer.step()
 # │ Imports: (none)
 # │ Exports: train_batch, train_input, train_hidden, train_output
 # └─────────────────────────────────────────────────────────────────────────────
-train_batch = 32                                                                # batch size
-train_input = 784                                                               # MNIST input (28 × 28)
-train_hidden = 256                                                              # hidden layer
-train_output = 10                                                               # 10 classes
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TrainingStepDims:
+    """Model dimensions for the two-layer MLP training step example."""
+
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    train_batch = 32                                                            # batch size
+    train_input = 784                                                           # MNIST input (28 × 28)
+    train_hidden = 256                                                          # hidden layer
+    train_output = 10                                                           # 10 classes
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+train_batch = TrainingStepDims.train_batch
+train_input = TrainingStepDims.train_input
+train_hidden = TrainingStepDims.train_hidden
+train_output = TrainingStepDims.train_output
 ```
 
 ### Phase 1: Forward Pass (Solving the Execution Problem) {.unnumbered}
@@ -3824,69 +3906,80 @@ Applying the Dispatch Overhead Equation (@eq-dispatch-overhead) to this step, @t
 from mlsys.formatting import fmt, check
 from mlsys.constants import byte, KB, MB, flop, KFLOPs, MFLOPs
 
-# --- Inputs (matching training-step-dims) ---
-train_batch = 32                                                                # batch size
-train_input = 784                                                               # MNIST input (28 × 28)
-train_hidden = 256                                                              # hidden layer
-train_output = 10                                                               # 10 classes
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TrainingStepCalc:
+    """FLOPs and memory analysis for each operation in a two-layer MLP training step."""
 
-# --- Process: MatMul 1 [32, 784] @ [784, 256] ---
-train_mm1_flops = 2 * train_batch * train_input * train_hidden                 # ~12.8M FLOPs
-train_mm1_mem_bytes = (train_batch * train_input + train_input * train_hidden + train_batch * train_hidden) * 4  # FP32
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Dimensions from TrainingStepDims (available at module scope via EXPORTS)
+    _batch = train_batch
+    _input = train_input
+    _hidden = train_hidden
+    _output = train_output
 
-# --- Process: ReLU [32, 256] ---
-train_relu_flops = train_batch * train_hidden                                   # ~8K FLOPs
-train_relu_mem_bytes = (train_batch * train_hidden) * 2 * 4                    # read + write
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # MatMul 1: [32, 784] @ [784, 256]
+    mm1_flops = 2 * _batch * _input * _hidden                                  # ~12.8M FLOPs
+    mm1_mem_bytes = (_batch * _input + _input * _hidden + _batch * _hidden) * 4  # FP32
 
-# --- Process: MatMul 2 [32, 256] @ [256, 10] ---
-train_mm2_flops = 2 * train_batch * train_hidden * train_output                # ~164K FLOPs
-train_mm2_mem_bytes = (train_batch * train_hidden + train_hidden * train_output + train_batch * train_output) * 4
+    # ReLU: [32, 256]
+    relu_flops = _batch * _hidden                                               # ~8K FLOPs
+    relu_mem_bytes = (_batch * _hidden) * 2 * 4                                # read + write
 
-# --- Process: Cross Entropy [32, 10] ---
-train_ce_flops = train_batch * train_output * 3                                 # ~1K FLOPs (exp + sum + div)
-train_ce_mem_bytes = (train_batch * train_output) * 2 * 4
+    # MatMul 2: [32, 256] @ [256, 10]
+    mm2_flops = 2 * _batch * _hidden * _output                                 # ~164K FLOPs
+    mm2_mem_bytes = (_batch * _hidden + _hidden * _output + _batch * _output) * 4
 
-# --- Process: Backward pass (2x forward FLOPs) ---
-train_bwd_flops = 2 * (train_mm1_flops + train_relu_flops + train_mm2_flops + train_ce_flops)
-train_bwd_mem_str = "~3.2 MB"                                                   # approximation
-train_bwd_ai_str = "~8.0"                                                       # approximation
+    # Cross Entropy: [32, 10]
+    ce_flops = _batch * _output * 3                                             # ~1K FLOPs (exp + sum + div)
+    ce_mem_bytes = (_batch * _output) * 2 * 4
 
-# --- Outputs (formatted strings for table) ---
-train_mm1_flops_str = fmt((train_mm1_flops * flop).to(MFLOPs).magnitude, precision=1, commas=False) + "M"
-train_mm1_mem_str = fmt((train_mm1_mem_bytes * byte).to(MB).magnitude, precision=1, commas=False) + " MB"
-train_mm1_ai_str = fmt(train_mm1_flops / train_mm1_mem_bytes, precision=1, commas=False)
+    # Backward pass (2x forward FLOPs)
+    bwd_flops = 2 * (mm1_flops + relu_flops + mm2_flops + ce_flops)
+    bwd_mem_str = "~3.2 MB"                                                     # approximation
+    bwd_ai_str = "~8.0"                                                         # approximation
 
-train_relu_flops_str = fmt((train_relu_flops * flop).to(KFLOPs).magnitude, precision=1, commas=False) + "K"
-train_relu_mem_str = fmt((train_relu_mem_bytes * byte).to(KB).magnitude, precision=1, commas=False) + " KB"
-train_relu_ai_str = fmt(train_relu_flops / train_relu_mem_bytes, precision=2, commas=False)
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(mm1_flops / mm1_mem_bytes > relu_flops / relu_mem_bytes,
+          "MatMul must have higher arithmetic intensity than ReLU.")
 
-train_mm2_flops_str = fmt((train_mm2_flops * flop).to(KFLOPs).magnitude, precision=1, commas=False) + "K"
-train_mm2_mem_str = fmt((train_mm2_mem_bytes * byte).to(KB).magnitude, precision=1, commas=False) + " KB"
-train_mm2_ai_str = fmt(train_mm2_flops / train_mm2_mem_bytes, precision=1, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    train_mm1_flops_str = fmt((mm1_flops * flop).m_as(MFLOPs), precision=1, commas=False) + "M"
+    train_mm1_mem_str = fmt((mm1_mem_bytes * byte).m_as(MB), precision=1, commas=False) + " MB"
+    train_mm1_ai_str = fmt(mm1_flops / mm1_mem_bytes, precision=1, commas=False)
 
-train_ce_flops_str = fmt((train_ce_flops * flop).to(KFLOPs).magnitude, precision=1, commas=False) + "K"
-train_ce_mem_str = fmt((train_ce_mem_bytes * byte).to(KB).magnitude, precision=1, commas=False) + " KB"
-train_ce_ai_str = fmt(train_ce_flops / train_ce_mem_bytes, precision=2, commas=False)
+    train_relu_flops_str = fmt((relu_flops * flop).m_as(KFLOPs), precision=0, commas=False) + "K"
+    train_relu_mem_str = fmt((relu_mem_bytes * byte).m_as(KB), precision=0, commas=False) + " KB"
+    train_relu_ai_str = fmt(relu_flops / relu_mem_bytes, precision=3, commas=False)
 
-train_bwd_flops_str = fmt((train_bwd_flops * flop).to(MFLOPs).magnitude, precision=1, commas=False) + "M"
+    train_mm2_flops_str = fmt((mm2_flops * flop).m_as(KFLOPs), precision=0, commas=False) + "K"
+    train_mm2_mem_str = fmt((mm2_mem_bytes * byte).m_as(KB), precision=0, commas=False) + " KB"
+    train_mm2_ai_str = fmt(mm2_flops / mm2_mem_bytes, precision=1, commas=False)
 
-# ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-check(train_mm1_flops / train_mm1_mem_bytes > train_relu_flops / train_relu_mem_bytes,
-      "MatMul must have higher arithmetic intensity than ReLU.")
+    train_ce_flops_str = fmt((ce_flops * flop).m_as(KFLOPs), precision=0, commas=False) + "K"
+    train_ce_mem_str = fmt((ce_mem_bytes * byte).m_as(KB), precision=0, commas=False) + " KB"
+    train_ce_ai_str = fmt(ce_flops / ce_mem_bytes, precision=1, commas=False)
 
-train_relu_flops_str = fmt((train_relu_flops * flop).to(KFLOPs).magnitude, precision=0, commas=False) + "K"
-train_relu_mem_str = fmt((train_relu_mem_bytes * byte).to(KB).magnitude, precision=0, commas=False) + " KB"
-train_relu_ai_str = fmt(train_relu_flops / train_relu_mem_bytes, precision=3, commas=False)
+    train_bwd_flops_str = fmt((bwd_flops * flop).m_as(MFLOPs), precision=0, commas=False) + "M"
+    train_bwd_mem_str = bwd_mem_str
+    train_bwd_ai_str = bwd_ai_str
 
-train_mm2_flops_str = fmt((train_mm2_flops * flop).to(KFLOPs).magnitude, precision=0, commas=False) + "K"
-train_mm2_mem_str = fmt((train_mm2_mem_bytes * byte).to(KB).magnitude, precision=0, commas=False) + " KB"
-train_mm2_ai_str = fmt(train_mm2_flops / train_mm2_mem_bytes, precision=1, commas=False)
-
-train_ce_flops_str = fmt((train_ce_flops * flop).to(KFLOPs).magnitude, precision=0, commas=False) + "K"
-train_ce_mem_str = fmt((train_ce_mem_bytes * byte).to(KB).magnitude, precision=0, commas=False) + " KB"
-train_ce_ai_str = fmt(train_ce_flops / train_ce_mem_bytes, precision=1, commas=False)
-
-train_bwd_flops_str = fmt((train_bwd_flops * flop).to(MFLOPs).magnitude, precision=0, commas=False) + "M"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+train_mm1_flops_str = TrainingStepCalc.train_mm1_flops_str
+train_mm1_mem_str = TrainingStepCalc.train_mm1_mem_str
+train_mm1_ai_str = TrainingStepCalc.train_mm1_ai_str
+train_relu_flops_str = TrainingStepCalc.train_relu_flops_str
+train_relu_mem_str = TrainingStepCalc.train_relu_mem_str
+train_relu_ai_str = TrainingStepCalc.train_relu_ai_str
+train_mm2_flops_str = TrainingStepCalc.train_mm2_flops_str
+train_mm2_mem_str = TrainingStepCalc.train_mm2_mem_str
+train_mm2_ai_str = TrainingStepCalc.train_mm2_ai_str
+train_ce_flops_str = TrainingStepCalc.train_ce_flops_str
+train_ce_mem_str = TrainingStepCalc.train_ce_mem_str
+train_ce_ai_str = TrainingStepCalc.train_ce_ai_str
+train_bwd_flops_str = TrainingStepCalc.train_bwd_flops_str
+train_bwd_mem_str = TrainingStepCalc.train_bwd_mem_str
+train_bwd_ai_str = TrainingStepCalc.train_bwd_ai_str
 ```
 
 | **Component**                     |                                                                **FLOPs** |            **Memory Traffic** |     **Arithmetic Intensity** |
@@ -3920,31 +4013,40 @@ train_bwd_flops_str = fmt((train_bwd_flops * flop).to(MFLOPs).magnitude, precisi
 from mlsys.constants import A100_FLOPS_FP16_TENSOR, A100_MEM_BW, TRILLION, flop, byte, second
 from mlsys.formatting import fmt, check
 
-# --- Inputs: workload characteristics ---
-mnist_total_flops_value = 40e6                                                  # ~40M FLOPs total
-mnist_mem_traffic_bytes_value = 5e6                                             # ~5 MB traffic
-mnist_n_ops_value = 6                                                           # 6 kernel launches
-mnist_us_per_op_value = 5                                                       # 5 μs dispatch/op
+class MnistTrainingStepCalc:
+    """MNIST overhead-bound analysis: dispatch dominates compute and memory on A100."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    total_flops = 40e6                                                          # ~40M FLOPs total
+    mem_traffic_bytes = 5e6                                                     # ~5 MB traffic
+    n_ops = 6                                                                   # 6 kernel launches
+    us_per_op = 5                                                               # 5 μs dispatch/op
+    peak_flops = A100_FLOPS_FP16_TENSOR.m_as(flop/second)                      # 312e12 FLOPS
+    mem_bw_bytes = A100_MEM_BW.m_as(byte/second)                               # ~2e12 B/s
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    t_compute_us = total_flops / peak_flops * MILLION                          # ~0.1 μs
+    t_memory_us = mem_traffic_bytes / mem_bw_bytes * MILLION                   # ~2.5 μs
+    t_overhead_us = n_ops * us_per_op                                          # 30 μs (dominant!)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mnist_t_compute_us_str = fmt(t_compute_us, precision=1, commas=False)
+    mnist_t_memory_us_str = fmt(t_memory_us, precision=1, commas=False)
+    mnist_t_overhead_us_str = fmt(t_overhead_us, precision=0, commas=False)
+    mnist_total_flops_str = f"{total_flops/MILLION:.0f}M"
+    mnist_mem_traffic_str = f"{mem_traffic_bytes/MILLION:.0f}MB"
+    mnist_n_ops_str = fmt(n_ops, precision=0, commas=False)
+    mnist_us_per_op_str = fmt(us_per_op, precision=0, commas=False)
+    a100_peak_tflops_str = fmt(peak_flops/TRILLION, precision=0, commas=False)
+    a100_mem_bw_tbs_str = fmt(mem_bw_bytes/TRILLION, precision=0, commas=False)
 
-# --- Inputs: A100 hardware specs ---
-a100_peak_tflops_value = A100_FLOPS_FP16_TENSOR.to(flop/second).magnitude      # 312e12 FLOPS
-a100_mem_bw_bytes_value = A100_MEM_BW.to(byte/second).magnitude                # ~2e12 B/s
-
-# --- Process: timing breakdown ---
-mnist_t_compute_us_value = mnist_total_flops_value / a100_peak_tflops_value * MILLION  # ~0.1 μs
-mnist_t_memory_us_value = mnist_mem_traffic_bytes_value / a100_mem_bw_bytes_value * MILLION  # ~2.5 μs
-mnist_t_overhead_us_value = mnist_n_ops_value * mnist_us_per_op_value          # 30 μs (dominant!)
-
-# --- Outputs (formatted strings for prose) ---
-mnist_t_compute_us_str = fmt(mnist_t_compute_us_value, precision=1, commas=False)
-mnist_t_memory_us_str = fmt(mnist_t_memory_us_value, precision=1, commas=False)
-mnist_t_overhead_us_str = fmt(mnist_t_overhead_us_value, precision=0, commas=False)
-mnist_total_flops_str = f"{mnist_total_flops_value/MILLION:.0f}M"
-mnist_mem_traffic_str = f"{mnist_mem_traffic_bytes_value/MILLION:.0f}MB"
-mnist_n_ops_str = fmt(mnist_n_ops_value, precision=0, commas=False)
-mnist_us_per_op_str = fmt(mnist_us_per_op_value, precision=0, commas=False)
-a100_peak_tflops_str = fmt(a100_peak_tflops_value/TRILLION, precision=0, commas=False)
-a100_mem_bw_tbs_str = fmt(a100_mem_bw_bytes_value/TRILLION, precision=0, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mnist_t_compute_us_str = MnistTrainingStepCalc.mnist_t_compute_us_str
+mnist_t_memory_us_str = MnistTrainingStepCalc.mnist_t_memory_us_str
+mnist_t_overhead_us_str = MnistTrainingStepCalc.mnist_t_overhead_us_str
+mnist_total_flops_str = MnistTrainingStepCalc.mnist_total_flops_str
+mnist_mem_traffic_str = MnistTrainingStepCalc.mnist_mem_traffic_str
+mnist_n_ops_str = MnistTrainingStepCalc.mnist_n_ops_str
+mnist_us_per_op_str = MnistTrainingStepCalc.mnist_us_per_op_str
+a100_peak_tflops_str = MnistTrainingStepCalc.a100_peak_tflops_str
+a100_mem_bw_tbs_str = MnistTrainingStepCalc.a100_mem_bw_tbs_str
 ```
 
 Total: ~`{python} mnist_total_flops_str` FLOPs, ~`{python} mnist_mem_traffic_str` memory traffic. On an A100:
@@ -3993,37 +4095,47 @@ Framework selection involves subtle trade-offs where intuitions from conventiona
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FRAMEWORK PERFORMANCE GAPS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Fallacies section demonstrating framework non-equivalence
+# │ Context: @sec-ml-frameworks-fallacies-pitfalls-61ef — first two Fallacy/Pitfall
+# │          items on framework equivalence and deployment memory footprint
 # │
-# │ Goal: Shows 17x performance gap (52ms vs 3ms) between PyTorch and TensorRT
-# │      on same model, and 6875x memory gap between PyTorch Mobile (220MB) and
-# │      TFLite Micro (32KB). Frameworks are NOT interchangeable.
+# │ Goal: Quantify the latency gap (PyTorch vs TensorRT: 52 ms vs 3 ms = 17×)
+# │       and runtime memory gap (PyTorch Mobile vs TFLite Micro: 6875×).
+# │ Show: "17× performance gap" and "6875× memory difference" — inline in both
+# │       Fallacy and Pitfall prose paragraphs.
+# │ How: Simple ratio arithmetic on hardcoded benchmark values; no pint units
+# │      (pure latency ms and memory MB/KB scalars from @tbl-framework-efficiency-matrix).
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.formatting (fmt, check)
 # │ Exports: pytorch_ms_str, tensorrt_ms_str, perf_gap_str, pytorch_mobile_mb_str,
 # │          tflite_micro_kb_str, memory_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs: framework performance (from @tbl-framework-efficiency-matrix) ---
-pytorch_ms_value = 52                                                           # 52 ms inference
-tensorrt_ms_value = 3                                                           # 3 ms inference
+class FrameworkGapsCalc:
+    """PyTorch vs TensorRT latency gap and PyTorch Mobile vs TFLite Micro memory gap."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    pytorch_ms = 52                                                             # 52 ms inference
+    tensorrt_ms = 3                                                             # 3 ms inference
+    pytorch_mobile_mb = 220                                                     # 220 MB runtime
+    tflite_micro_kb = 32                                                        # 32 KB runtime
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    perf_gap = pytorch_ms / tensorrt_ms                                         # ~17x gap
+    memory_ratio = pytorch_mobile_mb * 1000 / tflite_micro_kb                  # ~6875x gap (decimal SI: 1 MB = 1000 KB)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    pytorch_ms_str = fmt(pytorch_ms, precision=0, commas=False)                # e.g. "52"
+    tensorrt_ms_str = fmt(tensorrt_ms, precision=0, commas=False)              # e.g. "3"
+    pytorch_mobile_mb_str = fmt(pytorch_mobile_mb, precision=0, commas=False)  # e.g. "220"
+    tflite_micro_kb_str = fmt(tflite_micro_kb, precision=0, commas=False)      # e.g. "32"
+    perf_gap_str = fmt(perf_gap, precision=0, commas=False)                    # e.g. "17"
+    memory_ratio_str = fmt(memory_ratio, precision=0, commas=False)            # e.g. "6875"
 
-# --- Inputs: deployment memory spectrum ---
-pytorch_mobile_mb_value = 220                                                   # 220 MB runtime
-tflite_micro_kb_value = 32                                                      # 32 KB runtime
-
-# --- Process ---
-perf_gap_value = pytorch_ms_value / tensorrt_ms_value                          # ~17x gap
-memory_ratio_value = pytorch_mobile_mb_value * 1000 / tflite_micro_kb_value             # ~6875x gap (decimal SI: 1 MB = 1000 KB)
-
-# --- Outputs (formatted strings for prose) ---
-pytorch_ms_str = fmt(pytorch_ms_value, precision=0, commas=False)              # e.g. "52"
-tensorrt_ms_str = fmt(tensorrt_ms_value, precision=0, commas=False)            # e.g. "3"
-pytorch_mobile_mb_str = fmt(pytorch_mobile_mb_value, precision=0, commas=False)  # e.g. "220"
-tflite_micro_kb_str = fmt(tflite_micro_kb_value, precision=0, commas=False)    # e.g. "32"
-perf_gap_str = fmt(perf_gap_value, precision=0, commas=False)                  # e.g. "17"
-memory_ratio_str = fmt(memory_ratio_value, precision=0, commas=False)          # e.g. "6875"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+pytorch_ms_str = FrameworkGapsCalc.pytorch_ms_str
+tensorrt_ms_str = FrameworkGapsCalc.tensorrt_ms_str
+pytorch_mobile_mb_str = FrameworkGapsCalc.pytorch_mobile_mb_str
+tflite_micro_kb_str = FrameworkGapsCalc.tflite_micro_kb_str
+perf_gap_str = FrameworkGapsCalc.perf_gap_str
+memory_ratio_str = FrameworkGapsCalc.memory_ratio_str
 ```
 
 **Fallacy:** *"All frameworks provide equivalent performance for the same model architecture."*
@@ -4066,17 +4178,22 @@ from mlsys.constants import A100_MEM_CAPACITY, BYTES_FP16, GB, GiB
 from mlsys.formulas import model_memory
 from mlsys.formatting import fmt, check
 
-# --- Inputs (from scenario) ---
-model_7b_params = 7e9                                                           # 7 billion parameters
-a100_mem_value = A100_MEM_CAPACITY.to(GiB).magnitude                           # 80 GB
+class Model7BMemory:
+    """7B-parameter FP16 weight memory to show batch-size myth under capacity constraints."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    params = 7e9                                                                # 7 billion parameters
+    a100_mem = A100_MEM_CAPACITY.m_as(GiB)                                     # 80 GB
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fp16_gb = model_memory(params, BYTES_FP16, GB)                             # 14 GB
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    model_7b_fp16_gb_str = fmt(fp16_gb, precision=0, commas=False)             # e.g. "14"
+    a100_remaining_7b_gb_str = fmt(a100_mem - fp16_gb, precision=0, commas=False)  # e.g. "66"
+    a100_mem_str = fmt(a100_mem, precision=0, commas=False)                    # e.g. "80"
 
-# --- Process ---
-model_7b_fp16_gb_value = model_memory(model_7b_params, BYTES_FP16, GB)         # 14 GB
-
-# --- Outputs (formatted strings for prose) ---
-model_7b_fp16_gb_str = fmt(model_7b_fp16_gb_value, precision=0, commas=False)  # e.g. "14"
-a100_remaining_7b_gb_str = fmt(a100_mem_value - model_7b_fp16_gb_value, precision=0, commas=False)  # e.g. "66"
-a100_mem_str = fmt(a100_mem_value, precision=0, commas=False)                  # e.g. "80"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+model_7b_fp16_gb_str = Model7BMemory.model_7b_fp16_gb_str
+a100_remaining_7b_gb_str = Model7BMemory.a100_remaining_7b_gb_str
+a100_mem_str = Model7BMemory.a100_mem_str
 ```
 
 **Fallacy:** *"Increasing batch size is a free throughput optimization within framework memory limits."*
@@ -4105,26 +4222,35 @@ Engineers assume that if memory is available, larger batches always improve thro
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs: prototyping scenario ---
-n_images_value = 10_000                                                         # small experiment
-eager_throughput_value = 1_450                                                  # images/sec (eager)
-compiled_throughput_value = 2_150                                               # images/sec (compiled)
-n_recompilations_value = 10                                                     # code changes
-compilation_time_s_value = 30                                                   # seconds per compile
+class CompilationOverheadCalc:
+    """Break-even analysis showing frequent recompilation negates compiled-mode throughput gains."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_images = 10_000                                                           # small experiment
+    eager_throughput = 1_450                                                    # images/sec (eager)
+    compiled_throughput = 2_150                                                 # images/sec (compiled)
+    n_recompilations = 10                                                       # code changes
+    compilation_time_s = 30                                                     # seconds per compile
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    eager_total = n_images / eager_throughput                                   # ~6.9 s
+    compiled_total = (n_images / compiled_throughput +
+                      n_recompilations * compilation_time_s)                   # ~304.7 s
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    n_images_str = f"{n_images:,}"                                              # e.g. "10,000"
+    n_recompilations_str = fmt(n_recompilations, precision=0, commas=False)    # e.g. "10"
+    eager_throughput_str = f"{eager_throughput:,}"                              # e.g. "1,450"
+    compiled_throughput_str = f"{compiled_throughput:,}"                        # e.g. "2,150"
+    compilation_time_s_str = fmt(compilation_time_s, precision=0, commas=False)  # e.g. "30"
+    eager_total_str = fmt(eager_total, precision=1, commas=False)              # e.g. "6.9"
+    compiled_total_str = fmt(compiled_total, precision=1, commas=False)        # e.g. "304.7"
 
-# --- Process: total execution time ---
-eager_total_value = n_images_value / eager_throughput_value                    # ~6.9 s
-compiled_total_value = (n_images_value / compiled_throughput_value +
-                        n_recompilations_value * compilation_time_s_value)     # ~304.7 s
-
-# --- Outputs (formatted strings for prose) ---
-n_images_str = f"{n_images_value:,}"                                            # e.g. "10,000"
-n_recompilations_str = fmt(n_recompilations_value, precision=0, commas=False)  # e.g. "10"
-eager_throughput_str = f"{eager_throughput_value:,}"                            # e.g. "1,450"
-compiled_throughput_str = f"{compiled_throughput_value:,}"                      # e.g. "2,150"
-compilation_time_s_str = fmt(compilation_time_s_value, precision=0, commas=False)  # e.g. "30"
-eager_total_str = fmt(eager_total_value, precision=1, commas=False)            # e.g. "6.9"
-compiled_total_str = fmt(compiled_total_value, precision=1, commas=False)      # e.g. "304.7"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_images_str = CompilationOverheadCalc.n_images_str
+n_recompilations_str = CompilationOverheadCalc.n_recompilations_str
+eager_throughput_str = CompilationOverheadCalc.eager_throughput_str
+compiled_throughput_str = CompilationOverheadCalc.compiled_throughput_str
+compilation_time_s_str = CompilationOverheadCalc.compilation_time_s_str
+eager_total_str = CompilationOverheadCalc.eager_total_str
+compiled_total_str = CompilationOverheadCalc.compiled_total_str
 ```
 
 Engineers assume compilation overhead is a one-time cost that pays off quickly. @tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput but incurs 15--60 seconds compilation overhead per graph change. For a `{python} n_images_str`-image experiment with `{python} n_recompilations_str` code changes: Eager completes in `{python} eager_total_str` seconds while Compiled requires `{python} compiled_total_str` seconds (including `{python} n_recompilations_str` $\times$ `{python} compilation_time_s_str` s recompilation overhead). Teams that enable compilation during rapid prototyping waste hours waiting for recompilations that negate any throughput gains.

@@ -4,6 +4,8 @@ Formatting + presentation helpers for QMD output.
 Keep science in formulas.py; keep display here.
 """
 
+from .constants import ureg
+
 # Lazy import for IPython.display.Markdown
 _Markdown = None
 
@@ -21,16 +23,16 @@ def fmt(quantity, unit=None, precision=1, commas=True, allow_zero=False):
     """
     Format a Pint Quantity for narrative text.
     Returns ONLY the number string (no unit suffix).
-    
-    Safety: Raises ValueError if a non-zero value is formatted as "0" 
+
+    Safety: Raises ValueError if a non-zero value is formatted as "0"
     due to insufficient precision (unless allow_zero=True).
     """
     if unit:
         # If a raw number is passed, assume it is already in base units.
-        if hasattr(quantity, "magnitude"):
+        if isinstance(quantity, ureg.Quantity):
             quantity = quantity.to(unit)
 
-    if hasattr(quantity, "magnitude"):
+    if isinstance(quantity, ureg.Quantity):
         val = quantity.magnitude
     else:
         val = quantity
@@ -38,14 +40,14 @@ def fmt(quantity, unit=None, precision=1, commas=True, allow_zero=False):
     # Primary formatting
     fmt_str = f",.{precision}f" if commas else f".{precision}f"
     result = f"{val:{fmt_str}}"
-    
+
     # --- Precision Safety Check ---
     # Check if we accidentally rounded a non-zero value to zero
     try:
         numeric_result = float(result.replace(",", ""))
     except ValueError:
         numeric_result = None # Case for non-numeric strings if any
-        
+
     if numeric_result == 0.0 and abs(val) > 1e-12 and not allow_zero:
         raise ValueError(
             f"Formatting Precision Error: Value {val} was formatted as '{result}' "
@@ -67,7 +69,7 @@ def sci(val, precision=2):
         "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻",
     }
 
-    if hasattr(val, "magnitude"):
+    if isinstance(val, ureg.Quantity):
         val = val.magnitude
     s = f"{val:.{precision}e}"
     base, exp = s.split("e")
@@ -119,7 +121,7 @@ def sci_latex(val, precision=2):
     Formats a number or Pint Quantity into LaTeX scientific notation.
     Example: 4.1e9 -> "4.10 \\times 10^{9}"
     """
-    if hasattr(val, "magnitude"):
+    if isinstance(val, ureg.Quantity):
         val = val.magnitude
     s = f"{val:.{precision}e}"
     base, exp = s.split('e')
@@ -171,3 +173,52 @@ def md_math(expression):
     Wrap a LaTeX math expression in Markdown().
     """
     return md(f"${expression}$")
+
+
+def fmt_full(quantity, precision=1, commas=True):
+    """
+    Format a Pint Quantity as a complete "value unit" string.
+    Returns a single string like "2,039 GB/s" or "312 TFLOPs/s".
+
+    Value and unit are always in sync — unit is taken directly from the Quantity.
+
+    RULE: Use the whole string in prose. Do NOT add a separate unit label.
+        ✓ "`{python} bw_str` of memory bandwidth"
+        ✗ "`{python} bw_str` GB/s"  ← unit already in string; this doubles it
+
+    Use fmt()  when the unit is fixed and hardcoded in prose.
+    Use fmt_split() for tables needing separate value/unit columns.
+    """
+    if not isinstance(quantity, ureg.Quantity):
+        raise TypeError(
+            f"fmt_full() requires a pint Quantity, got {type(quantity).__name__}. "
+            f"Use fmt() for raw numbers."
+        )
+    val = quantity.magnitude
+    unit_str = f"{quantity.units:~P}"   # e.g. "GB/s", "TFLOPs/s"
+    fmt_str = f",.{precision}f" if commas else f".{precision}f"
+    value_str = f"{val:{fmt_str}}"
+
+    # Precision safety check (same guard as fmt())
+    try:
+        numeric_result = float(value_str.replace(",", ""))
+    except ValueError:
+        numeric_result = None
+    if numeric_result == 0.0 and abs(val) > 1e-12:
+        raise ValueError(
+            f"fmt_full() Precision Error: {val} formatted as '{value_str}' "
+            f"with precision={precision}. Increase precision."
+        )
+    return f"{value_str} {unit_str}"
+
+
+def fmt_split(quantity, precision=1, commas=True):
+    """
+    Format a Pint Quantity as a (value_str, unit_str) tuple. For table columns only.
+    For prose, use fmt_full() instead.
+
+        bw_val, bw_unit = fmt_split(A100_MEM_BW)  # ("2,039", "GB/s")
+    """
+    full = fmt_full(quantity, precision=precision, commas=commas)
+    parts = full.rsplit(" ", 1)
+    return (parts[0], parts[1]) if len(parts) == 2 else (full, "")

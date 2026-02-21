@@ -1,6 +1,7 @@
 # models.py
 # Hierarchical Model Definitions for MLSys Textbook
 
+import pint
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from .constants import (
@@ -27,15 +28,32 @@ class ModelSpec:
     model_size: Optional[Q_] = None # For models defined by size (DLRM)
     
     def __post_init__(self):
-        """Validate model specs."""
+        """Validate model specs: correct dimension type first, then positive value."""
+        from .constants import ureg
         if self.parameters is not None:
-            assert self.parameters.magnitude > 0, f"{self.name}: Parameter count must be positive."
+            if not self.parameters.is_compatible_with(ureg.count):
+                raise pint.DimensionalityError(self.parameters.units, ureg.count,
+                    extra_msg=f" — {self.name}.parameters must be in param/count units")
+            if self.parameters.magnitude <= 0:
+                raise ValueError(f"{self.name}: parameters must be positive.")
+        if self.inference_flops is not None and not self.inference_flops.is_compatible_with(ureg.flop):
+            raise pint.DimensionalityError(self.inference_flops.units, ureg.flop,
+                extra_msg=f" — {self.name}.inference_flops must be in flop units")
+        if self.training_ops is not None and not self.training_ops.is_compatible_with(ureg.flop):
+            raise pint.DimensionalityError(self.training_ops.units, ureg.flop,
+                extra_msg=f" — {self.name}.training_ops must be in flop units")
+        if self.model_size is not None and not self.model_size.is_compatible_with(ureg.byte):
+            raise pint.DimensionalityError(self.model_size.units, ureg.byte,
+                extra_msg=f" — {self.name}.model_size must be in byte units")
 
     def size_in_bytes(self, precision: Q_ = BYTES_FP16) -> Q_:
         """Calculates the weight storage size for a given precision."""
+        from .constants import ureg
         if self.model_size:
             return self.model_size
-        return (self.parameters.magnitude * precision).to('byte')
+        param_count = self.parameters.to(ureg.count).magnitude
+        bpp = precision.to(ureg.byte).magnitude
+        return (param_count * bpp * ureg.byte).to(ureg.byte)
 
     def __repr__(self):
         return f"Model({self.name}, {self.architecture})"
@@ -44,14 +62,14 @@ class GPT:
     """GPT Model Family."""
     GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer", layers=48)
     GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer", layers=96, training_ops=GPT3_TRAINING_OPS)
-    GPT4 = ModelSpec("GPT-4", 1.8e12 * ureg.count, "Transformer", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
+    GPT4 = ModelSpec("GPT-4", 1.8e12 * ureg.param, "Transformer", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
 
 class Language:
     """Large Language Models."""
     GPT = GPT
     BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer", layers=12, inference_flops=22e9 * ureg.flop)
     BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer", layers=24)
-    Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.count, "Transformer", layers=80)
+    Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.param, "Transformer", layers=80)
 
 class Recommendation:
     """Recommendation Models."""

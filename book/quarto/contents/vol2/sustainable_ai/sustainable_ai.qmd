@@ -47,14 +47,22 @@ Power is not merely an operational expense but a hard physical constraint that l
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ SUSTAINABLE AI: CHAPTER-WIDE CONSTANTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide setup for Sustainable AI.
+# │ Context: @sec-sustainable-ai — chapter-wide energy and carbon reference values
 # │
-# │ Goal: Provide energy, carbon, and hardware specs for sustainability analysis.
-# │ Show: The gap between compute growth and energy infrastructure.
-# │ How: Centralize GPU TDP, grid intensities, and scaling statistics.
+# │ Goal: Establish GPU TDP (H100 700 W, A100 400 W), grid carbon intensities
+# │       (US avg 429 gCO₂/kWh, Quebec 20 gCO₂/kWh), and the 350,000× compute
+# │       growth vs ~80% battery/grid efficiency gain mismatch to ground the
+# │       sustainability paradox argument throughout the chapter.
+# │ Show: H100 ~700 W, A100 ~400 W; GPT-3 ~175B params; battery 12-yr gain ~80%
+# │       vs compute growth 350,000× → energy wall gap ~195,000× — inline prose.
+# │ How: Compound growth (1 + r)^12 for battery/grid; gap = compute_growth /
+# │       battery_gain; format TDP via .to(watt).magnitude (class-level attribute).
 # │
-# │ Imports: mlsys.constants, mlsys.formatting
-# │ Exports: h100_*, gpt3_*, grid_*, energy_wall_*
+# │ Imports: mlsys.constants (H100_TDP, A100_TDP, GPT3_PARAMS, watt, BILLION,
+# │           param, second, hour, TFLOPs, MILLION)
+# │ Imports: mlsys.formatting (fmt, sci, check)
+# │ Exports: h100_tdp_w, h100_tdp_kw, a100_tdp_w, gpt3_params_b,
+# │          energy_wall_gap_str, battery_gain_pct, grid_gain_pct
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     H100_TDP, A100_TDP, GPT3_PARAMS, GPT3_TRAINING_OPS,
@@ -97,10 +105,10 @@ class SustainableAISetup:
     check(battery_12yr_gain < 2.0, "Battery density doubles every ~15-20 years, not 12.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    h100_tdp_w = f"{h100_tdp_raw.to(watt).magnitude:.0f}"
-    h100_tdp_kw = f"{h100_tdp_raw.to(watt).magnitude / 1000:.1f}"
-    a100_tdp_w = f"{a100_tdp_raw.to(watt).magnitude:.0f}"
-    gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / BILLION:.0f}"
+    h100_tdp_w = f"{h100_tdp_raw.m_as(watt):.0f}"
+    h100_tdp_kw = f"{h100_tdp_raw.m_as(watt) / 1000:.1f}"
+    a100_tdp_w = f"{a100_tdp_raw.m_as(watt):.0f}"
+    gpt3_params_b = f"{GPT3_PARAMS.m_as(param) / BILLION:.0f}"
 
     energy_wall_gap_str = fmt(energy_wall_gap, precision=0)
     battery_gain_pct = f"{(battery_12yr_gain - 1) * 100:.0f}"
@@ -1093,40 +1101,71 @@ where $E_{total}$ is the energy consumed by IT equipment, $CI_{grid}$ is the car
 ```{python}
 #| label: training-emissions-setup
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING EMISSIONS CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-sustainable-ai-scale-environmental-impact-ac9a Training Emissions
+# │          Calculation callout example
+# │
+# │ Goal: Compute step-by-step operational carbon for 64 A100 GPUs training for
+# │       14 days at US average grid intensity (429 gCO₂/kWh) and compare to
+# │       a low-carbon alternative (Quebec, 20 gCO₂/kWh) to quantify the geographic
+# │       multiplier argument.
+# │ Show: ~21,504 kWh GPU energy → ~25,805 kWh facility (PUE 1.2) → ~4,428 kg CO₂
+# │       US vs ~516 kg CO₂ Quebec → ~21x reduction — inline in callout example.
+# │ How: GPU energy = n_gpus × A100_TDP × hours; facility = GPU × PUE;
+# │       emissions = facility_kwh × grid_intensity / 1000.
+# │
+# │ Imports: mlsys.constants (A100_TDP, watt — via SustainableAISetup cell)
+# │ Exports: training_hours_str, gpu_energy_wh_str, gpu_energy_kwh_str,
+# │          facility_energy_kwh_str, emissions_kg_str, emissions_tons_str,
+# │          quebec_emissions_kg_str, emissions_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Training emissions worked example
-n_gpus_emissions = 64
-training_days = 14
-training_hours = training_days * 24
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TrainingEmissions:
+    """Namespace for GPT-3 training emissions worked example."""
 
-# GPU energy
-gpu_power_w = A100_TDP.to(watt).magnitude  # 400
-gpu_energy_wh = n_gpus_emissions * gpu_power_w * training_hours
-gpu_energy_kwh = gpu_energy_wh / 1000
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_gpus = 64
+    training_days = 14
+    training_hours = training_days * 24
+    gpu_power_w = A100_TDP.m_as(watt)  # 400
+    pue = 1.2
+    grid_ci_g_per_kwh = 429  # US average gCO2/kWh
+    quebec_ci = 20            # gCO2/kWh
 
-# Facility
-pue = 1.2
-facility_energy_kwh = gpu_energy_kwh * pue
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    gpu_energy_wh = n_gpus * gpu_power_w * training_hours
+    gpu_energy_kwh = gpu_energy_wh / 1000
+    facility_energy_kwh = gpu_energy_kwh * pue
+    emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / 1000
+    emissions_tons = emissions_kg / 1000
+    quebec_emissions_kg = facility_energy_kwh * quebec_ci / 1000
+    emissions_ratio = emissions_kg / quebec_emissions_kg
 
-# Emissions (US average)
-grid_ci_g_per_kwh = 429  # US average gCO2/kWh
-emissions_kg = facility_energy_kwh * grid_ci_g_per_kwh / 1000
-emissions_tons = emissions_kg / 1000
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are monotone functions of inputs.
 
-# Low-carbon comparison (Quebec)
-quebec_ci = 20  # gCO2/kWh
-quebec_emissions_kg = facility_energy_kwh * quebec_ci / 1000
-emissions_ratio = emissions_kg / quebec_emissions_kg
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    training_hours_str = f"{training_hours:,}"
+    gpu_energy_wh_str = f"{gpu_energy_wh:,.0f}"
+    gpu_energy_kwh_str = f"{gpu_energy_kwh:,.0f}"
+    facility_energy_kwh_str = f"{facility_energy_kwh:,.0f}"
+    emissions_kg_str = f"{emissions_kg:,.0f}"
+    emissions_tons_str = f"{emissions_tons:.1f}"
+    quebec_emissions_kg_str = f"{quebec_emissions_kg:,.0f}"
+    emissions_ratio_str = f"{emissions_ratio:.0f}"
 
-# Format strings
-training_hours_str = f"{training_hours:,}"
-gpu_energy_wh_str = f"{gpu_energy_wh:,.0f}"
-gpu_energy_kwh_str = f"{gpu_energy_kwh:,.0f}"
-facility_energy_kwh_str = f"{facility_energy_kwh:,.0f}"
-emissions_kg_str = f"{emissions_kg:,.0f}"
-emissions_tons_str = f"{emissions_tons:.1f}"
-quebec_emissions_kg_str = f"{quebec_emissions_kg:,.0f}"
-emissions_ratio_str = f"{emissions_ratio:.0f}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+training_hours_str = TrainingEmissions.training_hours_str
+gpu_energy_wh_str = TrainingEmissions.gpu_energy_wh_str
+gpu_energy_kwh_str = TrainingEmissions.gpu_energy_kwh_str
+facility_energy_kwh_str = TrainingEmissions.facility_energy_kwh_str
+emissions_kg_str = TrainingEmissions.emissions_kg_str
+emissions_tons_str = TrainingEmissions.emissions_tons_str
+quebec_emissions_kg_str = TrainingEmissions.quebec_emissions_kg_str
+emissions_ratio_str = TrainingEmissions.emissions_ratio_str
 ```
 
 ::: {.callout-example title="Training Emissions Calculation"}
@@ -2391,14 +2430,46 @@ Many deep learning models rely on billions of parameters, requiring trillions of
 ```{python}
 #| label: energy-efficiency-range-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY EFFICIENCY RANGE CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-sustainable-ai-energyefficient-algorithmic-design-e71c
+# │
+# │ Goal: Compute 1000x efficiency range from CPU (~100 pJ/FLOP) to ASIC
+# │       (~0.1 pJ/FLOP) to quantify the sustainability opportunity.
+# │ Show: "1000" efficiency range — inline in footnote and prose.
+# │ How: Scalar ratio of CPU vs ASIC pJ/FLOP energy costs.
+# │
+# │ Imports: (none — pure scalars)
+# │ Exports: cpu_pj_per_flop, gpu_pj_per_flop, tpu_pj_per_flop,
+# │          asic_pj_per_flop, efficiency_range_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Energy efficiency range across hardware
-cpu_pj_per_flop = 100
-gpu_pj_per_flop = 10
-tpu_pj_per_flop = 1
-asic_pj_per_flop = 0.1
-efficiency_range = cpu_pj_per_flop / asic_pj_per_flop
-efficiency_range_str = f"{efficiency_range:.0f}"
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class EnergyEfficiencyRange:
+    """Namespace for hardware energy efficiency range across CPU to ASIC."""
+
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cpu_pj_per_flop = 100
+    gpu_pj_per_flop = 10
+    tpu_pj_per_flop = 1
+    asic_pj_per_flop = 0.1
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    efficiency_range = cpu_pj_per_flop / asic_pj_per_flop
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are definitional constants.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    efficiency_range_str = f"{efficiency_range:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cpu_pj_per_flop = EnergyEfficiencyRange.cpu_pj_per_flop
+gpu_pj_per_flop = EnergyEfficiencyRange.gpu_pj_per_flop
+tpu_pj_per_flop = EnergyEfficiencyRange.tpu_pj_per_flop
+asic_pj_per_flop = EnergyEfficiencyRange.asic_pj_per_flop
+efficiency_range_str = EnergyEfficiencyRange.efficiency_range_str
 ```
 
 [^fn-flops-vs-flops]: **FLOPS vs FLOPs**: FLOPS (all caps) = Floating-Point Operations Per Second (rate), while FLOPs (mixed case) = total Floating-Point Operations (count). GPT-3 training required 3.1 $\times$ 10²³ FLOPs total, executed on hardware capable of 1.25 $\times$ 10¹⁷ FLOPS. Energy efficiency varies dramatically across hardware: CPUs consume ~`{python} cpu_pj_per_flop` pJ/FLOP, GPUs achieve ~`{python} gpu_pj_per_flop` pJ/FLOP, TPUs reach ~`{python} tpu_pj_per_flop` pJ/FLOP, while specialized AI accelerators approach `{python} asic_pj_per_flop` pJ/FLOP—a `{python} efficiency_range_str` $\times$ efficiency range that defines sustainability opportunities.

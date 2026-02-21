@@ -5,6 +5,8 @@
 
 import pint
 ureg = pint.UnitRegistry()
+ureg.default_format = "~P"           # compact Pretty: "312 TFLOPs/s" not "312.0 teraFLOPs / second"
+pint.set_application_registry(ureg)  # canonical registry for the whole mlsys package
 Q_ = ureg.Quantity
 
 # --- Dimensionless Scalars (Helpers) ---
@@ -60,7 +62,7 @@ GiB = ureg.GiB
 TiB = ureg.TiB
 
 # --- Time (registered so .to(MS) scales magnitudes correctly) ---
-ureg.define('MS = 1e-3 * second')
+ureg.define('MS = 1e-3 * second')   # NOTE: MS = millisecond here. SI convention uses ms (lowercase). Prefer ms.
 ureg.define('US = 1e-6 * second')
 ureg.define('NS = 1e-9 * second')
 

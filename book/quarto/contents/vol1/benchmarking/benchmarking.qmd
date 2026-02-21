@@ -82,124 +82,156 @@ Every preceding chapter introduced decisions with measurable consequences: which
 # │          anomaly_energy_uj_str, gpt3_energy_mwh_str, accel_power_w_str,
 # │          latency_fast_ms_str, latency_slow_ms_str, energy_fast_j_str,
 # │          energy_fast_wh_str, energy_slow_wh_str
+# │
+# │ Note: This is a chapter-wide setup cell. Several exports are used >150 lines
+# │       away by design — they are chapter-level constants, not section-local
+# │       values. Distant consumers: anomaly_* (~line 1427), gpt3_tokens_b_str
+# │       (~line 1609), accel_power_w_str/energy_*_wh_str (~line 1595),
+# │       gpt3_energy_mwh_str (~line 2071). No JIT split is appropriate here
+# │       because these variables share the same Digital Twin import context.
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsys import Hardware, Models
 from mlsys.constants import *
 from mlsys.formatting import fmt, sci
 
-# --- Inputs (hardware specs from Hardware Digital Twins) ---
-a100_tflops_fp16_value = Hardware.A100.peak_flops.to(TFLOPs/second).magnitude
-a100_tflops_fp32_value = V100_FLOPS_FP32.to(TFLOPs/second).magnitude # Using V100 constant for fp32 baseline
-a100_bw_gbs_value = Hardware.A100.memory_bw.to(GB/second).magnitude
-a100_bw_tbs_value = Hardware.A100.memory_bw.to(TB/second).magnitude
-h100_tflops_fp16_value = Hardware.H100.peak_flops.to(TFLOPs/second).magnitude
-h100_tflops_fp8_value = H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude
-h100_bw_tbs_value = Hardware.H100.memory_bw.to(TB/second).magnitude
+class BenchmarkingSetup:
+    """Chapter-wide hardware and model constants for all benchmarking sections and callouts."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Hardware specs from Digital Twins
+    _a100_fp16 = Hardware.A100.peak_flops.m_as(TFLOPs/second)
+    _a100_fp32 = V100_FLOPS_FP32.m_as(TFLOPs/second)                           # V100 constant for fp32 baseline
+    _a100_bw_gbs = Hardware.A100.memory_bw.m_as(GB/second)
+    _a100_bw_tbs = Hardware.A100.memory_bw.m_as(TB/second)
+    _h100_fp16 = Hardware.H100.peak_flops.m_as(TFLOPs/second)
+    _h100_fp8 = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second)
+    _h100_bw_tbs = Hardware.H100.memory_bw.m_as(TB/second)
+    _gpt3_params_b = Models.GPT3.parameters.m_as(Bparam)
+    _h100_tdp = Hardware.H100.tdp.m_as(watt)
+    _e_fp32 = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.flop)
+    _e_fp16 = ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule / ureg.flop)
+    _e_int8 = ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule / ureg.flop)
+    _e_dram = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
+    _e_reg = ENERGY_REG_PJ.m_as(ureg.picojoule)
+    _e_l1 = ENERGY_SRAM_L1_PJ.m_as(ureg.picojoule)
+    _e_l2 = ENERGY_SRAM_L2_PJ.m_as(ureg.picojoule)
+    _edgetpu_latency_ms = 2
+    _cpu_latency_ms = 15
+    _bert_m = Models.Language.BERT_Base.parameters.m_as(Mparam)
+    _bert_large_m = Models.Language.BERT_Large.parameters.m_as(Mparam)
+    _mobilenet_m = Models.MobileNetV2.parameters.m_as(Mparam)
+    _mobilenet_v1_m = Models.Vision.MobileNetV1.parameters.m_as(Mparam)
+    _resnet50_m = Models.ResNet50.parameters.m_as(Mparam)
+    _v100_fp32 = Hardware.V100.peak_flops.m_as(TFLOPs/second)
+    _gpt3_tokens_b = GPT3_TRAINING_TOKENS.m_as(count) / BILLION
+    _anomaly_k = Models.Tiny.AnomalyDetector.parameters.m_as(Kparam)
+    _anomaly_latency_ms = ANOMALY_MODEL_LATENCY.m_as(ureg.ms)
+    _anomaly_auc = ANOMALY_MODEL_AUC
+    _anomaly_energy_uj = ANOMALY_MODEL_ENERGY.m_as(ureg.microjoule)
+    _gpt3_energy_mwh = 1287
+    _accel_power_w = 300
+    _lat_fast_ms = 10
+    _lat_slow_ms = 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    _a100_ridge = Hardware.A100.ridge_point().m_as('flop/byte')
+    _mv1_size_mb = _mobilenet_v1_m * 4
+    _mv1_int8_mb = _mobilenet_v1_m * 1
+    _mv1_compress = _mv1_size_mb / _mv1_int8_mb
+    _flops_ratio = RESNET50_FLOPs.m_as(GFLOPs) / MOBILENETV2_FLOPs.m_as(GFLOPs)
+    _e_fast_j = _accel_power_w * (_lat_fast_ms / 1000)
+    _e_fast_wh = _e_fast_j / SEC_PER_HOUR
+    _e_slow_j = _accel_power_w * (_lat_slow_ms / 1000)
+    _e_slow_wh = _e_slow_j / SEC_PER_HOUR
+    _gpt3_b_str = fmt(_gpt3_params_b, precision=0, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    a100_tflops_fp16_str = fmt(_a100_fp16, precision=0, commas=False)
+    a100_tflops_fp32_str = fmt(_a100_fp32, precision=1, commas=False)
+    a100_bw_gbs_str = fmt(_a100_bw_gbs, precision=0, commas=True)
+    a100_bw_tbs_str = fmt(_a100_bw_tbs, precision=2, commas=False)
+    h100_tflops_fp16_str = fmt(_h100_fp16, precision=0, commas=False)
+    h100_tflops_fp8_str = fmt(_h100_fp8, precision=0, commas=True)
+    h100_tflops_int8_str = fmt(_h100_fp8, precision=0, commas=False)            # same as FP8 for dense
+    h100_bw_tbs_str = fmt(_h100_bw_tbs, precision=2, commas=False)
+    a100_ridge_str = fmt(_a100_ridge, precision=0, commas=False)
+    gpt3_params_b_str = _gpt3_b_str
+    gpt3_params_billion_str = f"{_gpt3_b_str} billion"
+    gpt3_tokens_b_str = fmt(_gpt3_tokens_b, precision=0, commas=False)
+    h100_tdp_str = fmt(_h100_tdp, precision=0, commas=False)
+    energy_fp32_str = f"{_e_fp32}"
+    energy_fp16_str = f"{_e_fp16}"
+    energy_int8_str = f"{_e_int8}"
+    energy_dram_str = fmt(_e_dram, precision=0, commas=False)
+    energy_reg_str = fmt(_e_reg, precision=2, commas=False)
+    energy_l1_str = fmt(_e_l1, precision=1, commas=False)
+    energy_l2_str = fmt(_e_l2, precision=1, commas=False)
+    dram_energy_pj_str = fmt(ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule / byte), precision=0, commas=False)
+    bert_params_m_str = fmt(_bert_m, precision=0, commas=False)
+    bert_large_params_m_str = fmt(_bert_large_m, precision=0, commas=False)
+    mobilenet_params_m_str = fmt(_mobilenet_m, precision=1, commas=False)
+    mobilenet_v1_size_mb_str = fmt(_mv1_size_mb, precision=0, commas=False)
+    mobilenet_v1_int8_size_mb_str = fmt(_mv1_int8_mb, precision=1, commas=False)
+    mobilenet_v1_compression_ratio_str = fmt(_mv1_compress, precision=0, commas=False)
+    mobilenet_flops_ratio_str = fmt(_flops_ratio, precision=1, commas=False)
+    edgetpu_latency_ms_str = fmt(_edgetpu_latency_ms, precision=1, commas=False)
+    cpu_latency_ms_str = fmt(_cpu_latency_ms, precision=0, commas=False)
+    resnet50_params_m_str = fmt(_resnet50_m, precision=1, commas=False)
+    v100_tflops_fp32_str = fmt(_v100_fp32, precision=1, commas=False)
+    anomaly_params_k_str = fmt(_anomaly_k, precision=0, commas=False)
+    anomaly_latency_ms_str = fmt(_anomaly_latency_ms, precision=1, commas=False)
+    anomaly_auc_str = fmt(_anomaly_auc, precision=2, commas=False)
+    anomaly_energy_uj_str = fmt(_anomaly_energy_uj, precision=0, commas=False)
+    gpt3_energy_mwh_str = fmt(_gpt3_energy_mwh, precision=0, commas=True)
+    accel_power_w_str = fmt(_accel_power_w, precision=0, commas=False)
+    latency_fast_ms_str = fmt(_lat_fast_ms, precision=0, commas=False)
+    latency_slow_ms_str = fmt(_lat_slow_ms, precision=0, commas=False)
+    energy_fast_j_str = fmt(_e_fast_j, precision=0, commas=False)
+    energy_fast_wh_str = fmt(_e_fast_wh, precision=6, commas=False)
+    energy_slow_wh_str = fmt(_e_slow_wh, precision=5, commas=False)
 
-gpt3_params_b_value = Models.GPT3.parameters.to(Bparam).magnitude
-h100_tdp_value = Hardware.H100.tdp.to(watt).magnitude
-
-energy_fp32_value = ENERGY_FLOP_FP32_PJ.magnitude
-
-edgetpu_latency_ms_value = 2
-cpu_latency_ms_value = 15
-energy_fp16_value = ENERGY_FLOP_FP16_PJ.magnitude
-energy_int8_value = ENERGY_FLOP_INT8_PJ.magnitude
-energy_dram_value = ENERGY_DRAM_ACCESS_PJ.magnitude
-
-bert_params_m_value = Models.Language.BERT_Base.parameters.to(Mparam).magnitude
-mobilenet_params_m_value = Models.MobileNetV2.parameters.to(Mparam).magnitude
-bert_large_params_m_value = Models.Language.BERT_Large.parameters.to(Mparam).magnitude
-mobilenet_v1_params_m_value = Models.Vision.MobileNetV1.parameters.to(Mparam).magnitude
-resnet50_params_m_value = Models.ResNet50.parameters.to(Mparam).magnitude
-v100_tflops_fp32_value = Hardware.V100.peak_flops.to(TFLOPs/second).magnitude # Updated to use Twin
-gpt3_tokens_b_value = GPT3_TRAINING_TOKENS.to(count).magnitude / BILLION
-
-energy_reg_value = ENERGY_REG_PJ.magnitude
-energy_l1_value = ENERGY_SRAM_L1_PJ.magnitude
-energy_l2_value = ENERGY_SRAM_L2_PJ.magnitude
-
-anomaly_params_k_value = Models.Tiny.AnomalyDetector.parameters.to(Kparam).magnitude
-anomaly_latency_ms_value = ANOMALY_MODEL_LATENCY.to(ureg.ms).magnitude
-anomaly_auc_value = ANOMALY_MODEL_AUC
-anomaly_energy_uj_value = ANOMALY_MODEL_ENERGY.to(ureg.microjoule).magnitude
-
-# --- Process (derived values from Hardware Digital Twins) ---
-a100_ridge_value = Hardware.A100.ridge_point().magnitude
-mobilenet_v1_size_mb_value = mobilenet_v1_params_m_value * 4
-mobilenet_v1_int8_size_mb_value = mobilenet_v1_params_m_value * 1
-mobilenet_v1_compression_ratio_value = (
-    mobilenet_v1_size_mb_value / mobilenet_v1_int8_size_mb_value
-)
-mobilenet_flops_ratio_value = (
-    RESNET50_FLOPs.to(GFLOPs).magnitude / MOBILENETV2_FLOPs.to(GFLOPs).magnitude
-)
-
-# --- Outputs (formatted strings for prose) ---
-a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)
-a100_tflops_fp32_str = fmt(a100_tflops_fp32_value, precision=1, commas=False)
-a100_bw_gbs_str = fmt(a100_bw_gbs_value, precision=0, commas=True)
-a100_bw_tbs_str = fmt(a100_bw_tbs_value, precision=2, commas=False)
-h100_tflops_fp16_str = fmt(h100_tflops_fp16_value, precision=0, commas=False)
-h100_tflops_fp8_str = fmt(h100_tflops_fp8_value, precision=0, commas=True)
-h100_tflops_int8_str = fmt(h100_tflops_fp8_value, precision=0, commas=False) # Same as FP8 for dense
-h100_bw_tbs_str = fmt(h100_bw_tbs_value, precision=2, commas=False)
-
-a100_ridge_str = fmt(a100_ridge_value, precision=0, commas=False)
-
-gpt3_params_b_str = fmt(gpt3_params_b_value, precision=0, commas=False)
-gpt3_params_billion_str = f"{gpt3_params_b_str} billion"
-gpt3_tokens_b_str = fmt(gpt3_tokens_b_value, precision=0, commas=False)
-h100_tdp_str = fmt(h100_tdp_value, precision=0, commas=False)
-
-energy_fp32_str = f"{energy_fp32_value}"
-energy_fp16_str = f"{energy_fp16_value}"
-energy_int8_str = f"{energy_int8_value}"
-energy_dram_str = fmt(energy_dram_value, precision=0, commas=False)
-energy_reg_str = fmt(energy_reg_value, precision=2, commas=False)
-energy_l1_str = fmt(energy_l1_value, precision=1, commas=False)
-energy_l2_str = fmt(energy_l2_value, precision=1, commas=False)
-dram_energy_pj_str = fmt(ENERGY_DRAM_PJ_PER_BYTE.magnitude, precision=0, commas=False)
-
-bert_params_m_str = fmt(bert_params_m_value, precision=0, commas=False)
-bert_large_params_m_str = fmt(bert_large_params_m_value, precision=0, commas=False)
-mobilenet_params_m_str = fmt(mobilenet_params_m_value, precision=1, commas=False)
-mobilenet_v1_size_mb_str = fmt(mobilenet_v1_size_mb_value, precision=0, commas=False)
-mobilenet_v1_int8_size_mb_str = fmt(mobilenet_v1_int8_size_mb_value, precision=1, commas=False)
-mobilenet_v1_compression_ratio_str = fmt(
-    mobilenet_v1_compression_ratio_value, precision=0, commas=False
-)
-mobilenet_flops_ratio_str = fmt(mobilenet_flops_ratio_value, precision=1, commas=False)
-edgetpu_latency_ms_str = fmt(edgetpu_latency_ms_value, precision=1, commas=False)
-cpu_latency_ms_str = fmt(cpu_latency_ms_value, precision=0, commas=False)
-resnet50_params_m_str = fmt(resnet50_params_m_value, precision=1, commas=False)
-v100_tflops_fp32_str = fmt(v100_tflops_fp32_value, precision=1, commas=False)
-
-anomaly_params_k_str = fmt(anomaly_params_k_value, precision=0, commas=False)
-anomaly_latency_ms_str = fmt(anomaly_latency_ms_value, precision=1, commas=False)
-anomaly_auc_str = fmt(anomaly_auc_value, precision=2, commas=False)
-anomaly_energy_uj_str = fmt(anomaly_energy_uj_value, precision=0, commas=False)
-
-gpt3_energy_mwh_value = 1287
-gpt3_energy_mwh_str = fmt(gpt3_energy_mwh_value, precision=0, commas=True)
-
-# Energy per query example
-accel_power_w_value = 300
-latency_fast_ms_value = 10
-latency_slow_ms_value = 100
-
-energy_fast_j_value = accel_power_w_value * (latency_fast_ms_value / 1000)
-energy_fast_wh_value = energy_fast_j_value / SEC_PER_HOUR
-energy_slow_j_value = accel_power_w_value * (latency_slow_ms_value / 1000)
-energy_slow_wh_value = energy_slow_j_value / SEC_PER_HOUR
-
-accel_power_w_str = fmt(accel_power_w_value, precision=0, commas=False)
-latency_fast_ms_str = fmt(latency_fast_ms_value, precision=0, commas=False)
-latency_slow_ms_str = fmt(latency_slow_ms_value, precision=0, commas=False)
-energy_fast_j_str = fmt(energy_fast_j_value, precision=0, commas=False)
-energy_fast_wh_str = fmt(energy_fast_wh_value, precision=6, commas=False)
-energy_slow_wh_str = fmt(energy_slow_wh_value, precision=5, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_tflops_fp16_str = BenchmarkingSetup.a100_tflops_fp16_str
+a100_tflops_fp32_str = BenchmarkingSetup.a100_tflops_fp32_str
+a100_bw_gbs_str = BenchmarkingSetup.a100_bw_gbs_str
+a100_bw_tbs_str = BenchmarkingSetup.a100_bw_tbs_str
+h100_tflops_fp16_str = BenchmarkingSetup.h100_tflops_fp16_str
+h100_tflops_fp8_str = BenchmarkingSetup.h100_tflops_fp8_str
+h100_tflops_int8_str = BenchmarkingSetup.h100_tflops_int8_str
+h100_bw_tbs_str = BenchmarkingSetup.h100_bw_tbs_str
+a100_ridge_str = BenchmarkingSetup.a100_ridge_str
+gpt3_params_b_str = BenchmarkingSetup.gpt3_params_b_str
+gpt3_params_billion_str = BenchmarkingSetup.gpt3_params_billion_str
+gpt3_tokens_b_str = BenchmarkingSetup.gpt3_tokens_b_str
+h100_tdp_str = BenchmarkingSetup.h100_tdp_str
+energy_fp32_str = BenchmarkingSetup.energy_fp32_str
+energy_fp16_str = BenchmarkingSetup.energy_fp16_str
+energy_int8_str = BenchmarkingSetup.energy_int8_str
+energy_dram_str = BenchmarkingSetup.energy_dram_str
+energy_reg_str = BenchmarkingSetup.energy_reg_str
+energy_l1_str = BenchmarkingSetup.energy_l1_str
+energy_l2_str = BenchmarkingSetup.energy_l2_str
+dram_energy_pj_str = BenchmarkingSetup.dram_energy_pj_str
+bert_params_m_str = BenchmarkingSetup.bert_params_m_str
+bert_large_params_m_str = BenchmarkingSetup.bert_large_params_m_str
+mobilenet_params_m_str = BenchmarkingSetup.mobilenet_params_m_str
+mobilenet_v1_size_mb_str = BenchmarkingSetup.mobilenet_v1_size_mb_str
+mobilenet_v1_int8_size_mb_str = BenchmarkingSetup.mobilenet_v1_int8_size_mb_str
+mobilenet_v1_compression_ratio_str = BenchmarkingSetup.mobilenet_v1_compression_ratio_str
+mobilenet_flops_ratio_str = BenchmarkingSetup.mobilenet_flops_ratio_str
+edgetpu_latency_ms_str = BenchmarkingSetup.edgetpu_latency_ms_str
+cpu_latency_ms_str = BenchmarkingSetup.cpu_latency_ms_str
+resnet50_params_m_str = BenchmarkingSetup.resnet50_params_m_str
+v100_tflops_fp32_str = BenchmarkingSetup.v100_tflops_fp32_str
+anomaly_params_k_str = BenchmarkingSetup.anomaly_params_k_str
+anomaly_latency_ms_str = BenchmarkingSetup.anomaly_latency_ms_str
+anomaly_auc_str = BenchmarkingSetup.anomaly_auc_str
+anomaly_energy_uj_str = BenchmarkingSetup.anomaly_energy_uj_str
+gpt3_energy_mwh_str = BenchmarkingSetup.gpt3_energy_mwh_str
+accel_power_w_str = BenchmarkingSetup.accel_power_w_str
+latency_fast_ms_str = BenchmarkingSetup.latency_fast_ms_str
+latency_slow_ms_str = BenchmarkingSetup.latency_slow_ms_str
+energy_fast_j_str = BenchmarkingSetup.energy_fast_j_str
+energy_fast_wh_str = BenchmarkingSetup.energy_fast_wh_str
+energy_slow_wh_str = BenchmarkingSetup.energy_slow_wh_str
 ```
 
 ## ML Benchmarking Framework {#sec-benchmarking-machine-learning-benchmarking-framework-70b8}
@@ -531,8 +563,8 @@ class RooflineExamples:
 
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
     # A100 Specs (re-derived locally for safety)
-    peak_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
-    peak_bw = A100_MEM_BW.to(TB/second).magnitude
+    peak_flops = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
+    peak_bw = A100_MEM_BW.m_as(TB/second)
     ridge_point = (peak_flops * TRILLION) / (peak_bw * TRILLION) # ~153
 
     # ResNet (Compute Bound)
@@ -645,15 +677,15 @@ class BertRoofline:
     # ┌── 1. PARAMETERS (Inputs from Twins) ───────────────────────────────────
     # Model
     m_bert = Models.Language.BERT_Base
-    params_m = m_bert.parameters.to(Mparam).magnitude
-    flops_b_per_inf = m_bert.inference_flops.to(Bparam).magnitude
-    weight_mb = m_bert.size_in_bytes(BYTES_FP32).to(MB).magnitude
+    params_m = m_bert.parameters.m_as(Mparam)
+    flops_b_per_inf = m_bert.inference_flops.m_as(Bparam)
+    weight_mb = m_bert.size_in_bytes(BYTES_FP32).m_as(MB)
 
     # Hardware (A100)
     h_a100 = Hardware.Cloud.A100
-    peak_flops = h_a100.peak_flops.to(TFLOPs/second).magnitude
-    peak_bw = h_a100.memory_bw.to(TB/second).magnitude
-    ridge_point = h_a100.ridge_point().magnitude
+    peak_flops = h_a100.peak_flops.m_as(TFLOPs/second)
+    peak_bw = h_a100.memory_bw.m_as(TB/second)
+    ridge_point = h_a100.ridge_point().m_as('flop/byte')
 
     # Scenarios
     batch_1 = 1
@@ -1886,27 +1918,36 @@ A key metric for evaluating parallelism is *scaling efficiency*, which quantifie
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (training scenario) ---
-t1_hours_value = 24       # single-GPU training time
-n_gpus_value = 8
-tn_hours_value = 4        # actual N-GPU training time
+class ScalingEfficiencyCalc:
+    """Strong scaling efficiency for 8-GPU ResNet-50 training: 75% efficiency, 25% overhead loss."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    t1_hours = 24                                                               # single-GPU training time
+    n_gpus = 8
+    tn_hours = 4                                                                # actual N-GPU training time
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    ideal_hours = t1_hours / n_gpus
+    efficiency_pct = t1_hours / (n_gpus * tn_hours) * 100
+    loss_pct = 100 - efficiency_pct
+    eff_denom = n_gpus * tn_hours
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    ideal_str = fmt(ideal_hours, precision=0, commas=False)
+    eff_str = fmt(efficiency_pct, precision=0, commas=False)
+    loss_str = fmt(loss_pct, precision=0, commas=False)
+    eff_denom_str = f"{eff_denom}"
+    t1_hours_str = fmt(t1_hours, precision=0, commas=False)
+    n_gpus_str = fmt(n_gpus, precision=0, commas=False)
+    tn_hours_str = fmt(tn_hours, precision=0, commas=False)
+    scaling_eq_str = f"Efficiency({n_gpus}) = {t1_hours} hours / ({n_gpus} × {tn_hours} hours) × 100%"
 
-# --- Process (scaling efficiency calculation) ---
-ideal_hours_value = t1_hours_value / n_gpus_value
-efficiency_pct_value = t1_hours_value / (n_gpus_value * tn_hours_value) * 100
-loss_pct_value = 100 - efficiency_pct_value
-eff_denom_value = n_gpus_value * tn_hours_value
-
-# --- Outputs (formatted strings for callout) ---
-ideal_str = fmt(ideal_hours_value, precision=0, commas=False)
-eff_str = fmt(efficiency_pct_value, precision=0, commas=False)
-loss_str = fmt(loss_pct_value, precision=0, commas=False)
-eff_denom_str = f"{eff_denom_value}"
-t1_hours_str = fmt(t1_hours_value, precision=0, commas=False)
-n_gpus_str = fmt(n_gpus_value, precision=0, commas=False)
-tn_hours_str = fmt(tn_hours_value, precision=0, commas=False)
-
-scaling_eq_str = f"Efficiency({n_gpus_value}) = {t1_hours_value} hours / ({n_gpus_value} × {tn_hours_value} hours) × 100%"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ideal_str = ScalingEfficiencyCalc.ideal_str
+eff_str = ScalingEfficiencyCalc.eff_str
+loss_str = ScalingEfficiencyCalc.loss_str
+eff_denom_str = ScalingEfficiencyCalc.eff_denom_str
+t1_hours_str = ScalingEfficiencyCalc.t1_hours_str
+n_gpus_str = ScalingEfficiencyCalc.n_gpus_str
+tn_hours_str = ScalingEfficiencyCalc.tn_hours_str
+scaling_eq_str = ScalingEfficiencyCalc.scaling_eq_str
 ```
 
 ::: {.callout-notebook title="Scaling Efficiency Calculation"}
@@ -1968,11 +2009,11 @@ Training large-scale machine learning models requires substantial computational 
 # │ Context: Callout "Why INT8 Saves Energy" — decomposes MobileNet inference
 # │          energy into memory-load and compute components for FP32 vs INT8
 # │
-# │ Goal: Demonstrate the energy benefits of quantization.
-# │      compute. This calculation reveals the dominant savings come from
-# │      reduced memory traffic (4× fewer bytes loaded from DRAM), not just
-# │      cheaper arithmetic. The load-vs-compute breakdown makes the memory
-
+# │ Goal: Demonstrate that INT8 quantization saves energy primarily through
+# │       reduced DRAM traffic (4× fewer bytes loaded), not cheaper arithmetic.
+# │ Show: FP32 vs INT8 load and compute energy costs, and total savings ratio.
+# │ How: Multiply MobileNet parameter count and MAC count by pJ-per-operation
+# │      constants; compare FP32 and INT8 totals to get savings ratios.
 # │
 # │ Imports: mlsys.constants (ENERGY_DRAM_PJ_PER_BYTE, ENERGY_FLOP_FP32_PJ,
 # │          ENERGY_FLOP_INT8_PJ), mlsys.formatting (fmt)
@@ -1985,51 +2026,64 @@ Training large-scale machine learning models requires substantial computational 
 from mlsys.formatting import fmt, check
 from mlsys.constants import ENERGY_DRAM_PJ_PER_BYTE, ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ
 
-# --- Inputs (MobileNet model characteristics) ---
-m_params_value = 4.3  # Million params (INT8)
-m_macs_value = 300    # Million MACs
+class EnergyBreakdownCalc:
+    """FP32 vs INT8 MobileNet inference energy: memory load dominates; INT8 attacks both sources."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    m_params = 4.3                                                              # Million params
+    m_macs = 300                                                                # Million MACs
+    _dram_pj = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule / byte)
+    _fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.flop)
+    _int8_pj = ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule / ureg.flop)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # FP32: 4 bytes/param for load; INT8: 1 byte/param
+    e_fp32_load = (m_params * MILLION * 4 * _dram_pj) / MILLION               # uJ
+    e_fp32_compute = (m_macs * MILLION * _fp32_pj) / MILLION                  # uJ
+    e_int8_load = (m_params * MILLION * 1 * _dram_pj) / MILLION               # uJ
+    e_int8_compute = (m_macs * MILLION * _int8_pj) / MILLION                  # uJ
+    m_fp32_mb = m_params * 4
+    m_int8_mb = m_params
+    e_fp32_total = e_fp32_load + e_fp32_compute
+    e_int8_total = e_int8_load + e_int8_compute
+    s_load = e_fp32_load / e_int8_load
+    s_compute = e_fp32_compute / e_int8_compute
+    s_total = e_fp32_total / e_int8_total
+    e_fp32_load_mj = e_fp32_load / 1000
+    e_fp32_compute_mj = e_fp32_compute / 1000
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    dram_energy_pj_str = fmt(_dram_pj, precision=0, commas=False)
+    m_params_str = f"{m_params}"
+    m_macs_str = fmt(m_macs, precision=0, commas=False)
+    m_fp32_mb_str = fmt(m_fp32_mb, precision=0, commas=False)
+    m_int8_mb_str = f"{m_int8_mb}"
+    e_fp32_load_str = fmt(e_fp32_load, precision=0, commas=False)
+    e_fp32_compute_str = fmt(e_fp32_compute, precision=0, commas=True)
+    e_fp32_total_str = fmt(e_fp32_total, precision=0, commas=True)
+    e_int8_load_str = fmt(e_int8_load, precision=0, commas=False)
+    e_int8_compute_str = fmt(e_int8_compute, precision=0, commas=False)
+    e_int8_total_str = fmt(e_int8_total, precision=0, commas=True)
+    s_load_str = fmt(s_load, precision=0, commas=False)
+    s_compute_str = fmt(s_compute, precision=0, commas=False)
+    s_total_str = fmt(s_total, precision=0, commas=False)
+    e_fp32_load_mj_str = fmt(e_fp32_load_mj, precision=1, commas=False)
+    e_fp32_compute_mj_str = fmt(e_fp32_compute_mj, precision=1, commas=False)
 
-# --- Inputs (energy per operation from physics constants) ---
-# FP32 model size = params * 4 bytes; Energy = Size * pJ/byte
-e_fp32_load_value = (m_params_value * MILLION * 4 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / MILLION # uJ
-e_fp32_compute_value = (m_macs_value * MILLION * ENERGY_FLOP_FP32_PJ.magnitude) / MILLION # uJ
-
-# INT8 model size = params * 1 byte
-e_int8_load_value = (m_params_value * MILLION * 1 * ENERGY_DRAM_PJ_PER_BYTE.magnitude) / MILLION # uJ
-e_int8_compute_value = (m_macs_value * MILLION * ENERGY_FLOP_INT8_PJ.magnitude) / MILLION # uJ
-
-# --- Process (totals and savings ratios) ---
-m_fp32_mb_value = m_params_value * 4
-m_int8_mb_value = m_params_value
-
-e_fp32_total_value = e_fp32_load_value + e_fp32_compute_value
-e_int8_total_value = e_int8_load_value + e_int8_compute_value
-
-s_load_value = e_fp32_load_value / e_int8_load_value
-s_compute_value = e_fp32_compute_value / e_int8_compute_value
-s_total_value = e_fp32_total_value / e_int8_total_value
-
-# --- Outputs (formatted strings for callout) ---
-dram_energy_pj_str = fmt(ENERGY_DRAM_PJ_PER_BYTE.magnitude, precision=0, commas=False)
-m_params_str = f"{m_params_value}"
-m_macs_str = fmt(m_macs_value, precision=0, commas=False)
-m_fp32_mb_str = fmt(m_fp32_mb_value, precision=0, commas=False)
-m_int8_mb_str = f"{m_int8_mb_value}"
-
-e_fp32_load_str = fmt(e_fp32_load_value, precision=0, commas=False)
-e_fp32_compute_str = fmt(e_fp32_compute_value, precision=0, commas=True)
-e_fp32_total_str = fmt(e_fp32_total_value, precision=0, commas=True)
-e_int8_load_str = fmt(e_int8_load_value, precision=0, commas=False)
-e_int8_compute_str = fmt(e_int8_compute_value, precision=0, commas=False)
-e_int8_total_str = fmt(e_int8_total_value, precision=0, commas=True)
-s_load_str = fmt(s_load_value, precision=0, commas=False)
-s_compute_str = fmt(s_compute_value, precision=0, commas=False)
-s_total_str = fmt(s_total_value, precision=0, commas=False)
-
-e_fp32_load_mj_value = e_fp32_load_value / 1000
-e_fp32_compute_mj_value = e_fp32_compute_value / 1000
-e_fp32_load_mj_str = fmt(e_fp32_load_mj_value, precision=1, commas=False)
-e_fp32_compute_mj_str = fmt(e_fp32_compute_mj_value, precision=1, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+dram_energy_pj_str = EnergyBreakdownCalc.dram_energy_pj_str
+m_params_str = EnergyBreakdownCalc.m_params_str
+m_macs_str = EnergyBreakdownCalc.m_macs_str
+m_fp32_mb_str = EnergyBreakdownCalc.m_fp32_mb_str
+m_int8_mb_str = EnergyBreakdownCalc.m_int8_mb_str
+e_fp32_load_str = EnergyBreakdownCalc.e_fp32_load_str
+e_fp32_compute_str = EnergyBreakdownCalc.e_fp32_compute_str
+e_fp32_total_str = EnergyBreakdownCalc.e_fp32_total_str
+e_int8_load_str = EnergyBreakdownCalc.e_int8_load_str
+e_int8_compute_str = EnergyBreakdownCalc.e_int8_compute_str
+e_int8_total_str = EnergyBreakdownCalc.e_int8_total_str
+s_load_str = EnergyBreakdownCalc.s_load_str
+s_compute_str = EnergyBreakdownCalc.s_compute_str
+s_total_str = EnergyBreakdownCalc.s_total_str
+e_fp32_load_mj_str = EnergyBreakdownCalc.e_fp32_load_mj_str
+e_fp32_compute_mj_str = EnergyBreakdownCalc.e_fp32_compute_mj_str
 ```
 
 ::: {.callout-notebook title="Why INT8 Saves Energy"}
@@ -2313,10 +2367,10 @@ These component-level contributions explain why optimizing any single stage yiel
 # │          optimizing only the inference component of a pipeline yields
 # │          diminishing end-to-end returns
 # │
-# │ Goal: Demonstrate why raw inference speedup overstates end-to-end gains.
-# │      isolation. This calculation shows that a 5× inference speedup
-# │      translates to only ~1.8× end-to-end improvement when preprocessing
-
+# │ Goal: Demonstrate that a 5× inference speedup yields only ~1.8× end-to-end
+# │       improvement when preprocessing dominates the unconstrained pipeline.
+# │ Show: Pre-optimization and post-optimization total latency, Amdahl ceiling.
+# │ How: Apply Amdahl's Law: new total = non-optimized + optimized/speedup.
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: bench_preprocess_ms_str, bench_inference_ms_str,
@@ -2326,31 +2380,42 @@ These component-level contributions explain why optimizing any single stage yiel
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (vision inference pipeline scenario) ---
-bench_preprocess_ms_value = 8
-bench_inference_ms_value = 10
-bench_inf_speedup_value = 5
+class AmdahlBenchmarkCalc:
+    """Amdahl ceiling: 5× inference speedup → only 1.8× end-to-end when preprocessing dominates."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    bench_preprocess_ms = 8
+    bench_inference_ms = 10
+    bench_inf_speedup = 5
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    bench_total_ms = bench_preprocess_ms + bench_inference_ms
+    bench_opt_inference_ms = bench_inference_ms / bench_inf_speedup
+    bench_opt_total_ms = bench_preprocess_ms + bench_opt_inference_ms
+    bench_e2e_improvement = bench_total_ms / bench_opt_total_ms
+    preprocess_fraction = bench_preprocess_ms / bench_total_ms
+    amdahl_ceiling = 1 / preprocess_fraction
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    bench_preprocess_ms_str = fmt(bench_preprocess_ms, precision=0, commas=False)
+    bench_inference_ms_str = fmt(bench_inference_ms, precision=0, commas=False)
+    bench_inf_speedup_str = fmt(bench_inf_speedup, precision=0, commas=False)
+    bench_total_ms_str = fmt(bench_total_ms, precision=0, commas=False)
+    bench_e2e_str = fmt(bench_e2e_improvement, precision=1, commas=False)
+    bench_opt_total_str = fmt(bench_opt_total_ms, precision=0, commas=False)
+    bench_opt_inf_str = fmt(bench_opt_inference_ms, precision=0, commas=False)
+    amdahl_ceiling_str = fmt(amdahl_ceiling, precision=2, commas=False)
+    preprocess_pct_str = fmt(preprocess_fraction * 100, precision=0, commas=False)
+    preprocess_fraction_str = fmt(preprocess_fraction, precision=2, commas=False)
 
-# --- Process (Amdahl's Law application) ---
-bench_total_ms_value = bench_preprocess_ms_value + bench_inference_ms_value
-bench_opt_inference_ms_value = bench_inference_ms_value / bench_inf_speedup_value
-bench_opt_total_ms_value = bench_preprocess_ms_value + bench_opt_inference_ms_value
-bench_e2e_improvement_value = bench_total_ms_value / bench_opt_total_ms_value
-
-preprocess_fraction_value = bench_preprocess_ms_value / bench_total_ms_value
-amdahl_ceiling_value = 1 / preprocess_fraction_value
-
-# --- Outputs (formatted strings for callout) ---
-bench_preprocess_ms_str = fmt(bench_preprocess_ms_value, precision=0, commas=False)
-bench_inference_ms_str = fmt(bench_inference_ms_value, precision=0, commas=False)
-bench_inf_speedup_str = fmt(bench_inf_speedup_value, precision=0, commas=False)
-bench_total_ms_str = fmt(bench_total_ms_value, precision=0, commas=False)
-bench_e2e_str = fmt(bench_e2e_improvement_value, precision=1, commas=False)
-bench_opt_total_str = fmt(bench_opt_total_ms_value, precision=0, commas=False)
-bench_opt_inf_str = fmt(bench_opt_inference_ms_value, precision=0, commas=False)
-amdahl_ceiling_str = fmt(amdahl_ceiling_value, precision=2, commas=False)
-preprocess_pct_str = fmt(preprocess_fraction_value*100, precision=0, commas=False)
-preprocess_fraction_str = fmt(preprocess_fraction_value, precision=2, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+bench_preprocess_ms_str = AmdahlBenchmarkCalc.bench_preprocess_ms_str
+bench_inference_ms_str = AmdahlBenchmarkCalc.bench_inference_ms_str
+bench_inf_speedup_str = AmdahlBenchmarkCalc.bench_inf_speedup_str
+bench_total_ms_str = AmdahlBenchmarkCalc.bench_total_ms_str
+bench_e2e_str = AmdahlBenchmarkCalc.bench_e2e_str
+bench_opt_total_str = AmdahlBenchmarkCalc.bench_opt_total_str
+bench_opt_inf_str = AmdahlBenchmarkCalc.bench_opt_inf_str
+amdahl_ceiling_str = AmdahlBenchmarkCalc.amdahl_ceiling_str
+preprocess_pct_str = AmdahlBenchmarkCalc.preprocess_pct_str
+preprocess_fraction_str = AmdahlBenchmarkCalc.preprocess_fraction_str
 ```
 
 ::: {.callout-notebook title="Amdahl's Law: Optimization Ceiling"}
@@ -2599,37 +2664,49 @@ These scenarios explain why the same hardware can report dramatically different 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (illustrative EdgeTPU vs Cortex-M7 characteristics) ---
-edgetpu_latency_ms_value = 2
-cpu_latency_ms_value = 15
-edgetpu_e2e_ms_value = 6
-cpu_e2e_ms_value = 18
-edgetpu_power_mw_value = 500
-cpu_power_mw_value = 120
+class EdgeTPUSpeedupCalc:
+    """EdgeTPU vs Cortex-M7: 7.5× inference speedup, higher peak power, lower energy per inference."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    edgetpu_latency_ms = 2
+    cpu_latency_ms = 15
+    edgetpu_e2e_ms = 6
+    cpu_e2e_ms = 18
+    edgetpu_power_mw = 500
+    cpu_power_mw = 120
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    inference_speedup = cpu_latency_ms / edgetpu_latency_ms
+    e2e_speedup = cpu_e2e_ms / edgetpu_e2e_ms
+    power_ratio = edgetpu_power_mw / cpu_power_mw
+    cpu_energy_mj = cpu_power_mw * cpu_latency_ms / 1000
+    edgetpu_energy_mj = edgetpu_power_mw * edgetpu_latency_ms / 1000
+    energy_ratio = cpu_energy_mj / edgetpu_energy_mj
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    edgetpu_latency_ms_str = fmt(edgetpu_latency_ms, precision=0, commas=False)
+    cpu_latency_ms_str = fmt(cpu_latency_ms, precision=0, commas=False)
+    edgetpu_e2e_ms_str = fmt(edgetpu_e2e_ms, precision=0, commas=False)
+    cpu_e2e_ms_str = fmt(cpu_e2e_ms, precision=0, commas=False)
+    edgetpu_power_mw_str = fmt(edgetpu_power_mw, precision=0, commas=False)
+    cpu_power_mw_str = fmt(cpu_power_mw, precision=0, commas=False)
+    inference_speedup_str = fmt(inference_speedup, precision=0, commas=False)
+    e2e_speedup_str = fmt(e2e_speedup, precision=0, commas=False)
+    edgetpu_power_ratio_str = fmt(power_ratio, precision=0, commas=False)
+    cpu_energy_mj_str = fmt(cpu_energy_mj, precision=1, commas=False)
+    edgetpu_energy_mj_str = fmt(edgetpu_energy_mj, precision=1, commas=False)
+    energy_ratio_str = fmt(energy_ratio, precision=1, commas=False)
 
-# --- Process (speedup and energy comparisons) ---
-inference_speedup_value = cpu_latency_ms_value / edgetpu_latency_ms_value
-e2e_speedup_value = cpu_e2e_ms_value / edgetpu_e2e_ms_value
-power_ratio_value = edgetpu_power_mw_value / cpu_power_mw_value
-
-cpu_energy_mj_value = cpu_power_mw_value * cpu_latency_ms_value / 1000
-edgetpu_energy_mj_value = edgetpu_power_mw_value * edgetpu_latency_ms_value / 1000
-energy_ratio_value = cpu_energy_mj_value / edgetpu_energy_mj_value
-
-# --- Outputs (formatted strings for callout) ---
-edgetpu_latency_ms_str = fmt(edgetpu_latency_ms_value, precision=0, commas=False)
-cpu_latency_ms_str = fmt(cpu_latency_ms_value, precision=0, commas=False)
-edgetpu_e2e_ms_str = fmt(edgetpu_e2e_ms_value, precision=0, commas=False)
-cpu_e2e_ms_str = fmt(cpu_e2e_ms_value, precision=0, commas=False)
-edgetpu_power_mw_str = fmt(edgetpu_power_mw_value, precision=0, commas=False)
-cpu_power_mw_str = fmt(cpu_power_mw_value, precision=0, commas=False)
-
-inference_speedup_str = fmt(inference_speedup_value, precision=0, commas=False)
-e2e_speedup_str = fmt(e2e_speedup_value, precision=0, commas=False)
-edgetpu_power_ratio_str = fmt(power_ratio_value, precision=0, commas=False)
-cpu_energy_mj_str = fmt(cpu_energy_mj_value, precision=1, commas=False)
-edgetpu_energy_mj_str = fmt(edgetpu_energy_mj_value, precision=1, commas=False)
-energy_ratio_str = fmt(energy_ratio_value, precision=1, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+edgetpu_latency_ms_str = EdgeTPUSpeedupCalc.edgetpu_latency_ms_str
+cpu_latency_ms_str = EdgeTPUSpeedupCalc.cpu_latency_ms_str
+edgetpu_e2e_ms_str = EdgeTPUSpeedupCalc.edgetpu_e2e_ms_str
+cpu_e2e_ms_str = EdgeTPUSpeedupCalc.cpu_e2e_ms_str
+edgetpu_power_mw_str = EdgeTPUSpeedupCalc.edgetpu_power_mw_str
+cpu_power_mw_str = EdgeTPUSpeedupCalc.cpu_power_mw_str
+inference_speedup_str = EdgeTPUSpeedupCalc.inference_speedup_str
+e2e_speedup_str = EdgeTPUSpeedupCalc.e2e_speedup_str
+edgetpu_power_ratio_str = EdgeTPUSpeedupCalc.edgetpu_power_ratio_str
+cpu_energy_mj_str = EdgeTPUSpeedupCalc.cpu_energy_mj_str
+edgetpu_energy_mj_str = EdgeTPUSpeedupCalc.edgetpu_energy_mj_str
+energy_ratio_str = EdgeTPUSpeedupCalc.energy_ratio_str
 ```
 
 ::: {.callout-lighthouse title="MobileNet on EdgeTPU"}
@@ -3740,41 +3817,52 @@ Acceptable degradation depends on deployment context. A 2% accuracy drop might b
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (MobileNetV2 FP32 baseline and INT8 results) ---
-mv2_acc_fp32_value = 71.8
-mv2_params_m_value = 3.5
-mv2_size_fp32_mb_value = 14.0
-mv2_size_int8_mb_value = 3.5 # 14 / 4
-mv2_acc_int8_value = 70.9
-mv2_acc_drop_value = mv2_acc_fp32_value - mv2_acc_int8_value
+class MobileNetINT8Calc:
+    """MobileNetV2 FP32 vs INT8: aggregate accuracy holds but calibration and edge cases degrade."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    acc_fp32 = 71.8
+    params_m = 3.5
+    size_fp32_mb = 14.0
+    size_int8_mb = 3.5                                                          # 14 / 4
+    acc_int8 = 70.9
+    top5_fp32 = 91.0
+    top5_int8 = 90.4
+    ece_fp32 = 0.031
+    ece_int8 = 0.089
+    edge_fp32 = 68.2
+    edge_int8 = 61.4
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    acc_drop = acc_fp32 - acc_int8
+    edge_drop = edge_fp32 - edge_int8
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mv2_acc_fp32_str = fmt(acc_fp32, precision=1, commas=False)
+    mv2_params_m_str = fmt(params_m, precision=1, commas=False)
+    mv2_size_fp32_mb_str = fmt(size_fp32_mb, precision=1, commas=False)
+    mv2_size_int8_mb_str = fmt(size_int8_mb, precision=1, commas=False)
+    mv2_acc_int8_str = fmt(acc_int8, precision=1, commas=False)
+    mv2_acc_drop_str = fmt(acc_drop, precision=1, commas=False)                # 0.9
+    mv2_top5_fp32_str = fmt(top5_fp32, precision=1, commas=False)
+    mv2_top5_int8_str = fmt(top5_int8, precision=1, commas=False)
+    mv2_ece_fp32_str = fmt(ece_fp32, precision=3, commas=False)
+    mv2_ece_int8_str = fmt(ece_int8, precision=3, commas=False)
+    mv2_edge_fp32_str = fmt(edge_fp32, precision=1, commas=False)
+    mv2_edge_int8_str = fmt(edge_int8, precision=1, commas=False)
+    mv2_edge_drop_str = fmt(edge_drop, precision=0, commas=False)              # ~7%
 
-mv2_top5_fp32_value = 91.0
-mv2_top5_int8_value = 90.4
-
-mv2_ece_fp32_value = 0.031
-mv2_ece_int8_value = 0.089
-
-mv2_edge_fp32_value = 68.2
-mv2_edge_int8_value = 61.4
-mv2_edge_drop_value = mv2_edge_fp32_value - mv2_edge_int8_value
-
-# --- Outputs (formatted strings for callout) ---
-mv2_acc_fp32_str = fmt(mv2_acc_fp32_value, precision=1, commas=False)
-mv2_params_m_str = fmt(mv2_params_m_value, precision=1, commas=False)
-mv2_size_fp32_mb_str = fmt(mv2_size_fp32_mb_value, precision=1, commas=False)
-mv2_size_int8_mb_str = fmt(mv2_size_int8_mb_value, precision=1, commas=False)
-mv2_acc_int8_str = fmt(mv2_acc_int8_value, precision=1, commas=False)
-mv2_acc_drop_str = fmt(mv2_acc_drop_value, precision=1, commas=False) # 0.9
-
-mv2_top5_fp32_str = fmt(mv2_top5_fp32_value, precision=1, commas=False)
-mv2_top5_int8_str = fmt(mv2_top5_int8_value, precision=1, commas=False)
-
-mv2_ece_fp32_str = fmt(mv2_ece_fp32_value, precision=3, commas=False)
-mv2_ece_int8_str = fmt(mv2_ece_int8_value, precision=3, commas=False)
-
-mv2_edge_fp32_str = fmt(mv2_edge_fp32_value, precision=1, commas=False)
-mv2_edge_int8_str = fmt(mv2_edge_int8_value, precision=1, commas=False)
-mv2_edge_drop_str = fmt(mv2_edge_drop_value, precision=0, commas=False) # ~7%
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mv2_acc_fp32_str = MobileNetINT8Calc.mv2_acc_fp32_str
+mv2_params_m_str = MobileNetINT8Calc.mv2_params_m_str
+mv2_size_fp32_mb_str = MobileNetINT8Calc.mv2_size_fp32_mb_str
+mv2_size_int8_mb_str = MobileNetINT8Calc.mv2_size_int8_mb_str
+mv2_acc_int8_str = MobileNetINT8Calc.mv2_acc_int8_str
+mv2_acc_drop_str = MobileNetINT8Calc.mv2_acc_drop_str
+mv2_top5_fp32_str = MobileNetINT8Calc.mv2_top5_fp32_str
+mv2_top5_int8_str = MobileNetINT8Calc.mv2_top5_int8_str
+mv2_ece_fp32_str = MobileNetINT8Calc.mv2_ece_fp32_str
+mv2_ece_int8_str = MobileNetINT8Calc.mv2_ece_int8_str
+mv2_edge_fp32_str = MobileNetINT8Calc.mv2_edge_fp32_str
+mv2_edge_int8_str = MobileNetINT8Calc.mv2_edge_int8_str
+mv2_edge_drop_str = MobileNetINT8Calc.mv2_edge_drop_str
 ```
 
 ::: {.callout-lighthouse title="MobileNet INT8 Compression"}
@@ -3853,21 +3941,28 @@ Generation-specific metrics capture properties absent from discriminative benchm
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (LLM response scenario) ---
-response_tokens_value = 750  # ~500 words
-slow_toks_value = 25
-fast_toks_value = 100
+class LLMThroughputCalc:
+    """25 vs 100 tok/s on a 750-token response: 30 s vs 7.5 s — a 4× user-perceived difference."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    response_tokens = 750                                                       # ~500 words
+    slow_toks = 25
+    fast_toks = 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    slow_sec = response_tokens / slow_toks
+    fast_sec = response_tokens / fast_toks
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    slow_str = fmt(slow_sec, precision=0, commas=False)
+    fast_str = fmt(fast_sec, precision=1, commas=False)
+    response_tokens_str = fmt(response_tokens, precision=0, commas=False)
+    slow_toks_str = fmt(slow_toks, precision=0, commas=False)
+    fast_toks_str = fmt(fast_toks, precision=0, commas=False)
 
-# --- Process (wall-clock time for each throughput level) ---
-slow_sec_value = response_tokens_value / slow_toks_value
-fast_sec_value = response_tokens_value / fast_toks_value
-
-# --- Outputs (formatted strings for prose) ---
-slow_str = fmt(slow_sec_value, precision=0, commas=False)
-fast_str = fmt(fast_sec_value, precision=1, commas=False)
-response_tokens_str = fmt(response_tokens_value, precision=0, commas=False)
-slow_toks_str = fmt(slow_toks_value, precision=0, commas=False)
-fast_toks_str = fmt(fast_toks_value, precision=0, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+slow_str = LLMThroughputCalc.slow_str
+fast_str = LLMThroughputCalc.fast_str
+response_tokens_str = LLMThroughputCalc.response_tokens_str
+slow_toks_str = LLMThroughputCalc.slow_toks_str
+fast_toks_str = LLMThroughputCalc.fast_toks_str
 ```
 
 - **Tokens per second** measures generation throughput. Modern LLMs achieve 20–100 tokens/second depending on model size and hardware. For a response of ~`{python} response_tokens_str` tokens, `{python} slow_toks_str` vs `{python} fast_toks_str` tokens/second means `{python} slow_str` seconds vs `{python} fast_str` seconds.
@@ -4285,104 +4380,138 @@ With benchmarking principles, methodologies, and production considerations estab
 # │          availability_nines_str, downtime_minutes_month_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# Fallacy 1: Benchmark vs. production accuracy gap
-benchmark_accuracy_pct = 92
-production_accuracy_low_pct = 78
-production_accuracy_high_pct = 82
-accuracy_drop_pct = benchmark_accuracy_pct - production_accuracy_high_pct
+class FallaciesPitfallsSetup:
+    """Quantitative backing for all Fallacy/Pitfall items in the benchmarking chapter."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Fallacy 1: Benchmark vs. production accuracy gap
+    benchmark_accuracy_pct = 92
+    production_accuracy_low_pct = 78
+    production_accuracy_high_pct = 82
+    # Fallacy 1: Latency gap (mean vs. p99)
+    benchmark_latency_mean_ms = 15
+    production_p99_low_ms = 150
+    production_p99_high_ms = 200
+    # Pitfall 1 (Goodhart): Quantization speedup
+    pre_quant_latency_ms = 12
+    post_quant_latency_ms = 8
+    ranking_improvement = 15
+    energy_increase_pct = 40
+    ood_degradation_pct = 25
+    accuracy_improvement_pct = 2.1
+    # Fallacy 2: Single-metric trade-offs
+    rec_accuracy_pct = 94
+    rec_p99_latency_ms = 180
+    slo_p99_requirement_ms = 100
+    high_throughput_qps = 1200
+    low_throughput_qps = 1000
+    high_power_w = 420
+    low_power_w = 180
+    battery_multiplier = 2.3
+    # Pitfall 2: Benchmark saturation (ImageNet)
+    imagenet_error_2010_pct = 28.2
+    imagenet_error_2015_pct = 3.57
+    imagenet_competition_end_year = 2017
+    imagenet_teams_above_95 = 29
+    imagenet_total_teams = 38
+    mnist_accuracy_pct = 99.8
+    edge_memory_constraint_x = 10
+    edge_power_constraint_x = 100
+    # Pitfall 3: Research vs. production
+    isolated_throughput_qps = 800
+    production_throughput_low_qps = 400
+    production_throughput_high_qps = 500
+    production_utilization_pct = 90
+    model_inference_low_ms = 5
+    model_inference_high_ms = 10
+    e2e_latency_low_ms = 50
+    e2e_latency_high_ms = 100
+    availability_nines = 99.9
+    downtime_minutes_month = 43
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    accuracy_drop_pct = benchmark_accuracy_pct - production_accuracy_high_pct
+    latency_multiplier = production_p99_low_ms / benchmark_latency_mean_ms
+    power_ratio = high_power_w / low_power_w
+    throughput_loss_pct = round((1 - low_throughput_qps / high_throughput_qps) * 100)
+    throughput_degradation_pct = round((1 - production_throughput_high_qps / isolated_throughput_qps) * 100)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    benchmark_accuracy_pct_str = f"{benchmark_accuracy_pct}"
+    production_accuracy_range_str = f"{production_accuracy_low_pct}-{production_accuracy_high_pct}"
+    accuracy_drop_pct_str = f"{accuracy_drop_pct}"
+    benchmark_latency_mean_ms_str = f"{benchmark_latency_mean_ms}"
+    production_p99_range_str = f"{production_p99_low_ms}-{production_p99_high_ms}"
+    latency_multiplier_str = f"{latency_multiplier:.0f}"
+    pre_quant_latency_ms_str = f"{pre_quant_latency_ms}"
+    post_quant_latency_ms_str = f"{post_quant_latency_ms}"
+    ranking_improvement_str = f"{ranking_improvement}"
+    energy_increase_pct_str = f"{energy_increase_pct}"
+    ood_degradation_pct_str = f"{ood_degradation_pct}"
+    accuracy_improvement_pct_str = f"{accuracy_improvement_pct}"
+    rec_accuracy_pct_str = f"{rec_accuracy_pct}"
+    rec_p99_latency_ms_str = f"{rec_p99_latency_ms}"
+    slo_p99_requirement_ms_str = f"{slo_p99_requirement_ms}"
+    high_throughput_qps_str = f"{high_throughput_qps:,}"
+    low_throughput_qps_str = f"{low_throughput_qps:,}"
+    high_power_w_str = f"{high_power_w}"
+    low_power_w_str = f"{low_power_w}"
+    power_ratio_str = f"{power_ratio:.1f}"
+    throughput_loss_pct_str = f"{throughput_loss_pct}"
+    battery_multiplier_str = f"{battery_multiplier}"
+    imagenet_error_2010_pct_str = f"{imagenet_error_2010_pct}"
+    imagenet_error_2015_pct_str = f"{imagenet_error_2015_pct}"
+    imagenet_competition_end_year_str = f"{imagenet_competition_end_year}"
+    imagenet_teams_above_95_str = f"{imagenet_teams_above_95}"
+    imagenet_total_teams_str = f"{imagenet_total_teams}"
+    mnist_accuracy_pct_str = f"{mnist_accuracy_pct}"
+    edge_memory_constraint_x_str = f"{edge_memory_constraint_x}"
+    edge_power_constraint_x_str = f"{edge_power_constraint_x}"
+    isolated_throughput_qps_str = f"{isolated_throughput_qps}"
+    production_throughput_range_str = f"{production_throughput_low_qps}-{production_throughput_high_qps}"
+    production_utilization_pct_str = f"{production_utilization_pct}"
+    throughput_degradation_pct_str = f"{throughput_degradation_pct}"
+    model_inference_range_str = f"{model_inference_low_ms}-{model_inference_high_ms}"
+    e2e_latency_range_str = f"{e2e_latency_low_ms}-{e2e_latency_high_ms}"
+    availability_nines_str = f"{availability_nines}"
+    downtime_minutes_month_str = f"{downtime_minutes_month}"
 
-# Fallacy 1: Latency gap (mean vs. p99)
-benchmark_latency_mean_ms = 15
-production_p99_low_ms = 150
-production_p99_high_ms = 200
-latency_multiplier = production_p99_low_ms / benchmark_latency_mean_ms
-
-# Pitfall 1 (Goodhart): Quantization speedup
-pre_quant_latency_ms = 12
-post_quant_latency_ms = 8
-ranking_improvement = 15
-energy_increase_pct = 40
-ood_degradation_pct = 25
-accuracy_improvement_pct = 2.1
-
-# Fallacy 2: Single-metric trade-offs
-rec_accuracy_pct = 94
-rec_p99_latency_ms = 180
-slo_p99_requirement_ms = 100
-high_throughput_qps = 1200
-low_throughput_qps = 1000
-high_power_w = 420
-low_power_w = 180
-power_ratio = high_power_w / low_power_w
-throughput_loss_pct = round((1 - low_throughput_qps / high_throughput_qps) * 100)
-battery_multiplier = 2.3
-
-# Pitfall 2: Benchmark saturation (ImageNet)
-imagenet_error_2010_pct = 28.2
-imagenet_error_2015_pct = 3.57
-imagenet_competition_end_year = 2017
-imagenet_teams_above_95 = 29
-imagenet_total_teams = 38
-mnist_accuracy_pct = 99.8
-edge_memory_constraint_x = 10
-edge_power_constraint_x = 100
-
-# Pitfall 3: Research vs. production
-isolated_throughput_qps = 800
-production_throughput_low_qps = 400
-production_throughput_high_qps = 500
-production_utilization_pct = 90
-throughput_degradation_pct = round((1 - production_throughput_high_qps / isolated_throughput_qps) * 100)
-model_inference_low_ms = 5
-model_inference_high_ms = 10
-e2e_latency_low_ms = 50
-e2e_latency_high_ms = 100
-availability_nines = 99.9
-downtime_minutes_month = 43
-
-# Pre-format all strings
-benchmark_accuracy_pct_str = f"{benchmark_accuracy_pct}"
-production_accuracy_range_str = f"{production_accuracy_low_pct}-{production_accuracy_high_pct}"
-accuracy_drop_pct_str = f"{accuracy_drop_pct}"
-benchmark_latency_mean_ms_str = f"{benchmark_latency_mean_ms}"
-production_p99_range_str = f"{production_p99_low_ms}-{production_p99_high_ms}"
-latency_multiplier_str = f"{latency_multiplier:.0f}"
-
-pre_quant_latency_ms_str = f"{pre_quant_latency_ms}"
-post_quant_latency_ms_str = f"{post_quant_latency_ms}"
-ranking_improvement_str = f"{ranking_improvement}"
-energy_increase_pct_str = f"{energy_increase_pct}"
-ood_degradation_pct_str = f"{ood_degradation_pct}"
-accuracy_improvement_pct_str = f"{accuracy_improvement_pct}"
-
-rec_accuracy_pct_str = f"{rec_accuracy_pct}"
-rec_p99_latency_ms_str = f"{rec_p99_latency_ms}"
-slo_p99_requirement_ms_str = f"{slo_p99_requirement_ms}"
-high_throughput_qps_str = f"{high_throughput_qps:,}"
-low_throughput_qps_str = f"{low_throughput_qps:,}"
-high_power_w_str = f"{high_power_w}"
-low_power_w_str = f"{low_power_w}"
-power_ratio_str = f"{power_ratio:.1f}"
-throughput_loss_pct_str = f"{throughput_loss_pct}"
-battery_multiplier_str = f"{battery_multiplier}"
-
-imagenet_error_2010_pct_str = f"{imagenet_error_2010_pct}"
-imagenet_error_2015_pct_str = f"{imagenet_error_2015_pct}"
-imagenet_competition_end_year_str = f"{imagenet_competition_end_year}"
-imagenet_teams_above_95_str = f"{imagenet_teams_above_95}"
-imagenet_total_teams_str = f"{imagenet_total_teams}"
-mnist_accuracy_pct_str = f"{mnist_accuracy_pct}"
-edge_memory_constraint_x_str = f"{edge_memory_constraint_x}"
-edge_power_constraint_x_str = f"{edge_power_constraint_x}"
-
-isolated_throughput_qps_str = f"{isolated_throughput_qps}"
-production_throughput_range_str = f"{production_throughput_low_qps}-{production_throughput_high_qps}"
-production_utilization_pct_str = f"{production_utilization_pct}"
-throughput_degradation_pct_str = f"{throughput_degradation_pct}"
-model_inference_range_str = f"{model_inference_low_ms}-{model_inference_high_ms}"
-e2e_latency_range_str = f"{e2e_latency_low_ms}-{e2e_latency_high_ms}"
-availability_nines_str = f"{availability_nines}"
-downtime_minutes_month_str = f"{downtime_minutes_month}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+benchmark_accuracy_pct_str = FallaciesPitfallsSetup.benchmark_accuracy_pct_str
+production_accuracy_range_str = FallaciesPitfallsSetup.production_accuracy_range_str
+accuracy_drop_pct_str = FallaciesPitfallsSetup.accuracy_drop_pct_str
+benchmark_latency_mean_ms_str = FallaciesPitfallsSetup.benchmark_latency_mean_ms_str
+production_p99_range_str = FallaciesPitfallsSetup.production_p99_range_str
+latency_multiplier_str = FallaciesPitfallsSetup.latency_multiplier_str
+pre_quant_latency_ms_str = FallaciesPitfallsSetup.pre_quant_latency_ms_str
+post_quant_latency_ms_str = FallaciesPitfallsSetup.post_quant_latency_ms_str
+ranking_improvement_str = FallaciesPitfallsSetup.ranking_improvement_str
+energy_increase_pct_str = FallaciesPitfallsSetup.energy_increase_pct_str
+ood_degradation_pct_str = FallaciesPitfallsSetup.ood_degradation_pct_str
+accuracy_improvement_pct_str = FallaciesPitfallsSetup.accuracy_improvement_pct_str
+rec_accuracy_pct_str = FallaciesPitfallsSetup.rec_accuracy_pct_str
+rec_p99_latency_ms_str = FallaciesPitfallsSetup.rec_p99_latency_ms_str
+slo_p99_requirement_ms_str = FallaciesPitfallsSetup.slo_p99_requirement_ms_str
+high_throughput_qps_str = FallaciesPitfallsSetup.high_throughput_qps_str
+low_throughput_qps_str = FallaciesPitfallsSetup.low_throughput_qps_str
+high_power_w_str = FallaciesPitfallsSetup.high_power_w_str
+low_power_w_str = FallaciesPitfallsSetup.low_power_w_str
+power_ratio_str = FallaciesPitfallsSetup.power_ratio_str
+throughput_loss_pct_str = FallaciesPitfallsSetup.throughput_loss_pct_str
+battery_multiplier_str = FallaciesPitfallsSetup.battery_multiplier_str
+imagenet_error_2010_pct_str = FallaciesPitfallsSetup.imagenet_error_2010_pct_str
+imagenet_error_2015_pct_str = FallaciesPitfallsSetup.imagenet_error_2015_pct_str
+imagenet_competition_end_year_str = FallaciesPitfallsSetup.imagenet_competition_end_year_str
+imagenet_teams_above_95_str = FallaciesPitfallsSetup.imagenet_teams_above_95_str
+imagenet_total_teams_str = FallaciesPitfallsSetup.imagenet_total_teams_str
+mnist_accuracy_pct_str = FallaciesPitfallsSetup.mnist_accuracy_pct_str
+edge_memory_constraint_x_str = FallaciesPitfallsSetup.edge_memory_constraint_x_str
+edge_power_constraint_x_str = FallaciesPitfallsSetup.edge_power_constraint_x_str
+isolated_throughput_qps_str = FallaciesPitfallsSetup.isolated_throughput_qps_str
+production_throughput_range_str = FallaciesPitfallsSetup.production_throughput_range_str
+production_utilization_pct_str = FallaciesPitfallsSetup.production_utilization_pct_str
+throughput_degradation_pct_str = FallaciesPitfallsSetup.throughput_degradation_pct_str
+model_inference_range_str = FallaciesPitfallsSetup.model_inference_range_str
+e2e_latency_range_str = FallaciesPitfallsSetup.e2e_latency_range_str
+availability_nines_str = FallaciesPitfallsSetup.availability_nines_str
+downtime_minutes_month_str = FallaciesPitfallsSetup.downtime_minutes_month_str
 ```
 
 Benchmarking creates false confidence when standardized measurement obscures deployment realities. Teams assume controlled evaluations predict production performance, but real systems face variability, resource constraints, and multi-objective trade-offs that benchmarks cannot capture. These fallacies waste engineering effort and produce systems optimized for evaluation rather than deployment.

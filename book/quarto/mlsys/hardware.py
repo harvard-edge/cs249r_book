@@ -1,6 +1,7 @@
 # hardware.py
 # Hierarchical Hardware Definitions for MLSys Textbook
 
+import pint
 from dataclasses import dataclass
 from typing import Optional, Tuple
 from .constants import (
@@ -34,14 +35,25 @@ class HardwareSpec:
     int8_flops: Optional[Q_] = None
     
     def __post_init__(self):
-        """Validate hardware specs."""
-        assert self.memory_bw.magnitude > 0, f"{self.name}: Memory bandwidth must be positive."
-        assert self.peak_flops.magnitude > 0, f"{self.name}: Peak FLOPS must be positive."
-        assert self.memory_capacity.magnitude > 0, f"{self.name}: Memory capacity must be positive."
+        """Validate hardware specs: correct dimension type first, then positive value."""
+        from .constants import ureg
+
+        def _validate(qty, name, target_unit, dim_desc):
+            if not qty.is_compatible_with(target_unit):
+                raise pint.DimensionalityError(
+                    qty.units, target_unit,
+                    extra_msg=f" — {self.name}.{name} must be {dim_desc}, got {qty.units}"
+                )
+            if qty.magnitude <= 0:
+                raise ValueError(f"{self.name}.{name} must be positive, got {qty}")
+
+        _validate(self.memory_bw,       "memory_bw",       ureg.byte/ureg.second, "data/time (e.g. GB/s)")
+        _validate(self.peak_flops,      "peak_flops",      ureg.flop/ureg.second, "compute rate (e.g. TFLOPs/s)")
+        _validate(self.memory_capacity, "memory_capacity", ureg.byte,             "data size (e.g. GiB)")
         if self.tdp:
-            assert self.tdp.magnitude > 0, f"{self.name}: TDP must be positive."
+            _validate(self.tdp,         "tdp",             ureg.watt,             "power (e.g. W)")
         if self.battery_capacity:
-            assert self.battery_capacity.magnitude > 0, f"{self.name}: Battery capacity must be positive."
+            _validate(self.battery_capacity, "battery_capacity", ureg.joule,      "energy (e.g. Wh or J)")
 
     def ridge_point(self) -> Q_:
         """Calculates the Roofline ridge point (Intensity threshold)."""

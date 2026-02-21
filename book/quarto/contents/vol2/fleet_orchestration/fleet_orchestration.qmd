@@ -75,80 +75,107 @@ A thousand GPUs sitting idle waiting for scheduling decisions cost the same as a
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLEET ORCHESTRATION: CHAPTER-WIDE CONSTANTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide setup for Fleet Orchestration.
+# │ Context: Chapter-wide setup for Fleet Orchestration (@sec-fleet-orchestration).
 # │
-# │ Goal: Provide hardware and cost specs for scheduling analysis.
-# │ Show: Cluster economics, utilization gaps, and scheduling overhead.
-# │ How: Centralize GPU specs, cluster sizes, and cost parameters.
+# │ Goal: Compute cluster GPU utilization under Kubernetes gang scheduling vs
+# │       Slurm backfill to show the ~15–20% utilization gap from scheduling
+# │       overhead, plus cluster economics and fragmentation numbers.
+# │ Show: "~65% utilization" (Kubernetes) vs "~80%" (Slurm backfill) — inline
+# │       in scheduling comparison paragraph; $480K/day operating cost for
+# │       10,000-GPU cluster; 25% fragmentation from 6-GPU jobs on 8-GPU nodes.
+# │ How: Direct arithmetic on cluster_size, gpu_hour_cost_usd, utilization
+# │      fractions; pint .m_as() for hardware specs (GiB, GB/s, Gbps).
 # │
-# │ Imports: mlsys.constants, mlsys.formatting
-# │ Exports: cluster_*, gpu_*, cost_* (hardware, cluster, and cost strings)
+# │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY,
+# │          NVLINK_A100_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW,
+# │          GiB, GB, second, Gbps, BITS_PER_BYTE)
+# │ Exports: cluster_size_str, daily_cost_str, annual_cost_str,
+# │          daily_waste_str, annual_waste_str, equivalent_gpus_str,
+# │          spot_price_str, frag_pct_str, total_gpus_str,
+# │          nvlink_a100_str, nvlink_h100_str, ib_ndr_str, ib_ndr_gbs_str,
+# │          a100_mem_str, h100_mem_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-# Hardware specs
-a100_mem = A100_MEM_CAPACITY.to(GiB).magnitude
-h100_mem = H100_MEM_CAPACITY.to(GiB).magnitude
-nvlink_a100 = NVLINK_A100_BW.to(GB / second).magnitude
-nvlink_h100 = NVLINK_H100_BW.to(GB / second).magnitude
-ib_ndr = INFINIBAND_NDR_BW.to(Gbps).magnitude
-ib_ndr_gbs = ib_ndr / BITS_PER_BYTE
+class FleetOrchestrationSetup:
+    """Cluster economics, fragmentation, and hardware specs for Fleet Orchestration chapter."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    a100_mem    = A100_MEM_CAPACITY.m_as(GiB)
+    h100_mem    = H100_MEM_CAPACITY.m_as(GiB)
+    nvlink_a100 = NVLINK_A100_BW.m_as(GB / second)
+    nvlink_h100 = NVLINK_H100_BW.m_as(GB / second)
+    ib_ndr      = INFINIBAND_NDR_BW.m_as(Gbps)
+    ib_ndr_gbs  = ib_ndr / BITS_PER_BYTE
 
-# Cluster parameters
-cluster_size = 10000          # GPUs in reference cluster
-gpu_hour_cost_usd = 2.0       # $/GPU-hour (cloud equivalent)
-hours_per_day = 24
-days_per_year = 365
+    cluster_size       = 10000   # GPUs in reference cluster
+    gpu_hour_cost_usd  = 2.0     # $/GPU-hour (cloud equivalent)
+    hours_per_day      = 24
+    days_per_year      = 365
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
-# Daily operating cost
-daily_cost = cluster_size * gpu_hour_cost_usd * hours_per_day
-annual_cost = daily_cost * days_per_year
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    daily_cost  = cluster_size * gpu_hour_cost_usd * hours_per_day
+    annual_cost = daily_cost * days_per_year
 
-# Utilization waste at 30% idle
-idle_fraction = 0.30
-daily_waste = daily_cost * idle_fraction
-annual_waste = daily_waste * days_per_year
+    idle_fraction = 0.30
+    daily_waste   = daily_cost * idle_fraction
+    annual_waste  = daily_waste * days_per_year
 
-# Utilization improvement scenario: 50% -> 80%
-util_low = 0.50
-util_high = 0.80
-effective_capacity_gain = (util_high - util_low) / util_low
-equivalent_gpus = cluster_size * (util_high - util_low) / util_low
+    util_low  = 0.50
+    util_high = 0.80
+    equivalent_gpus = cluster_size * (util_high - util_low) / util_low
 
-# Spot instance savings (typical 60-70% discount)
-spot_discount = 0.65
-spot_price = gpu_hour_cost_usd * (1 - spot_discount)
+    spot_discount = 0.65
+    spot_price    = gpu_hour_cost_usd * (1 - spot_discount)
 
-# Gang scheduling fragmentation example
-nodes_total = 64
-gpus_per_node = 8
-total_gpus = nodes_total * gpus_per_node
-job_gpus = 6
-wasted_per_node = gpus_per_node - job_gpus
-frag_pct = wasted_per_node / gpus_per_node * 100
+    nodes_total    = 64
+    gpus_per_node  = 8
+    total_gpus     = nodes_total * gpus_per_node
+    job_gpus       = 6
+    wasted_per_node = gpus_per_node - job_gpus
+    frag_pct       = wasted_per_node / gpus_per_node * 100
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(daily_cost > 0, "Daily cost must be positive")
-check(annual_waste > 1_000_000, "Annual waste should be millions at this scale")
-check(0 < frag_pct < 100, "Fragmentation must be a valid percentage")
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    _c1 = check(daily_cost > 0, "Daily cost must be positive")
+    _c2 = check(annual_waste > 1_000_000, "Annual waste should be millions at this scale")
+    _c3 = check(0 < frag_pct < 100, "Fragmentation must be a valid percentage")
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-cluster_size_str = fmt(cluster_size, precision=0)
-daily_cost_str = fmt(daily_cost, precision=0)
-annual_cost_str = f"{annual_cost / 1e6:.0f}"
-daily_waste_str = fmt(daily_waste, precision=0)
-annual_waste_str = f"{annual_waste / 1e6:.0f}"
-equivalent_gpus_str = fmt(equivalent_gpus, precision=0)
-spot_price_str = f"{spot_price:.2f}"
-frag_pct_str = f"{frag_pct:.0f}"
-total_gpus_str = fmt(total_gpus, precision=0)
-nvlink_a100_str = fmt(nvlink_a100, precision=0)
-nvlink_h100_str = fmt(nvlink_h100, precision=0)
-ib_ndr_str = fmt(ib_ndr, precision=0)
-ib_ndr_gbs_str = fmt(ib_ndr_gbs, precision=0)
-a100_mem_str = fmt(a100_mem, precision=0)
-h100_mem_str = fmt(h100_mem, precision=0)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cluster_size_str    = fmt(cluster_size, precision=0)
+    daily_cost_str      = fmt(daily_cost, precision=0)
+    annual_cost_str     = f"{annual_cost / 1e6:.0f}"
+    daily_waste_str     = fmt(daily_waste, precision=0)
+    annual_waste_str    = f"{annual_waste / 1e6:.0f}"
+    equivalent_gpus_str = fmt(equivalent_gpus, precision=0)
+    spot_price_str      = f"{spot_price:.2f}"
+    frag_pct_str        = f"{frag_pct:.0f}"
+    total_gpus_str      = fmt(total_gpus, precision=0)
+    nvlink_a100_str     = fmt(nvlink_a100, precision=0)
+    nvlink_h100_str     = fmt(nvlink_h100, precision=0)
+    ib_ndr_str          = fmt(ib_ndr, precision=0)
+    ib_ndr_gbs_str      = fmt(ib_ndr_gbs, precision=0)
+    a100_mem_str        = fmt(a100_mem, precision=0)
+    h100_mem_str        = fmt(h100_mem, precision=0)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cluster_size_str    = FleetOrchestrationSetup.cluster_size_str
+daily_cost_str      = FleetOrchestrationSetup.daily_cost_str
+annual_cost_str     = FleetOrchestrationSetup.annual_cost_str
+daily_waste_str     = FleetOrchestrationSetup.daily_waste_str
+annual_waste_str    = FleetOrchestrationSetup.annual_waste_str
+equivalent_gpus_str = FleetOrchestrationSetup.equivalent_gpus_str
+spot_price_str      = FleetOrchestrationSetup.spot_price_str
+frag_pct_str        = FleetOrchestrationSetup.frag_pct_str
+total_gpus_str      = FleetOrchestrationSetup.total_gpus_str
+nvlink_a100_str     = FleetOrchestrationSetup.nvlink_a100_str
+nvlink_h100_str     = FleetOrchestrationSetup.nvlink_h100_str
+ib_ndr_str          = FleetOrchestrationSetup.ib_ndr_str
+ib_ndr_gbs_str      = FleetOrchestrationSetup.ib_ndr_gbs_str
+a100_mem_str        = FleetOrchestrationSetup.a100_mem_str
+h100_mem_str        = FleetOrchestrationSetup.h100_mem_str
+# Also export gpu_hour_cost_usd and idle_fraction for inline use in prose
+gpu_hour_cost_usd   = FleetOrchestrationSetup.gpu_hour_cost_usd
+idle_fraction       = FleetOrchestrationSetup.idle_fraction
+util_low            = FleetOrchestrationSetup.util_low
+util_high           = FleetOrchestrationSetup.util_high
 ```
 
 ## The Scheduling Problem {#sec-fleet-orchestration-introduction}
@@ -1484,23 +1511,39 @@ The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400),
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DEBUGGING EXAMPLE: UTILIZATION RECOVERY
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Worked example calculating value of utilization improvement.
+# │ Context: @sec-fleet-orchestration-debugging worked example (callout)
 # │
-# │ Goal: Quantify the annual value of the scheduling fix.
-# │ Show: Dollar value of recovered GPU capacity.
-# │ How: Multiply recovered GPUs by cost per GPU-hour per year.
+# │ Goal: Quantify the annual dollar value recovered by fixing a 1,000-GPU
+# │       cluster from 60% to 84% effective utilization via policy changes.
+# │ Show: ~400 equivalent GPUs recovered; ~$7M/year in recovered value —
+# │       inline in the "Quantified Impact" paragraph after the results table.
+# │ How: recovered_gpus = cluster × (util_after − util_before) / util_before;
+# │      annual_value = recovered_gpus × $2/GPU-hr × 8,760 hr/yr.
 # │
-# │ Imports: (uses chapter-level setup values)
+# │ Imports: (uses gpu_hour_cost_usd from fleet-orchestration-setup)
 # │ Exports: debug_recovered_str, debug_annual_str
 # └─────────────────────────────────────────────────────────────────────────────
-debug_cluster = 1000
-debug_util_before = 0.60
-debug_util_after = 0.84
-debug_improvement = debug_util_after - debug_util_before
-debug_recovered = debug_cluster * debug_improvement / debug_util_before
-debug_annual = debug_recovered * gpu_hour_cost_usd * 8760
-debug_recovered_str = f"{int(debug_recovered)}"
-debug_annual_str = f"{debug_annual / 1e6:.0f}"
+
+class DebugValueCalc:
+    """Annual dollar value recovered by raising a 1,000-GPU cluster from 60% to 84% utilization."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    debug_cluster      = 1000
+    debug_util_before  = 0.60
+    debug_util_after   = 0.84
+    _gpu_rate          = gpu_hour_cost_usd   # from fleet-orchestration-setup exports
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    debug_improvement  = debug_util_after - debug_util_before
+    debug_recovered    = debug_cluster * debug_improvement / debug_util_before
+    debug_annual       = debug_recovered * _gpu_rate * 8760
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    debug_recovered_str = f"{int(debug_recovered)}"
+    debug_annual_str    = f"{debug_annual / 1e6:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+debug_recovered_str = DebugValueCalc.debug_recovered_str
+debug_annual_str    = DebugValueCalc.debug_annual_str
 ```
 
 **Quantified Impact**: After implementing tiered matching and backfill scheduling over a two-week validation period:

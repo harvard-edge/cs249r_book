@@ -3,7 +3,8 @@
 # centralizing the logic for TCO, Physics, and Performance math.
 
 import math
-from .constants import ureg, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour
+import pint
+from .constants import ureg, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour, second, byte
 
 def _ensure_unit(val, unit):
     """Helper to attach unit if value is a raw number."""
@@ -15,7 +16,7 @@ def calc_network_latency_ms(distance_km):
     """Calculates round-trip time in milliseconds."""
     d = _ensure_unit(distance_km, ureg.kilometer)
     round_trip_s = (d * 2) / SPEED_OF_LIGHT_FIBER_KM_S
-    return round_trip_s.to(ureg.millisecond).magnitude
+    return round_trip_s.m_as(ureg.millisecond)
 
 def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     """
@@ -31,7 +32,7 @@ def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
 def calc_training_time_days(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     """Calculates training duration in days."""
     duration = dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta)
-    return duration.to(ureg.day).magnitude
+    return duration.m_as(ureg.day)
 
 def calc_amdahls_speedup(p, s):
     """
@@ -47,7 +48,7 @@ def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
     b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second)
     monthly_bytes = b_s * (30 * ureg.day)
     cost = monthly_bytes * cost_per_gb
-    return cost.to(ureg.dollar).magnitude
+    return cost.m_as(ureg.dollar)
 
 def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     """Calculates Total Cost of Ownership (TCO)."""
@@ -59,14 +60,14 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     total_energy = p_w * quantity * time
     power_opex = total_energy * price
     total = fleet_capex + power_opex
-    return total.to(ureg.dollar).magnitude
+    return total.m_as(ureg.dollar)
 
 def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     """Roofline bottleneck analysis."""
     compute_time = ops / device_flops
     memory_time = model_bytes / device_bw
-    t_comp_ms = compute_time.to(ureg.millisecond).magnitude
-    t_mem_ms = memory_time.to(ureg.millisecond).magnitude
+    t_comp_ms = compute_time.m_as(ureg.millisecond)
+    t_mem_ms = memory_time.m_as(ureg.millisecond)
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
     intensity = ops / model_bytes
@@ -94,14 +95,25 @@ def model_memory(params, bytes_per_param, unit=MB):
         >>> model_memory(RESNET50_PARAMS, BYTES_FP32)  # Returns ~102 (MB)
         >>> model_memory(GPT3_PARAMS, BYTES_FP16, GB)  # Returns ~350 (GB)
     """
-    # Extract magnitudes to avoid param*byte dimension issues
-    if hasattr(params, 'magnitude'):
-        param_count = params.magnitude
+    if isinstance(params, ureg.Quantity):
+        try:
+            param_count = params.to(ureg.count).magnitude
+        except pint.DimensionalityError:
+            raise pint.DimensionalityError(
+                params.units, ureg.count,
+                extra_msg=f" in model_memory() — params must be in param/count units, got {params.units}"
+            )
     else:
         param_count = params
 
-    if hasattr(bytes_per_param, 'magnitude'):
-        bpp = bytes_per_param.magnitude
+    if isinstance(bytes_per_param, ureg.Quantity):
+        try:
+            bpp = bytes_per_param.to(ureg.byte).magnitude
+        except pint.DimensionalityError:
+            raise pint.DimensionalityError(
+                bytes_per_param.units, ureg.byte,
+                extra_msg=f" in model_memory() — bytes_per_param must be byte units, got {bytes_per_param.units}"
+            )
     else:
         bpp = bytes_per_param
 
@@ -128,12 +140,15 @@ def calc_ring_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
         latency_s: Per-message startup latency in seconds (α)
 
     Returns:
-        Estimated AllReduce time in seconds
+        Quantity[second]: Estimated AllReduce time
     """
+    msg = _ensure_unit(message_bytes, ureg.byte)
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
+    lat = _ensure_unit(latency_s, ureg.second)
     n = n_gpus
-    bw_term = 2 * (n - 1) / n * message_bytes / bandwidth_bytes_s
-    lat_term = 2 * (n - 1) * latency_s
-    return bw_term + lat_term
+    bw_term = 2 * (n - 1) / n * msg / bw
+    lat_term = 2 * (n - 1) * lat
+    return (bw_term + lat_term).to(ureg.second)
 
 
 def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
@@ -149,12 +164,15 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
         latency_s: Per-message startup latency in seconds (α)
 
     Returns:
-        Estimated AllReduce time in seconds
+        Quantity[second]: Estimated AllReduce time
     """
+    msg = _ensure_unit(message_bytes, ureg.byte)
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
+    lat = _ensure_unit(latency_s, ureg.second)
     log_n = math.log2(n_gpus)
-    bw_term = 2 * log_n * message_bytes / bandwidth_bytes_s
-    lat_term = 2 * log_n * latency_s
-    return bw_term + lat_term
+    bw_term = 2 * log_n * msg / bw
+    lat_term = 2 * log_n * lat
+    return (bw_term + lat_term).to(ureg.second)
 
 
 def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
@@ -168,9 +186,12 @@ def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
         mtbf_s: Mean Time Between Failures in seconds (M)
 
     Returns:
-        Optimal checkpoint interval in seconds
+        Quantity[second]: Optimal checkpoint interval
     """
-    return math.sqrt(2 * checkpoint_cost_s * mtbf_s)
+    delta = _ensure_unit(checkpoint_cost_s, ureg.second)
+    mtbf  = _ensure_unit(mtbf_s, ureg.second)
+    seconds = math.sqrt(2 * delta.m_as(ureg.second) * mtbf.m_as(ureg.second))
+    return seconds * ureg.second
 
 
 def calc_mtbf_cluster(component_mtbf_hours, n_components):
@@ -180,13 +201,14 @@ def calc_mtbf_cluster(component_mtbf_hours, n_components):
     MTBF_cluster = MTBF_component / N
 
     Args:
-        component_mtbf_hours: Single component MTBF in hours
+        component_mtbf_hours: Single component MTBF in hours (or Quantity[hour])
         n_components: Number of identical components
 
     Returns:
-        Cluster MTBF in hours
+        Quantity[hour]: Cluster MTBF
     """
-    return component_mtbf_hours / n_components
+    mtbf = _ensure_unit(component_mtbf_hours, ureg.hour)
+    return (mtbf / n_components).to(ureg.hour)
 
 
 def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
@@ -197,24 +219,25 @@ def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
     1/MTBF_node = n_gpu/MTBF_gpu + n_nic/MTBF_nic + n_psu/MTBF_psu + ...
 
     Args:
-        gpu_mtbf_h: GPU MTTF in hours
+        gpu_mtbf_h: GPU MTTF in hours (or Quantity[hour])
         n_gpus: GPUs per node
-        nic_mtbf_h: NIC MTTF in hours
+        nic_mtbf_h: NIC MTTF in hours (or Quantity[hour])
         n_nics: NICs per node
-        psu_mtbf_h: PSU MTTF in hours
+        psu_mtbf_h: PSU MTTF in hours (or Quantity[hour])
         n_psus: PSUs per node
         other_mtbf_h: Optional other component MTTF
         n_other: Count of other components
 
     Returns:
-        Node MTBF in hours
+        Quantity[hour]: Node MTBF
     """
-    failure_rate = (n_gpus / gpu_mtbf_h +
-                    n_nics / nic_mtbf_h +
-                    n_psus / psu_mtbf_h)
-    if other_mtbf_h and n_other > 0:
-        failure_rate += n_other / other_mtbf_h
-    return 1.0 / failure_rate
+    gpu = _ensure_unit(gpu_mtbf_h, ureg.hour)
+    nic = _ensure_unit(nic_mtbf_h, ureg.hour)
+    psu = _ensure_unit(psu_mtbf_h, ureg.hour)
+    rate = n_gpus / gpu + n_nics / nic + n_psus / psu
+    if other_mtbf_h is not None and n_other > 0:
+        rate += n_other / _ensure_unit(other_mtbf_h, ureg.hour)
+    return (1.0 / rate).to(ureg.hour)
 
 
 def calc_pipeline_bubble(n_stages, n_microbatches):
@@ -247,9 +270,10 @@ def calc_checkpoint_size(n_params, bytes_per_param=16):
         bytes_per_param: Bytes per parameter (default 16 for mixed-precision Adam)
 
     Returns:
-        Checkpoint size in bytes
+        Quantity[byte]: Checkpoint size
     """
-    return n_params * bytes_per_param
+    bpp = _ensure_unit(bytes_per_param, ureg.byte)
+    return (n_params * bpp).to(ureg.byte)
 
 
 def calc_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
@@ -270,9 +294,10 @@ def calc_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
         bytes_per_elem: Bytes per element (default 2 for FP16/BF16)
 
     Returns:
-        KV cache size in bytes
+        Quantity[byte]: KV cache size
     """
-    return 2 * n_layers * n_heads * head_dim * seq_len * batch_size * bytes_per_elem
+    bpe = _ensure_unit(bytes_per_elem, ureg.byte)
+    return (2 * n_layers * n_heads * head_dim * seq_len * batch_size * bpe).to(ureg.byte)
 
 
 def calc_availability_stacked(single_availability, n_replicas):
@@ -291,20 +316,35 @@ def calc_availability_stacked(single_availability, n_replicas):
     return 1.0 - (1.0 - single_availability) ** n_replicas
 
 
-def calc_failure_probability(mtbf_s, job_duration_s):
+def calc_failure_probability(mtbf, job_duration):
     """
     Probability of at least one failure during a job.
 
     P(≥1 failure) = 1 - e^(-T / MTBF)
 
+    If both are Quantities: units auto-reconciled (pass hours or seconds freely).
+    If both are raw numbers: caller must use consistent units.
+    Mixed types (one Quantity, one raw) raise TypeError — ambiguous unit intent.
+
     Args:
-        mtbf_s: Mean Time Between Failures (seconds or hours — be consistent)
-        job_duration_s: Job duration (same units as mtbf_s)
+        mtbf: Mean Time Between Failures (Quantity or raw number)
+        job_duration: Job duration (Quantity or raw number; same units if raw)
 
     Returns:
         Probability of at least one failure (0.0 to 1.0)
     """
-    return 1.0 - math.exp(-job_duration_s / mtbf_s)
+    both_qty = isinstance(mtbf, ureg.Quantity) and isinstance(job_duration, ureg.Quantity)
+    either_qty = isinstance(mtbf, ureg.Quantity) or isinstance(job_duration, ureg.Quantity)
+    if either_qty and not both_qty:
+        raise TypeError(
+            "calc_failure_probability: both arguments must be Quantities or both raw numbers. "
+            "Mixed types are ambiguous — attach units to the raw number first."
+        )
+    if both_qty:
+        ratio = job_duration.to(ureg.second).magnitude / mtbf.to(ureg.second).magnitude
+    else:
+        ratio = job_duration / mtbf   # raw: caller responsible for consistent units
+    return 1.0 - math.exp(-ratio)
 
 
 def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
@@ -314,13 +354,13 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     Effective = Peak × MFU × η_scaling × Goodput/Rawput
 
     Args:
-        peak_flops: Aggregate peak FLOPS of the cluster
+        peak_flops: Aggregate peak FLOPS of the cluster (Quantity or raw)
         mfu: Model FLOPS Utilization (0.0 to 1.0)
         scaling_eff: Scaling efficiency η (0.0 to 1.0)
         goodput_ratio: Goodput / Rawput ratio (0.0 to 1.0)
 
     Returns:
-        Effective FLOPS (same units as peak_flops)
+        Effective FLOPS in same units as peak_flops
     """
-    return peak_flops * mfu * scaling_eff * goodput_ratio
-
+    pf = _ensure_unit(peak_flops, ureg.flop / ureg.second)
+    return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)

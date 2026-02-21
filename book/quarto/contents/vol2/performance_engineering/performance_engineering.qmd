@@ -74,14 +74,24 @@ Performance Engineering is the **Optimization Layer** of the Fleet Stack. While 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PERFORMANCE ENGINEERING SYSTEM CONSTANTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide setup for Performance Engineering.
+# │ Context: Chapter-wide setup for @sec-performance-engineering
 # │
-# │ Goal: Provide foundational hardware specs for roofline and bottleneck analysis.
-# │ Show: H100, A100, B200 specs for memory bandwidth, compute, and capacity.
-# │ How: Pull from mlsys.constants, format for inline use.
+# │ Goal: Establish H100/A100/B200 hardware specs as shared reference for roofline,
+# │       bottleneck analysis, and SRAM-vs-HBM energy ratio throughout the chapter.
+# │ Show: H100 ~3.35 TB/s BW, ~989 TFLOPs FP16, ~1979 TFLOPs FP8; ridge points
+# │       ~295 FP16 and ~590 FP8 FLOP/byte; energy ratio ~1280x DRAM/SRAM.
+# │ How: Pull from mlsys.constants; compute ridge points as FLOPS/BW ratio
+# │       (TFLOPs/TB → FLOP/byte via .m_as(flop/byte)).
 # │
-# │ Imports: mlsys.constants (H100_*, A100_*, B200_*, ENERGY_*)
-# │ Exports: h100_*, a100_*, b200_* formatted strings
+# │ Imports: mlsys.constants (H100_MEM_BW, H100_FLOPS_FP16_TENSOR,
+# │           H100_FLOPS_FP8_TENSOR, H100_MEM_CAPACITY, H100_TDP,
+# │           A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY,
+# │           B200_FLOPS_FP8_TENSOR, B200_MEM_BW, B200_MEM_CAPACITY,
+# │           ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ)
+# │ Exports: h100_hbm_bw_str, h100_hbm_bw_gbs_str, h100_fp16_str, h100_fp8_str,
+# │          h100_mem_str, h100_tdp_str, h100_ridge_fp16_str, h100_ridge_fp8_str,
+# │          a100_hbm_bw_str, a100_hbm_bw_gbs_str, a100_fp16_str, a100_ridge_fp16_str,
+# │          b200_fp8_str, b200_hbm_bw_str, b200_mem_str, energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -122,8 +132,8 @@ class PerformanceSetup:
     energy_ratio_val = energy_dram_pj / energy_sram_pj
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(h100_hbm_bw.to(TB / second).magnitude > 3.0, "H100 HBM BW mismatch")
-    check(h100_fp16.to(TFLOPs / second).magnitude > 900, "H100 FP16 mismatch")
+    check(h100_hbm_bw.m_as(TB / second) > 3.0, "H100 HBM BW mismatch")
+    check(h100_fp16.m_as(TFLOPs / second) > 900, "H100 FP16 mismatch")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     # Exports handled below...
@@ -136,14 +146,14 @@ h100_fp16_str = fmt(PerformanceSetup.h100_fp16, "TFLOPs/s", precision=0)
 h100_fp8_str = fmt(PerformanceSetup.h100_fp8, "TFLOPs/s", precision=0)
 h100_mem_str = fmt(PerformanceSetup.h100_mem, "GiB", precision=0)
 h100_tdp_str = fmt(PerformanceSetup.h100_tdp, "W", precision=0)
-h100_ridge_fp16_str = f"{PerformanceSetup.h100_ridge_fp16.magnitude:.0f}"
-h100_ridge_fp8_str = f"{PerformanceSetup.h100_ridge_fp8.magnitude:.0f}"
+h100_ridge_fp16_str = f"{PerformanceSetup.h100_ridge_fp16.m_as(flop/byte):.0f}"
+h100_ridge_fp8_str = f"{PerformanceSetup.h100_ridge_fp8.m_as(flop/byte):.0f}"
 
 # A100
 a100_hbm_bw_str = fmt(PerformanceSetup.a100_hbm_bw, "TB/s", precision=0)
 a100_hbm_bw_gbs_str = fmt(PerformanceSetup.a100_hbm_bw, "GB/s", precision=0)
 a100_fp16_str = fmt(PerformanceSetup.a100_fp16, "TFLOPs/s", precision=0)
-a100_ridge_fp16_str = f"{PerformanceSetup.a100_ridge_fp16.magnitude:.0f}"
+a100_ridge_fp16_str = f"{PerformanceSetup.a100_ridge_fp16.m_as(flop/byte):.0f}"
 
 # B200
 b200_fp8_str = fmt(PerformanceSetup.b200_fp8, "TFLOPs/s", precision=0)
@@ -151,7 +161,7 @@ b200_hbm_bw_str = fmt(PerformanceSetup.b200_hbm_bw, "TB/s", precision=0)
 b200_mem_str = fmt(PerformanceSetup.b200_mem, "GiB", precision=0)
 
 # Energy ratio
-energy_ratio_str = f"{PerformanceSetup.energy_ratio_val.magnitude:.0f}"
+energy_ratio_str = f"{PerformanceSetup.energy_ratio_val.m_as(''):.0f}"
 ```
 
 ## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}
@@ -428,35 +438,47 @@ $$
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ ROOFLINE RIDGE POINT COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Roofline Model section — ridge point comparison across GPUs
+# │ Context: @sec-performance-engineering-roofline — ridge point prose comparison
 # │
-# │ Goal: Show how the ridge point shifts across hardware generations.
-# │ Show: A100 vs H100 vs H100-FP8 ridge points.
-# │ How: Compute P/B for each configuration.
+# │ Goal: Verify and expose ridge-point values (P/B = FLOPS/BW in FLOP/byte) for
+# │       A100 FP16 (~153), H100 FP16 (~295), and H100 FP8 (~591) to explain why
+# │       each new generation makes more workloads memory-bound.
+# │ Show: ~153 FLOP/byte (A100), ~295 (H100 FP16), ~591 (H100 FP8) — inline prose.
+# │ How: Extract pre-computed ridge quantities from PerformanceSetup; convert to
+# │       FLOP/byte using .m_as(flop/byte); guard ordering with check().
 # │
-# │ Imports: mlsys.constants (A100_*, H100_*)
-# │ Exports: ridge point strings for prose
+# │ Imports: (none — values from perf-eng-setup cell), mlsys.formatting (check)
+# │ Exports: a100_ridge_str, h100_fp16_ridge_str, h100_fp8_ridge_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-# Already computed in setup cell
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class RooflineRidgeCalc:
+    """Ridge point comparison across A100/H100 FP16/FP8."""
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
-# Ridge points already computed; verify
-a100_ridge_val = PerformanceSetup.a100_ridge_fp16.magnitude
-h100_ridge_fp16_val = PerformanceSetup.h100_ridge_fp16.magnitude
-h100_ridge_fp8_val = PerformanceSetup.h100_ridge_fp8.magnitude
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Already computed in setup cell
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(h100_ridge_fp16_val > a100_ridge_val,
-      "H100 FP16 ridge should exceed A100 FP16 ridge")
-check(h100_ridge_fp8_val > h100_ridge_fp16_val,
-      "H100 FP8 ridge should exceed H100 FP16 ridge")
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Ridge points already computed; verify
+    a100_ridge_val = PerformanceSetup.a100_ridge_fp16.m_as(flop/byte)
+    h100_ridge_fp16_val = PerformanceSetup.h100_ridge_fp16.m_as(flop/byte)
+    h100_ridge_fp8_val = PerformanceSetup.h100_ridge_fp8.m_as(flop/byte)
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-a100_ridge_str = f"{a100_ridge_val:.0f}"
-h100_fp16_ridge_str = f"{h100_ridge_fp16_val:.0f}"
-h100_fp8_ridge_str = f"{h100_ridge_fp8_val:.0f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(h100_ridge_fp16_val > a100_ridge_val,
+          "H100 FP16 ridge should exceed A100 FP16 ridge")
+    check(h100_ridge_fp8_val > h100_ridge_fp16_val,
+          "H100 FP8 ridge should exceed H100 FP16 ridge")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    a100_ridge_str = f"{a100_ridge_val:.0f}"
+    h100_fp16_ridge_str = f"{h100_ridge_fp16_val:.0f}"
+    h100_fp8_ridge_str = f"{h100_ridge_fp8_val:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_ridge_str = RooflineRidgeCalc.a100_ridge_str
+h100_fp16_ridge_str = RooflineRidgeCalc.h100_fp16_ridge_str
+h100_fp8_ridge_str = RooflineRidgeCalc.h100_fp8_ridge_str
 ```
 
 This means that any operation performing fewer than `{python} h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} h100_fp8_str` TFLOPS while bandwidth remains `{python} h100_hbm_bw_str` TB/s, the ridge point rises to approximately `{python} h100_fp8_ridge_str` FLOP/byte. The A100, with `{python} a100_fp16_str` TFLOPS and `{python} a100_hbm_bw_str` TB/s, has a lower ridge point of approximately `{python} a100_ridge_str` FLOP/byte at FP16. Each hardware generation increases compute faster than bandwidth, pushing the ridge point higher and making more workloads memory-bound.
@@ -555,56 +577,69 @@ Different ML operations have vastly different arithmetic intensities. Understand
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ WORKLOAD ARITHMETIC INTENSITY
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Roofline section — classify common ML ops by arithmetic intensity
+# │ Context: @sec-performance-engineering-workload-placement — classify ML ops
 # │
-# │ Goal: Compute arithmetic intensity for GEMM, attention, element-wise ops.
-# │ Show: Which ops are compute-bound vs memory-bound.
-# │ How: FLOP counts and byte counts for canonical operations.
+# │ Goal: Compute arithmetic intensity (FLOP/byte) for a 4096×4096 FP16 GEMM,
+# │       a GELU element-wise op, and LLM decode at batch=1 on a 4096-dim model
+# │       to show why inference is predominantly memory-bound.
+# │ Show: ~1365 FLOP/byte (GEMM, compute-bound), ~1.25 (GELU, memory-bound),
+# │       ~1 (LLM decode batch=1, deeply memory-bound) — inline and in table.
+# │ How: FLOP count / byte count; GEMM uses 2*M*N*K / (M*K + K*N + M*N)*bytes;
+# │       element-wise uses ~5 FLOPs per element / (load + store) bytes.
 # │
-# │ Imports: (none, standalone calculation)
-# │ Exports: intensity values for prose
+# │ Imports: (none — standalone calculation), mlsys.formatting (check)
+# │ Exports: gemm_intensity_str, elem_intensity_str, decode_intensity_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-# GEMM: C = A*B where A is MxK, B is KxN (FP16: 2 bytes/element)
-M, K, N = 4096, 4096, 4096
-bytes_per_elem = 2  # FP16
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class WorkloadIntensityCalc:
+    """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
-# Element-wise (e.g., GELU): 1 op per element, load + store
-elem_count = M * K
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # GEMM: C = A*B where A is MxK, B is KxN (FP16: 2 bytes/element)
+    M, K, N = 4096, 4096, 4096
+    bytes_per_elem = 2  # FP16
 
-# LLM decode: batch=1, read full weight matrix
-decode_batch = 1
-decode_hidden = 4096
+    # Element-wise (e.g., GELU): 1 op per element, load + store
+    elem_count = M * K
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
+    # LLM decode: batch=1, read full weight matrix
+    decode_batch = 1
+    decode_hidden = 4096
 
-# GEMM: 2*M*N*K FLOPs, load A (M*K*2) + B (K*N*2) + store C (M*N*2)
-gemm_flops = 2 * M * N * K
-gemm_bytes = (M * K + K * N + M * N) * bytes_per_elem
-gemm_intensity = gemm_flops / gemm_bytes
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
 
-# Element-wise: ~5 FLOPs per element (GELU approximation), load+store
-elem_flops = 5 * elem_count
-elem_bytes = 2 * elem_count * bytes_per_elem  # load + store
-elem_intensity = elem_flops / elem_bytes
+    # GEMM: 2*M*N*K FLOPs, load A (M*K*2) + B (K*N*2) + store C (M*N*2)
+    gemm_flops = 2 * M * N * K
+    gemm_bytes = (M * K + K * N + M * N) * bytes_per_elem
+    gemm_intensity = gemm_flops / gemm_bytes
 
-# LLM decode step: batch=1, weight matrix is hidden*hidden
-decode_flops = 2 * decode_batch * decode_hidden * decode_hidden
-decode_weight_bytes = decode_hidden * decode_hidden * bytes_per_elem
-decode_activation_bytes = decode_batch * decode_hidden * bytes_per_elem
-decode_bytes = decode_weight_bytes + decode_activation_bytes
-decode_intensity = decode_flops / decode_bytes
+    # Element-wise: ~5 FLOPs per element (GELU approximation), load+store
+    elem_flops = 5 * elem_count
+    elem_bytes = 2 * elem_count * bytes_per_elem  # load + store
+    elem_intensity = elem_flops / elem_bytes
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity}")
-check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity}")
-check(decode_intensity < 5, f"Decode should be memory-bound, got {decode_intensity}")
+    # LLM decode step: batch=1, weight matrix is hidden*hidden
+    decode_flops = 2 * decode_batch * decode_hidden * decode_hidden
+    decode_weight_bytes = decode_hidden * decode_hidden * bytes_per_elem
+    decode_activation_bytes = decode_batch * decode_hidden * bytes_per_elem
+    decode_bytes = decode_weight_bytes + decode_activation_bytes
+    decode_intensity = decode_flops / decode_bytes
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-gemm_intensity_str = f"{gemm_intensity:.0f}"
-elem_intensity_str = f"{elem_intensity:.1f}"
-decode_intensity_str = f"{decode_intensity:.1f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity}")
+    check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity}")
+    check(decode_intensity < 5, f"Decode should be memory-bound, got {decode_intensity}")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gemm_intensity_str = f"{gemm_intensity:.0f}"
+    elem_intensity_str = f"{elem_intensity:.1f}"
+    decode_intensity_str = f"{decode_intensity:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gemm_intensity_str = WorkloadIntensityCalc.gemm_intensity_str
+elem_intensity_str = WorkloadIntensityCalc.elem_intensity_str
+decode_intensity_str = WorkloadIntensityCalc.decode_intensity_str
 ```
 
 Large matrix multiplications (GEMMs) are the most compute-intensive operations in ML. A square matrix multiplication of dimension 4096 $\times$ 4096 in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.
@@ -831,51 +866,64 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLASHATTENTION MEMORY SAVINGS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: FlashAttention section — quantify HBM traffic reduction
+# │ Context: @sec-performance-engineering-operator-fusion FlashAttention prose
 # │
-# │ Goal: Compare naive attention HBM traffic vs FlashAttention tiled traffic.
-# │ Show: Memory savings ratio for seq_len=8192, head_dim=128.
-# │ How: Count bytes read/written for each approach.
+# │ Goal: Quantify HBM traffic reduction from tiling attention for a 32-head,
+# │       seq_len=8192, head_dim=128, FP16 configuration to make the O(N²)→O(N)
+# │       memory savings concrete and motivate the algorithm.
+# │ Show: ~8,590 MB naive vs ~134 MB FlashAttention → ~64x HBM traffic reduction,
+# │       inline in the paragraph after FlashAttention is introduced.
+# │ How: Naive: 2*N²*heads*bytes (write+read score matrix); FA: 4*N*d*heads*bytes
+# │       (read Q,K,V + write O once); savings = naive / fa.
 # │
-# │ Imports: (none, standalone)
-# │ Exports: savings ratio string
+# │ Imports: (none — standalone calculation), mlsys.formatting (check)
+# │ Exports: naive_mb_str, flash_mb_str, savings_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-seq_len = 8192
-head_dim = 128
-num_heads = 32
-bytes_per_elem_fp16 = 2
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class FlashAttentionSavings:
+    """HBM traffic comparison: naive attention vs FlashAttention."""
 
-# SRAM block size (typical for H100)
-sram_block = 128  # tile size in sequence dimension
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    seq_len = 8192
+    head_dim = 128
+    num_heads = 32
+    bytes_per_elem_fp16 = 2
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
+    # SRAM block size (typical for H100)
+    sram_block = 128  # tile size in sequence dimension
 
-# Naive attention HBM traffic per head:
-# Write S = Q*K^T (N*N), read S for softmax, write P = softmax(S), read P for P*V
-# Approximately: 4 * N^2 * bytes (read Q, K for GEMM; write S; read S; write P; read P, V)
-# Simplified: dominant term is materializing NxN matrix
-naive_attn_bytes_per_head = 2 * seq_len * seq_len * bytes_per_elem_fp16  # write + read S
-naive_attn_bytes_total = naive_attn_bytes_per_head * num_heads
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
 
-# FlashAttention HBM traffic per head:
-# Read Q, K, V once (3 * N * d * bytes), write O once (N * d * bytes)
-# No NxN materialization
-flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem_fp16
-flash_attn_bytes_total = flash_attn_bytes_per_head * num_heads
+    # Naive attention HBM traffic per head:
+    # Write S = Q*K^T (N*N), read S for softmax, write P = softmax(S), read P for P*V
+    # Approximately: 4 * N^2 * bytes (read Q, K for GEMM; write S; read S; write P; read P, V)
+    # Simplified: dominant term is materializing NxN matrix
+    naive_attn_bytes_per_head = 2 * seq_len * seq_len * bytes_per_elem_fp16  # write + read S
+    naive_attn_bytes_total = naive_attn_bytes_per_head * num_heads
 
-# Savings ratio
-savings_ratio = naive_attn_bytes_total / flash_attn_bytes_total
+    # FlashAttention HBM traffic per head:
+    # Read Q, K, V once (3 * N * d * bytes), write O once (N * d * bytes)
+    # No NxN materialization
+    flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem_fp16
+    flash_attn_bytes_total = flash_attn_bytes_per_head * num_heads
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(savings_ratio > 10,
-      f"FlashAttention should save >10x HBM traffic, got {savings_ratio:.1f}x")
+    # Savings ratio
+    savings_ratio = naive_attn_bytes_total / flash_attn_bytes_total
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-naive_mb_str = f"{naive_attn_bytes_total / 1e6:.0f}"
-flash_mb_str = f"{flash_attn_bytes_total / 1e6:.0f}"
-savings_str = f"{savings_ratio:.0f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(savings_ratio > 10,
+          f"FlashAttention should save >10x HBM traffic, got {savings_ratio:.1f}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    naive_mb_str = f"{naive_attn_bytes_total / 1e6:.0f}"
+    flash_mb_str = f"{flash_attn_bytes_total / 1e6:.0f}"
+    savings_str = f"{savings_ratio:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+naive_mb_str = FlashAttentionSavings.naive_mb_str
+flash_mb_str = FlashAttentionSavings.flash_mb_str
+savings_str = FlashAttentionSavings.savings_str
 ```
 
 FlashAttention, introduced by Dao et al. (2022), reformulates attention as a **tiled** computation. Instead of materializing the full $N \times N$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads a block of $Q$ rows and iterates over blocks of $K$ and $V$ columns, computing partial attention scores and maintaining running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
@@ -1094,43 +1142,58 @@ During autoregressive generation, the Key-Value (KV) cache stores the key and va
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ KV CACHE MEMORY CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: KV Cache Compression section
+# │ Context: @sec-performance-engineering-kv-cache KV cache compression prose
 # │
-# │ Goal: Compute KV cache size for a 70B model and show INT4 savings.
-# │ Show: KV cache in FP16 vs INT4, and freed memory as extra batch capacity.
-# │ How: 2 * num_layers * num_heads * head_dim * seq_len * bytes_per_elem.
+# │ Goal: Compute FP16 and INT4 KV cache footprint for a 70B MHA model (80 layers,
+# │       64 KV heads, head_dim=128, seq_len=4096) to quantify the memory pressure
+# │       that motivates KV cache quantization and GQA.
+# │ Show: ~84.9 GB FP16 vs ~10.6 GB INT4 → 8x compression, freeing ~74 GB for
+# │       larger batch sizes — inline in KV Cache Compression section.
+# │ How: 2 * layers * heads * head_dim * seq_len * bytes_per_elem; compression
+# │       from FP16 (2 bytes) to INT4 (0.5 bytes) = 4x reduction.
 # │
-# │ Imports: (none, standalone)
-# │ Exports: kv cache size strings
+# │ Imports: (none — standalone calculation), mlsys.formatting (check)
+# │ Exports: kv_fp16_gb_str, kv_int4_gb_str, kv_savings_gb_str, kv_compression_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-kv_layers = 80
-kv_heads = 64     # total KV heads (could be GQA, but assume MHA for max)
-kv_head_dim = 128
-kv_seq_len = 4096
-kv_bytes_fp16 = 2
-kv_bytes_int4 = 0.5
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class KVCacheCalc:
+    """KV cache memory footprint: FP16 vs INT4 for a 70B MHA model."""
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
-# KV cache = 2 (key+value) * layers * heads * head_dim * seq_len * bytes
-kv_fp16_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_fp16
-kv_int4_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_int4
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    kv_layers = 80
+    kv_heads = 64     # total KV heads (could be GQA, but assume MHA for max)
+    kv_head_dim = 128
+    kv_seq_len = 4096
+    kv_bytes_fp16 = 2
+    kv_bytes_int4 = 0.5
 
-kv_fp16_gb = kv_fp16_bytes / 1e9
-kv_int4_gb = kv_int4_bytes / 1e9
-kv_savings_gb = kv_fp16_gb - kv_int4_gb
-kv_compression = kv_fp16_gb / kv_int4_gb
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # KV cache = 2 (key+value) * layers * heads * head_dim * seq_len * bytes
+    kv_fp16_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_fp16
+    kv_int4_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_int4
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(kv_fp16_gb > 5, f"KV cache should be substantial, got {kv_fp16_gb:.1f} GB")
-check(kv_compression > 3, f"INT4 should give >3x compression, got {kv_compression:.1f}x")
+    kv_fp16_gb = kv_fp16_bytes / 1e9
+    kv_int4_gb = kv_int4_bytes / 1e9
+    kv_savings_gb = kv_fp16_gb - kv_int4_gb
+    kv_compression = kv_fp16_gb / kv_int4_gb
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-kv_fp16_gb_str = f"{kv_fp16_gb:.1f}"
-kv_int4_gb_str = f"{kv_int4_gb:.1f}"
-kv_savings_gb_str = f"{kv_savings_gb:.1f}"
-kv_compression_str = f"{kv_compression:.0f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(kv_fp16_gb > 5, f"KV cache should be substantial, got {kv_fp16_gb:.1f} GB")
+    check(kv_compression > 3, f"INT4 should give >3x compression, got {kv_compression:.1f}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    kv_fp16_gb_str = f"{kv_fp16_gb:.1f}"
+    kv_int4_gb_str = f"{kv_int4_gb:.1f}"
+    kv_savings_gb_str = f"{kv_savings_gb:.1f}"
+    kv_compression_str = f"{kv_compression:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+kv_fp16_gb = KVCacheCalc.kv_fp16_gb
+kv_fp16_gb_str = KVCacheCalc.kv_fp16_gb_str
+kv_int4_gb_str = KVCacheCalc.kv_int4_gb_str
+kv_savings_gb_str = KVCacheCalc.kv_savings_gb_str
+kv_compression_str = KVCacheCalc.kv_compression_str
 ```
 
 $$
@@ -1384,66 +1447,78 @@ The rejection sampling scheme works as follows. Let $p(x)$ be the target model's
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ SPECULATIVE DECODING SPEEDUP
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Speculative Decoding section
+# │ Context: @sec-performance-engineering-speculative-speedup speedup analysis prose
 # │
-# │ Goal: Compute expected speedup for different acceptance rates.
-# │ Show: How acceptance probability and draft length affect throughput.
-# │ How: E[accepted tokens] = sum of geometric probabilities.
+# │ Goal: Compute expected latency speedup from speculative decoding at K=5 draft
+# │       tokens with a 20x-faster draft model, across three acceptance rates
+# │       (α=0.9 high, 0.7 medium, 0.5 low), to show the α-sensitivity of the gain.
+# │ Show: ~3.5x (α=0.9), ~2.2x (α=0.7), ~1.4x (α=0.5) — inline speedup bullets
+# │       in @sec-performance-engineering-speculative-speedup.
+# │ How: E[accepted tokens] = Σ αⁱ for i in 0..K (geometric sum); speedup =
+# │       (E[tokens] * t_target) / (t_draft_total + t_target).
 # │
-# │ Imports: (none, standalone)
-# │ Exports: speedup strings for different scenarios
+# │ Imports: (none — standalone calculation), mlsys.formatting (check)
+# │ Exports: sp_high_str, sp_med_str, sp_low_str, et_high_str, et_med_str, et_low_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-alpha_high = 0.9    # acceptance rate for "easy" text (continuation, common patterns)
-alpha_med = 0.7     # medium-difficulty text
-alpha_low = 0.5     # "hard" text (reasoning, code)
-K = 5               # draft length
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class SpeculativeSpeedup:
+    """Speculative decoding latency speedup across acceptance rates."""
 
-# Target model: time for 1 forward pass
-t_target = 1.0      # normalized
-# Draft model: time for K drafts
-t_draft_per_token = 0.05  # draft is ~20x faster
-t_draft_total = t_draft_per_token * K  # 0.25
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    alpha_high = 0.9    # acceptance rate for "easy" text (continuation, common patterns)
+    alpha_med = 0.7     # medium-difficulty text
+    alpha_low = 0.5     # "hard" text (reasoning, code)
+    K = 5               # draft length
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
-# Expected tokens per speculation round: 1 + sum(alpha^i for i=1..K)
-# = (1 - alpha^(K+1)) / (1 - alpha) for geometric distribution
+    # Target model: time for 1 forward pass
+    t_target = 1.0      # normalized
+    # Draft model: time for K drafts
+    t_draft_per_token = 0.05  # draft is ~20x faster
+    t_draft_total = t_draft_per_token * K  # 0.25
 
-def expected_tokens(alpha, k):
-    """Expected accepted tokens per round."""
-    # Sum of alpha^0, alpha^1, ..., alpha^k (we always get at least 1 from correction)
-    total = sum(alpha**i for i in range(k + 1))
-    return total
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Expected tokens per speculation round: 1 + sum(alpha^i for i=1..K)
+    # = (1 - alpha^(K+1)) / (1 - alpha) for geometric distribution
 
-def speedup(alpha, k, t_target_norm, t_draft_total_norm):
-    """Speedup over standard autoregressive."""
-    et = expected_tokens(alpha, k)
-    # Time per round = draft time + 1 target verify
-    time_per_round = t_draft_total_norm + t_target_norm
-    # Baseline: et tokens * t_target each
-    baseline_time = et * t_target_norm
-    return baseline_time / time_per_round
+    def _expected_tokens(alpha, k):
+        """Expected accepted tokens per round."""
+        return sum(alpha**i for i in range(k + 1))
 
-sp_high = speedup(alpha_high, K, t_target, t_draft_total)
-sp_med = speedup(alpha_med, K, t_target, t_draft_total)
-sp_low = speedup(alpha_low, K, t_target, t_draft_total)
+    def _speedup(alpha, k, t_target_norm, t_draft_total_norm):
+        """Speedup over standard autoregressive."""
+        et = sum(alpha**i for i in range(k + 1))
+        time_per_round = t_draft_total_norm + t_target_norm
+        baseline_time = et * t_target_norm
+        return baseline_time / time_per_round
 
-et_high = expected_tokens(alpha_high, K)
-et_med = expected_tokens(alpha_med, K)
-et_low = expected_tokens(alpha_low, K)
+    sp_high = _speedup(alpha_high, K, t_target, t_draft_total)
+    sp_med = _speedup(alpha_med, K, t_target, t_draft_total)
+    sp_low = _speedup(alpha_low, K, t_target, t_draft_total)
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(sp_high > 2.0, f"High acceptance speedup should be >2x, got {sp_high:.1f}x")
-check(sp_low > 1.0, f"Even low acceptance should give speedup, got {sp_low:.1f}x")
+    et_high = _expected_tokens(alpha_high, K)
+    et_med = _expected_tokens(alpha_med, K)
+    et_low = _expected_tokens(alpha_low, K)
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-sp_high_str = f"{sp_high:.1f}"
-sp_med_str = f"{sp_med:.1f}"
-sp_low_str = f"{sp_low:.1f}"
-et_high_str = f"{et_high:.1f}"
-et_med_str = f"{et_med:.1f}"
-et_low_str = f"{et_low:.1f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(sp_high > 2.0, f"High acceptance speedup should be >2x, got {sp_high:.1f}x")
+    check(sp_low > 1.0, f"Even low acceptance should give speedup, got {sp_low:.1f}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    sp_high_str = f"{sp_high:.1f}"
+    sp_med_str = f"{sp_med:.1f}"
+    sp_low_str = f"{sp_low:.1f}"
+    et_high_str = f"{et_high:.1f}"
+    et_med_str = f"{et_med:.1f}"
+    et_low_str = f"{et_low:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+sp_high_str = SpeculativeSpeedup.sp_high_str
+sp_med_str = SpeculativeSpeedup.sp_med_str
+sp_low_str = SpeculativeSpeedup.sp_low_str
+et_high_str = SpeculativeSpeedup.et_high_str
+et_med_str = SpeculativeSpeedup.et_med_str
+et_low_str = SpeculativeSpeedup.et_low_str
 ```
 
 ### Speedup Analysis {#sec-performance-engineering-speculative-speedup}
@@ -1577,48 +1652,62 @@ Several architectural innovations in DeepSeek-V3 address the system challenges d
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MOE ECONOMICS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: MoE section — compare dense vs MoE inference cost
+# │ Context: @sec-performance-engineering-moe MoE performance advantages prose
 # │
-# │ Goal: Quantify memory and compute savings from sparse activation.
-# │ Show: Dense 400B vs MoE with 50B active parameters.
-# │ How: Weight memory and per-token FLOP comparison.
+# │ Goal: Quantify per-token bandwidth and compute savings of a DeepSeek-V3 MoE
+# │       (671B total, 37B active) versus a dense 400B model in FP16, to show that
+# │       sparse activation delivers dense-quality inference at 10x lower cost.
+# │ Show: 800 GB/step (dense 400B) vs ~74 GB/step (37B active) → ~11x BW reduction;
+# │       ~11x FLOP reduction per token — inline in MoE performance paragraph.
+# │ How: Per-token bandwidth = active_params * bytes_fp16; FLOPs = 2 * active_params;
+# │       ratio = dense / active for both metrics.
 # │
-# │ Imports: (none, standalone)
-# │ Exports: comparison strings
+# │ Imports: (none — standalone calculation), mlsys.formatting (check)
+# │ Exports: dense_mem_str, moe_mem_str, compute_ratio_str, bw_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-dense_params_b = 400     # Dense model: 400B parameters
-moe_total_params_b = 671 # DeepSeek-V3 total
-moe_active_params_b = 37 # Active per token
-bytes_fp16 = 2
-bytes_int4 = 0.5
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MoEEconomics:
+    """MoE vs dense model bandwidth and compute comparison."""
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    dense_params_b = 400     # Dense model: 400B parameters
+    moe_total_params_b = 671 # DeepSeek-V3 total
+    moe_active_params_b = 37 # Active per token
+    bytes_fp16 = 2
+    bytes_int4 = 0.5
 
-# Memory: all parameters must be in memory (even MoE stores all experts)
-dense_mem_fp16 = dense_params_b * bytes_fp16   # 800 GB
-moe_mem_fp16 = moe_total_params_b * bytes_fp16 # 1342 GB
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
 
-# Per-token compute (FLOPs ~ 2 * active_params for forward pass)
-dense_flops_per_token = 2 * dense_params_b     # 800B FLOPs
-moe_flops_per_token = 2 * moe_active_params_b  # 74B FLOPs
-compute_ratio = dense_flops_per_token / moe_flops_per_token
+    # Memory: all parameters must be in memory (even MoE stores all experts)
+    dense_mem_fp16 = dense_params_b * bytes_fp16   # 800 GB
+    moe_mem_fp16 = moe_total_params_b * bytes_fp16 # 1342 GB
 
-# Memory bandwidth per decode step (batch=1): read active weights
-dense_decode_bytes = dense_params_b * bytes_fp16  # 800 GB
-moe_decode_bytes = moe_active_params_b * bytes_fp16  # 74 GB
-bw_ratio = dense_decode_bytes / moe_decode_bytes
+    # Per-token compute (FLOPs ~ 2 * active_params for forward pass)
+    dense_flops_per_token = 2 * dense_params_b     # 800B FLOPs
+    moe_flops_per_token = 2 * moe_active_params_b  # 74B FLOPs
+    compute_ratio = dense_flops_per_token / moe_flops_per_token
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(compute_ratio > 5, f"MoE should give >5x compute reduction, got {compute_ratio:.1f}x")
-check(bw_ratio > 5, f"MoE should give >5x BW reduction, got {bw_ratio:.1f}x")
+    # Memory bandwidth per decode step (batch=1): read active weights
+    dense_decode_bytes = dense_params_b * bytes_fp16  # 800 GB
+    moe_decode_bytes = moe_active_params_b * bytes_fp16  # 74 GB
+    bw_ratio = dense_decode_bytes / moe_decode_bytes
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-dense_mem_str = f"{dense_mem_fp16:.0f}"
-moe_mem_str = f"{moe_mem_fp16:.0f}"
-compute_ratio_str = f"{compute_ratio:.0f}"
-bw_ratio_str = f"{bw_ratio:.0f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(compute_ratio > 5, f"MoE should give >5x compute reduction, got {compute_ratio:.1f}x")
+    check(bw_ratio > 5, f"MoE should give >5x BW reduction, got {bw_ratio:.1f}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    dense_mem_str = f"{dense_mem_fp16:.0f}"
+    moe_mem_str = f"{moe_mem_fp16:.0f}"
+    compute_ratio_str = f"{compute_ratio:.0f}"
+    bw_ratio_str = f"{bw_ratio:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+dense_mem_str = MoEEconomics.dense_mem_str
+moe_mem_str = MoEEconomics.moe_mem_str
+compute_ratio_str = MoEEconomics.compute_ratio_str
+bw_ratio_str = MoEEconomics.bw_ratio_str
 ```
 
 The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} dense_mem_str` GB per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} bw_ratio_str` $\times$ reduction in per-token bandwidth. The compute savings are proportional: `{python} compute_ratio_str` $\times$ fewer FLOPs per token.
@@ -1797,71 +1886,91 @@ The potential benefit of communication-computation overlap depends on the relati
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ COMMUNICATION-COMPUTATION OVERLAP ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Overlap section — quantify overlap benefit for data parallelism
+# │ Context: @sec-performance-engineering-comm-comp-overlap overlap analysis prose
 # │
-# │ Goal: Compare step time with and without gradient overlap.
-# │ Show: Step time breakdown for a 7B model on 8 GPUs with NVLink.
-# │ How: Compute gradient size, AllReduce time, backward time.
+# │ Goal: Quantify training step speedup from overlapping ring-AllReduce with
+# │       backward pass for a 7B model on 8 H100 GPUs over NVLink (900 GB/s),
+# │       at 40% MFU, to show when overlap fully hides communication overhead.
+# │ Show: ~14 GB gradients; ~31 ms backward; ~31 ms AllReduce; step collapses from
+# │       ~93 ms (no overlap) to ~62 ms (with overlap) → ~1.50x speedup — inline.
+# │ How: AllReduce time = 2 * gradient_bytes / nvlink_bw; backward time =
+# │       backward_flops / (h100_tflops * MFU); overlap removes min(back, AR).
 # │
-# │ Imports: mlsys.constants (NVLINK_H100_BW, H100_FLOPS_FP16_TENSOR)
-# │ Exports: timing strings for prose
+# │ Imports: (none — uses inline constants), mlsys.formatting (check)
+# │ Exports: gradient_gb_str, allreduce_ms_str, backward_ms_str, forward_ms_str,
+# │          step_no_overlap_ms_str, step_overlap_ms_str, overlap_speedup_str,
+# │          overlap_status
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
-model_params = 7e9           # 7B parameter model
-bytes_per_param_fp16 = 2     # FP16 gradients
-num_gpus = 8
-nvlink_bw = 900e9            # H100 NVLink: 900 GB/s bidirectional
-ring_allreduce_factor = 2    # Ring AllReduce: 2*(N-1)/N ≈ 2 for large N
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class OverlapCalc:
+    """Communication-computation overlap speedup for 7B model on 8 H100s."""
 
-# Backward pass compute: ~2 * forward FLOPs (gradient computation)
-# Forward FLOPs ≈ 2 * params * seq_len * batch_per_gpu
-# Simplified: backward ≈ 4 * params * tokens_per_gpu
-tokens_per_gpu = 2048        # seq_len * micro_batch
-forward_flops = 2 * model_params * tokens_per_gpu
-backward_flops = 2 * forward_flops  # backward is ~2x forward
-h100_fp16_tflops = 989e12    # Tensor core TFLOPS
-mfu = 0.40                   # Realistic MFU
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    model_params = 7e9           # 7B parameter model
+    bytes_per_param_fp16 = 2     # FP16 gradients
+    num_gpus = 8
+    nvlink_bw = 900e9            # H100 NVLink: 900 GB/s bidirectional
+    ring_allreduce_factor = 2    # Ring AllReduce: 2*(N-1)/N ≈ 2 for large N
 
-# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
+    # Backward pass compute: ~2 * forward FLOPs (gradient computation)
+    # Forward FLOPs ≈ 2 * params * seq_len * batch_per_gpu
+    # Simplified: backward ≈ 4 * params * tokens_per_gpu
+    tokens_per_gpu = 2048        # seq_len * micro_batch
+    forward_flops = 2 * model_params * tokens_per_gpu
+    backward_flops = 2 * forward_flops  # backward is ~2x forward
+    h100_fp16_tflops = 989e12    # Tensor core TFLOPS
+    mfu = 0.40                   # Realistic MFU
 
-# Gradient size
-gradient_bytes = model_params * bytes_per_param_fp16
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
 
-# AllReduce time (ring): 2*(N-1)/N * gradient_bytes / bandwidth
-allreduce_time_s = ring_allreduce_factor * gradient_bytes / nvlink_bw
+    # Gradient size
+    gradient_bytes = model_params * bytes_per_param_fp16
 
-# Backward pass compute time
-backward_time_s = backward_flops / (h100_fp16_tflops * mfu)
+    # AllReduce time (ring): 2*(N-1)/N * gradient_bytes / bandwidth
+    allreduce_time_s = ring_allreduce_factor * gradient_bytes / nvlink_bw
 
-# Forward pass compute time (roughly half of backward)
-forward_time_s = forward_flops / (h100_fp16_tflops * mfu)
+    # Backward pass compute time
+    backward_time_s = backward_flops / (h100_fp16_tflops * mfu)
 
-# Step time without overlap
-step_no_overlap = forward_time_s + backward_time_s + allreduce_time_s
+    # Forward pass compute time (roughly half of backward)
+    forward_time_s = forward_flops / (h100_fp16_tflops * mfu)
 
-# Step time with overlap
-step_with_overlap = forward_time_s + max(backward_time_s, allreduce_time_s)
+    # Step time without overlap
+    step_no_overlap = forward_time_s + backward_time_s + allreduce_time_s
 
-# Speedup
-overlap_speedup = step_no_overlap / step_with_overlap
+    # Step time with overlap
+    step_with_overlap = forward_time_s + max(backward_time_s, allreduce_time_s)
 
-# Can we fully overlap?
-can_overlap = backward_time_s > allreduce_time_s
+    # Speedup
+    overlap_speedup = step_no_overlap / step_with_overlap
 
-# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
-check(overlap_speedup > 1.0,
-      f"Overlap should provide speedup, got {overlap_speedup:.2f}x")
+    # Can we fully overlap?
+    can_overlap = backward_time_s > allreduce_time_s
 
-# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
-gradient_gb_str = f"{gradient_bytes / 1e9:.0f}"
-allreduce_ms_str = f"{allreduce_time_s * 1000:.1f}"
-backward_ms_str = f"{backward_time_s * 1000:.1f}"
-forward_ms_str = f"{forward_time_s * 1000:.1f}"
-step_no_overlap_ms_str = f"{step_no_overlap * 1000:.1f}"
-step_overlap_ms_str = f"{step_with_overlap * 1000:.1f}"
-overlap_speedup_str = f"{overlap_speedup:.2f}"
-overlap_status = "fully hidden" if can_overlap else "partially hidden"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(overlap_speedup > 1.0,
+          f"Overlap should provide speedup, got {overlap_speedup:.2f}x")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gradient_gb_str = f"{gradient_bytes / 1e9:.0f}"
+    allreduce_ms_str = f"{allreduce_time_s * 1000:.1f}"
+    backward_ms_str = f"{backward_time_s * 1000:.1f}"
+    forward_ms_str = f"{forward_time_s * 1000:.1f}"
+    step_no_overlap_ms_str = f"{step_no_overlap * 1000:.1f}"
+    step_overlap_ms_str = f"{step_with_overlap * 1000:.1f}"
+    overlap_speedup_str = f"{overlap_speedup:.2f}"
+    overlap_status = "fully hidden" if can_overlap else "partially hidden"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gradient_gb_str = OverlapCalc.gradient_gb_str
+allreduce_ms_str = OverlapCalc.allreduce_ms_str
+backward_ms_str = OverlapCalc.backward_ms_str
+forward_ms_str = OverlapCalc.forward_ms_str
+step_no_overlap_ms_str = OverlapCalc.step_no_overlap_ms_str
+step_overlap_ms_str = OverlapCalc.step_overlap_ms_str
+overlap_speedup_str = OverlapCalc.overlap_speedup_str
+overlap_status = OverlapCalc.overlap_status
 ```
 
 Consider a 7B parameter model trained on 8 H100 GPUs within a single node connected by NVLink at 900 GB/s. The gradient tensor contains `{python} gradient_gb_str` GB of FP16 values. A ring AllReduce across 8 GPUs transfers approximately $2 \times (N-1)/N \approx 2$ times this volume, taking approximately `{python} allreduce_ms_str` ms at NVLink bandwidth. The backward pass computation, at 40% Model FLOPs Utilization, takes approximately `{python} backward_ms_str` ms.

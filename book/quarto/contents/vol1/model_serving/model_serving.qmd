@@ -66,6 +66,11 @@ Training and serving demand opposite physics. Training maximizes throughput (\(T
 # │ Imports: mlsys (Hardware), mlsys.constants (units), mlsys.formatting (fmt)
 # │ Exports: v100_tflops_fp32, v100_bw, a100_bw_tbs, h100_bw_tbs, h100_mem,
 # │          h100_tdp
+# │
+# │ Note: This is a chapter-wide setup cell. h100_mem and h100_bw_tbs are used
+# │       >3400 lines away (LLM serving case study, ~lines 3493, 3593). No JIT
+# │       split is appropriate because all hardware specs share the same Digital
+# │       Twin import and are used as chapter-level constants throughout.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware
 from mlsys.constants import (
@@ -74,29 +79,37 @@ from mlsys.constants import (
 )
 from mlsys.formatting import fmt
 
-# --- Hardware Twins ---
-h_v100 = Hardware.Cloud.V100
-h_a100 = Hardware.Cloud.A100
-h_h100 = Hardware.Cloud.H100
+class GpuSpecs:
+    """Hardware specifications for V100, A100, and H100 GPUs."""
 
-# --- Outputs (formatted strings for prose) ---
-v100_tflops_fp32_value = h_v100.peak_flops_fp32.to(TFLOPs / second).magnitude
-v100_tflops_fp32 = f"{v100_tflops_fp32_value:.1f}"                         # e.g. "14.1" TFLOPS
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    h_v100 = Hardware.Cloud.V100
+    h_a100 = Hardware.Cloud.A100
+    h_h100 = Hardware.Cloud.H100
 
-v100_bw_value = h_v100.memory_bw.to(GB / second).magnitude
-v100_bw = f"{v100_bw_value:.0f}"                                           # e.g. "900" GB/s
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    v100_tflops_fp32_value = h_v100.peak_flops_fp32.m_as(TFLOPs / second)
+    v100_bw_value = h_v100.memory_bw.m_as(GB / second)
+    a100_bw_tbs_value = h_a100.memory_bw.m_as(TB / second)
+    h100_bw_tbs_value = h_h100.memory_bw.m_as(TB / second)
+    h100_mem_value = h_h100.memory_capacity.m_as(GiB)
+    h100_tdp_value = h_h100.tdp.m_as(watt)
 
-a100_bw_tbs_value = h_a100.memory_bw.to(TB / second).magnitude
-a100_bw_tbs = f"{a100_bw_tbs_value:.1f}"                                   # e.g. "2.0" TB/s
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    v100_tflops_fp32 = f"{v100_tflops_fp32_value:.1f}"                     # e.g. "14.1" TFLOPS
+    v100_bw = f"{v100_bw_value:.0f}"                                       # e.g. "900" GB/s
+    a100_bw_tbs = f"{a100_bw_tbs_value:.1f}"                               # e.g. "2.0" TB/s
+    h100_bw_tbs = f"{h100_bw_tbs_value:.2f}"                               # e.g. "3.35" TB/s
+    h100_mem = f"{h100_mem_value:.0f}"                                     # e.g. "80" GB
+    h100_tdp = f"{h100_tdp_value:.0f}"                                     # e.g. "700" W
 
-h100_bw_tbs_value = h_h100.memory_bw.to(TB / second).magnitude
-h100_bw_tbs = f"{h100_bw_tbs_value:.2f}"                                   # e.g. "3.35" TB/s
-
-h100_mem_value = h_h100.memory_capacity.to(GiB).magnitude
-h100_mem = f"{h100_mem_value:.0f}"                                         # e.g. "80" GB
-
-h100_tdp_value = h_h100.tdp.to(watt).magnitude
-h100_tdp = f"{h100_tdp_value:.0f}"                                         # e.g. "700" W
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+v100_tflops_fp32 = GpuSpecs.v100_tflops_fp32
+v100_bw = GpuSpecs.v100_bw
+a100_bw_tbs = GpuSpecs.a100_bw_tbs
+h100_bw_tbs = GpuSpecs.h100_bw_tbs
+h100_mem = GpuSpecs.h100_mem
+h100_tdp = GpuSpecs.h100_tdp
 ```
 
 ## Serving Paradigm {#sec-model-serving-serving-paradigm-9634}
@@ -116,6 +129,20 @@ Applying the **D·A·M taxonomy** reveals how deployment inverts your engineerin
 #| echo: false
 #| fig-cap: "**The Tail Latency Explosion**: Request Latency vs. System Utilization ($\\rho$). While mean latency (Blue) remains moderate, tail latency (Red, p99) explodes once utilization passes the 'Knee' at ~70%. This uses a simple M/M/1 approximation (p99 ≈ 4.6× mean), so the curve is illustrative rather than workload-specific."
 #| fig-alt: "Line plot showing latency growing with utilization. Blue line (Mean) rises gradually then steeply. Red line (Tail, p99) curves upward sharply at 70% utilization. Shaded regions indicate 'Safe Zone' and 'Danger Zone'."
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TAIL LATENCY EXPLOSION FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-tail-latency-explosion — illustrates why tail latency diverges
+# │          from mean latency as system utilization approaches 100%
+# │
+# │ Goal: Visually demonstrate the nonlinear explosion of p99 latency near
+# │       saturation using an M/M/1 queueing model approximation.
+# │ Show: Mean vs. p99 latency curves, with Safe Zone and Danger Zone annotations.
+# │ How: Compute mean = 1/(1-ρ) and p99 ≈ 4.6× mean; plot on shared axes.
+# │
+# │ Imports: numpy (np), mlsys.viz (viz)
+# │ Exports: (figure only, no prose variables)
+# └─────────────────────────────────────────────────────────────────────────────
 
 import numpy as np
 from mlsys import viz
@@ -170,19 +197,29 @@ The consequences of ignoring this inversion become apparent during a *traffic sp
 # │          bf_spike_factor_str, bf_collapse_latency_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (traffic spike scenario) ---
-bf_latency_ms_value = 50              # normal operation latency (ms)
-bf_qps_normal_value = 1000            # normal queries per second
-bf_qps_spike_value = 10000            # Black Friday peak QPS
-bf_spike_factor_value = 10            # spike multiplier (10x)
-bf_collapse_latency_s_value = 10      # latency during collapse (seconds)
+class BlackFridayCalc:
+    """Models the nonlinear failure mode of serving systems under a 10× traffic spike."""
 
-# --- Outputs (formatted strings for prose) ---
-bf_latency_ms_str = f"{bf_latency_ms_value}"              # e.g. "50" ms
-bf_qps_normal_str = f"{bf_qps_normal_value:,}"            # e.g. "1,000" QPS
-bf_qps_spike_str = f"{bf_qps_spike_value:,}"              # e.g. "10,000" QPS
-bf_spike_factor_str = f"{bf_spike_factor_value}"          # e.g. "10" x
-bf_collapse_latency_s_str = f"{bf_collapse_latency_s_value}"  # e.g. "10" seconds
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    bf_latency_ms_value = 50              # normal operation latency (ms)
+    bf_qps_normal_value = 1000            # normal queries per second
+    bf_qps_spike_value = 10000            # Black Friday peak QPS
+    bf_spike_factor_value = 10            # spike multiplier (10x)
+    bf_collapse_latency_s_value = 10      # latency during collapse (seconds)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    bf_latency_ms_str = f"{bf_latency_ms_value}"              # e.g. "50" ms
+    bf_qps_normal_str = f"{bf_qps_normal_value:,}"            # e.g. "1,000" QPS
+    bf_qps_spike_str = f"{bf_qps_spike_value:,}"              # e.g. "10,000" QPS
+    bf_spike_factor_str = f"{bf_spike_factor_value}"          # e.g. "10" x
+    bf_collapse_latency_s_str = f"{bf_collapse_latency_s_value}"  # e.g. "10" seconds
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+bf_latency_ms_str = BlackFridayCalc.bf_latency_ms_str
+bf_qps_normal_str = BlackFridayCalc.bf_qps_normal_str
+bf_qps_spike_str = BlackFridayCalc.bf_qps_spike_str
+bf_spike_factor_str = BlackFridayCalc.bf_spike_factor_str
+bf_collapse_latency_s_str = BlackFridayCalc.bf_collapse_latency_s_str
 ```
 
 ::: {.callout-example title="The 'Black Friday' Traffic Spike"}
@@ -211,6 +248,21 @@ Beyond the technical limits of latency, the economics of serving have undergone 
 #| echo: false
 #| fig-cap: "**Intelligence Deflation**: Cost per 1M output tokens (USD) over time (Log Scale). Prices are based on public API list prices (2020–2025) and are intended as a market trend indicator, not a controlled comparison. The cost of token generation has collapsed by multiple orders of magnitude, transforming the economics of automated AI workflows."
 #| fig-alt: "Line plot showing token pricing collapsing from $20/M tokens in 2020 to <$0.10/M tokens in 2025. Log scale highlights the deflationary trend with models from OpenAI, Anthropic, Google, and DeepSeek."
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INTELLIGENCE DEFLATION FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-intelligence-deflation — log-scale scatter plot of public API
+# │          token prices from 2020 to 2025, annotated with model names
+# │
+# │ Goal: Visualize the ~10× per-18-month collapse in inference token cost that
+# │       is transforming AI serving economics.
+# │ Show: Named model price points on a log scale with deflation trend line.
+# │ How: Fit a log-linear trend through representative price points; scatter
+# │      remaining models; annotate each with model name.
+# │
+# │ Imports: numpy (np), mlsys.viz (viz)
+# │ Exports: (figure only, no prose variables)
+# └─────────────────────────────────────────────────────────────────────────────
 
 import numpy as np
 from mlsys import viz
@@ -355,19 +407,28 @@ Dynamic inference\index{Dynamic Inference!real-time prediction} (also called onl
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (photo classification scenario) ---
-n_photos_value = 10_000               # photos in user library
-inference_ms_value = 5                # ResNet-50 inference time (ms)
-dynamic_latency_budget_ms_value = 100 # real-time latency budget (ms)
+class StaticBatchCalc:
+    """Contrasts static vs. dynamic inference economics for photo classification."""
 
-# --- Process (batch total time) ---
-batch_total_s_value = n_photos_value * inference_ms_value / 1000
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_photos_value = 10_000               # photos in user library
+    inference_ms_value = 5                # ResNet-50 inference time (ms)
+    dynamic_latency_budget_ms_value = 100 # real-time latency budget (ms)
 
-# --- Outputs (formatted strings for prose) ---
-n_photos_str = f"{n_photos_value:,}"                                       # e.g. "10,000" photos
-inference_ms_str = f"{inference_ms_value}"                                 # e.g. "5" ms
-batch_total_s_str = fmt(batch_total_s_value, precision=0, commas=False)    # e.g. "50" seconds
-dynamic_latency_budget_ms_str = f"{dynamic_latency_budget_ms_value}"       # e.g. "100" ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    batch_total_s_value = n_photos_value * inference_ms_value / 1000
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    n_photos_str = f"{n_photos_value:,}"                                   # e.g. "10,000" photos
+    inference_ms_str = f"{inference_ms_value}"                             # e.g. "5" ms
+    batch_total_s_str = fmt(batch_total_s_value, precision=0, commas=False)# e.g. "50" seconds
+    dynamic_latency_budget_ms_str = f"{dynamic_latency_budget_ms_value}"   # e.g. "100" ms
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_photos_str = StaticBatchCalc.n_photos_str
+inference_ms_str = StaticBatchCalc.inference_ms_str
+batch_total_s_str = StaticBatchCalc.batch_total_s_str
+dynamic_latency_budget_ms_str = StaticBatchCalc.dynamic_latency_budget_ms_str
 ```
 
 For our ResNet-50 image classifier, consider two deployment scenarios. A **static approach** suits a photo organization app that pre-classifies all images in a user's library overnight. With `{python} n_photos_str` photos and `{python} inference_ms_str` ms inference each, batch processing takes ~`{python} batch_total_s_str` seconds total, and users see instant classification when browsing. A **dynamic approach** suits a content moderation API that must classify user-uploaded images in real-time, with each image requiring the full preprocessing→inference→postprocessing pipeline and a `{python} dynamic_latency_budget_ms_str`ms latency budget. Most production image classification systems use a **hybrid approach**: frequently requested images (popular products, known memes) are pre-classified and cached, while novel uploads trigger dynamic inference.
@@ -394,31 +455,48 @@ The choice between static and dynamic serving has direct economic implications. 
 from mlsys.constants import SEC_PER_HOUR, MILLION
 from mlsys.formatting import fmt, check
 
-# --- Inputs (GPU rental and batching scenarios) ---
-gpu_cost_per_hour_value = 4.0         # GPU rental cost ($/hour)
-latency_a_ms_value = 5                # Scenario A: low latency (ms)
-throughput_a_rps_value = 200          # Scenario A: throughput (req/s)
-latency_b_ms_value = 10               # Scenario B: higher latency (ms)
-throughput_b_rps_value = 800          # Scenario B: throughput (req/s)
+class CostLatencyCalc:
+    """Quantifies the economic tradeoff between latency and hardware cost per million queries."""
 
-# --- Process (cost per million queries) ---
-queries_per_hour_a_value = throughput_a_rps_value * SEC_PER_HOUR
-cost_per_million_a_value = gpu_cost_per_hour_value / (queries_per_hour_a_value / MILLION)
-queries_per_hour_b_value = throughput_b_rps_value * SEC_PER_HOUR
-cost_per_million_b_value = gpu_cost_per_hour_value / (queries_per_hour_b_value / MILLION)
-cost_increase_pct_value = (cost_per_million_a_value / cost_per_million_b_value - 1) * 100
-cost_ratio_value = cost_per_million_a_value / cost_per_million_b_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    gpu_cost_per_hour_value = 4.0         # GPU rental cost ($/hour)
+    latency_a_ms_value = 5                # Scenario A: low latency (ms)
+    throughput_a_rps_value = 200          # Scenario A: throughput (req/s)
+    latency_b_ms_value = 10               # Scenario B: higher latency (ms)
+    throughput_b_rps_value = 800          # Scenario B: throughput (req/s)
 
-# --- Outputs (formatted strings for prose) ---
-gpu_cost_per_hour_str = fmt(gpu_cost_per_hour_value, precision=0, commas=False)
-latency_a_ms_str = f"{latency_a_ms_value}"
-throughput_a_rps_str = f"{throughput_a_rps_value}"
-latency_b_ms_str = f"{latency_b_ms_value}"
-throughput_b_rps_str = f"{throughput_b_rps_value}"
-cost_a_str = fmt(cost_per_million_a_value, precision=2, commas=False)
-cost_b_str = fmt(cost_per_million_b_value, precision=2, commas=False)
-cost_increase_str = fmt(cost_increase_pct_value, precision=0, commas=False)
-cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    queries_per_hour_a_value = throughput_a_rps_value * SEC_PER_HOUR
+    cost_per_million_a_value = gpu_cost_per_hour_value / (queries_per_hour_a_value / MILLION)
+    queries_per_hour_b_value = throughput_b_rps_value * SEC_PER_HOUR
+    cost_per_million_b_value = gpu_cost_per_hour_value / (queries_per_hour_b_value / MILLION)
+    cost_increase_pct_value = (cost_per_million_a_value / cost_per_million_b_value - 1) * 100
+    cost_ratio_value = cost_per_million_a_value / cost_per_million_b_value
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(cost_ratio_value > 1, "Scenario A (low latency) must cost more per query than Scenario B.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gpu_cost_per_hour_str = fmt(gpu_cost_per_hour_value, precision=0, commas=False)
+    latency_a_ms_str = f"{latency_a_ms_value}"
+    throughput_a_rps_str = f"{throughput_a_rps_value}"
+    latency_b_ms_str = f"{latency_b_ms_value}"
+    throughput_b_rps_str = f"{throughput_b_rps_value}"
+    cost_a_str = fmt(cost_per_million_a_value, precision=2, commas=False)
+    cost_b_str = fmt(cost_per_million_b_value, precision=2, commas=False)
+    cost_increase_str = fmt(cost_increase_pct_value, precision=0, commas=False)
+    cost_ratio_str = fmt(cost_ratio_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpu_cost_per_hour_str = CostLatencyCalc.gpu_cost_per_hour_str
+latency_a_ms_str = CostLatencyCalc.latency_a_ms_str
+throughput_a_rps_str = CostLatencyCalc.throughput_a_rps_str
+latency_b_ms_str = CostLatencyCalc.latency_b_ms_str
+throughput_b_rps_str = CostLatencyCalc.throughput_b_rps_str
+cost_a_str = CostLatencyCalc.cost_a_str
+cost_b_str = CostLatencyCalc.cost_b_str
+cost_increase_str = CostLatencyCalc.cost_increase_str
+cost_ratio_str = CostLatencyCalc.cost_ratio_str
 ```
 
 ::: {.callout-notebook #notebook-cost-latency title="The Cost of Latency"}
@@ -548,12 +626,12 @@ class ResNetServingSpectrum:
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Calculate sizes using the Digital Twins
-    cloud_size_mb = m_resnet.size_in_bytes(BYTES_FP16).to('MB').magnitude
-    mobile_size_mb = m_resnet.size_in_bytes(BYTES_INT8).to('MB').magnitude
-    tiny_original_mb = m_resnet.size_in_bytes(BYTES_INT8).to('MB').magnitude
-    tiny_alt_mb = m_mobilenet.size_in_bytes(BYTES_INT8).to('MB').magnitude
+    cloud_size_mb = m_resnet.size_in_bytes(BYTES_FP16).m_as('MB')
+    mobile_size_mb = m_resnet.size_in_bytes(BYTES_INT8).m_as('MB')
+    tiny_original_mb = m_resnet.size_in_bytes(BYTES_INT8).m_as('MB')
+    tiny_alt_mb = m_mobilenet.size_in_bytes(BYTES_INT8).m_as('MB')
 
-    tiny_limit_mb = t_tiny.storage.to('MB').magnitude
+    tiny_limit_mb = t_tiny.storage.m_as('MB')
     tiny_feasibility = tiny_original_mb < tiny_limit_mb
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
@@ -847,15 +925,21 @@ For dynamic inference systems\index{Latency Budget!optimization objectives}, the
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (latency distribution example) ---
-mean_latency_ms_value = 50            # mean latency (ms)
-p99_latency_ms_value = 2000           # p99 latency (ms)
+class TailLatencyRatioCalc:
+    """Demonstrates why mean latency misleads by showing the p99-to-mean ratio."""
 
-# --- Process (ratio calculation) ---
-tail_ratio_value = p99_latency_ms_value / mean_latency_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    mean_latency_ms_value = 50            # mean latency (ms)
+    p99_latency_ms_value = 2000           # p99 latency (ms)
 
-# --- Output (formatted string for prose) ---
-tail_ratio_str = fmt(tail_ratio_value, precision=0, commas=False)            # e.g. "40" times
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    tail_ratio_value = p99_latency_ms_value / mean_latency_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    tail_ratio_str = fmt(tail_ratio_value, precision=0, commas=False)      # e.g. "40" times
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+tail_ratio_str = TailLatencyRatioCalc.tail_ratio_str
 ```
 
 The metrics that matter change from aggregate throughput to latency distributions. Mean latency tells you little about user experience; p50\index{p50 Latency!median response time}, p95\index{p95 Latency!percentile target}, and p99 latencies\index{Latency!percentiles (p50, p95, p99)} reveal *how* the system performs across the full range of requests. If your mean latency is 50 ms but p99 is 2 seconds, one in a hundred users waits `{python} tail_ratio_str` times longer than average. For consumer-facing applications, these tail latencies often determine user satisfaction and retention.[^fn-tail-latency-impact]
@@ -913,38 +997,56 @@ Understanding *where* time goes requires instrumenting each phase independently.
 # │          p_transfer_str, p_inf_str, p_post_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (latency per phase, ms) ---
-l_jpeg_value = 3.0                    # JPEG decode
-l_resize_value = 1.0                  # resize to 224×224
-l_norm_value = 0.5                    # normalize (mean/std)
-l_transfer_value = 0.5                # CPU→GPU transfer
-l_inf_value = 5.0                     # ResNet-50 forward pass
-l_post_value = 0.1                    # softmax + top-5
+class LatencyTableCalc:
+    """Decomposes the ResNet-50 request lifecycle into processing phases with percentages."""
 
-# --- Process (totals and percentages) ---
-l_total_value = l_jpeg_value + l_resize_value + l_norm_value + l_transfer_value + l_inf_value + l_post_value
-p_jpeg_value = l_jpeg_value / l_total_value * 100
-p_resize_value = l_resize_value / l_total_value * 100
-p_norm_value = l_norm_value / l_total_value * 100
-p_transfer_value = l_transfer_value / l_total_value * 100
-p_inf_value = l_inf_value / l_total_value * 100
-p_post_value = l_post_value / l_total_value * 100
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    l_jpeg_value = 3.0                    # JPEG decode (ms)
+    l_resize_value = 1.0                  # resize to 224×224 (ms)
+    l_norm_value = 0.5                    # normalize (mean/std) (ms)
+    l_transfer_value = 0.5                # CPU→GPU transfer (ms)
+    l_inf_value = 5.0                     # ResNet-50 forward pass (ms)
+    l_post_value = 0.1                    # softmax + top-5 (ms)
 
-# --- Outputs (formatted strings for table) ---
-l_jpeg_str = f"{l_jpeg_value:.1f}ms"                                         # e.g. "3.0ms"
-l_resize_str = f"{l_resize_value:.1f}ms"                                     # e.g. "1.0ms"
-l_norm_str = f"{l_norm_value:.1f}ms"                                         # e.g. "0.5ms"
-l_transfer_str = f"{l_transfer_value:.1f}ms"                                 # e.g. "0.5ms"
-l_inf_str = f"{l_inf_value:.1f}ms"                                           # e.g. "5.0ms"
-l_post_str = f"{l_post_value:.1f}ms"                                         # e.g. "0.1ms"
-l_total_str = f"{l_total_value:.1f}ms"                                       # e.g. "10.1ms"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    l_total_value = l_jpeg_value + l_resize_value + l_norm_value + l_transfer_value + l_inf_value + l_post_value
+    p_jpeg_value = l_jpeg_value / l_total_value * 100
+    p_resize_value = l_resize_value / l_total_value * 100
+    p_norm_value = l_norm_value / l_total_value * 100
+    p_transfer_value = l_transfer_value / l_total_value * 100
+    p_inf_value = l_inf_value / l_total_value * 100
+    p_post_value = l_post_value / l_total_value * 100
 
-p_jpeg_str = f"{p_jpeg_value:.0f}%"                                          # e.g. "30%"
-p_resize_str = f"{p_resize_value:.0f}%"                                      # e.g. "10%"
-p_norm_str = f"{p_norm_value:.0f}%"                                          # e.g. "5%"
-p_transfer_str = f"{p_transfer_value:.0f}%"                                  # e.g. "5%"
-p_inf_str = f"{p_inf_value:.0f}%"                                            # e.g. "50%"
-p_post_str = f"~{p_post_value:.0f}%"                                         # e.g. "~1%"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    l_jpeg_str = f"{l_jpeg_value:.1f}ms"
+    l_resize_str = f"{l_resize_value:.1f}ms"
+    l_norm_str = f"{l_norm_value:.1f}ms"
+    l_transfer_str = f"{l_transfer_value:.1f}ms"
+    l_inf_str = f"{l_inf_value:.1f}ms"
+    l_post_str = f"{l_post_value:.1f}ms"
+    l_total_str = f"{l_total_value:.1f}ms"
+
+    p_jpeg_str = f"{p_jpeg_value:.0f}%"
+    p_resize_str = f"{p_resize_value:.0f}%"
+    p_norm_str = f"{p_norm_value:.0f}%"
+    p_transfer_str = f"{p_transfer_value:.0f}%"
+    p_inf_str = f"{p_inf_value:.0f}%"
+    p_post_str = f"~{p_post_value:.0f}%"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+l_jpeg_str = LatencyTableCalc.l_jpeg_str
+l_resize_str = LatencyTableCalc.l_resize_str
+l_norm_str = LatencyTableCalc.l_norm_str
+l_transfer_str = LatencyTableCalc.l_transfer_str
+l_inf_str = LatencyTableCalc.l_inf_str
+l_post_str = LatencyTableCalc.l_post_str
+l_total_str = LatencyTableCalc.l_total_str
+p_jpeg_str = LatencyTableCalc.p_jpeg_str
+p_resize_str = LatencyTableCalc.p_resize_str
+p_norm_str = LatencyTableCalc.p_norm_str
+p_transfer_str = LatencyTableCalc.p_transfer_str
+p_inf_str = LatencyTableCalc.p_inf_str
+p_post_str = LatencyTableCalc.p_post_str
 ```
 
 ```{python}
@@ -966,31 +1068,44 @@ p_post_str = f"~{p_post_value:.0f}%"                                         # e
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (latency components, ms) ---
-jpeg_decode_ms_value = 3.0            # JPEG decode
-resize_ms_value = 1.0                 # resize
-normalize_ms_value = 0.5              # normalize
-cpu_gpu_ms_value = 0.5                # CPU→GPU transfer
-resnet_inference_ms_value = 5.0       # PyTorch inference
-postprocess_ms_value = 0.1            # postprocessing
-tensorrt_inference_ms_value = 2.0     # TensorRT optimized inference
+class LatencyBudgetCalc:
+    """Demonstrates the shifting bottleneck from inference to preprocessing after TensorRT optimization."""
 
-# --- Process (preprocessing percentage) ---
-preprocess_ms_value = jpeg_decode_ms_value + resize_ms_value + normalize_ms_value
-total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
-preprocess_pct_value = preprocess_ms_value / total_latency_ms_value * 100
-tensorrt_total_ms_value = preprocess_ms_value + cpu_gpu_ms_value + tensorrt_inference_ms_value + postprocess_ms_value
-tensorrt_preprocess_pct_value = preprocess_ms_value / tensorrt_total_ms_value * 100
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    jpeg_decode_ms_value = 3.0            # JPEG decode (ms)
+    resize_ms_value = 1.0                 # resize (ms)
+    normalize_ms_value = 0.5              # normalize (ms)
+    cpu_gpu_ms_value = 0.5                # CPU→GPU transfer (ms)
+    resnet_inference_ms_value = 5.0       # PyTorch inference (ms)
+    postprocess_ms_value = 0.1            # postprocessing (ms)
+    tensorrt_inference_ms_value = 2.0     # TensorRT optimized inference (ms)
 
-# --- Outputs (formatted strings for prose) ---
-preprocess_ms_str = fmt(preprocess_ms_value, precision=1, commas=False)                # e.g. "4.5" ms
-cpu_gpu_ms_str = fmt(cpu_gpu_ms_value, precision=1, commas=False)                      # e.g. "0.5" ms
-resnet_inference_ms_str = fmt(resnet_inference_ms_value, precision=0, commas=False)    # e.g. "5" ms
-tensorrt_inference_ms_str = fmt(tensorrt_inference_ms_value, precision=0, commas=False)# e.g. "2" ms
-model_10x_ms_str = fmt(resnet_inference_ms_value / 10, precision=1, commas=False)      # e.g. "0.5" ms
-total_latency_str = fmt(total_latency_ms_value, precision=1, commas=False)             # e.g. "10.1" ms
-preprocess_pct_str = fmt(preprocess_pct_value, precision=0, commas=False)              # e.g. "45" %
-tensorrt_preprocess_pct_str = fmt(tensorrt_preprocess_pct_value, precision=0, commas=False)  # e.g. "68" %
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    preprocess_ms_value = jpeg_decode_ms_value + resize_ms_value + normalize_ms_value
+    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
+    preprocess_pct_value = preprocess_ms_value / total_latency_ms_value * 100
+    tensorrt_total_ms_value = preprocess_ms_value + cpu_gpu_ms_value + tensorrt_inference_ms_value + postprocess_ms_value
+    tensorrt_preprocess_pct_value = preprocess_ms_value / tensorrt_total_ms_value * 100
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    preprocess_ms_str = fmt(preprocess_ms_value, precision=1, commas=False)
+    cpu_gpu_ms_str = fmt(cpu_gpu_ms_value, precision=1, commas=False)
+    resnet_inference_ms_str = fmt(resnet_inference_ms_value, precision=0, commas=False)
+    tensorrt_inference_ms_str = fmt(tensorrt_inference_ms_value, precision=0, commas=False)
+    model_10x_ms_str = fmt(resnet_inference_ms_value / 10, precision=1, commas=False)
+    total_latency_str = fmt(total_latency_ms_value, precision=1, commas=False)
+    preprocess_pct_str = fmt(preprocess_pct_value, precision=0, commas=False)
+    tensorrt_preprocess_pct_str = fmt(tensorrt_preprocess_pct_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+preprocess_ms_str = LatencyBudgetCalc.preprocess_ms_str
+cpu_gpu_ms_str = LatencyBudgetCalc.cpu_gpu_ms_str
+resnet_inference_ms_str = LatencyBudgetCalc.resnet_inference_ms_str
+tensorrt_inference_ms_str = LatencyBudgetCalc.tensorrt_inference_ms_str
+model_10x_ms_str = LatencyBudgetCalc.model_10x_ms_str
+total_latency_str = LatencyBudgetCalc.total_latency_str
+preprocess_pct_str = LatencyBudgetCalc.preprocess_pct_str
+tensorrt_preprocess_pct_str = LatencyBudgetCalc.tensorrt_preprocess_pct_str
 ```
 
 ::: {.callout-notebook title="ResNet-50: Latency Budget Breakdown"}
@@ -1030,21 +1145,31 @@ The ResNet example represents compute-bound inference where math dominates. Reco
 # │          dlrm_total_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (DLRM latency components, ms) ---
-dlrm_input_ms_value = 0.5             # request parsing (CPU)
-dlrm_embed_ms_value = 6.0             # embedding lookups (memory BW)
-dlrm_mlp_ms_value = 1.5               # MLP forward pass (compute)
-dlrm_post_ms_value = 1.0              # ranking & filtering (CPU)
+class DlrmLatencyCalc:
+    """Models DLRM serving latency to contrast I/O-bound vs. compute-bound bottlenecks."""
 
-# --- Process (total latency) ---
-dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    dlrm_input_ms_value = 0.5             # request parsing (CPU) (ms)
+    dlrm_embed_ms_value = 6.0             # embedding lookups (memory BW) (ms)
+    dlrm_mlp_ms_value = 1.5               # MLP forward pass (compute) (ms)
+    dlrm_post_ms_value = 1.0              # ranking & filtering (CPU) (ms)
 
-# --- Outputs (formatted strings for table) ---
-dlrm_input_str = f"{dlrm_input_ms_value}ms"                                  # e.g. "0.5ms"
-dlrm_embed_str = f"{dlrm_embed_ms_value}ms"                                  # e.g. "6.0ms"
-dlrm_mlp_str = f"{dlrm_mlp_ms_value}ms"                                      # e.g. "1.5ms"
-dlrm_post_str = f"{dlrm_post_ms_value}ms"                                    # e.g. "1.0ms"
-dlrm_total_str = f"{dlrm_total_ms_value}ms"                                  # e.g. "9.0ms"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    dlrm_total_ms_value = dlrm_input_ms_value + dlrm_embed_ms_value + dlrm_mlp_ms_value + dlrm_post_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    dlrm_input_str = f"{dlrm_input_ms_value}ms"
+    dlrm_embed_str = f"{dlrm_embed_ms_value}ms"
+    dlrm_mlp_str = f"{dlrm_mlp_ms_value}ms"
+    dlrm_post_str = f"{dlrm_post_ms_value}ms"
+    dlrm_total_str = f"{dlrm_total_ms_value}ms"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+dlrm_input_str = DlrmLatencyCalc.dlrm_input_str
+dlrm_embed_str = DlrmLatencyCalc.dlrm_embed_str
+dlrm_mlp_str = DlrmLatencyCalc.dlrm_mlp_str
+dlrm_post_str = DlrmLatencyCalc.dlrm_post_str
+dlrm_total_str = DlrmLatencyCalc.dlrm_total_str
 ```
 
 ::: {.callout-lighthouse title="Lighthouse Example: DLRM Serving"}
@@ -1084,25 +1209,33 @@ This breakdown reveals why straightforward optimization efforts often fail. Engi
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (re-derived from latency-budget-calc constants) ---
-preprocess_ms_value = 3.0 + 1.0 + 0.5      # JPEG decode + resize + normalize
-cpu_gpu_ms_value = 0.5                       # CPU→GPU transfer
-resnet_inference_ms_value = 5.0              # PyTorch inference
-postprocess_ms_value = 0.1                   # postprocessing
-total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
+class AmdahlServingCalc:
+    """Applies Amdahl's Law to show that 10× model speedup yields only ~1.8× end-to-end improvement."""
 
-non_model_ms_value = preprocess_ms_value + cpu_gpu_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Re-derived from latency-budget-calc constants
+    preprocess_ms_value = 3.0 + 1.0 + 0.5      # JPEG decode + resize + normalize
+    cpu_gpu_ms_value = 0.5                       # CPU→GPU transfer
+    resnet_inference_ms_value = 5.0              # PyTorch inference
+    postprocess_ms_value = 0.1                   # postprocessing
 
-# --- Process (Amdahl's Law calculation) ---
-non_model_pct_value = non_model_ms_value / total_latency_ms_value * 100
-model_10x_ms_value = resnet_inference_ms_value / 10
-optimized_total_ms_value = non_model_ms_value + model_10x_ms_value + postprocess_ms_value
-amdahl_speedup_value = total_latency_ms_value / optimized_total_ms_value
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    total_latency_ms_value = preprocess_ms_value + cpu_gpu_ms_value + resnet_inference_ms_value + postprocess_ms_value
+    non_model_ms_value = preprocess_ms_value + cpu_gpu_ms_value
+    non_model_pct_value = non_model_ms_value / total_latency_ms_value * 100
+    model_10x_ms_value = resnet_inference_ms_value / 10
+    optimized_total_ms_value = non_model_ms_value + model_10x_ms_value + postprocess_ms_value
+    amdahl_speedup_value = total_latency_ms_value / optimized_total_ms_value
 
-# --- Outputs (formatted strings for prose) ---
-non_model_pct_str = fmt(non_model_pct_value, precision=0, commas=False)       # e.g. "50" %
-optimized_total_str = fmt(optimized_total_ms_value, precision=1, commas=False)# e.g. "5.6" ms
-amdahl_speedup_str = fmt(amdahl_speedup_value, precision=1, commas=False)     # e.g. "1.8" x
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    non_model_pct_str = fmt(non_model_pct_value, precision=0, commas=False)
+    optimized_total_str = fmt(optimized_total_ms_value, precision=1, commas=False)
+    amdahl_speedup_str = fmt(amdahl_speedup_value, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+non_model_pct_str = AmdahlServingCalc.non_model_pct_str
+optimized_total_str = AmdahlServingCalc.optimized_total_str
+amdahl_speedup_str = AmdahlServingCalc.amdahl_speedup_str
 ```
 
 ::: {.callout-notebook title="The Quantitative Approach to Serving"}
@@ -1165,19 +1298,28 @@ $$\frac{X(r_2)}{X(r_1)} = \left(\frac{r_1}{r_2}\right)^2$$ {#eq-resolution-throu
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (resolution comparison) ---
-r1_value = 224                        # original resolution
-r2_value = 448                        # doubled resolution
-measured_slowdown_value = 3.6         # actual measured slowdown
+class ResolutionScalingCalc:
+    """Quantifies the quadratic relationship between input resolution and inference slowdown."""
 
-# --- Process (theoretical slowdown from equation) ---
-theoretical_slowdown_value = (r2_value / r1_value) ** 2
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    r1_value = 224                        # original resolution
+    r2_value = 448                        # doubled resolution
+    measured_slowdown_value = 3.6         # actual measured slowdown
 
-# --- Outputs (formatted strings for prose) ---
-r1_str = f"{r1_value}"                                                       # e.g. "224"
-r2_str = f"{r2_value}"                                                       # e.g. "448"
-theoretical_str = fmt(theoretical_slowdown_value, precision=0, commas=False) # e.g. "4" x
-measured_slowdown_str = f"{measured_slowdown_value}"                         # e.g. "3.6" x
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    theoretical_slowdown_value = (r2_value / r1_value) ** 2
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    r1_str = f"{r1_value}"
+    r2_str = f"{r2_value}"
+    theoretical_str = fmt(theoretical_slowdown_value, precision=0, commas=False)
+    measured_slowdown_str = f"{measured_slowdown_value}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+r1_str = ResolutionScalingCalc.r1_str
+r2_str = ResolutionScalingCalc.r2_str
+theoretical_str = ResolutionScalingCalc.theoretical_str
+measured_slowdown_str = ResolutionScalingCalc.measured_slowdown_str
 ```
 
 Doubling resolution from `{python} r1_str` to `{python} r2_str` theoretically yields `{python} theoretical_str` $\times$ slowdown (measured: `{python} measured_slowdown_str` $\times$ due to fixed overhead amortization). However, at high resolutions, models transition from compute-bound to memory-bound as activation tensors exceed cache capacity. @tbl-resolution-bottleneck quantifies this transition for ResNet-50, showing how arithmetic intensity decreases with resolution:
@@ -1199,32 +1341,45 @@ Doubling resolution from `{python} r1_str` to `{python} r2_str` theoretically yi
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (activation sizes per resolution, MB) ---
-act_224_mb_value = 12.5               # 224×224 activation size
-act_384_mb_value = 36.8               # 384×384 activation size
-act_512_mb_value = 65.5               # 512×512 activation size
-act_640_mb_value = 102.4              # 640×640 activation size
+class ResolutionBottleneckCalc:
+    """Shows that increasing resolution decreases arithmetic intensity, shifting from compute- to memory-bound."""
 
-# --- Inputs (arithmetic intensity, FLOPs/byte) ---
-ai_224_value = 85                     # 224×224 arithmetic intensity
-ai_384_value = 49                     # 384×384 arithmetic intensity
-ai_512_value = 28                     # 512×512 arithmetic intensity
-ai_640_value = 18                     # 640×640 arithmetic intensity
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    act_224_mb_value = 12.5               # 224×224 activation size (MB)
+    act_384_mb_value = 36.8               # 384×384 activation size (MB)
+    act_512_mb_value = 65.5               # 512×512 activation size (MB)
+    act_640_mb_value = 102.4              # 640×640 activation size (MB)
 
-ridge_point_value = 16                # V100 ridge point (FLOPs/byte)
+    ai_224_value = 85                     # 224×224 arithmetic intensity (FLOPs/byte)
+    ai_384_value = 49                     # 384×384 arithmetic intensity (FLOPs/byte)
+    ai_512_value = 28                     # 512×512 arithmetic intensity (FLOPs/byte)
+    ai_640_value = 18                     # 640×640 arithmetic intensity (FLOPs/byte)
 
-# --- Outputs (formatted strings for table) ---
-act_224_mb_str = f"{act_224_mb_value}"                                       # e.g. "12.5" MB
-act_384_mb_str = f"{act_384_mb_value}"                                       # e.g. "36.8" MB
-act_512_mb_str = f"{act_512_mb_value}"                                       # e.g. "65.5" MB
-act_640_mb_str = f"{act_640_mb_value}"                                       # e.g. "102.4" MB
+    ridge_point_value = 16                # V100 ridge point (FLOPs/byte)
 
-ai_224_str = f"{ai_224_value}"                                               # e.g. "85" FLOPs/byte
-ai_384_str = f"{ai_384_value}"                                               # e.g. "49" FLOPs/byte
-ai_512_str = f"{ai_512_value}"                                               # e.g. "28" FLOPs/byte
-ai_640_str = f"{ai_640_value}"                                               # e.g. "18" FLOPs/byte
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    act_224_mb_str = f"{act_224_mb_value}"
+    act_384_mb_str = f"{act_384_mb_value}"
+    act_512_mb_str = f"{act_512_mb_value}"
+    act_640_mb_str = f"{act_640_mb_value}"
 
-ridge_point_str = f"{ridge_point_value}"                                     # e.g. "16" FLOPs/byte
+    ai_224_str = f"{ai_224_value}"
+    ai_384_str = f"{ai_384_value}"
+    ai_512_str = f"{ai_512_value}"
+    ai_640_str = f"{ai_640_value}"
+
+    ridge_point_str = f"{ridge_point_value}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+act_224_mb_str = ResolutionBottleneckCalc.act_224_mb_str
+act_384_mb_str = ResolutionBottleneckCalc.act_384_mb_str
+act_512_mb_str = ResolutionBottleneckCalc.act_512_mb_str
+act_640_mb_str = ResolutionBottleneckCalc.act_640_mb_str
+ai_224_str = ResolutionBottleneckCalc.ai_224_str
+ai_384_str = ResolutionBottleneckCalc.ai_384_str
+ai_512_str = ResolutionBottleneckCalc.ai_512_str
+ai_640_str = ResolutionBottleneckCalc.ai_640_str
+ridge_point_str = ResolutionBottleneckCalc.ridge_point_str
 ```
 
 The resulting shift from compute-bound to memory-bound operation is evident in @tbl-resolution-bottleneck:
@@ -1259,13 +1414,20 @@ Different deployment contexts impose distinct resolution requirements shaped by 
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (adaptive resolution results) ---
-adaptive_throughput_improvement_value = 1.4    # throughput gain factor
-adaptive_accuracy_retention_value = 99.2       # accuracy retention (%)
+class AdaptiveResolutionCalc:
+    """Demonstrates 1.4× throughput gain from content-aware resolution selection."""
 
-# --- Outputs (formatted strings for prose) ---
-adaptive_throughput_improvement_str = fmt(adaptive_throughput_improvement_value, precision=1, commas=False)  # e.g. "1.4" x
-adaptive_accuracy_retention_str = fmt(adaptive_accuracy_retention_value, precision=1, commas=False)          # e.g. "99.2" %
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    adaptive_throughput_improvement_value = 1.4    # throughput gain factor
+    adaptive_accuracy_retention_value = 99.2       # accuracy retention (%)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    adaptive_throughput_improvement_str = fmt(adaptive_throughput_improvement_value, precision=1, commas=False)
+    adaptive_accuracy_retention_str = fmt(adaptive_accuracy_retention_value, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+adaptive_throughput_improvement_str = AdaptiveResolutionCalc.adaptive_throughput_improvement_str
+adaptive_accuracy_retention_str = AdaptiveResolutionCalc.adaptive_accuracy_retention_str
 ```
 
 #### Adaptive Resolution {#sec-model-serving-adaptive-resolution-cb4e}
@@ -1566,51 +1728,65 @@ With the queuing model and tail latency analysis established, we can now apply t
 import math
 from mlsys.formatting import fmt
 
-# --- Inputs (capacity planning requirements) ---
-cp_peak_qps_value = 5000              # peak traffic (QPS)
-cp_service_ms_value = 5               # TensorRT FP16 service time (ms)
-cp_p99_target_ms_value = 50           # p99 latency SLO (ms)
-cp_rho_safe_value = 0.72              # safe utilization (M/D/1 adjusted)
-cp_v100_throughput_value = 1143       # V100 throughput at batch-16 (img/s)
-cp_headroom_value = 1.3               # 30% headroom for variance
+class CapacityPlanningCalc:
+    """ResNet-50 capacity planning: GPUs needed for 5000 QPS at 50ms p99 with N+1 redundancy."""
 
-# --- Inputs (precision comparison) ---
-cp_fp32_bits_value = 32               # FP32 bit width
-cp_int8_bits_value = 8                # INT8 bit width
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cp_peak_qps_value = 5000              # peak traffic (QPS)
+    cp_service_ms_value = 5               # TensorRT FP16 service time (ms)
+    cp_p99_target_ms_value = 50           # p99 latency SLO (ms)
+    cp_rho_safe_value = 0.72              # safe utilization (M/D/1 adjusted)
+    cp_v100_throughput_value = 1143       # V100 throughput at batch-16 (img/s)
+    cp_headroom_value = 1.3               # 30% headroom for variance
+    cp_fp32_bits_value = 32               # FP32 bit width
+    cp_int8_bits_value = 8                # INT8 bit width
+    mm1_p99_factor_value = 4.6            # p99 multiplier for M/M/1
+    mm1_rho_example_value = 0.7           # example utilization
 
-# --- Inputs (M/M/1 parameters) ---
-mm1_p99_factor_value = 4.6            # p99 multiplier for M/M/1
-mm1_rho_example_value = 0.7           # example utilization
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cp_mu_required_value = cp_peak_qps_value / cp_rho_safe_value
+    cp_gpus_raw_value = cp_mu_required_value / cp_v100_throughput_value
+    cp_gpus_ceil_value = math.ceil(cp_gpus_raw_value)
+    cp_final_raw_value = cp_gpus_ceil_value * cp_headroom_value
+    cp_final_ceil_value = math.ceil(cp_final_raw_value)
+    cp_gpus_after_fail_value = cp_final_ceil_value - 1
+    cp_util_after_fail_value = (cp_peak_qps_value / cp_v100_throughput_value) / cp_gpus_after_fail_value * 100
+    cp_precision_ratio_value = cp_fp32_bits_value // cp_int8_bits_value
+    mm1_wait_factor_value = mm1_p99_factor_value / (1 - mm1_rho_example_value)
 
-# --- Process (capacity planning steps) ---
-cp_mu_required_value = cp_peak_qps_value / cp_rho_safe_value
-cp_gpus_raw_value = cp_mu_required_value / cp_v100_throughput_value
-cp_gpus_ceil_value = math.ceil(cp_gpus_raw_value)
-cp_final_raw_value = cp_gpus_ceil_value * cp_headroom_value
-cp_final_ceil_value = math.ceil(cp_final_raw_value)
-cp_gpus_after_fail_value = cp_final_ceil_value - 1
-cp_util_after_fail_value = (cp_peak_qps_value / cp_v100_throughput_value) / cp_gpus_after_fail_value * 100
-cp_precision_ratio_value = cp_fp32_bits_value // cp_int8_bits_value
-mm1_wait_factor_value = mm1_p99_factor_value / (1 - mm1_rho_example_value)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cp_mu_required_str = fmt(cp_mu_required_value, precision=0, commas=False)
+    cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)
+    cp_gpus_ceil_str = f"{cp_gpus_ceil_value}"
+    cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)
+    cp_final_ceil_str = f"{cp_final_ceil_value}"
+    cp_gpus_after_fail_str = f"{cp_gpus_after_fail_value}"
+    cp_util_after_fail_str = fmt(cp_util_after_fail_value, precision=1, commas=False)
+    cp_peak_qps_str = f"{cp_peak_qps_value:,}"
+    cp_v100_throughput_str = f"{cp_v100_throughput_value:,}"
+    cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)
+    cp_rho_safe_pct_str = f"{cp_rho_safe_value * 100:.0f}"
+    cp_mu_required_comma_str = f"{cp_mu_required_value:,.0f}"
+    cp_precision_ratio_str = f"{cp_precision_ratio_value}"
+    mm1_p99_factor_str = f"{mm1_p99_factor_value}"
+    mm1_wait_factor_str = fmt(mm1_wait_factor_value, precision=1, commas=False)
 
-# --- Outputs (formatted strings for prose) ---
-cp_mu_required_str = fmt(cp_mu_required_value, precision=0, commas=False)    # e.g. "6944" req/s
-cp_gpus_raw_str = fmt(cp_gpus_raw_value, precision=1, commas=False)          # e.g. "6.1" GPUs
-cp_gpus_ceil_str = f"{cp_gpus_ceil_value}"                                   # e.g. "7" GPUs
-cp_final_raw_str = fmt(cp_final_raw_value, precision=1, commas=False)        # e.g. "9.1" GPUs
-cp_final_ceil_str = f"{cp_final_ceil_value}"                                 # e.g. "10" GPUs
-cp_gpus_after_fail_str = f"{cp_gpus_after_fail_value}"                       # e.g. "9" GPUs
-cp_util_after_fail_str = fmt(cp_util_after_fail_value, precision=1, commas=False)  # e.g. "48.7" %
-
-cp_peak_qps_str = f"{cp_peak_qps_value:,}"                                   # e.g. "5,000" QPS
-cp_v100_throughput_str = f"{cp_v100_throughput_value:,}"                     # e.g. "1,143" img/s
-cp_rho_safe_str = fmt(cp_rho_safe_value, precision=2, commas=False)          # e.g. "0.72"
-cp_rho_safe_pct_str = f"{cp_rho_safe_value * 100:.0f}"                       # e.g. "72" %
-cp_mu_required_comma_str = f"{cp_mu_required_value:,.0f}"                    # e.g. "6,944" req/s
-cp_precision_ratio_str = f"{cp_precision_ratio_value}"                       # e.g. "4" x
-
-mm1_p99_factor_str = f"{mm1_p99_factor_value}"                               # e.g. "4.6"
-mm1_wait_factor_str = fmt(mm1_wait_factor_value, precision=1, commas=False)  # e.g. "15.3" x
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cp_mu_required_str = CapacityPlanningCalc.cp_mu_required_str
+cp_gpus_raw_str = CapacityPlanningCalc.cp_gpus_raw_str
+cp_gpus_ceil_str = CapacityPlanningCalc.cp_gpus_ceil_str
+cp_final_raw_str = CapacityPlanningCalc.cp_final_raw_str
+cp_final_ceil_str = CapacityPlanningCalc.cp_final_ceil_str
+cp_gpus_after_fail_str = CapacityPlanningCalc.cp_gpus_after_fail_str
+cp_util_after_fail_str = CapacityPlanningCalc.cp_util_after_fail_str
+cp_peak_qps_str = CapacityPlanningCalc.cp_peak_qps_str
+cp_v100_throughput_str = CapacityPlanningCalc.cp_v100_throughput_str
+cp_rho_safe_str = CapacityPlanningCalc.cp_rho_safe_str
+cp_rho_safe_pct_str = CapacityPlanningCalc.cp_rho_safe_pct_str
+cp_mu_required_comma_str = CapacityPlanningCalc.cp_mu_required_comma_str
+cp_precision_ratio_str = CapacityPlanningCalc.cp_precision_ratio_str
+mm1_p99_factor_str = CapacityPlanningCalc.mm1_p99_factor_str
+mm1_wait_factor_str = CapacityPlanningCalc.mm1_wait_factor_str
 ```
 
 We can formalize this through *ResNet-50 capacity planning*.
@@ -1769,26 +1945,38 @@ Cold start\index{Cold Start!anatomy} latency compounds from multiple sources, ea
 # │ Exports: cs_*_str formatted strings for timeline table
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (cold start phases, seconds) ---
-cs_ssd_value = 0.5                    # weight loading from SSD
-cs_s3_value = 4.0                     # weight loading from S3
-cs_cuda_value = 0.4                   # CUDA context initialization
-cs_compile_value = 30.0               # TensorRT compilation
-cs_warmup_value = 0.2                 # warmup inferences
-cs_runtime_overhead_value = 0.4       # runtime overhead
+class ColdStartCalc:
+    """Decomposes cold start latency showing pre-compiled TensorRT reduces startup from ~35s to ~1.5s."""
 
-# --- Process (total cold start times) ---
-cs_local_total_value = cs_ssd_value + cs_cuda_value + cs_warmup_value + cs_runtime_overhead_value
-cs_cloud_total_value = cs_s3_value + cs_cuda_value + cs_compile_value + cs_warmup_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cs_ssd_value = 0.5                    # weight loading from SSD (s)
+    cs_s3_value = 4.0                     # weight loading from S3 (s)
+    cs_cuda_value = 0.4                   # CUDA context initialization (s)
+    cs_compile_value = 30.0               # TensorRT compilation (s)
+    cs_warmup_value = 0.2                 # warmup inferences (s)
+    cs_runtime_overhead_value = 0.4       # runtime overhead (s)
 
-# --- Outputs (formatted strings for table) ---
-cs_local_str = f"~{cs_local_total_value:.1f}s"                               # e.g. "~1.5s"
-cs_cloud_str = f"~{cs_cloud_total_value:.0f}s"                               # e.g. "~35s"
-cs_ssd_str = f"{cs_ssd_value}s"                                              # e.g. "0.5s"
-cs_s3_str = "3-5s"                                                           # range for S3
-cs_cuda_str = "0.3-0.5s"                                                     # range for CUDA
-cs_compile_str = "15-30s"                                                    # range for TensorRT
-cs_warmup_str = f"{cs_warmup_value}s"                                        # e.g. "0.2s"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cs_local_total_value = cs_ssd_value + cs_cuda_value + cs_warmup_value + cs_runtime_overhead_value
+    cs_cloud_total_value = cs_s3_value + cs_cuda_value + cs_compile_value + cs_warmup_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cs_local_str = f"~{cs_local_total_value:.1f}s"
+    cs_cloud_str = f"~{cs_cloud_total_value:.0f}s"
+    cs_ssd_str = f"{cs_ssd_value}s"
+    cs_s3_str = "3-5s"                                                       # range for S3
+    cs_cuda_str = "0.3-0.5s"                                                 # range for CUDA
+    cs_compile_str = "15-30s"                                                # range for TensorRT
+    cs_warmup_str = f"{cs_warmup_value}s"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cs_local_str = ColdStartCalc.cs_local_str
+cs_cloud_str = ColdStartCalc.cs_cloud_str
+cs_ssd_str = ColdStartCalc.cs_ssd_str
+cs_s3_str = ColdStartCalc.cs_s3_str
+cs_cuda_str = ColdStartCalc.cs_cuda_str
+cs_compile_str = ColdStartCalc.cs_compile_str
+cs_warmup_str = ColdStartCalc.cs_warmup_str
 ```
 
 ::: {.callout-notebook title="ResNet-50: Cold Start Timeline"}
@@ -1869,17 +2057,25 @@ When the aggregate size of all models exceeds GPU memory capacity, the serving s
 from mlsys.constants import PCIE_GEN4_BW, GB, second
 from mlsys.formatting import fmt
 
-# --- Inputs (model and PCIe specs) ---
-model_size_gb_value = 10              # model size (GB)
-pcie_bw_gbs_value = PCIE_GEN4_BW.to(GB / second).magnitude  # PCIe Gen4 x16 bandwidth
+class ModelSwapCalc:
+    """Quantifies the latency cost of swapping a 10 GB model over PCIe Gen4."""
 
-# --- Process (swap time calculation) ---
-model_swap_ms_value = model_size_gb_value / pcie_bw_gbs_value * 1000
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    model_size_gb_value = 10              # model size (GB)
+    pcie_bw_gbs_value = PCIE_GEN4_BW.m_as(GB / second)  # PCIe Gen4 x16 bandwidth
 
-# --- Outputs (formatted strings for prose) ---
-model_size_gb_str = f"{model_size_gb_value}"                                 # e.g. "10" GB
-pcie_bw_gbs_str = fmt(pcie_bw_gbs_value, precision=0, commas=False)          # e.g. "32" GB/s
-model_swap_ms_str = fmt(model_swap_ms_value, precision=0, commas=False)      # e.g. "312" ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    model_swap_ms_value = model_size_gb_value / pcie_bw_gbs_value * 1000
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    model_size_gb_str = f"{model_size_gb_value}"
+    pcie_bw_gbs_str = fmt(pcie_bw_gbs_value, precision=0, commas=False)
+    model_swap_ms_str = fmt(model_swap_ms_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+model_size_gb_str = ModelSwapCalc.model_size_gb_str
+pcie_bw_gbs_str = ModelSwapCalc.pcie_bw_gbs_str
+model_swap_ms_str = ModelSwapCalc.model_swap_ms_str
 ```
 
 For a `{python} model_size_gb_str` GB model on PCIe Gen4 x16 (`{python} pcie_bw_gbs_str` GB/s theoretical bandwidth), loading takes at least:
@@ -1929,23 +2125,33 @@ Two fixed costs dominate at small batch sizes. **Kernel launch overhead**\index{
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (batching comparison) ---
-batch1_throughput_value = 200         # batch-1 throughput (img/s)
-batch32_throughput_value = 1280       # batch-32 throughput (img/s)
-batch32_inference_ms_value = 25.0     # batch-32 inference time (ms)
-batch_window_ms_value = 10.0          # batching window (ms)
-batch1_inference_total_ms_value = 5.0 # batch-1 total latency (ms)
+class BatchThroughputCalc:
+    """Quantifies the 6.4× throughput gain of batch-32 over batch-1 and its latency cost."""
 
-# --- Process (throughput ratio and total latency) ---
-throughput_ratio_value = batch32_throughput_value / batch1_throughput_value
-batch32_total_ms_value = batch_window_ms_value + batch32_inference_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    batch1_throughput_value = 200         # batch-1 throughput (img/s)
+    batch32_throughput_value = 1280       # batch-32 throughput (img/s)
+    batch32_inference_ms_value = 25.0     # batch-32 inference time (ms)
+    batch_window_ms_value = 10.0          # batching window (ms)
+    batch1_inference_total_ms_value = 5.0 # batch-1 total latency (ms)
 
-# --- Outputs (formatted strings for prose) ---
-throughput_ratio_str = fmt(throughput_ratio_value, precision=1, commas=False)         # e.g. "6.4" x
-batch_window_ms_str = fmt(batch_window_ms_value, precision=0, commas=False)           # e.g. "10" ms
-batch32_inference_ms_str = fmt(batch32_inference_ms_value, precision=0, commas=False) # e.g. "25" ms
-batch32_total_str = fmt(batch32_total_ms_value, precision=0, commas=False)            # e.g. "35" ms
-batch1_inference_total_ms_str = fmt(batch1_inference_total_ms_value, precision=0, commas=False)  # e.g. "5" ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    throughput_ratio_value = batch32_throughput_value / batch1_throughput_value
+    batch32_total_ms_value = batch_window_ms_value + batch32_inference_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    throughput_ratio_str = fmt(throughput_ratio_value, precision=1, commas=False)
+    batch_window_ms_str = fmt(batch_window_ms_value, precision=0, commas=False)
+    batch32_inference_ms_str = fmt(batch32_inference_ms_value, precision=0, commas=False)
+    batch32_total_str = fmt(batch32_total_ms_value, precision=0, commas=False)
+    batch1_inference_total_ms_str = fmt(batch1_inference_total_ms_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+throughput_ratio_str = BatchThroughputCalc.throughput_ratio_str
+batch_window_ms_str = BatchThroughputCalc.batch_window_ms_str
+batch32_inference_ms_str = BatchThroughputCalc.batch32_inference_ms_str
+batch32_total_str = BatchThroughputCalc.batch32_total_str
+batch1_inference_total_ms_str = BatchThroughputCalc.batch1_inference_total_ms_str
 ```
 
 ::: {.callout-notebook title="ResNet-50 Batching Efficiency"}
@@ -1985,25 +2191,37 @@ The table reveals the throughput-latency tradeoff in stark terms: larger batches
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (batching sweet spot scenario) ---
-batch1_ms_value = 5.0                 # batch-1 inference (ms)
-batch1_imgs_value = 200               # batch-1 throughput (img/s)
-batch8_wait_ms_value = 5.0            # batch-8 wait time (ms)
-batch8_inference_ms_value = 9.0       # batch-8 inference time (ms)
+class BatchingSweetspotCalc:
+    """Demonstrates that batch-8 yields ~3× throughput within a 20ms SLO budget."""
 
-# --- Process (user latency and throughput) ---
-batch8_user_latency_ms_value = batch8_wait_ms_value + batch8_inference_ms_value
-batch8_throughput_value = 8 / (batch8_user_latency_ms_value / 1000)
-latency_increase_value = batch8_user_latency_ms_value / batch1_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    batch1_ms_value = 5.0                 # batch-1 inference (ms)
+    batch1_imgs_value = 200               # batch-1 throughput (img/s)
+    batch8_wait_ms_value = 5.0            # batch-8 wait time (ms)
+    batch8_inference_ms_value = 9.0       # batch-8 inference time (ms)
 
-# --- Outputs (formatted strings for prose) ---
-batch1_ms_str = fmt(batch1_ms_value, precision=0, commas=False)                       # e.g. "5" ms
-batch1_imgs_str = f"{batch1_imgs_value}"                                              # e.g. "200" img/s
-batch8_wait_ms_str = fmt(batch8_wait_ms_value, precision=0, commas=False)             # e.g. "5" ms
-batch8_inference_ms_str = fmt(batch8_inference_ms_value, precision=0, commas=False)   # e.g. "9" ms
-batch8_user_latency_str = fmt(batch8_user_latency_ms_value, precision=0, commas=False)# e.g. "14" ms
-batch8_throughput_str = fmt(batch8_throughput_value, precision=0, commas=False)       # e.g. "571" img/s
-latency_increase_str = fmt(latency_increase_value, precision=0, commas=False)         # e.g. "3" x
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    batch8_user_latency_ms_value = batch8_wait_ms_value + batch8_inference_ms_value
+    batch8_throughput_value = 8 / (batch8_user_latency_ms_value / 1000)
+    latency_increase_value = batch8_user_latency_ms_value / batch1_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    batch1_ms_str = fmt(batch1_ms_value, precision=0, commas=False)
+    batch1_imgs_str = f"{batch1_imgs_value}"
+    batch8_wait_ms_str = fmt(batch8_wait_ms_value, precision=0, commas=False)
+    batch8_inference_ms_str = fmt(batch8_inference_ms_value, precision=0, commas=False)
+    batch8_user_latency_str = fmt(batch8_user_latency_ms_value, precision=0, commas=False)
+    batch8_throughput_str = fmt(batch8_throughput_value, precision=0, commas=False)
+    latency_increase_str = fmt(latency_increase_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+batch1_ms_str = BatchingSweetspotCalc.batch1_ms_str
+batch1_imgs_str = BatchingSweetspotCalc.batch1_imgs_str
+batch8_wait_ms_str = BatchingSweetspotCalc.batch8_wait_ms_str
+batch8_inference_ms_str = BatchingSweetspotCalc.batch8_inference_ms_str
+batch8_user_latency_str = BatchingSweetspotCalc.batch8_user_latency_str
+batch8_throughput_str = BatchingSweetspotCalc.batch8_throughput_str
+latency_increase_str = BatchingSweetspotCalc.latency_increase_str
 ```
 
 ::: {.callout-notebook title="The Batching Sweet Spot"}
@@ -2029,6 +2247,21 @@ Look for the **"Knee"** in @fig-throughput-latency-knee, the point where the blu
 #| echo: false
 #| fig-cap: "**The Throughput-Latency Knee.** Batch Size vs. Throughput (Blue) and Latency (Orange). Throughput increases with batch size as hardware utilization improves, but eventually saturates. Latency remains relatively flat until the 'Knee,' after which it spikes due to queuing. Values are representative and depend on model/hardware."
 #| fig-alt: "Dual-axis line chart. Blue line (Throughput) rises and plateaus. Orange line (Latency) stays low then spikes upward. A vertical line marks the optimal point where throughput is high before latency explodes."
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THROUGHPUT-LATENCY KNEE FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-throughput-latency-knee — dual-axis plot preceding the
+# │          dynamic batching section, illustrating the throughput/latency tradeoff
+# │
+# │ Goal: Show that throughput saturates and latency spikes at the same batch
+# │       size threshold, revealing the optimal operating point.
+# │ Show: Throughput (req/s) and latency (ms) as a function of batch size on
+# │       log-scale x-axis with an annotated optimal point.
+# │ How: Plot tabular BATCHING_DATA on dual y-axes; mark optimal with axvline.
+# │
+# │ Imports: pandas (pd), mlsys.viz (viz)
+# │ Exports: (figure only, no prose variables)
+# └─────────────────────────────────────────────────────────────────────────────
 
 import pandas as pd
 from mlsys import viz
@@ -2123,18 +2356,25 @@ $$E[L_{\text{lat,wait}}] = \frac{T}{2}$$ {#eq-avg-wait}
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (batching scenario) ---
-batch_window_ms_value = 20            # batching window (ms)
-slo_ms_value = 50                     # latency SLO (ms)
-inference_ms_value = 5                # inference time (ms)
+class BatchingBudgetCalc:
+    """Shows that a 20ms batching window consumes 20% of a 50ms SLO before any computation."""
 
-# --- Process (average wait and budget share) ---
-avg_wait_ms_value = batch_window_ms_value / 2
-budget_pct_value = avg_wait_ms_value / slo_ms_value * 100
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    batch_window_ms_value = 20            # batching window (ms)
+    slo_ms_value = 50                     # latency SLO (ms)
+    inference_ms_value = 5                # inference time (ms)
 
-# --- Outputs (formatted strings for prose) ---
-avg_wait_str = fmt(avg_wait_ms_value, precision=0, commas=False)             # e.g. "10" ms
-budget_pct_str = fmt(budget_pct_value, precision=0, commas=False)            # e.g. "20" %
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    avg_wait_ms_value = batch_window_ms_value / 2
+    budget_pct_value = avg_wait_ms_value / slo_ms_value * 100
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    avg_wait_str = fmt(avg_wait_ms_value, precision=0, commas=False)
+    budget_pct_str = fmt(budget_pct_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+avg_wait_str = BatchingBudgetCalc.avg_wait_str
+budget_pct_str = BatchingBudgetCalc.budget_pct_str
 ```
 
 This simple relationship has direct implications. A 20 ms batching window adds `{python} avg_wait_str` ms average latency regardless of batch size achieved. If your latency SLO is 50ms and inference takes 5ms, the batching window consumes `{python} budget_pct_str`% of your latency budget before any computation begins.
@@ -2180,48 +2420,68 @@ For ResNet-50 on a V100 GPU, service time approximately scales as $S(b) = 5\text
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: throughput_*, b1_*, b32_*, il_*, T_window_str
+# │          service_time_value (function, used by slo-violation-calc)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# --- Inputs (batching model parameters) ---
-T_window_value = 10.0                 # batching window (ms)
-fixed_overhead_ms_value = 5.0         # fixed overhead (ms)
-per_image_ms_value = 0.6              # per-image compute (ms)
+# Helper functions at module scope (used by class body and slo-violation-calc)
+def service_time_value(b, _fixed=5.0, _per_image=0.6):
+    return _fixed + _per_image * b
 
-batch_sizes_value = [1, 4, 8, 16, 32]
-il_overhead_ms_value = 5.0            # Iron Law overhead (ms)
-il_compute_b1_ms_value = 0.6          # batch-1 compute (ms)
-il_compute_b32_ms_value = 19.2        # batch-32 compute (ms)
-il_threshold_pct_value = 10           # efficiency threshold (%)
+def total_latency_value(b, _T=10.0, _fixed=5.0, _per_image=0.6):
+    return _T + _fixed + _per_image * b
 
-# --- Process (throughput and efficiency calculations) ---
-def service_time_value(b):
-    return fixed_overhead_ms_value + per_image_ms_value * b
-def total_latency_value(b):
-    return T_window_value + service_time_value(b)
-def throughput_value(b):
-    return b / (total_latency_value(b) / 1000)
+def throughput_value(b, _T=10.0, _fixed=5.0, _per_image=0.6):
+    return b / ((_T + _fixed + _per_image * b) / 1000)
 
-throughputs_value = {b: throughput_value(b) for b in batch_sizes_value}
-latencies_value = {b: total_latency_value(b) for b in batch_sizes_value}
-throughput_increase_value = throughputs_value[32] / throughputs_value[1]
-il_eff_b1_pct_value = int(il_compute_b1_ms_value / (il_overhead_ms_value + il_compute_b1_ms_value) * 100)
-il_eff_b32_pct_value = int(il_compute_b32_ms_value / (il_overhead_ms_value + il_compute_b32_ms_value) * 100)
+class BatchingAnalysisCalc:
+    """Quantifies batching efficiency: batch-32 achieves 14.6× throughput gain over batch-1."""
 
-# --- Outputs (formatted strings for prose) ---
-throughput_increase_str = fmt(throughput_increase_value, precision=1, commas=False)  # e.g. "14.6" x
-b1_throughput_str = fmt(throughputs_value[1], precision=0, commas=False)             # e.g. "64" img/s
-b32_throughput_str = fmt(throughputs_value[32], precision=0, commas=False)           # e.g. "935" img/s
-b1_latency_str = fmt(latencies_value[1], precision=1, commas=False)                  # e.g. "15.6" ms
-b32_latency_str = fmt(latencies_value[32], precision=1, commas=False)                # e.g. "34.2" ms
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    T_window_value = 10.0                 # batching window (ms)
+    fixed_overhead_ms_value = 5.0         # fixed overhead (ms)
+    per_image_ms_value = 0.6              # per-image compute (ms)
+    batch_sizes_value = [1, 4, 8, 16, 32]
+    il_overhead_ms_value = 5.0            # Iron Law overhead (ms)
+    il_compute_b1_ms_value = 0.6          # batch-1 compute (ms)
+    il_compute_b32_ms_value = 19.2        # batch-32 compute (ms)
+    il_threshold_pct_value = 10           # efficiency threshold (%)
 
-il_overhead_str = fmt(il_overhead_ms_value, precision=0, commas=False)               # e.g. "5" ms
-il_compute_b1_str = f"{il_compute_b1_ms_value}"                                      # e.g. "0.6" ms
-il_compute_b32_str = f"{il_compute_b32_ms_value}"                                    # e.g. "19.2" ms
-il_eff_b1_str = f"{il_eff_b1_pct_value}"                                             # e.g. "11" %
-il_eff_b32_str = f"{il_eff_b32_pct_value}"                                           # e.g. "79" %
-il_threshold_str = fmt(il_threshold_pct_value, precision=0, commas=False)            # e.g. "10" %
-T_window_str = fmt(T_window_value, precision=0, commas=False)                        # e.g. "10" ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    throughputs_value = {b: throughput_value(b) for b in batch_sizes_value}
+    latencies_value = {b: total_latency_value(b) for b in batch_sizes_value}
+    throughput_increase_value = throughputs_value[32] / throughputs_value[1]
+    il_eff_b1_pct_value = int(il_compute_b1_ms_value / (il_overhead_ms_value + il_compute_b1_ms_value) * 100)
+    il_eff_b32_pct_value = int(il_compute_b32_ms_value / (il_overhead_ms_value + il_compute_b32_ms_value) * 100)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    throughput_increase_str = fmt(throughput_increase_value, precision=1, commas=False)
+    b1_throughput_str = fmt(throughputs_value[1], precision=0, commas=False)
+    b32_throughput_str = fmt(throughputs_value[32], precision=0, commas=False)
+    b1_latency_str = fmt(latencies_value[1], precision=1, commas=False)
+    b32_latency_str = fmt(latencies_value[32], precision=1, commas=False)
+    il_overhead_str = fmt(il_overhead_ms_value, precision=0, commas=False)
+    il_compute_b1_str = f"{il_compute_b1_ms_value}"
+    il_compute_b32_str = f"{il_compute_b32_ms_value}"
+    il_eff_b1_str = f"{il_eff_b1_pct_value}"
+    il_eff_b32_str = f"{il_eff_b32_pct_value}"
+    il_threshold_str = fmt(il_threshold_pct_value, precision=0, commas=False)
+    T_window_str = fmt(T_window_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+throughput_increase_str = BatchingAnalysisCalc.throughput_increase_str
+b1_throughput_str = BatchingAnalysisCalc.b1_throughput_str
+b32_throughput_str = BatchingAnalysisCalc.b32_throughput_str
+b1_latency_str = BatchingAnalysisCalc.b1_latency_str
+b32_latency_str = BatchingAnalysisCalc.b32_latency_str
+il_overhead_str = BatchingAnalysisCalc.il_overhead_str
+il_compute_b1_str = BatchingAnalysisCalc.il_compute_b1_str
+il_compute_b32_str = BatchingAnalysisCalc.il_compute_b32_str
+il_eff_b1_str = BatchingAnalysisCalc.il_eff_b1_str
+il_eff_b32_str = BatchingAnalysisCalc.il_eff_b32_str
+il_threshold_str = BatchingAnalysisCalc.il_threshold_str
+T_window_str = BatchingAnalysisCalc.T_window_str
+# service_time_value, total_latency_value, throughput_value already at module scope
 ```
 
 | **Batch Size** | **Service Time** | **Total Latency** | **Throughput** | **Efficiency** |
@@ -2377,8 +2637,6 @@ $$L_{\text{lat,p99}} \approx T + S(b_{p99})$$ {#eq-p99-batch-latency}
 ```{python}
 #| label: slo-violation-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ SLO VIOLATION ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2389,40 +2647,54 @@ from mlsys.formatting import fmt
 # │ Show: That p99 latency can be 2.2× higher than the mean due to batch size variance.
 # │ How: Model request arrival and batch assembly to compare mean vs. tail response times.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.formatting (fmt); service_time_value from batching-analysis-calc
 # │ Exports: qps_str, T_slo_str, mean_wait_str, mean_batch_str,
 # │          mean_service_str, mean_latency_str, p99_service_str,
 # │          p99_latency_str, p99_ratio_str, p99_batch_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (traffic and SLO parameters) ---
-qps_value = 500
-T_slo_value = 10.0
-p99_batch_value = 11
+class SloViolationCalc:
+    """p99 latency is 2.2× the mean due to batch size variance from Poisson arrivals."""
 
-# --- Process (mean vs p99 latency comparison) ---
-mean_batch_value = qps_value * (T_slo_value / 1000)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    qps_value = 500
+    T_slo_value = 10.0
+    p99_batch_value = 11
 
-mean_wait_value = T_slo_value / 2
-mean_service_value = service_time_value(int(mean_batch_value))
-mean_latency_value = mean_wait_value + mean_service_value
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # service_time_value is a module-level function from batching-analysis-calc
+    mean_batch_value = qps_value * (T_slo_value / 1000)
+    mean_wait_value = T_slo_value / 2
+    mean_service_value = service_time_value(int(mean_batch_value))
+    mean_latency_value = mean_wait_value + mean_service_value
+    p99_service_value = service_time_value(p99_batch_value)
+    p99_latency_value = T_slo_value + p99_service_value
+    p99_to_mean_value = p99_latency_value / mean_latency_value
 
-p99_service_value = service_time_value(p99_batch_value)
-p99_latency_value = T_slo_value + p99_service_value
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    qps_str = f"{qps_value}"
+    T_slo_str = fmt(T_slo_value, precision=0, commas=False)
+    mean_wait_str = fmt(mean_wait_value, precision=0, commas=False)
+    mean_batch_str = fmt(mean_batch_value, precision=0, commas=False)
+    mean_service_str = fmt(mean_service_value, precision=1, commas=False)
+    mean_latency_str = fmt(mean_latency_value, precision=0, commas=False)
+    p99_service_str = fmt(p99_service_value, precision=1, commas=False)
+    p99_latency_str = fmt(p99_latency_value, precision=1, commas=False)
+    p99_ratio_str = fmt(p99_to_mean_value, precision=2, commas=False)
+    p99_batch_str = f"{p99_batch_value}"
 
-p99_to_mean_value = p99_latency_value / mean_latency_value
-
-# --- Outputs (formatted strings for prose) ---
-qps_str = f"{qps_value}"
-T_slo_str = fmt(T_slo_value, precision=0, commas=False)
-mean_wait_str = fmt(mean_wait_value, precision=0, commas=False)
-mean_batch_str = fmt(mean_batch_value, precision=0, commas=False)
-mean_service_str = fmt(mean_service_value, precision=1, commas=False)
-mean_latency_str = fmt(mean_latency_value, precision=0, commas=False)
-p99_service_str = fmt(p99_service_value, precision=1, commas=False)
-p99_latency_str = fmt(p99_latency_value, precision=1, commas=False)
-p99_ratio_str = fmt(p99_to_mean_value, precision=2, commas=False)
-p99_batch_str = f"{p99_batch_value}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+qps_str = SloViolationCalc.qps_str
+T_slo_str = SloViolationCalc.T_slo_str
+mean_wait_str = SloViolationCalc.mean_wait_str
+mean_batch_str = SloViolationCalc.mean_batch_str
+mean_service_str = SloViolationCalc.mean_service_str
+mean_latency_str = SloViolationCalc.mean_latency_str
+p99_service_str = SloViolationCalc.p99_service_str
+p99_latency_str = SloViolationCalc.p99_latency_str
+p99_ratio_str = SloViolationCalc.p99_ratio_str
+p99_batch_str = SloViolationCalc.p99_batch_str
 ```
 
 where bp99 is the 99th percentile batch size. For lambda = `{python} qps_str` QPS and T = `{python} T_slo_str` ms:
@@ -2508,8 +2780,6 @@ For ResNet-50 with 50ms SLO and 500 QPS traffic:
 ```{python}
 #| label: practical-config-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PRACTICAL BATCHING CONFIGURATION
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2527,33 +2797,49 @@ from mlsys.formatting import fmt
 # │          pc_config_batch_str, pc_predicted_p99_ms_str,
 # │          pc_predicted_throughput_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (SLO, traffic, and memory constraints) ---
-pc_slo_ms_value = 50
-pc_qps_value = 500
-pc_budget_pct_value = 0.3
-pc_mem_limit_batch_value = 32
+class PracticalConfigCalc:
+    """Derives a production batching config: 30% SLO budget yields a 12ms window for 500 QPS."""
 
-# --- Process (budget allocation and configuration) ---
-pc_batch_budget_ms_value = pc_slo_ms_value * pc_budget_pct_value
-pc_max_window_ms_value = pc_batch_budget_ms_value
-pc_expected_batch_value = pc_qps_value * (pc_max_window_ms_value / 1000)
-pc_config_window_ms_value = 12 # Tuned
-pc_config_batch_value = 32
-pc_predicted_p99_ms_value = 43
-pc_predicted_throughput_value = 1180
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    pc_slo_ms_value = 50
+    pc_qps_value = 500
+    pc_budget_pct_value = 0.3
+    pc_mem_limit_batch_value = 32
+    pc_config_window_ms_value = 12       # tuned value
+    pc_config_batch_value = 32
+    pc_predicted_p99_ms_value = 43
+    pc_predicted_throughput_value = 1180
 
-# --- Outputs (formatted strings for prose) ---
-pc_slo_ms_str = f"{pc_slo_ms_value}"
-pc_qps_str = f"{pc_qps_value}"
-pc_batch_budget_ms_str = f"{pc_batch_budget_ms_value:.0f}"
-pc_max_window_ms_str = f"{pc_max_window_ms_value:.0f}"
-pc_expected_batch_str = f"{pc_expected_batch_value}"
-pc_mem_limit_batch_str = f"{pc_mem_limit_batch_value}"
-pc_config_window_ms_str = f"{pc_config_window_ms_value}"
-pc_config_batch_str = f"{pc_config_batch_value}"
-pc_predicted_p99_ms_str = f"{pc_predicted_p99_ms_value}"
-pc_predicted_throughput_str = f"{pc_predicted_throughput_value:,}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    pc_batch_budget_ms_value = pc_slo_ms_value * pc_budget_pct_value
+    pc_max_window_ms_value = pc_batch_budget_ms_value
+    pc_expected_batch_value = pc_qps_value * (pc_max_window_ms_value / 1000)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    pc_slo_ms_str = f"{pc_slo_ms_value}"
+    pc_qps_str = f"{pc_qps_value}"
+    pc_batch_budget_ms_str = f"{pc_batch_budget_ms_value:.0f}"
+    pc_max_window_ms_str = f"{pc_max_window_ms_value:.0f}"
+    pc_expected_batch_str = f"{pc_expected_batch_value}"
+    pc_mem_limit_batch_str = f"{pc_mem_limit_batch_value}"
+    pc_config_window_ms_str = f"{pc_config_window_ms_value}"
+    pc_config_batch_str = f"{pc_config_batch_value}"
+    pc_predicted_p99_ms_str = f"{pc_predicted_p99_ms_value}"
+    pc_predicted_throughput_str = f"{pc_predicted_throughput_value:,}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+pc_slo_ms_str = PracticalConfigCalc.pc_slo_ms_str
+pc_qps_str = PracticalConfigCalc.pc_qps_str
+pc_batch_budget_ms_str = PracticalConfigCalc.pc_batch_budget_ms_str
+pc_max_window_ms_str = PracticalConfigCalc.pc_max_window_ms_str
+pc_expected_batch_str = PracticalConfigCalc.pc_expected_batch_str
+pc_mem_limit_batch_str = PracticalConfigCalc.pc_mem_limit_batch_str
+pc_config_window_ms_str = PracticalConfigCalc.pc_config_window_ms_str
+pc_config_batch_str = PracticalConfigCalc.pc_config_batch_str
+pc_predicted_p99_ms_str = PracticalConfigCalc.pc_predicted_p99_ms_str
+pc_predicted_throughput_str = PracticalConfigCalc.pc_predicted_throughput_str
 ```
 
 - Latency budget for batching: `{python} pc_batch_budget_ms_str`ms
@@ -2685,7 +2971,6 @@ Mobile\index{Single-User Traffic!mobile serving}\index{SingleStream!MLPerf scena
 ```{python}
 #| label: mobile-serving-calc
 #| echo: false
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MOBILE SERVING LATENCY AND ENERGY
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2701,41 +2986,56 @@ Mobile\index{Single-User Traffic!mobile serving}\index{SingleStream!MLPerf scena
 # │          m_resize_mj_str, m_npu_mj_str, m_ui_mj_str, m_total_mj_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (mobile latency and energy per phase) ---
-m_cam_ms_value = 8
-m_jpeg_ms_value = 15
-m_resize_ms_value = 5
-m_npu_ms_value = 12
-m_ui_ms_value = 5
+class MobileServingCalc:
+    """Mobile vision pipeline: JPEG decode dominates energy; NPU handles inference at 82% utilization."""
 
-m_cam_mj_value = 0.08
-m_jpeg_mj_value = 1.5
-m_resize_mj_value = 0.4
-m_npu_mj_value = 0.8
-m_ui_mj_value = 0.2
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    m_cam_ms_value = 8
+    m_jpeg_ms_value = 15
+    m_resize_ms_value = 5
+    m_npu_ms_value = 12
+    m_ui_ms_value = 5
+    m_cam_mj_value = 0.08
+    m_jpeg_mj_value = 1.5
+    m_resize_mj_value = 0.4
+    m_npu_mj_value = 0.8
+    m_ui_mj_value = 0.2
 
-# --- Process (total latency and energy) ---
-m_total_ms_value = (
-    m_cam_ms_value + m_jpeg_ms_value + m_resize_ms_value + m_npu_ms_value + m_ui_ms_value
-)
-m_total_mj_value = (
-    m_cam_mj_value + m_jpeg_mj_value + m_resize_mj_value + m_npu_mj_value + m_ui_mj_value
-)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    m_total_ms_value = (
+        m_cam_ms_value + m_jpeg_ms_value + m_resize_ms_value + m_npu_ms_value + m_ui_ms_value
+    )
+    m_total_mj_value = (
+        m_cam_mj_value + m_jpeg_mj_value + m_resize_mj_value + m_npu_mj_value + m_ui_mj_value
+    )
 
-# --- Outputs (formatted strings for table) ---
-m_cam_ms_str = f"{m_cam_ms_value}ms"
-m_jpeg_ms_str = f"{m_jpeg_ms_value}ms"
-m_resize_ms_str = f"{m_resize_ms_value}ms"
-m_npu_ms_str = f"{m_npu_ms_value}ms"
-m_ui_ms_str = f"{m_ui_ms_value}ms"
-m_total_ms_str = f"{m_total_ms_value}ms"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    m_cam_ms_str = f"{m_cam_ms_value}ms"
+    m_jpeg_ms_str = f"{m_jpeg_ms_value}ms"
+    m_resize_ms_str = f"{m_resize_ms_value}ms"
+    m_npu_ms_str = f"{m_npu_ms_value}ms"
+    m_ui_ms_str = f"{m_ui_ms_value}ms"
+    m_total_ms_str = f"{m_total_ms_value}ms"
+    m_cam_mj_str = f"{m_cam_mj_value}mJ"
+    m_jpeg_mj_str = f"{m_jpeg_mj_value}mJ"
+    m_resize_mj_str = f"{m_resize_mj_value}mJ"
+    m_npu_mj_str = f"{m_npu_mj_value}mJ"
+    m_ui_mj_str = f"{m_ui_mj_value}mJ"
+    m_total_mj_str = f"{m_total_mj_value:.1f}mJ"
 
-m_cam_mj_str = f"{m_cam_mj_value}mJ"
-m_jpeg_mj_str = f"{m_jpeg_mj_value}mJ"
-m_resize_mj_str = f"{m_resize_mj_value}mJ"
-m_npu_mj_str = f"{m_npu_mj_value}mJ"
-m_ui_mj_str = f"{m_ui_mj_value}mJ"
-m_total_mj_str = f"{m_total_mj_value:.1f}mJ"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+m_cam_ms_str = MobileServingCalc.m_cam_ms_str
+m_jpeg_ms_str = MobileServingCalc.m_jpeg_ms_str
+m_resize_ms_str = MobileServingCalc.m_resize_ms_str
+m_npu_ms_str = MobileServingCalc.m_npu_ms_str
+m_ui_ms_str = MobileServingCalc.m_ui_ms_str
+m_total_ms_str = MobileServingCalc.m_total_ms_str
+m_cam_mj_str = MobileServingCalc.m_cam_mj_str
+m_jpeg_mj_str = MobileServingCalc.m_jpeg_mj_str
+m_resize_mj_str = MobileServingCalc.m_resize_mj_str
+m_npu_mj_str = MobileServingCalc.m_npu_mj_str
+m_ui_mj_str = MobileServingCalc.m_ui_mj_str
+m_total_mj_str = MobileServingCalc.m_total_mj_str
 ```
 
 ::: {.callout-notebook title="ResNet-50: Mobile Serving"}
@@ -2860,8 +3160,7 @@ The computational intensity of managing KV caches across concurrent requests rai
 # │ Show: That poor utilization causes 10× higher energy consumption per token.
 # │ How: Calculate Joules per token based on TDP and concurrent request volume.
 # │
-# │ Imports: mlsys.constants (H100_TDP, energy comparisons), h100_tdp_value (from
-# │          gpu-specs cell)
+# │ Imports: mlsys.constants (H100_TDP, energy comparisons)
 # │ Exports: cc_concurrent_str, cc_tokens_req_str, cc_total_tokens_str,
 # │          cc_host_overhead_str, cc_total_power_str, cc_joules_token_str,
 # │          cc_response_tokens_str, cc_response_joules_str, cc_smartphone_str,
@@ -2870,39 +3169,57 @@ The computational intensity of managing KV caches across concurrent requests rai
 from mlsys.constants import H100_TDP, ENERGY_SMARTPHONE_CHARGE_J, ENERGY_BOILING_WATER_J, watt, joule
 from mlsys.formatting import fmt
 
-# --- Inputs (LLM serving scenario assumptions) ---
-cc_concurrent_req_value = 114                     # concurrent requests per H100
-cc_tokens_per_sec_req_value = 7.5                 # tokens/sec per request (decode phase)
-cc_host_overhead_w_value = 300                    # host server power overhead (W)
-cc_response_tokens_value = 500                    # typical response length
-cc_low_util_pct_value = 10                        # poor utilization scenario (%)
-cc_idle_power_w_value = 300                       # GPU idle power (W)
+class CarbonCostCalc:
+    """Energy cost per LLM token: poor utilization causes 10× higher Joules/token."""
 
-# --- Process (energy calculations) ---
-h100_tdp_value = H100_TDP.to(watt).magnitude
-cc_total_tokens_sec_value = cc_concurrent_req_value * cc_tokens_per_sec_req_value
-cc_total_power_w_value = h100_tdp_value + cc_host_overhead_w_value
-cc_joules_per_token_value = cc_total_power_w_value / cc_total_tokens_sec_value
-cc_response_joules_value = cc_joules_per_token_value * cc_response_tokens_value
-cc_smartphone_joules_value = ENERGY_SMARTPHONE_CHARGE_J.to(joule).magnitude
-cc_boiling_water_joules_value = ENERGY_BOILING_WATER_J.to(joule).magnitude
-cc_low_util_tokens_sec_value = cc_total_tokens_sec_value * (cc_low_util_pct_value / 100)
-cc_low_util_joules_value = cc_idle_power_w_value / cc_low_util_tokens_sec_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cc_concurrent_req_value = 114                     # concurrent requests per H100
+    cc_tokens_per_sec_req_value = 7.5                 # tokens/sec per request (decode phase)
+    cc_host_overhead_w_value = 300                    # host server power overhead (W)
+    cc_response_tokens_value = 500                    # typical response length
+    cc_low_util_pct_value = 10                        # poor utilization scenario (%)
+    cc_idle_power_w_value = 300                       # GPU idle power (W)
 
-# --- Outputs (formatted strings for prose) ---
-cc_concurrent_str = fmt(cc_concurrent_req_value, precision=0, commas=False)           # e.g. "114" requests
-cc_tokens_req_str = fmt(cc_tokens_per_sec_req_value, precision=1, commas=False)       # e.g. "7.5" tokens/sec
-cc_total_tokens_str = fmt(cc_total_tokens_sec_value, precision=0, commas=False)       # e.g. "855" tokens/sec
-cc_host_overhead_str = fmt(cc_host_overhead_w_value, precision=0, commas=False)       # e.g. "300" W
-cc_total_power_str = fmt(cc_total_power_w_value, precision=0, commas=False)           # e.g. "1000" W
-cc_joules_token_str = fmt(cc_joules_per_token_value, precision=2, commas=False)       # e.g. "1.17" J/token
-cc_response_tokens_str = fmt(cc_response_tokens_value, precision=0, commas=False)     # e.g. "500" tokens
-cc_response_joules_str = fmt(cc_response_joules_value, precision=0, commas=False)     # e.g. "585" J
-cc_smartphone_str = f"{cc_smartphone_joules_value:,}"                                 # e.g. "50,400" J
-cc_boiling_str = f"{cc_boiling_water_joules_value:,}"                                 # e.g. "420,000" J
-cc_low_util_str = fmt(cc_low_util_pct_value, precision=0, commas=False)               # e.g. "10" %
-cc_idle_power_str = fmt(cc_idle_power_w_value, precision=0, commas=False)             # e.g. "300" W
-cc_low_util_joules_str = fmt(cc_low_util_joules_value, precision=1, commas=False)     # e.g. "3.5" J/token
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    _h100_tdp_w = H100_TDP.m_as(watt)
+    cc_total_tokens_sec_value = cc_concurrent_req_value * cc_tokens_per_sec_req_value
+    cc_total_power_w_value = _h100_tdp_w + cc_host_overhead_w_value
+    cc_joules_per_token_value = cc_total_power_w_value / cc_total_tokens_sec_value
+    cc_response_joules_value = cc_joules_per_token_value * cc_response_tokens_value
+    _smartphone_joules = ENERGY_SMARTPHONE_CHARGE_J.m_as(joule)
+    _boiling_joules = ENERGY_BOILING_WATER_J.m_as(joule)
+    cc_low_util_tokens_sec_value = cc_total_tokens_sec_value * (cc_low_util_pct_value / 100)
+    cc_low_util_joules_value = cc_idle_power_w_value / cc_low_util_tokens_sec_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cc_concurrent_str = fmt(cc_concurrent_req_value, precision=0, commas=False)
+    cc_tokens_req_str = fmt(cc_tokens_per_sec_req_value, precision=1, commas=False)
+    cc_total_tokens_str = fmt(cc_total_tokens_sec_value, precision=0, commas=False)
+    cc_host_overhead_str = fmt(cc_host_overhead_w_value, precision=0, commas=False)
+    cc_total_power_str = fmt(cc_total_power_w_value, precision=0, commas=False)
+    cc_joules_token_str = fmt(cc_joules_per_token_value, precision=2, commas=False)
+    cc_response_tokens_str = fmt(cc_response_tokens_value, precision=0, commas=False)
+    cc_response_joules_str = fmt(cc_response_joules_value, precision=0, commas=False)
+    cc_smartphone_str = f"{_smartphone_joules:,}"
+    cc_boiling_str = f"{_boiling_joules:,}"
+    cc_low_util_str = fmt(cc_low_util_pct_value, precision=0, commas=False)
+    cc_idle_power_str = fmt(cc_idle_power_w_value, precision=0, commas=False)
+    cc_low_util_joules_str = fmt(cc_low_util_joules_value, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cc_concurrent_str = CarbonCostCalc.cc_concurrent_str
+cc_tokens_req_str = CarbonCostCalc.cc_tokens_req_str
+cc_total_tokens_str = CarbonCostCalc.cc_total_tokens_str
+cc_host_overhead_str = CarbonCostCalc.cc_host_overhead_str
+cc_total_power_str = CarbonCostCalc.cc_total_power_str
+cc_joules_token_str = CarbonCostCalc.cc_joules_token_str
+cc_response_tokens_str = CarbonCostCalc.cc_response_tokens_str
+cc_response_joules_str = CarbonCostCalc.cc_response_joules_str
+cc_smartphone_str = CarbonCostCalc.cc_smartphone_str
+cc_boiling_str = CarbonCostCalc.cc_boiling_str
+cc_low_util_str = CarbonCostCalc.cc_low_util_str
+cc_idle_power_str = CarbonCostCalc.cc_idle_power_str
+cc_low_util_joules_str = CarbonCostCalc.cc_low_util_joules_str
 ```
 
 ::: {.callout-notebook #notebook-carbon-chat title="The Carbon Cost of a Chat"}
@@ -2966,8 +3283,6 @@ These optimizations typically achieve 2–5 $\times$ speedup over framework-nati
 ```{python}
 #| label: runtime-comparison-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RUNTIME COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2985,37 +3300,54 @@ from mlsys.formatting import fmt
 # │          rt_onnx_speedup_str, rt_trt_fp32_speedup_str,
 # │          rt_trt_fp16_speedup_str, rt_trt_int8_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (latency per runtime, ms, ResNet-50 batch-1 on V100) ---
-rt_pytorch_ms_value = 8.5
-rt_torchscript_ms_value = 6.2
-rt_onnx_ms_value = 5.1
-rt_trt_fp32_ms_value = 2.8
-rt_trt_fp16_ms_value = 1.4
-rt_trt_int8_ms_value = 0.9
+class RuntimeComparisonCalc:
+    """ResNet-50 runtime comparison: TensorRT INT8 achieves up to 9× speedup over eager PyTorch."""
 
-# --- Process (speedup relative to PyTorch eager baseline) ---
-rt_pytorch_speedup_value = 1.0
-rt_torchscript_speedup_value = rt_pytorch_ms_value / rt_torchscript_ms_value
-rt_onnx_speedup_value = rt_pytorch_ms_value / rt_onnx_ms_value
-rt_trt_fp32_speedup_value = rt_pytorch_ms_value / rt_trt_fp32_ms_value
-rt_trt_fp16_speedup_value = rt_pytorch_ms_value / rt_trt_fp16_ms_value
-rt_trt_int8_speedup_value = rt_pytorch_ms_value / rt_trt_int8_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    rt_pytorch_ms_value = 8.5
+    rt_torchscript_ms_value = 6.2
+    rt_onnx_ms_value = 5.1
+    rt_trt_fp32_ms_value = 2.8
+    rt_trt_fp16_ms_value = 1.4
+    rt_trt_int8_ms_value = 0.9
 
-# --- Outputs (formatted strings for table) ---
-rt_pytorch_ms_str = f"{rt_pytorch_ms_value}"
-rt_torchscript_ms_str = f"{rt_torchscript_ms_value}"
-rt_onnx_ms_str = f"{rt_onnx_ms_value}"
-rt_trt_fp32_ms_str = f"{rt_trt_fp32_ms_value}"
-rt_trt_fp16_ms_str = f"{rt_trt_fp16_ms_value}"
-rt_trt_int8_ms_str = f"{rt_trt_int8_ms_value}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    rt_pytorch_speedup_value = 1.0
+    rt_torchscript_speedup_value = rt_pytorch_ms_value / rt_torchscript_ms_value
+    rt_onnx_speedup_value = rt_pytorch_ms_value / rt_onnx_ms_value
+    rt_trt_fp32_speedup_value = rt_pytorch_ms_value / rt_trt_fp32_ms_value
+    rt_trt_fp16_speedup_value = rt_pytorch_ms_value / rt_trt_fp16_ms_value
+    rt_trt_int8_speedup_value = rt_pytorch_ms_value / rt_trt_int8_ms_value
 
-rt_pytorch_speedup_str = fmt(rt_pytorch_speedup_value, precision=1, commas=False)
-rt_torchscript_speedup_str = fmt(rt_torchscript_speedup_value, precision=1, commas=False)
-rt_onnx_speedup_str = fmt(rt_onnx_speedup_value, precision=1, commas=False)
-rt_trt_fp32_speedup_str = fmt(rt_trt_fp32_speedup_value, precision=1, commas=False)
-rt_trt_fp16_speedup_str = fmt(rt_trt_fp16_speedup_value, precision=1, commas=False)
-rt_trt_int8_speedup_str = fmt(rt_trt_int8_speedup_value, precision=1, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    rt_pytorch_ms_str = f"{rt_pytorch_ms_value}"
+    rt_torchscript_ms_str = f"{rt_torchscript_ms_value}"
+    rt_onnx_ms_str = f"{rt_onnx_ms_value}"
+    rt_trt_fp32_ms_str = f"{rt_trt_fp32_ms_value}"
+    rt_trt_fp16_ms_str = f"{rt_trt_fp16_ms_value}"
+    rt_trt_int8_ms_str = f"{rt_trt_int8_ms_value}"
+    rt_pytorch_speedup_str = fmt(rt_pytorch_speedup_value, precision=1, commas=False)
+    rt_torchscript_speedup_str = fmt(rt_torchscript_speedup_value, precision=1, commas=False)
+    rt_onnx_speedup_str = fmt(rt_onnx_speedup_value, precision=1, commas=False)
+    rt_trt_fp32_speedup_str = fmt(rt_trt_fp32_speedup_value, precision=1, commas=False)
+    rt_trt_fp16_speedup_str = fmt(rt_trt_fp16_speedup_value, precision=1, commas=False)
+    rt_trt_int8_speedup_str = fmt(rt_trt_int8_speedup_value, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+rt_pytorch_ms_str = RuntimeComparisonCalc.rt_pytorch_ms_str
+rt_torchscript_ms_str = RuntimeComparisonCalc.rt_torchscript_ms_str
+rt_onnx_ms_str = RuntimeComparisonCalc.rt_onnx_ms_str
+rt_trt_fp32_ms_str = RuntimeComparisonCalc.rt_trt_fp32_ms_str
+rt_trt_fp16_ms_str = RuntimeComparisonCalc.rt_trt_fp16_ms_str
+rt_trt_int8_ms_str = RuntimeComparisonCalc.rt_trt_int8_ms_str
+rt_pytorch_speedup_str = RuntimeComparisonCalc.rt_pytorch_speedup_str
+rt_torchscript_speedup_str = RuntimeComparisonCalc.rt_torchscript_speedup_str
+rt_onnx_speedup_str = RuntimeComparisonCalc.rt_onnx_speedup_str
+rt_trt_fp32_speedup_str = RuntimeComparisonCalc.rt_trt_fp32_speedup_str
+rt_trt_fp16_speedup_str = RuntimeComparisonCalc.rt_trt_fp16_speedup_str
+rt_trt_int8_speedup_str = RuntimeComparisonCalc.rt_trt_int8_speedup_str
 ```
 
 ::: {.callout-notebook title="ResNet-50: Runtime Comparison"}
@@ -3058,8 +3390,6 @@ In practice, GPU compute pipelines and Tensor Core alignment requirements limit 
 ```{python}
 #| label: precision-tradeoff-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PRECISION TRADEOFFS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3077,47 +3407,63 @@ from mlsys.formatting import fmt
 # │          pt_int8_ptq_acc_str, pt_int8_qat_acc_str, pt_int8_util_str,
 # │          pt_int8_speedup_str, pt_fp16_speedup_str, pt_int8_acc_loss_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (precision metrics for ResNet-50 on V100) ---
-pt_fp32_ms_value = 2.8
-pt_fp32_mem_mb_value = 98
-pt_fp32_acc_value = 76.13
+class PrecisionTradeoffCalc:
+    """ResNet-50 precision tradeoffs: FP16 gives 2× free speedup; INT8 gives 3× with <0.4pp accuracy loss."""
 
-pt_fp16_ms_value = 1.4
-pt_fp16_mem_mb_value = 49
-pt_fp16_acc_value = 76.13
-pt_fp16_util_value = 85
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    pt_fp32_ms_value = 2.8
+    pt_fp32_mem_mb_value = 98
+    pt_fp32_acc_value = 76.13
+    pt_fp16_ms_value = 1.4
+    pt_fp16_mem_mb_value = 49
+    pt_fp16_acc_value = 76.13
+    pt_fp16_util_value = 85
+    pt_int8_ms_value = 0.9
+    pt_int8_mem_mb_value = 25
+    pt_int8_ptq_acc_value = 75.80
+    pt_int8_qat_acc_value = 76.05
+    pt_int8_util_value = 92
 
-pt_int8_ms_value = 0.9
-pt_int8_mem_mb_value = 25
-pt_int8_ptq_acc_value = 75.80
-pt_int8_qat_acc_value = 76.05
-pt_int8_util_value = 92
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    pt_int8_speedup_value = pt_fp32_ms_value / pt_int8_ms_value
+    pt_fp16_speedup_value = pt_fp32_ms_value / pt_fp16_ms_value
+    pt_int8_acc_loss_value = pt_fp32_acc_value - pt_int8_ptq_acc_value
 
-# --- Process (speedup ratios and accuracy loss) ---
-pt_int8_speedup_value = pt_fp32_ms_value / pt_int8_ms_value
-pt_fp16_speedup_value = pt_fp32_ms_value / pt_fp16_ms_value
-pt_int8_acc_loss_value = pt_fp32_acc_value - pt_int8_ptq_acc_value
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    pt_fp32_ms_str = f"{pt_fp32_ms_value}"
+    pt_fp32_mem_mb_str = f"{pt_fp32_mem_mb_value}"
+    pt_fp32_acc_str = f"{pt_fp32_acc_value}"
+    pt_fp16_ms_str = f"{pt_fp16_ms_value}"
+    pt_fp16_mem_mb_str = f"{pt_fp16_mem_mb_value}"
+    pt_fp16_acc_str = f"{pt_fp16_acc_value}"
+    pt_fp16_util_str = f"{pt_fp16_util_value}"
+    pt_int8_ms_str = f"{pt_int8_ms_value}"
+    pt_int8_mem_mb_str = f"{pt_int8_mem_mb_value}"
+    pt_int8_ptq_acc_str = f"{pt_int8_ptq_acc_value:.2f}"
+    pt_int8_qat_acc_str = f"{pt_int8_qat_acc_value:.2f}"
+    pt_int8_util_str = f"{pt_int8_util_value}"
+    pt_int8_speedup_str = fmt(pt_int8_speedup_value, precision=1, commas=False)
+    pt_fp16_speedup_str = fmt(pt_fp16_speedup_value, precision=0, commas=False)
+    pt_int8_acc_loss_str = f"{pt_int8_acc_loss_value:.2f}"
 
-# --- Outputs (formatted strings for table) ---
-pt_fp32_ms_str = f"{pt_fp32_ms_value}"
-pt_fp32_mem_mb_str = f"{pt_fp32_mem_mb_value}"
-pt_fp32_acc_str = f"{pt_fp32_acc_value}"
-
-pt_fp16_ms_str = f"{pt_fp16_ms_value}"
-pt_fp16_mem_mb_str = f"{pt_fp16_mem_mb_value}"
-pt_fp16_acc_str = f"{pt_fp16_acc_value}"
-pt_fp16_util_str = f"{pt_fp16_util_value}"
-
-pt_int8_ms_str = f"{pt_int8_ms_value}"
-pt_int8_mem_mb_str = f"{pt_int8_mem_mb_value}"
-pt_int8_ptq_acc_str = f"{pt_int8_ptq_acc_value:.2f}"
-pt_int8_qat_acc_str = f"{pt_int8_qat_acc_value:.2f}"
-pt_int8_util_str = f"{pt_int8_util_value}"
-
-pt_int8_speedup_str = fmt(pt_int8_speedup_value, precision=1, commas=False)
-pt_fp16_speedup_str = fmt(pt_fp16_speedup_value, precision=0, commas=False)
-pt_int8_acc_loss_str = f"{pt_int8_acc_loss_value:.2f}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+pt_fp32_ms_str = PrecisionTradeoffCalc.pt_fp32_ms_str
+pt_fp32_mem_mb_str = PrecisionTradeoffCalc.pt_fp32_mem_mb_str
+pt_fp32_acc_str = PrecisionTradeoffCalc.pt_fp32_acc_str
+pt_fp16_ms_str = PrecisionTradeoffCalc.pt_fp16_ms_str
+pt_fp16_mem_mb_str = PrecisionTradeoffCalc.pt_fp16_mem_mb_str
+pt_fp16_acc_str = PrecisionTradeoffCalc.pt_fp16_acc_str
+pt_fp16_util_str = PrecisionTradeoffCalc.pt_fp16_util_str
+pt_int8_ms_str = PrecisionTradeoffCalc.pt_int8_ms_str
+pt_int8_mem_mb_str = PrecisionTradeoffCalc.pt_int8_mem_mb_str
+pt_int8_ptq_acc_str = PrecisionTradeoffCalc.pt_int8_ptq_acc_str
+pt_int8_qat_acc_str = PrecisionTradeoffCalc.pt_int8_qat_acc_str
+pt_int8_util_str = PrecisionTradeoffCalc.pt_int8_util_str
+pt_int8_speedup_str = PrecisionTradeoffCalc.pt_int8_speedup_str
+pt_fp16_speedup_str = PrecisionTradeoffCalc.pt_fp16_speedup_str
+pt_int8_acc_loss_str = PrecisionTradeoffCalc.pt_int8_acc_loss_str
 ```
 
 ::: {.callout-notebook title="ResNet-50: Precision Tradeoffs on V100"}
@@ -3285,8 +3631,6 @@ Total\index{Cost Per Inference!serving economics} serving cost decomposes into f
 ```{python}
 #| label: cost-analysis-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ COST ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3296,44 +3640,55 @@ from mlsys.formatting import fmt
 # │ Show: That expensive GPUs (V100) can be cheaper per-inference than T4 or CPU due to high throughput.
 # │ How: Calculate unit costs using AWS hourly rates and measured images-per-second.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.constants (SEC_PER_HOUR, MILLION), mlsys.formatting (fmt)
 # │ Exports: ca_cpu_cost_str, ca_cpu_throughput_str, ca_cpu_cpm_str,
 # │          ca_t4_cost_str, ca_t4_throughput_str, ca_t4_cpm_str,
 # │          ca_v100_cost_str, ca_v100_throughput_str, ca_v100_cpm_str,
 # │          ca_v100_price_increase_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import SEC_PER_HOUR, MILLION
+from mlsys.formatting import fmt
 
-# --- Inputs (AWS on-demand pricing and throughput) ---
-ca_cpu_cost_value = 0.17
-ca_cpu_throughput_value = 50
+class CostAnalysisCalc:
+    """ResNet-50 cost analysis: T4 achieves lowest cost-per-image despite higher hourly rate than CPU."""
 
-ca_t4_cost_value = 0.53
-ca_t4_throughput_value = 400
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    ca_cpu_cost_value = 0.17
+    ca_cpu_throughput_value = 50
+    ca_t4_cost_value = 0.53
+    ca_t4_throughput_value = 400
+    ca_v100_cost_value = 3.06
+    ca_v100_throughput_value = 1200
 
-ca_v100_cost_value = 3.06
-ca_v100_throughput_value = 1200
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    ca_cpu_cpm_value = ca_cpu_cost_value / (ca_cpu_throughput_value * SEC_PER_HOUR / MILLION)
+    ca_t4_cpm_value = ca_t4_cost_value / (ca_t4_throughput_value * SEC_PER_HOUR / MILLION)
+    ca_v100_cpm_value = ca_v100_cost_value / (ca_v100_throughput_value * SEC_PER_HOUR / MILLION)
+    ca_v100_price_increase_value = ca_v100_cost_value / ca_t4_cost_value
 
-# --- Process (cost per million images) ---
-ca_cpu_cpm_value = ca_cpu_cost_value / (ca_cpu_throughput_value * SEC_PER_HOUR / MILLION)
-ca_t4_cpm_value = ca_t4_cost_value / (ca_t4_throughput_value * SEC_PER_HOUR / MILLION)
-ca_v100_cpm_value = ca_v100_cost_value / (ca_v100_throughput_value * SEC_PER_HOUR / MILLION)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    ca_cpu_cost_str = fmt(ca_cpu_cost_value, precision=2, commas=False)
+    ca_cpu_throughput_str = f"{ca_cpu_throughput_value}"
+    ca_cpu_cpm_str = fmt(ca_cpu_cpm_value, precision=2, commas=False)
+    ca_t4_cost_str = fmt(ca_t4_cost_value, precision=2, commas=False)
+    ca_t4_throughput_str = f"{ca_t4_throughput_value}"
+    ca_t4_cpm_str = fmt(ca_t4_cpm_value, precision=2, commas=False)
+    ca_v100_cost_str = fmt(ca_v100_cost_value, precision=2, commas=False)
+    ca_v100_throughput_str = f"{ca_v100_throughput_value:,}"
+    ca_v100_cpm_str = fmt(ca_v100_cpm_value, precision=2, commas=False)
+    ca_v100_price_increase_str = fmt(ca_v100_price_increase_value, precision=0, commas=False)
 
-ca_v100_price_increase_value = ca_v100_cost_value / ca_t4_cost_value
-
-# --- Outputs (formatted strings for table) ---
-ca_cpu_cost_str = fmt(ca_cpu_cost_value, precision=2, commas=False)
-ca_cpu_throughput_str = f"{ca_cpu_throughput_value}"
-ca_cpu_cpm_str = fmt(ca_cpu_cpm_value, precision=2, commas=False)
-
-ca_t4_cost_str = fmt(ca_t4_cost_value, precision=2, commas=False)
-ca_t4_throughput_str = f"{ca_t4_throughput_value}"
-ca_t4_cpm_str = fmt(ca_t4_cpm_value, precision=2, commas=False)
-
-ca_v100_cost_str = fmt(ca_v100_cost_value, precision=2, commas=False)
-ca_v100_throughput_str = f"{ca_v100_throughput_value:,}"
-ca_v100_cpm_str = fmt(ca_v100_cpm_value, precision=2, commas=False)
-
-ca_v100_price_increase_str = fmt(ca_v100_price_increase_value, precision=0, commas=False)
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ca_cpu_cost_str = CostAnalysisCalc.ca_cpu_cost_str
+ca_cpu_throughput_str = CostAnalysisCalc.ca_cpu_throughput_str
+ca_cpu_cpm_str = CostAnalysisCalc.ca_cpu_cpm_str
+ca_t4_cost_str = CostAnalysisCalc.ca_t4_cost_str
+ca_t4_throughput_str = CostAnalysisCalc.ca_t4_throughput_str
+ca_t4_cpm_str = CostAnalysisCalc.ca_t4_cpm_str
+ca_v100_cost_str = CostAnalysisCalc.ca_v100_cost_str
+ca_v100_throughput_str = CostAnalysisCalc.ca_v100_throughput_str
+ca_v100_cpm_str = CostAnalysisCalc.ca_v100_cpm_str
+ca_v100_price_increase_str = CostAnalysisCalc.ca_v100_price_increase_str
 ```
 
 ::: {.callout-notebook title="ResNet-50: Cost Analysis"}
@@ -3377,6 +3732,22 @@ We begin with the bottleneck that dominates LLM serving costs: KV cache memory. 
 #| echo: false
 #| fig-cap: "**The KV-Cache Explosion**: Memory usage vs. Context Length for a 70B-class model. Assumes 80 layers, d_model=8192, FP16 KV cache, GQA (8x). The linear growth of the Key-Value cache (storing attention history) quickly consumes available GPU memory (red dashed line). For batch size 32 (purple), the system hits the 'OOM Zone' at just 8k context length, forcing a trade-off between batch size (throughput) and context window (capability)."
 #| fig-alt: "Line chart showing memory usage increasing linearly with context length. Multiple lines for different batch sizes. Red dashed horizontal line marks GPU memory limit. Purple line for batch 32 crosses into OOM zone at 8k context."
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KV-CACHE GROWTH FIGURE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-kv-cache-growth — introduces the KV-cache memory bottleneck
+# │          for LLM serving with long contexts and large batch sizes
+# │
+# │ Goal: Demonstrate that KV-cache memory grows linearly with context length
+# │       and batch size, hitting OOM at practical serving configurations.
+# │ Show: KV-cache size (GB) vs. context length (tokens) for batch sizes 1, 4,
+# │       16, 32; A100/H100 80 GB limit annotated; OOM zone shaded.
+# │ How: Compute KV cache bytes = 2 × layers × d_model × seq × batch × bytes
+# │      ÷ gqa_ratio; convert to GB; plot per-batch-size using mlsys.viz palette.
+# │
+# │ Imports: numpy (np), mlsys.viz (viz), mlsys.constants (BYTES_FP16, byte, GB)
+# │ Exports: (figure only, no prose variables)
+# └─────────────────────────────────────────────────────────────────────────────
 
 import numpy as np
 from mlsys import viz
@@ -3388,13 +3759,13 @@ fig, ax, COLORS, plt = viz.setup_plot()
 # PLOT: The KV-Cache Explosion
 # =============================================================================
 seq_len = np.linspace(0, 32000, 100)
-layers, d_model, bytes_per_param = 80, 8192, BYTES_FP16.magnitude  # 70B model params, FP16
+layers, d_model, bytes_per_param = 80, 8192, BYTES_FP16.m_as(byte)  # 70B model params, FP16
 gqa_ratio = 8  # Grouped Query Attention (8x reduction)
 
 def get_kv_gb(batch, seq):
     # KV cache size = 2 * layers * d_model * seq * batch * bytes_per_param / gqa_ratio
     bytes_total = (2 * layers * d_model * seq * batch * bytes_per_param) / gqa_ratio
-    return (bytes_total * byte).to(GB).magnitude
+    return (bytes_total * byte).m_as(GB)
 
 batches = [1, 4, 16, 32]
 colors = [COLORS['BlueLine'], COLORS['GreenLine'], COLORS['OrangeLine'], COLORS['VioletLine']]
@@ -3461,8 +3832,6 @@ Every time you generate a token, you are paying a massive "energy tax" to move t
 ```{python}
 #| label: llm-serving-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ LLM SERVING ECONOMICS (LLAMA-3-8B CASE STUDY)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3471,9 +3840,10 @@ from mlsys.formatting import fmt
 # │
 # │ Goal: Connect memory bandwidth, KV cache capacity, and serving economics.
 # │ Show: That memory capacity bounds throughput while bandwidth bounds latency.
-# │ How: Calculate TPOT, concurrent batch size, and $/M tokens for Llama-2-7B on H100.
+# │ How: Calculate TPOT, concurrent batch size, and $/M tokens for Llama-3-8B on H100.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsys.constants (H100_MEM_BW, TB, second, SEC_PER_HOUR, MILLION),
+# │          mlsys.formatting (fmt)
 # │ Exports: model_weight_gb_str, h100_bw_tb_str,
 # │          token_time_theoretical_ms_str, realized_tpot_ms_str,
 # │          decode_tokens_str, total_decode_s_str, kv_cache_gb_str,
@@ -3482,52 +3852,68 @@ from mlsys.formatting import fmt
 # │          req_time_s_str, hourly_cost_str, tokens_per_hour_m_str,
 # │          cost_per_m_tokens_str, remaining_vram_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import H100_MEM_BW, TB, second, SEC_PER_HOUR, MILLION
+from mlsys.formatting import fmt
 
-# --- Inputs (model, hardware, and cost parameters) ---
-model_weight_gb_value = 3.5
-h100_bw_tb_value = H100_MEM_BW.to(TB / second).magnitude
-realized_tpot_ms_value = 10 # Conservative production target (theoretical min ~1-2ms)
-decode_tokens_value = 256
+class LlmServingCalc:
+    """Llama-3-8B serving economics: memory capacity bounds throughput, bandwidth bounds latency."""
 
-kv_cache_gb_value = 72
-kv_per_token_mb_value = 0.5
-tokens_per_req_value = 1256
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    model_weight_gb_value = 3.5
+    realized_tpot_ms_value = 10      # conservative production target (theoretical min ~1-2ms)
+    decode_tokens_value = 256
+    kv_cache_gb_value = 72
+    kv_per_token_mb_value = 0.5
+    tokens_per_req_value = 1256
+    ttft_s_value = 0.12
+    hourly_cost_value = 3.00
 
-ttft_s_value = 0.12
-hourly_cost_value = 3.00
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    _h100_bw_tb = H100_MEM_BW.m_as(TB / second)
+    token_time_theoretical_ms_value = model_weight_gb_value / (_h100_bw_tb * 1000) * 1000
+    total_decode_s_value = decode_tokens_value * realized_tpot_ms_value / 1000
+    kv_capacity_tokens_value = int(kv_cache_gb_value * 1000 / kv_per_token_mb_value)
+    concurrent_batch_value = int(kv_capacity_tokens_value / tokens_per_req_value)
+    req_time_s_value = ttft_s_value + decode_tokens_value * realized_tpot_ms_value / 1000
+    tokens_per_hour_value = concurrent_batch_value * (SEC_PER_HOUR / req_time_s_value) * tokens_per_req_value
+    cost_per_m_tokens_value = hourly_cost_value / (tokens_per_hour_value / MILLION)
+    remaining_vram_gb_value = int(80 - model_weight_gb_value)
 
-# --- Process (latency, capacity, and economics) ---
-token_time_theoretical_ms_value = model_weight_gb_value / (h100_bw_tb_value * 1000) * 1000
-total_decode_s_value = decode_tokens_value * realized_tpot_ms_value / 1000
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    model_weight_gb_str = f"{model_weight_gb_value}"
+    h100_bw_tb_str = fmt(_h100_bw_tb, precision=1, commas=False)
+    token_time_theoretical_ms_str = fmt(token_time_theoretical_ms_value, precision=0, commas=False)
+    realized_tpot_ms_str = f"{realized_tpot_ms_value}"
+    decode_tokens_str = f"{decode_tokens_value}"
+    total_decode_s_str = fmt(total_decode_s_value, precision=2, commas=False)
+    kv_cache_gb_str = f"{kv_cache_gb_value}"
+    kv_per_token_mb_str = f"{kv_per_token_mb_value}"
+    kv_capacity_tokens_str = f"{kv_capacity_tokens_value:,}"
+    tokens_per_req_str = f"{tokens_per_req_value:,}"
+    concurrent_batch_str = f"{concurrent_batch_value}"
+    req_time_s_str = fmt(req_time_s_value, precision=2, commas=False)
+    hourly_cost_str = fmt(hourly_cost_value, precision=2, commas=False)
+    tokens_per_hour_m_str = fmt(tokens_per_hour_value / MILLION, precision=0, commas=False)
+    cost_per_m_tokens_str = fmt(cost_per_m_tokens_value, precision=3, commas=False)
+    remaining_vram_gb_str = f"{remaining_vram_gb_value}"
 
-kv_capacity_tokens_value = int(kv_cache_gb_value * 1000 / kv_per_token_mb_value)
-concurrent_batch_value = int(kv_capacity_tokens_value / tokens_per_req_value)
-
-req_time_s_value = ttft_s_value + decode_tokens_value * realized_tpot_ms_value / 1000
-tokens_per_hour_value = concurrent_batch_value * (SEC_PER_HOUR / req_time_s_value) * tokens_per_req_value
-cost_per_m_tokens_value = hourly_cost_value / (tokens_per_hour_value / MILLION)
-
-remaining_vram_gb_value = int(80 - model_weight_gb_value)
-
-# --- Outputs (formatted strings for prose) ---
-model_weight_gb_str = f"{model_weight_gb_value}"
-h100_bw_tb_str = fmt(h100_bw_tb_value, precision=1, commas=False)
-token_time_theoretical_ms_str = fmt(token_time_theoretical_ms_value, precision=0, commas=False)
-realized_tpot_ms_str = f"{realized_tpot_ms_value}"
-decode_tokens_str = f"{decode_tokens_value}"
-total_decode_s_str = fmt(total_decode_s_value, precision=2, commas=False)
-
-kv_cache_gb_str = f"{kv_cache_gb_value}"
-kv_per_token_mb_str = f"{kv_per_token_mb_value}"
-kv_capacity_tokens_str = f"{kv_capacity_tokens_value:,}"
-tokens_per_req_str = f"{tokens_per_req_value:,}"
-concurrent_batch_str = f"{concurrent_batch_value}"
-
-req_time_s_str = fmt(req_time_s_value, precision=2, commas=False)
-hourly_cost_str = fmt(hourly_cost_value, precision=2, commas=False)
-tokens_per_hour_m_str = fmt(tokens_per_hour_value / MILLION, precision=0, commas=False)
-cost_per_m_tokens_str = fmt(cost_per_m_tokens_value, precision=3, commas=False)
-remaining_vram_gb_str = f"{remaining_vram_gb_value}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+model_weight_gb_str = LlmServingCalc.model_weight_gb_str
+h100_bw_tb_str = LlmServingCalc.h100_bw_tb_str
+token_time_theoretical_ms_str = LlmServingCalc.token_time_theoretical_ms_str
+realized_tpot_ms_str = LlmServingCalc.realized_tpot_ms_str
+decode_tokens_str = LlmServingCalc.decode_tokens_str
+total_decode_s_str = LlmServingCalc.total_decode_s_str
+kv_cache_gb_str = LlmServingCalc.kv_cache_gb_str
+kv_per_token_mb_str = LlmServingCalc.kv_per_token_mb_str
+kv_capacity_tokens_str = LlmServingCalc.kv_capacity_tokens_str
+tokens_per_req_str = LlmServingCalc.tokens_per_req_str
+concurrent_batch_str = LlmServingCalc.concurrent_batch_str
+req_time_s_str = LlmServingCalc.req_time_s_str
+hourly_cost_str = LlmServingCalc.hourly_cost_str
+tokens_per_hour_m_str = LlmServingCalc.tokens_per_hour_m_str
+cost_per_m_tokens_str = LlmServingCalc.cost_per_m_tokens_str
+remaining_vram_gb_str = LlmServingCalc.remaining_vram_gb_str
 ```
 
 *   Ttoken ≈ `{python} model_weight_gb_str` GB / `{python} h100_bw_tbs` TB/s ≈ `{python} token_time_theoretical_ms_str` ms (theoretical limit).
@@ -3563,8 +3949,6 @@ Serving inverts training priorities in ways that violate intuitions from batch p
 ```{python}
 #| label: fallacy-latency-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FALLACY: INFERENCE LATENCY ≠ USER LATENCY
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3583,47 +3967,56 @@ from mlsys.formatting import fmt
 # │          fl_total_slow_ms_str, fl_total_fast_ms_str,
 # │          fl_system_speedup_str, fl_model_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (utilization and service times) ---
-fl_utilization_high_value = 0.8
-fl_service_slow_ms_value = 5
-fl_service_fast_ms_value = 2
+class FallacyLatencyCalc:
+    """Shows system-level speedup far exceeds model-level speedup due to nonlinear queuing dynamics."""
 
-# --- Process (M/M/1 queuing model) ---
-# M/M/1 wait = service / (1 - rho) - service = service * rho / (1 - rho)
-# Wait time at 80% util
-fl_wait_slow_ms_value = fl_service_slow_ms_value * fl_utilization_high_value / (1 - fl_utilization_high_value)
-fl_total_slow_ms_value = fl_wait_slow_ms_value + fl_service_slow_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    fl_utilization_high_value = 0.8
+    fl_service_slow_ms_value = 5
+    fl_service_fast_ms_value = 2
 
-# New utilization with faster service (assuming constant arrival rate)
-# rho_new = rho_old * (service_new / service_old)
-fl_utilization_new_value = fl_utilization_high_value * (fl_service_fast_ms_value / fl_service_slow_ms_value)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # M/M/1: wait = service * rho / (1 - rho)
+    fl_wait_slow_ms_value = fl_service_slow_ms_value * fl_utilization_high_value / (1 - fl_utilization_high_value)
+    fl_total_slow_ms_value = fl_wait_slow_ms_value + fl_service_slow_ms_value
+    # New utilization: rho_new = rho_old * (service_new / service_old)
+    fl_utilization_new_value = fl_utilization_high_value * (fl_service_fast_ms_value / fl_service_slow_ms_value)
+    fl_wait_fast_ms_value = fl_service_fast_ms_value * fl_utilization_new_value / (1 - fl_utilization_new_value)
+    fl_total_fast_ms_value = fl_wait_fast_ms_value + fl_service_fast_ms_value
+    fl_model_speedup_value = fl_service_slow_ms_value / fl_service_fast_ms_value
+    fl_system_speedup_value = fl_total_slow_ms_value / fl_total_fast_ms_value
+    fl_queuing_improvement_value = fl_wait_slow_ms_value / fl_wait_fast_ms_value
+    fl_inference_gain_ms_value = fl_service_slow_ms_value - fl_service_fast_ms_value
 
-fl_wait_fast_ms_value = fl_service_fast_ms_value * fl_utilization_new_value / (1 - fl_utilization_new_value)
-fl_total_fast_ms_value = fl_wait_fast_ms_value + fl_service_fast_ms_value
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    fl_utilization_high_pct_str = f"{fl_utilization_high_value * 100:.0f}"
+    fl_service_slow_ms_str = f"{fl_service_slow_ms_value}"
+    fl_wait_slow_ms_str = f"{fl_wait_slow_ms_value:.0f}"
+    fl_service_fast_ms_str = f"{fl_service_fast_ms_value}"
+    fl_utilization_new_pct_str = f"{fl_utilization_new_value * 100:.0f}"
+    fl_wait_fast_ms_str = f"{fl_wait_fast_ms_value:.1f}"
+    fl_inference_gain_ms_str = f"{fl_inference_gain_ms_value}"
+    fl_queuing_improvement_str = f"{fl_queuing_improvement_value:.0f}"
+    fl_total_slow_ms_str = f"{fl_total_slow_ms_value:.0f}"
+    fl_total_fast_ms_str = f"{fl_total_fast_ms_value:.1f}"
+    fl_system_speedup_str = f"{fl_system_speedup_value:.1f}"
+    fl_model_speedup_str = f"{fl_model_speedup_value:.1f}"
 
-fl_model_speedup_value = fl_service_slow_ms_value / fl_service_fast_ms_value
-fl_system_speedup_value = fl_total_slow_ms_value / fl_total_fast_ms_value
-fl_queuing_improvement_value = fl_wait_slow_ms_value / fl_wait_fast_ms_value
-
-fl_inference_gain_ms_value = fl_service_slow_ms_value - fl_service_fast_ms_value
-
-# --- Outputs (formatted strings for prose) ---
-fl_utilization_high_pct_str = f"{fl_utilization_high_value * 100:.0f}"
-fl_service_slow_ms_str = f"{fl_service_slow_ms_value}"
-fl_wait_slow_ms_str = f"{fl_wait_slow_ms_value:.0f}"
-
-fl_service_fast_ms_str = f"{fl_service_fast_ms_value}"
-fl_utilization_new_pct_str = f"{fl_utilization_new_value * 100:.0f}"
-fl_wait_fast_ms_str = f"{fl_wait_fast_ms_value:.1f}"
-
-fl_inference_gain_ms_str = f"{fl_inference_gain_ms_value}"
-fl_queuing_improvement_str = f"{fl_queuing_improvement_value:.0f}"
-
-fl_total_slow_ms_str = f"{fl_total_slow_ms_value:.0f}"
-fl_total_fast_ms_str = f"{fl_total_fast_ms_value:.1f}"
-fl_system_speedup_str = f"{fl_system_speedup_value:.1f}"
-fl_model_speedup_str = f"{fl_model_speedup_value:.1f}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fl_utilization_high_pct_str = FallacyLatencyCalc.fl_utilization_high_pct_str
+fl_service_slow_ms_str = FallacyLatencyCalc.fl_service_slow_ms_str
+fl_wait_slow_ms_str = FallacyLatencyCalc.fl_wait_slow_ms_str
+fl_service_fast_ms_str = FallacyLatencyCalc.fl_service_fast_ms_str
+fl_utilization_new_pct_str = FallacyLatencyCalc.fl_utilization_new_pct_str
+fl_wait_fast_ms_str = FallacyLatencyCalc.fl_wait_fast_ms_str
+fl_inference_gain_ms_str = FallacyLatencyCalc.fl_inference_gain_ms_str
+fl_queuing_improvement_str = FallacyLatencyCalc.fl_queuing_improvement_str
+fl_total_slow_ms_str = FallacyLatencyCalc.fl_total_slow_ms_str
+fl_total_fast_ms_str = FallacyLatencyCalc.fl_total_fast_ms_str
+fl_system_speedup_str = FallacyLatencyCalc.fl_system_speedup_str
+fl_model_speedup_str = FallacyLatencyCalc.fl_model_speedup_str
 ```
 
 Engineers who optimize model inference expect proportional improvement in user-perceived latency\index{Latency!inference vs user-perceived}, but serving systems introduce latency sources absent from offline benchmarks. Under load, queuing delay dominates: @eq-mm1-wait shows that at `{python} fl_utilization_high_pct_str` percent utilization with `{python} fl_service_slow_ms_str`ms service time, average wait time is `{python} fl_wait_slow_ms_str`ms before inference even begins. Reducing inference from `{python} fl_service_slow_ms_str`ms to `{python} fl_service_fast_ms_str`ms changes service time but also shifts utilization from `{python} fl_utilization_high_pct_str` percent to `{python} fl_utilization_new_pct_str` percent, reducing queuing wait from `{python} fl_wait_slow_ms_str`ms to `{python} fl_wait_fast_ms_str`ms, a `{python} fl_queuing_improvement_str` $\times$ queuing improvement that dwarfs the `{python} fl_inference_gain_ms_str`ms inference gain. This nonlinear interaction between inference speed and queuing behavior means the *system-level* speedup (`{python} fl_total_slow_ms_str`ms → `{python} fl_total_fast_ms_str`ms, or `{python} fl_system_speedup_str` $\times$) far exceeds the *model-level* speedup (`{python} fl_service_slow_ms_str`ms → `{python} fl_service_fast_ms_str`ms, or `{python} fl_model_speedup_str` $\times$). Conversely, teams that reduce inference by only 20 percent at high utilization see negligible user-facing improvement because queuing still dominates. Serving optimization requires analyzing the complete latency budget, including serialization, queuing, preprocessing, and postprocessing, under realistic load conditions rather than profiling inference latency in isolation.
@@ -3633,8 +4026,6 @@ Engineers who optimize model inference expect proportional improvement in user-p
 ```{python}
 #| label: fallacy-utilization-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PITFALL: HIGH UTILIZATION LATENCY DEGRADATION
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3651,38 +4042,47 @@ from mlsys.formatting import fmt
 # │          fu_cost_reduction_str, fu_latency_increase_str,
 # │          fu_service_ms_str, fu_p99_mod_ms_str, fu_p99_high_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (utilization levels and service time) ---
-fu_util_high_value = 0.9
-fu_util_mod_value = 0.7
-fu_service_ms_value = 5
+class FallacyUtilizationCalc:
+    """Moving from 70% to 90% utilization cuts costs 22% but triples average latency."""
 
-# --- Process (M/M/1 queuing model at two utilization levels) ---
-# M/M/1 wait factor = rho / (1-rho); total time = service / (1-rho)
-fu_wait_high_factor_value = fu_util_high_value / (1 - fu_util_high_value)
-fu_wait_high_ms_value = fu_service_ms_value * fu_wait_high_factor_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    fu_util_high_value = 0.9
+    fu_util_mod_value = 0.7
+    fu_service_ms_value = 5
 
-fu_cost_reduction_pct_value = (1 - fu_util_mod_value / fu_util_high_value) * 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # M/M/1: wait factor = rho / (1 - rho); total time = service / (1 - rho)
+    fu_wait_high_factor_value = fu_util_high_value / (1 - fu_util_high_value)
+    fu_cost_reduction_pct_value = (1 - fu_util_mod_value / fu_util_high_value) * 100
+    fu_avg_latency_mod_value = fu_service_ms_value / (1 - fu_util_mod_value)
+    fu_avg_latency_high_value = fu_service_ms_value / (1 - fu_util_high_value)
+    fu_latency_increase_factor_value = fu_avg_latency_high_value / fu_avg_latency_mod_value
+    fu_p99_mod_value = 4.6 * fu_service_ms_value / (1 - fu_util_mod_value)
+    fu_p99_high_value = 4.6 * fu_service_ms_value / (1 - fu_util_high_value)
 
-fu_avg_latency_mod_value = fu_service_ms_value / (1 - fu_util_mod_value)
-fu_avg_latency_high_value = fu_service_ms_value / (1 - fu_util_high_value)
-fu_latency_increase_factor_value = fu_avg_latency_high_value / fu_avg_latency_mod_value
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    fu_util_high_pct_str = f"{fu_util_high_value * 100:.0f}"
+    fu_util_mod_pct_str = f"{fu_util_mod_value * 100:.0f}"
+    fu_wait_high_factor_str = f"{fu_wait_high_factor_value:.0f}"
+    fu_total_high_factor_str = f"{1/(1-fu_util_high_value):.0f}"
+    fu_cost_reduction_str = f"{fu_cost_reduction_pct_value:.0f}"
+    fu_latency_increase_str = f"{fu_latency_increase_factor_value:.0f}"
+    fu_service_ms_str = f"{fu_service_ms_value}"
+    fu_p99_mod_ms_str = f"{fu_p99_mod_value:.0f}"
+    fu_p99_high_ms_str = f"{fu_p99_high_value:.0f}"
 
-fu_p99_mod_value = 4.6 * fu_service_ms_value / (1 - fu_util_mod_value) # Approx formula
-fu_p99_high_value = 4.6 * fu_service_ms_value / (1 - fu_util_high_value)
-
-# --- Outputs (formatted strings for prose) ---
-fu_util_high_pct_str = f"{fu_util_high_value * 100:.0f}"
-fu_util_mod_pct_str = f"{fu_util_mod_value * 100:.0f}"
-fu_wait_high_factor_str = f"{fu_wait_high_factor_value:.0f}" # 9
-fu_total_high_factor_str = f"{1/(1-fu_util_high_value):.0f}" # 10
-
-fu_cost_reduction_str = f"{fu_cost_reduction_pct_value:.0f}"
-fu_latency_increase_str = f"{fu_latency_increase_factor_value:.0f}"
-
-fu_service_ms_str = f"{fu_service_ms_value}"
-fu_p99_mod_ms_str = f"{fu_p99_mod_value:.0f}" # ~77
-fu_p99_high_ms_str = f"{fu_p99_high_value:.0f}" # ~230
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fu_util_high_pct_str = FallacyUtilizationCalc.fu_util_high_pct_str
+fu_util_mod_pct_str = FallacyUtilizationCalc.fu_util_mod_pct_str
+fu_wait_high_factor_str = FallacyUtilizationCalc.fu_wait_high_factor_str
+fu_total_high_factor_str = FallacyUtilizationCalc.fu_total_high_factor_str
+fu_cost_reduction_str = FallacyUtilizationCalc.fu_cost_reduction_str
+fu_latency_increase_str = FallacyUtilizationCalc.fu_latency_increase_str
+fu_service_ms_str = FallacyUtilizationCalc.fu_service_ms_str
+fu_p99_mod_ms_str = FallacyUtilizationCalc.fu_p99_mod_ms_str
+fu_p99_high_ms_str = FallacyUtilizationCalc.fu_p99_high_ms_str
 ```
 
 Teams target `{python} fu_util_high_pct_str` percent utilization\index{Utilization!high utilization pitfall} to minimize idle capacity. In production, latency degrades nonlinearly as utilization approaches capacity. @eq-mm1-wait shows that at `{python} fu_util_high_pct_str` percent utilization, average time in system reaches `{python} fu_total_high_factor_str` $\times$ service time. Moving from `{python} fu_util_mod_pct_str` percent to `{python} fu_util_high_pct_str` percent utilization cuts infrastructure costs by `{python} fu_cost_reduction_str` percent but triples average latency. For a `{python} fu_service_ms_str`ms inference service, p99 latency jumps from ~`{python} fu_p99_mod_ms_str`ms to ~`{python} fu_p99_high_ms_str`ms (M/M/1 model). Systems provisioned for average load violate SLOs precisely when traffic increases during business-critical periods. Production systems targeting 60 to 70 percent utilization at peak load maintain the latency headroom needed to absorb traffic spikes.
@@ -3692,37 +4092,45 @@ Teams target `{python} fu_util_high_pct_str` percent utilization\index{Utilizati
 ```{python}
 #| label: fallacy-skew-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FALLACY: TRAINING-SERVING SKEW
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Fallacy "Training accuracy guarantees serving accuracy"
 # │
 # │ Goal: Quantify the silent accuracy degradation from preprocessing mismatches.
-# │      mismatches between training and serving. A model at 95% validation
-# │      accuracy drops to 90% in production from resize interpolation
+# │ Show: A model at 95% validation accuracy drops to 90% in production from
+# │       resize interpolation differences between training and serving pipelines.
 # │ How: Model validation vs. production accuracy for a mismatched vision pipeline.
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: fs_val_acc_str, fs_prod_acc_str, fs_acc_drop_str,
 # │          fs_resize_drop_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (accuracy values and skew range) ---
-fs_val_acc_value = 95.0
-fs_prod_acc_value = 90.0
-fs_resize_drop_min_value = 0.5
-fs_resize_drop_max_value = 1.0
+class FallacySkewCalc:
+    """Training-serving skew: 95% validation accuracy drops to 90% from preprocessing mismatches."""
 
-# --- Process (accuracy drop) ---
-fs_acc_drop_value = fs_val_acc_value - fs_prod_acc_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    fs_val_acc_value = 95.0
+    fs_prod_acc_value = 90.0
+    fs_resize_drop_min_value = 0.5
+    fs_resize_drop_max_value = 1.0
 
-# --- Outputs (formatted strings for prose) ---
-fs_val_acc_str = f"{fs_val_acc_value:.0f}"
-fs_prod_acc_str = f"{fs_prod_acc_value:.0f}"
-fs_acc_drop_str = f"{fs_acc_drop_value:.0f}"
-fs_resize_drop_str = f"{fs_resize_drop_min_value}-{fs_resize_drop_max_value}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fs_acc_drop_value = fs_val_acc_value - fs_prod_acc_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    fs_val_acc_str = f"{fs_val_acc_value:.0f}"
+    fs_prod_acc_str = f"{fs_prod_acc_value:.0f}"
+    fs_acc_drop_str = f"{fs_acc_drop_value:.0f}"
+    fs_resize_drop_str = f"{fs_resize_drop_min_value}-{fs_resize_drop_max_value}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fs_val_acc_str = FallacySkewCalc.fs_val_acc_str
+fs_prod_acc_str = FallacySkewCalc.fs_prod_acc_str
+fs_acc_drop_str = FallacySkewCalc.fs_acc_drop_str
+fs_resize_drop_str = FallacySkewCalc.fs_resize_drop_str
 ```
 
 Engineers assume identical model weights preserve validation set performance\index{Latency!inference vs user-perceived}. In production, preprocessing differences silently shift inputs outside the training distribution. @sec-model-serving-trainingserving-skew-7b99 shows *how* training-serving skew causes accuracy degradation despite identical weights: PIL versus OpenCV resize interpolation alone can shift accuracy by `{python} fs_resize_drop_str` percent, float64 versus float32 normalization produces different values, or feature computation timing changes. A model achieving `{python} fs_val_acc_str` percent validation accuracy drops to `{python} fs_prod_acc_str` percent in production from these preprocessing mismatches, a `{python} fs_acc_drop_str` percentage point loss invisible to latency monitoring. Standard monitoring checking exceptions and latency violations fails to detect this silent degradation. Production systems require either identical preprocessing code for training and serving, or statistical monitoring comparing input distributions to catch drift before accuracy degrades.
@@ -3732,8 +4140,6 @@ Engineers assume identical model weights preserve validation set performance\ind
 ```{python}
 #| label: tail-latency-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PITFALL: TAIL LATENCY AMPLIFICATION
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3741,32 +4147,43 @@ from mlsys.formatting import fmt
 # │          performance"
 # │
 # │ Goal: Demonstrate the significant gap between mean and p99 latency in queuing systems.
-# │      queues. At 70% utilization, average latency is ~17ms but p99 reaches
-# │      ~77ms—a gap invisible to mean-based monitoring. The slowest 1% of
-# │      requests often represent the highest-value users.
+# │ Show: At 70% utilization, average latency is ~17ms but p99 reaches ~77ms —
+# │       a 4.6× gap invisible to mean-based monitoring.
+# │ How: M/M/1 mean vs. p99 approximation at typical serving utilization.
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: tl_util_pct_str, tl_service_ms_str, tl_avg_ms_str,
 # │          tl_p99_ms_str, tl_gap_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (utilization and service time) ---
-tl_util_value = 0.7
-tl_service_ms_value = 5
+class TailLatencyCalc:
+    """At 70% utilization, p99 latency is 4.6× the mean — invisible to average-based monitoring."""
 
-# --- Process (M/M/1 mean vs p99 latency) ---
-# M/M/1: avg time in system = service / (1 - rho)
-tl_avg_ms_value = tl_service_ms_value / (1 - tl_util_value)
-# M/M/1 p99 approximation: 4.6 * avg
-tl_p99_ms_value = 4.6 * tl_avg_ms_value
-tl_gap_value = tl_p99_ms_value / tl_avg_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    tl_util_value = 0.7
+    tl_service_ms_value = 5
 
-# --- Outputs (formatted strings for prose) ---
-tl_util_pct_str = f"{tl_util_value * 100:.0f}"
-tl_service_ms_str = f"{tl_service_ms_value}"
-tl_avg_ms_str = f"{tl_avg_ms_value:.0f}"
-tl_p99_ms_str = f"{tl_p99_ms_value:.0f}"
-tl_gap_str = f"{tl_gap_value:.1f}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # M/M/1: avg time in system = service / (1 - rho)
+    tl_avg_ms_value = tl_service_ms_value / (1 - tl_util_value)
+    # M/M/1 p99 approximation: 4.6 * avg
+    tl_p99_ms_value = 4.6 * tl_avg_ms_value
+    tl_gap_value = tl_p99_ms_value / tl_avg_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    tl_util_pct_str = f"{tl_util_value * 100:.0f}"
+    tl_service_ms_str = f"{tl_service_ms_value}"
+    tl_avg_ms_str = f"{tl_avg_ms_value:.0f}"
+    tl_p99_ms_str = f"{tl_p99_ms_value:.0f}"
+    tl_gap_str = f"{tl_gap_value:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+tl_util_pct_str = TailLatencyCalc.tl_util_pct_str
+tl_service_ms_str = TailLatencyCalc.tl_service_ms_str
+tl_avg_ms_str = TailLatencyCalc.tl_avg_ms_str
+tl_p99_ms_str = TailLatencyCalc.tl_p99_ms_str
+tl_gap_str = TailLatencyCalc.tl_gap_str
 ```
 
 Engineers monitor average latency\index{Mean Latency!monitoring pitfall} because it trends smoothly and is simple to compute. In production, averages hide the slowest requests that determine user satisfaction. As @sec-model-serving-tail-latency-5376 demonstrates, at `{python} tl_util_pct_str` percent utilization with `{python} tl_service_ms_str`ms service time, average latency is `{python} tl_avg_ms_str`ms while p99 reaches `{python} tl_p99_ms_str`ms, a `{python} tl_gap_str` $\times$ gap invisible to mean-based monitoring. Teams optimizing average latency miss the tail that determines user satisfaction: the 1 percent of users experiencing `{python} tl_p99_ms_str`ms delays often generate the most valuable transactions. Production SLOs specify percentile targets (p95, p99) precisely because averages mask tail behavior.
@@ -3776,8 +4193,6 @@ Engineers monitor average latency\index{Mean Latency!monitoring pitfall} because
 ```{python}
 #| label: fallacy-batching-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FALLACY: LARGER BATCHES ALWAYS IMPROVE THROUGHPUT
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3785,38 +4200,50 @@ from mlsys.formatting import fmt
 # │          affecting latency SLOs"
 # │
 # │ Goal: Demonstrate the diminishing returns of increasing serving batch sizes.
-# │      batch size from 16 to 32 gains only ~12% throughput while nearly
-# │      doubling inference time (14ms→25ms), plus padding wastes 15-30% of
-
+# │ Show: Batch size 16→32 gains only ~12% throughput while nearly doubling
+# │       inference time (14ms→25ms); padding wastes 15-30% of compute.
+# │ How: Compare throughput and inference time across two batch sizes.
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: fb_batch_small_str, fb_batch_large_str, fb_throughput_gain_str,
 # │          fb_inf_small_ms_str, fb_inf_large_ms_str,
 # │          fb_padding_waste_min_str, fb_padding_waste_max_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (batch size comparison data) ---
-fb_batch_small_value = 16
-fb_batch_large_value = 32
-fb_throughput_small_value = 1143 # From earlier table
-fb_throughput_large_value = 1280 # From earlier table
-fb_inf_small_ms_value = 14
-fb_inf_large_ms_value = 25
+class FallacyBatchingCalc:
+    """Batch-16 to batch-32 yields only ~12% more throughput while nearly doubling inference time."""
 
-fb_padding_waste_min_pct_value = 15
-fb_padding_waste_max_pct_value = 30
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    fb_batch_small_value = 16
+    fb_batch_large_value = 32
+    fb_throughput_small_value = 1143       # from earlier table
+    fb_throughput_large_value = 1280       # from earlier table
+    fb_inf_small_ms_value = 14
+    fb_inf_large_ms_value = 25
+    fb_padding_waste_min_pct_value = 15
+    fb_padding_waste_max_pct_value = 30
 
-# --- Process (throughput gain percentage) ---
-fb_throughput_gain_pct_value = (fb_throughput_large_value / fb_throughput_small_value - 1) * 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fb_throughput_gain_pct_value = (fb_throughput_large_value / fb_throughput_small_value - 1) * 100
 
-# --- Outputs (formatted strings for prose) ---
-fb_batch_small_str = f"{fb_batch_small_value}"
-fb_batch_large_str = f"{fb_batch_large_value}"
-fb_throughput_gain_str = f"{fb_throughput_gain_pct_value:.0f}"
-fb_inf_small_ms_str = f"{fb_inf_small_ms_value}"
-fb_inf_large_ms_str = f"{fb_inf_large_ms_value}"
-fb_padding_waste_min_str = f"{fb_padding_waste_min_pct_value}"
-fb_padding_waste_max_str = f"{fb_padding_waste_max_pct_value}"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    fb_batch_small_str = f"{fb_batch_small_value}"
+    fb_batch_large_str = f"{fb_batch_large_value}"
+    fb_throughput_gain_str = f"{fb_throughput_gain_pct_value:.0f}"
+    fb_inf_small_ms_str = f"{fb_inf_small_ms_value}"
+    fb_inf_large_ms_str = f"{fb_inf_large_ms_value}"
+    fb_padding_waste_min_str = f"{fb_padding_waste_min_pct_value}"
+    fb_padding_waste_max_str = f"{fb_padding_waste_max_pct_value}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fb_batch_small_str = FallacyBatchingCalc.fb_batch_small_str
+fb_batch_large_str = FallacyBatchingCalc.fb_batch_large_str
+fb_throughput_gain_str = FallacyBatchingCalc.fb_throughput_gain_str
+fb_inf_small_ms_str = FallacyBatchingCalc.fb_inf_small_ms_str
+fb_inf_large_ms_str = FallacyBatchingCalc.fb_inf_large_ms_str
+fb_padding_waste_min_str = FallacyBatchingCalc.fb_padding_waste_min_str
+fb_padding_waste_max_str = FallacyBatchingCalc.fb_padding_waste_max_str
 ```
 
 Engineers maximize batch size\index{Batching!fallacy of larger batches} assuming GPU saturation improves cost efficiency under production load. In serving systems, however, batching introduces a latency-throughput tradeoff\index{Latency-Throughput Tradeoff!batching} governed by queuing dynamics absent from offline benchmarks. Accumulating requests into larger batches increases wait time for early arrivals: a batch window of 10 ms means the first request waits 10 ms before inference begins, directly adding to p99 latency. For ResNet-50 on V100, increasing batch size from `{python} fb_batch_small_str` to `{python} fb_batch_large_str` improves throughput only `{python} fb_throughput_gain_str` percent while nearly doubling per-batch inference time from `{python} fb_inf_small_ms_str` ms to `{python} fb_inf_large_ms_str` ms, and variable input sizes within a batch create padding overhead that wastes `{python} fb_padding_waste_min_str` to `{python} fb_padding_waste_max_str` percent of compute on padding tokens. @sec-model-serving-dynamic-batching-latencythroughput-tradeoffs-986d shows that for 50ms p99 targets, batch sizes above 32 routinely violate SLOs because batch formation delay plus increased per-batch inference time exceeds the latency budget. Serving batch optimization requires jointly tuning batch size, batch timeout, and concurrency against latency SLOs under realistic traffic patterns, not maximizing throughput in isolation.
@@ -3826,8 +4253,6 @@ Engineers maximize batch size\index{Batching!fallacy of larger batches} assuming
 ```{python}
 #| label: fallacy-calibration-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PITFALL: CALIBRATION DATA MISMATCH
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3835,24 +4260,34 @@ from mlsys.formatting import fmt
 # │          than production traffic"
 # │
 # │ Goal: Quantify the accuracy loss from calibrating INT8 on mismatched data.
-# │      ImageNet data when production traffic differs (e.g., wildlife cameras).
-# │      A 3.2pp drop (76.1%→72.9%) is invisible to latency monitoring but
-
-
+# │ Show: ResNet-50 INT8 drops 3.2pp (76.1%→72.9%) when calibrated on ImageNet
+# │       but served on wildlife camera images — invisible to latency monitoring.
+# │ How: Model validation vs. OOD accuracy for a calibration-mismatched system.
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: fc_acc_loss_str, fc_imagenet_acc_str, fc_ood_acc_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (accuracy and calibration mismatch) ---
-fc_acc_loss_pct_value = 3.2
-fc_imagenet_acc_value = 76.1  # ResNet-50 INT8 on ImageNet
-fc_ood_acc_value = fc_imagenet_acc_value - fc_acc_loss_pct_value
+class FallacyCalibrationCalc:
+    """INT8 model calibrated on ImageNet drops 3.2pp when serving out-of-distribution wildlife images."""
 
-# --- Outputs (formatted strings for prose) ---
-fc_acc_loss_str = f"{fc_acc_loss_pct_value}"
-fc_imagenet_acc_str = f"{fc_imagenet_acc_value:.1f}"
-fc_ood_acc_str = f"{fc_ood_acc_value:.1f}"
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    fc_acc_loss_pct_value = 3.2
+    fc_imagenet_acc_value = 76.1       # ResNet-50 INT8 on ImageNet
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fc_ood_acc_value = fc_imagenet_acc_value - fc_acc_loss_pct_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    fc_acc_loss_str = f"{fc_acc_loss_pct_value}"
+    fc_imagenet_acc_str = f"{fc_imagenet_acc_value:.1f}"
+    fc_ood_acc_str = f"{fc_ood_acc_value:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fc_acc_loss_str = FallacyCalibrationCalc.fc_acc_loss_str
+fc_imagenet_acc_str = FallacyCalibrationCalc.fc_imagenet_acc_str
+fc_ood_acc_str = FallacyCalibrationCalc.fc_ood_acc_str
 ```
 
 Teams calibrate with training data\index{Calibration!production traffic mismatch} because it is readily available and produced validation accuracy. In production, traffic distribution often differs from training data, making calibration scale factors suboptimal. Post-training quantization determines INT8 scale factors by measuring activation ranges on calibration data, but this assumes production inputs match the calibration distribution. One production system achieving `{python} fc_imagenet_acc_str` percent accuracy on ImageNet-calibrated INT8 dropped to `{python} fc_ood_acc_str` percent, a `{python} fc_acc_loss_str` percentage point loss, when serving wildlife camera images with different lighting and backgrounds. @sec-model-compression shows quantization error scales with activation range: miscalibration amplifies errors precisely on out-of-distribution inputs where activations exceed calibrated ranges. Effective quantization requires calibrating with representative samples of actual serving traffic, not convenience data.
@@ -3862,40 +4297,50 @@ Teams calibrate with training data\index{Calibration!production traffic mismatch
 ```{python}
 #| label: fallacy-coldstart-calc
 #| echo: false
-from mlsys.formatting import fmt
-
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PITFALL: COLD START COMPOUNDING
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Pitfall "Cold start latency only matters for the first request"
 # │
 # │ Goal: Demonstrate how cold starts compound during traffic spikes.
-# │      reliability matters most. Scaling up 10 instances with 30s TensorRT
-# │      compilation each creates 300s of aggregate delay, and requests
-
+# │ Show: 10 new instances × 30s TensorRT compilation = 300s aggregate delay;
+# │       cold requests hit 100× latency vs. steady-state.
+# │ How: Calculate aggregate cold-start delay and per-request latency multiplier.
 # │
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: cs_new_instances_str, cs_compile_time_str, cs_aggregate_cold_str,
 # │          cs_steady_latency_str, cs_cold_latency_str, cs_cold_mult_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt
 
-# --- Inputs (scale-up scenario parameters) ---
-cs_new_instances_value = 10
-cs_compile_time_s_value = 30  # TensorRT compilation per instance
-cs_steady_latency_ms_value = 5
-cs_cold_latency_ms_value = 500  # First request during cold start
+class FallacyColdstartCalc:
+    """Cold starts compound: 10 new instances at 30s compile time = 300s aggregate user-facing delay."""
 
-# --- Process (aggregate cold start and multiplier) ---
-cs_aggregate_cold_s_value = cs_new_instances_value * cs_compile_time_s_value
-cs_cold_multiplier_value = cs_cold_latency_ms_value / cs_steady_latency_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cs_new_instances_value = 10
+    cs_compile_time_s_value = 30       # TensorRT compilation per instance
+    cs_steady_latency_ms_value = 5
+    cs_cold_latency_ms_value = 500     # first request during cold start
 
-# --- Outputs (formatted strings for prose) ---
-cs_new_instances_str = f"{cs_new_instances_value}"
-cs_compile_time_str = f"{cs_compile_time_s_value}"
-cs_aggregate_cold_str = f"{cs_aggregate_cold_s_value}"
-cs_steady_latency_str = f"{cs_steady_latency_ms_value}"
-cs_cold_latency_str = f"{cs_cold_latency_ms_value}"
-cs_cold_mult_str = f"{cs_cold_multiplier_value:.0f}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cs_aggregate_cold_s_value = cs_new_instances_value * cs_compile_time_s_value
+    cs_cold_multiplier_value = cs_cold_latency_ms_value / cs_steady_latency_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cs_new_instances_str = f"{cs_new_instances_value}"
+    cs_compile_time_str = f"{cs_compile_time_s_value}"
+    cs_aggregate_cold_str = f"{cs_aggregate_cold_s_value}"
+    cs_steady_latency_str = f"{cs_steady_latency_ms_value}"
+    cs_cold_latency_str = f"{cs_cold_latency_ms_value}"
+    cs_cold_mult_str = f"{cs_cold_multiplier_value:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cs_new_instances_str = FallacyColdstartCalc.cs_new_instances_str
+cs_compile_time_str = FallacyColdstartCalc.cs_compile_time_str
+cs_aggregate_cold_str = FallacyColdstartCalc.cs_aggregate_cold_str
+cs_steady_latency_str = FallacyColdstartCalc.cs_steady_latency_str
+cs_cold_latency_str = FallacyColdstartCalc.cs_cold_latency_str
+cs_cold_mult_str = FallacyColdstartCalc.cs_cold_mult_str
 ```
 
 Engineers optimize steady-state latency\index{Cold Start!bursty traffic impact} assuming most requests hit warm instances. In production, cold starts compound during the events that matter most: traffic spikes requiring scale-up, deployments rolling out new versions, and recovery from instance failures. @sec-model-serving-model-loading-initialization-cc5a details the anatomy of cold start: TensorRT compilation alone takes `{python} cs_compile_time_str` seconds per instance. During a traffic spike requiring `{python} cs_new_instances_str` new instances, aggregate cold start latency reaches `{python} cs_aggregate_cold_str` seconds of user-facing delay before new capacity becomes useful. Worse, requests hitting cold instances experience `{python} cs_cold_latency_str` ms latency versus `{python} cs_steady_latency_str` ms steady-state, a `{python} cs_cold_mult_str` $\times$ degradation that violates SLOs precisely when traffic is highest. Systems ignoring cold start meet SLOs during steady state but fail during scale-up events and deployment windows when reliability matters most.

@@ -21,7 +21,7 @@ sys.path.insert(0, _quarto_dir)
 
 from mlsys.constants import *
 from mlsys.formulas import *
-from mlsys.formatting import fmt, sci
+from mlsys.formatting import fmt, sci, fmt_full, fmt_split
 
 FAILURES = []
 
@@ -351,6 +351,162 @@ def test_formula_helpers():
     return ok
 
 
+# ── 17. Robustness: Wrong-Unit HardwareSpec ──────────────────────────
+
+def test_hardware_wrong_unit_raises():
+    """Wrong-unit HardwareSpec must raise DimensionalityError, not pass silently."""
+    from mlsys.hardware import HardwareSpec
+    import pint
+    ok = True
+    # Passing watts as memory_bw (wrong dimension) must fail at construction
+    try:
+        HardwareSpec("Bad", 2024,
+            memory_bw=100 * watt,           # WRONG — should be data/time
+            peak_flops=312 * TFLOPs / second,
+            memory_capacity=80 * GiB)
+        FAILURES.append("  ✗ HardwareSpec accepted wrong memory_bw unit (watt) silently")
+        ok = False
+    except (pint.DimensionalityError, ValueError):
+        pass  # Expected — dimension-first validation fired
+    return ok
+
+
+# ── 18. Robustness: model_memory() Wrong Units ───────────────────────
+
+def test_model_memory_wrong_units():
+    """Passing watts as params to model_memory() must raise DimensionalityError."""
+    import pint
+    ok = True
+    try:
+        model_memory(100 * watt, BYTES_FP32)
+        FAILURES.append("  ✗ model_memory() accepted wrong params unit (watt) silently")
+        ok = False
+    except (pint.DimensionalityError, ValueError):
+        pass  # Expected
+    return ok
+
+
+# ── 19. Fleet Formulas: Quantity Inputs + Quantity Returns ────────────
+
+def test_fleet_formulas_accept_quantities():
+    """Fleet formulas must accept Pint Quantities and return typed Quantities."""
+    ok = True
+
+    # calc_ring_allreduce_time: Quantity inputs → Quantity[second] return
+    result = calc_ring_allreduce_time(1 * GB, 256, 50 * GB / second, 5e-6 * second)
+    if not isinstance(result, ureg.Quantity):
+        FAILURES.append(f"  ✗ calc_ring_allreduce_time must return Quantity, got {type(result).__name__}")
+        ok = False
+    elif not result.is_compatible_with(ureg.second):
+        FAILURES.append(f"  ✗ calc_ring_allreduce_time must return Quantity[second], got {result.units}")
+        ok = False
+
+    # calc_failure_probability: both Quantities → plain float (dimensionless)
+    result2 = calc_failure_probability(1000 * ureg.hour, 24 * ureg.hour)
+    if isinstance(result2, ureg.Quantity):
+        FAILURES.append("  ✗ calc_failure_probability must return float, not Quantity")
+        ok = False
+    elif not (0 < result2 < 1):
+        FAILURES.append(f"  ✗ calc_failure_probability result {result2} not in (0, 1)")
+        ok = False
+
+    # calc_checkpoint_size: returns Quantity[byte]
+    ckpt = calc_checkpoint_size(7e9, 2)
+    if not isinstance(ckpt, ureg.Quantity):
+        FAILURES.append(f"  ✗ calc_checkpoint_size must return Quantity, got {type(ckpt).__name__}")
+        ok = False
+    elif not ckpt.is_compatible_with(ureg.byte):
+        FAILURES.append(f"  ✗ calc_checkpoint_size must return Quantity[byte], got {ckpt.units}")
+        ok = False
+
+    # calc_mtbf_cluster: returns Quantity[hour]
+    mtbf = calc_mtbf_cluster(100000 * ureg.hour, 1024)
+    if not isinstance(mtbf, ureg.Quantity):
+        FAILURES.append(f"  ✗ calc_mtbf_cluster must return Quantity, got {type(mtbf).__name__}")
+        ok = False
+    elif not mtbf.is_compatible_with(ureg.hour):
+        FAILURES.append(f"  ✗ calc_mtbf_cluster must return Quantity[hour], got {mtbf.units}")
+        ok = False
+
+    return ok
+
+
+# ── 20. Failure Probability: Mixed-Type Guard ─────────────────────────
+
+def test_failure_probability_mixed_types():
+    """Mixed Quantity + raw number in calc_failure_probability must raise TypeError."""
+    ok = True
+    try:
+        calc_failure_probability(1000 * ureg.second, 24)   # Quantity + raw
+        FAILURES.append("  ✗ calc_failure_probability accepted (Qty, raw) silently")
+        ok = False
+    except TypeError:
+        pass  # Expected — mixed-type guard fired
+    try:
+        calc_failure_probability(1000, 24 * ureg.second)   # raw + Quantity
+        FAILURES.append("  ✗ calc_failure_probability accepted (raw, Qty) silently")
+        ok = False
+    except TypeError:
+        pass  # Expected
+    return ok
+
+
+# ── 21. fmt_full(): Compact String Display ────────────────────────────
+
+def test_fmt_full_returns_string():
+    """fmt_full must return a non-empty 'value unit' string for a valid Quantity."""
+    ok = True
+    result = fmt_full(A100_MEM_BW)
+    if not isinstance(result, str):
+        FAILURES.append(f"  ✗ fmt_full must return str, got {type(result).__name__}")
+        ok = False
+    elif " " not in result:
+        FAILURES.append(f"  ✗ fmt_full result '{result}' must contain 'value unit' with space")
+        ok = False
+    return ok
+
+
+def test_fmt_full_rejects_raw_number():
+    """fmt_full() must reject raw numbers (int/float) with TypeError."""
+    ok = True
+    try:
+        fmt_full(2039)
+        FAILURES.append("  ✗ fmt_full() accepted raw int without raising TypeError")
+        ok = False
+    except TypeError:
+        pass  # Expected
+    try:
+        fmt_full(2039.0)
+        FAILURES.append("  ✗ fmt_full() accepted raw float without raising TypeError")
+        ok = False
+    except TypeError:
+        pass  # Expected
+    return ok
+
+
+# ── 22. fmt_split(): Table Column Tuple ───────────────────────────────
+
+def test_fmt_split_returns_tuple():
+    """fmt_split must return a (value_str, unit_str) 2-tuple of non-empty strings."""
+    ok = True
+    result = fmt_split(A100_MEM_BW)
+    if not isinstance(result, tuple) or len(result) != 2:
+        FAILURES.append(f"  ✗ fmt_split must return 2-tuple, got {result!r}")
+        ok = False
+    else:
+        val, unit = result
+        if not isinstance(val, str) or not isinstance(unit, str):
+            FAILURES.append(
+                f"  ✗ fmt_split must return (str, str), got "
+                f"({type(val).__name__}, {type(unit).__name__})"
+            )
+            ok = False
+        elif not val or not unit:
+            FAILURES.append(f"  ✗ fmt_split must return non-empty strings, got ({val!r}, {unit!r})")
+            ok = False
+    return ok
+
+
 # ── Runner ───────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -371,6 +527,14 @@ if __name__ == "__main__":
         ("Model specs (GPT-2, BERT, MobileNet)", test_model_specs),
         ("Ridge point derivations (V100/A100/H100)", test_ridge_points),
         ("Formula helpers (fmt, sci)", test_formula_helpers),
+        # ── Robustness tests (Changes 1-6 verification) ──────────────────
+        ("Robustness: wrong-unit HardwareSpec raises DimensionalityError", test_hardware_wrong_unit_raises),
+        ("Robustness: model_memory() rejects wrong-unit params", test_model_memory_wrong_units),
+        ("Fleet formulas: accept Quantities, return typed Quantities", test_fleet_formulas_accept_quantities),
+        ("Fleet formulas: failure probability rejects mixed types", test_failure_probability_mixed_types),
+        ("fmt_full(): returns compact 'value unit' string", test_fmt_full_returns_string),
+        ("fmt_full(): rejects raw numbers with TypeError", test_fmt_full_rejects_raw_number),
+        ("fmt_split(): returns (value_str, unit_str) tuple", test_fmt_split_returns_tuple),
     ]
 
     all_ok = True

@@ -42,13 +42,15 @@ Computation scales by adding processors; communication scales by moving data bet
 ```{python}
 #| label: communication-setup
 #| echo: false
+# Goal: Surface canonical interconnect bandwidth constants for inline prose references.
+# Exports: nvlink_h100_bw_gbs, ib_ndr_bw_gbs
 
 from mlsys.constants import *
 from mlsys.formatting import fmt, sci, check
 
 # Interconnect bandwidth specs (for prose references)
 nvlink_h100_bw_gbs = fmt(NVLINK_H100_BW, "GB/s", precision=0)
-ib_ndr_bw_gbs = f"{INFINIBAND_NDR_BW.to('bit/second').magnitude / 8 / BILLION:.0f}"
+ib_ndr_bw_gbs = f"{INFINIBAND_NDR_BW.m_as(ureg.bit / ureg.second) / 8 / BILLION:.0f}"
 ```
 
 ## From Parallelism to Communication Patterns {#sec-communication-collective-operations-collective-operations-communication-fundamentals-44eb}
@@ -96,6 +98,22 @@ These three constraints interact multiplicatively. Latency sets the floor for ev
 ```{python}
 #| label: allreduce-napkin-math
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ALLREDUCE COST — 70B MODEL NAPKIN MATH
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "AllReduce Cost for a 70B Model" .callout-notebook
+# │
+# │ Goal: Compute Ring AllReduce latency for a 70B-parameter model across 64
+# │       GPUs on 400G InfiniBand NDR to show that gradient sync dominates
+# │       step time at scale.
+# │ Show: ring_total_ms ≈ 11,200 ms — inline inside notebook callout steps.
+# │ How: α-β model: T = 2(N-1)α + 2(N-1)/N × M/β; bare arithmetic (no pint)
+# │      because this is a step-by-step pedagogical trace.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: gradient_size_gb_str, ring_bw_time_ms_str, ring_lat_time_ms_str,
+# │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_str
+# └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class AllReduceCost:
@@ -382,68 +400,89 @@ The alpha-beta model becomes most valuable when applied to real training configu
 ```{python}
 #| label: llama-budget-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LLAMA 70B COMMUNICATION BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §Putting the Model to Work: Llama 70B Communication Budget
+# │          (@sec-communication-llama-budget) prose paragraphs
+# │
+# │ Goal: Quantify hierarchical AllReduce vs. flat Ring AllReduce for a 70B
+# │       model across 128 GPUs (16 nodes × 8 GPUs) to show that hierarchical
+# │       decomposition cuts inter-node traffic by 8×, enabling overlap.
+# │ Show: hier_total_llama_ms ≈ 399 ms vs flat_total_ms ≈ 5,600 ms — inline.
+# │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
+# │      AllGather; comm-to-compute ratio computed for both strategies.
+# │
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Exports: gradient_bf16_gb_str, intra_rs_time_ms_str, inter_payload_gb_str,
+# │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
+# │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
+# │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Llama 70B communication budget analysis
-# Context: Worked example in alpha-beta section
+class LlamaBudgetCalc:
+    """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_gpus_llama        = 128
+    n_nodes_llama       = 16
+    gpus_per_node_llama = 8
+    param_count_b       = 70
+    gradient_bf16_gb    = param_count_b * 2   # 140 GB in BF16
 
-n_gpus_llama = 128
-n_nodes_llama = 16
-gpus_per_node_llama = 8
-param_count_b = 70
-gradient_fp32_gb = param_count_b * 4  # 280 GB in FP32
-gradient_bf16_gb = param_count_b * 2  # 140 GB in BF16
+    nvlink_bw   = 900    # GB/s
+    nvlink_alpha = 1.5   # us
+    ib_bw        = 50    # GB/s per port
+    ib_alpha     = 3     # us
+    compute_per_step_ms = 200  # approximate for illustration
 
-# Intra-node: NVLink
-nvlink_bw = 900  # GB/s
-nvlink_alpha = 1.5  # us
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Hierarchical AllReduce — Step 1: Intra-node ReduceScatter
+    intra_payload_gb  = gradient_bf16_gb * (gpus_per_node_llama - 1) / gpus_per_node_llama
+    intra_rs_time_ms  = intra_payload_gb / nvlink_bw * 1000
 
-# Inter-node: IB NDR
-ib_bw = 50  # GB/s per port
-ib_alpha = 3  # us
+    # Step 2: Inter-node AllReduce (reduced payload)
+    inter_payload_gb          = gradient_bf16_gb / gpus_per_node_llama
+    inter_ring_bw_time_ms     = 2 * (n_nodes_llama - 1) / n_nodes_llama * inter_payload_gb / ib_bw * 1000
+    inter_ring_lat_time_ms    = 2 * (n_nodes_llama - 1) * ib_alpha / 1000
 
-# Hierarchical AllReduce for BF16 gradients
-# Step 1: Intra-node ReduceScatter
-intra_payload_gb = gradient_bf16_gb * (gpus_per_node_llama - 1) / gpus_per_node_llama  # ~122.5 GB
-intra_rs_time_ms = intra_payload_gb / nvlink_bw * 1000  # ms
+    # Step 3: Intra-node AllGather (symmetric)
+    intra_ag_time_ms = intra_rs_time_ms
 
-# Step 2: Inter-node AllReduce (reduced payload)
-inter_payload_gb = gradient_bf16_gb / gpus_per_node_llama  # 17.5 GB per GPU
-# Ring among 16 nodes
-inter_ring_bw_time_ms = 2 * (n_nodes_llama - 1) / n_nodes_llama * inter_payload_gb / ib_bw * 1000
-inter_ring_lat_time_ms = 2 * (n_nodes_llama - 1) * ib_alpha / 1000
+    hier_total_llama_ms = intra_rs_time_ms + inter_ring_bw_time_ms + inter_ring_lat_time_ms + intra_ag_time_ms
 
-# Step 3: Intra-node AllGather
-intra_ag_time_ms = intra_rs_time_ms  # symmetric
+    # Flat Ring AllReduce (BF16)
+    flat_ring_bw_ms = 2 * (n_gpus_llama - 1) / n_gpus_llama * gradient_bf16_gb / ib_bw * 1000
+    flat_ring_lat_ms = 2 * (n_gpus_llama - 1) * ib_alpha / 1000
+    flat_total_ms   = flat_ring_bw_ms + flat_ring_lat_ms
 
-# Total hierarchical
-hier_total_llama_ms = intra_rs_time_ms + inter_ring_bw_time_ms + inter_ring_lat_time_ms + intra_ag_time_ms
+    ccr_hier = hier_total_llama_ms / compute_per_step_ms
+    ccr_flat = flat_total_ms / compute_per_step_ms
 
-# Flat Ring AllReduce (for comparison, BF16)
-flat_ring_bw_ms = 2 * (n_gpus_llama - 1) / n_gpus_llama * gradient_bf16_gb / ib_bw * 1000
-flat_ring_lat_ms = 2 * (n_gpus_llama - 1) * ib_alpha / 1000
-flat_total_ms = flat_ring_bw_ms + flat_ring_lat_ms
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gradient_bf16_gb_str       = f"{gradient_bf16_gb}"
+    intra_rs_time_ms_str       = f"{intra_rs_time_ms:.1f}"
+    inter_payload_gb_str       = f"{inter_payload_gb:.1f}"
+    inter_ring_bw_time_ms_str  = f"{inter_ring_bw_time_ms:.0f}"
+    inter_ring_lat_time_ms_str = f"{inter_ring_lat_time_ms:.2f}"
+    intra_ag_time_ms_str       = f"{intra_ag_time_ms:.1f}"
+    hier_total_llama_ms_str    = f"{hier_total_llama_ms:.0f}"
+    flat_total_ms_str          = f"{flat_total_ms:,.0f}"
+    ccr_hier_str               = f"{ccr_hier:.1f}"
+    ccr_flat_str               = f"{ccr_flat:.1f}"
+    n_gpus_llama_str           = f"{n_gpus_llama}"
 
-# Typical H100 backward pass for 70B at batch=1 microbatch (rough)
-# ~6 * 70B * 2048 (seq_len) * 2 (fwd+bwd) FLOPs per microbatch
-# distributed across 128 GPUs at ~1000 TFLOPS each
-compute_per_step_ms = 200  # approximate for illustration
-
-# Comm-to-compute ratio
-ccr_hier = hier_total_llama_ms / compute_per_step_ms
-ccr_flat = flat_total_ms / compute_per_step_ms
-
-# Format
-gradient_bf16_gb_str = f"{gradient_bf16_gb}"
-intra_rs_time_ms_str = f"{intra_rs_time_ms:.1f}"
-inter_payload_gb_str = f"{inter_payload_gb:.1f}"
-inter_ring_bw_time_ms_str = f"{inter_ring_bw_time_ms:.0f}"
-inter_ring_lat_time_ms_str = f"{inter_ring_lat_time_ms:.2f}"
-intra_ag_time_ms_str = f"{intra_ag_time_ms:.1f}"
-hier_total_llama_ms_str = f"{hier_total_llama_ms:.0f}"
-flat_total_ms_str = f"{flat_total_ms:,.0f}"
-ccr_hier_str = f"{ccr_hier:.1f}"
-ccr_flat_str = f"{ccr_flat:.1f}"
-n_gpus_llama_str = f"{n_gpus_llama}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gradient_bf16_gb_str       = LlamaBudgetCalc.gradient_bf16_gb_str
+intra_rs_time_ms_str       = LlamaBudgetCalc.intra_rs_time_ms_str
+inter_payload_gb_str       = LlamaBudgetCalc.inter_payload_gb_str
+inter_ring_bw_time_ms_str  = LlamaBudgetCalc.inter_ring_bw_time_ms_str
+inter_ring_lat_time_ms_str = LlamaBudgetCalc.inter_ring_lat_time_ms_str
+intra_ag_time_ms_str       = LlamaBudgetCalc.intra_ag_time_ms_str
+hier_total_llama_ms_str    = LlamaBudgetCalc.hier_total_llama_ms_str
+flat_total_ms_str          = LlamaBudgetCalc.flat_total_ms_str
+ccr_hier_str               = LlamaBudgetCalc.ccr_hier_str
+ccr_flat_str               = LlamaBudgetCalc.ccr_flat_str
+n_gpus_llama_str           = LlamaBudgetCalc.n_gpus_llama_str
 ```
 
 Using BF16 gradients (a standard practice that halves communication volume to `{python} gradient_bf16_gb_str` GB), the hierarchical AllReduce decomposes as follows:
@@ -946,46 +985,67 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 ```{python}
 #| label: hierarchical-allreduce-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HIERARCHICAL ALLREDUCE — 8-NODE CLUSTER ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Hierarchical Bandwidth Multiplier" .callout-notebook
+# │
+# │ Goal: Compare flat Ring AllReduce vs. 3-step hierarchical AllReduce for a
+# │       1 GB gradient on 8 nodes × 8 GPUs to quantify the speedup from
+# │       exploiting NVLink vs. InfiniBand bandwidth hierarchy.
+# │ Show: speedup_str ≈ 5.7× — inline in callout insight sentence.
+# │ How: Flat: T = 2M/β_IB; Hierarchical: T = T_rs + T_inter + T_ag with
+# │      NVLink for intra-node phases and IB for inter-node phase.
+# │
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Exports: flat_time_ms_str, intra_data_mb_str, intra_rs_ms_str,
+# │          inter_data_mb_str, inter_time_ms_str, intra_ag_ms_str,
+# │          hier_total_ms_str, speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Hierarchical AllReduce analysis
-n_nodes_har = 8
-gpus_per_node = 8
-total_gpus_har = n_nodes_har * gpus_per_node
-gradient_gb = 1  # 1 GB gradient buffer
+class HierarchicalAllreduceCalc:
+    """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_nodes_har    = 8
+    gpus_per_node  = 8
+    gradient_gb    = 1       # 1 GB gradient buffer
+    ib_bw_gbs      = 50      # InfiniBand GB/s
+    nvlink_bw_gbs  = 900     # NVLink GB/s
 
-# Flat Ring AllReduce
-ib_bw_gbs = 50  # InfiniBand GB/s
-flat_data_gb = 2 * gradient_gb  # bandwidth-optimal Ring sends ~2x
-flat_time_ms = flat_data_gb / ib_bw_gbs * 1000  # ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    flat_data_gb  = 2 * gradient_gb   # bandwidth-optimal Ring sends ~2×
+    flat_time_ms  = flat_data_gb / ib_bw_gbs * 1000
 
-# Hierarchical AllReduce
-nvlink_bw_gbs = 900  # NVLink GB/s
+    intra_data_mb = int(gradient_gb * 1000 * (gpus_per_node - 1) / gpus_per_node)  # ~875 MB
+    intra_rs_ms   = intra_data_mb / 1000 / nvlink_bw_gbs * 1000
 
-# Step 1: Intra-node ReduceScatter
-intra_data_mb = int(gradient_gb * 1000 * (gpus_per_node - 1) / gpus_per_node)  # ~875 MB
-intra_rs_ms = intra_data_mb / 1000 / nvlink_bw_gbs * 1000  # ~1 ms
+    inter_data_mb = int(gradient_gb * 1000 / gpus_per_node)  # 125 MB
+    inter_time_ms = 5  # approximate with ring overhead for the example
 
-# Step 2: Inter-node AllReduce (only 1/G of data crosses IB)
-inter_data_mb = int(gradient_gb * 1000 / gpus_per_node)  # 125 MB
-inter_time_ms = inter_data_mb / 1000 / ib_bw_gbs * 1000  # ~2.5 ms, but with ring overhead ~5ms
-inter_time_ms = 5  # approximate with ring overhead for the example
+    intra_ag_ms   = intra_rs_ms   # symmetric
 
-# Step 3: Intra-node AllGather
-intra_ag_ms = intra_rs_ms  # symmetric
+    hier_total_ms = intra_rs_ms + inter_time_ms + intra_ag_ms
+    speedup       = flat_time_ms / hier_total_ms
 
-# Total
-hier_total_ms = intra_rs_ms + inter_time_ms + intra_ag_ms
-speedup = flat_time_ms / hier_total_ms
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    flat_time_ms_str  = f"{flat_time_ms:.0f}"
+    intra_data_mb_str = f"{intra_data_mb}"
+    intra_rs_ms_str   = f"{intra_rs_ms:.0f}"
+    inter_data_mb_str = f"{inter_data_mb}"
+    inter_time_ms_str = f"{inter_time_ms:.0f}"
+    intra_ag_ms_str   = f"{intra_ag_ms:.0f}"
+    hier_total_ms_str = f"{hier_total_ms:.0f}"
+    speedup_str       = f"{speedup:.1f}"
 
-# Format strings
-flat_time_ms_str = f"{flat_time_ms:.0f}"
-intra_data_mb_str = f"{intra_data_mb}"
-intra_rs_ms_str = f"{intra_rs_ms:.0f}"
-inter_data_mb_str = f"{inter_data_mb}"
-inter_time_ms_str = f"{inter_time_ms:.0f}"
-intra_ag_ms_str = f"{intra_ag_ms:.0f}"
-hier_total_ms_str = f"{hier_total_ms:.0f}"
-speedup_str = f"{speedup:.1f}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+flat_time_ms_str  = HierarchicalAllreduceCalc.flat_time_ms_str
+intra_data_mb_str = HierarchicalAllreduceCalc.intra_data_mb_str
+intra_rs_ms_str   = HierarchicalAllreduceCalc.intra_rs_ms_str
+inter_data_mb_str = HierarchicalAllreduceCalc.inter_data_mb_str
+inter_time_ms_str = HierarchicalAllreduceCalc.inter_time_ms_str
+intra_ag_ms_str   = HierarchicalAllreduceCalc.intra_ag_ms_str
+hier_total_ms_str = HierarchicalAllreduceCalc.hier_total_ms_str
+speedup_str       = HierarchicalAllreduceCalc.speedup_str
 ```
 
 ::: {.callout-notebook title="The Hierarchical Bandwidth Multiplier"}
@@ -1086,53 +1146,82 @@ The hierarchical approach generalizes beyond two levels. Large clusters with mul
 ```{python}
 #| label: three-level-napkin
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THREE-LEVEL HIERARCHICAL ALLREDUCE — RACK-SCALE BUDGET
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Three-Level Hierarchical Bandwidth Budget" .callout-notebook
+# │
+# │ Goal: Extend 2-level analysis to 3 tiers (NVLink → IB → oversubscribed
+# │       spine) for 128 GPUs across 4 racks to show how hierarchical reduction
+# │       cuts cross-rack traffic by 32× compared to flat AllReduce.
+# │ Show: total_3l_ms_str ≈ 5.5 ms vs flat_3l_ms_str ≈ 160 ms — inline.
+# │ How: α-β model per tier; each level reduces payload by GPUs-per-unit before
+# │      crossing the next, slower boundary (oversubscription ratio 2:1).
+# │
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Exports: total_gpus_3l_str, gradient_3l_gb_str, step1_payload_gb_str,
+# │          step1_time_ms_str, step2_payload_gb_str, step2_ring_bw_ms_str,
+# │          step3_payload_gb_str, step3_ring_bw_ms_str, total_3l_ms_str,
+# │          flat_3l_ms_str, reduction_factor_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Three-level hierarchical AllReduce analysis
-# Context: Napkin Math callout in Hierarchical AllReduce section
+class ThreeLevelNapkin:
+    """3-tier hierarchical AllReduce budget for a 128-GPU rack-scale cluster."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Cluster: 4 racks × 4 nodes × 8 GPUs = 128 GPUs
+    n_racks        = 4
+    nodes_per_rack = 4
+    gpus_per_node_3l = 8
+    total_gpus_3l  = n_racks * nodes_per_rack * gpus_per_node_3l
 
-# Cluster: 4 racks, 4 nodes per rack, 8 GPUs per node = 128 GPUs
-n_racks = 4
-nodes_per_rack = 4
-gpus_per_node_3l = 8
-total_gpus_3l = n_racks * nodes_per_rack * gpus_per_node_3l
+    gradient_3l_gb = 2    # 2 GB gradient (BF16 for a ~250B model)
+    nvlink_bw_3l   = 900  # GB/s
+    ib_bw_3l       = 50   # GB/s per port
+    cross_rack_bw  = 25   # GB/s effective (50/2 oversubscription)
 
-gradient_3l_gb = 2  # 2 GB gradient (BF16 for a ~250B model)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Level 1: NVLink (intra-node)
+    step1_payload_gb  = gradient_3l_gb * (gpus_per_node_3l - 1) / gpus_per_node_3l  # 1.75 GB
+    step1_time_ms     = step1_payload_gb / nvlink_bw_3l * 1000
 
-# Level 1: NVLink (intra-node)
-nvlink_bw_3l = 900  # GB/s
-step1_payload_gb = gradient_3l_gb * (gpus_per_node_3l - 1) / gpus_per_node_3l  # 1.75 GB
-step1_time_ms = step1_payload_gb / nvlink_bw_3l * 1000
+    # Level 2: InfiniBand within rack
+    step2_payload_gb  = gradient_3l_gb / gpus_per_node_3l               # 0.25 GB per GPU
+    step2_ring_bw_ms  = 2 * (nodes_per_rack - 1) / nodes_per_rack * step2_payload_gb / ib_bw_3l * 1000
 
-# Level 2: InfiniBand within rack (intra-rack, inter-node)
-ib_bw_3l = 50  # GB/s per port
-step2_payload_gb = gradient_3l_gb / gpus_per_node_3l  # 0.25 GB per GPU
-# Ring among 4 nodes in a rack
-step2_ring_bw_ms = 2 * (nodes_per_rack - 1) / nodes_per_rack * step2_payload_gb / ib_bw_3l * 1000
+    # Level 3: Spine switch between racks
+    step3_payload_gb  = step2_payload_gb / nodes_per_rack
+    step3_ring_bw_ms  = 2 * (n_racks - 1) / n_racks * step3_payload_gb / cross_rack_bw * 1000
 
-# Level 3: Spine switch between racks (cross-rack)
-# Oversubscription ratio 2:1 reduces effective cross-rack BW
-cross_rack_bw = 25  # GB/s effective (50/2 oversubscription)
-step3_payload_gb = step2_payload_gb / nodes_per_rack  # further reduced by intra-rack reduction
-step3_ring_bw_ms = 2 * (n_racks - 1) / n_racks * step3_payload_gb / cross_rack_bw * 1000
+    # Totals
+    total_3l_ms      = 2 * step1_time_ms + 2 * step2_ring_bw_ms + step3_ring_bw_ms
+    flat_3l_ms       = 2 * gradient_3l_gb / cross_rack_bw * 1000
+    reduction_factor = gradient_3l_gb / step3_payload_gb
 
-# Total with symmetric gather phases
-total_3l_ms = 2 * step1_time_ms + 2 * step2_ring_bw_ms + step3_ring_bw_ms
-# Flat baseline
-flat_3l_ms = 2 * gradient_3l_gb / cross_rack_bw * 1000  # limited by slowest link
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    total_gpus_3l_str    = f"{total_gpus_3l}"
+    gradient_3l_gb_str   = f"{gradient_3l_gb}"
+    step1_payload_gb_str = f"{step1_payload_gb:.2f}"
+    step1_time_ms_str    = f"{step1_time_ms:.1f}"
+    step2_payload_gb_str = f"{step2_payload_gb:.2f}"
+    step2_ring_bw_ms_str = f"{step2_ring_bw_ms:.1f}"
+    step3_payload_gb_str = f"{step3_payload_gb:.3f}"
+    step3_ring_bw_ms_str = f"{step3_ring_bw_ms:.2f}"
+    total_3l_ms_str      = f"{total_3l_ms:.1f}"
+    flat_3l_ms_str       = f"{flat_3l_ms:.0f}"
+    reduction_factor_str = f"{reduction_factor:.0f}"
 
-# Formatting
-total_gpus_3l_str = f"{total_gpus_3l}"
-gradient_3l_gb_str = f"{gradient_3l_gb}"
-step1_payload_gb_str = f"{step1_payload_gb:.2f}"
-step1_time_ms_str = f"{step1_time_ms:.1f}"
-step2_payload_gb_str = f"{step2_payload_gb:.2f}"
-step2_ring_bw_ms_str = f"{step2_ring_bw_ms:.1f}"
-step3_payload_gb_str = f"{step3_payload_gb:.3f}"
-step3_ring_bw_ms_str = f"{step3_ring_bw_ms:.2f}"
-total_3l_ms_str = f"{total_3l_ms:.1f}"
-flat_3l_ms_str = f"{flat_3l_ms:.0f}"
-reduction_factor = gradient_3l_gb / step3_payload_gb
-reduction_factor_str = f"{reduction_factor:.0f}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+total_gpus_3l_str    = ThreeLevelNapkin.total_gpus_3l_str
+gradient_3l_gb_str   = ThreeLevelNapkin.gradient_3l_gb_str
+step1_payload_gb_str = ThreeLevelNapkin.step1_payload_gb_str
+step1_time_ms_str    = ThreeLevelNapkin.step1_time_ms_str
+step2_payload_gb_str = ThreeLevelNapkin.step2_payload_gb_str
+step2_ring_bw_ms_str = ThreeLevelNapkin.step2_ring_bw_ms_str
+step3_payload_gb_str = ThreeLevelNapkin.step3_payload_gb_str
+step3_ring_bw_ms_str = ThreeLevelNapkin.step3_ring_bw_ms_str
+total_3l_ms_str      = ThreeLevelNapkin.total_3l_ms_str
+flat_3l_ms_str       = ThreeLevelNapkin.flat_3l_ms_str
+reduction_factor_str = ThreeLevelNapkin.reduction_factor_str
 ```
 
 ::: {.callout-notebook title="Three-Level Hierarchical Bandwidth Budget" collapse="false"}
@@ -1521,43 +1610,65 @@ The following example quantifies the impact of overlap on a realistic training c
 ```{python}
 #| label: overlap-budget-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ COMMUNICATION-COMPUTATION OVERLAP BUDGET — 7B TRANSFORMER
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Overlap Budget for a 7B Transformer" .callout-notebook
+# │
+# │ Goal: Quantify step time savings from layer-by-layer AllReduce overlap for
+# │       a 32-layer, 7B transformer on 64 GPUs, showing the exposed-latency
+# │       residual when AllReduce exceeds per-layer backward time.
+# │ Show: overlap_savings_pct_str ≈ 73% — inline in callout insight sentence.
+# │ How: Sequential: T = T_bwd + N_layers × T_comm; pipelined: T = T_bwd +
+# │      T_first_comm + (N-1) × max(0, T_comm - T_bwd_per_layer).
+# │
+# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Exports: total_backward_ms_str, allreduce_per_layer_ms_str,
+# │          no_overlap_ms_str, with_overlap_ms_str, overlap_savings_pct_str,
+# │          exposed_per_layer_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Communication-computation overlap budget
-# Context: Quantitative example in overlap section
+class OverlapBudgetCalc:
+    """Step-time savings from layer-by-layer AllReduce overlap for a 32-layer 7B transformer."""
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_layers_overlap       = 32    # transformer layers
+    backward_per_layer_ms  = 15    # ms per layer backward pass
+    gradient_per_layer_mb_val = 880  # MB per layer (7B model, FP32)
+    bucket_size_mb         = 100   # MB per AllReduce bucket
+    allreduce_per_bucket_ms = 3    # ms per bucket (hierarchical on IB NDR)
 
-n_layers_overlap = 32  # transformer layers
-backward_per_layer_ms = 15  # ms per layer backward pass
-total_backward_ms = n_layers_overlap * backward_per_layer_ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    total_backward_ms      = n_layers_overlap * backward_per_layer_ms
+    buckets_per_layer      = gradient_per_layer_mb_val / bucket_size_mb
+    allreduce_per_layer_ms = buckets_per_layer * allreduce_per_bucket_ms
 
-# Gradient size per layer (attention + FFN weights for a 7B model)
-params_per_layer_m = 220  # million parameters
-gradient_per_layer_mb = params_per_layer_m * 4  # FP32, in MB
-gradient_per_layer_mb_val = 880  # MB
+    # Sequential (no overlap)
+    no_overlap_ms = total_backward_ms + n_layers_overlap * allreduce_per_layer_ms
 
-# AllReduce time per bucket (hierarchical, 64 GPUs)
-bucket_size_mb = 100  # MB
-allreduce_per_bucket_ms = 3  # ms (achievable with hierarchical on IB NDR)
-buckets_per_layer = gradient_per_layer_mb_val / bucket_size_mb  # ~8.8
-allreduce_per_layer_ms = buckets_per_layer * allreduce_per_bucket_ms
+    # Pipelined (with overlap)
+    exposed_per_layer_ms = max(0, allreduce_per_layer_ms - backward_per_layer_ms)
+    with_overlap_ms = (
+        total_backward_ms
+        + allreduce_per_layer_ms
+        + (n_layers_overlap - 1) * exposed_per_layer_ms
+    )
+    overlap_savings_pct = (1 - with_overlap_ms / no_overlap_ms) * 100
 
-# Without overlap: sequential
-no_overlap_ms = total_backward_ms + n_layers_overlap * allreduce_per_layer_ms
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    total_backward_ms_str      = f"{total_backward_ms}"
+    allreduce_per_layer_ms_str = f"{allreduce_per_layer_ms:.0f}"
+    no_overlap_ms_str          = f"{no_overlap_ms:.0f}"
+    with_overlap_ms_str        = f"{with_overlap_ms:.0f}"
+    overlap_savings_pct_str    = f"{overlap_savings_pct:.0f}"
+    exposed_per_layer_ms_str   = f"{exposed_per_layer_ms:.0f}"
 
-# With overlap: communication hidden behind next layer's backward
-# Exposed communication = first layer's allreduce (no prior compute to hide it)
-# + any excess where allreduce > backward per layer
-exposed_per_layer_ms = max(0, allreduce_per_layer_ms - backward_per_layer_ms)
-with_overlap_ms = total_backward_ms + allreduce_per_layer_ms + (n_layers_overlap - 1) * exposed_per_layer_ms
-
-overlap_savings_pct = (1 - with_overlap_ms / no_overlap_ms) * 100
-
-# Format
-total_backward_ms_str = f"{total_backward_ms}"
-allreduce_per_layer_ms_str = f"{allreduce_per_layer_ms:.0f}"
-no_overlap_ms_str = f"{no_overlap_ms:.0f}"
-with_overlap_ms_str = f"{with_overlap_ms:.0f}"
-overlap_savings_pct_str = f"{overlap_savings_pct:.0f}"
-exposed_per_layer_ms_str = f"{exposed_per_layer_ms:.0f}"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+total_backward_ms_str      = OverlapBudgetCalc.total_backward_ms_str
+allreduce_per_layer_ms_str = OverlapBudgetCalc.allreduce_per_layer_ms_str
+no_overlap_ms_str          = OverlapBudgetCalc.no_overlap_ms_str
+with_overlap_ms_str        = OverlapBudgetCalc.with_overlap_ms_str
+overlap_savings_pct_str    = OverlapBudgetCalc.overlap_savings_pct_str
+exposed_per_layer_ms_str   = OverlapBudgetCalc.exposed_per_layer_ms_str
 ```
 
 ::: {.callout-notebook title="Overlap Budget for a 7B Transformer" collapse="false"}

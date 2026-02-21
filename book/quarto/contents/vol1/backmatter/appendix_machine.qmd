@@ -37,73 +37,116 @@ Conventions used here follow the book-wide notation (for example, we reserve \(B
 ## Numbers to Know {#sec-machine-foundations-numbers-know-b531}
 
 ```{python}
-#| label: numbers-to-know-setup
 #| echo: false
+#| label: numbers-to-know-setup
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NUMBERS TO KNOW SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-numbers-know-b531 — all reference tables
+# │          (@tbl-energy-ratios-ref, @tbl-memory-ratios-ref,
+# │          @tbl-scaling-rules-ref, @tbl-memory-current-ref,
+# │          @tbl-compute-current-ref, @tbl-ridge-current-ref)
+# │
+# │ Goal: Compute all invariant ratios and current hardware specs for the
+# │       "Numbers Every ML Systems Engineer Should Know" reference section.
+# │ Show: Energy ratios (~580x DRAM vs FP16 compute), latency hierarchy,
+# │       bandwidth specs, ridge points for A100/H100.
+# │ How: Scalar extraction via .m_as(unit); ratios remain stable across
+# │       hardware generations.
+# │
+# │ Imports: mlsys.constants (*), mlsys.formatting (fmt)
+# │ Exports: dram_vs_compute, fp32_vs_int8, fp32_vs_fp16, l1_vs_reg,
+# │          hbm_vs_l1, ssd_vs_l1, network_vs_local, gpu_bw_vs_pcie,
+# │          lat_l1_ns, lat_l2_ns, lat_hbm_ns, lat_pcie_ns, lat_ib_ns,
+# │          lat_ssd_ns, bw_hbm_h100, bw_pcie5, bw_dram, bw_nvme,
+# │          flops_h100_fp16, flops_h100_fp8, flops_a100_fp16,
+# │          flops_mobile_int8, dc_mobile_ratio, ridge_a100, ridge_h100
+# └─────────────────────────────────────────────────────────────────────────────
 
 from mlsys.constants import *
 from mlsys.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compute all values for the "Numbers Every ML Systems Engineer
-#          Should Know" quick reference section. Inspired by Jeff Dean's
-#          famous "Latency Numbers Every Programmer Should Know."
-#
-# Philosophy: RATIOS and RULES are eternal; absolute numbers are snapshots.
-#             We organize this section to emphasize what will still be true
-#             in 10 years, while providing current hardware specs as reference.
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class NumbersToKnow:
+    """Namespace for machine-foundations reference numbers (ratios and hardware specs)."""
 
-# =============================================================================
-# PHYSICS CONSTANTS (Eternal)
-# =============================================================================
-speed_of_light_km_ms = int(SPEED_OF_LIGHT_FIBER_KM_S.to(ureg.kilometer / second).magnitude / 1000)
+    # Philosophy: RATIOS and RULES are eternal; absolute numbers are snapshots.
+    #             We emphasize what will still be true in 10 years.
 
-# =============================================================================
-# ENERGY RATIOS (Stable across process nodes)
-# =============================================================================
-dram_vs_compute = int(ENERGY_DRAM_ACCESS_PJ.magnitude / ENERGY_FLOP_FP16_PJ.magnitude)
-fp32_vs_int8 = int(ENERGY_FLOP_FP32_PJ.magnitude / ENERGY_FLOP_INT8_PJ.magnitude)
-fp32_vs_fp16 = round(ENERGY_FLOP_FP32_PJ.magnitude / ENERGY_FLOP_FP16_PJ.magnitude, 1)
-l1_vs_reg = int(ENERGY_SRAM_L1_PJ.magnitude / ENERGY_REG_PJ.magnitude)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # (All inputs drawn from mlsys.constants via wildcard import above)
 
-# =============================================================================
-# MEMORY HIERARCHY RATIOS (Stable)
-# =============================================================================
-hbm_vs_l1 = int(LATENCY_HBM3.to(NS).magnitude / LATENCY_L1_REGISTER.to(NS).magnitude)
-ssd_vs_l1 = int(LATENCY_NVME_SSD.to(NS).magnitude / LATENCY_L1_REGISTER.to(NS).magnitude)
-network_vs_local = int(LATENCY_INFINIBAND.to(NS).magnitude / LATENCY_HBM3.to(NS).magnitude)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Physics Constants (Eternal)
+    speed_of_light_km_ms = int(SPEED_OF_LIGHT_FIBER_KM_S.m_as(ureg.kilometer / second) / 1000)
 
-# GPU bandwidth vs CPU-GPU link (architectural ratio)
-gpu_bw_vs_pcie = int(H100_MEM_BW.to(GB / second).magnitude / PCIE_GEN5_BW.to(GB / second).magnitude)
+    # Energy Ratios (Stable across process nodes)
+    dram_vs_compute = int(ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule))
+    fp32_vs_int8 = int(ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule))
+    fp32_vs_fp16 = round(ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule), 1)
+    l1_vs_reg = int(ENERGY_SRAM_L1_PJ.m_as(ureg.picojoule) / ENERGY_REG_PJ.m_as(ureg.picojoule))
 
-# =============================================================================
-# CURRENT HARDWARE REFERENCE (circa 2024 — will need updates)
-# =============================================================================
-# Latencies
-lat_l1_ns = int(LATENCY_L1_REGISTER.to(NS).magnitude)
-lat_l2_ns = int(LATENCY_L2_CACHE.to(NS).magnitude)
-lat_hbm_ns = int(LATENCY_HBM3.to(NS).magnitude)
-lat_pcie_ns = int(LATENCY_PCIE_GEN5.to(NS).magnitude)
-lat_ib_ns = int(LATENCY_INFINIBAND.to(NS).magnitude)
-lat_ssd_ns = int(LATENCY_NVME_SSD.to(NS).magnitude)
+    # Memory Hierarchy Ratios (Stable)
+    hbm_vs_l1 = int(LATENCY_HBM3.m_as(NS) / LATENCY_L1_REGISTER.m_as(NS))
+    ssd_vs_l1 = int(LATENCY_NVME_SSD.m_as(NS) / LATENCY_L1_REGISTER.m_as(NS))
+    network_vs_local = int(LATENCY_INFINIBAND.m_as(NS) / LATENCY_HBM3.m_as(NS))
+    gpu_bw_vs_pcie = int(H100_MEM_BW.m_as(GB / second) / PCIE_GEN5_BW.m_as(GB / second))
 
-# Bandwidths
-bw_hbm_h100 = f"{H100_MEM_BW.to(TB / second).magnitude:.1f}"
-bw_pcie5 = int(PCIE_GEN5_BW.to(GB / second).magnitude)
-bw_dram = int(SYSTEM_MEMORY_BW.to(GB / second).magnitude)
-bw_nvme = f"{NVME_SEQUENTIAL_BW.to(GB / second).magnitude:.1f}"
+    # Current Hardware Reference (circa 2024)
+    lat_l1_ns = int(LATENCY_L1_REGISTER.m_as(NS))
+    lat_l2_ns = int(LATENCY_L2_CACHE.m_as(NS))
+    lat_hbm_ns = int(LATENCY_HBM3.m_as(NS))
+    lat_pcie_ns = int(LATENCY_PCIE_GEN5.m_as(NS))
+    lat_ib_ns = int(LATENCY_INFINIBAND.m_as(NS))
+    lat_ssd_ns = int(LATENCY_NVME_SSD.m_as(NS))
 
-# Compute
-flops_h100_fp16 = int(H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude)
-flops_h100_fp8 = int(H100_FLOPS_FP8_TENSOR.to(TFLOPs / second).magnitude)
-flops_a100_fp16 = int(A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude)
-flops_mobile_int8 = int(MOBILE_NPU_TOPS_INT8.to(TFLOPs / second).magnitude)
-dc_mobile_ratio = int(flops_h100_fp16 / flops_mobile_int8)
+    bw_hbm_h100 = f"{H100_MEM_BW.m_as(TB / second):.1f}"
+    bw_pcie5 = int(PCIE_GEN5_BW.m_as(GB / second))
+    bw_dram = int(SYSTEM_MEMORY_BW.m_as(GB / second))
+    bw_nvme = f"{NVME_SEQUENTIAL_BW.m_as(GB / second):.1f}"
 
-# Ridge points
-ridge_a100 = int(A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude / A100_MEM_BW.to(TB / second).magnitude)
-ridge_h100 = int(H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude / H100_MEM_BW.to(TB / second).magnitude)
+    flops_h100_fp16 = int(H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
+    flops_h100_fp8 = int(H100_FLOPS_FP8_TENSOR.m_as(TFLOPs / second))
+    flops_a100_fp16 = int(A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
+    flops_mobile_int8 = int(MOBILE_NPU_TOPS_INT8.m_as(TFLOPs / second))
+    dc_mobile_ratio = int(flops_h100_fp16 / flops_mobile_int8)
+
+    ridge_a100 = int(A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second) / A100_MEM_BW.m_as(TB / second))
+    ridge_h100 = int(H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second) / H100_MEM_BW.m_as(TB / second))
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — all values are monotone functions of constants.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # All exports are the computed class attributes above.
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+speed_of_light_km_ms = NumbersToKnow.speed_of_light_km_ms
+dram_vs_compute = NumbersToKnow.dram_vs_compute
+fp32_vs_int8 = NumbersToKnow.fp32_vs_int8
+fp32_vs_fp16 = NumbersToKnow.fp32_vs_fp16
+l1_vs_reg = NumbersToKnow.l1_vs_reg
+hbm_vs_l1 = NumbersToKnow.hbm_vs_l1
+ssd_vs_l1 = NumbersToKnow.ssd_vs_l1
+network_vs_local = NumbersToKnow.network_vs_local
+gpu_bw_vs_pcie = NumbersToKnow.gpu_bw_vs_pcie
+lat_l1_ns = NumbersToKnow.lat_l1_ns
+lat_l2_ns = NumbersToKnow.lat_l2_ns
+lat_hbm_ns = NumbersToKnow.lat_hbm_ns
+lat_pcie_ns = NumbersToKnow.lat_pcie_ns
+lat_ib_ns = NumbersToKnow.lat_ib_ns
+lat_ssd_ns = NumbersToKnow.lat_ssd_ns
+bw_hbm_h100 = NumbersToKnow.bw_hbm_h100
+bw_pcie5 = NumbersToKnow.bw_pcie5
+bw_dram = NumbersToKnow.bw_dram
+bw_nvme = NumbersToKnow.bw_nvme
+flops_h100_fp16 = NumbersToKnow.flops_h100_fp16
+flops_h100_fp8 = NumbersToKnow.flops_h100_fp8
+flops_a100_fp16 = NumbersToKnow.flops_a100_fp16
+flops_mobile_int8 = NumbersToKnow.flops_mobile_int8
+dc_mobile_ratio = NumbersToKnow.dc_mobile_ratio
+ridge_a100 = NumbersToKnow.ridge_a100
+ridge_h100 = NumbersToKnow.ridge_h100
 ```
 
 Just as Jeff Dean's "Latency Numbers Every Programmer Should Know"[^fn-jeff-dean-latency] shaped a generation of systems engineers, these reference numbers provide the order-of-magnitude intuition essential for ML systems design. While absolute values evolve with hardware generations, the *ratios* between categories remain remarkably stable. **Memorize the relationships; use the specific numbers as sanity checks.**
@@ -299,94 +342,138 @@ Doubling the batch size $B$ doubles FLOPs while keeping weight loads constant—
 :::
 
 ```{python}
-#| label: appendix-machine-setup
 #| echo: false
+#| label: appendix-machine-setup
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ROOFLINE AND HARDWARE CHEAT SHEET SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-roofline-model-2529 (A100 analysis),
+# │          @tbl-latency-hierarchy, @tbl-hardware-cheatsheet
+# │
+# │ Goal: Compute roofline ridge point, GEMM/ReLU intensity examples, energy
+# │       wall values, and full hardware specs for H100 and TPU v5p.
+# │ Show: A100 ridge ~208 FLOP/byte; n=4096 GEMM is compute-bound (~1365);
+# │       ReLU at 0.25 op/byte is deeply memory-bound (~0.12% utilization).
+# │ How: Scalar extraction via .m_as(unit); class-level computation
+# │      pattern not used here — module-level variables exported directly.
+# │
+# │ Imports: mlsys.constants (*), mlsys.formatting (fmt)
+# │ Exports: a100_fp16, a100_bw_tb, n_gemm, ridge_point, gemm_intensity,
+# │          relu_intensity, relu_util_str, dram_pj, flop_pj, energy_ratio_str,
+# │          l1_ns, l2_ns, hbm_ns, nvlink_ns, pcie_ns, ib_ns, ssd_ns,
+# │          h100_flops, h100_bw, h100_cap, h100_nvlink, h100_l2_mb,
+# │          tpuv5_flops, tpuv5_bw, tpuv5_cap, tpuv5_ici, tpuv5_l2_mb
+# └─────────────────────────────────────────────────────────────────────────────
 
 from mlsys.constants import *
 from mlsys.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compute roofline and hardware cheat sheet values
-# Used in: Appendix machine foundations
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AppendixMachineSetup:
+    """Namespace for roofline analysis, energy wall, latency table, and hardware cheatsheet."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-n_gemm_value = 4096
-relu_intensity_value = 0.25
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_gemm_value = 4096
+    relu_intensity_value = 0.25
+    h100_l2_mb_value = 50
+    tpuv5_l2_mb_value = 100
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-a100_fp16_raw_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
-a100_bw_raw_value = A100_MEM_BW.to(TB / second).magnitude
-ridge_point_value = int(a100_fp16_raw_value / a100_bw_raw_value)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    a100_fp16_raw_value = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+    a100_bw_raw_value = A100_MEM_BW.m_as(TB / second)
+    ridge_point_value = int(a100_fp16_raw_value / a100_bw_raw_value)
 
-gemm_intensity_value = int(n_gemm_value / 3)
-relu_achieved_tflops_value = relu_intensity_value * a100_bw_raw_value
-relu_utilization_value = relu_achieved_tflops_value / a100_fp16_raw_value * 100
+    gemm_intensity_value = int(n_gemm_value / 3)
+    relu_achieved_tflops_value = relu_intensity_value * a100_bw_raw_value
+    relu_utilization_value = relu_achieved_tflops_value / a100_fp16_raw_value * 100
 
-dram_pj_value = int(ENERGY_DRAM_ACCESS_PJ.magnitude)
-flop_pj_value = ENERGY_FLOP_FP16_PJ.magnitude
-energy_ratio_value = int(dram_pj_value / flop_pj_value)
+    dram_pj_value = int(ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule))
+    flop_pj_value = ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule)
+    energy_ratio_value = int(dram_pj_value / flop_pj_value)
 
-l1_ns_value = int(LATENCY_L1_REGISTER.to(NS).magnitude)
-l2_ns_value = int(LATENCY_L2_CACHE.to(NS).magnitude)
-hbm_ns_value = int(LATENCY_HBM3.to(NS).magnitude)
-nvlink_ns_value = int(LATENCY_NVLINK.to(NS).magnitude)
-pcie_ns_value = int(LATENCY_PCIE_GEN5.to(NS).magnitude)
-ib_ns_value = int(LATENCY_INFINIBAND.to(NS).magnitude)
-ssd_ns_value = int(LATENCY_NVME_SSD.to(NS).magnitude)
+    l1_ns_value = int(LATENCY_L1_REGISTER.m_as(NS))
+    l2_ns_value = int(LATENCY_L2_CACHE.m_as(NS))
+    hbm_ns_value = int(LATENCY_HBM3.m_as(NS))
+    nvlink_ns_value = int(LATENCY_NVLINK.m_as(NS))
+    pcie_ns_value = int(LATENCY_PCIE_GEN5.m_as(NS))
+    ib_ns_value = int(LATENCY_INFINIBAND.m_as(NS))
+    ssd_ns_value = int(LATENCY_NVME_SSD.m_as(NS))
 
-h100_flops_value = int(H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude)
-h100_bw_value = H100_MEM_BW.to(TB / second).magnitude
-h100_cap_value = int(H100_MEM_CAPACITY.to(GiB).magnitude)
-h100_nvlink_value = int(NVLINK_H100_BW.to(GB/second).magnitude)
-h100_l2_mb_value = 50
+    h100_flops_value = int(H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
+    h100_bw_value = H100_MEM_BW.m_as(TB / second)
+    h100_cap_value = int(H100_MEM_CAPACITY.m_as(GiB))
+    h100_nvlink_value = int(NVLINK_H100_BW.m_as(GB / second))
 
-tpuv5_flops_value = int(TPUV5P_FLOPS_BF16.to(TFLOPs / second).magnitude)
-tpuv5_bw_value = TPUV5P_MEM_BW.to(TB / second).magnitude
-tpuv5_cap_value = int(TPUV5P_MEM_CAPACITY.to(GiB).magnitude)
-tpuv5_ici_value = int(TPUV5P_ICI_BW.to(GB/second).magnitude)
-tpuv5_l2_mb_value = 100
+    tpuv5_flops_value = int(TPUV5P_FLOPS_BF16.m_as(TFLOPs / second))
+    tpuv5_bw_value = TPUV5P_MEM_BW.m_as(TB / second)
+    tpuv5_cap_value = int(TPUV5P_MEM_CAPACITY.m_as(GiB))
+    tpuv5_ici_value = int(TPUV5P_ICI_BW.m_as(GB / second))
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-a100_fp16 = fmt(A100_FLOPS_FP16_TENSOR, "TFLOP/s", precision=0)
-a100_bw_tb = fmt(A100_MEM_BW, "TB/s", precision=1)
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — all values are monotone functions of constants.
 
-n_gemm = n_gemm_value
-ridge_point = ridge_point_value
-gemm_intensity = gemm_intensity_value
-relu_intensity = relu_intensity_value
-relu_util_str = fmt(relu_utilization_value, precision=2, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    a100_fp16 = fmt(A100_FLOPS_FP16_TENSOR, "TFLOP/s", precision=0)
+    a100_bw_tb = fmt(A100_MEM_BW, "TB/s", precision=1)
 
-dram_pj = dram_pj_value
-flop_pj = f"{flop_pj_value:.0f}"
-energy_ratio_str = f"{energy_ratio_value}"
+    n_gemm = n_gemm_value
+    ridge_point = ridge_point_value
+    gemm_intensity = gemm_intensity_value
+    relu_intensity = relu_intensity_value
+    relu_util_str = fmt(relu_utilization_value, precision=2, commas=False)
 
-l1_ns = l1_ns_value
-l2_ns = l2_ns_value
-hbm_ns = hbm_ns_value
-nvlink_ns = nvlink_ns_value
-pcie_ns = pcie_ns_value
-ib_ns = ib_ns_value
-ssd_ns = ssd_ns_value
+    dram_pj = dram_pj_value
+    flop_pj = f"{flop_pj_value:.0f}"
+    energy_ratio_str = f"{energy_ratio_value}"
 
-h100_flops = h100_flops_value
-h100_bw = f"{h100_bw_value:.2f}"
-h100_cap = h100_cap_value
-h100_nvlink = h100_nvlink_value
-h100_l2_mb = h100_l2_mb_value
+    l1_ns = l1_ns_value
+    l2_ns = l2_ns_value
+    hbm_ns = hbm_ns_value
+    nvlink_ns = nvlink_ns_value
+    pcie_ns = pcie_ns_value
+    ib_ns = ib_ns_value
+    ssd_ns = ssd_ns_value
 
-tpuv5_flops = tpuv5_flops_value
-tpuv5_bw = f"{tpuv5_bw_value:.2f}"
-tpuv5_cap = tpuv5_cap_value
-tpuv5_ici = tpuv5_ici_value
-tpuv5_l2_mb = tpuv5_l2_mb_value
+    h100_flops = h100_flops_value
+    h100_bw = f"{h100_bw_value:.2f}"
+    h100_cap = h100_cap_value
+    h100_nvlink = h100_nvlink_value
+    h100_l2_mb = h100_l2_mb_value
+
+    tpuv5_flops = tpuv5_flops_value
+    tpuv5_bw = f"{tpuv5_bw_value:.2f}"
+    tpuv5_cap = tpuv5_cap_value
+    tpuv5_ici = tpuv5_ici_value
+    tpuv5_l2_mb = tpuv5_l2_mb_value
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_fp16 = AppendixMachineSetup.a100_fp16
+a100_bw_tb = AppendixMachineSetup.a100_bw_tb
+n_gemm = AppendixMachineSetup.n_gemm
+ridge_point = AppendixMachineSetup.ridge_point
+gemm_intensity = AppendixMachineSetup.gemm_intensity
+relu_intensity = AppendixMachineSetup.relu_intensity
+relu_util_str = AppendixMachineSetup.relu_util_str
+dram_pj = AppendixMachineSetup.dram_pj
+flop_pj = AppendixMachineSetup.flop_pj
+energy_ratio_str = AppendixMachineSetup.energy_ratio_str
+l1_ns = AppendixMachineSetup.l1_ns
+l2_ns = AppendixMachineSetup.l2_ns
+hbm_ns = AppendixMachineSetup.hbm_ns
+nvlink_ns = AppendixMachineSetup.nvlink_ns
+pcie_ns = AppendixMachineSetup.pcie_ns
+ib_ns = AppendixMachineSetup.ib_ns
+ssd_ns = AppendixMachineSetup.ssd_ns
+h100_flops = AppendixMachineSetup.h100_flops
+h100_bw = AppendixMachineSetup.h100_bw
+h100_cap = AppendixMachineSetup.h100_cap
+h100_nvlink = AppendixMachineSetup.h100_nvlink
+h100_l2_mb = AppendixMachineSetup.h100_l2_mb
+tpuv5_flops = AppendixMachineSetup.tpuv5_flops
+tpuv5_bw = AppendixMachineSetup.tpuv5_bw
+tpuv5_cap = AppendixMachineSetup.tpuv5_cap
+tpuv5_ici = AppendixMachineSetup.tpuv5_ici
+tpuv5_l2_mb = AppendixMachineSetup.tpuv5_l2_mb
 ```
 
 #### A Concrete Example: The A100 Analysis {#sec-machine-foundations-concrete-example-a100-analysis-5b30}
@@ -440,32 +527,46 @@ As $n \to \infty$, the term $\frac{1-s}{n} \to 0$, and the speedup converges to 
 ```{python}
 #| label: amdahl-setup
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-strong-scaling-amdahls-law-c6c2
+# │
+# │ Goal: Define constants for Amdahl's Law prose lead-in text.
+# │ Show: "5%" serial overhead, "95%" parallel fraction — inline in prose.
+# │ How: Pure scalar constants; string formatting for inline Python refs.
+# │
+# │ Imports: (none — pure scalars)
+# │ Exports: s_pct_str, p_pct_str, n_8_str, s_str, p_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Define constants for Amdahl's Law prose references.
-# Used in: Amdahl's Law example lead-in text.
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AmdahlSetup:
+    """Namespace for Amdahl's Law lead-in constants."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-s_value = 0.05   # Serial fraction
-n_8_value = 8    # Number of processors for example
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    s_value = 0.05   # Serial fraction
+    n_8_value = 8    # Number of processors for example
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-p_value = 1 - s_value  # Parallel fraction
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    p_value = 1 - s_value  # Parallel fraction
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-s_pct_str = "5"
-p_pct_str = "95"
-n_8_str = "8"
-s_str = "0.05"
-p_str = "0.95"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are definitional constants.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    s_pct_str = "5"
+    p_pct_str = "95"
+    n_8_str = "8"
+    s_str = "0.05"
+    p_str = "0.95"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+s_pct_str = AmdahlSetup.s_pct_str
+p_pct_str = AmdahlSetup.p_pct_str
+n_8_str = AmdahlSetup.n_8_str
+s_str = AmdahlSetup.s_str
+p_str = AmdahlSetup.p_str
 ```
 
 To see Amdahl's Law in action, suppose `{python} s_pct_str`% of your training step is serial overhead (e.g., Python GIL, kernel launch latency) and `{python} p_pct_str`% is parallelizable matrix math:
@@ -473,32 +574,43 @@ To see Amdahl's Law in action, suppose `{python} s_pct_str`% of your training st
 ```{python}
 #| label: amdahl-example
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AMDAHL EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-strong-scaling-amdahls-law-c6c2
+# │
+# │ Goal: Compute Amdahl's Law speedup at n=8 and n=infinity.
+# │ Show: "~7.5x" at 8 GPUs, "20x" max — inline in bullet-list example.
+# │ How: Amdahl formula: 1 / (s + p/n); limit as n→∞ is 1/s.
+# │
+# │ Imports: mlsys.formatting (fmt)
+# │ Exports: amdahl_8_str, amdahl_inf_str
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compute Amdahl's Law speedup examples
-# Used in: Amdahl's Law example
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AmdahlExample:
+    """Namespace for Amdahl's Law speedup at 8 processors and theoretical max."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-s_value = 0.05
-n_8_value = 8
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    s_value = 0.05
+    n_8_value = 8
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-p_value = 1 - s_value
-amdahl_8_value = 1 / (s_value + p_value / n_8_value)
-amdahl_inf_value = 1 / s_value
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    p_value = 1 - s_value
+    amdahl_8_value = 1 / (s_value + p_value / n_8_value)
+    amdahl_inf_value = 1 / s_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-amdahl_8_str = fmt(amdahl_8_value, precision=1, commas=False)
-amdahl_inf_str = fmt(amdahl_inf_value, precision=0, commas=False)
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are monotone functions of inputs.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    amdahl_8_str = fmt(amdahl_8_value, precision=1, commas=False)
+    amdahl_inf_str = fmt(amdahl_inf_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+amdahl_8_str = AmdahlExample.amdahl_8_str
+amdahl_inf_str = AmdahlExample.amdahl_inf_str
 ```
 
 *   With $n=1$, speedup is 1.
@@ -524,23 +636,39 @@ Here, the parallel part of the workload grows linearly with $n$, while the seria
 ```{python}
 #| label: gustafson-setup
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GUSTAFSON SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-weak-scaling-gustafsons-law-eb7e
+# │
+# │ Goal: Define constants for Gustafson's Law prose lead-in text.
+# │ Show: "5%" serial overhead — inline in prose before the example.
+# │ How: Pure scalar constants; string formatting for inline Python refs.
+# │
+# │ Imports: (none — pure scalars)
+# │ Exports: s_g_pct_str, s_g_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Define constants for Gustafson's Law prose references.
-# Used in: Gustafson's Law example lead-in text.
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GustafsonSetup:
+    """Namespace for Gustafson's Law lead-in constants."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-s_g_value = 0.05  # Serial fraction (same as Amdahl example)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    s_g_value = 0.05  # Serial fraction (same as Amdahl example)
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-s_g_pct_str = "5"
-s_g_str = "0.05"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # No derived values — only string formatting.
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are definitional constants.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    s_g_pct_str = "5"
+    s_g_str = "0.05"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+s_g_pct_str = GustafsonSetup.s_g_pct_str
+s_g_str = GustafsonSetup.s_g_str
 ```
 
 Using the same `{python} s_g_pct_str`% serial overhead ($s$ = `{python} s_g_str`), Gustafson's Law tells a very different story:
@@ -548,38 +676,55 @@ Using the same `{python} s_g_pct_str`% serial overhead ($s$ = `{python} s_g_str`
 ```{python}
 #| label: gustafson-example
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GUSTAFSON EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-weak-scaling-gustafsons-law-eb7e
+# │
+# │ Goal: Compute Gustafson's Law scaled speedup at n=8 and n=1000.
+# │ Show: "~7.67x" at 8 GPUs, "~951x" at 1000 GPUs — inline in bullet list.
+# │ How: Gustafson formula: n - s*(n-1).
+# │
+# │ Imports: mlsys.formatting (fmt)
+# │ Exports: gustafson_8_str, gustafson_8_serial, gustafson_1000_str,
+# │          n_8_g_str, n_8_g_minus_1_str, n_1000_str, n_1000_minus_1_str
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compute Gustafson's Law speedup examples
-# Used in: Gustafson's Law example
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GustafsonExample:
+    """Namespace for Gustafson's Law scaled speedup at 8 and 1000 processors."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-s_g_value = 0.05
-n_8_g_value = 8
-n_1000_value = 1000
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    s_g_value = 0.05
+    n_8_g_value = 8
+    n_1000_value = 1000
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-gustafson_8_value = n_8_g_value - s_g_value * (n_8_g_value - 1)
-gustafson_8_serial_value = s_g_value * (n_8_g_value - 1)
-gustafson_1000_value = n_1000_value - s_g_value * (n_1000_value - 1)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    gustafson_8_value = n_8_g_value - s_g_value * (n_8_g_value - 1)
+    gustafson_8_serial_value = s_g_value * (n_8_g_value - 1)
+    gustafson_1000_value = n_1000_value - s_g_value * (n_1000_value - 1)
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-gustafson_8_str = fmt(gustafson_8_value, precision=2, commas=False)
-gustafson_8_serial = f"{gustafson_8_serial_value:.2f}"
-gustafson_1000_str = fmt(gustafson_1000_value, precision=0, commas=False)
-n_8_g_str = str(n_8_g_value)
-n_8_g_minus_1_str = str(n_8_g_value - 1)
-n_1000_str = str(n_1000_value)
-n_1000_minus_1_str = str(n_1000_value - 1)
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are monotone functions of inputs.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gustafson_8_str = fmt(gustafson_8_value, precision=2, commas=False)
+    gustafson_8_serial = f"{gustafson_8_serial_value:.2f}"
+    gustafson_1000_str = fmt(gustafson_1000_value, precision=0, commas=False)
+    n_8_g_str = str(n_8_g_value)
+    n_8_g_minus_1_str = str(n_8_g_value - 1)
+    n_1000_str = str(n_1000_value)
+    n_1000_minus_1_str = str(n_1000_value - 1)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gustafson_8_str = GustafsonExample.gustafson_8_str
+gustafson_8_serial = GustafsonExample.gustafson_8_serial
+gustafson_1000_str = GustafsonExample.gustafson_1000_str
+n_8_g_str = GustafsonExample.n_8_g_str
+n_8_g_minus_1_str = GustafsonExample.n_8_g_minus_1_str
+n_1000_str = GustafsonExample.n_1000_str
+n_1000_minus_1_str = GustafsonExample.n_1000_minus_1_str
 ```
 
 *   With $n=1$, speedup is 1.
@@ -614,7 +759,7 @@ class TrainingTimeRef:
     p_params = 1 * BILLION
     d_tokens = 20 * BILLION
     n_gpus = 1
-    x_flops = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
+    x_flops = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
     u_mfu = 0.40
 
     # Rename variables for internal logic
@@ -707,43 +852,61 @@ $$ L = \lambda \times W $$
 ```{python}
 #| label: littles-law-example
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LITTLE'S LAW EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-littles-law-21a3
+# │
+# │ Goal: Apply Little's Law to size inference concurrency and memory.
+# │ Show: "50" concurrent requests, "24" GPU memory cap at 1 GB/req — inline.
+# │ How: L = λ × W; max_concurrent = gpu_mem / mem_per_req.
+# │
+# │ Imports: mlsys.formatting (fmt, md_math)
+# │ Exports: L_concurrent_str, lambda_qps_str, lambda_qps_raw_str,
+# │          w_latency_ms_str, w_latency_s_str, mem_per_req_gb_str,
+# │          gpu_mem_gb_str, max_concurrent_str, eq_max_throughput
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, md_math
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Apply Little's Law for concurrency sizing
-# Used in: Little's Law example
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class LittlesLawExample:
+    """Namespace for Little's Law concurrency sizing for inference systems."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-lambda_qps_value = 1000        # queries per second
-w_latency_s_value = 0.050      # 50 ms in seconds
-mem_per_req_gb_value = 1
-gpu_mem_gb_value = 24
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    lambda_qps_value = 1000        # queries per second
+    w_latency_s_value = 0.050      # 50 ms in seconds
+    mem_per_req_gb_value = 1
+    gpu_mem_gb_value = 24
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-l_concurrent_value = lambda_qps_value * w_latency_s_value
-max_concurrent_value = int(gpu_mem_gb_value / mem_per_req_gb_value)
-max_throughput_value = max_concurrent_value / w_latency_s_value
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    l_concurrent_value = lambda_qps_value * w_latency_s_value
+    max_concurrent_value = int(gpu_mem_gb_value / mem_per_req_gb_value)
+    max_throughput_value = max_concurrent_value / w_latency_s_value
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-L_concurrent_str = fmt(l_concurrent_value, precision=0, commas=False)
-lambda_qps_str = fmt(lambda_qps_value, precision=0)
-lambda_qps_raw_str = fmt(lambda_qps_value, precision=0, commas=False)
-w_latency_ms_str = str(int(w_latency_s_value * 1000))
-w_latency_s_str = f"{w_latency_s_value:.2f}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are monotone functions of inputs.
 
-mem_per_req_gb_str = str(mem_per_req_gb_value)
-gpu_mem_gb_str = str(gpu_mem_gb_value)
-max_concurrent_str = str(max_concurrent_value)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    L_concurrent_str = fmt(l_concurrent_value, precision=0, commas=False)
+    lambda_qps_str = fmt(lambda_qps_value, precision=0)
+    lambda_qps_raw_str = fmt(lambda_qps_value, precision=0, commas=False)
+    w_latency_ms_str = str(int(w_latency_s_value * 1000))
+    w_latency_s_str = f"{w_latency_s_value:.2f}"
+    mem_per_req_gb_str = str(mem_per_req_gb_value)
+    gpu_mem_gb_str = str(gpu_mem_gb_value)
+    max_concurrent_str = str(max_concurrent_value)
+    eq_max_throughput = md_math(f"L/W = {max_concurrent_value} / {w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}")
 
-eq_max_throughput = md_math(f"L/W = {max_concurrent_value} / {w_latency_s_value} = {int(max_throughput_value)} \\text{{ QPS}}")
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+L_concurrent_str = LittlesLawExample.L_concurrent_str
+lambda_qps_str = LittlesLawExample.lambda_qps_str
+lambda_qps_raw_str = LittlesLawExample.lambda_qps_raw_str
+w_latency_ms_str = LittlesLawExample.w_latency_ms_str
+w_latency_s_str = LittlesLawExample.w_latency_s_str
+mem_per_req_gb_str = LittlesLawExample.mem_per_req_gb_str
+gpu_mem_gb_str = LittlesLawExample.gpu_mem_gb_str
+max_concurrent_str = LittlesLawExample.max_concurrent_str
+eq_max_throughput = LittlesLawExample.eq_max_throughput
 ```
 
 To see this in practice, consider sustaining `{python} lambda_qps_str` queries per second (QPS) with `{python} w_latency_ms_str` ms average latency. The law tells us the system must support `{python} lambda_qps_raw_str` $\times$ `{python} w_latency_s_str` = `{python} L_concurrent_str` concurrent requests.
@@ -828,26 +991,43 @@ For small transfers (e.g., single-token inference), latency dominates. For large
 ```{python}
 #| label: bandwidth-latency-setup
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BANDWIDTH-LATENCY SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-bandwidth-vs-latency-5320
+# │
+# │ Goal: Define constants for bandwidth-latency prose lead-in text.
+# │ Show: "10 Gbps", "10 ms ping", "1 KB" — inline before the example.
+# │ How: Pure scalar constants; string formatting for inline Python refs.
+# │
+# │ Imports: (none — pure scalars)
+# │ Exports: bw_gbps_str, ping_ms_str, data_kb_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Define constants for bandwidth-latency prose references.
-# Used in: Bandwidth vs Latency example lead-in text.
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class BandwidthLatencySetup:
+    """Namespace for bandwidth-latency lead-in constants."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-bw_gbps_value = 10    # Link bandwidth in Gbps
-ping_ms_value = 10    # Network latency in ms
-data_kb_value = 1     # Packet size in KB
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    bw_gbps_value = 10    # Link bandwidth in Gbps
+    ping_ms_value = 10    # Network latency in ms
+    data_kb_value = 1     # Packet size in KB
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-bw_gbps_str = "10"
-ping_ms_str = "10"
-data_kb_str = "1"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # No derived values — only string formatting.
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are definitional constants.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    bw_gbps_str = "10"
+    ping_ms_str = "10"
+    data_kb_str = "1"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+bw_gbps_str = BandwidthLatencySetup.bw_gbps_str
+ping_ms_str = BandwidthLatencySetup.ping_ms_str
+data_kb_str = BandwidthLatencySetup.data_kb_str
 ```
 
 Consider sending data over a `{python} bw_gbps_str` Gbps link with `{python} ping_ms_str` ms ping (latency). The dominant bottleneck depends entirely on the transfer size:
@@ -855,40 +1035,53 @@ Consider sending data over a `{python} bw_gbps_str` Gbps link with `{python} pin
 ```{python}
 #| label: bandwidth-latency-example
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BANDWIDTH-LATENCY EXAMPLE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-machine-foundations-bandwidth-vs-latency-5320
+# │
+# │ Goal: Estimate transmission time for small (latency-bound) and large
+# │       (bandwidth-bound) transfers to illustrate the T = lat + size/bw formula.
+# │ Show: "0.8 μs" for 1 KB packet vs "~810 ms" for 1 GB checkpoint — inline.
+# │ How: tx_time = (data_bytes * 8) / bw_bits; large_time = size / bw + ping.
+# │
+# │ Imports: mlsys.constants (MILLION, BILLION), mlsys.formatting (fmt, md_math)
+# │ Exports: tx_time_us_str, large_data_gb_str, eq_large_tx, eq_large_total
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, md_math
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Estimate transmission time for small packets
-# Used in: Bandwidth vs. latency example
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class BandwidthLatencyExample:
+    """Namespace for latency-bound vs. bandwidth-bound transmission time example."""
 
-# =============================================================================
-# INPUT
-# =============================================================================
-data_kb_value = 1e3             # 1 KB in bytes
-bw_gbps_value = 10e9            # 10 Gbps in bits/s
-large_data_gb_value = 1
-ping_ms_value = 10
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    data_kb_value = 1e3             # 1 KB in bytes
+    bw_gbps_value = 10e9            # 10 Gbps in bits/s
+    large_data_gb_value = 1
+    ping_ms_value = 10
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-tx_time_s_value = (data_kb_value * 8) / bw_gbps_value
-tx_time_us_value = tx_time_s_value * MILLION
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    tx_time_s_value = (data_kb_value * 8) / bw_gbps_value
+    tx_time_us_value = tx_time_s_value * MILLION
 
-large_data_bits_value = large_data_gb_value * 8e9
-large_tx_time_s_value = large_data_bits_value / bw_gbps_value
-total_large_time_ms_value = ping_ms_value + large_tx_time_s_value * 1000
+    large_data_bits_value = large_data_gb_value * 8e9
+    large_tx_time_s_value = large_data_bits_value / bw_gbps_value
+    total_large_time_ms_value = ping_ms_value + large_tx_time_s_value * 1000
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-tx_time_us_str = fmt(tx_time_us_value, precision=1, commas=False)
-large_data_gb_str = str(large_data_gb_value)
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are monotone functions of inputs.
 
-eq_large_tx = md_math(f"{large_data_gb_value}\\text{{GB}} / {int(bw_gbps_value/BILLION)}\\text{{Gbps}} \\approx {int(large_tx_time_s_value*1000)}\\text{{ms}}")
-eq_large_total = md_math(f"\\approx {int(ping_ms_value)}\\text{{ms}} + {int(large_tx_time_s_value*1000)}\\text{{ms}} = {int(total_large_time_ms_value)}\\text{{ms}}")
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    tx_time_us_str = fmt(tx_time_us_value, precision=1, commas=False)
+    large_data_gb_str = str(large_data_gb_value)
+    eq_large_tx = md_math(f"{large_data_gb_value}\\text{{GB}} / {int(bw_gbps_value/BILLION)}\\text{{Gbps}} \\approx {int(large_tx_time_s_value*1000)}\\text{{ms}}")
+    eq_large_total = md_math(f"\\approx {int(ping_ms_value)}\\text{{ms}} + {int(large_tx_time_s_value*1000)}\\text{{ms}} = {int(total_large_time_ms_value)}\\text{{ms}}")
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+tx_time_us_str = BandwidthLatencyExample.tx_time_us_str
+large_data_gb_str = BandwidthLatencyExample.large_data_gb_str
+eq_large_tx = BandwidthLatencyExample.eq_large_tx
+eq_large_total = BandwidthLatencyExample.eq_large_total
 ```
 
 *   **Latency-Bound (`{python} data_kb_str` KB Packet)**:

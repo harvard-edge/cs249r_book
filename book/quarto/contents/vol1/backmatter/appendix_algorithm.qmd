@@ -34,52 +34,73 @@ Conventions used here follow the book-wide notation (for example, we reserve \(B
 - **When sparsity is proposed as a fix**: Use @sec-algorithm-foundations-sparse-matrix-formats-0bd0 to check density and metadata overhead.
 
 ```{python}
-#| label: appendix-algorithm-setup
 #| echo: false
+#| label: appendix-algorithm-setup
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ALGORITHM FOUNDATIONS SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-algorithm-foundations — Sparse Storage, GEMM Intensity,
+# │          Training Memory sections
+# │
+# │ Goal: Compute sparse vs. dense storage tradeoff and GEMM intensity
+# │       examples for a vocabulary embedding matrix and small GEMM.
+# │ Show: ~4 GB dense vs. ~8 MB sparse at 1% density; ridge point ~208;
+# │       small 64×64 GEMM at ~1% efficiency.
+# │ How: Scalar arithmetic using byte counts from pint constants (.m_as).
+# │
+# │ Imports: mlsys.constants (BYTES_FP32, BYTES_FP16, BYTES_INT32,
+# │          A100_FLOPS_FP16_TENSOR, A100_MEM_BW, ureg, byte, GB, MB,
+# │          TFLOPs, second, TB, BILLION, MILLION, THOUSAND)
+# │          mlsys.formatting (fmt, check, md_math)
+# │ Exports: n_small_str, small_intensity_str, small_efficiency_pct_str,
+# │          a100_ridge_str, sparsity_pct_str, reduction_factor_str,
+# │          vocab_size_str, embed_dim_str, total_elements_str,
+# │          dense_gb_str, nonzeros_str, sparse_mb_str,
+# │          bytes_fp16_str, bytes_fp32_str, bytes_int32_str,
+# │          optimizer_overhead_str, gemm_intensity_eq
+# └─────────────────────────────────────────────────────────────────────────────
 
 from mlsys.constants import (
     BYTES_FP32, BYTES_FP16, BYTES_INT32,
     A100_FLOPS_FP16_TENSOR, A100_MEM_BW,
     TFLOPs, second, TB, byte, GB, MB,
-    BILLION, MILLION, THOUSAND, KIB_TO_BYTES
+    BILLION, MILLION, THOUSAND, KIB_TO_BYTES,
+    ureg
 )
 from mlsys.formatting import fmt, check, md_math
-
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
-# Scenarios: Sparse Storage, GEMM Intensity, Training Memory
 
 class AlgorithmFoundations:
     """
     Namespace for algorithm performance metrics.
     """
 
-    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
     vocab_size = 100 * THOUSAND
     embed_dim = 10 * THOUSAND
     sparsity_pct = 1
     n_small = 64
 
-    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
     total_elements = vocab_size * embed_dim
-    dense_bytes = total_elements * BYTES_FP32.magnitude
-    dense_gb = (dense_bytes * byte).to(GB).magnitude
+    dense_bytes = total_elements * BYTES_FP32.m_as(ureg.byte)
+    dense_gb = (dense_bytes * byte).m_as(GB)
 
     nonzeros = int(total_elements * sparsity_pct / 100)
-    sparse_bytes = nonzeros * (BYTES_FP32.magnitude + BYTES_INT32.magnitude)
-    sparse_mb = (sparse_bytes * byte).to(MB).magnitude
+    sparse_bytes = nonzeros * (BYTES_FP32.m_as(ureg.byte) + BYTES_INT32.m_as(ureg.byte))
+    sparse_mb = (sparse_bytes * byte).m_as(MB)
     reduction_factor = int(dense_bytes / sparse_bytes)
 
     small_intensity = n_small / 3
     a100_ridge = int(
-        A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
-        / A100_MEM_BW.to(TB / second).magnitude
+        A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+        / A100_MEM_BW.m_as(TB / second)
     )
     small_efficiency_pct = small_intensity / a100_ridge * 100
 
-    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
     check(a100_ridge > 150, f"A100 ridge point ({a100_ridge}) unexpectedly low.")
 
-    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
     n_small_str = f"{n_small}"
     small_intensity_str = f"{int(small_intensity)}"
     small_efficiency_pct_str = f"{int(small_efficiency_pct)}"
@@ -93,9 +114,9 @@ class AlgorithmFoundations:
     nonzeros_str = fmt(nonzeros / MILLION, precision=0, commas=False)
     sparse_mb_str = fmt(sparse_mb, precision=0, commas=False)
 
-    bytes_fp16_str = f"{int(BYTES_FP16.magnitude)}"
-    bytes_fp32_str = f"{int(BYTES_FP32.magnitude)}"
-    bytes_int32_str = f"{int(BYTES_INT32.magnitude)}"
+    bytes_fp16_str = f"{int(BYTES_FP16.m_as(ureg.byte))}"
+    bytes_fp32_str = f"{int(BYTES_FP32.m_as(ureg.byte))}"
+    bytes_int32_str = f"{int(BYTES_INT32.m_as(ureg.byte))}"
     optimizer_overhead_str = "8–12"
 
     gemm_intensity_eq = md_math(rf"\text{{Intensity}} = \frac{{\text{{Ops}}}}{{\text{{Bytes}}}} = \frac{{2n^3}}{{3n^2 \times {bytes_fp16_str}}} = \frac{{n}}{{3}} \text{{ FLOP/byte}}")
