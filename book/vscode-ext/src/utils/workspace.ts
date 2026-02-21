@@ -27,7 +27,8 @@ export function getRepoRoot(): string | undefined {
     }
   }
 
-  return folders[0].uri.fsPath;
+  // No book/binder found — do not return a root. Extension will bail early.
+  return undefined;
 }
 
 export function parseQmdFile(uri: vscode.Uri): QmdFileContext | undefined {

@@ -33,6 +33,22 @@ import { HealthManager, HealthStatus } from './validation/healthManager';
 import { PrecommitStatusManager } from './validation/precommitStatusManager';
 
 export function activate(context: vscode.ExtensionContext): void {
+  try {
+    activateInner(context);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    const output = vscode.window.createOutputChannel('MLSysBook');
+    output.appendLine(`[ERROR] Extension activation failed: ${msg}`);
+    if (err instanceof Error && err.stack) {
+      output.appendLine(err.stack);
+    }
+    vscode.window.showErrorMessage(
+      `MLSysBook Workbench failed to activate: ${msg}. See Output → MLSysBook for details.`,
+    );
+  }
+}
+
+function activateInner(context: vscode.ExtensionContext): void {
   const root = getRepoRoot();
   if (!root) {
     vscode.window.showWarningMessage('MLSysBook Workbench: could not find repo root (book/binder not found).');
