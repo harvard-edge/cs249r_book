@@ -167,7 +167,7 @@ What makes ML scheduling fundamentally harder than traditional job scheduling ar
 
 ML workloads present scheduling challenges that distinguish them fundamentally from traditional high-performance computing and cloud computing. **Gang scheduling**[^fn-gang] represents the most critical difference: a distributed training job requiring 1,024 GPUs cannot make progress with only 512. Unlike traditional HPC simulations that can often scale to whatever resources are available, synchronous data parallelism demands all-or-nothing allocation. Every worker must participate in every AllReduce operation, and a missing worker blocks all others. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster.
 
-[^fn-gang]: **Gang scheduling**: A scheduling policy that allocates resources for multi-component jobs atomically, ensuring all components start simultaneously or none do. First developed for parallel computing in the 1980s by Ousterhout [@ousterhout1982scheduling], gang scheduling prevents deadlock scenarios where jobs partially acquire resources and block each other. For ML training, gang scheduling ensures all workers are ready before training begins, avoiding wasted GPU cycles on partially started jobs.
+[^fn-gang]: **Gang scheduling**: A scheduling policy that allocates resources for multi-component jobs atomically, ensuring all components start simultaneously or none do. First developed for parallel computing in the 1980s, gang scheduling prevents deadlock scenarios where jobs partially acquire resources and block each other. For ML training, gang scheduling ensures all workers are ready before training begins, avoiding wasted GPU cycles on partially started jobs.
 
 GPU heterogeneity adds a second challenging dimension. Modern clusters contain mixtures of A100 and H100 accelerators with different memory capacities (`{python} a100_mem_str` GB versus `{python} h100_mem_str` GB), compute throughput, and interconnect bandwidth. An H100 provides roughly twice the training throughput of an A100 for transformer workloads but costs proportionally more. Some models fit in A100 memory with appropriate parallelism strategies; others require the larger H100 memory to avoid excessive model sharding. The scheduler must match workloads to appropriate hardware based on actual requirements, not user preferences, while maintaining high utilization across heterogeneous pools. When users request specific GPU types out of habit rather than necessity, the mismatch between requested and required resources can leave entire hardware pools idle while queues overflow on preferred hardware.
 
@@ -195,7 +195,7 @@ Ordering without global time presents the fourth fundamental issue. Without a gl
 
 These four challenges connect directly to the **CAP theorem**[^fn-cap], which applies to cluster scheduling with particular force. A scheduler cannot simultaneously provide perfect consistency (every allocation reflects true cluster state), availability (every scheduling request gets a response), and partition tolerance (the system continues operating despite network failures). Production schedulers make different trade-offs along this spectrum, and those trade-offs shape their behavior in fundamental ways. Slurm prioritizes consistency, blocking allocations during uncertainty rather than risking conflicting assignments. This means Slurm may fail to schedule jobs during transient network issues, but the jobs it does schedule always have valid, non-conflicting resource assignments. Kubernetes prioritizes availability, using eventual consistency with reconciliation loops that continuously drive actual state toward desired state. This means Kubernetes remains responsive during partial failures, but may temporarily have inconsistent views of resource allocation that are resolved asynchronously. Custom ML schedulers often accept bounded inconsistency in exchange for scheduling throughput, using optimistic concurrency where conflicts are detected and resolved after the fact rather than prevented through locking.
 
-[^fn-cap]: **CAP theorem**: A fundamental distributed systems result proving that no system can simultaneously guarantee Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (the system operates despite network failures). First conjectured by Eric Brewer in 2000 and formally proven by Gilbert and Lynch in 2002 [@gilbert2002brewer], CAP forces designers to choose which property to sacrifice when partitions occur. Most modern schedulers choose availability over strict consistency, using eventual consistency models with reconciliation.
+[^fn-cap]: **CAP theorem**: A fundamental distributed systems result proving that no system can simultaneously guarantee Consistency (all nodes see the same data), Availability (every request receives a response), and Partition tolerance (the system operates despite network failures). First conjectured by Eric Brewer in 2000 and formally proven by Gilbert and Lynch in 2002, CAP forces designers to choose which property to sacrifice when partitions occur. Most modern schedulers choose availability over strict consistency, using eventual consistency models with reconciliation.
 
 ### Failure Rates at Scale {#sec-fleet-orchestration-failure-rates}
 
@@ -574,6 +574,92 @@ Between racks connected through **spine switches**, communication crosses additi
 This hierarchy means that a 64-GPU job allocated entirely within a single rack (8 nodes, all under one leaf switch) will outperform the same job spread across 8 racks (1 node per rack, crossing spine switches for every AllReduce). The performance difference stems directly from the communication analysis in @sec-collective-communication: ring AllReduce latency scales with the slowest link in the ring, and cross-rack hops introduce both higher latency and increased contention risk. For synchronous training, every iteration waits for the slowest worker to complete its AllReduce, so even occasional cross-rack congestion events create persistent throughput degradation.
 
 The scheduler must model the cluster not as a flat list of compute slots, but as a hierarchical graph with distinct bandwidth cliffs: GPU, Node, Rack, and Pod. At the lowest level, GPUs within a single node (e.g., an HGX H100 system) communicate via NVLink/NVSwitch at 900 GB/s, enabling virtually seamless tensor parallelism. Crossing the node boundary forces traffic onto InfiniBand or RoCE adapters, dropping effective bandwidth to 200–400 GB/s and introducing significant latency penalties for synchronous operations like AllReduce. At the rack and pod levels, network oversubscription—often 2:1 or 4:1 at the spine switches—further restricts bisection bandwidth. A topology-aware scheduler explicitly optimizes for these constraints, treating "locality" as a first-class resource. For a distributed training job requiring 1,024 GPUs, a fragmented placement that scatters workers across random racks can degrade training throughput by 30–50% compared to a compact placement within a single pod.
+
+@fig-topology-placement-paths contrasts optimal and scattered placement for an 8-GPU tensor parallel group, showing how the communication path determines whether GPUs use NVLink or must traverse slower InfiniBand links.
+
+::: {#fig-topology-placement-paths fig-env="figure" fig-pos="htb" fig-cap="**Topology-Aware vs. Scattered Placement**. An 8-GPU tensor parallel group placed within a single node (left, green paths) communicates exclusively via NVLink at 900 GB/s. The same group scattered across two nodes (right, red paths) must route half its traffic through InfiniBand at 50 GB/s, an 18$\\times$ bandwidth reduction that compounds at every transformer layer." fig-alt="Two side-by-side diagrams. Left shows 8 GPUs in one node connected by green NVLink paths through a central NVSwitch. Right shows 8 GPUs split across two nodes with red InfiniBand paths crossing between them."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{BlueL}{HTML}{D1E6F3}
+  \definecolor{GreenLine}{HTML}{008F45}
+  \definecolor{GreenL}{HTML}{D4EFDF}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{RedL}{HTML}{F5D2D5}
+  \definecolor{OrangeLine}{HTML}{E67817}
+  \definecolor{BrownLine}{HTML}{78492A}
+  \definecolor{BrownL}{HTML}{E3D3C8}
+
+  \tikzset{
+    gpu/.style={draw=black!60, fill=BlueL, thick, rounded corners=2pt,
+                minimum width=0.6cm, minimum height=0.5cm, font=\tiny\bfseries},
+    switch/.style={draw=black!60, fill=BrownL, thick, rounded corners=2pt,
+                   minimum width=1.6cm, minimum height=0.4cm, font=\tiny\bfseries},
+    nodebox/.style={draw=black!30, fill=black!3, rounded corners=6pt,
+                    minimum width=4.5cm, minimum height=2.5cm},
+    nvpath/.style={draw=GreenLine, line width=1.5pt},
+    ibpath/.style={draw=RedLine, line width=1.5pt, dashed}
+  }
+
+  % === LEFT: Optimal Placement ===
+  \node[font=\small\bfseries, text=GreenLine] at (2.25, 3.5) {Optimal (Single Node)};
+
+  % Node box
+  \node[nodebox] (opt_node) at (2.25, 1.2) {};
+  \node[font=\tiny, anchor=south] at (2.25, -0.2) {Node 0};
+
+  % NVSwitch
+  \node[switch, fill=GreenL] (nvsw) at (2.25, 1.8) {NVSwitch};
+
+  % GPUs (2 rows of 4)
+  \foreach \i in {0,...,3} {
+    \pgfmathsetmacro{\xpos}{0.6 + \i * 1.1}
+    \node[gpu, fill=GreenL] (og\i) at (\xpos, 0.5) {G\i};
+    \draw[nvpath] (og\i) -- (nvsw);
+  }
+  \foreach \i in {4,...,7} {
+    \pgfmathsetmacro{\xpos}{0.6 + (\i-4) * 1.1}
+    \pgfmathtruncatemacro{\idx}{\i}
+    \node[gpu, fill=GreenL] (og\idx) at (\xpos, -0.3) {G\idx};
+    \draw[nvpath] (og\idx) -- (nvsw);
+  }
+
+  % Bandwidth label
+  \node[font=\scriptsize\bfseries, text=GreenLine] at (2.25, -1.0) {900 GB/s (NVLink)};
+
+  % === RIGHT: Scattered Placement ===
+  \node[font=\small\bfseries, text=RedLine] at (9.25, 3.5) {Scattered (Two Nodes)};
+
+  % Node A
+  \node[nodebox, minimum width=3.2cm, minimum height=2.0cm] (sn_a) at (7.5, 1.4) {};
+  \node[font=\tiny, anchor=south] at (7.5, 0.1) {Node 0};
+  \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_a) at (7.5, 1.8) {NVSw};
+  \foreach \i in {0,...,3} {
+    \pgfmathsetmacro{\xpos}{6.3 + \i * 0.8}
+    \node[gpu, fill=GreenL] (sg\i) at (\xpos, 0.7) {G\i};
+    \draw[nvpath] (sg\i) -- (nvsw_a);
+  }
+
+  % Node B
+  \node[nodebox, minimum width=3.2cm, minimum height=2.0cm] (sn_b) at (11.0, 1.4) {};
+  \node[font=\tiny, anchor=south] at (11.0, 0.1) {Node 1};
+  \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_b) at (11.0, 1.8) {NVSw};
+  \foreach \i in {4,...,7} {
+    \pgfmathsetmacro{\xpos}{9.8 + (\i-4) * 0.8}
+    \pgfmathtruncatemacro{\idx}{\i}
+    \node[gpu, fill=RedL] (sg\idx) at (\xpos, 0.7) {G\idx};
+    \draw[nvpath] (sg\idx) -- (nvsw_b);
+  }
+
+  % InfiniBand link between nodes
+  \draw[ibpath] (nvsw_a.east) -- node[above, font=\tiny\bfseries, text=RedLine] {IB 50 GB/s} (nvsw_b.west);
+
+  % Bandwidth label
+  \node[font=\scriptsize\bfseries, text=RedLine] at (9.25, -1.0) {50 GB/s cross-node (18$\times$ slower)};
+
+\end{tikzpicture}
+```
+:::
 
 ### Placement Algorithms {#sec-fleet-orchestration-placement-algorithms}
 

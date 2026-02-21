@@ -232,6 +232,83 @@ These bandwidth requirements impose a hard constraint on hardware placement, a p
 If you attempt **Tensor Parallelism** across server racks connected by standard Ethernet, your training will stall. The communication volume (proportional to Batch $\times$ Layers) requires the `{python} nvlink_a100`-`{python} nvlink_h100` GB/s bandwidth of NVLink. For cross-rack scaling, you *must* switch to **Pipeline** or **Data** parallelism to respect the physics of the network.
 :::
 
+@fig-parallelism-decision-tree formalizes this constraint satisfaction process as a decision tree, showing how model size and hardware topology determine the viable parallelism strategies.
+
+::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. Starting from the model's memory requirements, the tree guides practitioners through the constraint satisfaction process that determines which parallelism strategies are physically feasible. The critical branching points are model memory versus single-GPU capacity and communication bandwidth versus parallelism demands. Leaf nodes are annotated with the dominant hardware constraint." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{BlueL}{HTML}{D1E6F3}
+  \definecolor{GreenLine}{HTML}{008F45}
+  \definecolor{GreenL}{HTML}{D4EFDF}
+  \definecolor{OrangeLine}{HTML}{E67817}
+  \definecolor{OrangeL}{HTML}{FCE4CC}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{RedL}{HTML}{F5D2D5}
+  \definecolor{VioletLine}{HTML}{7E317B}
+  \definecolor{VioletL}{HTML}{E6D4E5}
+
+  \tikzset{
+    decision/.style={diamond, draw=#1, fill=#1!12, thick, aspect=2.2,
+                     inner sep=1pt, align=center, font=\scriptsize},
+    leaf/.style={draw=#1, fill=#1!20, rounded corners=3pt, thick,
+                 minimum width=2.4cm, minimum height=0.9cm, align=center, font=\scriptsize},
+    hw/.style={font=\tiny\itshape, text=black!60, align=center},
+    yes/.style={font=\scriptsize\bfseries, text=GreenLine},
+    no/.style={font=\scriptsize\bfseries, text=RedLine},
+    arrow/.style={-{Triangle[width=5pt,length=4pt]}, thick, black!50}
+  }
+
+  % Root decision
+  \node[decision=BlueLine] (d1) at (0, 0)
+    {Model fits in\\single GPU\\memory?};
+
+  % YES branch: Data Parallel
+  \node[leaf=GreenLine] (dp) at (-4.5, -2.2)
+    {\textbf{Data Parallelism}\\Scale batch size};
+  \node[hw] at (-4.5, -3.0) {InfiniBand sufficient};
+
+  \draw[arrow] (d1) -- node[yes, left, pos=0.3] {Yes} (dp);
+
+  % NO branch: second decision
+  \node[decision=OrangeLine] (d2) at (3.5, -2.2)
+    {Model fits in\\single node\\(8 GPUs)?};
+
+  \draw[arrow] (d1) -- node[no, right, pos=0.3] {No} (d2);
+
+  % YES from d2: Tensor Parallel
+  \node[leaf=BlueLine] (tp) at (0.5, -4.8)
+    {\textbf{Tensor Parallelism}\\Split layers across GPUs};
+  \node[hw] at (0.5, -5.6) {Requires NVLink};
+
+  \draw[arrow] (d2) -- node[yes, left, pos=0.3] {Yes} (tp);
+
+  % NO from d2: third decision
+  \node[decision=RedLine] (d3) at (7.0, -4.8)
+    {Sequential\\dependencies\\dominate?};
+
+  \draw[arrow] (d2) -- node[no, right, pos=0.3] {No} (d3);
+
+  % YES from d3: Pipeline Parallel
+  \node[leaf=OrangeLine] (pp) at (4.0, -7.2)
+    {\textbf{Pipeline Parallelism}\\Stage layers across nodes};
+  \node[hw] at (4.0, -8.0) {Low BW (Ethernet OK)};
+
+  \draw[arrow] (d3) -- node[yes, left, pos=0.3] {Yes} (pp);
+
+  % NO from d3: 3D Hybrid
+  \node[leaf=VioletLine] (hybrid) at (10.0, -7.2)
+    {\textbf{3D Hybrid}\\TP + PP + DP};
+  \node[hw] at (10.0, -8.0) {NVLink + IB + Ethernet};
+
+  \draw[arrow] (d3) -- node[no, right, pos=0.3] {No} (hybrid);
+
+\end{tikzpicture}
+```
+:::
+
+The decision tree reveals that parallelism strategy selection is not a preference but a consequence of physical constraints. With this framework in mind, we turn to the mechanics of how distributed training actually executes on a cluster.
+
 ## The Distributed Training Step {#sec-distributed-training-systems-systems-distributed-training-fundamentals-97da}
 
 How exactly do 1,024 GPUs, operating completely independently, agree on a single, mathematically rigorous set of updated weights at the end of a training iteration? The single-machine optimization techniques discussed in the previous section only delay the inevitable; eventually, the computation must span multiple devices.
@@ -254,7 +331,7 @@ If we view the training process as a massive loop over data and layers, distribu
 
 The progression from single-machine to distributed training follows a natural scaling path of optimizing locally first, then scaling horizontally. This progression ensures that distributed systems operate efficiently at each node while adding the coordination mechanisms necessary for multi-machine training. Training machine learning models often requires scaling beyond a single machine due to increasing model complexity and dataset sizes. The demand for computational power, memory, and storage can exceed the capacity of individual devices, especially in domains like natural language processing and computer vision. Distributed training[^fn-distributed-training] addresses this challenge by spreading the workload across multiple machines that coordinate to train a single model efficiently.
 
-[^fn-distributed-training]: **Distributed Training**: Google's DistBelief [@dean2012distbelief] pioneered large-scale distributed neural network training, enabling models with billions of parameters across thousands of machines. This breakthrough led to modern frameworks like Horovod [@sergeev2018horovod] and PyTorch's DistributedDataParallel, democratizing distributed training for researchers worldwide.
+[^fn-distributed-training]: **Distributed Training**: Google's DistBelief pioneered large-scale distributed neural network training, enabling models with billions of parameters across thousands of machines. This breakthrough led to modern frameworks like Horovod and PyTorch's DistributedDataParallel, democratizing distributed training for researchers worldwide.
 
 This coordination relies on consensus protocols and synchronization primitives to ensure parameter updates remain consistent across nodes. While basic barrier synchronization suffices for research, production deployments require careful fault tolerance, checkpointing, and recovery mechanisms. @sec-fault-tolerance-reliability examines these reliability engineering challenges, including how to handle node failures without losing days of training progress.
 

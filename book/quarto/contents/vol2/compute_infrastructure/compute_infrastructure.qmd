@@ -36,7 +36,7 @@ from mlsys.constants import (
     WSE3_CORES, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP,
     TPUV5P_MEM_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW, SYSTEM_MEMORY_BW,
     CLOUD_ELECTRICITY_PER_KWH, USD, GPT3_PARAMS,
-    Mparam, TFLOPs, flop, param, MFLOPs, GFLOPs
+    Mparam, Bparam, TFLOPs, flop, param, MFLOPs, GFLOPs
 )
 from mlsys.formatting import fmt, sci, check
 
@@ -209,7 +209,7 @@ v100_ef = f"{InfraSetup.v100_tflops_per_watt:.2f}"
 annual_elec_cost_str = f"{InfraSetup.annual_elec_cost:,.0f}"
 onprem_node_annual_str = f"{InfraSetup.onprem_node_total_annual:,.0f}"
 cloud_node_annual_str = f"{InfraSetup.cloud_node_annual:,.0f}"
-gpt3_params_b = f"{GPT3_PARAMS.to(BILLION).magnitude:.0f}"
+gpt3_params_b = f"{GPT3_PARAMS.to(Bparam).magnitude:.0f}"
 
 t_mem_str = f"{TokenLatency.t_mem_ms:.1f}"
 t_comp_str = f"{TokenLatency.t_comp_ms:.2f}"
@@ -285,6 +285,78 @@ This question sits at the foundation of every fleet. The smallest physical unit 
 
 Every architecture decision in this chapter is a response to one or more of three fundamental physical constraints. The **Memory Wall** limits per-device throughput: HBM bandwidth, not arithmetic capability, determines token generation latency for inference workloads. The **Power Wall** limits per-rack compute density: thermal dissipation at 700--1,000 W per accelerator forces the transition from air cooling to liquid cooling and drives megawatt-scale power delivery engineering. The **Communication Wall** limits per-cluster scaling: network bandwidth between nodes determines whether adding more accelerators produces proportional speedup or diminishing returns. These three walls are not independent problems to be solved in isolation; they interact at every level of the infrastructure stack, and the design of each level represents a negotiated response to all three simultaneously.
 
+:::
+
+@fig-three-walls-grid illustrates how these three constraints cascade through every level of the infrastructure stack, from a single accelerator to a full pod.
+
+::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows how the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows why the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{BlueL}{HTML}{D1E6F3}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{RedL}{HTML}{F5D2D5}
+  \definecolor{GreenLine}{HTML}{008F45}
+  \definecolor{GreenL}{HTML}{D4EFDF}
+  \definecolor{OrangeLine}{HTML}{E67817}
+  \definecolor{OrangeL}{HTML}{FCE4CC}
+  \definecolor{BrownLine}{HTML}{78492A}
+  \definecolor{BrownL}{HTML}{E3D3C8}
+
+  \tikzset{
+    cell/.style={draw=#1, fill=#1!15, rounded corners=2pt, minimum width=3.4cm,
+                 minimum height=1.1cm, align=center, font=\scriptsize, thick},
+    levelbox/.style={draw=BrownLine, fill=BrownL!40, rounded corners=2pt,
+                     minimum width=1.8cm, minimum height=1.1cm, align=center,
+                     font=\small\bfseries},
+    wallhdr/.style={font=\small\bfseries, align=center},
+    cascade/.style={-{Triangle[width=5pt,length=4pt]}, thick, black!40}
+  }
+
+  % Column headers
+  \node[wallhdr, text=BlueLine] at (3.2, 7.2) {Memory Wall};
+  \node[wallhdr, text=OrangeLine] at (7.0, 7.2) {Power Wall};
+  \node[wallhdr, text=GreenLine] at (10.8, 7.2) {Communication Wall};
+
+  % Row 1: Accelerator
+  \node[levelbox] (L1) at (0, 5.8) {Accelerator};
+  \node[cell=BlueLine] (m1) at (3.2, 5.8) {HBM bandwidth\\bottleneck\\(3.35 TB/s)};
+  \node[cell=OrangeLine] (p1) at (7.0, 5.8) {700 W TDP\\per chip};
+  \node[cell=GreenLine] (c1) at (10.8, 5.8) {On-die SRAM\\capacity limit};
+
+  % Row 2: Node
+  \node[levelbox] (L2) at (0, 3.8) {Node\\(8 GPUs)};
+  \node[cell=BlueLine] (m2) at (3.2, 3.8) {640 GB aggregate\\HBM capacity\\$<$ model size};
+  \node[cell=OrangeLine] (p2) at (7.0, 3.8) {5.6 kW compute\\forces liquid\\cooling};
+  \node[cell=GreenLine] (c2) at (10.8, 3.8) {NVLink 900 GB/s\\intra-node only};
+
+  % Row 3: Rack
+  \node[levelbox] (L3) at (0, 1.8) {Rack\\(4 nodes)};
+  \node[cell=BlueLine] (m3) at (3.2, 1.8) {Host DRAM\\needed for\\optimizer state};
+  \node[cell=OrangeLine] (p3) at (7.0, 1.8) {40+ kW rack\\power delivery\\and cooling};
+  \node[cell=GreenLine] (c3) at (10.8, 1.8) {PCIe between\\nodes: 64 GB/s};
+
+  % Row 4: Pod
+  \node[levelbox] (L4) at (0, -0.2) {Pod\\(1000+ GPUs)};
+  \node[cell=BlueLine] (m4) at (3.2, -0.2) {Distributed\\storage: PFS\\and object};
+  \node[cell=OrangeLine] (p4) at (7.0, -0.2) {Megawatt facility\\PUE $\approx$ 1.1--1.3};
+  \node[cell=GreenLine] (c4) at (10.8, -0.2) {InfiniBand\\50 GB/s per link\\dominates cost};
+
+  % Cascade arrows
+  \foreach \i/\j in {1/2, 2/3, 3/4} {
+    \draw[cascade] (m\i.south) -- (m\j.north);
+    \draw[cascade] (p\i.south) -- (p\j.north);
+    \draw[cascade] (c\i.south) -- (c\j.north);
+  }
+
+  % Emphasis bracket on Communication Wall
+  \draw[RedLine, ultra thick, decorate, decoration={brace, amplitude=6pt, mirror}]
+    (12.7, -0.8) -- (12.7, 6.4)
+    node[midway, right=8pt, align=left, font=\scriptsize\bfseries, text=RedLine]
+    {Dominates\\at scale};
+
+\end{tikzpicture}
+```
 :::
 
 This chapter begins at the silicon die and expands outward through four physical levels. At each level, we encounter the same engineering pattern: a constraint becomes intolerable, and the solution creates the next level of infrastructure. The Node aggregates accelerators to overcome memory capacity limits. The Rack concentrates nodes and confronts power delivery and cooling. The Pod wires racks into a warehouse-scale computer and faces the communication wall at full force. By the end, we will have mapped the complete physical stack from transistor to datacenter, with our `{python} gpt3_params_b`B model serving as the thread that connects each level.
@@ -417,8 +489,8 @@ Wafer-scale engines sit at a unique point on the spectrum: they are highly speci
 \end{scope}
 
 % Labels
-\node[below=0.2 of (0,-4.2)] {\textbf{300mm Silicon Wafer}};
-\node[above right=0.1 and 0.1 of (5.5, 2.7)] {\textbf{Unified Compute Fabric}};
+\node[below] at (0,-4.4) {\textbf{300mm Silicon Wafer}};
+\node[above right] at (5.6, 2.8) {\textbf{Unified Compute Fabric}};
 
 \end{tikzpicture}
 ```
@@ -683,11 +755,11 @@ The distinction between memory *capacity* (how many gigabytes the HBM can store)
 **Scenario**: Generating one token for Llama-3 70B (140 GB weights in FP16) on an NVIDIA H100.
 
 1. **Compute Time**: Each token requires $2 \times 70\text{B} = 1.4 \times 10^{11}$ floating-point operations. At `{python} h100_tflops` TFLOPS peak throughput, the arithmetic takes:
-   $T_{comp} \approx \mathbf{`{python} TokenLatency.t_comp_str` \text{ ms}}$.
+   $T_{comp} \approx \mathbf{`{python} t_comp_str` \text{ ms}}$.
 2. **Memory Time**: Loading 140 GB of weights from HBM at 3.35 TB/s takes:
-   $T_{mem} \approx \mathbf{`{python} TokenLatency.t_mem_str` \text{ ms}}$.
+   $T_{mem} \approx \mathbf{`{python} t_mem_str` \text{ ms}}$.
 
-**Conclusion**: The processor spends **`{python} TokenLatency.dominance_str`%** of its time waiting for data from memory. The arithmetic units are idle for almost the entire token generation. Even a hypothetical processor with *infinite* compute throughput would generate tokens only negligibly faster, because the memory transfer time dominates completely. This is why HBM bandwidth improvements deliver nearly linear speedups for inference workloads.
+**Conclusion**: The processor spends **`{python} dominance_str`%** of its time waiting for data from memory. The arithmetic units are idle for almost the entire token generation. Even a hypothetical processor with *infinite* compute throughput would generate tokens only negligibly faster, because the memory transfer time dominates completely. This is why HBM bandwidth improvements deliver nearly linear speedups for inference workloads.
 
 :::
 
@@ -695,7 +767,7 @@ This napkin math reveals a profound asymmetry at the heart of modern ML infrastr
 
 This asymmetry is the single most important physical fact about ML inference, and it shapes every architectural and economic decision about serving infrastructure.
 
-The ratio between memory time and compute time, `{python} TokenLatency.dominance_str`% in this example, is called the **memory-boundedness** of the workload. A workload that is 99% memory-bound will see almost no benefit from a faster processor (more TFLOPS) but will see nearly linear speedup from faster memory (more TB/s bandwidth).
+The ratio between memory time and compute time, `{python} dominance_str`% in this example, is called the **memory-boundedness** of the workload. A workload that is 99% memory-bound will see almost no benefit from a faster processor (more TFLOPS) but will see nearly linear speedup from faster memory (more TB/s bandwidth).
 
 This is a quantitative expression of the Memory Wall: the gap between processing speed and memory speed that has been widening for decades and is particularly acute for ML inference workloads. The Memory Wall was first identified by Wulf and McKee in 1995, who observed that processor speed was improving at 60% per year while DRAM speed improved at only 7% per year. This growing disparity meant that processors would increasingly spend their time waiting for data rather than computing on it. Thirty years later, their prediction has proven remarkably accurate, and the ML inference workload is perhaps the most extreme manifestation of the memory wall in modern computing.
 

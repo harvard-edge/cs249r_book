@@ -245,7 +245,7 @@ def generate_markdown_output(chapters_data: list[dict], output_path: Path,
     # Get volume title from YAML if possible
     vol_titles = {
         '1': 'Volume I: Introduction',
-        '2': 'Volume II: Advanced Topics',
+        '2': 'Volume II: At Scale',
     }
     vol_title = vol_titles.get(vol, f'Volume {vol}')
     

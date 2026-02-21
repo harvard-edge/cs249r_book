@@ -186,6 +186,80 @@ Standard model compression (pruning, quantization, distillation) reduces the num
 
 Each technique attacks a different term, and this taxonomy guides optimization strategy: diagnose which term dominates (using the roofline model from @sec-performance-engineering-roofline), then apply the technique targeting that term. Applying a technique that targets the non-dominant term wastes engineering effort.
 
+@fig-iron-law-flowchart codifies this diagnostic process as a decision flowchart, mapping each bottleneck to its corresponding optimization technique.
+
+::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**. The optimization process begins with profiling to determine which term in @eq-iron-law-perf dominates. If the workload is compute-bound, precision engineering or algorithmic changes reduce the numerator. If memory-bound, operator fusion and tiling reduce HBM traffic. If overhead-bound, graph compilation and communication overlap attack the residual term. Applying the wrong technique yields zero improvement." fig-alt="Flowchart starting with Profile Workload, branching to Compute Bound, Memory Bound, or Overhead Bound, each leading to specific optimization techniques."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{BlueL}{HTML}{D1E6F3}
+  \definecolor{GreenLine}{HTML}{008F45}
+  \definecolor{GreenL}{HTML}{D4EFDF}
+  \definecolor{OrangeLine}{HTML}{E67817}
+  \definecolor{OrangeL}{HTML}{FCE4CC}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{RedL}{HTML}{F5D2D5}
+  \definecolor{VioletLine}{HTML}{7E317B}
+  \definecolor{VioletL}{HTML}{E6D4E5}
+
+  \tikzset{
+    start/.style={draw=black!70, fill=black!10, rounded corners=3pt, thick,
+                  minimum width=3cm, minimum height=0.8cm, align=center, font=\small\bfseries},
+    diag/.style={diamond, draw=#1, fill=#1!12, thick, aspect=2.5,
+                 inner sep=1pt, align=center, font=\scriptsize},
+    action/.style={draw=#1, fill=#1!15, rounded corners=3pt, thick,
+                   minimum width=2.6cm, minimum height=0.7cm, align=center, font=\scriptsize},
+    arrow/.style={-{Triangle[width=5pt,length=4pt]}, thick, black!50}
+  }
+
+  % Start
+  \node[start] (profile) at (5, 0) {Profile Workload\\(Roofline Analysis)};
+
+  % Three branches
+  \node[diag=BlueLine] (cb) at (0.5, -2.2) {Compute\\Bound?};
+  \node[diag=OrangeLine] (mb) at (5, -2.2) {Memory\\Bound?};
+  \node[diag=VioletLine] (ob) at (9.5, -2.2) {Overhead\\Bound?};
+
+  \draw[arrow] (profile) -- (cb);
+  \draw[arrow] (profile) -- (mb);
+  \draw[arrow] (profile) -- (ob);
+
+  % Compute-bound actions
+  \node[action=BlueLine] (a1) at (-0.8, -4.2) {Precision Eng.\\(FP8, INT4)};
+  \node[action=BlueLine] (a2) at (2.0, -4.2) {Algorithmic\\(MoE, Speculative)};
+  \draw[arrow] (cb) -- (a1);
+  \draw[arrow] (cb) -- (a2);
+
+  % Memory-bound actions
+  \node[action=OrangeLine] (a3) at (3.8, -4.2) {Operator Fusion\\(FlashAttention)};
+  \node[action=OrangeLine] (a4) at (6.4, -4.2) {Tiling \&\\KV Cache Opt.};
+  \draw[arrow] (mb) -- (a3);
+  \draw[arrow] (mb) -- (a4);
+
+  % Overhead-bound actions
+  \node[action=VioletLine] (a5) at (8.2, -4.2) {Graph Compile\\(torch.compile)};
+  \node[action=VioletLine] (a6) at (10.8, -4.2) {Comm. Overlap\\(CUDA Graphs)};
+  \draw[arrow] (ob) -- (a5);
+  \draw[arrow] (ob) -- (a6);
+
+  % Re-profile loop
+  \node[start, minimum width=2.2cm, font=\scriptsize\bfseries] (re) at (5, -5.8) {Re-profile};
+  \draw[arrow] (a1.south) |- (re);
+  \draw[arrow] (a2.south) |- (re);
+  \draw[arrow] (a3.south) |- (re);
+  \draw[arrow] (a4.south) |- (re);
+  \draw[arrow] (a5.south) |- (re);
+  \draw[arrow] (a6.south) |- (re);
+
+  % Loop back
+  \draw[arrow, dashed] (re.east) -- ++(2.5,0) |- (profile.east);
+  \node[font=\tiny\itshape, text=black!50] at (9.5, -3.0) {iterate until};
+  \node[font=\tiny\itshape, text=black!50] at (9.5, -3.3) {target met};
+
+\end{tikzpicture}
+```
+:::
+
 The **efficiency frontier** is the Pareto-optimal curve of model quality versus system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
 The multi-dimensional nature of this frontier makes optimization challenging. The relevant dimensions include:
@@ -369,9 +443,9 @@ $$
 
 # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
 # Ridge points already computed; verify
-a100_ridge_val = a100_ridge_fp16.magnitude
-h100_ridge_fp16_val = h100_ridge_fp16.magnitude
-h100_ridge_fp8_val = h100_ridge_fp8.magnitude
+a100_ridge_val = PerformanceSetup.a100_ridge_fp16.magnitude
+h100_ridge_fp16_val = PerformanceSetup.h100_ridge_fp16.magnitude
+h100_ridge_fp8_val = PerformanceSetup.h100_ridge_fp8.magnitude
 
 # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
 check(h100_ridge_fp16_val > a100_ridge_val,
@@ -631,6 +705,93 @@ More importantly, each unfused kernel must materialize its output in HBM. Consid
 3. **LayerNorm kernel**: Read $Z_2$ from HBM, compute LayerNorm($Z_2$), write $Y$ to HBM.
 
 Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $Y$. For a hidden dimension of 4096 and batch size of 2048 in FP16, each intermediate tensor is $4096 \times 2048 \times 2 = 16$ MB. The unfused execution reads and writes 32 MB of intermediate data that a fused kernel avoids entirely by holding $Z_1$ and $Z_2$ in registers or shared memory (SRAM) within the SM.
+
+@fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
+
+::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**. Left: three separate kernels each read from and write to HBM, materializing intermediate tensors $Z_1$ and $Z_2$ (5 HBM transfers total). Right: a single fused kernel reads $X$ and $W$ once, performs all three operations with intermediates held in SRAM, and writes only the final output $Y$ (2 HBM transfers). The fused path eliminates 32 MB of redundant HBM traffic per layer." fig-alt="Two side-by-side dataflow diagrams. Left unfused path shows 5 arrows between operations and HBM. Right fused path shows 2 arrows with intermediates staying in SRAM."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{BlueL}{HTML}{D1E6F3}
+  \definecolor{GreenLine}{HTML}{008F45}
+  \definecolor{GreenL}{HTML}{D4EFDF}
+  \definecolor{OrangeLine}{HTML}{E67817}
+  \definecolor{OrangeL}{HTML}{FCE4CC}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{RedL}{HTML}{F5D2D5}
+
+  \tikzset{
+    op/.style={draw=BlueLine, fill=BlueL, rounded corners=2pt, thick,
+               minimum width=2.0cm, minimum height=0.6cm, align=center, font=\scriptsize\bfseries},
+    mem/.style={draw=RedLine, fill=RedL!40, rounded corners=2pt, thick,
+                minimum width=2.0cm, minimum height=0.5cm, align=center, font=\scriptsize},
+    sram/.style={draw=GreenLine, fill=GreenL, rounded corners=2pt, thick,
+                 minimum width=2.0cm, minimum height=0.5cm, align=center, font=\scriptsize},
+    fusedbox/.style={draw=GreenLine, fill=GreenL!20, rounded corners=6pt, thick,
+                     inner sep=6pt},
+    hbmio/.style={-{Triangle[width=4pt,length=3pt]}, thick, RedLine},
+    sramio/.style={-{Triangle[width=4pt,length=3pt]}, thick, GreenLine}
+  }
+
+  % === LEFT: Unfused ===
+  \node[font=\small\bfseries, text=RedLine] at (1.5, 5.5) {Unfused (3 Kernels)};
+
+  % HBM at top
+  \node[mem, minimum width=3.0cm] (hbm_l) at (1.5, 4.5) {HBM (Off-Chip)};
+
+  % Operations
+  \node[op] (gemm) at (1.5, 3.2) {GEMM};
+  \node[op] (gelu) at (1.5, 1.8) {GELU};
+  \node[op] (ln) at (1.5, 0.4) {LayerNorm};
+
+  % HBM read/write arrows (5 total round trips)
+  \draw[hbmio] (hbm_l.south) -- node[left, font=\tiny, text=RedLine] {read} (gemm.north);
+  \draw[hbmio] (gemm.east) -- ++(0.6,0) |- node[right, font=\tiny, text=RedLine, pos=0.2] {$Z_1$} (hbm_l.east);
+  \draw[hbmio] (hbm_l.south west) ++(0.3,0) -- ++(0,-2.1) -- (gelu.west);
+  \draw[hbmio] (gelu.east) -- ++(0.6,0) |- node[right, font=\tiny, text=RedLine, pos=0.2] {$Z_2$} ++(0,2.7);
+  \draw[hbmio] ([xshift=-5pt]hbm_l.south) -- ++(0,-3.5) -- (ln.west);
+  \draw[hbmio] (ln.south) -- ++(0,-0.4) node[below, font=\tiny] {$Y$ to HBM};
+
+  % Count annotation
+  \node[font=\scriptsize\bfseries, text=RedLine] at (1.5, -0.8) {5 HBM transfers};
+  \node[font=\tiny, text=RedLine] at (1.5, -1.2) {32 MB intermediate traffic};
+
+  % === RIGHT: Fused ===
+  \node[font=\small\bfseries, text=GreenLine] at (8.0, 5.5) {Fused (1 Kernel)};
+
+  % HBM at top
+  \node[mem, minimum width=3.0cm] (hbm_r) at (8.0, 4.5) {HBM (Off-Chip)};
+
+  % Fused kernel box
+  \node[fusedbox, minimum width=3.2cm, minimum height=3.2cm] (fbox) at (8.0, 1.8) {};
+
+  % Operations inside fused box
+  \node[op] (f_gemm) at (8.0, 3.0) {GEMM};
+  \node[op] (f_gelu) at (8.0, 1.8) {GELU};
+  \node[op] (f_ln) at (8.0, 0.6) {LayerNorm};
+
+  % SRAM label
+  \node[sram, minimum width=1.0cm] at (10.0, 1.8) {SRAM};
+
+  % Internal SRAM arrows
+  \draw[sramio] (f_gemm) -- node[right, font=\tiny, text=GreenLine] {$Z_1$} (f_gelu);
+  \draw[sramio] (f_gelu) -- node[right, font=\tiny, text=GreenLine] {$Z_2$} (f_ln);
+
+  % Only 2 HBM transfers
+  \draw[hbmio] (hbm_r.south) -- node[left, font=\tiny, text=RedLine] {read $X$,$W$} (fbox.north);
+  \draw[hbmio] (fbox.south) -- ++(0,-0.4) node[below, font=\tiny] {$Y$ to HBM};
+
+  % Count annotation
+  \node[font=\scriptsize\bfseries, text=GreenLine] at (8.0, -0.8) {2 HBM transfers};
+  \node[font=\tiny, text=GreenLine] at (8.0, -1.2) {0 MB intermediate traffic};
+
+  % Speedup annotation
+  \draw[OrangeLine, ultra thick, -{Triangle[width=6pt,length=5pt]}] (4.2, 1.8) -- (5.3, 1.8)
+    node[midway, above, font=\scriptsize\bfseries, text=OrangeLine] {2.5$\times$ faster};
+
+\end{tikzpicture}
+```
+:::
 
 In a naive implementation without operator fusion, executing one Transformer layer requires roughly 50 separate kernel launches. If each launch incurs a 10-microsecond overhead, the system spends 500 microseconds purely on dispatch latency. If the actual arithmetic execution of the layer takes only 2 milliseconds, the launch overhead consumes 20% of the total wall-clock time, leaving the GPU compute units idle for one-fifth of the inference cycle. This "launch-bound" regime limits the benefits of faster hardware; doubling the GPU's FLOPs does nothing to reduce the 500-microsecond fixed cost. Operator fusion addresses this by compiling these 50 discrete operations into a small handful of fused kernels—often reducing the count to 5–10 launches—thereby reclaiming the lost cycles and shifting the workload back towards a compute-bound profile.
 

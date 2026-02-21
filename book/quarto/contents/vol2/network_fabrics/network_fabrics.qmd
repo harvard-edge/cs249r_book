@@ -233,6 +233,76 @@ plt.show()
 
 @fig-bandwidth-hierarchy reveals that the NVLink-to-InfiniBand ratio has remained between 12 $\times$ and 25 $\times$ across four GPU generations, despite absolute bandwidth improvements at every tier. This persistent cliff is not a temporary engineering shortcoming; it reflects the fundamental physics that on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient: tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate the lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in the remainder of this chapter is an attempt to minimize the impact of this hierarchy on collective communication performance.
 
+To see why this ratio matters so viscerally, consider what happens during a single training step. @fig-bandwidth-cliff-gantt contrasts the timeline for an 8-GPU job communicating within a node versus a 64-GPU job communicating across nodes.
+
+::: {#fig-bandwidth-cliff-gantt fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Cliff in a Training Step**. Two timelines for the same model: an 8-GPU intra-node job (top) using NVLink at 900 GB/s, and a 64-GPU inter-node job (bottom) using InfiniBand at 50 GB/s. The AllReduce phase (red) grows from a thin sliver to a dominant fraction of the step. Without communication--computation overlap, GPUs sit idle during the entire AllReduce, and the utilization gap between the two scenarios exceeds 10 percentage points." fig-alt="Two horizontal Gantt bars. Top bar shows forward pass, backward pass, and thin AllReduce sliver at 99 percent utilization. Bottom bar shows same compute phases but a wide AllReduce block dropping utilization to 87 percent."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{BlueLine}{HTML}{006395}
+  \definecolor{BlueL}{HTML}{D1E6F3}
+  \definecolor{GreenLine}{HTML}{008F45}
+  \definecolor{GreenL}{HTML}{D4EFDF}
+  \definecolor{RedLine}{HTML}{CB202D}
+  \definecolor{RedL}{HTML}{F5D2D5}
+  \definecolor{OrangeLine}{HTML}{E67817}
+  \definecolor{BrownLine}{HTML}{78492A}
+
+  % --- Scenario A: Intra-node (NVLink) ---
+  \node[font=\small\bfseries, anchor=east] at (-0.3, 1.8) {Intra-Node};
+  \node[font=\scriptsize, anchor=east, text=black!60] at (-0.3, 1.4) {8 GPUs, NVLink};
+
+  % Forward pass
+  \fill[GreenLine!80] (0, 1.2) rectangle (4, 2.0);
+  \node[font=\scriptsize, text=white] at (2, 1.6) {Forward (100 ms)};
+
+  % Backward pass
+  \fill[BlueLine!80] (4, 1.2) rectangle (8, 2.0);
+  \node[font=\scriptsize, text=white] at (6, 1.6) {Backward (100 ms)};
+
+  % AllReduce (tiny)
+  \fill[RedLine] (8, 1.2) rectangle (8.2, 2.0);
+  \node[font=\tiny, anchor=west, text=RedLine] at (8.3, 1.6) {AR (1 ms)};
+
+  % Utilization annotation
+  \node[font=\scriptsize\bfseries, anchor=west, text=GreenLine] at (9.0, 1.6) {99.5\% util.};
+
+  % --- Scenario B: Inter-node (InfiniBand) ---
+  \node[font=\small\bfseries, anchor=east] at (-0.3, 0.2) {Inter-Node};
+  \node[font=\scriptsize, anchor=east, text=black!60] at (-0.3, -0.2) {64 GPUs, IB};
+
+  % Forward pass
+  \fill[GreenLine!80] (0, -0.4) rectangle (4, 0.4);
+  \node[font=\scriptsize, text=white] at (2, 0.0) {Forward (100 ms)};
+
+  % Backward pass
+  \fill[BlueLine!80] (4, -0.4) rectangle (8, 0.4);
+  \node[font=\scriptsize, text=white] at (6, 0.0) {Backward (100 ms)};
+
+  % AllReduce (large)
+  \fill[RedLine] (8, -0.4) rectangle (10.4, 0.4);
+  \node[font=\scriptsize, text=white] at (9.2, 0.0) {AllReduce (30 ms)};
+
+  % Utilization annotation
+  \node[font=\scriptsize\bfseries, anchor=west, text=OrangeLine] at (10.6, 0.0) {87\% util.};
+
+  % Time axis
+  \draw[->, thick, black!60] (0, -1.0) -- (11, -1.0) node[right, font=\scriptsize] {Time (ms)};
+  \foreach \x/\t in {0/0, 4/100, 8/200, 10.4/230} {
+    \draw[black!60] (\x, -0.9) -- (\x, -1.1);
+    \node[font=\tiny, below] at (\x, -1.1) {\t};
+  }
+
+  % Idle cost annotation
+  \draw[RedLine, thick, decorate, decoration={brace, amplitude=4pt}]
+    (10.4, -0.5) -- (8.2, -0.5)
+    node[midway, below=5pt, font=\tiny\bfseries, text=RedLine] {30 ms idle per step};
+
+\end{tikzpicture}
+```
+:::
+
+The 12 percentage-point utilization gap in @fig-bandwidth-cliff-gantt represents millions of dollars in wasted compute over a months-long training run. This is why network fabric design is not an afterthought but the central engineering challenge of distributed training.
+
 ## How ML Networking Inverts Datacenter Assumptions {#sec-network-workload-inversion}
 
 A network architect from the world of large-scale web services would find the traffic patterns of a distributed training cluster deeply counter-intuitive. Traditional datacenter traffic is characterized by a vast number of small, independent, and asynchronous flows. Millions of users accessing a web service generate a stochastic traffic pattern that is well-served by standard TCP/IP and statistically multiplexed, oversubscribed networks.
@@ -693,23 +763,32 @@ The trade-offs between these topologies become stark when quantified for a large
   % Fat Tree
   \begin{scope}
     \node[anchor=south, crimson] at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
-    % Spine
-    \foreach \x in {0.5, 1.5, 2.5, 3.5} \node[switch] (s\x) at (\x, 3) {};
+    % Spine (use letter suffixes to avoid decimal-point node name ambiguity)
+    \node[switch] (sA) at (0.5, 3) {};
+    \node[switch] (sB) at (1.5, 3) {};
+    \node[switch] (sC) at (2.5, 3) {};
+    \node[switch] (sD) at (3.5, 3) {};
     % Leaf
     \foreach \x in {0, 1, 3, 4} \node[switch] (l\x) at (\x, 1.5) {};
     % Nodes
-    \foreach \x in {0, 0.5, 1, 1.5} \node[node] (n\x) at (\x-0.25, 0) {};
-    \foreach \x in {3, 3.5, 4, 4.5} \node[node] (nm\x) at (\x-0.25, 0) {};
+    \node[node] (nA) at (-0.25, 0) {};
+    \node[node] (nB) at (0.25, 0) {};
+    \node[node] (nC) at (0.75, 0) {};
+    \node[node] (nD) at (1.25, 0) {};
+    \node[node] (nmA) at (2.75, 0) {};
+    \node[node] (nmB) at (3.25, 0) {};
+    \node[node] (nmC) at (3.75, 0) {};
+    \node[node] (nmD) at (4.25, 0) {};
 
     % Connections
-    \foreach \s in {0.5, 1.5, 2.5, 3.5} {
-        \draw[black!40, thin] (s\s) -- (l0);
-        \draw[black!40, thin] (s\s) -- (l1);
-        \draw[black!40, thin] (s\s) -- (l3);
-        \draw[black!40, thin] (s\s) -- (l4);
+    \foreach \s in {sA, sB, sC, sD} {
+        \draw[black!40, thin] (\s) -- (l0);
+        \draw[black!40, thin] (\s) -- (l1);
+        \draw[black!40, thin] (\s) -- (l3);
+        \draw[black!40, thin] (\s) -- (l4);
     }
-    \draw[black!60] (l0) -- (n0); \draw[black!60] (l0) -- (n0.5);
-    \draw[black!60] (l1) -- (n1); \draw[black!60] (l1) -- (n1.5);
+    \draw[black!60] (l0) -- (nA); \draw[black!60] (l0) -- (nB);
+    \draw[black!60] (l1) -- (nC); \draw[black!60] (l1) -- (nD);
   \end{scope}
 
   % Rail Optimized
@@ -908,9 +987,9 @@ To avoid the blunt instrument of PFC pauses, modern fabrics rely on proactive co
 
 **HPCC**[^fn-hpcc] addresses this opacity by leveraging In-Network Telemetry (INT). Instead of a simple bit mark, switches append precise metadata—current queue depth, link utilization, and timestamps—to every packet header. This provides the sender with a full dashboard of the network state, allowing it to calculate the exact allowable transmission rate within a single round-trip time. By reacting to precise telemetry rather than binary signals, HPCC virtually eliminates queue buildup and stabilizes link utilization above 95%, significantly reducing the tail latency variance for bursty AllToAll traffic. The primary trade-off is hardware support: while DCQCN functions on standard ECN-capable Ethernet switches, HPCC requires programmable switches capable of pushing INT metadata at line rate.
 
-[^fn-dcqcn]: **DCQCN (Data Center Quantized Congestion Notification)**: A congestion control protocol developed by Microsoft that combines ECN marking with rate-based flow control, designed specifically for RDMA over Converged Ethernet (RoCE) fabrics [@zhu2015congestion].
+[^fn-dcqcn]: **DCQCN (Data Center Quantized Congestion Notification)**: A congestion control protocol developed by Microsoft that combines ECN marking with rate-based flow control, designed specifically for RDMA over Converged Ethernet (RoCE) fabrics.
 
-[^fn-hpcc]: **HPCC (High Precision Congestion Control)**: A protocol developed by Alibaba that uses in-network telemetry (INT) to achieve near-zero queue buildup, enabling higher link utilization than ECN-based schemes [@li2019hpcc].
+[^fn-hpcc]: **HPCC (High Precision Congestion Control)**: A protocol developed by Alibaba that uses in-network telemetry (INT) to achieve near-zero queue buildup, enabling higher link utilization than ECN-based schemes.
 
 ### Adaptive Routing {#sec-network-fabrics-adaptive-routing}
 
