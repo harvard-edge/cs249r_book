@@ -61,6 +61,15 @@ from tinytorch.core.activations import ReLU, Sigmoid  # Module 02 - intelligence
 #| default_exp core.layers
 #| export
 
+from __future__ import annotations
+from typing import Union, Any, List, Optional, Tuple
+from typing_extensions import TypeAlias  # or from typing import TypeAlias if Python 3.10+
+import numpy.typing as npt
+
+# Define the custom types the reviewer suggested
+ArrayLike: TypeAlias = npt.ArrayLike
+TensorLike: TypeAlias = Union[ArrayLike, "Tensor"]
+
 import numpy as np
 
 # Import from TinyTorch package (previous modules must be completed and exported)
@@ -196,7 +205,7 @@ class Layer:
     The __call__ method is provided to make layers callable.
     """
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """
         Forward pass through the layer.
 
@@ -216,11 +225,11 @@ class Layer:
             f"         return transformed_x"
         )
 
-    def __call__(self, x, *args, **kwargs):
+    def __call__(self, x: Tensor, *args: Any, **kwargs: Any) -> Tensor:
         """Allow layer to be called like a function."""
         return self.forward(x, *args, **kwargs)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """
         Return list of trainable parameters.
 
@@ -229,7 +238,7 @@ class Layer:
         """
         return []  # Base class has no parameters
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation of the layer."""
         return f"{self.__class__.__name__}()"
 
@@ -287,7 +296,7 @@ class Linear(Layer):
     Applies a linear transformation to incoming data.
     """
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True) -> None:
         """
         Initialize linear layer with proper weight initialization.
 
@@ -393,7 +402,7 @@ class Linear(Layer):
         return params
         ### END SOLUTION
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation for debugging."""
         bias_str = f", bias={self.bias is not None}"
         return f"Linear(in_features={self.in_features}, out_features={self.out_features}{bias_str})"
@@ -410,7 +419,7 @@ This test validates our Linear layer implementation works correctly.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear", "locked": true, "points": 15}
-def test_unit_linear_layer():
+def test_unit_linear_layer() -> None:
     """🧪 Test Linear layer implementation."""
     print("🧪 Unit Test: Linear Layer...")
 
@@ -459,7 +468,7 @@ Additional tests for edge cases and error handling.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-edge-cases", "locked": true, "points": 5}
-def test_unit_edge_cases_linear():
+def test_unit_edge_cases_linear() -> None:
     """🧪 Test Linear layer edge cases."""
     print("🧪 Edge Case Tests: Linear Layer...")
 
@@ -502,7 +511,7 @@ Tests to ensure Linear layer parameters can be collected for optimization.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-linear-params", "locked": true, "points": 5}
-def test_unit_parameter_collection_linear():
+def test_unit_parameter_collection_linear() -> None:
     """🧪 Test Linear layer parameter collection."""
     print("🧪 Parameter Collection Test: Linear Layer...")
 
@@ -592,7 +601,7 @@ class Dropout(Layer):
     This prevents overfitting by forcing the network to not rely on specific neurons.
     """
 
-    def __init__(self, p=0.5):
+    def __init__(self, p: float = 0.5) -> None:
         """
         Initialize dropout layer.
 
@@ -630,7 +639,7 @@ class Dropout(Layer):
         self.p = p
         ### END SOLUTION
 
-    def _should_apply_dropout(self, training):
+    def _should_apply_dropout(self, training: bool) -> bool:
         """
         Determine whether dropout should be applied.
 
@@ -657,7 +666,7 @@ class Dropout(Layer):
         return training and self.p > DROPOUT_MIN_PROB
         ### END SOLUTION
 
-    def _generate_dropout_mask(self, shape):
+    def _generate_dropout_mask(self, shape: Tuple[int, ...]) -> Tensor:
         """
         Generate a random dropout mask with inverted scaling.
 
@@ -700,7 +709,7 @@ class Dropout(Layer):
         return Tensor(binary_mask * scale)
         ### END SOLUTION
 
-    def forward(self, x, training=True):
+    def forward(self, x: Tensor, training: bool = True) -> Tensor:
         """
         Forward pass through dropout layer.
 
@@ -737,15 +746,15 @@ class Dropout(Layer):
         return x * mask
         ### END SOLUTION
 
-    def __call__(self, x, training=True):
+    def __call__(self, x: Tensor, training: bool = True) -> Tensor:
         """Allows the layer to be called like a function."""
         return self.forward(x, training)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Dropout has no parameters."""
         return []
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Dropout(p={self.p})"
 
 # %% [markdown]
@@ -764,7 +773,7 @@ training-vs-inference distinction without interference from randomness.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-should-apply-dropout", "locked": true, "points": 3}
-def test_unit_should_apply_dropout():
+def test_unit_should_apply_dropout() -> None:
     """🧪 Test _should_apply_dropout decision logic."""
     print("🧪 Unit Test: Dropout Decision Logic...")
 
@@ -820,7 +829,7 @@ mask:     [2.0,  0.0,  2.0,  0.0 ]   ← kept values are 2.0, not 1.0
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-generate-dropout-mask", "locked": true, "points": 3}
-def test_unit_generate_dropout_mask():
+def test_unit_generate_dropout_mask() -> None:
     """🧪 Test _generate_dropout_mask output properties."""
     print("🧪 Unit Test: Dropout Mask Generation...")
 
@@ -883,6 +892,20 @@ This is TinyTorch's equivalent of PyTorch's nn.Sequential - simpler but same ide
 # %% nbgrader={"grade": false, "grade_id": "sequential", "solution": false}
 #| export
 class Sequential:
+    """Container that chains layers together sequentially.
+
+    After you understand explicit layer composition, Sequential provides
+    a convenient way to bundle layers together.
+
+    Example:
+        >>> model = Sequential(
+        ...     Linear(784, 128),
+        ...     ReLU(),
+        ...     Linear(128, 10)
+        ... )
+        >>> output = model(input_tensor)
+        >>> params = model.parameters()  # All parameters from all layers
+    """
     """
     Container that chains layers together sequentially.
 
@@ -899,32 +922,32 @@ class Sequential:
         >>> params = model.parameters()  # All parameters from all layers
     """
 
-    def __init__(self, *layers):
+    def __init__(self, *layers: Layer) -> None:
         """Initialize with layers to chain together."""
         # Accept both Sequential(layer1, layer2) and Sequential([layer1, layer2])
         if len(layers) == 1 and isinstance(layers[0], (list, tuple)):
-            self.layers = list(layers[0])
+            self.layers = list(layers[0])  # type: ignore[arg-type]
         else:
             self.layers = list(layers)
 
-    def forward(self, x):
+    def forward(self, x: Tensor) -> Tensor:
         """Forward pass through all layers sequentially."""
         for layer in self.layers:
             x = layer.forward(x)
         return x
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         """Allow model to be called like a function."""
         return self.forward(x)
 
-    def parameters(self):
+    def parameters(self) -> List[Tensor]:
         """Collect all parameters from all layers."""
-        params = []
+        params: List[Tensor] = []
         for layer in self.layers:
             params.extend(layer.parameters())
         return params
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         layer_reprs = ", ".join(repr(layer) for layer in self.layers)
         return f"Sequential({layer_reprs})"
 
@@ -1115,7 +1138,7 @@ Layer Operation Complexity:
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-layer-memory", "solution": true}
-def analyze_layer_memory():
+def analyze_layer_memory() -> None:
     """📊 Analyze memory usage patterns in layer operations."""
     print("📊 Analyzing Layer Memory Usage...")
 
@@ -1158,7 +1181,7 @@ if __name__ == "__main__":
     analyze_layer_memory()
 
 # %% nbgrader={"grade": false, "grade_id": "analyze-layer-performance", "solution": true}
-def analyze_layer_performance():
+def analyze_layer_performance() -> None:
     """📊 Analyze computational complexity of layer operations."""
     import time
 
@@ -1222,7 +1245,7 @@ Final validation that everything works together correctly.
 
 
 # %% nbgrader={"grade": true, "grade_id": "module-integration", "locked": true, "points": 20}
-def test_module():
+def test_module() -> None:
     """🧪 Module Test: Complete Integration
 
     Comprehensive test of entire module functionality.
@@ -1401,7 +1424,7 @@ Combined with your layers, this creates the foundation for learning.
 """
 
 # %%
-def demo_layers():
+def demo_layers() -> None:
     """🎯 See how layers transform shapes."""
     print("🎯 AHA MOMENT: Layers Transform Shapes")
     print("=" * 45)
