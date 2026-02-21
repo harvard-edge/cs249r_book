@@ -251,7 +251,7 @@ class ComputeDataGap:
     check(gap_ratio >= 1.0, f"Compute ({tokens_capacity:.1e}) is less than Data ({tokens_available:.1e}). No Data Wall.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    llama_params_str = fmt(model.parameters.to(Bparam).magnitude, precision=0, commas=False) + "B"
+    llama_params_str = fmt(model.parameters.m_as(Bparam), precision=0, commas=False) + "B"
     h100_count_str = fmt(h100_count, precision=0, commas=True)
     tokens_capacity_str = fmt(tokens_capacity / TRILLION, precision=0, commas=False) + "T"
     tokens_available_str = fmt(tokens_available / TRILLION, precision=0, commas=False) + "T"
@@ -531,44 +531,62 @@ To make the Information-Compute Ratio concrete, consider how coreset selection i
 from mlsys.constants import RESNET50_FLOPs, GFLOPs, IMAGENET_IMAGES
 from mlsys.formatting import fmt, check
 
-# --- Inputs (ImageNet/ResNet-50 benchmark scenario) ---
-imagenet_size_value = Models.Vision.ResNet50.parameters.magnitude # Using parameters as proxy for N if not in Twin
-# Better: check constants for IMAGENET_IMAGES
-from mlsys.constants import IMAGENET_IMAGES
-imagenet_size_value = IMAGENET_IMAGES.magnitude
+class IcrCoresetComparison:
+    """Compare learning-per-FLOP for random sampling vs. coreset selection."""
 
-acc_gain_random_value = 5.0                                     # % accuracy per epoch
-acc_gain_coreset_value = 4.5                                    # % with 50% coreset
-coreset_fraction_value = 0.5                                    # keep 50% of data
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    imagenet_size_value = IMAGENET_IMAGES.m_as('count')
+    acc_gain_random_value = 5.0                                 # % accuracy per epoch
+    acc_gain_coreset_value = 4.5                                # % with 50% coreset
+    coreset_fraction_value = 0.5                                # keep 50% of data
 
-# --- Process (compute ICR for both strategies using Models Twin) ---
-m_resnet = Models.ResNet50
-resnet50_fwd_gflops_value = m_resnet.inference_flops.to(GFLOPs).magnitude
-resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 2).to(GFLOPs).magnitude
-full_epoch_flops_value = imagenet_size_value * resnet50_fwdbwd_gflops_value * BILLION
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    m_resnet = Models.ResNet50
+    resnet50_fwd_gflops_value = m_resnet.inference_flops.m_as(GFLOPs)
+    resnet50_fwdbwd_gflops_value = (m_resnet.inference_flops * 2).m_as(GFLOPs)
+    full_epoch_flops_value = imagenet_size_value * resnet50_fwdbwd_gflops_value * BILLION
 
-icr_random_value = acc_gain_random_value / full_epoch_flops_value
+    icr_random_value = acc_gain_random_value / full_epoch_flops_value
 
-coreset_size_value = int(imagenet_size_value * coreset_fraction_value)
-coreset_flops_value = coreset_size_value * resnet50_fwdbwd_gflops_value * BILLION
-icr_coreset_value = acc_gain_coreset_value / coreset_flops_value
-icr_ratio_value = icr_coreset_value / icr_random_value
-acc_diff_value = acc_gain_random_value - acc_gain_coreset_value
+    coreset_size_value = int(imagenet_size_value * coreset_fraction_value)
+    coreset_flops_value = coreset_size_value * resnet50_fwdbwd_gflops_value * BILLION
+    icr_coreset_value = acc_gain_coreset_value / coreset_flops_value
+    icr_ratio_value = icr_coreset_value / icr_random_value
+    acc_diff_value = acc_gain_random_value - acc_gain_coreset_value
 
-# --- Outputs (formatted strings for prose) ---
-resnet50_fwd_gflops_str = fmt(m_resnet.inference_flops.to(GFLOPs), precision=1)           # e.g. "8.2"
-resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 2).to(GFLOPs), precision=1)  # e.g. "16.4"
-full_epoch_flops_str = f"{full_epoch_flops_value:.2e}"          # e.g. "2.10e+19"
-icr_random_str = f"{icr_random_value:.1e}"                      # e.g. "2.4e-19"
-imagenet_size_str = fmt(imagenet_size_value / MILLION, precision=2) + "M"           # e.g. "1.28M"
-coreset_size_str = f"{coreset_size_value / 1000:.0f}K"          # e.g. "640K"
-coreset_flops_str = f"{coreset_flops_value:.1e}"                # e.g. "1.05e+19"
-icr_coreset_str = f"{icr_coreset_value:.1e}"                    # e.g. "4.3e-19"
-icr_ratio_str = fmt(icr_ratio_value, precision=1, commas=False) # e.g. "1.8"
-acc_gain_random_str = fmt(acc_gain_random_value, precision=1, commas=False)     # e.g. "5.0"
-acc_gain_coreset_str = fmt(acc_gain_coreset_value, precision=1, commas=False)   # e.g. "4.5"
-acc_diff_str = fmt(acc_diff_value, precision=1, commas=False)   # e.g. "0.5"
-coreset_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False)  # e.g. "50"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(icr_ratio_value > 1.0, f"Coreset ICR ({icr_ratio_value:.2f}) should exceed random ICR.")
+    check(coreset_fraction_value < 1.0, "Coreset fraction must be less than 1.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    resnet50_fwd_gflops_str = fmt(m_resnet.inference_flops.to(GFLOPs), precision=1)
+    resnet50_fwdbwd_gflops_str = fmt((m_resnet.inference_flops * 2).to(GFLOPs), precision=1)
+    full_epoch_flops_str = f"{full_epoch_flops_value:.2e}"
+    icr_random_str = f"{icr_random_value:.1e}"
+    imagenet_size_str = fmt(imagenet_size_value / MILLION, precision=2) + "M"
+    coreset_size_str = f"{coreset_size_value / 1000:.0f}K"
+    coreset_flops_str = f"{coreset_flops_value:.1e}"
+    icr_coreset_str = f"{icr_coreset_value:.1e}"
+    icr_ratio_str = fmt(icr_ratio_value, precision=1, commas=False)
+    acc_gain_random_str = fmt(acc_gain_random_value, precision=1, commas=False)
+    acc_gain_coreset_str = fmt(acc_gain_coreset_value, precision=1, commas=False)
+    acc_diff_str = fmt(acc_diff_value, precision=1, commas=False)
+    coreset_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+resnet50_fwd_gflops_str = IcrCoresetComparison.resnet50_fwd_gflops_str
+resnet50_fwdbwd_gflops_str = IcrCoresetComparison.resnet50_fwdbwd_gflops_str
+full_epoch_flops_str = IcrCoresetComparison.full_epoch_flops_str
+icr_random_str = IcrCoresetComparison.icr_random_str
+imagenet_size_str = IcrCoresetComparison.imagenet_size_str
+coreset_size_str = IcrCoresetComparison.coreset_size_str
+coreset_flops_str = IcrCoresetComparison.coreset_flops_str
+icr_coreset_str = IcrCoresetComparison.icr_coreset_str
+icr_ratio_str = IcrCoresetComparison.icr_ratio_str
+acc_gain_random_str = IcrCoresetComparison.acc_gain_random_str
+acc_gain_coreset_str = IcrCoresetComparison.acc_gain_coreset_str
+acc_diff_str = IcrCoresetComparison.acc_diff_str
+coreset_pct_str = IcrCoresetComparison.coreset_pct_str
 ```
 
 ::: {.callout-example title="Computing ICR: Coresets"}
@@ -844,19 +862,32 @@ Given these trade-offs, most practitioners find that EL2N with a small proxy mod
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (practical coreset scenario) ---
-n_train_images_value = 1_000_000                                # 1M training images
-coreset_fraction_value = 0.1                                    # keep 10%
-n_epochs_proxy_value = 5                                        # proxy training epochs
+class CoresetPractice:
+    """Practical 10× coreset workflow: 5-epoch proxy selects 100K from 1M images."""
 
-# --- Process ---
-n_coreset_value = int(n_train_images_value * coreset_fraction_value)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_train_images_value = 1_000_000                            # 1M training images
+    coreset_fraction_value = 0.1                                # keep 10%
+    n_epochs_proxy_value = 5                                    # proxy training epochs
 
-# --- Outputs (formatted strings for prose) ---
-n_train_images_str = fmt(n_train_images_value / MILLION, precision=0) + " million"  # e.g. "1 million"
-coreset_fraction_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False)  # e.g. "10"
-n_coreset_str = fmt(n_coreset_value, precision=0, commas=True)  # e.g. "100,000"
-n_epochs_proxy_str = fmt(n_epochs_proxy_value, precision=0, commas=False)  # e.g. "5"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    n_coreset_value = int(n_train_images_value * coreset_fraction_value)
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(n_coreset_value > 0, "Coreset must be non-empty.")
+    check(coreset_fraction_value < 1.0, "Coreset fraction must be less than 1.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    n_train_images_str = fmt(n_train_images_value / MILLION, precision=0) + " million"
+    coreset_fraction_pct_str = fmt(coreset_fraction_value * 100, precision=0, commas=False)
+    n_coreset_str = fmt(n_coreset_value, precision=0, commas=True)
+    n_epochs_proxy_str = fmt(n_epochs_proxy_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_train_images_str = CoresetPractice.n_train_images_str
+coreset_fraction_pct_str = CoresetPractice.coreset_fraction_pct_str
+n_coreset_str = CoresetPractice.n_coreset_str
+n_epochs_proxy_str = CoresetPractice.n_epochs_proxy_str
 ```
 
 ::: {.callout-example title="Coreset Selection in Practice"}
@@ -1019,30 +1050,52 @@ From a systems perspective, curriculum learning improves convergence by reducing
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (benchmark results from literature) ---
-cifar10_baseline_epochs = 150                                   # standard training
-cifar10_curriculum_epochs = 115                                 # with curriculum
+class CurriculumBenchmarks:
+    """Curriculum learning convergence speedups across CIFAR-10, CIFAR-100, ImageNet, MentorNet."""
 
-cifar100_baseline_epochs = 220                                  # standard training
-cifar100_curriculum_epochs = 180                                # with curriculum
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cifar10_baseline_epochs = 150
+    cifar10_curriculum_epochs = 115
 
-imagenet_baseline_epochs = 90                                   # standard training
-imagenet_curriculum_epochs = 80                                 # with curriculum
+    cifar100_baseline_epochs = 220
+    cifar100_curriculum_epochs = 180
 
-mentornet_baseline_epochs = 90                                  # noisy labels
-mentornet_curriculum_epochs = 70                                # with MentorNet
+    imagenet_baseline_epochs = 90
+    imagenet_curriculum_epochs = 80
 
-# --- Process (compute speedup percentages) ---
-cifar10_speedup_pct = (cifar10_baseline_epochs - cifar10_curriculum_epochs) / cifar10_baseline_epochs * 100
-cifar100_speedup_pct = (cifar100_baseline_epochs - cifar100_curriculum_epochs) / cifar100_baseline_epochs * 100
-imagenet_speedup_pct = (imagenet_baseline_epochs - imagenet_curriculum_epochs) / imagenet_baseline_epochs * 100
-mentornet_speedup_pct = (mentornet_baseline_epochs - mentornet_curriculum_epochs) / mentornet_baseline_epochs * 100
+    mentornet_baseline_epochs = 90
+    mentornet_curriculum_epochs = 70
 
-# --- Outputs (formatted strings for table) ---
-cifar10_speedup_str = fmt(cifar10_speedup_pct, precision=0, commas=False)   # e.g. "23"
-cifar100_speedup_str = fmt(cifar100_speedup_pct, precision=0, commas=False) # e.g. "18"
-imagenet_speedup_str = fmt(imagenet_speedup_pct, precision=0, commas=False) # e.g. "11"
-mentornet_speedup_str = fmt(mentornet_speedup_pct, precision=0, commas=False)  # e.g. "22"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cifar10_speedup_pct = (cifar10_baseline_epochs - cifar10_curriculum_epochs) / cifar10_baseline_epochs * 100
+    cifar100_speedup_pct = (cifar100_baseline_epochs - cifar100_curriculum_epochs) / cifar100_baseline_epochs * 100
+    imagenet_speedup_pct = (imagenet_baseline_epochs - imagenet_curriculum_epochs) / imagenet_baseline_epochs * 100
+    mentornet_speedup_pct = (mentornet_baseline_epochs - mentornet_curriculum_epochs) / mentornet_baseline_epochs * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(cifar10_speedup_pct > imagenet_speedup_pct, "CIFAR-10 (more redundant) should show larger speedup than ImageNet.")
+    check(all(p > 0 for p in [cifar10_speedup_pct, cifar100_speedup_pct, imagenet_speedup_pct, mentornet_speedup_pct]),
+          "All speedups must be positive.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cifar10_speedup_str = fmt(cifar10_speedup_pct, precision=0, commas=False)
+    cifar100_speedup_str = fmt(cifar100_speedup_pct, precision=0, commas=False)
+    imagenet_speedup_str = fmt(imagenet_speedup_pct, precision=0, commas=False)
+    mentornet_speedup_str = fmt(mentornet_speedup_pct, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cifar10_baseline_epochs = CurriculumBenchmarks.cifar10_baseline_epochs
+cifar10_curriculum_epochs = CurriculumBenchmarks.cifar10_curriculum_epochs
+cifar100_baseline_epochs = CurriculumBenchmarks.cifar100_baseline_epochs
+cifar100_curriculum_epochs = CurriculumBenchmarks.cifar100_curriculum_epochs
+imagenet_baseline_epochs = CurriculumBenchmarks.imagenet_baseline_epochs
+imagenet_curriculum_epochs = CurriculumBenchmarks.imagenet_curriculum_epochs
+mentornet_baseline_epochs = CurriculumBenchmarks.mentornet_baseline_epochs
+mentornet_curriculum_epochs = CurriculumBenchmarks.mentornet_curriculum_epochs
+cifar10_speedup_str = CurriculumBenchmarks.cifar10_speedup_str
+cifar100_speedup_str = CurriculumBenchmarks.cifar100_speedup_str
+imagenet_speedup_str = CurriculumBenchmarks.imagenet_speedup_str
+mentornet_speedup_str = CurriculumBenchmarks.mentornet_speedup_str
 ```
 
 Observe the varying convergence gains in @tbl-curriculum-benchmarks:
@@ -1150,37 +1203,57 @@ The economic implications are substantial. In production settings, labeling cost
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (medical imaging scenario) ---
-n_unlabeled_value = 1_000_000                                   # scans in pool
-cost_per_label_value = 5.00                                     # $/label (specialist)
-budget_value = 500_000                                          # $ available
-deadline_months_value = 1                                       # time constraint
+class ActiveLearningRoi:
+    """Medical imaging active learning: 20× speedup, $4.75M savings vs. naive labeling."""
 
-# --- Process (compare naive vs active learning) ---
-cost_all_value = n_unlabeled_value * cost_per_label_value
-n_random_value = int(budget_value / cost_per_label_value)
-n_random_pct_value = n_random_value / n_unlabeled_value * 100
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_unlabeled_value = 1_000_000                               # scans in pool
+    cost_per_label_value = 5.00                                 # $/label (specialist)
+    budget_value = 500_000                                      # $ available
+    deadline_months_value = 1                                   # time constraint
+    n_active_value = 50_000                                     # samples needed with AL
 
-n_active_value = 50_000                                         # samples needed with AL
-cost_active_value = n_active_value * cost_per_label_value
-cost_active_pct_value = (budget_value - cost_active_value) / budget_value * 100
-speedup_value = n_unlabeled_value / n_active_value
-cost_saving_value = cost_all_value - cost_active_value
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cost_all_value = n_unlabeled_value * cost_per_label_value
+    n_random_value = int(budget_value / cost_per_label_value)
+    n_random_pct_value = n_random_value / n_unlabeled_value * 100
 
-# --- Outputs (formatted strings for prose) ---
-n_unlabeled_str = fmt(n_unlabeled_value / MILLION, precision=0) + " Million"    # e.g. "1 Million"
-cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)       # e.g. "5.00"
-budget_str = fmt(budget_value, precision=0, commas=True)        # e.g. "500,000"
-cost_all_str = fmt(cost_all_value, precision=0, commas=True)    # e.g. "5,000,000"
-n_random_str = fmt(n_random_value, precision=0, commas=True)    # e.g. "100,000"
-n_random_pct_str = fmt(n_random_pct_value, precision=0, commas=False)           # e.g. "10"
+    cost_active_value = n_active_value * cost_per_label_value
+    cost_active_pct_value = (budget_value - cost_active_value) / budget_value * 100
+    speedup_value = n_unlabeled_value / n_active_value
+    cost_saving_value = cost_all_value - cost_active_value
 
-n_active_str = fmt(n_active_value, precision=0, commas=True)    # e.g. "50,000"
-cost_active_str = fmt(cost_active_value, precision=0, commas=True)              # e.g. "250,000"
-cost_active_pct_str = fmt(cost_active_pct_value, precision=0, commas=False)     # e.g. "50"
-speedup_str = fmt(speedup_value, precision=0, commas=False)     # e.g. "20"
-cost_saving_str = fmt(cost_saving_value / MILLION, precision=2) + " Million"    # e.g. "4.75 Million"
-deadline_months_str = fmt(deadline_months_value, precision=0, commas=False)     # e.g. "1"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(cost_active_value < budget_value, "Active learning cost must be within budget.")
+    check(speedup_value > 1.0, "Active learning must require fewer labels than naive labeling.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    n_unlabeled_str = fmt(n_unlabeled_value / MILLION, precision=0) + " Million"
+    cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)
+    budget_str = fmt(budget_value, precision=0, commas=True)
+    cost_all_str = fmt(cost_all_value, precision=0, commas=True)
+    n_random_str = fmt(n_random_value, precision=0, commas=True)
+    n_random_pct_str = fmt(n_random_pct_value, precision=0, commas=False)
+    n_active_str = fmt(n_active_value, precision=0, commas=True)
+    cost_active_str = fmt(cost_active_value, precision=0, commas=True)
+    cost_active_pct_str = fmt(cost_active_pct_value, precision=0, commas=False)
+    speedup_str = fmt(speedup_value, precision=0, commas=False)
+    cost_saving_str = fmt(cost_saving_value / MILLION, precision=2) + " Million"
+    deadline_months_str = fmt(deadline_months_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_unlabeled_str = ActiveLearningRoi.n_unlabeled_str
+cost_per_label_str = ActiveLearningRoi.cost_per_label_str
+budget_str = ActiveLearningRoi.budget_str
+cost_all_str = ActiveLearningRoi.cost_all_str
+n_random_str = ActiveLearningRoi.n_random_str
+n_random_pct_str = ActiveLearningRoi.n_random_pct_str
+n_active_str = ActiveLearningRoi.n_active_str
+cost_active_str = ActiveLearningRoi.cost_active_str
+cost_active_pct_str = ActiveLearningRoi.cost_active_pct_str
+speedup_str = ActiveLearningRoi.speedup_str
+cost_saving_str = ActiveLearningRoi.cost_saving_str
+deadline_months_str = ActiveLearningRoi.deadline_months_str
 ```
 
 ::: {.callout-notebook title="The Active Learning ROI"}
@@ -1300,57 +1373,84 @@ The systems trade-off in semi-supervised learning is straightforward: it typical
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (FixMatch benchmark results) ---
-cifar10_full_labels = 50000                                     # CIFAR-10 full size
-cifar10_full_acc = 96.1                                         # % supervised accuracy
+class FixmatchLabelEfficiency:
+    """FixMatch CIFAR-10: 200× label reduction for ~8× total cost savings."""
 
-cifar10_fixmatch_4k_labels = 4000                               # 8% of data
-cifar10_fixmatch_4k_acc = 95.7                                  # % FixMatch accuracy
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cifar10_full_labels = 50000
+    cifar10_full_acc = 96.1
 
-cifar10_fixmatch_250_labels = 250                               # 0.5% of data
-cifar10_fixmatch_250_acc = 94.9                                 # % FixMatch accuracy
+    cifar10_fixmatch_4k_labels = 4000
+    cifar10_fixmatch_4k_acc = 95.7
 
-cifar10_fixmatch_40_labels = 40                                 # 0.08% of data
-cifar10_fixmatch_40_acc = 88.6                                  # % FixMatch accuracy
+    cifar10_fixmatch_250_labels = 250
+    cifar10_fixmatch_250_acc = 94.9
 
-# --- Inputs (cost assumptions) ---
-cost_label = 1                                                  # $/label
-cost_gpu_hr = 0.50                                              # $/GPU-hour
+    cifar10_fixmatch_40_labels = 40
+    cifar10_fixmatch_40_acc = 88.6
 
-supervised_labels = 4000                                        # baseline comparison
-supervised_compute_cost = 50                                    # $ compute cost
+    cost_label = 1                                              # $/label
+    cost_gpu_hr = 0.50                                          # $/GPU-hour
 
-fixmatch_labels = 250                                           # semi-supervised
-fixmatch_compute_cost = 250                                     # $ (5x more training)
+    supervised_labels = 4000
+    supervised_compute_cost = 50
 
-# --- Process (compute efficiencies and costs) ---
-cifar10_fixmatch_4k_eff = cifar10_full_labels / cifar10_fixmatch_4k_labels
-cifar10_fixmatch_250_eff = cifar10_full_labels / cifar10_fixmatch_250_labels
-cifar10_fixmatch_40_eff = cifar10_full_labels / cifar10_fixmatch_40_labels
+    fixmatch_labels = 250
+    fixmatch_compute_cost = 250                                 # 5x more training
 
-supervised_label_cost = supervised_labels * cost_label
-supervised_total = supervised_label_cost + supervised_compute_cost
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cifar10_fixmatch_4k_eff = cifar10_full_labels / cifar10_fixmatch_4k_labels
+    cifar10_fixmatch_250_eff = cifar10_full_labels / cifar10_fixmatch_250_labels
+    cifar10_fixmatch_40_eff = cifar10_full_labels / cifar10_fixmatch_40_labels
 
-fixmatch_label_cost = fixmatch_labels * cost_label
-fixmatch_total = fixmatch_label_cost + fixmatch_compute_cost
+    supervised_label_cost = supervised_labels * cost_label
+    supervised_total = supervised_label_cost + supervised_compute_cost
 
-fixmatch_compute_multiplier_value = fixmatch_compute_cost / supervised_compute_cost
-cost_reduction = supervised_total / fixmatch_total
-acc_loss = cifar10_full_acc - cifar10_fixmatch_250_acc
+    fixmatch_label_cost = fixmatch_labels * cost_label
+    fixmatch_total = fixmatch_label_cost + fixmatch_compute_cost
 
-# --- Outputs (formatted strings for table and prose) ---
-supervised_label_cost_str = fmt(supervised_label_cost, precision=0, commas=True)       # e.g. "4,000"
-supervised_total_str = fmt(supervised_total, precision=0, commas=True)                 # e.g. "4,050"
-fixmatch_label_cost_str = fmt(fixmatch_label_cost, precision=0, commas=True)           # e.g. "250"
-fixmatch_total_str = fmt(fixmatch_total, precision=0, commas=True)                     # e.g. "500"
-cost_reduction_str = fmt(cost_reduction, precision=0, commas=False)                    # e.g. "8"
-acc_loss_str = fmt(acc_loss, precision=1, commas=False)                                # e.g. "1.2"
-fixmatch_compute_multiplier_str = fmt(fixmatch_compute_multiplier_value, precision=0, commas=False)  # e.g. "5"
+    fixmatch_compute_multiplier_value = fixmatch_compute_cost / supervised_compute_cost
+    cost_reduction = supervised_total / fixmatch_total
+    acc_loss = cifar10_full_acc - cifar10_fixmatch_250_acc
 
-cifar10_full_labels_str = fmt(cifar10_full_labels, precision=0, commas=True)           # e.g. "50,000"
-cifar10_fixmatch_4k_labels_str = fmt(cifar10_fixmatch_4k_labels, precision=0, commas=True)    # e.g. "4,000"
-cifar10_fixmatch_250_labels_str = fmt(cifar10_fixmatch_250_labels, precision=0, commas=True)  # e.g. "250"
-cifar10_fixmatch_40_labels_str = fmt(cifar10_fixmatch_40_labels, precision=0, commas=True)    # e.g. "40"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(cost_reduction > 1.0, "FixMatch must be cheaper than supervised baseline.")
+    check(cifar10_fixmatch_250_eff > 1.0, "FixMatch must require fewer labels than full supervision.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    supervised_label_cost_str = fmt(supervised_label_cost, precision=0, commas=True)
+    supervised_total_str = fmt(supervised_total, precision=0, commas=True)
+    fixmatch_label_cost_str = fmt(fixmatch_label_cost, precision=0, commas=True)
+    fixmatch_total_str = fmt(fixmatch_total, precision=0, commas=True)
+    cost_reduction_str = fmt(cost_reduction, precision=0, commas=False)
+    acc_loss_str = fmt(acc_loss, precision=1, commas=False)
+    fixmatch_compute_multiplier_str = fmt(fixmatch_compute_multiplier_value, precision=0, commas=False)
+    cifar10_full_labels_str = fmt(cifar10_full_labels, precision=0, commas=True)
+    cifar10_fixmatch_4k_labels_str = fmt(cifar10_fixmatch_4k_labels, precision=0, commas=True)
+    cifar10_fixmatch_250_labels_str = fmt(cifar10_fixmatch_250_labels, precision=0, commas=True)
+    cifar10_fixmatch_40_labels_str = fmt(cifar10_fixmatch_40_labels, precision=0, commas=True)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+supervised_label_cost_str = FixmatchLabelEfficiency.supervised_label_cost_str
+supervised_total_str = FixmatchLabelEfficiency.supervised_total_str
+supervised_compute_cost = FixmatchLabelEfficiency.supervised_compute_cost
+fixmatch_label_cost_str = FixmatchLabelEfficiency.fixmatch_label_cost_str
+fixmatch_total_str = FixmatchLabelEfficiency.fixmatch_total_str
+fixmatch_compute_cost = FixmatchLabelEfficiency.fixmatch_compute_cost
+cost_reduction_str = FixmatchLabelEfficiency.cost_reduction_str
+acc_loss_str = FixmatchLabelEfficiency.acc_loss_str
+fixmatch_compute_multiplier_str = FixmatchLabelEfficiency.fixmatch_compute_multiplier_str
+cifar10_full_acc = FixmatchLabelEfficiency.cifar10_full_acc
+cifar10_fixmatch_250_acc = FixmatchLabelEfficiency.cifar10_fixmatch_250_acc
+cifar10_fixmatch_4k_acc = FixmatchLabelEfficiency.cifar10_fixmatch_4k_acc
+cifar10_fixmatch_40_acc = FixmatchLabelEfficiency.cifar10_fixmatch_40_acc
+cifar10_fixmatch_4k_eff = FixmatchLabelEfficiency.cifar10_fixmatch_4k_eff
+cifar10_fixmatch_250_eff = FixmatchLabelEfficiency.cifar10_fixmatch_250_eff
+cifar10_fixmatch_40_eff = FixmatchLabelEfficiency.cifar10_fixmatch_40_eff
+cifar10_full_labels_str = FixmatchLabelEfficiency.cifar10_full_labels_str
+cifar10_fixmatch_4k_labels_str = FixmatchLabelEfficiency.cifar10_fixmatch_4k_labels_str
+cifar10_fixmatch_250_labels_str = FixmatchLabelEfficiency.cifar10_fixmatch_250_labels_str
+cifar10_fixmatch_40_labels_str = FixmatchLabelEfficiency.cifar10_fixmatch_40_labels_str
 ```
 
 ::: {.callout-example title="FixMatch on CIFAR-10"}
@@ -1439,44 +1539,63 @@ To illustrate this economic transformation, consider a company building ten spec
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (cost scenario: 10 classification tasks) ---
-cost_scratch_per_task_value = 1000                              # GPU-hrs per task
-n_tasks_value = 10                                              # number of tasks
-cost_pretrain_value = 10000                                     # GPU-hrs (one-time)
-cost_finetune_value = 50                                        # GPU-hrs per task
+class FoundationCostAmortization:
+    """Foundation model amortization: 10 tasks, 100× label reduction, 20× marginal compute drop."""
 
-labels_per_task_scratch = 100_000                               # labels needed from scratch
-cost_per_label = 1                                              # $/label
-labels_per_task_finetune = 1_000                                # labels for fine-tuning
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cost_scratch_per_task_value = 1000                          # GPU-hrs per task
+    n_tasks_value = 10                                          # number of tasks
+    cost_pretrain_value = 10000                                 # GPU-hrs (one-time)
+    cost_finetune_value = 50                                    # GPU-hrs per task
+    labels_per_task_scratch = 100_000                           # labels from scratch
+    cost_per_label = 1                                          # $/label
+    labels_per_task_finetune = 1_000                            # labels for fine-tuning
 
-# --- Process (compute total costs and reductions) ---
-cost_scratch_total_value = cost_scratch_per_task_value * n_tasks_value
-cost_foundation_total_value = cost_pretrain_value + (cost_finetune_value * n_tasks_value)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cost_scratch_total_value = cost_scratch_per_task_value * n_tasks_value
+    cost_foundation_total_value = cost_pretrain_value + (cost_finetune_value * n_tasks_value)
 
-label_cost_scratch_total = labels_per_task_scratch * cost_per_label * n_tasks_value
-label_cost_finetune_total = labels_per_task_finetune * cost_per_label * n_tasks_value
+    label_cost_scratch_total = labels_per_task_scratch * cost_per_label * n_tasks_value
+    label_cost_finetune_total = labels_per_task_finetune * cost_per_label * n_tasks_value
 
-label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
-marginal_compute_reduction = cost_scratch_per_task_value / cost_finetune_value
-crossover_tasks_value = cost_pretrain_value / (cost_scratch_per_task_value - cost_finetune_value)
+    label_cost_reduction = label_cost_scratch_total / label_cost_finetune_total
+    marginal_compute_reduction = cost_scratch_per_task_value / cost_finetune_value
+    crossover_tasks_value = cost_pretrain_value / (cost_scratch_per_task_value - cost_finetune_value)
 
-# --- Outputs (formatted strings for prose) ---
-total_a_hrs_str = f"{cost_scratch_total_value:,}"               # e.g. "10,000"
-total_b_hrs_str = f"{cost_foundation_total_value:,}"            # e.g. "10,500"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(label_cost_reduction > 1.0, "Fine-tuning must require fewer labels than scratch training.")
+    check(marginal_compute_reduction > 1.0, "Fine-tuning marginal compute must be less than scratch training.")
+    check(crossover_tasks_value > 0, "Crossover must be a positive number of tasks.")
 
-labels_per_task_scratch_str = fmt(labels_per_task_scratch, precision=0, commas=True)    # e.g. "100,000"
-label_cost_scratch_total_str = f"${label_cost_scratch_total / 1_000_000:.0f}M"          # e.g. "$1M"
-cost_scratch_per_task_str = fmt(cost_scratch_per_task_value, precision=0, commas=True)  # e.g. "1,000"
-cost_scratch_total_str = fmt(cost_scratch_total_value, precision=0, commas=True)        # e.g. "10,000"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    total_a_hrs_str = f"{cost_scratch_total_value:,}"
+    total_b_hrs_str = f"{cost_foundation_total_value:,}"
+    labels_per_task_scratch_str = fmt(labels_per_task_scratch, precision=0, commas=True)
+    label_cost_scratch_total_str = f"${label_cost_scratch_total / 1_000_000:.0f}M"
+    cost_scratch_per_task_str = fmt(cost_scratch_per_task_value, precision=0, commas=True)
+    cost_scratch_total_str = fmt(cost_scratch_total_value, precision=0, commas=True)
+    labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas=True)
+    label_cost_finetune_total_str = f"${label_cost_finetune_total / 1_000:.0f}K"
+    cost_finetune_value_str = fmt(cost_finetune_value, precision=0, commas=True)
+    cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True)
+    marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
+    crossover_tasks_str = fmt(crossover_tasks_value, precision=0, commas=False)
+    label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=False)
 
-labels_per_task_finetune_str = fmt(labels_per_task_finetune, precision=0, commas=True)  # e.g. "1,000"
-label_cost_finetune_total_str = f"${label_cost_finetune_total / 1_000:.0f}K"            # e.g. "$10K"
-cost_finetune_value_str = fmt(cost_finetune_value, precision=0, commas=True)            # e.g. "50"
-cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True)            # e.g. "10,000"
-marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)  # e.g. "20"
-crossover_tasks_str = fmt(crossover_tasks_value, precision=0, commas=False)             # e.g. "11"
-
-label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=False)              # e.g. "100"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+total_a_hrs_str = FoundationCostAmortization.total_a_hrs_str
+total_b_hrs_str = FoundationCostAmortization.total_b_hrs_str
+labels_per_task_scratch_str = FoundationCostAmortization.labels_per_task_scratch_str
+label_cost_scratch_total_str = FoundationCostAmortization.label_cost_scratch_total_str
+cost_scratch_per_task_str = FoundationCostAmortization.cost_scratch_per_task_str
+cost_scratch_total_str = FoundationCostAmortization.cost_scratch_total_str
+labels_per_task_finetune_str = FoundationCostAmortization.labels_per_task_finetune_str
+label_cost_finetune_total_str = FoundationCostAmortization.label_cost_finetune_total_str
+cost_finetune_value_str = FoundationCostAmortization.cost_finetune_value_str
+cost_pretrain_value_str = FoundationCostAmortization.cost_pretrain_value_str
+marginal_compute_reduction_str = FoundationCostAmortization.marginal_compute_reduction_str
+crossover_tasks_str = FoundationCostAmortization.crossover_tasks_str
+label_cost_drop_str = FoundationCostAmortization.label_cost_drop_str
 ```
 
 Training each classifier from scratch would require substantial investment in both labeling and compute. With ten tasks each needing `{python} labels_per_task_scratch_str` labels at \$1 per label, the total labeling cost reaches **`{python} label_cost_scratch_total_str`**. The compute burden amounts to `{python} cost_scratch_total_str` GPU-hours across all tasks, with each requiring its own data collection effort. From start to finish, each task takes 6–12 months to complete.
@@ -1504,19 +1623,26 @@ This explains *why* the fine-tuning paradigm dominates production ML. The pre-tr
 # │ Exports: total_a_hrs_str, total_b_hrs_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (same as foundation-cost-calc) ---
-cost_scratch_per_task_value = 1000                              # GPU-hrs per task
-n_tasks_value = 10                                              # number of tasks
-cost_pretrain_value = 10000                                     # GPU-hrs (one-time)
-cost_finetune_value = 50                                        # GPU-hrs per task
+class FoundationAmortizationData:
+    """Figure data: scratch vs. foundation model GPU-hours for 10 tasks."""
 
-# --- Process ---
-cost_scratch_total_value = cost_scratch_per_task_value * n_tasks_value
-cost_foundation_total_value = cost_pretrain_value + (cost_finetune_value * n_tasks_value)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cost_scratch_per_task_value = 1000                          # GPU-hrs per task
+    n_tasks_value = 10                                          # number of tasks
+    cost_pretrain_value = 10000                                 # GPU-hrs (one-time)
+    cost_finetune_value = 50                                    # GPU-hrs per task
 
-# --- Outputs (formatted strings for figure annotations) ---
-total_a_hrs_str = f"{cost_scratch_total_value:,}"               # e.g. "10,000"
-total_b_hrs_str = f"{cost_foundation_total_value:,}"            # e.g. "10,500"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cost_scratch_total_value = cost_scratch_per_task_value * n_tasks_value
+    cost_foundation_total_value = cost_pretrain_value + (cost_finetune_value * n_tasks_value)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    total_a_hrs_str = f"{cost_scratch_total_value:,}"
+    total_b_hrs_str = f"{cost_foundation_total_value:,}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+total_a_hrs_str = FoundationAmortizationData.total_a_hrs_str
+total_b_hrs_str = FoundationAmortizationData.total_b_hrs_str
 ```
 
 Contrast the two bar charts in @fig-amortization-comparison to see this cost structure in action. Training from scratch (left) incurs the full cost for each task independently. The foundation model approach (right) pays a large upfront pre-training cost but then fine-tunes each task at a fraction of the per-task cost.
@@ -1958,55 +2084,81 @@ Here $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the c
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (1M image coreset scenario) ---
-n_images_value = 1_000_000                                      # total images
-n_coreset_value = 100_000                                       # 10% coreset
-n_epochs_value = 100                                            # training epochs
-resnet50_time_per_image_value = 0.01                            # sec/image (full model)
-resnet18_time_per_image_value = 0.002                           # sec/image (proxy)
-trap_sel_hrs_value = 50                                         # hrs for 7B model scoring
+class SelectionInequalityCalc:
+    """1M image scenario: proxy scoring (0.6 hrs) preserves 90% compute savings vs full-model scoring."""
 
-# --- Process (compare options A, B, and trap scenario) ---
-score_a_sec_value = n_images_value * resnet50_time_per_image_value
-train_a_sec_value = n_coreset_value * n_epochs_value * resnet50_time_per_image_value
-total_a_sec_value = score_a_sec_value + train_a_sec_value
-total_a_hrs_value = total_a_sec_value / SEC_PER_HOUR
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_images_value = 1_000_000                                  # total images
+    n_coreset_value = 100_000                                   # 10% coreset
+    n_epochs_value = 100                                        # training epochs
+    resnet50_time_per_image_value = 0.01                        # sec/image (full model)
+    resnet18_time_per_image_value = 0.002                       # sec/image (proxy)
+    trap_sel_hrs_value = 50                                     # hrs for 7B model scoring
 
-score_b_sec_value = n_images_value * resnet18_time_per_image_value
-train_b_sec_value = train_a_sec_value                           # same training time
-total_b_sec_value = score_b_sec_value + train_b_sec_value
-total_b_hrs_value = total_b_sec_value / SEC_PER_HOUR
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    score_a_sec_value = n_images_value * resnet50_time_per_image_value
+    train_a_sec_value = n_coreset_value * n_epochs_value * resnet50_time_per_image_value
+    total_a_sec_value = score_a_sec_value + train_a_sec_value
+    total_a_hrs_value = total_a_sec_value / SEC_PER_HOUR
 
-baseline_sec_value = n_images_value * n_epochs_value * resnet50_time_per_image_value
-baseline_hrs_value = baseline_sec_value / SEC_PER_HOUR
+    score_b_sec_value = n_images_value * resnet18_time_per_image_value
+    train_b_sec_value = train_a_sec_value
+    total_b_sec_value = score_b_sec_value + train_b_sec_value
+    total_b_hrs_value = total_b_sec_value / SEC_PER_HOUR
 
-savings_a_hrs_value = baseline_hrs_value - total_a_hrs_value
-savings_a_pct_value = savings_a_hrs_value / baseline_hrs_value * 100
-savings_b_hrs_value = baseline_hrs_value - total_b_hrs_value
-savings_b_pct_value = savings_b_hrs_value / baseline_hrs_value * 100
-b_beats_a_hrs_value = total_a_hrs_value - total_b_hrs_value
+    baseline_sec_value = n_images_value * n_epochs_value * resnet50_time_per_image_value
+    baseline_hrs_value = baseline_sec_value / SEC_PER_HOUR
 
-trap_total_hrs_value = trap_sel_hrs_value + train_a_sec_value / SEC_PER_HOUR
-trap_overhead_pct_value = trap_sel_hrs_value / (baseline_hrs_value - trap_total_hrs_value) * 100
+    savings_a_hrs_value = baseline_hrs_value - total_a_hrs_value
+    savings_a_pct_value = savings_a_hrs_value / baseline_hrs_value * 100
+    savings_b_hrs_value = baseline_hrs_value - total_b_hrs_value
+    savings_b_pct_value = savings_b_hrs_value / baseline_hrs_value * 100
+    b_beats_a_hrs_value = total_a_hrs_value - total_b_hrs_value
 
-# --- Outputs (formatted strings for prose) ---
-score_a_str = fmt(score_a_sec_value, precision=0, commas=True)          # e.g. "10,000"
-score_a_hrs_str = fmt(score_a_sec_value/SEC_PER_HOUR, precision=1, commas=False)  # e.g. "2.8"
-train_a_str = fmt(train_a_sec_value, precision=0, commas=True)          # e.g. "100,000"
-train_a_hrs_str = fmt(train_a_sec_value/SEC_PER_HOUR, precision=1, commas=False)  # e.g. "27.8"
-total_a_hrs_str = fmt(total_a_hrs_value, precision=1, commas=False)     # e.g. "30.6"
-score_b_str = fmt(score_b_sec_value, precision=0, commas=True)          # e.g. "2,000"
-score_b_hrs_str = fmt(score_b_sec_value/SEC_PER_HOUR, precision=1, commas=False)  # e.g. "0.6"
-total_b_hrs_str = fmt(total_b_hrs_value, precision=1, commas=False)     # e.g. "28.3"
-baseline_str = fmt(baseline_sec_value, precision=0, commas=True)        # e.g. "1,000,000"
-baseline_hrs_str = fmt(baseline_hrs_value, precision=0, commas=False)   # e.g. "278"
-savings_a_str = fmt(savings_a_hrs_value, precision=0, commas=False)     # e.g. "247"
-savings_a_pct_str = fmt(savings_a_pct_value, precision=0, commas=False) # e.g. "89"
-savings_b_str = fmt(savings_b_hrs_value, precision=0, commas=False)     # e.g. "250"
-savings_b_pct_str = fmt(savings_b_pct_value, precision=0, commas=False) # e.g. "90"
-b_beats_a_str = fmt(b_beats_a_hrs_value, precision=1, commas=False)     # e.g. "2.2"
-trap_total_str = fmt(trap_total_hrs_value, precision=1, commas=False)   # e.g. "77.8"
-trap_pct_str = fmt(trap_overhead_pct_value, precision=0, commas=False)  # e.g. "25"
+    trap_total_hrs_value = trap_sel_hrs_value + train_a_sec_value / SEC_PER_HOUR
+    trap_overhead_pct_value = trap_sel_hrs_value / (baseline_hrs_value - trap_total_hrs_value) * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(savings_b_pct_value > savings_a_pct_value, "Proxy selection must outperform full-model selection.")
+    check(total_b_hrs_value < baseline_hrs_value, "Selection + subset training must beat full training.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    score_a_str = fmt(score_a_sec_value, precision=0, commas=True)
+    score_a_hrs_str = fmt(score_a_sec_value / SEC_PER_HOUR, precision=1, commas=False)
+    train_a_str = fmt(train_a_sec_value, precision=0, commas=True)
+    train_a_hrs_str = fmt(train_a_sec_value / SEC_PER_HOUR, precision=1, commas=False)
+    total_a_hrs_str = fmt(total_a_hrs_value, precision=1, commas=False)
+    score_b_str = fmt(score_b_sec_value, precision=0, commas=True)
+    score_b_hrs_str = fmt(score_b_sec_value / SEC_PER_HOUR, precision=1, commas=False)
+    total_b_hrs_str = fmt(total_b_hrs_value, precision=1, commas=False)
+    baseline_str = fmt(baseline_sec_value, precision=0, commas=True)
+    baseline_hrs_str = fmt(baseline_hrs_value, precision=0, commas=False)
+    savings_a_str = fmt(savings_a_hrs_value, precision=0, commas=False)
+    savings_a_pct_str = fmt(savings_a_pct_value, precision=0, commas=False)
+    savings_b_str = fmt(savings_b_hrs_value, precision=0, commas=False)
+    savings_b_pct_str = fmt(savings_b_pct_value, precision=0, commas=False)
+    b_beats_a_str = fmt(b_beats_a_hrs_value, precision=1, commas=False)
+    trap_total_str = fmt(trap_total_hrs_value, precision=1, commas=False)
+    trap_pct_str = fmt(trap_overhead_pct_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+score_a_str = SelectionInequalityCalc.score_a_str
+score_a_hrs_str = SelectionInequalityCalc.score_a_hrs_str
+train_a_str = SelectionInequalityCalc.train_a_str
+train_a_hrs_str = SelectionInequalityCalc.train_a_hrs_str
+total_a_hrs_str = SelectionInequalityCalc.total_a_hrs_str
+score_b_str = SelectionInequalityCalc.score_b_str
+score_b_hrs_str = SelectionInequalityCalc.score_b_hrs_str
+total_b_hrs_str = SelectionInequalityCalc.total_b_hrs_str
+baseline_str = SelectionInequalityCalc.baseline_str
+baseline_hrs_str = SelectionInequalityCalc.baseline_hrs_str
+savings_a_str = SelectionInequalityCalc.savings_a_str
+savings_a_pct_str = SelectionInequalityCalc.savings_a_pct_str
+savings_b_str = SelectionInequalityCalc.savings_b_str
+savings_b_pct_str = SelectionInequalityCalc.savings_b_pct_str
+b_beats_a_str = SelectionInequalityCalc.b_beats_a_str
+trap_total_str = SelectionInequalityCalc.trap_total_str
+trap_pct_str = SelectionInequalityCalc.trap_pct_str
 ```
 
 ::: {.callout-example title="Selection Inequality in Practice"}
@@ -2059,38 +2211,57 @@ The following analysis formalizes the 10% heuristic as *the selection inequality
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (normalized epoch costs) ---
-n_epochs_full = 100                                             # baseline epochs
-subset_fraction = 0.1                                           # keep 10%
-cost_selection_full = 1                                         # 1 epoch equivalent
-proxy_factor = 0.1                                              # proxy is 10x faster
+class SelectionInequalityMath:
+    """Epoch-normalized selection inequality: one-shot (9× speedup) vs. iterative (slower than baseline)."""
 
-# --- Process (compute costs for different strategies) ---
-n_epochs_subset = n_epochs_full * subset_fraction
-cost_total_efficient = cost_selection_full + n_epochs_subset
-speedup_efficient = n_epochs_full / cost_total_efficient
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_epochs_full = 100                                         # baseline epochs
+    subset_fraction = 0.1                                       # keep 10%
+    cost_selection_full = 1                                     # 1 epoch equivalent
+    proxy_factor = 0.1                                          # proxy is 10x faster
 
-cost_selection_iterative = n_epochs_full * 1                    # selection every epoch
-cost_total_iterative = cost_selection_iterative + n_epochs_subset
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    n_epochs_subset = n_epochs_full * subset_fraction
+    cost_total_efficient = cost_selection_full + n_epochs_subset
+    speedup_efficient = n_epochs_full / cost_total_efficient
 
-cost_selection_proxy = cost_selection_full * proxy_factor
-cost_total_proxy = cost_selection_proxy + n_epochs_subset
+    cost_selection_iterative = n_epochs_full * 1               # selection every epoch
+    cost_total_iterative = cost_selection_iterative + n_epochs_subset
 
-# --- Outputs (formatted strings for prose) ---
-n_epochs_full_str = fmt(n_epochs_full, precision=0, commas=False)           # e.g. "100"
-subset_fraction_pct_str = fmt(subset_fraction * 100, precision=0, commas=False)  # e.g. "10"
-cost_selection_full_str = fmt(cost_selection_full, precision=0, commas=False)    # e.g. "1"
-n_epochs_subset_str = fmt(n_epochs_subset, precision=0, commas=False)       # e.g. "10"
-cost_total_efficient_str = fmt(cost_total_efficient, precision=0, commas=False)  # e.g. "11"
-speedup_efficient_str = fmt(speedup_efficient, precision=0, commas=False)   # e.g. "9"
+    cost_selection_proxy = cost_selection_full * proxy_factor
+    cost_total_proxy = cost_selection_proxy + n_epochs_subset
 
-cost_selection_iterative_str = fmt(cost_selection_iterative, precision=0, commas=False)  # e.g. "100"
-cost_total_iterative_str = fmt(cost_total_iterative, precision=0, commas=False)  # e.g. "110"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(speedup_efficient > 1.0, "One-shot selection must yield positive speedup.")
+    check(cost_total_iterative > n_epochs_full, "Iterative selection must be slower than baseline.")
 
-proxy_factor_inv_str = fmt(1/proxy_factor, precision=0, commas=False)       # e.g. "10"
-cost_selection_proxy_str = fmt(cost_selection_proxy, precision=1, commas=False)  # e.g. "0.1"
-cost_total_proxy_str = fmt(cost_total_proxy, precision=1, commas=False)     # e.g. "10.1"
-subset_fraction_str = fmt(subset_fraction, precision=1, commas=False)       # e.g. "0.1"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    n_epochs_full_str = fmt(n_epochs_full, precision=0, commas=False)
+    subset_fraction_pct_str = fmt(subset_fraction * 100, precision=0, commas=False)
+    cost_selection_full_str = fmt(cost_selection_full, precision=0, commas=False)
+    n_epochs_subset_str = fmt(n_epochs_subset, precision=0, commas=False)
+    cost_total_efficient_str = fmt(cost_total_efficient, precision=0, commas=False)
+    speedup_efficient_str = fmt(speedup_efficient, precision=0, commas=False)
+    cost_selection_iterative_str = fmt(cost_selection_iterative, precision=0, commas=False)
+    cost_total_iterative_str = fmt(cost_total_iterative, precision=0, commas=False)
+    proxy_factor_inv_str = fmt(1 / proxy_factor, precision=0, commas=False)
+    cost_selection_proxy_str = fmt(cost_selection_proxy, precision=1, commas=False)
+    cost_total_proxy_str = fmt(cost_total_proxy, precision=1, commas=False)
+    subset_fraction_str = fmt(subset_fraction, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_epochs_full_str = SelectionInequalityMath.n_epochs_full_str
+subset_fraction_pct_str = SelectionInequalityMath.subset_fraction_pct_str
+cost_selection_full_str = SelectionInequalityMath.cost_selection_full_str
+n_epochs_subset_str = SelectionInequalityMath.n_epochs_subset_str
+cost_total_efficient_str = SelectionInequalityMath.cost_total_efficient_str
+speedup_efficient_str = SelectionInequalityMath.speedup_efficient_str
+cost_selection_iterative_str = SelectionInequalityMath.cost_selection_iterative_str
+cost_total_iterative_str = SelectionInequalityMath.cost_total_iterative_str
+proxy_factor_inv_str = SelectionInequalityMath.proxy_factor_inv_str
+cost_selection_proxy_str = SelectionInequalityMath.cost_selection_proxy_str
+cost_total_proxy_str = SelectionInequalityMath.cost_total_proxy_str
+subset_fraction_str = SelectionInequalityMath.subset_fraction_str
 ```
 
 ::: {.callout-notebook title="The Selection Inequality"}
@@ -2233,38 +2404,58 @@ If $R > 1$ (data pipeline is the bottleneck), set echo factor $e \leq R$ to full
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (ImageNet training with heavy augmentation) ---
-pipeline_throughput_value = 300                                 # images/sec (CPU-bound)
-gpu_throughput_value = 800                                      # images/sec (GPU capacity)
-n_epochs_echo_value = 90                                        # standard ImageNet epochs
-imagenet_size_value = 1_280_000                                 # ~1.28M images
-echo_factor_value = 2                                           # repeat each batch 2x
+class DataEchoingRoi:
+    """ImageNet heavy augmentation: echo factor 2 cuts training from 107 hrs to 53 hrs."""
 
-# --- Process (compute throughputs and training times) ---
-ratio_r_value = gpu_throughput_value / pipeline_throughput_value
-gpu_idle_pct_value = (1 - pipeline_throughput_value / gpu_throughput_value) * 100
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    pipeline_throughput_value = 300                             # images/sec (CPU-bound)
+    gpu_throughput_value = 800                                  # images/sec (GPU capacity)
+    n_epochs_echo_value = 90                                    # standard ImageNet epochs
+    imagenet_size_value = 1_280_000                             # ~1.28M images
+    echo_factor_value = 2                                       # repeat each batch 2x
 
-no_echo_throughput_value = pipeline_throughput_value
-no_echo_sec_value = n_epochs_echo_value * imagenet_size_value / no_echo_throughput_value
-no_echo_hrs_value = no_echo_sec_value / SEC_PER_HOUR
-gpu_util_no_echo_value = pipeline_throughput_value / gpu_throughput_value * 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    ratio_r_value = gpu_throughput_value / pipeline_throughput_value
+    gpu_idle_pct_value = (1 - pipeline_throughput_value / gpu_throughput_value) * 100
 
-echo_throughput_value = pipeline_throughput_value * echo_factor_value
-echo_sec_value = n_epochs_echo_value * imagenet_size_value / echo_throughput_value
-echo_hrs_value = echo_sec_value / SEC_PER_HOUR
+    no_echo_throughput_value = pipeline_throughput_value
+    no_echo_sec_value = n_epochs_echo_value * imagenet_size_value / no_echo_throughput_value
+    no_echo_hrs_value = no_echo_sec_value / SEC_PER_HOUR
+    gpu_util_no_echo_value = pipeline_throughput_value / gpu_throughput_value * 100
 
-# --- Outputs (formatted strings for prose) ---
-pipeline_throughput_str = fmt(pipeline_throughput_value, precision=0, commas=False)     # e.g. "300"
-gpu_throughput_str = fmt(gpu_throughput_value, precision=0, commas=False)               # e.g. "800"
-pipeline_ratio_str = fmt(ratio_r_value, precision=2, commas=False)  # e.g. "2.67"
-idle_pct_str = fmt(gpu_idle_pct_value, precision=0, commas=False)                       # e.g. "63"
-no_echo_sec_str = fmt(no_echo_sec_value, precision=0, commas=True)                      # e.g. "384,000"
-no_echo_hrs_str = fmt(no_echo_hrs_value, precision=0, commas=False)                     # e.g. "107"
-gpu_util_str = fmt(gpu_util_no_echo_value, precision=0, commas=False)                   # e.g. "38"
-echo_sec_str = fmt(echo_sec_value, precision=0, commas=True)    # e.g. "192,000"
-echo_hrs_str = fmt(echo_hrs_value, precision=0, commas=False)   # e.g. "53"
-echo_factor_str = fmt(echo_factor_value, precision=0, commas=False)                     # e.g. "2"
-effective_throughput_str = fmt(echo_throughput_value, precision=0, commas=False)        # e.g. "600"
+    echo_throughput_value = pipeline_throughput_value * echo_factor_value
+    echo_sec_value = n_epochs_echo_value * imagenet_size_value / echo_throughput_value
+    echo_hrs_value = echo_sec_value / SEC_PER_HOUR
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(ratio_r_value > 1.0, "Pipeline must be slower than GPU for echoing to help.")
+    check(echo_hrs_value < no_echo_hrs_value, "Echoing must reduce training time.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    pipeline_throughput_str = fmt(pipeline_throughput_value, precision=0, commas=False)
+    gpu_throughput_str = fmt(gpu_throughput_value, precision=0, commas=False)
+    pipeline_ratio_str = fmt(ratio_r_value, precision=2, commas=False)
+    idle_pct_str = fmt(gpu_idle_pct_value, precision=0, commas=False)
+    no_echo_sec_str = fmt(no_echo_sec_value, precision=0, commas=True)
+    no_echo_hrs_str = fmt(no_echo_hrs_value, precision=0, commas=False)
+    gpu_util_str = fmt(gpu_util_no_echo_value, precision=0, commas=False)
+    echo_sec_str = fmt(echo_sec_value, precision=0, commas=True)
+    echo_hrs_str = fmt(echo_hrs_value, precision=0, commas=False)
+    echo_factor_str = fmt(echo_factor_value, precision=0, commas=False)
+    effective_throughput_str = fmt(echo_throughput_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+pipeline_throughput_str = DataEchoingRoi.pipeline_throughput_str
+gpu_throughput_str = DataEchoingRoi.gpu_throughput_str
+pipeline_ratio_str = DataEchoingRoi.pipeline_ratio_str
+idle_pct_str = DataEchoingRoi.idle_pct_str
+no_echo_sec_str = DataEchoingRoi.no_echo_sec_str
+no_echo_hrs_str = DataEchoingRoi.no_echo_hrs_str
+gpu_util_str = DataEchoingRoi.gpu_util_str
+echo_sec_str = DataEchoingRoi.echo_sec_str
+echo_hrs_str = DataEchoingRoi.echo_hrs_str
+echo_factor_str = DataEchoingRoi.echo_factor_str
+effective_throughput_str = DataEchoingRoi.effective_throughput_str
 ```
 
 ::: {.callout-example title="Worked Example: Data Echoing ROI"}
@@ -2350,38 +2541,57 @@ For a concrete example, consider training a vision model:
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (ImageNet training cost scenario) ---
-c_raw_value = 50000                                             # $ for licensed dataset
-n_labels_value = 1_200_000                                      # images to label
-cost_per_label_value = 0.05                                     # $/label (crowd)
-c_store_value = 200                                             # $ storage (150GB × 12mo)
-c_train_value = 25000                                           # $ GPU compute
+class CostBreakdown:
+    """ImageNet-scale training cost breakdown: data costs (~81%) dominate compute (~19%)."""
 
-# --- Process (compute totals and percentages) ---
-c_label_value = n_labels_value * cost_per_label_value
-c_total_value = c_raw_value + c_label_value + c_store_value + c_train_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    c_raw_value = 50000                                         # $ for licensed dataset
+    n_labels_value = 1_200_000                                  # images to label
+    cost_per_label_value = 0.05                                 # $/label (crowd)
+    c_store_value = 200                                         # $ storage (150GB × 12mo)
+    c_train_value = 25000                                       # $ GPU compute
+    storage_gb = 150
+    storage_months = 12
+    train_epochs = 100
+    train_gpus = 8
+    train_hours = 24
 
-p_data_value = (c_raw_value + c_label_value + c_store_value) / c_total_value * 100
-p_compute_value = c_train_value / c_total_value * 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    c_label_value = n_labels_value * cost_per_label_value
+    c_total_value = c_raw_value + c_label_value + c_store_value + c_train_value
 
-# --- Outputs (formatted strings for table) ---
-c_raw_str = f"${c_raw_value:,}"                                 # e.g. "$50,000"
-c_label_str = f"${c_label_value:,.0f}"                          # e.g. "$60,000"
-c_store_str = f"${c_store_value}"                               # e.g. "$200"
-c_train_str = f"${c_train_value:,}"                             # e.g. "$25,000"
-c_total_str = f"${c_total_value:,.0f}"                          # e.g. "$135,200"
-p_data_str = f"{p_data_value:.0f}%"                             # e.g. "81%"
-p_compute_str = f"{p_compute_value:.0f}%"                       # e.g. "19%"
+    p_data_value = (c_raw_value + c_label_value + c_store_value) / c_total_value * 100
+    p_compute_value = c_train_value / c_total_value * 100
 
-n_labels_str = fmt(n_labels_value / MILLION, precision=1) + "M" # e.g. "1.2M"
-cb_cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)         # e.g. "0.05"
-storage_gb = 150                                                # GB stored
-storage_months = 12                                             # months
-storage_str = f"{storage_gb} GB × {storage_months} months"      # e.g. "150 GB × 12 months"
-train_epochs = 100                                              # training epochs
-train_gpus = 8                                                  # A100 GPUs
-train_hours = 24                                                # hours
-train_desc_str = f"{train_epochs} epochs × {train_gpus} A100s × {train_hours} h"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(p_data_value > p_compute_value, "Data costs must dominate compute costs in this scenario.")
+    check(abs(p_data_value + p_compute_value - 100) < 0.1, "Data + compute percentages must sum to 100.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    c_raw_str = f"${c_raw_value:,}"
+    c_label_str = f"${c_label_value:,.0f}"
+    c_store_str = f"${c_store_value}"
+    c_train_str = f"${c_train_value:,}"
+    c_total_str = f"${c_total_value:,.0f}"
+    p_data_str = f"{p_data_value:.0f}%"
+    p_compute_str = f"{p_compute_value:.0f}%"
+    n_labels_str = fmt(n_labels_value / MILLION, precision=1) + "M"
+    cb_cost_per_label_str = fmt(cost_per_label_value, precision=2, commas=False)
+    storage_str = f"{storage_gb} GB × {storage_months} months"
+    train_desc_str = f"{train_epochs} epochs × {train_gpus} A100s × {train_hours} h"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+c_raw_str = CostBreakdown.c_raw_str
+c_label_str = CostBreakdown.c_label_str
+c_store_str = CostBreakdown.c_store_str
+c_train_str = CostBreakdown.c_train_str
+c_total_str = CostBreakdown.c_total_str
+p_data_str = CostBreakdown.p_data_str
+p_compute_str = CostBreakdown.p_compute_str
+n_labels_str = CostBreakdown.n_labels_str
+cb_cost_per_label_str = CostBreakdown.cb_cost_per_label_str
+storage_str = CostBreakdown.storage_str
+train_desc_str = CostBreakdown.train_desc_str
 ```
 
 ::: {.callout-example title="Cost Breakdown: ImageNet-Scale Training"}
@@ -2441,38 +2651,59 @@ ROI calculations assume that techniques deliver their promised benefits, but act
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (active learning cost scenario) ---
-cost_label = 10                                                 # $/label
-n_initial = 1000                                                # initial labeled set
-n_queries_per_round = 100                                       # samples per round
-cost_inference = 50                                             # $/round (scoring pool)
-n_random = 5000                                                 # random sampling needs
-n_active = 2000                                                 # active learning needs
-n_rounds = 10                                                   # AL query rounds
+class BreakevenCalc:
+    """Active learning break-even: 2K labels + $500 inference achieves same accuracy as 5K random labels."""
 
-# --- Process (compute costs and ROI) ---
-cost_random_total = n_random * cost_label
-cost_active_label = n_active * cost_label
-cost_active_inference = n_rounds * cost_inference
-cost_active_total = cost_active_label + cost_active_inference
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cost_label = 10                                             # $/label
+    n_initial = 1000                                            # initial labeled set
+    n_queries_per_round = 100                                   # samples per round
+    cost_inference = 50                                         # $/round (scoring pool)
+    n_random = 5000                                             # random sampling needs
+    n_active = 2000                                             # active learning needs
+    n_rounds = 10                                               # AL query rounds
 
-roi_pct = (cost_random_total - cost_active_total) / cost_active_total * 100
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cost_random_total = n_random * cost_label
+    cost_active_label = n_active * cost_label
+    cost_active_inference = n_rounds * cost_inference
+    cost_active_total = cost_active_label + cost_active_inference
 
-# --- Outputs (formatted strings for prose) ---
-cost_label_str = fmt(cost_label, precision=0, commas=False)     # e.g. "10"
-n_initial_str = fmt(n_initial, precision=0, commas=True)        # e.g. "1,000"
-cost_initial_str = fmt(n_initial * cost_label, precision=0, commas=True)            # e.g. "10,000"
-n_queries_str = fmt(n_queries_per_round, precision=0, commas=False)                 # e.g. "100"
-cost_inference_str = fmt(cost_inference, precision=0, commas=False)                 # e.g. "50"
-be_n_random_str = fmt(n_random, precision=0, commas=True)       # e.g. "5,000"
-be_n_active_str = fmt(n_active, precision=0, commas=True)       # e.g. "2,000"
-n_rounds_str = fmt(n_rounds, precision=0, commas=False)         # e.g. "10"
+    roi_pct = (cost_random_total - cost_active_total) / cost_active_total * 100
 
-cost_random_total_str = fmt(cost_random_total, precision=0, commas=True)            # e.g. "50,000"
-cost_active_label_str = fmt(cost_active_label, precision=0, commas=True)            # e.g. "20,000"
-cost_active_inference_str = fmt(cost_active_inference, precision=0, commas=True)    # e.g. "500"
-cost_active_total_str = fmt(cost_active_total, precision=0, commas=True)            # e.g. "20,500"
-roi_pct_str = fmt(roi_pct, precision=0, commas=False)           # e.g. "144"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(cost_random_total > cost_active_total, "Active learning must be cheaper than random sampling.")
+    check(roi_pct > 0, "ROI must be positive for active learning to be justified.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cost_label_str = fmt(cost_label, precision=0, commas=False)
+    n_initial_str = fmt(n_initial, precision=0, commas=True)
+    cost_initial_str = fmt(n_initial * cost_label, precision=0, commas=True)
+    n_queries_str = fmt(n_queries_per_round, precision=0, commas=False)
+    cost_inference_str = fmt(cost_inference, precision=0, commas=False)
+    be_n_random_str = fmt(n_random, precision=0, commas=True)
+    be_n_active_str = fmt(n_active, precision=0, commas=True)
+    n_rounds_str = fmt(n_rounds, precision=0, commas=False)
+    cost_random_total_str = fmt(cost_random_total, precision=0, commas=True)
+    cost_active_label_str = fmt(cost_active_label, precision=0, commas=True)
+    cost_active_inference_str = fmt(cost_active_inference, precision=0, commas=True)
+    cost_active_total_str = fmt(cost_active_total, precision=0, commas=True)
+    roi_pct_str = fmt(roi_pct, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cost_label_str = BreakevenCalc.cost_label_str
+n_initial_str = BreakevenCalc.n_initial_str
+cost_initial_str = BreakevenCalc.cost_initial_str
+n_queries_str = BreakevenCalc.n_queries_str
+cost_inference_str = BreakevenCalc.cost_inference_str
+be_n_random_str = BreakevenCalc.be_n_random_str
+be_n_active_str = BreakevenCalc.be_n_active_str
+n_rounds_str = BreakevenCalc.n_rounds_str
+cost_random_total_str = BreakevenCalc.cost_random_total_str
+cost_active_label_str = BreakevenCalc.cost_active_label_str
+cost_active_inference_str = BreakevenCalc.cost_active_inference_str
+cost_active_total_str = BreakevenCalc.cost_active_total_str
+roi_pct_str = BreakevenCalc.roi_pct_str
 ```
 
 Suppose labeling costs \$`{python} cost_label_str`/sample and active learning requires:
@@ -2517,25 +2748,43 @@ $$
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Inputs (deduplication infrastructure scenario) ---
-cost_build = 50000                                              # $ engineering time
-cost_compute_once = 5000                                        # $ one-time MinHash compute
-savings_per_run = 10000                                         # $ saved per training run
+class DeduplicationAmortization:
+    """Deduplication pipeline ROI: negative at 1 run, highly profitable at 50 runs."""
 
-# --- Process (compute amortized ROI at different run counts) ---
-cost_investment = cost_build + cost_compute_once
-runs = [1, 5, 10, 50]
-rois = [(r * savings_per_run - cost_investment) / cost_investment * 100 for r in runs]
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cost_build = 50000                                          # $ engineering time
+    cost_compute_once = 5000                                    # $ one-time MinHash compute
+    savings_per_run = 10000                                     # $ saved per training run
 
-# --- Outputs (formatted strings for tables) ---
-cost_build_str = fmt(cost_build, precision=0, commas=True)      # e.g. "50,000"
-cost_compute_once_str = fmt(cost_compute_once, precision=0, commas=True)            # e.g. "5,000"
-savings_per_run_str = fmt(savings_per_run, precision=0, commas=True)                # e.g. "10,000"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cost_investment = cost_build + cost_compute_once
+    runs = [1, 5, 10, 50]
+    # For-loop (not list comprehension) — class bodies cannot access class attrs in comprehension scopes
+    rois = []
+    for _r in runs:
+        rois.append((_r * savings_per_run - cost_investment) / cost_investment * 100)
 
-roi_1_str = fmt(rois[0], precision=0, commas=False)             # e.g. "-82"
-roi_5_str = fmt(rois[1], precision=0, commas=False)             # e.g. "-9"
-roi_10_str = fmt(rois[2], precision=0, commas=False)            # e.g. "82"
-roi_50_str = fmt(rois[3], precision=0, commas=False)            # e.g. "809"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(rois[0] < 0, "Single-run ROI must be negative (investment not yet recovered).")
+    check(rois[3] > 0, "50-run ROI must be positive (highly profitable).")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cost_build_str = fmt(cost_build, precision=0, commas=True)
+    cost_compute_once_str = fmt(cost_compute_once, precision=0, commas=True)
+    savings_per_run_str = fmt(savings_per_run, precision=0, commas=True)
+    roi_1_str = fmt(rois[0], precision=0, commas=False)
+    roi_5_str = fmt(rois[1], precision=0, commas=False)
+    roi_10_str = fmt(rois[2], precision=0, commas=False)
+    roi_50_str = fmt(rois[3], precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cost_build_str = DeduplicationAmortization.cost_build_str
+cost_compute_once_str = DeduplicationAmortization.cost_compute_once_str
+savings_per_run_str = DeduplicationAmortization.savings_per_run_str
+roi_1_str = DeduplicationAmortization.roi_1_str
+roi_5_str = DeduplicationAmortization.roi_5_str
+roi_10_str = DeduplicationAmortization.roi_10_str
+roi_50_str = DeduplicationAmortization.roi_50_str
 ```
 
 | **Component**                             |                                       **Cost** |
@@ -2652,21 +2901,36 @@ Several strategies mitigate this staleness problem, each with distinct overhead 
 # │ Exports: t_embed_str, t_dedup_str, t_score_str, t_total_overhead_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (distributed selection timing on 8x A100) ---
-t_embed_value = 20                                              # minutes (parallel)
-t_dedup_value = 15                                              # minutes (distributed hash)
-t_score_value = 30                                              # minutes (parallel proxy)
-t_select_value = 2                                              # minutes (centralized)
+class DistributedOverheadCalc:
+    """8× A100 cluster coreset selection: 67-minute total overhead for 10× training speedup."""
 
-# --- Process ---
-t_total_overhead_value = t_embed_value + t_dedup_value + t_score_value + t_select_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    t_embed_value = 20                                          # minutes (parallel)
+    t_dedup_value = 15                                          # minutes (distributed hash)
+    t_score_value = 30                                          # minutes (parallel proxy)
+    t_select_value = 2                                          # minutes (centralized)
 
-# --- Outputs (formatted strings for prose) ---
-t_embed_str = f"{t_embed_value} minutes"                        # e.g. "20 minutes"
-t_dedup_str = f"{t_dedup_value} minutes"                        # e.g. "15 minutes"
-t_score_str = f"{t_score_value} minutes"                        # e.g. "30 minutes"
-t_select_str = f"{t_select_value} minutes"                      # e.g. "2 minutes"
-t_total_overhead_str = f"{t_total_overhead_value} minutes"      # e.g. "67 minutes"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    t_total_overhead_value = t_embed_value + t_dedup_value + t_score_value + t_select_value
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(t_total_overhead_value > 0, "Total overhead must be positive.")
+    check(t_score_value == max(t_embed_value, t_dedup_value, t_score_value, t_select_value),
+          "Scoring must be the dominant overhead phase.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    t_embed_str = f"{t_embed_value} minutes"
+    t_dedup_str = f"{t_dedup_value} minutes"
+    t_score_str = f"{t_score_value} minutes"
+    t_select_str = f"{t_select_value} minutes"
+    t_total_overhead_str = f"{t_total_overhead_value} minutes"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+t_embed_str = DistributedOverheadCalc.t_embed_str
+t_dedup_str = DistributedOverheadCalc.t_dedup_str
+t_score_str = DistributedOverheadCalc.t_score_str
+t_select_str = DistributedOverheadCalc.t_select_str
+t_total_overhead_str = DistributedOverheadCalc.t_total_overhead_str
 ```
 
 ::: {.callout-example title="Distributed Coreset Selection"}
@@ -3066,141 +3330,184 @@ Data selection involves counterintuitive diminishing returns that contradict the
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 
-# --- Fallacy 1: Diminishing returns (scaling law based) ---
-# Approximate scaling: accuracy ~ log(data_size)
-# Doubling data from 1M to 2M adds less than doubling from 100K to 200K
-data_1m_value = 1_000_000
-data_10m_value = 10_000_000
-# Illustrative: 10x data yields ~3-5% accuracy gain at scale
-acc_gain_10x_value = 4.0
-cost_10x_data_value = 9  # 9x more compute for 10x data (sublinear storage)
-cost_efficiency_10x_value = acc_gain_10x_value / cost_10x_data_value
+class FpScalingCalc:
+    """Quantitative backing for all Fallacies and Pitfalls in the F&P section."""
 
-# Curated vs raw comparison
-curated_size_value = 100_000
-raw_size_value = 1_000_000
-curated_accuracy_value = 92.0
-raw_accuracy_value = 88.0
-curated_cost_ratio_value = raw_size_value / curated_size_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Fallacy 1: Diminishing returns
+    data_1m_value = 1_000_000
+    data_10m_value = 10_000_000
+    acc_gain_10x_value = 4.0
+    curated_size_value = 100_000
+    raw_size_value = 1_000_000
+    curated_accuracy_value = 92.0
+    raw_accuracy_value = 88.0
 
-# --- Fallacy 2: Synthetic data / Model Collapse ---
-# Research shows accuracy drops after training on model-generated data
-synthetic_gen1_acc_value = 95.0  # First generation
-synthetic_gen5_acc_value = 78.0  # After 5 generations (collapse)
-synthetic_acc_drop_value = synthetic_gen1_acc_value - synthetic_gen5_acc_value
-optimal_synthetic_mix_min_value = 50
-optimal_synthetic_mix_max_value = 80
+    # Fallacy 2: Synthetic data / Model Collapse
+    synthetic_gen1_acc_value = 95.0
+    synthetic_gen5_acc_value = 78.0
+    optimal_synthetic_mix_min_value = 50
+    optimal_synthetic_mix_max_value = 80
 
-# --- Fallacy 4: Scale economics ---
-training_run_cost_value = 100_000_000  # $100M
-efficiency_gain_pct_value = 10
-savings_value = training_run_cost_value * efficiency_gain_pct_value / 100
+    # Fallacy 4: Scale economics
+    training_run_cost_value = 100_000_000
+    efficiency_gain_pct_value = 10
 
-# --- Pitfall 1: Selection overhead ---
-selection_time_bad_value = 10  # hours
-training_time_value = 2  # hours for subset
-full_training_time_value = 8  # hours for full dataset
-selection_overhead_ratio_value = selection_time_bad_value / training_time_value
-# Good scenario
-selection_time_good_value = 0.5  # 30 minutes with proxy
-selection_overhead_good_pct_value = selection_time_good_value / full_training_time_value * 100
+    # Pitfall 1: Selection overhead
+    selection_time_bad_value = 10                               # hours
+    training_time_value = 2                                     # hours for subset
+    full_training_time_value = 8                                # hours for full dataset
+    selection_time_good_value = 0.5                             # 30 minutes with proxy
 
-# --- Pitfall 2: Rare class pruning ---
-# Class imbalance scenario
-total_samples_value = 1_000_000
-rare_class_pct_value = 0.1  # 0.1% of data
-rare_class_count_value = int(total_samples_value * rare_class_pct_value / 100)
-coreset_pct_value = 10  # Keep 10%
-expected_rare_in_coreset_value = int(rare_class_count_value * coreset_pct_value / 100)
-min_samples_threshold_value = 50
+    # Pitfall 2: Rare class pruning
+    total_samples_value = 1_000_000
+    rare_class_pct_value = 0.1                                  # 0.1% of data
+    coreset_pct_value = 10                                      # Keep 10%
+    min_samples_threshold_value = 150
 
-# --- Pitfall 3: Deduplication leakage ---
-# Studies show 3-15% test set contamination in web-scraped data
-test_contamination_pct_value = 8
-inflated_acc_value = 94.0
-true_acc_value = 89.0
-inflation_gap_value = inflated_acc_value - true_acc_value
+    # Pitfall 3: Deduplication leakage
+    test_contamination_pct_value = 8
+    inflated_acc_value = 94.0
+    true_acc_value = 89.0
 
-# --- Pitfall 4: Active learning latency ---
-al_latency_days_value = 14  # 2 weeks for expert labels
-model_drift_epochs_value = 10
-batch_size_small_value = 100
-batch_size_large_value = 1000
+    # Pitfall 4: Active learning latency
+    al_latency_days_value = 14
+    model_drift_epochs_value = 10
+    batch_size_small_value = 100
+    batch_size_large_value = 1000
 
-# --- Fallacy 5: Benchmark transfer ---
-cifar10_coreset_pct_value = 50
-cifar10_acc_retained_value = 98
-imagenet_coreset_pct_value = 50
-imagenet_acc_retained_value = 95
-medical_coreset_pct_value = 50
-medical_acc_retained_value = 72
+    # Fallacy 5: Benchmark transfer
+    cifar10_coreset_pct_value = 50
+    cifar10_acc_retained_value = 98
+    imagenet_acc_retained_value = 95
+    medical_acc_retained_value = 72
 
-# --- Pitfall 5: Deployment metrics ---
-coreset_size_pct_value = 10
-ppd_score_value = 0.95
-rare_class_acc_value = 45
-majority_class_acc_value = 97
+    # Pitfall 5: Deployment metrics
+    coreset_size_pct_value = 10
+    rare_class_acc_value = 45
+    majority_class_acc_value = 97
 
-# --- Outputs (formatted strings) ---
-# Fallacy 1
-data_1m_str = fmt(data_1m_value / MILLION, precision=0) + "M"
-data_10m_str = fmt(data_10m_value / MILLION, precision=0) + "M"
-acc_gain_10x_str = fmt(acc_gain_10x_value, precision=0, commas=False)
-curated_size_str = fmt(curated_size_value / 1e3, precision=0) + "K"
-raw_size_str = fmt(raw_size_value / MILLION, precision=0) + "M"
-curated_accuracy_str = fmt(curated_accuracy_value, precision=0, commas=False)
-raw_accuracy_str = fmt(raw_accuracy_value, precision=0, commas=False)
-curated_cost_ratio_str = fmt(curated_cost_ratio_value, precision=0, commas=False)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    curated_cost_ratio_value = raw_size_value / curated_size_value
+    synthetic_acc_drop_value = synthetic_gen1_acc_value - synthetic_gen5_acc_value
+    savings_value = training_run_cost_value * efficiency_gain_pct_value / 100
+    selection_overhead_ratio_value = selection_time_bad_value / training_time_value
+    selection_overhead_good_pct_value = selection_time_good_value / full_training_time_value * 100
+    rare_class_count_value = int(total_samples_value * rare_class_pct_value / 100)
+    expected_rare_in_coreset_value = int(rare_class_count_value * coreset_pct_value / 100)
+    inflation_gap_value = inflated_acc_value - true_acc_value
 
-# Fallacy 2
-synthetic_gen1_acc_str = fmt(synthetic_gen1_acc_value, precision=0, commas=False)
-synthetic_gen5_acc_str = fmt(synthetic_gen5_acc_value, precision=0, commas=False)
-synthetic_acc_drop_str = fmt(synthetic_acc_drop_value, precision=0, commas=False)
-optimal_synthetic_mix_str = f"{optimal_synthetic_mix_min_value}–{optimal_synthetic_mix_max_value}"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(curated_accuracy_value > raw_accuracy_value,
+          "Curated small dataset must outperform raw large dataset.")
+    check(synthetic_acc_drop_value > 0, "Model collapse must degrade accuracy.")
+    check(expected_rare_in_coreset_value < min_samples_threshold_value,
+          "Random coreset should drop rare class below minimum threshold.")
 
-# Fallacy 4
-training_run_cost_str = fmt(training_run_cost_value / MILLION, precision=0) + "M"
-efficiency_gain_pct_str = fmt(efficiency_gain_pct_value, precision=0, commas=False)
-savings_str = fmt(savings_value / MILLION, precision=0) + "M"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # Fallacy 1
+    data_1m_str = fmt(data_1m_value / MILLION, precision=0) + "M"
+    data_10m_str = fmt(data_10m_value / MILLION, precision=0) + "M"
+    acc_gain_10x_str = fmt(acc_gain_10x_value, precision=0, commas=False)
+    curated_size_str = fmt(curated_size_value / 1e3, precision=0) + "K"
+    raw_size_str = fmt(raw_size_value / MILLION, precision=0) + "M"
+    curated_accuracy_str = fmt(curated_accuracy_value, precision=0, commas=False)
+    raw_accuracy_str = fmt(raw_accuracy_value, precision=0, commas=False)
+    curated_cost_ratio_str = fmt(curated_cost_ratio_value, precision=0, commas=False)
 
-# Pitfall 1
-selection_time_bad_str = fmt(selection_time_bad_value, precision=0, commas=False)
-training_time_str = fmt(training_time_value, precision=0, commas=False)
-full_training_time_str = fmt(full_training_time_value, precision=0, commas=False)
-selection_overhead_ratio_str = fmt(selection_overhead_ratio_value, precision=0, commas=False)
-selection_time_good_str = fmt(selection_time_good_value * 60, precision=0, commas=False)  # in minutes
-selection_overhead_good_pct_str = fmt(selection_overhead_good_pct_value, precision=0, commas=False)
+    # Fallacy 2
+    synthetic_gen1_acc_str = fmt(synthetic_gen1_acc_value, precision=0, commas=False)
+    synthetic_gen5_acc_str = fmt(synthetic_gen5_acc_value, precision=0, commas=False)
+    synthetic_acc_drop_str = fmt(synthetic_acc_drop_value, precision=0, commas=False)
+    optimal_synthetic_mix_str = f"{optimal_synthetic_mix_min_value}–{optimal_synthetic_mix_max_value}"
 
-# Pitfall 2
-total_samples_str = fmt(total_samples_value / MILLION, precision=0) + "M"
-rare_class_pct_str = fmt(rare_class_pct_value, precision=1, commas=False)
-rare_class_count_str = fmt(rare_class_count_value, precision=0, commas=True)
-fp_coreset_pct_str = fmt(coreset_pct_value, precision=0, commas=False)
-expected_rare_in_coreset_str = fmt(expected_rare_in_coreset_value, precision=0, commas=False)
-min_samples_threshold_str = fmt(min_samples_threshold_value, precision=0, commas=False)
+    # Fallacy 4
+    training_run_cost_str = fmt(training_run_cost_value / MILLION, precision=0) + "M"
+    efficiency_gain_pct_str = fmt(efficiency_gain_pct_value, precision=0, commas=False)
+    savings_str = fmt(savings_value / MILLION, precision=0) + "M"
 
-# Pitfall 3
-test_contamination_pct_str = fmt(test_contamination_pct_value, precision=0, commas=False)
-inflated_acc_str = fmt(inflated_acc_value, precision=0, commas=False)
-true_acc_str = fmt(true_acc_value, precision=0, commas=False)
-inflation_gap_str = fmt(inflation_gap_value, precision=0, commas=False)
+    # Pitfall 1
+    selection_time_bad_str = fmt(selection_time_bad_value, precision=0, commas=False)
+    training_time_str = fmt(training_time_value, precision=0, commas=False)
+    full_training_time_str = fmt(full_training_time_value, precision=0, commas=False)
+    selection_overhead_ratio_str = fmt(selection_overhead_ratio_value, precision=0, commas=False)
+    selection_time_good_str = fmt(selection_time_good_value * 60, precision=0, commas=False)
+    selection_overhead_good_pct_str = fmt(selection_overhead_good_pct_value, precision=0, commas=False)
 
-# Pitfall 4
-al_latency_days_str = fmt(al_latency_days_value, precision=0, commas=False)
-model_drift_epochs_str = fmt(model_drift_epochs_value, precision=0, commas=False)
-batch_size_small_str = fmt(batch_size_small_value, precision=0, commas=False)
-batch_size_large_str = fmt(batch_size_large_value, precision=0, commas=True)
+    # Pitfall 2
+    total_samples_str = fmt(total_samples_value / MILLION, precision=0) + "M"
+    rare_class_pct_str = fmt(rare_class_pct_value, precision=1, commas=False)
+    rare_class_count_str = fmt(rare_class_count_value, precision=0, commas=True)
+    fp_coreset_pct_str = fmt(coreset_pct_value, precision=0, commas=False)
+    expected_rare_in_coreset_str = fmt(expected_rare_in_coreset_value, precision=0, commas=False)
+    min_samples_threshold_str = fmt(min_samples_threshold_value, precision=0, commas=False)
 
-# Fallacy 5
-cifar10_coreset_pct_str = fmt(cifar10_coreset_pct_value, precision=0, commas=False)
-cifar10_acc_retained_str = fmt(cifar10_acc_retained_value, precision=0, commas=False)
-imagenet_acc_retained_str = fmt(imagenet_acc_retained_value, precision=0, commas=False)
-medical_acc_retained_str = fmt(medical_acc_retained_value, precision=0, commas=False)
+    # Pitfall 3
+    test_contamination_pct_str = fmt(test_contamination_pct_value, precision=0, commas=False)
+    inflated_acc_str = fmt(inflated_acc_value, precision=0, commas=False)
+    true_acc_str = fmt(true_acc_value, precision=0, commas=False)
+    inflation_gap_str = fmt(inflation_gap_value, precision=0, commas=False)
 
-# Pitfall 5
-coreset_size_pct_str = fmt(coreset_size_pct_value, precision=0, commas=False)
-rare_class_acc_str = fmt(rare_class_acc_value, precision=0, commas=False)
-majority_class_acc_str = fmt(majority_class_acc_value, precision=0, commas=False)
+    # Pitfall 4
+    al_latency_days_str = fmt(al_latency_days_value, precision=0, commas=False)
+    model_drift_epochs_str = fmt(model_drift_epochs_value, precision=0, commas=False)
+    batch_size_small_str = fmt(batch_size_small_value, precision=0, commas=False)
+    batch_size_large_str = fmt(batch_size_large_value, precision=0, commas=True)
+
+    # Fallacy 5
+    cifar10_coreset_pct_str = fmt(cifar10_coreset_pct_value, precision=0, commas=False)
+    cifar10_acc_retained_str = fmt(cifar10_acc_retained_value, precision=0, commas=False)
+    imagenet_acc_retained_str = fmt(imagenet_acc_retained_value, precision=0, commas=False)
+    medical_acc_retained_str = fmt(medical_acc_retained_value, precision=0, commas=False)
+
+    # Pitfall 5
+    coreset_size_pct_str = fmt(coreset_size_pct_value, precision=0, commas=False)
+    rare_class_acc_str = fmt(rare_class_acc_value, precision=0, commas=False)
+    majority_class_acc_str = fmt(majority_class_acc_value, precision=0, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+data_1m_str = FpScalingCalc.data_1m_str
+data_10m_str = FpScalingCalc.data_10m_str
+acc_gain_10x_str = FpScalingCalc.acc_gain_10x_str
+curated_size_str = FpScalingCalc.curated_size_str
+raw_size_str = FpScalingCalc.raw_size_str
+curated_accuracy_str = FpScalingCalc.curated_accuracy_str
+raw_accuracy_str = FpScalingCalc.raw_accuracy_str
+curated_cost_ratio_str = FpScalingCalc.curated_cost_ratio_str
+synthetic_gen1_acc_str = FpScalingCalc.synthetic_gen1_acc_str
+synthetic_gen5_acc_str = FpScalingCalc.synthetic_gen5_acc_str
+synthetic_acc_drop_str = FpScalingCalc.synthetic_acc_drop_str
+optimal_synthetic_mix_str = FpScalingCalc.optimal_synthetic_mix_str
+training_run_cost_str = FpScalingCalc.training_run_cost_str
+efficiency_gain_pct_str = FpScalingCalc.efficiency_gain_pct_str
+savings_str = FpScalingCalc.savings_str
+selection_time_bad_str = FpScalingCalc.selection_time_bad_str
+training_time_str = FpScalingCalc.training_time_str
+full_training_time_str = FpScalingCalc.full_training_time_str
+selection_overhead_ratio_str = FpScalingCalc.selection_overhead_ratio_str
+selection_time_good_str = FpScalingCalc.selection_time_good_str
+selection_overhead_good_pct_str = FpScalingCalc.selection_overhead_good_pct_str
+total_samples_str = FpScalingCalc.total_samples_str
+rare_class_pct_str = FpScalingCalc.rare_class_pct_str
+rare_class_count_str = FpScalingCalc.rare_class_count_str
+fp_coreset_pct_str = FpScalingCalc.fp_coreset_pct_str
+expected_rare_in_coreset_str = FpScalingCalc.expected_rare_in_coreset_str
+min_samples_threshold_str = FpScalingCalc.min_samples_threshold_str
+test_contamination_pct_str = FpScalingCalc.test_contamination_pct_str
+inflated_acc_str = FpScalingCalc.inflated_acc_str
+true_acc_str = FpScalingCalc.true_acc_str
+inflation_gap_str = FpScalingCalc.inflation_gap_str
+al_latency_days_str = FpScalingCalc.al_latency_days_str
+model_drift_epochs_str = FpScalingCalc.model_drift_epochs_str
+batch_size_small_str = FpScalingCalc.batch_size_small_str
+batch_size_large_str = FpScalingCalc.batch_size_large_str
+cifar10_coreset_pct_str = FpScalingCalc.cifar10_coreset_pct_str
+cifar10_acc_retained_str = FpScalingCalc.cifar10_acc_retained_str
+imagenet_acc_retained_str = FpScalingCalc.imagenet_acc_retained_str
+medical_acc_retained_str = FpScalingCalc.medical_acc_retained_str
+coreset_size_pct_str = FpScalingCalc.coreset_size_pct_str
+rare_class_acc_str = FpScalingCalc.rare_class_acc_str
+majority_class_acc_str = FpScalingCalc.majority_class_acc_str
 ```
 
 **Fallacy:** *Data is the new oil, so more is always better.*

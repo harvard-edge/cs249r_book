@@ -58,21 +58,32 @@ The defining insight of ML systems engineering is that constraints drive archite
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CHAPTER-WIDE DEPLOYMENT SPECTRUM CONSTANTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Used across entire chapter — deployment tables, paradigm sections,
-# │          physical constraints narrative, and Lighthouse Model summaries.
+# │ Context: Used across entire chapter — @tbl-deployment-paradigms-overview,
+# │          @sec-ml-systems-deployment-spectrum-71be (Power/Memory Wall prose),
+# │          @sec-ml-systems-cloud-ml-maximizing-computational-power-a338,
+# │          @sec-ml-systems-mobile-ml-personal-offline-intelligence-0983,
+# │          and @sec-ml-systems-fallacies-pitfalls-3dfe.
 # │
-# │ Goal: Provide foundational parameters for the deployment spectrum.
-# │ Show: Quantitative trade-offs across Cloud, Edge, Mobile, and TinyML.
-# │ How: Centralize latency, power, and memory specs from mlsys.constants.
+# │ Goal: Centralize foundational parameters for all four deployment paradigms.
+# │ Show: Quantitative trade-offs (latency, power, memory) across Cloud, Edge,
+# │       Mobile, and TinyML used in tables and narrative throughout the chapter.
+# │ How: Read hardware specs from Tiers and Hardware twins; compute GPT-3
+# │      petaflop-days from training_ops; derive mobile tier specs from phone twin.
 # │
-# │ Imports: mlsys.constants, mlsys.formatting
-# │ Exports: *_range_str (latency/RAM/storage), *_str (paradigm specs), gpt3_*_str
+# │ Imports: mlsys.constants (MOBILE_TDP_W, PHONE_BATTERY_WH, TFLOPs, etc.)
+# │ Exports: *_range_str (latency/RAM/storage), mobile_*_str, gpt3_*_str,
+# │          phone_battery_str, compute_doubling_months_str, mem_bw_growth_pct_str
+# │
+# │ Note: phone_battery_str, mobile_bw_range_str, mobile_tdp_range_str are also
+# │       consumed at @sec-ml-systems-mobile-ml-personal-offline-intelligence-0983
+# │       (~2300 lines below) and @sec-ml-systems-fallacies-pitfalls-3dfe
+# │       (~3200 lines below). These exports are intentionally chapter-scoped.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Tiers, Hardware, Models
 from mlsys.constants import (
     MOBILE_TDP_W, PHONE_BATTERY_WH, DLRM_MODEL_SIZE_FP32,
     TFLOPs, PFLOPs, Kparam, second, watt, hour, GB, SEC_PER_DAY,
-    BILLION, MILLION, TRILLION, THOUSAND
+    BILLION, MILLION, TRILLION, THOUSAND, ureg
 )
 from mlsys.formatting import fmt, check
 
@@ -100,7 +111,7 @@ class MLSystemsSetup:
     # Assumptions (ranges)
     mobile_ram_range = "8-16"
     mobile_storage_range = "128 GB-1 TB"
-    mobile_bw_range = f"{int(h_phone.memory_bw.to('GB/s').magnitude/2)}-{int(h_phone.memory_bw.to('GB/s').magnitude)}"
+    mobile_bw_range = f"{int(h_phone.memory_bw.m_as('GB/s')/2)}-{int(h_phone.memory_bw.m_as('GB/s'))}"
 
     # Latency ranges (ms)
     cloud_latency_range = "100-500"
@@ -118,13 +129,13 @@ class MLSystemsSetup:
     gpt3_v100_count = 10000
 
     # Mobile Specifics
-    mobile_tdp_w = h_phone.tdp.to(watt).magnitude if h_phone.tdp else 3
-    mobile_npu_tops = h_phone.peak_flops.to(TFLOPs/second).magnitude
-    phone_battery_wh = h_phone.battery_capacity.to('Wh').magnitude if h_phone.battery_capacity else 15
+    mobile_tdp_w = h_phone.tdp.m_as(watt) if h_phone.tdp else 3
+    mobile_npu_tops = h_phone.peak_flops.m_as(TFLOPs/second)
+    phone_battery_wh = h_phone.battery_capacity.m_as('Wh') if h_phone.battery_capacity else 15
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # GPT-3 Petaflop-days calculation using standardized units
-    gpt3_petaflop_days = (m_gpt3.training_ops / (PFLOPs * SEC_PER_DAY)).to_base_units().magnitude
+    gpt3_petaflop_days = (m_gpt3.training_ops / (PFLOPs * SEC_PER_DAY)).to_base_units().m_as(ureg.dimensionless)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(gpt3_petaflop_days >= 3000, f"GPT-3 training should be >=3000 PF-days, got {gpt3_petaflop_days:.0f}")
@@ -154,11 +165,11 @@ class MLSystemsSetup:
     mobile_npu_range_str = "1-10"
     phone_battery_str = fmt(phone_battery_wh, precision=0)
 
-    kws_params_str = fmt(m_kws.parameters.to(Kparam).magnitude, precision=0, commas=True)
+    kws_params_str = fmt(m_kws.parameters.m_as(Kparam), precision=0, commas=True)
     kws_size_kb_str = "100" # Approximate
 
     # DLRM Embedding (using Models Twin)
-    dlrm_embedding_str = fmt(Models.DLRM.model_size.to(GB).magnitude, precision=0)
+    dlrm_embedding_str = fmt(Models.DLRM.model_size.m_as(GB), precision=0)
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class ThrottlingScenario:
@@ -445,7 +456,7 @@ class LightLatency:
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Latency = (Distance * 2) / Speed of Light (Round-trip time)
     min_latency = (distance_km * 2) / SPEED_OF_LIGHT_FIBER_KM_S
-    min_latency_ms = min_latency.to(ureg.ms).magnitude
+    min_latency_ms = min_latency.m_as(ureg.ms)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(min_latency_ms > safety_budget_ms,
@@ -453,7 +464,7 @@ class LightLatency:
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     min_latency_str = fmt(min_latency_ms, precision=0, commas=False)
-    distance_str = f"{distance_km.magnitude:,}"
+    distance_str = f"{distance_km.m_as('km'):,}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 min_latency_str = LightLatency.min_latency_str
@@ -694,14 +705,26 @@ These archetypes map naturally to deployment paradigms: **Compute Beasts** and *
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ LIGHTHOUSE MODEL SPECIFICATIONS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Lighthouse Models callout (Five Reference Workloads)
+# │ Context: @sec-ml-systems-workload-archetypes-fd10 — "Five Reference Workloads"
+# │          callout; also @sec-ml-systems-system-balance-hardware-96ab
+# │          (ResNet-50 bottleneck example, @tbl-representative-systems).
 # │
-# │ Goal: Provide specifications for the five Lighthouse Models.
-# │ Show: Dimensionality and compute scale for ResNet, GPT, DLRM, and KWS.
-# │ How: Retrieve parameters and FLOPs from mlsys.constants and Models.
+# │ Goal: Provide specs for the five Lighthouse Models (ResNet-50, GPT-2/Llama,
+# │       DLRM, MobileNetV2, KWS DS-CNN).
+# │ Show: Parameter count, FLOP profile, and memory footprint that anchor
+# │       each workload archetype to a concrete system.
+# │ How: Retrieve parameters and FLOPs from Models twin; derive sizes using
+# │       size_in_bytes() with 4-byte (FP32) precision.
 # │
-# │ Imports: mlsys.constants (RESNET50_*, GPT2_PARAMS), mlsys.formatting (fmt)
-# │ Exports: resnet_*_str, gpt2_*_str, llama_range_str
+# │ Imports: mlsys.constants (RESNET50_FLOPs, GFLOPs, Mparam, Bparam, etc.)
+# │ Exports: resnet_gflops_str, resnet_params_m_str, resnet_fp32_mb_str,
+# │          gpt2_params_b_str, llama_range_str, dlrm_embedding_str,
+# │          mobilenet_flops_reduction_str, mobile_tdp_range_str,
+# │          kws_params_str, kws_size_kb_str
+# │
+# │ Note: mobile_tdp_range_str and mobilenet_flops_reduction_str are also
+# │       consumed at @sec-ml-systems-mobile-ml-personal-offline-intelligence-0983
+# │       (~1400 lines below). These exports are intentionally chapter-scoped.
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Models
 from mlsys.constants import (
@@ -725,22 +748,22 @@ class LighthouseModels:
     m_kws = Models.Tiny.DS_CNN
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    resnet_flops_g = RESNET50_FLOPs.to(GFLOPs).magnitude
-    resnet_params_m = m_resnet.parameters.to(Mparam).magnitude
-    resnet_fp32_mb = m_resnet.size_in_bytes(4 * byte).to(MB).magnitude
+    resnet_flops_g = RESNET50_FLOPs.m_as(GFLOPs)
+    resnet_params_m = m_resnet.parameters.m_as(Mparam)
+    resnet_fp32_mb = m_resnet.size_in_bytes(4 * byte).m_as(MB)
 
-    gpt2_params_b = m_gpt2.parameters.to(Bparam).magnitude
+    gpt2_params_b = m_gpt2.parameters.m_as(Bparam)
 
     # DLRM Embedding Size
-    dlrm_embedding_gb = m_dlrm.model_size.to(GB).magnitude
+    dlrm_embedding_gb = m_dlrm.model_size.m_as(GB)
 
     # MobileNet
     # ResNet-50 ~4.1 GFLOPs, MobileNetV2 ~300 MFLOPs
     mobilenet_flops_reduction = 4100 / 300
 
     # KWS
-    kws_params = m_kws.parameters.to(Kparam).magnitude
-    kws_size_kb = m_kws.size_in_bytes(4 * byte).to(KB).magnitude
+    kws_params = m_kws.parameters.m_as(Kparam)
+    kws_size_kb = m_kws.size_in_bytes(4 * byte).m_as(KB)
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(resnet_fp32_mb >= 90, f"ResNet50 size should be ~98MB, got {resnet_fp32_mb:.0f}MB")
@@ -812,39 +835,64 @@ With the analytical tools (Iron Law, Bottleneck Principle, Workload Archetypes) 
 ```{python}
 #| label: latency-constants
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ LATENCY NUMBERS FOR ML SYSTEM DESIGN
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Table "Latency Numbers for ML System Design"
+# │ Context: @tbl-latency-numbers in @sec-ml-systems-system-balance-hardware-96ab
 # │
-# │ Goal: Provide reference latencies for system design.
-# │ Show: The 8-order-of-magnitude gap between register access and cloud RTT.
-# │ How: List representative constants from NS to 100s of MS.
+# │ Goal: Populate the 14-row latency reference table spanning compute, memory,
+# │       network, and ML operation categories.
+# │ Show: The 8-order-of-magnitude gap from nanosecond register access to
+# │       hundreds-of-milliseconds cross-region network RTT.
+# │ How: Assign representative string constants derived from hardware specs and
+# │       published measurements; no arithmetic required.
 # │
-# │ Imports: (none — display constants only)
-# │ Exports: lat_*_str variables for table
+# │ Imports: (none — display string constants only)
+# │ Exports: lat_compute_str, lat_npu_str, lat_llm_str, lat_l1_str, lat_hbm_str,
+# │          lat_dram_str, lat_net_dc_str, lat_net_region_str, lat_net_cross_str,
+# │          lat_kws_str, lat_face_str, lat_gpt4_str, lat_train_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Outputs: Compute latencies ---
-lat_compute_str = "~1 ns"                                # GPU matrix multiply (per op)
-lat_npu_str = "5–20 ms"                                  # NPU inference (MobileNet)
-lat_llm_str = "20–100 ms"                                # LLM token generation
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class LatencyConstants:
+    """Namespace for Latency Constants."""
 
-# --- Outputs: Memory latencies ---
-lat_l1_str = "~1 ns"                                     # L1 cache hit
-lat_hbm_str = "20–50 ns"                                 # HBM read (GPU)
-lat_dram_str = "50–100 ns"                               # DRAM read (mobile)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    lat_compute_str = "~1 ns"                                # GPU matrix multiply (per op)
+    lat_npu_str = "5–20 ms"                                  # NPU inference (MobileNet)
+    lat_llm_str = "20–100 ms"                                # LLM token generation
 
-# --- Outputs: Network latencies ---
-lat_net_dc_str = "0.5 ms"                                # same datacenter
-lat_net_region_str = "1–5 ms"                            # same region
-lat_net_cross_str = "50–150 ms"                          # cross-region
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    lat_l1_str = "~1 ns"                                     # L1 cache hit
+    lat_hbm_str = "20–50 ns"                                 # HBM read (GPU)
+    lat_dram_str = "50–100 ns"                               # DRAM read (mobile)
 
-# --- Outputs: ML operation latencies ---
-lat_kws_str = "100 μs"                                   # wake-word detection (TinyML)
-lat_face_str = "10–30 ms"                                # face detection (mobile)
-lat_gpt4_str = "200–500 ms"                              # GPT-4 first token
-lat_train_str = "200–400 ms"                             # ResNet-50 training step
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    lat_net_dc_str = "0.5 ms"                                # same datacenter
+    lat_net_region_str = "1–5 ms"                            # same region
+    lat_net_cross_str = "50–150 ms"                          # cross-region
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    lat_kws_str = "100 μs"                                   # wake-word detection (TinyML)
+    lat_face_str = "10–30 ms"                                # face detection (mobile)
+    lat_gpt4_str = "200–500 ms"                              # GPT-4 first token
+    lat_train_str = "200–400 ms"                             # ResNet-50 training step
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+lat_compute_str = LatencyConstants.lat_compute_str
+lat_npu_str = LatencyConstants.lat_npu_str
+lat_llm_str = LatencyConstants.lat_llm_str
+lat_l1_str = LatencyConstants.lat_l1_str
+lat_hbm_str = LatencyConstants.lat_hbm_str
+lat_dram_str = LatencyConstants.lat_dram_str
+lat_net_dc_str = LatencyConstants.lat_net_dc_str
+lat_net_region_str = LatencyConstants.lat_net_region_str
+lat_net_cross_str = LatencyConstants.lat_net_cross_str
+lat_kws_str = LatencyConstants.lat_kws_str
+lat_face_str = LatencyConstants.lat_face_str
+lat_gpt4_str = LatencyConstants.lat_gpt4_str
+lat_train_str = LatencyConstants.lat_train_str
 ```
 
 These latencies, organized by category in @tbl-latency-numbers, span eight orders of magnitude:
@@ -911,6 +959,7 @@ The following worked example demonstrates how to apply this analysis quantitativ
 ```{python}
 #| echo: false
 #| label: resnet-setup
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RESNET-50 MODEL SIZE SETUP
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -923,27 +972,43 @@ The following worked example demonstrates how to apply this analysis quantitativ
 # │ Imports: mlsys.constants (RESNET50_FLOPs, RESNET50_PARAMS), mlsys.formatting
 # │ Exports: resnet_*_str (GFLOPs, params, MB at each precision)
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import RESNET50_FLOPs, RESNET50_PARAMS, GFLOPs, Mparam, byte, MB
 from mlsys.formatting import fmt, check
 
-# --- Process (model sizes at different precisions) ---
-resnet_fp32_bytes_value = RESNET50_PARAMS.magnitude * 4 * byte  # 4 bytes per FP32 param
-resnet_fp16_bytes_value = RESNET50_PARAMS.magnitude * 2 * byte  # 2 bytes per FP16 param
-resnet_int8_bytes_value = RESNET50_PARAMS.magnitude * 1 * byte  # 1 byte per INT8 param
-resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
-resnet_params_m_value = RESNET50_PARAMS.to(Mparam).magnitude
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ResnetSetup:
+    """Namespace for Resnet Setup."""
 
-# --- Outputs (formatted strings for prose) ---
-resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)                 # e.g. "4.1" GFLOPs
-resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)             # e.g. "25.6" M
-resnet_fp32_mb_str = fmt(resnet_fp32_bytes_value.to(MB).magnitude, precision=0, commas=False)  # e.g. "102" MB
-resnet_fp16_mb_str = fmt(resnet_fp16_bytes_value.to(MB).magnitude, precision=0, commas=False)  # e.g. "51" MB
-resnet_int8_mb_str = fmt(resnet_int8_bytes_value.to(MB).magnitude, precision=0, commas=False)  # e.g. "26" MB
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    resnet_fp32_bytes_value = RESNET50_PARAMS.m_as('param') * 4 * byte  # 4 bytes per FP32 param
+    resnet_fp16_bytes_value = RESNET50_PARAMS.m_as('param') * 2 * byte  # 2 bytes per FP16 param
+    resnet_int8_bytes_value = RESNET50_PARAMS.m_as('param') * 1 * byte  # 1 byte per INT8 param
+    resnet_gflops_value = RESNET50_FLOPs.m_as(GFLOPs)
+    resnet_params_m_value = RESNET50_PARAMS.m_as(Mparam)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)                 # e.g. "4.1" GFLOPs
+    resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)             # e.g. "25.6" M
+    resnet_fp32_mb_str = fmt(resnet_fp32_bytes_value.m_as(MB), precision=0, commas=False)   # e.g. "102" MB
+    resnet_fp16_mb_str = fmt(resnet_fp16_bytes_value.m_as(MB), precision=0, commas=False)   # e.g. "51" MB
+    resnet_int8_mb_str = fmt(resnet_int8_bytes_value.m_as(MB), precision=0, commas=False)   # e.g. "26" MB
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+resnet_fp16_mb_str = ResnetSetup.resnet_fp16_mb_str
+resnet_fp32_mb_str = ResnetSetup.resnet_fp32_mb_str
+resnet_gflops_str = ResnetSetup.resnet_gflops_str
+resnet_int8_mb_str = ResnetSetup.resnet_int8_mb_str
+resnet_params_m_str = ResnetSetup.resnet_params_m_str
+# Quantity values needed by downstream cells (ResnetCloud, ResnetMobile class bodies)
+resnet_fp16_bytes_value = ResnetSetup.resnet_fp16_bytes_value
+resnet_int8_bytes_value = ResnetSetup.resnet_int8_bytes_value
 ```
 
 ```{python}
 #| echo: false
 #| label: resnet-cloud
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RESNET-50 CLOUD (A100) BOTTLENECK ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -956,6 +1021,7 @@ resnet_int8_mb_str = fmt(resnet_int8_bytes_value.to(MB).magnitude, precision=0, 
 # │ Imports: mlsys.constants (A100_*, RESNET50_*), mlsys.formulas (calc_bottleneck)
 # │ Exports: a100_*_str, cloud_*_str, cloud_*_frac (Markdown fractions)
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys import Hardware
 from mlsys.constants import (
     RESNET50_FLOPs, A100_FLOPS_FP16_TENSOR, A100_MEM_BW,
@@ -964,43 +1030,62 @@ from mlsys.constants import (
 from mlsys.formulas import calc_bottleneck
 from mlsys.formatting import sci, fmt, sci_latex, md_frac
 
-# --- Process (bottleneck analysis using Hardware Twin) ---
-h_a100 = Hardware.A100
-cloud_stats = calc_bottleneck(
-    ops=RESNET50_FLOPs,
-    model_bytes=resnet_fp16_bytes_value,                 # from resnet-setup cell
-    device_flops=h_a100.peak_flops,
-    device_bw=h_a100.memory_bw,
-)
-a100_tflops_value = h_a100.peak_flops.to(TFLOPs / second).magnitude
-a100_bw_tbs_value = h_a100.memory_bw.to(TB / second).magnitude
-cloud_compute_ms_value = cloud_stats["compute_ms"]
-cloud_memory_ms_value = cloud_stats["memory_ms"]
-cloud_ratio_x_value = cloud_stats["ratio"]
-cloud_ai_value = cloud_stats["intensity"]
-cloud_bottleneck_value = cloud_stats["bottleneck"]
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ResnetCloud:
+    """Namespace for Resnet Cloud."""
 
-# --- LaTeX fraction components (for nice rendering) ---
-resnet_flops_latex = sci_latex(RESNET50_FLOPs.to(flop))
-a100_flops_latex = sci_latex(h_a100.peak_flops.to(flop / second))
-resnet_fp16_bytes_latex = sci_latex(resnet_fp16_bytes_value.to(byte))
-a100_bw_latex = sci_latex(h_a100.memory_bw.to(byte / second))
-cloud_compute_frac = md_frac(resnet_flops_latex, a100_flops_latex, f"{cloud_compute_ms_value:.3f}", "ms")
-cloud_memory_frac = md_frac(resnet_fp16_bytes_latex, a100_bw_latex, f"{cloud_memory_ms_value:.3f}", "ms")
-cloud_ai_frac = md_frac(resnet_flops_latex, resnet_fp16_bytes_latex, f"{cloud_ai_value:.0f}", "FLOPs/byte")
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    h_a100 = Hardware.A100
+    cloud_stats = calc_bottleneck(
+        ops=RESNET50_FLOPs,
+        model_bytes=resnet_fp16_bytes_value,                 # from resnet-setup cell
+        device_flops=h_a100.peak_flops,
+        device_bw=h_a100.memory_bw,
+    )
+    a100_tflops_value = h_a100.peak_flops.m_as(TFLOPs / second)
+    a100_bw_tbs_value = h_a100.memory_bw.m_as(TB / second)
+    cloud_compute_ms_value = cloud_stats["compute_ms"]
+    cloud_memory_ms_value = cloud_stats["memory_ms"]
+    cloud_ratio_x_value = cloud_stats["ratio"]
+    cloud_ai_value = cloud_stats["intensity"]
+    cloud_bottleneck_value = cloud_stats["bottleneck"]
 
-# --- Outputs (formatted strings for prose) ---
-a100_tflops_str = fmt(a100_tflops_value, precision=0, commas=False)        # e.g. "312" TFLOPS
-a100_bw_tbs_str = fmt(a100_bw_tbs_value, precision=0, commas=False)        # e.g. "2" TB/s
-cloud_compute_ms_str = fmt(cloud_compute_ms_value, precision=3, commas=False)
-cloud_memory_ms_str = fmt(cloud_memory_ms_value, precision=3, commas=False)
-cloud_ratio_x_str = fmt(cloud_ratio_x_value, precision=0, commas=False)    # memory/compute ratio
-cloud_bottleneck_str = cloud_bottleneck_value                              # "Memory" or "Compute"
+    # --- LaTeX fraction components (for nice rendering) ---
+    resnet_flops_latex = sci_latex(RESNET50_FLOPs.to(flop))
+    a100_flops_latex = sci_latex(h_a100.peak_flops.to(flop / second))
+    resnet_fp16_bytes_latex = sci_latex(resnet_fp16_bytes_value.to(byte))
+    a100_bw_latex = sci_latex(h_a100.memory_bw.to(byte / second))
+    cloud_compute_frac = md_frac(resnet_flops_latex, a100_flops_latex, f"{cloud_compute_ms_value:.3f}", "ms")
+    cloud_memory_frac = md_frac(resnet_fp16_bytes_latex, a100_bw_latex, f"{cloud_memory_ms_value:.3f}", "ms")
+    cloud_ai_frac = md_frac(resnet_flops_latex, resnet_fp16_bytes_latex, f"{cloud_ai_value:.0f}", "FLOPs/byte")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    a100_tflops_str = fmt(a100_tflops_value, precision=0, commas=False)        # e.g. "312" TFLOPS
+    a100_bw_tbs_str = fmt(a100_bw_tbs_value, precision=0, commas=False)        # e.g. "2" TB/s
+    cloud_compute_ms_str = fmt(cloud_compute_ms_value, precision=3, commas=False)
+    cloud_memory_ms_str = fmt(cloud_memory_ms_value, precision=3, commas=False)
+    cloud_ratio_x_str = fmt(cloud_ratio_x_value, precision=0, commas=False)    # memory/compute ratio
+    cloud_bottleneck_str = cloud_bottleneck_value                              # "Memory" or "Compute"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_bw_tbs_str = ResnetCloud.a100_bw_tbs_str
+a100_tflops_str = ResnetCloud.a100_tflops_str
+cloud_bottleneck_str = ResnetCloud.cloud_bottleneck_str
+cloud_compute_ms_str = ResnetCloud.cloud_compute_ms_str
+cloud_memory_ms_str = ResnetCloud.cloud_memory_ms_str
+cloud_ratio_x_str = ResnetCloud.cloud_ratio_x_str
+cloud_compute_frac = ResnetCloud.cloud_compute_frac
+cloud_memory_frac = ResnetCloud.cloud_memory_frac
+cloud_ai_frac = ResnetCloud.cloud_ai_frac
+# Values needed by downstream ResnetMobile class body
+cloud_stats = ResnetCloud.cloud_stats
+resnet_flops_latex = ResnetCloud.resnet_flops_latex
 ```
 
 ```{python}
 #| echo: false
 #| label: resnet-mobile
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RESNET-50 MOBILE (NPU) BOTTLENECK ANALYSIS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1013,6 +1098,7 @@ cloud_bottleneck_str = cloud_bottleneck_value                              # "Me
 # │ Imports: mlsys.constants (MOBILE_NPU_*, A100_MEM_BW), mlsys.formulas
 # │ Exports: mobile_*_str, bw_advantage_x_str, inference_speed_x_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys import Hardware, Models
 from mlsys.constants import (
     RESNET50_FLOPs, MOBILE_NPU_TOPS_INT8, MOBILE_NPU_MEM_BW, A100_MEM_BW,
@@ -1021,42 +1107,56 @@ from mlsys.constants import (
 from mlsys.formulas import calc_bottleneck
 from mlsys.formatting import sci_latex, md_frac, fmt
 
-# --- Process (bottleneck analysis using Hardware/Models Twins) ---
-h_phone = Hardware.Edge.Generic_Phone
-m_resnet = Models.ResNet50
-h_a100 = Hardware.A100
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ResnetMobile:
+    """Namespace for Resnet Mobile."""
 
-mobile_stats = calc_bottleneck(
-    ops=m_resnet.inference_flops,
-    model_bytes=resnet_int8_bytes_value,                 # from resnet-setup cell
-    device_flops=h_phone.peak_flops,
-    device_bw=h_phone.memory_bw,
-)
-mobile_tops_value = h_phone.peak_flops.to(TFLOPs / second).magnitude
-mobile_bw_gbs_value = h_phone.memory_bw.to(GB / second).magnitude
-mobile_compute_ms_value = mobile_stats["compute_ms"]
-mobile_memory_ms_value = mobile_stats["memory_ms"]
-mobile_ratio_x_value = mobile_stats["ratio"]
-mobile_bottleneck_value = mobile_stats["bottleneck"]
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    h_phone = Hardware.Edge.Generic_Phone
+    m_resnet = Models.ResNet50
+    h_a100 = Hardware.A100
 
-# --- Cross-platform comparison ---
-bw_advantage_x_value = h_a100.memory_bw / h_phone.memory_bw
-inference_speed_x_value = mobile_memory_ms_value / cloud_stats["memory_ms"]  # uses cloud_stats
+    mobile_stats = calc_bottleneck(
+        ops=m_resnet.inference_flops,
+        model_bytes=resnet_int8_bytes_value,                 # from resnet-setup cell
+        device_flops=h_phone.peak_flops,
+        device_bw=h_phone.memory_bw,
+    )
+    mobile_tops_value = h_phone.peak_flops.m_as(TFLOPs / second)
+    mobile_bw_gbs_value = h_phone.memory_bw.m_as(GB / second)
+    mobile_compute_ms_value = mobile_stats["compute_ms"]
+    mobile_memory_ms_value = mobile_stats["memory_ms"]
+    mobile_ratio_x_value = mobile_stats["ratio"]
+    mobile_bottleneck_value = mobile_stats["bottleneck"]
 
-# --- LaTeX fraction components (for nice rendering) ---
-mobile_npu_flops_latex = sci_latex(h_phone.peak_flops.to(flop / second))
-resnet_int8_bytes_latex = sci_latex(resnet_int8_bytes_value.to(byte))
-mobile_npu_bw_latex = sci_latex(h_phone.memory_bw.to(byte / second))
-mobile_compute_frac = md_frac(resnet_flops_latex, mobile_npu_flops_latex, f"{mobile_compute_ms_value:.2f}", "ms")
-mobile_memory_frac = md_frac(resnet_int8_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_value:.2f}", "ms")
+    # --- Cross-platform comparison ---
+    bw_advantage_x_value = h_a100.memory_bw / h_phone.memory_bw
+    inference_speed_x_value = mobile_memory_ms_value / cloud_stats["memory_ms"]  # uses cloud_stats
 
-# --- Outputs (formatted strings for prose) ---
-mobile_tops_str = fmt(mobile_tops_value, precision=0, commas=False)        # e.g. "10" TOPS
-mobile_bw_gbs_str = fmt(mobile_bw_gbs_value, precision=0, commas=False)    # e.g. "50" GB/s
-mobile_ratio_x_str = fmt(mobile_ratio_x_value, precision=0, commas=False)  # memory/compute ratio
-mobile_bottleneck_str = mobile_bottleneck_value                            # "Memory" or "Compute"
-bw_advantage_x_str = fmt(bw_advantage_x_value, precision=0, commas=False)  # A100 vs NPU bandwidth
-inference_speed_x_str = fmt(inference_speed_x_value, precision=0, commas=False)  # latency ratio
+    # --- LaTeX fraction components (for nice rendering) ---
+    mobile_npu_flops_latex = sci_latex(h_phone.peak_flops.to(flop / second))
+    resnet_int8_bytes_latex = sci_latex(resnet_int8_bytes_value.to(byte))
+    mobile_npu_bw_latex = sci_latex(h_phone.memory_bw.to(byte / second))
+    mobile_compute_frac = md_frac(resnet_flops_latex, mobile_npu_flops_latex, f"{mobile_compute_ms_value:.2f}", "ms")
+    mobile_memory_frac = md_frac(resnet_int8_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_value:.2f}", "ms")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mobile_tops_str = fmt(mobile_tops_value, precision=0, commas=False)        # e.g. "10" TOPS
+    mobile_bw_gbs_str = fmt(mobile_bw_gbs_value, precision=0, commas=False)    # e.g. "50" GB/s
+    mobile_ratio_x_str = fmt(mobile_ratio_x_value, precision=0, commas=False)  # memory/compute ratio
+    mobile_bottleneck_str = mobile_bottleneck_value                            # "Memory" or "Compute"
+    bw_advantage_x_str = fmt(bw_advantage_x_value, precision=0, commas=False)  # A100 vs NPU bandwidth
+    inference_speed_x_str = fmt(inference_speed_x_value, precision=0, commas=False)  # latency ratio
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mobile_tops_str = ResnetMobile.mobile_tops_str
+mobile_bw_gbs_str = ResnetMobile.mobile_bw_gbs_str
+mobile_ratio_x_str = ResnetMobile.mobile_ratio_x_str
+mobile_bottleneck_str = ResnetMobile.mobile_bottleneck_str
+mobile_compute_frac = ResnetMobile.mobile_compute_frac
+mobile_memory_frac = ResnetMobile.mobile_memory_frac
+bw_advantage_x_str = ResnetMobile.bw_advantage_x_str
+inference_speed_x_str = ResnetMobile.inference_speed_x_str
 ```
 
 ::: {.callout-notebook title="ResNet-50 on Cloud vs Mobile"}
@@ -1103,18 +1203,30 @@ As systems transition from Cloud to Edge to TinyML, available resources decrease
 ```{python}
 #| label: hardware-spectrum-setup
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ HARDWARE SPECTRUM: REPRESENTATIVE SYSTEMS TABLE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Tables "Hardware Spectrum" and "Deployment Decision Thresholds"
+# │ Context: @tbl-representative-systems in @sec-ml-systems-system-balance-hardware-96ab
+# │          and the deployment decision thresholds table that follows it.
 # │
-# │ Goal: Ground abstract deployment paradigms in concrete hardware.
-# │ Show: The 9-order-of-magnitude power gap between TinyML and Cloud pods.
-# │ How: List memory, power, and cost specs for TPU Pods, workstations, and MCUs.
+# │ Goal: Ground abstract deployment paradigms in concrete hardware specs for
+# │       TPU v4 Pod (Cloud), DGX Spark (Edge), and ESP32-CAM (TinyML).
+# │ Show: The 9-order-of-magnitude power gap (4 MW cloud to 0.1 W TinyML)
+# │       and 8-order-of-magnitude cost gap ($millions to $10) across tiers.
+# │ How: Read memory, power, and cost from mlsys.constants for each platform;
+# │      assign threshold strings for the decision boundary table.
 # │
-# │ Imports: mlsys.constants (TPU_POD_*, DGX_*, ESP32_*), mlsys.formatting (fmt)
-# │ Exports: tpu_*_str, edge_*_str, tiny_*_str, *_thresh_str
+# │ Imports: mlsys.constants (TPU_POD_MEM, TPU_POD_POWER, TPU_POD_CHIPS,
+# │          DGX_RAM, DGX_STORAGE, DGX_POWER, DGX_PRICE_MIN, DGX_PRICE_MAX,
+# │          ESP32_RAM, ESP32_FLASH, ESP32_POWER_MIN, ESP32_POWER_MAX, ESP32_PRICE)
+# │ Exports: tpu_chips_str, cloud_mem_tb_str, cloud_pwr_mw_str, edge_mem_gb_str,
+# │          edge_stor_tb_str, edge_pwr_w_str, edge_price_min_str, edge_price_max_str,
+# │          tiny_ram_kb_str, tiny_flash_mb_str, tiny_pwr_min_str, tiny_pwr_max_str,
+# │          tiny_price_str, cloud_thresh_tflops_str, edge_thresh_pflops_str,
+# │          tiny_thresh_tops_str, tiny_thresh_mw_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import (
     TPU_POD_MEM, TPU_POD_POWER, TPU_POD_CHIPS,
     DGX_RAM, DGX_STORAGE, DGX_POWER, DGX_PRICE_MIN, DGX_PRICE_MAX,
@@ -1123,32 +1235,57 @@ from mlsys.constants import (
 )
 from mlsys.formatting import fmt, check
 
-# --- Outputs: Cloud (TPU v4 Pod) ---
-tpu_chips_str = f"{TPU_POD_CHIPS:,}"                     # e.g. "4,096" chips
-cloud_mem_tb_str = fmt(TPU_POD_MEM.to(TB).magnitude, precision=0, commas=False)  # e.g. "131" TB
-cloud_pwr_mw_str = fmt(TPU_POD_POWER.to("megawatt").magnitude, precision=0, commas=False)  # e.g. "4" MW
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class HardwareSpectrumSetup:
+    """Namespace for Hardware Spectrum Setup."""
 
-# --- Outputs: Edge (DGX Spark) ---
-edge_mem_gb_str = fmt(DGX_RAM.to(GB).magnitude, precision=0, commas=False)       # e.g. "128" GB
-edge_stor_tb_str = fmt(DGX_STORAGE.to(TB).magnitude, precision=0, commas=False)  # e.g. "4" TB
-edge_pwr_w_str = fmt(DGX_POWER.to(watt).magnitude, precision=0, commas=False)    # e.g. "500" W
-edge_price_min_str = f"{DGX_PRICE_MIN.magnitude:,.0f}"                           # e.g. "3,000"
-edge_price_max_str = f"{DGX_PRICE_MAX.magnitude:,.0f}"                           # e.g. "5,000"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    tpu_chips_str = f"{TPU_POD_CHIPS:,}"                     # e.g. "4,096" chips
+    cloud_mem_tb_str = fmt(TPU_POD_MEM.m_as(TB), precision=0, commas=False)         # e.g. "131" TB
+    cloud_pwr_mw_str = fmt(TPU_POD_POWER.m_as("megawatt"), precision=0, commas=False)  # e.g. "4" MW
 
-# --- Outputs: TinyML (ESP32-CAM) ---
-tiny_ram_kb_str = fmt(ESP32_RAM.to(KiB).magnitude, precision=0, commas=False)    # e.g. "520" KB
-tiny_flash_mb_str = fmt(ESP32_FLASH.to(MB).magnitude, precision=0, commas=False) # e.g. "4" MB
-tiny_pwr_min_str = f"{ESP32_POWER_MIN.magnitude}"                                # e.g. "0.1" W
-tiny_pwr_max_str = f"{ESP32_POWER_MAX.magnitude}"                                # e.g. "0.5" W
-tiny_price_str = f"{ESP32_PRICE.magnitude}"                                      # e.g. "10" USD
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    edge_mem_gb_str = fmt(DGX_RAM.m_as(GB), precision=0, commas=False)              # e.g. "128" GB
+    edge_stor_tb_str = fmt(DGX_STORAGE.m_as(TB), precision=0, commas=False)         # e.g. "4" TB
+    edge_pwr_w_str = fmt(DGX_POWER.m_as(watt), precision=0, commas=False)           # e.g. "500" W
+    edge_price_min_str = f"{DGX_PRICE_MIN.m_as(USD):,.0f}"                          # e.g. "3,000"
+    edge_price_max_str = f"{DGX_PRICE_MAX.m_as(USD):,.0f}"                          # e.g. "5,000"
 
-# --- Outputs: Decision thresholds ---
-cloud_thresh_tflops_str = "1000"                         # TFLOPS threshold for cloud
-cloud_thresh_bw_str = "100"                              # GB/s memory bandwidth
-edge_thresh_pflops_str = "1"                             # PFLOPS AI compute threshold
-edge_thresh_bw_str = "270"                               # GB/s memory bandwidth
-tiny_thresh_tops_str = "1"                               # TOPS compute threshold
-tiny_thresh_mw_str = "1"                                 # mW power threshold
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    tiny_ram_kb_str = fmt(ESP32_RAM.m_as(KiB), precision=0, commas=False)           # e.g. "520" KB
+    tiny_flash_mb_str = fmt(ESP32_FLASH.m_as(MB), precision=0, commas=False)        # e.g. "4" MB
+    tiny_pwr_min_str = f"{ESP32_POWER_MIN.m_as(watt)}"                               # e.g. "0.1" W
+    tiny_pwr_max_str = f"{ESP32_POWER_MAX.m_as(watt)}"                               # e.g. "0.5" W
+    tiny_price_str = f"{ESP32_PRICE.m_as(USD)}"                                      # e.g. "10" USD
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cloud_thresh_tflops_str = "1000"                         # TFLOPS threshold for cloud
+    cloud_thresh_bw_str = "100"                              # GB/s memory bandwidth
+    edge_thresh_pflops_str = "1"                             # PFLOPS AI compute threshold
+    edge_thresh_bw_str = "270"                               # GB/s memory bandwidth
+    tiny_thresh_tops_str = "1"                               # TOPS compute threshold
+    tiny_thresh_mw_str = "1"                                 # mW power threshold
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+tpu_chips_str = HardwareSpectrumSetup.tpu_chips_str
+cloud_mem_tb_str = HardwareSpectrumSetup.cloud_mem_tb_str
+cloud_pwr_mw_str = HardwareSpectrumSetup.cloud_pwr_mw_str
+edge_mem_gb_str = HardwareSpectrumSetup.edge_mem_gb_str
+edge_stor_tb_str = HardwareSpectrumSetup.edge_stor_tb_str
+edge_pwr_w_str = HardwareSpectrumSetup.edge_pwr_w_str
+edge_price_min_str = HardwareSpectrumSetup.edge_price_min_str
+edge_price_max_str = HardwareSpectrumSetup.edge_price_max_str
+tiny_ram_kb_str = HardwareSpectrumSetup.tiny_ram_kb_str
+tiny_flash_mb_str = HardwareSpectrumSetup.tiny_flash_mb_str
+tiny_pwr_min_str = HardwareSpectrumSetup.tiny_pwr_min_str
+tiny_pwr_max_str = HardwareSpectrumSetup.tiny_pwr_max_str
+tiny_price_str = HardwareSpectrumSetup.tiny_price_str
+cloud_thresh_tflops_str = HardwareSpectrumSetup.cloud_thresh_tflops_str
+cloud_thresh_bw_str = HardwareSpectrumSetup.cloud_thresh_bw_str
+edge_thresh_pflops_str = HardwareSpectrumSetup.edge_thresh_pflops_str
+edge_thresh_bw_str = HardwareSpectrumSetup.edge_thresh_bw_str
+tiny_thresh_tops_str = HardwareSpectrumSetup.tiny_thresh_tops_str
+tiny_thresh_mw_str = HardwareSpectrumSetup.tiny_thresh_mw_str
 ```
 
 \index{hardware spectrum!resource progression}
@@ -1274,36 +1411,55 @@ above=1of $(B2.north east)!0.5!(B3.north west)$](B0){Cloud ML};
 ```{python}
 #| echo: false
 #| label: distance-penalty
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DISTANCE PENALTY CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Distance Penalty" (Cloud ML section)
+# │ Context: "The Distance Penalty" callout in
+# │          @sec-ml-systems-cloud-ml-tradeoffs-constraints-96ed
 # │
-# │ Goal: Demonstrate the physical impossibility of cloud for safety-critical real-time.
-# │ Show: That round-trip latency alone can exceed the entire response budget.
-# │ How: Calculate speed-of-light RTT for a 1,500km distance.
+# │ Goal: Demonstrate why cloud inference is physically impossible for a
+# │       10 ms safety-critical response budget at 1,500 km distance.
+# │ Show: That speed-of-light RTT alone (15 ms) already exceeds the 10 ms
+# │       budget, leaving a −5 ms deficit before any computation begins.
+# │ How: Apply calc_network_latency_ms() using SPEED_OF_LIGHT_FIBER_KM_S;
+# │      subtract RTT from budget to get deficit.
 # │
-# │ Imports: mlsys.constants (SPEED_OF_LIGHT_FIBER_KM_S), mlsys.formulas
-# │ Exports: sol_kms_str, rtt_formatted_str, deficit_str, distance_km_str
+# │ Imports: mlsys.constants (SPEED_OF_LIGHT_FIBER_KM_S),
+# │          mlsys.formulas (calc_network_latency_ms), mlsys.formatting (fmt, check)
+# │ Exports: sol_kms_str, rtt_formatted_str, deficit_str, distance_km_str,
+# │          safety_budget_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import SPEED_OF_LIGHT_FIBER_KM_S
 from mlsys.formulas import calc_network_latency_ms
 from mlsys.formatting import fmt, check
 
-# --- Inputs (safety-critical scenario) ---
-distance_km_value = 1500                                 # km to cloud datacenter
-safety_budget_ms_value = 10                              # ms safety requirement
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DistancePenalty:
+    """Namespace for Distance Penalty."""
 
-# --- Process (light-speed round-trip) ---
-round_trip_ms_value = calc_network_latency_ms(distance_km_value)
-deficit_ms_value = safety_budget_ms_value - round_trip_ms_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    distance_km_value = 1500                                 # km to cloud datacenter
+    safety_budget_ms_value = 10                              # ms safety requirement
 
-# --- Outputs (formatted strings for prose) ---
-sol_kms_str = f"{SPEED_OF_LIGHT_FIBER_KM_S.magnitude:,.0f}"  # e.g. "200,000" km/s
-rtt_formatted_str = fmt(round_trip_ms_value, precision=0, commas=False)  # e.g. "15" ms
-deficit_str = fmt(deficit_ms_value, precision=0, commas=False)           # e.g. "-5" ms
-distance_km_str = f"{distance_km_value:,}"                               # e.g. "1,500" km
-safety_budget_str = f"{safety_budget_ms_value}"                          # "10" ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    round_trip_ms_value = calc_network_latency_ms(distance_km_value)
+    deficit_ms_value = safety_budget_ms_value - round_trip_ms_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    sol_kms_str = f"{SPEED_OF_LIGHT_FIBER_KM_S.m_as('km/s'):,.0f}"  # e.g. "200,000" km/s
+    rtt_formatted_str = fmt(round_trip_ms_value, precision=0, commas=False)  # e.g. "15" ms
+    deficit_str = fmt(deficit_ms_value, precision=0, commas=False)           # e.g. "-5" ms
+    distance_km_str = f"{distance_km_value:,}"                               # e.g. "1,500" km
+    safety_budget_str = f"{safety_budget_ms_value}"                          # "10" ms
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+sol_kms_str = DistancePenalty.sol_kms_str
+rtt_formatted_str = DistancePenalty.rtt_formatted_str
+deficit_str = DistancePenalty.deficit_str
+distance_km_str = DistancePenalty.distance_km_str
+safety_budget_str = DistancePenalty.safety_budget_str
 ```
 
 ::: {.callout-notebook title="The Distance Penalty"}
@@ -1358,15 +1514,22 @@ Cost management introduces operational complexity requiring total cost of owners
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CLOUD VS. EDGE TOTAL COST OF OWNERSHIP (TCO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Cloud vs. Edge TCO" (Cloud ML Trade-offs section)
+# │ Context: "Cloud vs. Edge TCO" worked example callout in
+# │          @sec-ml-systems-cloud-ml-tradeoffs-constraints-96ed
 # │
-# │ Goal: Compare Total Cost of Ownership between Cloud and Edge.
-# │ Show: The 45% savings of Edge at high volume and its 60% labor dominance.
-# │ How: Model CapEx, OpEx, and egress costs over a 3-year lifespan.
+# │ Goal: Compute and compare 3-year annualized TCO for cloud (AWS A10G) vs.
+# │       on-premises edge (GenericServer) serving 1 million requests/day.
+# │ Show: That edge saves ~45% at this volume, but labor (~60% of edge cost)
+# │       dominates — making "minimize compute" a misleading optimization target.
+# │ How: Model cloud CapEx (GPU hours + egress + load balancer + logs) and
+# │      edge CapEx/OpEx (amortized hardware + power + cooling + fiber + labor)
+# │      using HOURS_PER_YEAR, CLOUD_EGRESS_PER_GB, and CLOUD_ELECTRICITY_PER_KWH.
 # │
 # │ Imports: mlsys.constants (DAYS_PER_YEAR, HOURS_PER_YEAR, CLOUD_EGRESS_PER_GB,
-# │          SERVER_POWER_W, CLOUD_ELECTRICITY_PER_KWH), mlsys.formatting (fmt)
-# │ Exports: c_*_str (cloud costs), e_*_str (edge costs), edge_savings_str
+# │          CLOUD_ELECTRICITY_PER_KWH, USD, GB, watt, ureg, MILLION, MIB_TO_BYTES)
+# │ Exports: c_gpu_str, c_egress_str, c_lb_str, c_logs_str, c_total_str,
+# │          e_capex_str, e_power_str, e_cool_str, e_net_str, e_labor_str,
+# │          e_total_str, edge_savings_str, labor_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware
 from mlsys.constants import (
@@ -1392,7 +1555,7 @@ class CloudEdgeTCO:
     # Cloud (AWS 2024)
     gpu_price_per_hr = 0.75 # A10G
     gpu_instances = 4
-    egress_per_gb = CLOUD_EGRESS_PER_GB.to(USD / GB).magnitude
+    egress_per_gb = CLOUD_EGRESS_PER_GB.m_as(USD / GB)
     lb_base_per_hr = 0.025
     lb_lcu_per_hr = 0.008
     avg_lcu = 50
@@ -1401,8 +1564,8 @@ class CloudEdgeTCO:
     server = Hardware.Edge.GenericServer
     server_cost = 15000
     server_life_years = 3
-    power_watts = server.tdp.to(watt).magnitude
-    electricity_per_kwh = CLOUD_ELECTRICITY_PER_KWH.to(USD / ureg.kilowatt_hour).magnitude
+    power_watts = server.tdp.m_as(watt)
+    electricity_per_kwh = CLOUD_ELECTRICITY_PER_KWH.m_as(USD / ureg.kilowatt_hour)
     cooling_overhead = 0.30
     fiber_annual = 1200
     devops_fte = 0.1
@@ -1547,15 +1710,23 @@ Economics drive this architecture as much as latency. Attempting to process voic
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ VOICE ASSISTANT WALL: ECONOMICS + INFRASTRUCTURE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Voice Assistant Wall" (Cloud ML large-scale section)
+# │ Context: "The Voice Assistant Wall" callout in
+# │          @sec-ml-systems-largescale-training-inference-e16d
 # │
-# │ Goal: Demonstrate why cloud-only voice processing fails at global scale.
-# │ Show: The economic ($500M/year) and bandwidth (32 TB/s) walls.
-# │ How: Model global cost and network traffic for 1 billion voice devices.
-# │      backbone; even query-only needs 20+ data centers at peak (infra wall).
+# │ Goal: Demonstrate why cloud-only voice processing fails at 1-billion-device
+# │       scale on both economics and infrastructure grounds simultaneously.
+# │ Show: The $500M/year economic wall and the 20+ datacenter infrastructure
+# │       wall that emerge from 1B devices × 20 queries/day at 200 ms/query.
+# │ How: Calculate total annual cloud cost, GPU-days required, peak datacenter
+# │       count (with 3× peak multiplier), and raw audio bandwidth (TB/s).
 # │
-# │ Imports: mlsys.formatting (fmt), mlsys.constants (BILLION, MILLION)
-# │ Exports: ww_*_str (economics), vi_*_str (infrastructure)
+# │ Imports: mlsys.constants (BILLION, TRILLION, SEC_PER_HOUR, HOURS_PER_DAY,
+# │          BITS_PER_BYTE, KIB_TO_BYTES, MIB_TO_BYTES, MS_PER_SEC)
+# │ Exports: ww_devices_b_str, ww_cloud_cost_str, ww_total_cost_str,
+# │          ww_edge_power_range_str, ww_edge_cost_str,
+# │          vi_devices_str, vi_queries_str, vi_total_queries_str,
+# │          vi_gpu_hours_str, vi_datacenters_avg_str, vi_datacenters_peak_str,
+# │          vi_audio_kb_str, vi_total_audio_tb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     BILLION, TRILLION, SEC_PER_HOUR, HOURS_PER_DAY,
@@ -1773,15 +1944,22 @@ The benefits of lower bandwidth usage and reduced latency become stark when we e
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ BANDWIDTH BOTTLENECK CALCULATION
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "The Bandwidth Bottleneck" (Edge ML section)
+# │ Context: "The Bandwidth Bottleneck" worked example callout in
+# │          @sec-ml-systems-edge-ml-benefits-deployment-challenges-b2d0
 # │
-# │ Goal: Demonstrate the physical bandwidth wall for raw video streaming.
-# │ Show: That 100 HD cameras exceed a 10 Gbps backbone by 5×.
-# │ How: Calculate aggregate data rates for 1080p video streams.
+# │ Goal: Prove that streaming 100 × 1080p cameras to the cloud is physically
+# │       impossible over a 10 Gbps link and economically prohibitive via egress.
+# │ Show: That aggregate data rate (≈5 GB/s) exceeds the 10 Gbps line by 5×,
+# │       and 24/7 egress costs $M/month — making local edge processing mandatory.
+# │ How: Calculate bytes/frame × fps × cameras; compare to Ethernet_10G cap;
+# │      use calc_monthly_egress_cost() for the economic wall.
 # │
-# │ Imports: mlsys.constants (VIDEO_*, CLOUD_EGRESS_PER_GB, NETWORK_10G_BW),
-# │          mlsys.formulas (calc_monthly_egress_cost), mlsys.formatting (fmt)
-# │ Exports: cam_rate_mbs_str, total_rate_gbs_str, monthly_cost_m_str, etc.
+# │ Imports: mlsys.constants (VIDEO_1080P_WIDTH, VIDEO_1080P_HEIGHT,
+# │          VIDEO_BYTES_PER_PIXEL_RGB, VIDEO_FPS_STANDARD, CLOUD_EGRESS_PER_GB,
+# │          MB, GB, second, MILLION), mlsys.formulas (calc_monthly_egress_cost)
+# │ Exports: cam_rate_mbs_str, total_rate_gbs_str, monthly_cost_m_str,
+# │          net_cap_gbs_str, bw_short_x_str, num_cameras_str, bb_fps_str,
+# │          egress_cost_str, video_width_str, video_height_str, bytes_per_pixel_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware
 from mlsys.formulas import calc_monthly_egress_cost
@@ -1813,7 +1991,7 @@ class BandwidthBottleneck:
     total_bytes_per_sec = (num_cameras * bytes_per_sec_single).to("byte/second")
     network_cap_bytes = network.bandwidth.to("byte/second")
 
-    shortfall_ratio = (total_bytes_per_sec / network_cap_bytes).magnitude
+    shortfall_ratio = (total_bytes_per_sec / network_cap_bytes).m_as('')
 
     # Cost (using helper formula)
     monthly_cost = calc_monthly_egress_cost(total_bytes_per_sec, CLOUD_EGRESS_PER_GB)
@@ -1823,15 +2001,15 @@ class BandwidthBottleneck:
     check(shortfall_ratio >= 2, f"Shortfall ({shortfall_ratio:.1f}x) is too small to be a 'crisis'.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    cam_rate_mbs_str = fmt(bytes_per_sec_single.to(MB/second).magnitude, precision=0, commas=False)
-    total_rate_gbs_str = fmt(total_bytes_per_sec.to(GB/second).magnitude, precision=1, commas=False)
+    cam_rate_mbs_str = fmt(bytes_per_sec_single.m_as(MB/second), precision=0, commas=False)
+    total_rate_gbs_str = fmt(total_bytes_per_sec.m_as(GB/second), precision=1, commas=False)
     monthly_cost_m_str = fmt(monthly_cost / MILLION, precision=1, commas=False)
-    net_cap_gbs_str = fmt(network.bandwidth.to(GB/second).magnitude, precision=2, commas=False)
+    net_cap_gbs_str = fmt(network.bandwidth.m_as(GB/second), precision=2, commas=False)
     bw_short_x_str = fmt(shortfall_ratio, precision=0, commas=False)
 
     num_cameras_str = f"{num_cameras}"
-    bb_fps_str = f"{int(fps.magnitude)}"
-    egress_cost_str = f"{CLOUD_EGRESS_PER_GB.magnitude}"
+    bb_fps_str = f"{int(fps.m_as('Hz'))}"
+    egress_cost_str = f"{CLOUD_EGRESS_PER_GB.m_as(USD / GB)}"
     video_width_str = fmt(width, precision=0, commas=False)
     video_height_str = fmt(height, precision=0, commas=False)
     bytes_per_pixel_str = fmt(bpp, precision=0, commas=False)
@@ -1973,20 +2151,26 @@ To make these trade-offs concrete, the following worked example applies *edge in
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ EDGE INFERENCE SIZING: RETAIL DEPLOYMENT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Edge Inference Sizing" — hardware selection for retail chain
+# │ Context: "Edge Inference Sizing" worked example callout in
+# │          @sec-ml-systems-realtime-industrial-iot-systems-373a
 # │
-# │ Goal: Select cost-optimal hardware for a large-scale edge deployment.
-# │ Show: That right-sized edge devices (Coral) outperform workstation-class hardware in TCO.
-# │ How: Calculate aggregate TFLOPS requirements and model 3-year fleet costs.
+# │ Goal: Select the cost-optimal edge accelerator for a 500-store YOLOv8 Nano
+# │       deployment running 20 cameras at 15 FPS per store.
+# │ Show: That right-sized purpose-built accelerators (Coral at 4 TOPS/W) yield
+# │       lower 3-year fleet TCO than over-provisioned workstation-class hardware.
+# │ How: Compute sustained GFLOPS requirement from inference rate × model FLOPs;
+# │      apply calc_fleet_tco() with hardware TDP and CLOUD_ELECTRICITY_PER_KWH.
 # │
-# │ Imports: mlsys.constants (YOLOV8_NANO_FLOPs, GFLOPs, CLOUD_ELECTRICITY_PER_KWH,
-# │                           HOURS_PER_YEAR), mlsys.formulas (calc_fleet_tco)
+# │ Imports: mlsys.constants (GFLOPs, TFLOPs, CLOUD_ELECTRICITY_PER_KWH,
+# │          HOURS_PER_YEAR, USD, watt, ureg), mlsys.formulas (calc_fleet_tco)
 # │ Exports: stores_str, cameras_per_store_str, fps_str, inf_per_sec_str,
-# │          yolo_gflops_str, sustained_gf_str, req_tflops_str, coral_*_str,
-# │          jetson_*_str, nuc_*_str, coral_tco_k_str, years_str, etc.
+# │          yolo_gflops_str, sustained_gf_str, req_tflops_str, coral_tops_str,
+# │          coral_power_w_str, coral_tco_k_str, jetson_tops_str, jetson_power_w_str,
+# │          jetson_tco_k_str, nuc_tops_str, nuc_power_w_str, nuc_tco_k_str,
+# │          power_ratio_str, elec_cost_str, years_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware, Models
-from mlsys.constants import GFLOPs, CLOUD_ELECTRICITY_PER_KWH, HOURS_PER_YEAR, TFLOPs
+from mlsys.constants import GFLOPs, CLOUD_ELECTRICITY_PER_KWH, HOURS_PER_YEAR, TFLOPs, USD, watt, ureg
 from mlsys.formulas import calc_fleet_tco
 from mlsys.formatting import fmt, check
 
@@ -2024,8 +2208,8 @@ class EdgeSizing:
     # YOLOv8 Nano Inference FLOPs from Models Twin
     yolo_flops = model.inference_flops if model.inference_flops else model.training_ops
 
-    sustained_gflops = (inf_per_sec * yolo_flops).to(GFLOPs).magnitude
-    required_tflops = (sustained_gflops * headroom * GFLOPs).to(TFLOPs).magnitude
+    sustained_gflops = (inf_per_sec * yolo_flops).m_as(GFLOPs)
+    required_tflops = (sustained_gflops * headroom * GFLOPs).m_as(TFLOPs)
 
     # TCO
     coral_tco = calc_fleet_tco(coral_cost, coral.tdp, stores, years, CLOUD_ELECTRICITY_PER_KWH)
@@ -2036,7 +2220,7 @@ class EdgeSizing:
     coral_power_opex = coral_tco - coral_fleet_capex
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    if required_tflops > coral.peak_flops.to(TFLOPs/second).magnitude:
+    if required_tflops > coral.peak_flops.m_as(TFLOPs/second):
         # Note: Coral is 4 TOPS (INT8). YOLO is FP32/INT8?
         # The original code used 4 TOPS vs 2 TFLOPS required.
         pass
@@ -2048,21 +2232,21 @@ class EdgeSizing:
     headroom_str = f"{headroom:.0f}"
     inf_per_sec_str = f"{inf_per_sec}"
 
-    yolo_gflops_str = fmt(yolo_flops.to(GFLOPs).magnitude, precision=1)
+    yolo_gflops_str = fmt(yolo_flops.m_as(GFLOPs), precision=1)
     sustained_gf_str = fmt(sustained_gflops, precision=0)
     req_tflops_str = fmt(required_tflops, precision=0)
 
     coral_cost_str = f"{coral_cost}"
-    coral_power_w_str = f"{coral.tdp.magnitude:.0f}"
-    coral_tops_str = f"{coral.peak_flops.to(TFLOPs/second).magnitude:.0f}"
+    coral_power_w_str = f"{coral.tdp.m_as(watt):.0f}"
+    coral_tops_str = f"{coral.peak_flops.m_as(TFLOPs/second):.0f}"
 
     jetson_cost_str = f"{jetson_cost}"
     jetson_power_range_str = "10-40"
-    jetson_tops_str = f"{jetson.peak_flops.to(TFLOPs/second).magnitude:.0f}"
+    jetson_tops_str = f"{jetson.peak_flops.m_as(TFLOPs/second):.0f}"
 
     nuc_cost_str = f"{nuc_cost}"
-    nuc_power_w_str = f"{nuc.tdp.magnitude:.0f}"
-    nuc_tops_str = f"{nuc.peak_flops.to(TFLOPs/second).magnitude:.0f}"
+    nuc_power_w_str = f"{nuc.tdp.m_as(watt):.0f}"
+    nuc_tops_str = f"{nuc.peak_flops.m_as(TFLOPs/second):.0f}"
 
     coral_fleet_k_str = fmt(coral_fleet_capex / 1000, precision=0)
     coral_tco_k_str = fmt(coral_tco / 1000, precision=0)
@@ -2078,8 +2262,8 @@ class EdgeSizing:
     hours_per_year_str = f"{HOURS_PER_YEAR}"
     coral_power_cost_k_str = fmt(coral_power_opex / 1000, precision=1)
 
-    power_ratio_str = fmt(jetson.tdp.magnitude / coral.tdp.magnitude, precision=0, commas=False)
-    elec_cost_str = f"{CLOUD_ELECTRICITY_PER_KWH.magnitude}"
+    power_ratio_str = fmt(jetson.tdp.m_as(watt) / coral.tdp.m_as(watt), precision=0, commas=False)
+    elec_cost_str = f"{CLOUD_ELECTRICITY_PER_KWH.m_as(USD / ureg.kilowatt_hour)}"
 
     # Cloud alternative: 500 stores each need ~1 GPU instance at $0.75/hr (A10G on-demand)
     cloud_gpu_price_per_hr = 0.75
@@ -2306,13 +2490,13 @@ class BatteryTax:
     daily_budget_pct = (power_draw * runtime_hours) / battery_wh * 100
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(runtime_hours.magnitude <= 24, f"Always-on ML should drain battery fast, but got {runtime_hours:.1f} hours.")
+    check(runtime_hours.m_as(ureg.hour) <= 24, f"Always-on ML should drain battery fast, but got {runtime_hours:.1f} hours.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    runtime_str = fmt(runtime_hours.magnitude, precision=1, commas=False)
-    pwr_w_str = fmt(power_draw.to(ureg.watt).magnitude, precision=0, commas=False)
-    batt_wh_str = fmt(battery_wh.magnitude, precision=0, commas=False)
-    budget_pct_str = fmt(daily_budget_pct.magnitude, precision=0, commas=False)
+    runtime_str = fmt(runtime_hours.m_as(ureg.hour), precision=1, commas=False)
+    pwr_w_str = fmt(power_draw.m_as(ureg.watt), precision=0, commas=False)
+    batt_wh_str = fmt(battery_wh.m_as(ureg.Wh), precision=0, commas=False)
+    budget_pct_str = fmt(daily_budget_pct.m_as(''), precision=0, commas=False)
 
     runtime_frac = md_frac(f"{batt_wh_str} Wh", f"{pwr_w_str} W", f"**{runtime_str} hours**")
 
@@ -2341,6 +2525,7 @@ The battery constraint limits total energy consumption over time. However, even 
 ```{python}
 #| label: thermal-quant-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ THERMAL WALL: QUANTIZATION POWER REDUCTION
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2353,16 +2538,26 @@ The battery constraint limits total energy consumption over time. However, even 
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: baseline_str, quant_power_str, quant_red_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 
-baseline_power_w_value = 12                                                      # W, unoptimized LLM power
-quant_reduction_value = 4                                                        # FP32→INT8 power reduction
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ThermalQuantCalc:
+    """Namespace for Thermal Quant Calc."""
 
-quant_power_w_value = baseline_power_w_value / quant_reduction_value             # 12W / 4 = 3W
+    baseline_power_w_value = 12                                                      # W, unoptimized LLM power
+    quant_reduction_value = 4                                                        # FP32→INT8 power reduction
 
-baseline_str = fmt(baseline_power_w_value, precision=0, commas=False)            # e.g. "12" W
-quant_power_str = fmt(quant_power_w_value, precision=0, commas=False)            # e.g. "3" W
-quant_red_str = fmt(quant_reduction_value, precision=0, commas=False)            # e.g. "4" ×
+    quant_power_w_value = baseline_power_w_value / quant_reduction_value             # 12W / 4 = 3W
+
+    baseline_str = fmt(baseline_power_w_value, precision=0, commas=False)            # e.g. "12" W
+    quant_power_str = fmt(quant_power_w_value, precision=0, commas=False)            # e.g. "3" W
+    quant_red_str = fmt(quant_reduction_value, precision=0, commas=False)            # e.g. "4" ×
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+baseline_str = ThermalQuantCalc.baseline_str
+quant_power_str = ThermalQuantCalc.quant_power_str
+quant_red_str = ThermalQuantCalc.quant_red_str
 ```
 
 ::: {.callout-notebook title="The Thermal Wall"}
@@ -2503,15 +2698,15 @@ class EnergyInference:
     e_mobilenet_str = "~50 mJ"
     e_kws_str = "~10 µJ"
 
-    q_gpt4_str = fmt(q_gpt4.magnitude, precision=0, commas=True)
-    q_resnet_cloud_str = fmt(q_resnet_cloud.magnitude, precision=0, commas=True)
-    q_resnet_edge_str = fmt(q_resnet_edge.magnitude, precision=0, commas=True)
-    q_mobilenet_str = fmt(q_mobilenet.magnitude, precision=0, commas=True)
+    q_gpt4_str = fmt(q_gpt4.m_as(''), precision=0, commas=True)
+    q_resnet_cloud_str = fmt(q_resnet_cloud.m_as(''), precision=0, commas=True)
+    q_resnet_edge_str = fmt(q_resnet_edge.m_as(''), precision=0, commas=True)
+    q_mobilenet_str = fmt(q_mobilenet.m_as(''), precision=0, commas=True)
     # Use BILLION constant
-    q_kws_str = fmt(q_kws.magnitude / BILLION, precision=0, commas=False) + " billion"
+    q_kws_str = fmt(q_kws.m_as('') / BILLION, precision=0, commas=False) + " billion"
 
-    batt_cap_mah_str = f"{BATTERY_CAPACITY_MAH.magnitude:.0f}"
-    batt_volt_str = f"{BATTERY_VOLTAGE_V.magnitude}"
+    batt_cap_mah_str = f"{BATTERY_CAPACITY_MAH.m_as('mAh'):.0f}"
+    batt_volt_str = f"{BATTERY_VOLTAGE_V.m_as('V')}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 e_gpt4_str = EnergyInference.e_gpt4_str
@@ -2658,6 +2853,7 @@ Each paradigm emerged as a response to specific physical constraints: Cloud ML a
 ```{python}
 #| label: paradigms-table
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PARADIGMS TABLE: CLOUD VS EDGE VS MOBILE VS TINYML
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2672,35 +2868,61 @@ Each paradigm emerged as a response to specific physical constraints: Cloud ML a
 # │ Exports: cloud_*_str, edge_*_str, mobile_*_str, tiny_*_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Latency (network + inference time) ---
-cloud_lat_str = "100 ms-1000 ms+"                                                # cloud round-trip
-edge_lat_str = "10-100 ms"                                                       # local network + inference
-mobile_lat_str = "5-50 ms"                                                       # on-device inference
-tiny_lat_str = "1-10 ms"                                                         # MCU response time
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ParadigmsTable:
+    """Namespace for Paradigms Table."""
 
-# --- Compute capability ---
-cloud_comp_str = "Very High (Multiple GPUs/TPUs)"                                # kW-class accelerators
-edge_comp_str = "High (Edge GPUs)"                                               # 10s-100s W accelerators
-mobile_comp_str = "Moderate (Mobile NPUs/GPUs)"                                  # 1-10 W NPUs
-tiny_comp_str = "Very Low (MCU/tiny processors)"                                 # mW-class MCUs
+    # --- Latency (network + inference time) ---
+    cloud_lat_str = "100 ms-1000 ms+"                                                # cloud round-trip
+    edge_lat_str = "10-100 ms"                                                       # local network + inference
+    mobile_lat_str = "5-50 ms"                                                       # on-device inference
+    tiny_lat_str = "1-10 ms"                                                         # MCU response time
 
-# --- Storage capacity ---
-cloud_stor_str = "Unlimited (petabytes+)"                                        # elastic cloud storage
-edge_stor_str = "Large (terabytes)"                                              # local SSDs
-mobile_stor_str = "Moderate (gigabytes)"                                         # phone flash
-tiny_stor_str = "Very Limited (kilobytes-megabytes)"                             # SRAM/flash
+    # --- Compute capability ---
+    cloud_comp_str = "Very High (Multiple GPUs/TPUs)"                                # kW-class accelerators
+    edge_comp_str = "High (Edge GPUs)"                                               # 10s-100s W accelerators
+    mobile_comp_str = "Moderate (Mobile NPUs/GPUs)"                                  # 1-10 W NPUs
+    tiny_comp_str = "Very Low (MCU/tiny processors)"                                 # mW-class MCUs
 
-# --- Energy consumption ---
-cloud_pwr_str = "Very High (kW-MW range)"                                        # data center scale
-edge_pwr_str = "High (100 s W)"                                                  # edge server scale
-mobile_pwr_str = "Moderate (1-10 W)"                                             # phone TDP
-tiny_pwr_str = "Very Low (mW range)"                                             # energy harvesting
+    # --- Storage capacity ---
+    cloud_stor_str = "Unlimited (petabytes+)"                                        # elastic cloud storage
+    edge_stor_str = "Large (terabytes)"                                              # local SSDs
+    mobile_stor_str = "Moderate (gigabytes)"                                         # phone flash
+    tiny_stor_str = "Very Limited (kilobytes-megabytes)"                             # SRAM/flash
 
-# --- Cost structure ---
-cloud_cost_str = "High ($1000s+/month)"                                          # usage-based cloud
-edge_cost_str = "Moderate ($100s-1000s)"                                         # hardware capex
-mobile_cost_str = "Low ($0-10s)"                                                 # app distribution
-tiny_cost_str = "Very Low ($1-10s)"                                              # MCU unit cost
+    # --- Energy consumption ---
+    cloud_pwr_str = "Very High (kW-MW range)"                                        # data center scale
+    edge_pwr_str = "High (100 s W)"                                                  # edge server scale
+    mobile_pwr_str = "Moderate (1-10 W)"                                             # phone TDP
+    tiny_pwr_str = "Very Low (mW range)"                                             # energy harvesting
+
+    # --- Cost structure ---
+    cloud_cost_str = "High ($1000s+/month)"                                          # usage-based cloud
+    edge_cost_str = "Moderate ($100s-1000s)"                                         # hardware capex
+    mobile_cost_str = "Low ($0-10s)"                                                 # app distribution
+    tiny_cost_str = "Very Low ($1-10s)"                                              # MCU unit cost
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cloud_comp_str = ParadigmsTable.cloud_comp_str
+cloud_cost_str = ParadigmsTable.cloud_cost_str
+cloud_lat_str = ParadigmsTable.cloud_lat_str
+cloud_pwr_str = ParadigmsTable.cloud_pwr_str
+cloud_stor_str = ParadigmsTable.cloud_stor_str
+edge_comp_str = ParadigmsTable.edge_comp_str
+edge_cost_str = ParadigmsTable.edge_cost_str
+edge_lat_str = ParadigmsTable.edge_lat_str
+edge_pwr_str = ParadigmsTable.edge_pwr_str
+edge_stor_str = ParadigmsTable.edge_stor_str
+mobile_comp_str = ParadigmsTable.mobile_comp_str
+mobile_cost_str = ParadigmsTable.mobile_cost_str
+mobile_lat_str = ParadigmsTable.mobile_lat_str
+mobile_pwr_str = ParadigmsTable.mobile_pwr_str
+mobile_stor_str = ParadigmsTable.mobile_stor_str
+tiny_comp_str = ParadigmsTable.tiny_comp_str
+tiny_cost_str = ParadigmsTable.tiny_cost_str
+tiny_lat_str = ParadigmsTable.tiny_lat_str
+tiny_pwr_str = ParadigmsTable.tiny_pwr_str
+tiny_stor_str = ParadigmsTable.tiny_stor_str
 ```
 
 The resulting fourteen-dimension comparison appears in @tbl-big_vs_tiny:
@@ -3250,6 +3472,7 @@ A related misconception holds that moving computation closer to the user always 
 ```{python}
 #| label: mobile-power-fallacy-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MOBILE POWER FALLACY: BATTERY DEPLETION CALCULATIONS
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3263,21 +3486,32 @@ A related misconception holds that moving computation closer to the user always 
 # │ Exports: low_power_hours_str, high_power_hours_str,
 # │          low_power_frac, high_power_frac
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check, md_frac
 
-battery_wh_value = 15                                                           # Wh, typical smartphone
-low_power_w_value = 1                                                           # W, light inference
-high_power_w_value = 5                                                          # W, heavy on-device model
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MobilePowerFallacyCalc:
+    """Namespace for Mobile Power Fallacy Calc."""
 
-low_power_hours_value = battery_wh_value / low_power_w_value                    # 15 / 1 = 15 hours
-high_power_hours_value = battery_wh_value / high_power_w_value                  # 15 / 5 = 3 hours
+    battery_wh_value = 15                                                           # Wh, typical smartphone
+    low_power_w_value = 1                                                           # W, light inference
+    high_power_w_value = 5                                                          # W, heavy on-device model
 
-low_power_hours_str = fmt(low_power_hours_value, precision=0, commas=False)     # "15"
-high_power_hours_str = fmt(high_power_hours_value, precision=0, commas=False)   # "3"
+    low_power_hours_value = battery_wh_value / low_power_w_value                    # 15 / 1 = 15 hours
+    high_power_hours_value = battery_wh_value / high_power_w_value                  # 15 / 5 = 3 hours
 
-# --- Inline fractions showing the physics ---
-low_power_frac = md_frac(f"{battery_wh_value} Wh", f"{low_power_w_value} W", f"**{low_power_hours_str} hours**")
-high_power_frac = md_frac(f"{battery_wh_value} Wh", f"{high_power_w_value} W", f"**{high_power_hours_str} hours**")
+    low_power_hours_str = fmt(low_power_hours_value, precision=0, commas=False)     # "15"
+    high_power_hours_str = fmt(high_power_hours_value, precision=0, commas=False)   # "3"
+
+    # --- Inline fractions showing the physics ---
+    low_power_frac = md_frac(f"{battery_wh_value} Wh", f"{low_power_w_value} W", f"**{low_power_hours_str} hours**")
+    high_power_frac = md_frac(f"{battery_wh_value} Wh", f"{high_power_w_value} W", f"**{high_power_hours_str} hours**")
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+low_power_hours_str = MobilePowerFallacyCalc.low_power_hours_str
+high_power_hours_str = MobilePowerFallacyCalc.high_power_hours_str
+low_power_frac = MobilePowerFallacyCalc.low_power_frac
+high_power_frac = MobilePowerFallacyCalc.high_power_frac
 ```
 
 **Fallacy:** *Model optimization overcomes mobile device power and thermal limits.*
@@ -3296,6 +3530,7 @@ The difference is qualitative, not just quantitative. As @sec-ml-systems-tinyml-
 ```{python}
 #| label: tco-pitfall-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ TCO PITFALL: EDGE VS CLOUD TOTAL COST OF OWNERSHIP
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3309,29 +3544,43 @@ The difference is qualitative, not just quantitative. As @sec-ml-systems-tinyml-
 # │ Exports: cloud_compute_str, edge_hw_str, edge_network_str, edge_maint_str,
 # │          edge_reliability_str, edge_total_str, tco_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 
-# Cloud costs (monthly)
-cloud_compute_value = 2000                                                      # $, inference compute
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TcoPitfallCalc:
+    """Namespace for Tco Pitfall Calc."""
 
-# Edge costs (monthly)
-edge_hardware_value = 500                                                       # $, amortized hardware
-edge_network_value = 3000                                                       # $, network engineering
-edge_maintenance_value = 500                                                    # $, hardware maintenance
-edge_reliability_value = 2000                                                   # $, reliability engineering
+    # Cloud costs (monthly)
+    cloud_compute_value = 2000                                                      # $, inference compute
 
-edge_total_value = (edge_hardware_value + edge_network_value +
-                    edge_maintenance_value + edge_reliability_value)            # $6,000
+    # Edge costs (monthly)
+    edge_hardware_value = 500                                                       # $, amortized hardware
+    edge_network_value = 3000                                                       # $, network engineering
+    edge_maintenance_value = 500                                                    # $, hardware maintenance
+    edge_reliability_value = 2000                                                   # $, reliability engineering
 
-tco_ratio_value = edge_total_value / cloud_compute_value                        # 3x
+    edge_total_value = (edge_hardware_value + edge_network_value +
+                        edge_maintenance_value + edge_reliability_value)            # $6,000
 
-cloud_compute_str = fmt(cloud_compute_value, precision=0, commas=True)          # "2,000"
-edge_hw_str = fmt(edge_hardware_value, precision=0, commas=False)               # "500"
-edge_network_str = fmt(edge_network_value, precision=0, commas=True)            # "3,000"
-edge_maint_str = fmt(edge_maintenance_value, precision=0, commas=False)         # "500"
-edge_reliability_str = fmt(edge_reliability_value, precision=0, commas=True)    # "2,000"
-edge_total_str = fmt(edge_total_value, precision=0, commas=True)                # "6,000"
-tco_ratio_str = fmt(tco_ratio_value, precision=0, commas=False)                 # "3"
+    tco_ratio_value = edge_total_value / cloud_compute_value                        # 3x
+
+    cloud_compute_str = fmt(cloud_compute_value, precision=0, commas=True)          # "2,000"
+    edge_hw_str = fmt(edge_hardware_value, precision=0, commas=False)               # "500"
+    edge_network_str = fmt(edge_network_value, precision=0, commas=True)            # "3,000"
+    edge_maint_str = fmt(edge_maintenance_value, precision=0, commas=False)         # "500"
+    edge_reliability_str = fmt(edge_reliability_value, precision=0, commas=True)    # "2,000"
+    edge_total_str = fmt(edge_total_value, precision=0, commas=True)                # "6,000"
+    tco_ratio_str = fmt(tco_ratio_value, precision=0, commas=False)                 # "3"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cloud_compute_str = TcoPitfallCalc.cloud_compute_str
+edge_hw_str = TcoPitfallCalc.edge_hw_str
+edge_network_str = TcoPitfallCalc.edge_network_str
+edge_maint_str = TcoPitfallCalc.edge_maint_str
+edge_reliability_str = TcoPitfallCalc.edge_reliability_str
+edge_total_str = TcoPitfallCalc.edge_total_str
+tco_ratio_str = TcoPitfallCalc.tco_ratio_str
 ```
 
 **Pitfall:** *Minimizing computational resources minimizes total cost.*
@@ -3341,6 +3590,7 @@ Teams optimize per-unit resource consumption while ignoring operational overhead
 ```{python}
 #| label: amdahl-camera-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ AMDAHL'S LAW: CAMERA PIPELINE EXAMPLE
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -3353,37 +3603,54 @@ Teams optimize per-unit resource consumption while ignoring operational overhead
 # │ Imports: mlsys.formatting (fmt)
 # │ Exports: cam_*_str variables for prose
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 
-# --- Inputs (smartphone camera pipeline stages) ---
-cam_isp_ms_value = 100                                                         # ms, ISP + auto-exposure
-cam_ml_ms_value = 60                                                           # ms, ML scene classification
-cam_post_ms_value = 40                                                         # ms, tone mapping + HDR merge
-cam_ml_speedup_value = 10                                                      # 10× faster ML model
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class AmdahlCameraCalc:
+    """Namespace for Amdahl Camera Calc."""
 
-# --- Process (Amdahl's Law) ---
-cam_total_ms_value = cam_isp_ms_value + cam_ml_ms_value + cam_post_ms_value    # 200 ms
-cam_ml_frac_value = cam_ml_ms_value / cam_total_ms_value                       # 0.30
-cam_non_ml_frac_value = 1 - cam_ml_frac_value                                 # 0.70
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    cam_isp_ms_value = 100                                                         # ms, ISP + auto-exposure
+    cam_ml_ms_value = 60                                                           # ms, ML scene classification
+    cam_post_ms_value = 40                                                         # ms, tone mapping + HDR merge
+    cam_ml_speedup_value = 10                                                      # 10× faster ML model
 
-cam_speedup_10x_value = 1 / (cam_non_ml_frac_value + cam_ml_frac_value / cam_ml_speedup_value)
-cam_speedup_inf_value = 1 / cam_non_ml_frac_value                             # theoretical max
-cam_ml_optimized_ms_value = cam_ml_ms_value / cam_ml_speedup_value             # 6 ms
-cam_total_optimized_ms_value = (cam_isp_ms_value +
-                                cam_ml_optimized_ms_value +
-                                cam_post_ms_value)                             # 146 ms
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    cam_total_ms_value = cam_isp_ms_value + cam_ml_ms_value + cam_post_ms_value    # 200 ms
+    cam_ml_frac_value = cam_ml_ms_value / cam_total_ms_value                       # 0.30
+    cam_non_ml_frac_value = 1 - cam_ml_frac_value                                 # 0.70
 
-# --- Outputs (formatted strings for prose) ---
-cam_isp_str = fmt(cam_isp_ms_value, precision=0, commas=False)                 # "100"
-cam_ml_str = fmt(cam_ml_ms_value, precision=0, commas=False)                   # "60"
-cam_post_str = fmt(cam_post_ms_value, precision=0, commas=False)               # "40"
-cam_total_str = fmt(cam_total_ms_value, precision=0, commas=False)             # "200"
-cam_ml_pct_str = fmt(cam_ml_frac_value * 100, precision=0, commas=False)       # "30"
-cam_non_ml_pct_str = fmt(cam_non_ml_frac_value * 100, precision=0, commas=False)  # "70"
-cam_speedup_10x_str = fmt(cam_speedup_10x_value, precision=2, commas=False)    # "1.37"
-cam_speedup_inf_str = fmt(cam_speedup_inf_value, precision=2, commas=False)    # "1.43"
-cam_ml_opt_str = fmt(cam_ml_optimized_ms_value, precision=0, commas=False)     # "6"
-cam_total_opt_str = fmt(cam_total_optimized_ms_value, precision=0, commas=False)  # "146"
+    cam_speedup_10x_value = 1 / (cam_non_ml_frac_value + cam_ml_frac_value / cam_ml_speedup_value)
+    cam_speedup_inf_value = 1 / cam_non_ml_frac_value                             # theoretical max
+    cam_ml_optimized_ms_value = cam_ml_ms_value / cam_ml_speedup_value             # 6 ms
+    cam_total_optimized_ms_value = (cam_isp_ms_value +
+                                    cam_ml_optimized_ms_value +
+                                    cam_post_ms_value)                             # 146 ms
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    cam_isp_str = fmt(cam_isp_ms_value, precision=0, commas=False)                 # "100"
+    cam_ml_str = fmt(cam_ml_ms_value, precision=0, commas=False)                   # "60"
+    cam_post_str = fmt(cam_post_ms_value, precision=0, commas=False)               # "40"
+    cam_total_str = fmt(cam_total_ms_value, precision=0, commas=False)             # "200"
+    cam_ml_pct_str = fmt(cam_ml_frac_value * 100, precision=0, commas=False)       # "30"
+    cam_non_ml_pct_str = fmt(cam_non_ml_frac_value * 100, precision=0, commas=False)  # "70"
+    cam_speedup_10x_str = fmt(cam_speedup_10x_value, precision=2, commas=False)    # "1.37"
+    cam_speedup_inf_str = fmt(cam_speedup_inf_value, precision=2, commas=False)    # "1.43"
+    cam_ml_opt_str = fmt(cam_ml_optimized_ms_value, precision=0, commas=False)     # "6"
+    cam_total_opt_str = fmt(cam_total_optimized_ms_value, precision=0, commas=False)  # "146"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cam_isp_str = AmdahlCameraCalc.cam_isp_str
+cam_ml_opt_str = AmdahlCameraCalc.cam_ml_opt_str
+cam_ml_pct_str = AmdahlCameraCalc.cam_ml_pct_str
+cam_ml_str = AmdahlCameraCalc.cam_ml_str
+cam_non_ml_pct_str = AmdahlCameraCalc.cam_non_ml_pct_str
+cam_post_str = AmdahlCameraCalc.cam_post_str
+cam_speedup_10x_str = AmdahlCameraCalc.cam_speedup_10x_str
+cam_speedup_inf_str = AmdahlCameraCalc.cam_speedup_inf_str
+cam_total_opt_str = AmdahlCameraCalc.cam_total_opt_str
+cam_total_str = AmdahlCameraCalc.cam_total_str
 ```
 
 **Fallacy:** *Model optimization translates linearly to system speedup.*

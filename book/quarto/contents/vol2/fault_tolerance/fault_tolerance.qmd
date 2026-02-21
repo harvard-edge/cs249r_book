@@ -40,25 +40,66 @@ A single GPU fails perhaps once per year. A thousand GPUs experience failures da
 :::
 
 ```{python}
-#| label: fault-tolerance-setup
 #| echo: false
+#| label: fault-tolerance-setup
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FAULT TOLERANCE CHAPTER SETUP
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter-wide registry — values used in §Young-Daly Law
+# │   (@eq-young-daly-applied, line ~1957), §Sharded Checkpointing (line ~2289),
+# │   and §Recovery Cost (line ~2365).
+# │
+# │ Goal: Pre-compute GPT-3 checkpoint size (weights + Adam states) and
+# │   per-worker shard size for 1000-worker training, motivating the
+# │   checkpoint-interval formula and distributed checkpoint design.
+# │ Show: gpt3_ckpt_tb="2.1" TB (full checkpoint),
+# │   gpt3_shard_gb="2.1" GB (per-worker shard at 1000 workers) — inline in prose.
+# │ How: Multiply GPT3_PARAMS.m_as(param) by bytes-per-param for each state;
+# │   convert result pint Quantity with .m_as(TB) and .m_as(GB).
+# │
+# │ Imports: mlsys.constants (GPT3_PARAMS, param, byte, TB, GB, BILLION),
+# │   mlsys.formatting (fmt, sci)
+# │ Exports: gpt3_params_b, gpt3_ckpt_tb, gpt3_adam_tb, gpt3_shard_gb
+# │ Note: PERSISTENT — gpt3_ckpt_tb used in §Young-Daly (line ~1957),
+# │   §Sharded Checkpointing (line ~2289), §Recovery (line ~2365, ~2385);
+# │   gpt3_shard_gb used in §Sharded Checkpointing (line ~2289), §Recovery (~2371, ~2385).
+# └─────────────────────────────────────────────────────────────────────────────
 
 from mlsys.constants import *
 from mlsys.formatting import fmt, sci
 
-# GPT-3 model parameters
-gpt3_params_b = f"{GPT3_PARAMS.to(param).magnitude / BILLION:.0f}"
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class FaultToleranceSetup:
+    """Namespace for GPT-3 checkpoint sizing and shard calculations."""
 
-# GPT-3 checkpoint size: weights (2 bytes FP16) + Adam m (4 bytes) + Adam v (4 bytes) = 12 bytes/param
-gpt3_ckpt_bytes = GPT3_PARAMS.magnitude * 12 * byte
-gpt3_ckpt_tb = f"{gpt3_ckpt_bytes.to(TB).magnitude:.1f}"
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # GPT-3 checkpoint byte layout:
+    #   weights (2 bytes FP16) + Adam m (4 bytes) + Adam v (4 bytes) = 12 bytes/param
+    bytes_full_ckpt = 12   # bytes per param: weights + Adam m + v
+    bytes_adam_only = 8    # bytes per param: Adam m + v only
+    n_workers = 1000       # workers for shard size calculation
 
-# GPT-3 Adam optimizer state: m + v = 8 bytes/param
-gpt3_adam_bytes = GPT3_PARAMS.magnitude * 8 * byte
-gpt3_adam_tb = f"{gpt3_adam_bytes.to(TB).magnitude:.1f}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Full checkpoint: weights + optimizer states
+    gpt3_ckpt_bytes = GPT3_PARAMS.m_as(param) * bytes_full_ckpt * byte
 
-# Per-worker shard for 1000 workers
-gpt3_shard_gb = f"{gpt3_ckpt_bytes.to(GB).magnitude / 1000:.1f}"
+    # Optimizer-only checkpoint: Adam m + v (no weights)
+    gpt3_adam_bytes = GPT3_PARAMS.m_as(param) * bytes_adam_only * byte
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # No check() calls needed — values are monotone functions of constants.
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    gpt3_params_b = f"{GPT3_PARAMS.m_as(param) / BILLION:.0f}"
+    gpt3_ckpt_tb = f"{gpt3_ckpt_bytes.m_as(TB):.1f}"
+    gpt3_adam_tb = f"{gpt3_adam_bytes.m_as(TB):.1f}"
+    gpt3_shard_gb = f"{gpt3_ckpt_bytes.m_as(GB) / n_workers:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpt3_params_b = FaultToleranceSetup.gpt3_params_b
+gpt3_ckpt_tb = FaultToleranceSetup.gpt3_ckpt_tb
+gpt3_adam_tb = FaultToleranceSetup.gpt3_adam_tb
+gpt3_shard_gb = FaultToleranceSetup.gpt3_shard_gb
 ```
 
 ## Failure Analysis at Scale {#sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b}
@@ -2123,45 +2164,88 @@ Imagine 10,000 GPUs, each holding a 10 GB shard of the model state, simultaneous
 While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, real deployments often encounter checkpoint times far exceeding these theoretical estimates. Diagnosing such discrepancies requires examining the full system stack.
 
 ```{python}
-#| label: checkpoint-debug-calc
 #| echo: false
+#| label: checkpoint-debug-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHECKPOINT DEBUG CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Debugging Checkpoint Overhead" callout in §Checkpoint Overhead.
+# │
+# │ Goal: Diagnose why a 70B model checkpoint takes 10 minutes instead of
+# │   2 minutes on an NFS-backed cluster, by computing theoretical bandwidth
+# │   limits and contention-induced effective throughput per node.
+# │ Show: total_ckpt_gb_str="420" GB, nfs_gbs_str="1.25" GB/s,
+# │   min_write_min_str="5.6" min, per_node_mbs_str="20" MB/s,
+# │   serialized_min_str="5,600" min — inline in the Fleet Stack diagnosis.
+# │ How: Compute weights + optimizer state size in GB; derive NFS bandwidth in
+# │   GB/s (10 Gbps / 8); calculate min write time and per-node bandwidth
+# │   under contention from 64 concurrent nodes.
+# │
+# │ Imports: (none — pure Python arithmetic, no pint quantities)
+# │ Exports: weights_gb_str, optimizer_gb_str, total_ckpt_gb_str, nfs_gbs_str,
+# │   min_write_s_str, min_write_min_str, per_node_mbs_str, serialized_min_str,
+# │   extended_weeks_str, extra_cost_k_str
+# └─────────────────────────────────────────────────────────────────────────────
 
-# 70B model checkpoint sizing
-model_params_b = 70  # billions
-bytes_per_param = 2  # BF16
-weights_gb = model_params_b * bytes_per_param  # 140 GB
-optimizer_gb = weights_gb * 2  # Adam first + second moments
-total_ckpt_gb = weights_gb + optimizer_gb  # 420 GB
+class CheckpointDebugCalc:
+    """Diagnose 70B checkpoint overhead on NFS-backed cluster."""
 
-# Storage constraints
-nfs_gbps = 10  # Gbps network
-nfs_gbs = nfs_gbps / 8  # 1.25 GB/s
-min_write_s = total_ckpt_gb / nfs_gbs  # seconds
-min_write_min = min_write_s / 60  # minutes
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    model_params_b = 70     # 70B parameter model
+    bytes_per_param = 2     # BF16 weights
+    nfs_gbps = 10           # NFS network attachment bandwidth in Gbps
+    n_nodes = 64            # nodes writing simultaneously
+    overhead_pct = 30       # observed training throughput loss %
+    base_weeks = 2          # baseline training duration (weeks)
+    extra_cost_k = 500      # additional cost from extended training ($K)
 
-# Contention analysis
-n_nodes = 64
-per_node_gbs = nfs_gbs / n_nodes  # GB/s per node
-per_node_mbs = per_node_gbs * 1000  # MB/s per node
-serialized_min = (total_ckpt_gb / per_node_gbs) / 60
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Model state sizing
+    weights_gb = model_params_b * bytes_per_param          # 140 GB
+    optimizer_gb = weights_gb * 2                           # Adam m + v moments
+    total_ckpt_gb = weights_gb + optimizer_gb               # 420 GB
 
-# Training extension
-overhead_pct = 30
-base_weeks = 2
-extended_weeks = base_weeks * (1 + overhead_pct / 100)
-extra_cost_k = 500  # $K
+    # Storage bandwidth limits
+    nfs_gbs = nfs_gbps / 8                                 # 1.25 GB/s
+    min_write_s = total_ckpt_gb / nfs_gbs                  # theoretical minimum seconds
+    min_write_min = min_write_s / 60                        # convert to minutes
 
-# Format strings
-weights_gb_str = f"{weights_gb:.0f}"
-optimizer_gb_str = f"{optimizer_gb:.0f}"
-total_ckpt_gb_str = f"{total_ckpt_gb:.0f}"
-nfs_gbs_str = f"{nfs_gbs}"
-min_write_s_str = f"{min_write_s:.0f}"
-min_write_min_str = f"{min_write_min:.1f}"
-per_node_mbs_str = f"{per_node_mbs:.0f}"
-serialized_min_str = f"{serialized_min:.0f}"
-extended_weeks_str = f"{extended_weeks:.1f}"
-extra_cost_k_str = f"{extra_cost_k}"
+    # Contention: 64 nodes sharing the NFS bandwidth
+    per_node_gbs = nfs_gbs / n_nodes                        # GB/s per node under contention
+    per_node_mbs = per_node_gbs * 1000                      # MB/s per node
+    serialized_min = (total_ckpt_gb / per_node_gbs) / 60   # worst-case serialized write time
+
+    # Training schedule impact
+    extended_weeks = base_weeks * (1 + overhead_pct / 100)
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    assert min_write_min < 10, "Theoretical minimum must be less than observed 10 minutes"
+    assert serialized_min > min_write_min, "Contention time must exceed theoretical minimum"
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    weights_gb_str     = f"{weights_gb:.0f}"
+    optimizer_gb_str   = f"{optimizer_gb:.0f}"
+    total_ckpt_gb_str  = f"{total_ckpt_gb:.0f}"
+    nfs_gbs_str        = f"{nfs_gbs}"
+    min_write_s_str    = f"{min_write_s:.0f}"
+    min_write_min_str  = f"{min_write_min:.1f}"
+    per_node_mbs_str   = f"{per_node_mbs:.0f}"
+    serialized_min_str = f"{serialized_min:.0f}"
+    extended_weeks_str = f"{extended_weeks:.1f}"
+    extra_cost_k_str   = f"{extra_cost_k}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+weights_gb_str     = CheckpointDebugCalc.weights_gb_str
+optimizer_gb_str   = CheckpointDebugCalc.optimizer_gb_str
+total_ckpt_gb_str  = CheckpointDebugCalc.total_ckpt_gb_str
+nfs_gbs_str        = CheckpointDebugCalc.nfs_gbs_str
+min_write_s_str    = CheckpointDebugCalc.min_write_s_str
+min_write_min_str  = CheckpointDebugCalc.min_write_min_str
+per_node_gbs       = CheckpointDebugCalc.per_node_gbs
+per_node_mbs_str   = CheckpointDebugCalc.per_node_mbs_str
+serialized_min_str = CheckpointDebugCalc.serialized_min_str
+extended_weeks_str = CheckpointDebugCalc.extended_weeks_str
+extra_cost_k_str   = CheckpointDebugCalc.extra_cost_k_str
 ```
 
 ::: {.callout-example title="Debugging Checkpoint Overhead"}

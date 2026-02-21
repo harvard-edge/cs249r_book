@@ -60,24 +60,35 @@ Neural networks reduce to a small set of mathematical operations. Matrix multipl
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ DL PRIMER COMMON IMPORTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Shared imports and unit definitions for all compute cells in
-# │ this chapter.
+# │ Context: Chapter-scoped preamble cell supporting all compute cells from
+# │          @sec-neural-computation-evolution-ml-paradigms-ec9c onward.
+# │          Also seeds inf_madd_total_str used in the Purpose opening paragraph.
 # │
-# │ Goal: Centralize import statements for the chapter.
-# │ Show: A clean namespace for subsequent calculations.
-# │ How: Import all constants and formatting helpers from mlsys.
+# │ Goal: Centralize unit imports and compute the MNIST forward-pass MAC count
+# │       used in the Purpose section before any architecture cell runs.
+# │ Show: A clean shared namespace and the 109,184 MAC count for 784→128→64→10.
+# │ How: Wildcard-import mlsys.constants for units; count MACs as the sum of
+# │      three layer products (784×128 + 128×64 + 64×10).
 # │
 # │ Imports: mlsys.constants (*), mlsys.formatting (fmt, sci),
 # │          mlsys.formulas (model_memory)
-# │ Exports: All mlsys.constants units and hardware specs
+# │ Exports: inf_madd_total_str (Purpose prose), all mlsys.constants units
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import *
 from mlsys.formatting import fmt, sci
 from mlsys.formulas import model_memory
 
-# MNIST 784→128→64→10 MAC count (used in Purpose / From Logic to Arithmetic)
-_inf_madd = 784 * 128 + 128 * 64 + 64 * 10  # 109,184
-inf_madd_total_str = f"{_inf_madd:,}"
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class DlPrimerImports:
+    """Namespace for Dl Primer Imports."""
+
+    # MNIST 784→128→64→10 MAC count (used in Purpose / From Logic to Arithmetic)
+    _inf_madd = 784 * 128 + 128 * 64 + 64 * 10  # 109,184
+    inf_madd_total_str = f"{_inf_madd:,}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+inf_madd_total_str = DlPrimerImports.inf_madd_total_str
 ```
 
 ## From Logic to Arithmetic {#sec-neural-computation-deep-learning-systems-engineering-foundation-597f}
@@ -122,66 +133,92 @@ To ground this arc in a concrete systems story, we start by following a single M
 ```{python}
 #| echo: false
 #| label: paradigm-systems-cost
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PARADIGM SYSTEMS COST — RUNNING MNIST EXAMPLE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Computing with Patterns" running example tracing the same
-# │ 28×28 MNIST digit through rule-based, classical ML, and deep learning
-# │ paradigms to make the systems cost escalation quantitative.
+# │ Context: @sec-neural-computation-evolution-ml-paradigms-ec9c — running example
+# │          comparing rule-based, classical ML (HOG + SVM), and deep learning on
+# │          the same 28×28 MNIST digit to quantify systems cost escalation.
 # │
-# │ Goal: Trace the computational cost of pattern recognition across paradigms.
-# │ Show: The order-of-magnitude cost escalation from rule-based to deep learning.
-# │ How: Compare ops and memory for processing a single 28×28 digit.
+# │ Goal: Establish concrete operation and memory counts for each paradigm so
+# │       that prose can state the escalation factor precisely.
+# │ Show: The ~1,500× MAC increase from rule-based (~100 ops) to deep learning
+# │       (~109K MACs) and the proportional memory footprint growth.
+# │ How: Hard-code pixel count, HOG cell grid, and MLP layer dimensions; compute
+# │      ops and memory for each paradigm using arithmetic only.
 # │
-# │ Imports: mlsys.formatting (fmt)
-# │ Exports: *_str variables for inline use in prose
+# │ Imports: mlsys.formatting (fmt, check),
+# │          mlsys.constants (KIB_TO_BYTES, MILLION, THOUSAND)
+# │ Exports: rb_pixels_str, rb_ops_str, rb_mem_str, hog_features_str,
+# │          hog_ops_approx_str, hog_mem_str, dl_total_macs_str, dl_params_str,
+# │          dl_weight_kb_str, dl_ops_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 from mlsys.constants import KIB_TO_BYTES, MILLION, THOUSAND
 
-# === Rule-Based Paradigm ===
-# Simple threshold comparisons on 28×28 = 784 pixels
-rb_pixels = 28 * 28                         # 784
-rb_ops = 100                                # ~100 comparisons (generous)
-rb_mem_bytes = rb_pixels                    # 784 bytes working set
-rb_pixels_str = fmt(rb_pixels, precision=0, commas=True)       # "784"
-rb_ops_str = fmt(rb_ops, precision=0, commas=False)            # "100"
-rb_mem_str = fmt(rb_mem_bytes, precision=0, commas=True)       # "784"
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class ParadigmSystemsCost:
+    """Namespace for Paradigm Systems Cost."""
 
-# === Classical ML (HOG + linear classifier) ===
-# HOG on 28×28: 7×7 grid of 4×4 cells, 9 orientation bins
-hog_cells = 7 * 7                           # 49 cells
-hog_bins = 9                                # orientation bins per cell
-hog_features = hog_cells * hog_bins         # 441 features
-# Gradient computation: ~2 ops per pixel (dx, dy) + histogram binning
-hog_gradient_ops = rb_pixels * 2            # 1,568
-hog_binning_ops = rb_pixels * 3             # ~2,352 (magnitude, angle, bin)
-hog_classify_ops = hog_features * 10        # ~4,410 (SVM: 10 classes, dot products)
-hog_total_ops = hog_gradient_ops + hog_binning_ops + hog_classify_ops  # ~8,330
-hog_mem_kb = 2                              # ~2 KB (image + gradients + histograms)
-hog_grid_str = "7"                                               # grid dimension
-hog_bins_str = fmt(hog_bins, precision=0, commas=False)          # "9"
-hog_features_str = fmt(hog_features, precision=0, commas=True)   # "441"
-hog_ops_str = fmt(hog_total_ops, precision=0, commas=True)       # "8,330"
-hog_ops_approx_str = "8,000"                                     # rounded for prose
-hog_mem_str = fmt(hog_mem_kb, precision=0, commas=False)         # "2"
+    # === Rule-Based Paradigm ===
+    # Simple threshold comparisons on 28×28 = 784 pixels
+    rb_pixels = 28 * 28                         # 784
+    rb_ops = 100                                # ~100 comparisons (generous)
+    rb_mem_bytes = rb_pixels                    # 784 bytes working set
+    rb_pixels_str = fmt(rb_pixels, precision=0, commas=True)       # "784"
+    rb_ops_str = fmt(rb_ops, precision=0, commas=False)            # "100"
+    rb_mem_str = fmt(rb_mem_bytes, precision=0, commas=True)       # "784"
 
-# === Deep Learning (784→128→64→10 MLP) ===
-# Forward pass MACs per layer
-dl_l1_macs = 784 * 128                     # 100,352
-dl_l2_macs = 128 * 64                      # 8,192
-dl_l3_macs = 64 * 10                       # 640
-dl_total_macs = dl_l1_macs + dl_l2_macs + dl_l3_macs  # 109,184
-# Parameters (weights only, no bias for simplicity)
-dl_params = dl_l1_macs + dl_l2_macs + dl_l3_macs      # same as MACs for dense layers
-dl_params_with_bias = dl_params + 128 + 64 + 10        # 109,386
-dl_weight_bytes = dl_params_with_bias * 4              # FP32 = 4 bytes each
-dl_weight_kb = dl_weight_bytes / KIB_TO_BYTES                  # ~427 KB
-dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)       # "109,184"
-dl_params_str = fmt(dl_params_with_bias, precision=0, commas=True)     # "109,386"
-dl_weight_kb_str = fmt(dl_weight_kb, precision=0, commas=False)        # "427"
-dl_ops_ratio = dl_total_macs / rb_ops                                  # ~1,092×
-dl_ops_ratio_str = fmt(dl_ops_ratio, precision=0, commas=True)         # "1,092"
+    # === Classical ML (HOG + linear classifier) ===
+    # HOG on 28×28: 7×7 grid of 4×4 cells, 9 orientation bins
+    hog_cells = 7 * 7                           # 49 cells
+    hog_bins = 9                                # orientation bins per cell
+    hog_features = hog_cells * hog_bins         # 441 features
+    # Gradient computation: ~2 ops per pixel (dx, dy) + histogram binning
+    hog_gradient_ops = rb_pixels * 2            # 1,568
+    hog_binning_ops = rb_pixels * 3             # ~2,352 (magnitude, angle, bin)
+    hog_classify_ops = hog_features * 10        # ~4,410 (SVM: 10 classes, dot products)
+    hog_total_ops = hog_gradient_ops + hog_binning_ops + hog_classify_ops  # ~8,330
+    hog_mem_kb = 2                              # ~2 KB (image + gradients + histograms)
+    hog_grid_str = "7"                                               # grid dimension
+    hog_bins_str = fmt(hog_bins, precision=0, commas=False)          # "9"
+    hog_features_str = fmt(hog_features, precision=0, commas=True)   # "441"
+    hog_ops_str = fmt(hog_total_ops, precision=0, commas=True)       # "8,330"
+    hog_ops_approx_str = "8,000"                                     # rounded for prose
+    hog_mem_str = fmt(hog_mem_kb, precision=0, commas=False)         # "2"
+
+    # === Deep Learning (784→128→64→10 MLP) ===
+    # Forward pass MACs per layer
+    dl_l1_macs = 784 * 128                     # 100,352
+    dl_l2_macs = 128 * 64                      # 8,192
+    dl_l3_macs = 64 * 10                       # 640
+    dl_total_macs = dl_l1_macs + dl_l2_macs + dl_l3_macs  # 109,184
+    # Parameters (weights only, no bias for simplicity)
+    dl_params = dl_l1_macs + dl_l2_macs + dl_l3_macs      # same as MACs for dense layers
+    dl_params_with_bias = dl_params + 128 + 64 + 10        # 109,386
+    dl_weight_bytes = dl_params_with_bias * 4              # FP32 = 4 bytes each
+    dl_weight_kb = dl_weight_bytes / KIB_TO_BYTES                  # ~427 KB
+    dl_total_macs_str = fmt(dl_total_macs, precision=0, commas=True)       # "109,184"
+    dl_params_str = fmt(dl_params_with_bias, precision=0, commas=True)     # "109,386"
+    dl_weight_kb_str = fmt(dl_weight_kb, precision=0, commas=False)        # "427"
+    dl_ops_ratio = dl_total_macs / rb_ops                                  # ~1,092×
+    dl_ops_ratio_str = fmt(dl_ops_ratio, precision=0, commas=True)         # "1,092"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+rb_pixels_str = ParadigmSystemsCost.rb_pixels_str
+rb_ops_str = ParadigmSystemsCost.rb_ops_str
+rb_mem_str = ParadigmSystemsCost.rb_mem_str
+hog_grid_str = ParadigmSystemsCost.hog_grid_str
+hog_bins_str = ParadigmSystemsCost.hog_bins_str
+hog_features_str = ParadigmSystemsCost.hog_features_str
+hog_ops_approx_str = ParadigmSystemsCost.hog_ops_approx_str
+hog_mem_str = ParadigmSystemsCost.hog_mem_str
+dl_total_macs_str = ParadigmSystemsCost.dl_total_macs_str
+dl_params_str = ParadigmSystemsCost.dl_params_str
+dl_weight_kb_str = ParadigmSystemsCost.dl_weight_kb_str
+dl_ops_ratio_str = ParadigmSystemsCost.dl_ops_ratio_str
 ```
 
 The shift from logic to arithmetic reshapes how we encode real-world patterns in a form a computer can process. To make this evolution concrete, we track a single task across all three paradigms: classifying a handwritten digit from a 28 $\times$ 28 pixel image from the MNIST[^fn-mnist-dataset] dataset (the same input used throughout this chapter). Watch how the computational profile changes as representation strategies evolve.
@@ -376,14 +413,18 @@ This architecture exhibits predictable scaling\index{Scalability!deep learning}:
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FIG-DOUBLE-DESCENT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-double-descent illustrating the double descent phenomenon
-# │ in model complexity vs test error.
+# │ Context: @fig-double-descent in @sec-neural-computation-automatic-pattern-discovery-214d,
+# │          illustrating why overparameterized deep learning defies classical
+# │          statistical Bias-Variance theory.
 # │
-# │ Goal: Visualize the double descent phenomenon in overparameterized models.
-# │ Show: That "bigger is better" holds past the interpolation threshold.
-# │ How: Plot test error vs. model complexity showing the U-shape and second descent.
+# │ Goal: Visualize the U-shape classical regime, the spike at the interpolation
+# │       threshold, and the second descent into the modern overparameterized regime.
+# │ Show: That "bigger is better" holds past the interpolation threshold —
+# │       the empirical basis for 100B+ parameter frontier models.
+# │ How: Generate a synthetic curve with a masked U-shape for the classical regime
+# │      and an exponential decay for the modern regime; smooth with convolution.
 # │
-# │ Imports: numpy (np), mlsys.viz (viz)
+# │ Imports: numpy (np), mlsys.viz (setup_plot, COLORS)
 # │ Exports: (figure only — no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
@@ -572,15 +613,19 @@ While the preceding sections established the technical foundations of deep learn
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FIG-TRENDS — COMPUTATIONAL GROWTH SCATTER PLOT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-trends showing seven decades of AI training compute on a
-# │ log scale, revealing the acceleration from 1.4× to 3.4-month doubling.
+# │ Context: @fig-trends in @sec-neural-computation-evolution-neural-network-computing-8754,
+# │          visually grounding the 4–5× annual compute growth cited in prose.
 # │
-# │ Goal: Visualize the acceleration of AI training compute requirements.
-# │ Show: The shift from 2-year to 3.4-month doubling times after 2012.
-# │ How: Plot training compute (FLOPs) vs. year on a logarithmic scale.
+# │ Goal: Plot seven decades of AI training compute on a log scale, exposing
+# │       the 1952–2010 linear trend (1.4×/year) and the 2012–2025 acceleration
+# │       (doubling every ~3.4 months) driven by the deep learning era.
+# │ Show: The inflection point at AlexNet (2012) where compute growth detached
+# │       from Moore's Law, creating the hardware investment arms race.
+# │ How: Load data/all_ai_models.csv; extract training compute per year; fit
+# │      OLS log-linear trend lines for each era; annotate key models.
 # │
 # │ Imports: pandas (pd), numpy (np), matplotlib.pyplot (plt),
-# │          datetime (datetime), os, mlsys.viz (setup_plot, COLORS)
+# │          datetime, os, mlsys.viz (setup_plot, COLORS)
 # │ Exports: (figure only — no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import pandas as pd
@@ -778,13 +823,19 @@ else:
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ HISTORICAL MODEL PARAMETERS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @tbl-historical-performance showing 4 decades of NN evolution
+# │ Context: @tbl-historical-performance in
+# │          @sec-neural-computation-evolution-neural-network-computing-8754,
+# │          providing the GPT-3 and GPT-4 cells that require live constants.
 # │
-# │ Goal: Provide concrete scale anchors for the evolution of neural networks.
-# │ Show: The 8-order-of-magnitude leap from LeNet to GPT-4.
-# │ How: Retrieve parameter counts for key historical models.
+# │ Goal: Supply exact GPT-3 parameter count (from mlsys.constants) and an
+# │       estimated GPT-4 MoE count for the 1989–2023 historical comparison table.
+# │ Show: The 8-order-of-magnitude parameter leap from LeNet-1 (~9.8K) to
+# │       GPT-4 (~1.8T), anchoring the co-scaling narrative.
+# │ How: Read GPT3_PARAMS and convert to Bparam; treat GPT-4 as 1.8T (MoE
+# │      estimate); compute scale factor as a guardrail invariant.
 # │
-# │ Imports: mlsys.constants (GPT3_PARAMS, Bparam), mlsys.formatting (fmt)
+# │ Imports: mlsys.constants (GPT3_PARAMS, Bparam, THOUSAND),
+# │          mlsys.formatting (fmt, check)
 # │ Exports: gpt3_params_b_str, gpt4_params_t_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import GPT3_PARAMS, Bparam, THOUSAND
@@ -798,7 +849,7 @@ class HistoricalScale:
     """
 
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    gpt3_params_b = GPT3_PARAMS.to(Bparam).magnitude
+    gpt3_params_b = GPT3_PARAMS.m_as(Bparam)
     gpt4_params_t = 1.8 # Estimate (MoE)
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
@@ -949,30 +1000,53 @@ To ground these concepts in a concrete example, we use handwritten digit recogni
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST ARCHITECTURE CONSTANTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Running Example callout and multiple subsequent references
+# │ Context: "Running Example: MNIST Digit Recognition" callout at the start of
+# │          @sec-neural-computation-network-architecture-fundamentals-1f58;
+# │          topology constants reused by mnist-memory-calc, mnist-flops-calc,
+# │          mnist-training-memory-calc, and mnist-weights-calc cells below.
 # │
-# │ Goal: Define the canonical MNIST architecture for the running example.
-# │ Show: The 784→128→64→10 topology used throughout the chapter.
-# │ How: Set constants for input, hidden, and output layer dimensions.
+# │ Goal: Define the canonical 784→128→64→10 MLP topology once, serving as the
+# │       single source of truth for all subsequent MNIST running-example cells.
+# │ Show: The four layer dimensions (input, two hidden, output) and the
+# │       human-readable architecture string used in prose and callouts.
+# │ How: Derive input dimension from MNIST_IMAGE_WIDTH × MNIST_IMAGE_HEIGHT;
+# │      assign hidden and output layer widths as named constants.
 # │
 # │ Imports: mlsys.constants (MNIST_IMAGE_WIDTH, MNIST_IMAGE_HEIGHT)
-# │ Exports: mnist_l1_dim, mnist_l2_dim, mnist_l3_dim, mnist_l4_dim,
-# │          mnist_arch_str, mnist_input_str
+# │ Exports: mnist_l1_dim (784), mnist_l2_dim (128), mnist_l3_dim (64),
+# │          mnist_l4_dim (10), mnist_arch_str ("784→128→64→10"), mnist_input_str
+# │
+# │ Note: mnist_l*_dim and mnist_arch_str are consumed by subsequent cells
+# │       up to mnist-weights-calc (~2700 lines below this cell). These are
+# │       intentionally chapter-scoped topology constants.
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import MNIST_IMAGE_WIDTH, MNIST_IMAGE_HEIGHT
 
-# --- Inputs (canonical MNIST architecture) ---
-mnist_l1_dim = 784                                       # input: 28×28 pixels
-mnist_l2_dim = 128                                       # hidden layer 1
-mnist_l3_dim = 64                                        # hidden layer 2
-mnist_l4_dim = 10                                        # output: 10 digit classes
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MnistArchitectureConstants:
+    """Namespace for Mnist Architecture Constants."""
 
-# --- Derived values ---
-mnist_input_neurons_value = MNIST_IMAGE_WIDTH * MNIST_IMAGE_HEIGHT  # 28×28 = 784
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    mnist_l1_dim = 784                                       # input: 28×28 pixels
+    mnist_l2_dim = 128                                       # hidden layer 1
+    mnist_l3_dim = 64                                        # hidden layer 2
+    mnist_l4_dim = 10                                        # output: 10 digit classes
 
-# --- Outputs (formatted strings for prose) ---
-mnist_arch_str = f"{mnist_l1_dim}→{mnist_l2_dim}→{mnist_l3_dim}→{mnist_l4_dim}"  # e.g. "784→128→64→10"
-mnist_input_str = f"{mnist_input_neurons_value}"                                 # e.g. "784"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    mnist_input_neurons_value = MNIST_IMAGE_WIDTH * MNIST_IMAGE_HEIGHT  # 28×28 = 784
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mnist_arch_str = f"{mnist_l1_dim}→{mnist_l2_dim}→{mnist_l3_dim}→{mnist_l4_dim}"  # e.g. "784→128→64→10"
+    mnist_input_str = f"{mnist_input_neurons_value}"                                 # e.g. "784"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mnist_l1_dim = MnistArchitectureConstants.mnist_l1_dim
+mnist_l2_dim = MnistArchitectureConstants.mnist_l2_dim
+mnist_l3_dim = MnistArchitectureConstants.mnist_l3_dim
+mnist_l4_dim = MnistArchitectureConstants.mnist_l4_dim
+mnist_arch_str = MnistArchitectureConstants.mnist_arch_str
+mnist_input_str = MnistArchitectureConstants.mnist_input_str
 ```
 
 ::: {.callout-example title="Running Example: MNIST Digit Recognition"}
@@ -1608,45 +1682,73 @@ This simple network demonstrates how hidden layers enable learning non-linear pa
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST NETWORK SCALE COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Footnote [^fn-computational-scale] comparing large vs small nets
+# │ Context: Footnote [^fn-computational-scale] in
+# │          @sec-neural-computation-feedforward-network-architecture-d2cf,
+# │          quantifying the memory-accuracy trade-off for two MNIST MLP variants.
 # │
-# │ Goal: Illustrate the diminishing returns of model scaling.
-# │ Show: That a 20× resource increase yields only marginal accuracy gains on MNIST.
-# │ How: Compare parameter counts for large vs. small MLP variants.
+# │ Goal: Show that a 20× parameter increase (784→1000→1000→10 vs 784→100→100→10)
+# │       yields only a marginal accuracy improvement (99.5% vs 98.5%) on MNIST.
+# │ Show: ~1.8M parameters requiring ~7 MB vs ~89K parameters requiring ~347 KB,
+# │       motivating architecture design discipline for mobile deployment.
+# │ How: Sum weights (input×output) + biases (output) per layer for both
+# │      architectures; convert to MB/KB using model_memory().
 # │
 # │ Imports: mlsys.constants (BYTES_FP32, MB, KiB, param, Mparam, Kparam),
 # │          mlsys.formulas (model_memory)
-# │ Exports: mnist_large_*, mnist_small_*
+# │ Exports: mnist_large_params_m_str, mnist_large_mem_mb_str,
+# │          mnist_small_params_k_str, mnist_small_mem_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import BYTES_FP32, MB, KiB, param, Mparam, Kparam
 from mlsys.formulas import model_memory
 
-# --- Inputs (large architecture: 784→1000→1000→10) ---
-mnist_large_l1 = 1000                                    # hidden layer 1 width
-mnist_large_l2 = 1000                                    # hidden layer 2 width
-mnist_large_arch = [(mnist_l1_dim, mnist_large_l1),
-                    (mnist_large_l1, mnist_large_l2),
-                    (mnist_large_l2, mnist_l4_dim)]
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MnistScaleComparison:
+    """Namespace for Mnist Scale Comparison."""
 
-# --- Inputs (small architecture: 784→100→100→10) ---
-mnist_small_l1 = 100                                     # hidden layer 1 width
-mnist_small_l2 = 100                                     # hidden layer 2 width
-mnist_small_arch = [(mnist_l1_dim, mnist_small_l1),
-                    (mnist_small_l1, mnist_small_l2),
-                    (mnist_small_l2, mnist_l4_dim)]
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    mnist_large_l1 = 1000                                    # hidden layer 1 width
+    mnist_large_l2 = 1000                                    # hidden layer 2 width
+    mnist_large_arch = [(mnist_l1_dim, mnist_large_l1),
+                        (mnist_large_l1, mnist_large_l2),
+                        (mnist_large_l2, mnist_l4_dim)]
 
-# --- Process (parameter and memory calculations) ---
-mnist_large_params = sum(i * o + o for i, o in mnist_large_arch)
-mnist_large_mem_mb = model_memory(mnist_large_params, BYTES_FP32, MB)
+    # Small architecture inputs
+    mnist_small_l1 = 100                                     # hidden layer 1 width
+    mnist_small_l2 = 100                                     # hidden layer 2 width
+    mnist_small_arch = [(mnist_l1_dim, mnist_small_l1),
+                        (mnist_small_l1, mnist_small_l2),
+                        (mnist_small_l2, mnist_l4_dim)]
 
-mnist_small_params = sum(i * o + o for i, o in mnist_small_arch)
-mnist_small_mem_kb = model_memory(mnist_small_params, BYTES_FP32, KiB)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Use explicit for-loops: generator expressions skip the class namespace in Python 3
+    _large_params = 0
+    for _i, _o in mnist_large_arch:
+        _large_params += _i * _o + _o
+    mnist_large_params = _large_params
+    mnist_large_mem_mb = model_memory(mnist_large_params, BYTES_FP32, MB)
 
-# --- Outputs (formatted strings for prose) ---
-mnist_large_params_m_str = f"{(mnist_large_params * param).to(Mparam).magnitude:.1f}"  # e.g. "1.8"
-mnist_large_mem_mb_str = f"{mnist_large_mem_mb:.0f}"                                   # e.g. "7"
-mnist_small_params_k_str = f"{(mnist_small_params * param).to(Kparam).magnitude:.0f}"  # e.g. "89"
-mnist_small_mem_kb_str = f"{mnist_small_mem_kb:.0f}"                                   # e.g. "347"
+    _small_params = 0
+    for _i, _o in mnist_small_arch:
+        _small_params += _i * _o + _o
+    mnist_small_params = _small_params
+    mnist_small_mem_kb = model_memory(mnist_small_params, BYTES_FP32, KiB)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mnist_large_params_m_str = f"{(mnist_large_params * param).m_as(Mparam):.1f}"          # e.g. "1.8"
+    mnist_large_mem_mb_str = f"{mnist_large_mem_mb:.0f}"                                   # e.g. "7"
+    mnist_small_params_k_str = f"{(mnist_small_params * param).m_as(Kparam):.0f}"          # e.g. "89"
+    mnist_small_mem_kb_str = f"{mnist_small_mem_kb:.0f}"                                   # e.g. "347"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mnist_large_l1 = MnistScaleComparison.mnist_large_l1
+mnist_large_l2 = MnistScaleComparison.mnist_large_l2
+mnist_small_l1 = MnistScaleComparison.mnist_small_l1
+mnist_small_l2 = MnistScaleComparison.mnist_small_l2
+mnist_large_params_m_str = MnistScaleComparison.mnist_large_params_m_str
+mnist_large_mem_mb_str = MnistScaleComparison.mnist_large_mem_mb_str
+mnist_small_params_k_str = MnistScaleComparison.mnist_small_params_k_str
+mnist_small_mem_kb_str = MnistScaleComparison.mnist_small_mem_kb_str
 ```
 
 The XOR example established the canonical three-layer architecture, but real-world networks require systematic consideration of design constraints and computational scale[^fn-computational-scale]. Recognizing handwritten digits using the MNIST\index{MNIST Dataset!digit recognition}\index{Dataset!MNIST benchmark} [@lecun1998gradient] dataset illustrates how problem structure determines network dimensions while hidden layer configuration remains an important design decision.
@@ -1872,21 +1974,33 @@ These connection patterns have significant implications for both the theoretical
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST MEMORY CALC — TRAINING VS INFERENCE FOOTPRINT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: MNIST memory callout, per-layer parameter/activation tables,
-# │ and forward-pass FLOP counts referenced throughout the chapter.
+# │ Context: Primary computation hub for the running example, feeding:
+# │   - Per-layer parameter and activation tables in
+# │     @sec-neural-computation-model-size-computational-complexity-1f0f
+# │   - "Memory: Training vs. Inference" callout (preceding mnist-training-memory-calc)
+# │   - Forward-pass FLOP analysis in @sec-neural-computation-forward-pass-computation-e5dd
+# │   - Backpropagation memory analysis in
+# │     @sec-neural-computation-gradient-computation-backpropagation-dacf
 # │
-# │ Goal: Establish the quantitative backbone for the running example.
-# │ Show: Exact parameter, memory, and FLOP counts for the 784→128→64→10 MLP.
-# │ How: Calculate per-layer stats for weights, biases, and activations.
+# │ Goal: Establish the complete quantitative backbone — parameter counts, memory
+# │       footprint, activation sizes, FLOP totals, and arithmetic intensity —
+# │       for the 784→128→64→10 MLP at batch=32.
+# │ Show: Exact per-layer stats (weights, biases, params, activations) and the
+# │       training_ratio showing training requires 4× inference memory.
+# │ How: Iterate over layer dimension pairs; compute weights = din × dout,
+# │      biases = dout; accumulate activation memory for batch=32; derive FLOPs
+# │      as 2×MACs×batch; compute arithmetic intensity as FLOPs/ModelBytes.
 # │
-# │ Imports: mlsys.formatting (fmt),
-# │          mlsys.constants (BYTES_FP32, flop, MFLOPs, KFLOPs)
-# │ Exports: param_mem_str, grad_mem_str, opt_mem_str, total_act_str,
-# │          training_mb_str, inference_kb_str, training_ratio_str,
-# │          w1_str..w3_str, b1_str..b3_str, t1_str..t3_str,
-# │          total_params_str, total_mops_str, per_image_kops_str,
-# │          layer1_pct_str, arith_intensity_str, batch_*_str, grad_l*_str,
-# │          bp_*_str, inf_madd_*_str
+# │ Imports: mlsys.formatting (fmt, check),
+# │          mlsys.constants (BYTES_FP32, flop, MFLOPs, KFLOPs, MILLION,
+# │          THOUSAND, KIB_TO_BYTES)
+# │ Exports: MNISTMemory class (all attributes), BackpropMemory class (all
+# │          attributes), plus top-level strings: w1_str, w2_str, w3_str,
+# │          b1_str, b2_str, b3_str, p1_str, p2_str, p3_str, total_params_str,
+# │          training_ratio_str, inf_madd_l1_str, inf_madd_l2_str, inf_madd_l3_str
+# │
+# │ Note: MNISTMemory and BackpropMemory attributes are consumed by
+# │       mnist-training-memory-calc and mnist-flops-calc cells (~300 lines below).
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
 from mlsys.constants import BYTES_FP32, flop, MFLOPs, KFLOPs, MILLION, THOUSAND, KIB_TO_BYTES
@@ -2112,46 +2226,82 @@ Parameter count grows with network width and depth. For our MNIST example, consi
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST TRAINING VS INFERENCE MEMORY — DETAILED BREAKDOWN
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Memory: Training vs. Inference"
+# │ Context: "Memory: Training vs. Inference" worked example callout in
+# │          @sec-neural-computation-model-size-computational-complexity-1f0f
 # │
-# │ Goal: Contrast training and inference memory usage.
-# │ Show: That training requires >2× more memory due to stored activations.
-# │ How: Sum weights, gradients, optimizer state, and activations for batch 32.
+# │ Goal: Compute per-layer and total memory for the 784→128→64→10 MLP at
+# │       batch=32, then contrast training vs. inference footprint.
+# │ Show: That training requires ~4× more memory than inference due to gradients
+# │       and Adam optimizer state, raising total from ~KB to ~MB.
+# │ How: Re-export pre-computed values from MNISTMemory and BackpropMemory
+# │      (defined in the preceding mnist-memory-calc cell) with descriptive names
+# │      for the per-layer table in the callout.
 # │
 # │ Imports: mlsys.formatting (fmt, check)
-# │ Exports: p1_str, p2_str, p3_str, act_*_str, grad_kib_str, etc.
+# │ Exports: param_kib_str, grad_kib_str, opt_kib_str, act_in_count_str,
+# │          act_in_kib_str, act_h1_count_str, act_h1_kib_str, act_h2_count_str,
+# │          act_h2_kib_str, act_out_count_str, act_out_kib_str,
+# │          total_act_count_str, total_act_kib_str,
+# │          total_train_mib_str, total_infer_kib_str,
+# │          bp_input_kb_str, bp_h1_kb_str, bp_h2_kb_str, bp_out_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 
-# Use MNISTMemory and BackpropMemory as Single Source of Truth
-# (Variables already exported in previous cell)
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MnistTrainingMemoryCalc:
+    """Namespace for Mnist Training Memory Calc."""
 
-# Re-exporting specifically for the prose below this cell for clarity
-# Canonical MNIST (MNISTMemory)
-param_kib_str = fmt(MNISTMemory.param_mem_kb, precision=1, commas=False)
-grad_kib_str = fmt(MNISTMemory.grad_mem_kb, precision=1, commas=False)
-opt_kib_str = fmt(MNISTMemory.opt_mem_kb, precision=1, commas=False)
+    # Use MNISTMemory and BackpropMemory as Single Source of Truth
+    # (Variables already exported in previous cell)
 
-act_in_count_str = f"{MNISTMemory.batch_act_sizes[0]:,}"
-act_in_kib_str = fmt((MNISTMemory.batch_act_sizes[0] * 4) / 1024, precision=1, commas=False)
-act_h1_count_str = f"{MNISTMemory.batch_act_sizes[1]:,}"
-act_h1_kib_str = fmt((MNISTMemory.batch_act_sizes[1] * 4) / 1024, precision=1, commas=False)
-act_h2_count_str = f"{MNISTMemory.batch_act_sizes[2]:,}"
-act_h2_kib_str = fmt((MNISTMemory.batch_act_sizes[2] * 4) / 1024, precision=1, commas=False)
-act_out_count_str = f"{MNISTMemory.batch_act_sizes[3]:,}"
-act_out_kib_str = fmt((MNISTMemory.batch_act_sizes[3] * 4) / 1024, precision=1, commas=False)
+    # Re-exporting specifically for the prose below this cell for clarity
+    # Canonical MNIST (MNISTMemory)
+    param_kib_str = fmt(MNISTMemory.param_mem_kb, precision=1, commas=False)
+    grad_kib_str = fmt(MNISTMemory.grad_mem_kb, precision=1, commas=False)
+    opt_kib_str = fmt(MNISTMemory.opt_mem_kb, precision=1, commas=False)
 
-total_act_count_str = f"{sum(MNISTMemory.batch_act_sizes):,}"
-total_act_kib_str = fmt(MNISTMemory.act_mem_kb, precision=1, commas=False)
+    act_in_count_str = f"{MNISTMemory.batch_act_sizes[0]:,}"
+    act_in_kib_str = fmt((MNISTMemory.batch_act_sizes[0] * 4) / 1024, precision=1, commas=False)
+    act_h1_count_str = f"{MNISTMemory.batch_act_sizes[1]:,}"
+    act_h1_kib_str = fmt((MNISTMemory.batch_act_sizes[1] * 4) / 1024, precision=1, commas=False)
+    act_h2_count_str = f"{MNISTMemory.batch_act_sizes[2]:,}"
+    act_h2_kib_str = fmt((MNISTMemory.batch_act_sizes[2] * 4) / 1024, precision=1, commas=False)
+    act_out_count_str = f"{MNISTMemory.batch_act_sizes[3]:,}"
+    act_out_kib_str = fmt((MNISTMemory.batch_act_sizes[3] * 4) / 1024, precision=1, commas=False)
 
-total_train_mib_str = fmt(MNISTMemory.training_total_kb / 1024, precision=1, commas=False)
-total_infer_kib_str = fmt(MNISTMemory.inference_total_kb, precision=0, commas=False)
+    total_act_count_str = f"{sum(MNISTMemory.batch_act_sizes):,}"
+    total_act_kib_str = fmt(MNISTMemory.act_mem_kb, precision=1, commas=False)
 
-# Backprop Wider Network (BackpropMemory)
-bp_input_kb_str = BackpropMemory.bp_input_kb_str
-bp_h1_kb_str = BackpropMemory.act_l1_kb_str
-bp_h2_kb_str = BackpropMemory.act_l2_kb_str
-bp_out_kb_str = fmt((BackpropMemory.act_counts[3] * 4) / 1024, precision=1, commas=False)
+    total_train_mib_str = fmt(MNISTMemory.training_total_kb / 1024, precision=1, commas=False)
+    total_infer_kib_str = fmt(MNISTMemory.inference_total_kb, precision=0, commas=False)
+
+    # Backprop Wider Network (BackpropMemory)
+    bp_input_kb_str = BackpropMemory.bp_input_kb_str
+    bp_h1_kb_str = BackpropMemory.act_l1_kb_str
+    bp_h2_kb_str = BackpropMemory.act_l2_kb_str
+    bp_out_kb_str = fmt((BackpropMemory.act_counts[3] * 4) / 1024, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+param_kib_str = MnistTrainingMemoryCalc.param_kib_str
+grad_kib_str = MnistTrainingMemoryCalc.grad_kib_str
+opt_kib_str = MnistTrainingMemoryCalc.opt_kib_str
+act_in_count_str = MnistTrainingMemoryCalc.act_in_count_str
+act_in_kib_str = MnistTrainingMemoryCalc.act_in_kib_str
+act_h1_count_str = MnistTrainingMemoryCalc.act_h1_count_str
+act_h1_kib_str = MnistTrainingMemoryCalc.act_h1_kib_str
+act_h2_count_str = MnistTrainingMemoryCalc.act_h2_count_str
+act_h2_kib_str = MnistTrainingMemoryCalc.act_h2_kib_str
+act_out_count_str = MnistTrainingMemoryCalc.act_out_count_str
+act_out_kib_str = MnistTrainingMemoryCalc.act_out_kib_str
+total_act_count_str = MnistTrainingMemoryCalc.total_act_count_str
+total_act_kib_str = MnistTrainingMemoryCalc.total_act_kib_str
+total_train_mib_str = MnistTrainingMemoryCalc.total_train_mib_str
+total_infer_kib_str = MnistTrainingMemoryCalc.total_infer_kib_str
+bp_input_kb_str = MnistTrainingMemoryCalc.bp_input_kb_str
+bp_h1_kb_str = MnistTrainingMemoryCalc.bp_h1_kb_str
+bp_h2_kb_str = MnistTrainingMemoryCalc.bp_h2_kb_str
+bp_out_kb_str = MnistTrainingMemoryCalc.bp_out_kb_str
 ```
 
 ::: {.callout-example title="Memory: Training vs. Inference"}
@@ -2209,47 +2359,67 @@ The memory requirements above seem modest for our small MNIST classifier. But wh
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MEMORY EXPLOSION COMPARISON
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Memory Explosion" callout comparing MNIST to GPT-2
+# │ Context: "The Memory Explosion" callout in
+# │          @sec-neural-computation-model-size-computational-complexity-1f0f,
+# │          quantifying the scale gap that motivates production GPU requirements.
 # │
-# │ Goal: Illustrate the scale gap between toy and production models.
-# │ Show: The 1.5 million-fold jump from MNIST to GPT-2 parameter scale.
-# │ How: Compare parameter counts and memory footprints for both architectures.
+# │ Goal: Contrast the toy MNIST MLP (~107K params, ~420 KB) with GPT-2
+# │       (124M params, ~475 MB) to make the 1,160× parameter scale-up visceral.
+# │ Show: That crossing from toy to production scale requires GPU memory rather
+# │       than CPU RAM, justifying the accelerator infrastructure introduced in
+# │       @sec-hardware-acceleration.
+# │ How: Re-derive MNIST params from the canonical architecture; read GPT2_PARAMS
+# │      from mlsys.constants; compute memory with model_memory(); express ratio.
 # │
 # │ Imports: mlsys.constants (GPT2_PARAMS, BYTES_FP32, param, Kparam, Bparam,
-# │          KiB, GB), mlsys.formulas (model_memory), mlsys.formatting (fmt)
+# │          KiB, GB), mlsys.formulas (model_memory), mlsys.formatting (fmt, check)
 # │ Exports: mnist_params_count_str, mnist_mem_str, mnist_params_k_str,
 # │          gpt2_params_count_str, gpt2_params_b_str, gpt2_mem_str, mem_jump_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import GPT2_PARAMS, BYTES_FP32, param, Kparam, Bparam, KiB, GB
 from mlsys.formulas import model_memory
 from mlsys.formatting import fmt, check
 
-# --- Re-derived inputs (MNIST canonical architecture: 784→128→64→10) ---
-mnist_l1_dim = 784                                       # input: 28×28 pixels
-mnist_l2_dim = 128                                       # hidden layer 1
-mnist_l3_dim = 64                                        # hidden layer 2
-mnist_l4_dim = 10                                        # output: 10 digit classes
-mnist_arch_value = [(mnist_l1_dim, mnist_l2_dim),
-                    (mnist_l2_dim, mnist_l3_dim),
-                    (mnist_l3_dim, mnist_l4_dim)]
-mnist_params_value = sum(i * o + o for i, o in mnist_arch_value)  # weights + biases
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MemoryExplosionCalc:
+    """Namespace for Memory Explosion Calc."""
 
-# --- Process (memory calculations) ---
-mnist_mem_kb_value = model_memory(mnist_params_value, BYTES_FP32, KiB)  # Uses 1024 base
-gpt2_params_count_value = GPT2_PARAMS.to(param).magnitude
-gpt2_params_b_value = GPT2_PARAMS.to(Bparam).magnitude
-gpt2_mem_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
-mem_jump_value = gpt2_params_count_value / mnist_params_value
+    # --- Re-derived inputs (MNIST canonical architecture: 784→128→64→10) ---
+    mnist_l1_dim = 784                                       # input: 28×28 pixels
+    mnist_l2_dim = 128                                       # hidden layer 1
+    mnist_l3_dim = 64                                        # hidden layer 2
+    mnist_l4_dim = 10                                        # output: 10 digit classes
+    mnist_arch_value = [(mnist_l1_dim, mnist_l2_dim),
+                        (mnist_l2_dim, mnist_l3_dim),
+                        (mnist_l3_dim, mnist_l4_dim)]
+    mnist_params_value = sum(i * o + o for i, o in mnist_arch_value)  # weights + biases
 
-# --- Outputs (formatted strings for prose) ---
-mnist_params_count_str = f"{mnist_params_value:,}"                        # e.g. "109,386"
-mnist_params_k_str = fmt((mnist_params_value * param).to(Kparam).magnitude,
-                         precision=0, commas=False)                       # e.g. "109"
-mnist_mem_str = fmt(mnist_mem_kb_value, precision=0, commas=False)        # e.g. "427"
-gpt2_params_count_str = fmt(gpt2_params_count_value, precision=0, commas=True)  # e.g. "1,558,000,000"
-gpt2_params_b_str = fmt(gpt2_params_b_value, precision=1, commas=False)   # e.g. "1.6"
-gpt2_mem_str = fmt(gpt2_mem_gb_value, precision=0, commas=False)          # e.g. "6"
-mem_jump_str = fmt(mem_jump_value, precision=0, commas=True)              # e.g. "14,244"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    mnist_mem_kb_value = model_memory(mnist_params_value, BYTES_FP32, KiB)  # Uses 1024 base
+    gpt2_params_count_value = GPT2_PARAMS.m_as(param)
+    gpt2_params_b_value = GPT2_PARAMS.m_as(Bparam)
+    gpt2_mem_gb_value = model_memory(GPT2_PARAMS, BYTES_FP32, GB)
+    mem_jump_value = gpt2_params_count_value / mnist_params_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mnist_params_count_str = f"{mnist_params_value:,}"                        # e.g. "109,386"
+    mnist_params_k_str = fmt((mnist_params_value * param).m_as(Kparam),
+                             precision=0, commas=False)                       # e.g. "109"
+    mnist_mem_str = fmt(mnist_mem_kb_value, precision=0, commas=False)        # e.g. "427"
+    gpt2_params_count_str = fmt(gpt2_params_count_value, precision=0, commas=True)  # e.g. "1,558,000,000"
+    gpt2_params_b_str = fmt(gpt2_params_b_value, precision=1, commas=False)   # e.g. "1.6"
+    gpt2_mem_str = fmt(gpt2_mem_gb_value, precision=0, commas=False)          # e.g. "6"
+    mem_jump_str = fmt(mem_jump_value, precision=0, commas=True)              # e.g. "14,244"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mnist_params_count_str = MemoryExplosionCalc.mnist_params_count_str
+mnist_mem_str = MemoryExplosionCalc.mnist_mem_str
+mnist_params_k_str = MemoryExplosionCalc.mnist_params_k_str
+gpt2_params_count_str = MemoryExplosionCalc.gpt2_params_count_str
+gpt2_params_b_str = MemoryExplosionCalc.gpt2_params_b_str
+gpt2_mem_str = MemoryExplosionCalc.gpt2_mem_str
+mem_jump_str = MemoryExplosionCalc.mem_jump_str
 ```
 
 ::: {.callout-notebook title="The Memory Explosion"}
@@ -2266,38 +2436,55 @@ The memory calculations above are precise but slow. Experienced engineers develo
 ```{python}
 #| label: mental-math-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MENTAL MATH CALC — QUICK GPU FEASIBILITY CHECK
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Quick Estimation for ML Engineers"
+# │ Context: "Quick Estimation for ML Engineers" callout in
+# │          @sec-neural-computation-model-size-computational-complexity-1f0f
 # │
-# │ Goal: Teach the napkin math for estimating training memory requirements.
-# │ Show: That parameters alone undercount memory usage by ~4×.
-# │ How: Calculate total footprint (weights + grads + optimizer) for a 100M param model.
+# │ Goal: Demonstrate the 4× training memory multiplier (weights + gradients
+# │       + Adam momentum + Adam velocity) for a 100M-parameter FP32 model on
+# │       a 16 GB GPU, leaving room for activations.
+# │ Show: That 100M × 4 bytes × 4 = 1.6 GB — the model fits comfortably,
+# │       teaching engineers to estimate feasibility before coding.
+# │ How: Multiply params × bytes_per_param × overhead_factor; subtract from GPU
+# │      capacity; express residual as available activation headroom.
 # │
-# │ Imports: mlsys.formatting (fmt), mlsys.constants (byte, GB)
+# │ Imports: mlsys.formatting (fmt, check), mlsys.constants (byte, GB, MILLION)
 # │ Exports: mm_model_str, mm_remaining_str, mm_params_m_str, mm_gpu_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 from mlsys.constants import byte, GB
 
-# --- Inputs (hypothetical 100M-param model on a 16 GB GPU) ---
-mm_params_m_value = 100
-mm_bytes_value = 4
-mm_overhead_value = 4  # params + grads + optimizer states
-mm_gpu_gb_value = 16
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MentalMathCalc:
+    """Namespace for Mental Math Calc."""
 
-# --- Process (total training memory footprint) ---
-mm_model_gb_value = (
-    mm_params_m_value * MILLION * mm_bytes_value * mm_overhead_value * byte
-).to(GB).magnitude
-mm_remaining_gb_value = mm_gpu_gb_value - mm_model_gb_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    mm_params_m_value = 100
+    mm_bytes_value = 4
+    mm_overhead_value = 4  # params + grads + optimizer states
+    mm_gpu_gb_value = 16
 
-# --- Outputs (formatted strings for prose) ---
-mm_model_str = fmt(mm_model_gb_value, precision=1, commas=False)
-mm_remaining_str = fmt(mm_remaining_gb_value, precision=0, commas=False)
-mm_params_m_str = str(mm_params_m_value)
-mm_gpu_gb_str = str(mm_gpu_gb_value)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    mm_model_gb_value = (
+        mm_params_m_value * MILLION * mm_bytes_value * mm_overhead_value * byte
+    ).m_as(GB)
+    mm_remaining_gb_value = mm_gpu_gb_value - mm_model_gb_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    mm_model_str = fmt(mm_model_gb_value, precision=1, commas=False)
+    mm_remaining_str = fmt(mm_remaining_gb_value, precision=0, commas=False)
+    mm_params_m_str = str(mm_params_m_value)
+    mm_gpu_gb_str = str(mm_gpu_gb_value)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+mm_model_str = MentalMathCalc.mm_model_str
+mm_remaining_str = MentalMathCalc.mm_remaining_str
+mm_params_m_str = MentalMathCalc.mm_params_m_str
+mm_gpu_gb_str = MentalMathCalc.mm_gpu_gb_str
 ```
 
 ::: {.callout-notebook title="Quick Estimation for ML Engineers"}
@@ -2570,79 +2757,102 @@ For each image in the batch, this produces a probability distribution over the p
 ```{python}
 #| label: mnist-flops-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST FLOPS CALC — FORWARD-PASS OPERATION COUNT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Callout "Counting Ops in Forward Pass"
+# │ Context: "Counting Ops in Forward Pass" worked example callout in
+# │          @sec-neural-computation-matrix-multiplication-formulation-417c
 # │
-# │ Goal: Build intuition for the arithmetic cost of neural networks.
-# │ Show: The $O(\text{width}^2)$ scaling of dense layer computation.
-# │ How: Calculate FLOPs for the canonical MLP and its 2× width variant.
+# │ Goal: Count FLOPs per layer for the canonical 784→128→64→10 MLP at batch=32,
+# │       then show that doubling hidden widths (→256→128) causes ~4× FLOP growth.
+# │ Show: That dense FC layers scale as O(width²), so a 2× width increase costs
+# │       ~4×, making architecture decisions a dominant systems variable.
+# │ How: Apply the formula 2×Batch×M×N for each matmul layer plus 2×Batch×N for
+# │      bias+activation; compare original vs. doubled-width totals.
 # │
-# │ Imports: mlsys.formatting (fmt), mlsys.constants (flop, MFLOPs)
-# │ Exports: l1_mm_str..l3_bias_str, total_mops_str,
-# │          double_total_mops_str, double_ratio_str, double_ratio_exact_str
+# │ Imports: mlsys.formatting (fmt, check), mlsys.constants (flop, MFLOPs)
+# │ Exports: l1_mm_str, l1_bias_str, l2_mm_str, l2_bias_str, l3_mm_str,
+# │          l3_bias_str, total_mops_str, double_total_mops_str,
+# │          double_ratio_str, double_ratio_exact_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.formatting import fmt, check
 from mlsys.constants import flop, MFLOPs
 
-# --- Inputs (MNIST architecture and doubled variant) ---
-batch_size_value = 32
-in_dim_value = 784
-h1_value = 128
-h2_value = 64
-out_dim_value = 10
-double_h1_value = 256
-double_h2_value = 128
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MnistFlopsCalc:
+    """Namespace for Mnist Flops Calc."""
 
-# --- Process (per-layer FLOP counts: 2×M×K×N for matmul) ---
-flops_l1_mm_value = 2 * batch_size_value * in_dim_value * h1_value
-flops_l1_bias_value = 2 * (batch_size_value * h1_value)  # Bias add + ReLU
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    batch_size_value = 32
+    in_dim_value = 784
+    h1_value = 128
+    h2_value = 64
+    out_dim_value = 10
+    double_h1_value = 256
+    double_h2_value = 128
 
-flops_l2_mm_value = 2 * batch_size_value * h1_value * h2_value
-flops_l2_bias_value = 2 * (batch_size_value * h2_value)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    flops_l1_mm_value = 2 * batch_size_value * in_dim_value * h1_value
+    flops_l1_bias_value = 2 * (batch_size_value * h1_value)  # Bias add + ReLU
 
-flops_l3_mm_value = 2 * batch_size_value * h2_value * out_dim_value
-flops_l3_bias_value = 2 * (batch_size_value * out_dim_value)  # Bias + Softmax approx
+    flops_l2_mm_value = 2 * batch_size_value * h1_value * h2_value
+    flops_l2_bias_value = 2 * (batch_size_value * h2_value)
 
-total_flops_value = (
-    flops_l1_mm_value
-    + flops_l1_bias_value
-    + flops_l2_mm_value
-    + flops_l2_bias_value
-    + flops_l3_mm_value
-    + flops_l3_bias_value
-)
-total_mops_value = (total_flops_value * flop).to(MFLOPs).magnitude
+    flops_l3_mm_value = 2 * batch_size_value * h2_value * out_dim_value
+    flops_l3_bias_value = 2 * (batch_size_value * out_dim_value)  # Bias + Softmax approx
 
-double_flops_l1_mm_value = 2 * batch_size_value * in_dim_value * double_h1_value
-double_flops_l1_bias_value = 2 * (batch_size_value * double_h1_value)
-double_flops_l2_mm_value = 2 * batch_size_value * double_h1_value * double_h2_value
-double_flops_l2_bias_value = 2 * (batch_size_value * double_h2_value)
-double_flops_l3_mm_value = 2 * batch_size_value * double_h2_value * out_dim_value
-double_flops_l3_bias_value = 2 * (batch_size_value * out_dim_value)
-double_total_flops_value = (
-    double_flops_l1_mm_value
-    + double_flops_l1_bias_value
-    + double_flops_l2_mm_value
-    + double_flops_l2_bias_value
-    + double_flops_l3_mm_value
-    + double_flops_l3_bias_value
-)
-double_total_mops_value = (double_total_flops_value * flop).to(MFLOPs).magnitude
-double_ratio_value = double_total_mops_value / total_mops_value
+    total_flops_value = (
+        flops_l1_mm_value
+        + flops_l1_bias_value
+        + flops_l2_mm_value
+        + flops_l2_bias_value
+        + flops_l3_mm_value
+        + flops_l3_bias_value
+    )
+    total_mops_value = (total_flops_value * flop).m_as(MFLOPs)
 
-# --- Outputs (formatted strings for prose) ---
-l1_mm_str = f"{flops_l1_mm_value:,}"
-l1_bias_str = f"{flops_l1_bias_value:,}"
-l2_mm_str = f"{flops_l2_mm_value:,}"
-l2_bias_str = f"{flops_l2_bias_value:,}"
-l3_mm_str = f"{flops_l3_mm_value:,}"
-l3_bias_str = f"{flops_l3_bias_value:,}"
-total_mops_str = fmt(total_mops_value, precision=1, commas=False)
-double_total_mops_str = fmt(double_total_mops_value, precision=1, commas=False)
-double_ratio_str = fmt(double_ratio_value, precision=1, commas=False)
-double_ratio_exact_str = fmt(double_ratio_value, precision=2, commas=False)
+    double_flops_l1_mm_value = 2 * batch_size_value * in_dim_value * double_h1_value
+    double_flops_l1_bias_value = 2 * (batch_size_value * double_h1_value)
+    double_flops_l2_mm_value = 2 * batch_size_value * double_h1_value * double_h2_value
+    double_flops_l2_bias_value = 2 * (batch_size_value * double_h2_value)
+    double_flops_l3_mm_value = 2 * batch_size_value * double_h2_value * out_dim_value
+    double_flops_l3_bias_value = 2 * (batch_size_value * out_dim_value)
+    double_total_flops_value = (
+        double_flops_l1_mm_value
+        + double_flops_l1_bias_value
+        + double_flops_l2_mm_value
+        + double_flops_l2_bias_value
+        + double_flops_l3_mm_value
+        + double_flops_l3_bias_value
+    )
+    double_total_mops_value = (double_total_flops_value * flop).m_as(MFLOPs)
+    double_ratio_value = double_total_mops_value / total_mops_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    l1_mm_str = f"{flops_l1_mm_value:,}"
+    l1_bias_str = f"{flops_l1_bias_value:,}"
+    l2_mm_str = f"{flops_l2_mm_value:,}"
+    l2_bias_str = f"{flops_l2_bias_value:,}"
+    l3_mm_str = f"{flops_l3_mm_value:,}"
+    l3_bias_str = f"{flops_l3_bias_value:,}"
+    total_mops_str = fmt(total_mops_value, precision=1, commas=False)
+    double_total_mops_str = fmt(double_total_mops_value, precision=1, commas=False)
+    double_ratio_str = fmt(double_ratio_value, precision=1, commas=False)
+    double_ratio_exact_str = fmt(double_ratio_value, precision=2, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+l1_mm_str = MnistFlopsCalc.l1_mm_str
+l1_bias_str = MnistFlopsCalc.l1_bias_str
+l2_mm_str = MnistFlopsCalc.l2_mm_str
+l2_bias_str = MnistFlopsCalc.l2_bias_str
+l3_mm_str = MnistFlopsCalc.l3_mm_str
+l3_bias_str = MnistFlopsCalc.l3_bias_str
+total_mops_str = MnistFlopsCalc.total_mops_str
+double_total_mops_str = MnistFlopsCalc.double_total_mops_str
+double_ratio_str = MnistFlopsCalc.double_ratio_str
+double_ratio_exact_str = MnistFlopsCalc.double_ratio_exact_str
 ```
 
 ::: {.callout-example title="Counting Ops in Forward Pass"}
@@ -3116,28 +3326,43 @@ The transition from training to inference introduces a constraint on model adapt
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ GPU SPECIFICATIONS FOR TRAINING FOOTNOTE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Footnote [^fn-training-gpu-specs] describing modern training GPUs
+# │ Context: Footnote [^fn-training-gpu-specs] in
+# │          @sec-neural-computation-operational-phase-differences-3f95,
+# │          supporting the prose on training-cluster GPU requirements.
 # │
-# │ Goal: Ground abstract training requirements in concrete silicon.
-# │ Show: The memory capacity and power constraints of datacenter GPUs.
-# │ How: Retrieve specs for A100 and H100 from mlsys.constants.
+# │ Goal: Ground the "training requires high-memory GPUs" claim with exact A100
+# │       and H100 specs from mlsys.constants (single source of truth).
+# │ Show: A100 provides 80 GiB HBM2e at 400 W; H100 consumes up to 700 W —
+# │       numbers that explain why datacenter cooling is a first-order constraint.
+# │ How: Read A100_MEM_CAPACITY, A100_TDP, and H100_TDP; extract scalar values
+# │      with m_as(); format as integer strings for the footnote.
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, A100_TDP, H100_TDP, GiB, watt),
-# │          mlsys.formatting (fmt)
+# │          mlsys.formatting (fmt, check)
 # │ Exports: a100_mem_gb_str, a100_tdp_w_str, h100_tdp_w_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import A100_MEM_CAPACITY, A100_TDP, H100_TDP, GiB, watt
 from mlsys.formatting import fmt, check
 
-# --- Inputs (from mlsys.constants) ---
-a100_mem_gb_value = A100_MEM_CAPACITY.to(GiB).magnitude      # e.g. 80
-a100_tdp_w_value = A100_TDP.to(watt).magnitude               # e.g. 400
-h100_tdp_w_value = H100_TDP.to(watt).magnitude               # e.g. 700
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GpuSpecsFootnote:
+    """Namespace for Gpu Specs Footnote."""
 
-# --- Outputs (formatted strings for prose) ---
-a100_mem_gb_str = fmt(a100_mem_gb_value, precision=0, commas=False)  # e.g. "80"
-a100_tdp_w_str = fmt(a100_tdp_w_value, precision=0, commas=False)    # e.g. "400"
-h100_tdp_w_str = fmt(h100_tdp_w_value, precision=0, commas=False)    # e.g. "700"
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    a100_mem_gb_value = A100_MEM_CAPACITY.m_as(GiB)              # e.g. 80
+    a100_tdp_w_value = A100_TDP.m_as(watt)                       # e.g. 400
+    h100_tdp_w_value = H100_TDP.m_as(watt)                       # e.g. 700
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    a100_mem_gb_str = fmt(a100_mem_gb_value, precision=0, commas=False)  # e.g. "80"
+    a100_tdp_w_str = fmt(a100_tdp_w_value, precision=0, commas=False)    # e.g. "400"
+    h100_tdp_w_str = fmt(h100_tdp_w_value, precision=0, commas=False)    # e.g. "700"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_mem_gb_str = GpuSpecsFootnote.a100_mem_gb_str
+a100_tdp_w_str = GpuSpecsFootnote.a100_tdp_w_str
+h100_tdp_w_str = GpuSpecsFootnote.h100_tdp_w_str
 ```
 
 Neural network operation divides into two distinct phases\index{Training vs. Inference!operational differences}\index{Inference!forward pass only} with markedly different computational requirements. @fig-training-vs-inference contrasts these phases visually.
@@ -3547,27 +3772,42 @@ Once captured, the raw images are far from ready for neural network processing. 
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ USPS LENET SPECIFICATIONS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: USPS case study comparing 1989 LeNet to modern systems
+# │ Context: @sec-neural-computation-engineering-process-design-decisions-2e8e
+# │          and the "Then vs. Now" comparison callout in
+# │          @sec-neural-computation-key-engineering-lessons-design-principles-f84e
 # │
-# │ Goal: Contrast historical LeNet scale with modern baselines.
-# │ Show: That early networks were 10× smaller than even today's toy models.
-# │ How: Calculate parameter count and memory for LeNet-1.
+# │ Goal: Compute memory footprint for the 1989 LeNet-1 (~10,000 parameters) to
+# │       quantify how compact early neural networks were relative to modern models.
+# │ Show: LeNet-1 required only ~39 KB of FP32 storage — 10× smaller than even
+# │       the toy MNIST MLP in the running example, anchoring the "Then vs. Now"
+# │       hardware progress table.
+# │ How: Set lenet_1_params = 10,000 (approximate historical value); compute
+# │      memory in KiB using model_memory() with BYTES_FP32 precision.
 # │
 # │ Imports: mlsys.constants (BYTES_FP32, KiB), mlsys.formulas (model_memory)
 # │ Exports: lenet_1_params_str, lenet_1_mem_kb_str
 # └─────────────────────────────────────────────────────────────────────────────
+
 from mlsys.constants import BYTES_FP32, KiB
 from mlsys.formulas import model_memory
 
-# --- Inputs (historical LeNet-1 architecture) ---
-lenet_1_params = 10000                                   # approx params in 1989 LeNet
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class UspsLenetSpecs:
+    """Namespace for Usps Lenet Specs."""
 
-# --- Process (memory calculation) ---
-lenet_1_mem_kb = model_memory(lenet_1_params, BYTES_FP32, KiB)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    lenet_1_params = 10000                                   # approx params in 1989 LeNet
 
-# --- Outputs (formatted strings for prose) ---
-lenet_1_params_str = f"{lenet_1_params:,}"               # e.g. "10,000"
-lenet_1_mem_kb_str = f"{lenet_1_mem_kb:.0f}"             # e.g. "39"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    lenet_1_mem_kb = model_memory(lenet_1_params, BYTES_FP32, KiB)
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    lenet_1_params_str = f"{lenet_1_params:,}"               # e.g. "10,000"
+    lenet_1_mem_kb_str = f"{lenet_1_mem_kb:.0f}"             # e.g. "39"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+lenet_1_params_str = UspsLenetSpecs.lenet_1_params_str
+lenet_1_mem_kb_str = UspsLenetSpecs.lenet_1_mem_kb_str
 ```
 
 \index{LeNet!architecture comparison}
@@ -3710,30 +3950,46 @@ Neural network architecture demonstrates hierarchical processing, where each lay
 ```{python}
 #| label: mnist-weights-calc
 #| echo: false
+
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ MNIST WEIGHTS CALC — FIRST-LAYER WEIGHT COUNT
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Summary section discussion of fully connected layer costs
+# │ Context: @sec-neural-computation-summary-f263 — motivates specialized
+# │          architectures (@sec-network-architectures) by showing the quadratic
+# │          scaling cost of fully connected layers on image inputs.
 # │
-# │ Goal: Demonstrate the quadratic scaling trap of fully connected layers.
-# │ Show: Why dense connectivity scales poorly for high-resolution inputs.
-# │ How: Calculate the connection count for the first layer of an MLP.
+# │ Goal: Compute the first-layer connection count for a 784-input MLP as a
+# │       concrete illustration of why dense FC layers waste compute on images.
+# │ Show: That 784 pixels × 128 neurons = 100,352 weights for a single layer,
+# │       learning irrelevant long-range pixel relationships that convolutions
+# │       avoid by design.
+# │ How: Multiply mnist_pixels_value × fc1_neurons_value using built-in math;
+# │      no external imports needed.
 # │
-# │ Imports: (none — uses only built-in arithmetic)
+# │ Imports: (none — built-in arithmetic only)
 # │ Exports: fc1_weights_str, mnist_pixels_str, fc1_neurons_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# --- Inputs (canonical MNIST first layer) ---
-mnist_pixels_value = 784
-fc1_neurons_value = 128
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class MnistWeightsCalc:
+    """Namespace for Mnist Weights Calc."""
 
-# --- Process (weight count for dense layer) ---
-fc1_weights_value = mnist_pixels_value * fc1_neurons_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    mnist_pixels_value = 784
+    fc1_neurons_value = 128
 
-# --- Outputs (formatted strings for prose) ---
-fc1_weights_str = f"{fc1_weights_value:,}"
-mnist_pixels_str = f"{mnist_pixels_value}"
-fc1_neurons_str = f"{fc1_neurons_value}"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    fc1_weights_value = mnist_pixels_value * fc1_neurons_value
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    fc1_weights_str = f"{fc1_weights_value:,}"
+    mnist_pixels_str = f"{mnist_pixels_value}"
+    fc1_neurons_str = f"{fc1_neurons_value}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fc1_weights_str = MnistWeightsCalc.fc1_weights_str
+mnist_pixels_str = MnistWeightsCalc.mnist_pixels_str
+fc1_neurons_str = MnistWeightsCalc.fc1_neurons_str
 ```
 
 The running MNIST example made this escalation tangible: the same 28 $\times$ 28 digit that required ~`{python} rb_ops_str` rule-based comparisons demanded `{python} dl_total_macs_str` MACs in even a modest three-layer network—a `{python} dl_ops_ratio_str` $\times$ increase that generalizes across the systems dimensions captured in @tbl-evolution. These fundamentals primarily develop the **Algorithm** axis of the D·A·M taxonomy while revealing how algorithmic choices propagate into **Machine** constraints.

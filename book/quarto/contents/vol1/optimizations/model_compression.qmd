@@ -26,7 +26,6 @@ start_chapter("vol1:model_compression")
 
 :::
 
-
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
@@ -78,101 +77,136 @@ Bridging that gap requires a systematic discipline of *compression*: trading cap
 from mlsys.constants import *
 from mlsys.formatting import fmt, check, sci
 
-# --- Inputs (GPU specs) ---
-a100_tflops_fp16_value = A100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
-a100_tflops_int8_value = A100_FLOPS_INT8.to(TFLOPs / second).magnitude
-a100_bw_tbs_value = A100_MEM_BW.to(TB / second).magnitude
-a100_int8_speedup_value = int(a100_tflops_int8_value / a100_tflops_fp16_value)
+class CompressionSetup:
+    """Chapter-wide constants: GPU specs, energy physics, model sizes, device constraints."""
 
-# --- Inputs (energy/perf illustrative values) ---
-int8_energy_reduction_value = 20
-mobilenet_int8_mj_value = 47
-mobilenet_fp32_mj_value = 312
-tpu_v4_tops_per_w_value = 0.9
-v100_tops_per_w_value = 0.3
-bandwidth_bound_speedup_value = 4
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Illustrative energy/perf values
+    int8_energy_reduction = 20
+    mobilenet_int8_mj = 47
+    mobilenet_fp32_mj = 312
+    tpu_v4_tops_per_w = 0.9
+    v100_tops_per_w = 0.3
+    bandwidth_bound_speedup = 4
+    llm_7b_params = 7
+    gpt3_training_flops_exp = 23
 
-# --- Inputs (energy: multiply-add operations from constants) ---
-energy_dram_value = ENERGY_DRAM_ACCESS_PJ.magnitude
-energy_dram_per_byte_value = ENERGY_DRAM_PJ_PER_BYTE.magnitude
-energy_flop_fp32_value = ENERGY_FLOP_FP32_PJ.magnitude
-energy_flop_int8_value = ENERGY_FLOP_INT8_PJ.magnitude
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # A100 specs
+    a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+    a100_tflops_int8 = A100_FLOPS_INT8.m_as(TFLOPs / second)
+    a100_bw_tbs = A100_MEM_BW.m_as(TB / second)
+    a100_int8_speedup = int(a100_tflops_int8 / a100_tflops_fp16)
 
-# Energy for addition operations (Horowitz 2014, 45nm process)
-energy_add_fp32_pj_value = ENERGY_ADD_FP32_PJ.to(ureg.picojoule).magnitude
-energy_add_fp16_pj_value = ENERGY_ADD_FP16_PJ.to(ureg.picojoule).magnitude
-energy_add_int32_pj_value = ENERGY_ADD_INT32_PJ.to(ureg.picojoule).magnitude
-energy_add_int8_pj_value = ENERGY_ADD_INT8_PJ.to(ureg.picojoule).magnitude
-energy_mul_fp32_pj_value = ENERGY_FLOP_FP32_PJ.magnitude
+    # Energy from constants (Horowitz 2014, 45nm process)
+    energy_dram = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
+    energy_dram_per_byte = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule / ureg.byte)
+    energy_flop_fp32 = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.count)
+    energy_flop_int8 = ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule / ureg.count)
+    energy_add_fp32_pj = ENERGY_ADD_FP32_PJ.m_as(ureg.picojoule)
+    energy_add_fp16_pj = ENERGY_ADD_FP16_PJ.m_as(ureg.picojoule)
+    energy_add_int32_pj = ENERGY_ADD_INT32_PJ.m_as(ureg.picojoule)
+    energy_add_int8_pj = ENERGY_ADD_INT8_PJ.m_as(ureg.picojoule)
+    energy_mul_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.count)
 
-# INT8 vs FP32 energy ratio (MAC-to-MAC: multiply + add for each precision)
-fp32_mac_pj_value = energy_mul_fp32_pj_value + energy_add_fp32_pj_value  # 3.7 + 0.9 = 4.6 pJ
-int8_mac_pj_value = energy_flop_int8_value + energy_add_int8_pj_value    # 0.2 + 0.03 = 0.23 pJ
-int8_fp32_energy_ratio_value = fp32_mac_pj_value / int8_mac_pj_value
+    # INT8 vs FP32 MAC energy ratio
+    fp32_mac_pj = energy_mul_fp32_pj + energy_add_fp32_pj   # 3.7 + 0.9 = 4.6 pJ
+    int8_mac_pj = energy_flop_int8 + energy_add_int8_pj     # 0.2 + 0.03 = 0.23 pJ
+    int8_fp32_energy_ratio = fp32_mac_pj / int8_mac_pj
 
-# V100 specs
-v100_bw_gbs_value = V100_MEM_BW.to(GB / second).magnitude
-v100_tflops_fp32_value = V100_FLOPS_FP32.to(TFLOPs / second).magnitude
+    # V100 specs
+    v100_bw_gbs = V100_MEM_BW.m_as(GB / second)
+    v100_tflops_fp32 = V100_FLOPS_FP32.m_as(TFLOPs / second)
 
-# Model specs
-resnet_params_m_value = RESNET50_PARAMS.to(Mparam).magnitude
-resnet_gflops_value = RESNET50_FLOPs.to(GFLOPs).magnitude
-mobilenetv2_mflops_value = MOBILENETV2_FLOPs.to(GFLOPs).magnitude * 1000
+    # Model specs
+    resnet_params_m = RESNET50_PARAMS.m_as(Mparam)
+    resnet_gflops = RESNET50_FLOPs.m_as(GFLOPs)
+    mobilenetv2_mflops = MOBILENETV2_FLOPs.m_as(GFLOPs) * 1000
 
-# LLM parameter/memory calculations
-llm_7b_params_value = 7
-llm_7b_mem_fp16_gb_value = llm_7b_params_value * 2
-llm_175b_params_value = GPT3_PARAMS.to(Bparam).magnitude
-llm_175b_mem_fp16_gb_value = llm_175b_params_value * 2
+    # LLM memory
+    llm_7b_mem_fp16_gb = llm_7b_params * 2
+    llm_175b_params = GPT3_PARAMS.m_as(Bparam)
+    llm_175b_mem_fp16_gb = llm_175b_params * 2
 
-# Device memory constraints
-smartphone_ram_gb_value = SMARTPHONE_RAM_GB.to(GB).magnitude
-mcu_ram_kb_value = MCU_RAM_KIB.to(KiB).magnitude
+    # Device memory
+    smartphone_ram_gb = SMARTPHONE_RAM_GB.m_as(GB)
+    mcu_ram_kb = MCU_RAM_KIB.m_as(KiB)
 
-# GPT-3 training FLOPs
-gpt3_training_flops_exp_value = 23
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(a100_int8_speedup >= 2, "A100 INT8 should be at least 2x faster than FP16.")
+    check(int8_fp32_energy_ratio > 1, "FP32 MAC must cost more energy than INT8 MAC.")
 
-# --- Outputs (formatted strings for prose) ---
-a100_tflops_fp16_str = fmt(a100_tflops_fp16_value, precision=0, commas=False)
-a100_tflops_int8_str = fmt(a100_tflops_int8_value, precision=0, commas=False)
-a100_bw_tbs_str = fmt(a100_bw_tbs_value, precision=1, commas=False)
-a100_int8_speedup_str = fmt(a100_int8_speedup_value, precision=0, commas=False)
-int8_energy_reduction_str = fmt(int8_energy_reduction_value, precision=0, commas=False)
-mobilenet_int8_mj_str = fmt(mobilenet_int8_mj_value, precision=0, commas=False)
-mobilenet_fp32_mj_str = fmt(mobilenet_fp32_mj_value, precision=0, commas=False)
-tpu_v4_tops_per_w_str = fmt(tpu_v4_tops_per_w_value, precision=1, commas=False)
-v100_tops_per_w_str = fmt(v100_tops_per_w_value, precision=1, commas=False)
-bandwidth_bound_speedup_str = fmt(bandwidth_bound_speedup_value, precision=0, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
+    a100_tflops_int8_str = fmt(a100_tflops_int8, precision=0, commas=False)
+    a100_bw_tbs_str = fmt(a100_bw_tbs, precision=1, commas=False)
+    a100_int8_speedup_str = fmt(a100_int8_speedup, precision=0, commas=False)
+    int8_energy_reduction_str = fmt(int8_energy_reduction, precision=0, commas=False)
+    mobilenet_int8_mj_str = fmt(mobilenet_int8_mj, precision=0, commas=False)
+    mobilenet_fp32_mj_str = fmt(mobilenet_fp32_mj, precision=0, commas=False)
+    tpu_v4_tops_per_w_str = fmt(tpu_v4_tops_per_w, precision=1, commas=False)
+    v100_tops_per_w_str = fmt(v100_tops_per_w, precision=1, commas=False)
+    bandwidth_bound_speedup_str = fmt(bandwidth_bound_speedup, precision=0, commas=False)
+    energy_dram_str = fmt(energy_dram, precision=0, commas=False)
+    energy_dram_per_byte_str = fmt(energy_dram_per_byte, precision=0, commas=False)
+    energy_flop_fp32_str = f"{energy_flop_fp32}"
+    energy_flop_int8_str = f"{energy_flop_int8}"
+    energy_add_fp32_str = f"{energy_add_fp32_pj}"
+    energy_add_fp16_str = f"{energy_add_fp16_pj}"
+    energy_add_int32_str = f"{energy_add_int32_pj}"
+    energy_add_int8_str = f"{energy_add_int8_pj}"
+    energy_mul_fp32_str = f"{energy_mul_fp32_pj}"
+    int8_fp32_energy_ratio_str = fmt(int8_fp32_energy_ratio, precision=1, commas=False)
+    v100_bw_gbs_str = fmt(v100_bw_gbs, precision=0, commas=False)
+    v100_tflops_fp32_str = fmt(v100_tflops_fp32, precision=1, commas=False)
+    resnet_params_m_str = fmt(resnet_params_m, precision=1, commas=False)
+    resnet_gflops_str = fmt(resnet_gflops, precision=1, commas=False)
+    mobilenetv2_mflops_str = fmt(mobilenetv2_mflops, precision=0, commas=False)
+    llm_7b_str = f"{llm_7b_params}"
+    llm_7b_mem_str = fmt(llm_7b_mem_fp16_gb, precision=0, commas=False)
+    llm_175b_str = fmt(llm_175b_params, precision=0, commas=False)
+    llm_175b_mem_str = fmt(llm_175b_mem_fp16_gb, precision=0, commas=False)
+    smartphone_ram_str = f"{smartphone_ram_gb}"
+    mcu_ram_str = f"{mcu_ram_kb}"
+    gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp}}}$"
 
-energy_dram_str = fmt(energy_dram_value, precision=0, commas=False)
-energy_dram_per_byte_str = fmt(energy_dram_per_byte_value, precision=0, commas=False)
-energy_flop_fp32_str = f"{energy_flop_fp32_value}"
-energy_flop_int8_str = f"{energy_flop_int8_value}"
-
-energy_add_fp32_str = f"{energy_add_fp32_pj_value}"
-energy_add_fp16_str = f"{energy_add_fp16_pj_value}"
-energy_add_int32_str = f"{energy_add_int32_pj_value}"
-energy_add_int8_str = f"{energy_add_int8_pj_value}"
-energy_mul_fp32_str = f"{energy_mul_fp32_pj_value}"
-
-int8_fp32_energy_ratio_str = fmt(int8_fp32_energy_ratio_value, precision=1, commas=False)
-
-v100_bw_gbs_str = fmt(v100_bw_gbs_value, precision=0, commas=False)
-v100_tflops_fp32_str = fmt(v100_tflops_fp32_value, precision=1, commas=False)
-
-resnet_params_m_str = fmt(resnet_params_m_value, precision=1, commas=False)
-resnet_gflops_str = fmt(resnet_gflops_value, precision=1, commas=False)
-mobilenetv2_mflops_str = fmt(mobilenetv2_mflops_value, precision=0, commas=False)
-
-llm_7b_str = f"{llm_7b_params_value}"
-llm_7b_mem_str = fmt(llm_7b_mem_fp16_gb_value, precision=0, commas=False)
-llm_175b_str = fmt(llm_175b_params_value, precision=0, commas=False)
-llm_175b_mem_str = fmt(llm_175b_mem_fp16_gb_value, precision=0, commas=False)
-smartphone_ram_str = f"{smartphone_ram_gb_value}"
-mcu_ram_str = f"{mcu_ram_kb_value}"
-gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp_value}}}$"
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+a100_tflops_fp16_str = CompressionSetup.a100_tflops_fp16_str
+a100_tflops_int8_str = CompressionSetup.a100_tflops_int8_str
+a100_bw_tbs_str = CompressionSetup.a100_bw_tbs_str
+a100_int8_speedup_str = CompressionSetup.a100_int8_speedup_str
+int8_energy_reduction_str = CompressionSetup.int8_energy_reduction_str
+mobilenet_int8_mj_str = CompressionSetup.mobilenet_int8_mj_str
+mobilenet_fp32_mj_str = CompressionSetup.mobilenet_fp32_mj_str
+tpu_v4_tops_per_w_str = CompressionSetup.tpu_v4_tops_per_w_str
+v100_tops_per_w_str = CompressionSetup.v100_tops_per_w_str
+bandwidth_bound_speedup_str = CompressionSetup.bandwidth_bound_speedup_str
+energy_dram_str = CompressionSetup.energy_dram_str
+energy_dram_per_byte_str = CompressionSetup.energy_dram_per_byte_str
+energy_flop_fp32_str = CompressionSetup.energy_flop_fp32_str
+energy_flop_int8_str = CompressionSetup.energy_flop_int8_str
+energy_add_fp32_str = CompressionSetup.energy_add_fp32_str
+energy_add_fp16_str = CompressionSetup.energy_add_fp16_str
+energy_add_int32_str = CompressionSetup.energy_add_int32_str
+energy_add_int8_str = CompressionSetup.energy_add_int8_str
+energy_mul_fp32_str = CompressionSetup.energy_mul_fp32_str
+int8_fp32_energy_ratio_str = CompressionSetup.int8_fp32_energy_ratio_str
+v100_bw_gbs_str = CompressionSetup.v100_bw_gbs_str
+v100_tflops_fp32_str = CompressionSetup.v100_tflops_fp32_str
+resnet_params_m_str = CompressionSetup.resnet_params_m_str
+resnet_gflops_str = CompressionSetup.resnet_gflops_str
+mobilenetv2_mflops_str = CompressionSetup.mobilenetv2_mflops_str
+llm_7b_str = CompressionSetup.llm_7b_str
+llm_7b_mem_str = CompressionSetup.llm_7b_mem_str
+llm_175b_str = CompressionSetup.llm_175b_str
+llm_175b_mem_str = CompressionSetup.llm_175b_mem_str
+smartphone_ram_str = CompressionSetup.smartphone_ram_str
+mcu_ram_str = CompressionSetup.mcu_ram_str
+gpt3_training_flops_str = CompressionSetup.gpt3_training_flops_str
+# Note: v100_bw_gbs_value used by downstream fusion-calc cell
+v100_bw_gbs_value = CompressionSetup.v100_bw_gbs
+v100_tflops_fp32_value = CompressionSetup.v100_tflops_fp32
 ```
-
 
 ## Optimization Framework {#sec-model-compression-optimization-framework-9e21}
 
@@ -420,7 +454,6 @@ We call this phenomenon *the quantization speedup*.
 
 The relative importance of each dimension varies by deployment target. Cloud systems may tolerate larger models but demand throughput; mobile devices prioritize memory and energy; embedded systems face hard constraints on all resources simultaneously. Understanding these deployment contexts shapes which optimization dimensions to prioritize.
 
-
 ## Deployment Context {#sec-model-compression-deployment-context-0d88}
 
 The optimization framework above identifies three dimensions of compression, but which dimensions matter most depends entirely on where the model will run. A datacenter GPU with 80 GB of HBM faces different binding constraints than a smartphone with shared RAM or a microcontroller with 256 KB of SRAM. @tbl-deployment-scenarios summarizes the key constraints across deployment environments.
@@ -482,55 +515,80 @@ from mlsys.constants import (GB, GiB, MiB, KiB, MB, KB, byte,
                              CLOUD_MEM_GIB, MOBILE_MEM_GIB, TINY_MEM_KIB,
                              DLRM_MODEL_SIZE_FP32)
 
-# --- Inputs (device capacities and model sizes) ---
-cloud_mem_value = CLOUD_MEM_GIB
-mobile_mem_value = MOBILE_MEM_GIB
-tiny_mem_value = TINY_MEM_KIB
-
-dlrm_mem_value = DLRM_MODEL_SIZE_FP32
-gpt2_mem_value = 6 * GiB
-resnet_mem_value = 100 * MiB
-mobilenet_mem_value = 14 * MiB
-mobilenet_int8_mem_value = 3.5 * MiB
-dscnn_mem_value = 500 * KiB
-
-# --- Process (compute fit ratios) ---
-def get_ratio(model_mem, device_mem):
-    ratio = model_mem.to(byte).magnitude / device_mem.to(byte).magnitude
+def _get_ratio(model_mem, device_mem):
+    """Return 'ok' if model fits, else 'no (Nx)' with how many times it overflows."""
+    ratio = model_mem.m_as(byte) / device_mem.m_as(byte)
     if ratio < 1:
         return "ok"
     return f"no ({ratio:.0f}x)"
 
-dlrm_mobile_value = get_ratio(dlrm_mem_value, mobile_mem_value)
-dlrm_tiny_value = get_ratio(dlrm_mem_value, tiny_mem_value)
+class ModelDeviceComparison:
+    """Contrast model requirements with device memory: 6-order-of-magnitude deployment gap."""
 
-gpt2_mobile_value = get_ratio(gpt2_mem_value, mobile_mem_value)
-gpt2_tiny_value = get_ratio(gpt2_mem_value, tiny_mem_value)
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Device capacities
+    cloud_mem = CLOUD_MEM_GIB
+    mobile_mem = MOBILE_MEM_GIB
+    tiny_mem = TINY_MEM_KIB
 
-resnet_tiny_value = get_ratio(resnet_mem_value, tiny_mem_value)
-mobilenet_tiny_value = get_ratio(mobilenet_mem_value, tiny_mem_value)
-mobilenet_int8_tiny_value = get_ratio(mobilenet_int8_mem_value, tiny_mem_value)
+    # Model sizes
+    dlrm_mem = DLRM_MODEL_SIZE_FP32
+    gpt2_mem = 6 * GiB
+    resnet_mem = 100 * MiB
+    mobilenet_mem = 14 * MiB
+    mobilenet_int8_mem = 3.5 * MiB
+    dscnn_mem = 500 * KiB
 
-# --- Outputs (formatted strings for prose) ---
-dlrm_str = f"{dlrm_mem_value.to(GB).magnitude:.0f} GB"
-gpt2_str = f"{gpt2_mem_value.to(GiB).magnitude:.0f} GB"
-resnet_str = f"{resnet_mem_value.to(MiB).magnitude:.0f} MB"
-mobilenet_str = f"{mobilenet_mem_value.to(MiB).magnitude:.0f} MB"
-mobilenet_int8_str = f"{mobilenet_int8_mem_value.to(MiB).magnitude:.1f} MB"
-dscnn_str = f"{dscnn_mem_value.to(KiB).magnitude:.0f} KB"
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    dlrm_mobile = _get_ratio(dlrm_mem, mobile_mem)
+    dlrm_tiny = _get_ratio(dlrm_mem, tiny_mem)
+    gpt2_mobile = _get_ratio(gpt2_mem, mobile_mem)
+    gpt2_tiny = _get_ratio(gpt2_mem, tiny_mem)
+    resnet_tiny = _get_ratio(resnet_mem, tiny_mem)
+    mobilenet_tiny = _get_ratio(mobilenet_mem, tiny_mem)
+    mobilenet_int8_tiny = _get_ratio(mobilenet_int8_mem, tiny_mem)
 
-cloud_cap_str = f"~{cloud_mem_value.to(GiB).magnitude:.0f} GB"
-mobile_cap_str = f"~{mobile_mem_value.to(GiB).magnitude:.0f} GB"
-tiny_cap_str = f"~{tiny_mem_value.to(KiB).magnitude:.0f} KB"
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # DS-CNN always fits TinyML — sanity check
+    assert _get_ratio(dscnn_mem, tiny_mem) == "ok", "DS-CNN must fit in TinyML device."
 
-dlrm_mobile_str = dlrm_mobile_value
-dlrm_tiny_str = dlrm_tiny_value
-gpt2_mobile_str = gpt2_mobile_value
-gpt2_tiny_str = gpt2_tiny_value
-resnet_tiny_str = resnet_tiny_value
-mobilenet_tiny_str = mobilenet_tiny_value
-mobilenet_int8_tiny_str = mobilenet_int8_tiny_value
-dscnn_tiny_str = "ok"
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    dlrm_str = f"{dlrm_mem.m_as(GB):.0f} GB"
+    gpt2_str = f"{gpt2_mem.m_as(GiB):.0f} GB"
+    resnet_str = f"{resnet_mem.m_as(MiB):.0f} MB"
+    mobilenet_str = f"{mobilenet_mem.m_as(MiB):.0f} MB"
+    mobilenet_int8_str = f"{mobilenet_int8_mem.m_as(MiB):.1f} MB"
+    dscnn_str = f"{dscnn_mem.m_as(KiB):.0f} KB"
+    cloud_cap_str = f"~{cloud_mem.m_as(GiB):.0f} GB"
+    mobile_cap_str = f"~{mobile_mem.m_as(GiB):.0f} GB"
+    tiny_cap_str = f"~{tiny_mem.m_as(KiB):.0f} KB"
+    dlrm_mobile_str = dlrm_mobile
+    dlrm_tiny_str = dlrm_tiny
+    gpt2_mobile_str = gpt2_mobile
+    gpt2_tiny_str = gpt2_tiny
+    resnet_tiny_str = resnet_tiny
+    mobilenet_tiny_str = mobilenet_tiny
+    mobilenet_int8_tiny_str = mobilenet_int8_tiny
+    dscnn_tiny_str = "ok"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+dlrm_str = ModelDeviceComparison.dlrm_str
+gpt2_str = ModelDeviceComparison.gpt2_str
+resnet_str = ModelDeviceComparison.resnet_str
+mobilenet_str = ModelDeviceComparison.mobilenet_str
+mobilenet_int8_str = ModelDeviceComparison.mobilenet_int8_str
+dscnn_str = ModelDeviceComparison.dscnn_str
+cloud_cap_str = ModelDeviceComparison.cloud_cap_str
+mobile_cap_str = ModelDeviceComparison.mobile_cap_str
+tiny_cap_str = ModelDeviceComparison.tiny_cap_str
+dlrm_mobile_str = ModelDeviceComparison.dlrm_mobile_str
+dlrm_tiny_str = ModelDeviceComparison.dlrm_tiny_str
+gpt2_mobile_str = ModelDeviceComparison.gpt2_mobile_str
+gpt2_tiny_str = ModelDeviceComparison.gpt2_tiny_str
+resnet_tiny_str = ModelDeviceComparison.resnet_tiny_str
+mobilenet_tiny_str = ModelDeviceComparison.mobilenet_tiny_str
+mobilenet_int8_tiny_str = ModelDeviceComparison.mobilenet_int8_tiny_str
+dscnn_tiny_str = ModelDeviceComparison.dscnn_tiny_str
 ```
 
 | **Model**              | **Memory** **(Runtime)**      | **Storage** **(Weights)**     | **Cloud** **(`{python} cloud_cap_str`)** | **Mobile** **(`{python} mobile_cap_str`)** | **TinyML** **(`{python} tiny_cap_str`)** |
@@ -599,7 +657,6 @@ Optimization is about trading one resource for another.
 :::
 
 Each deployment context above imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization techniques that follow address these constraints at three successive levels of the stack. We begin with structural methods that modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. We then turn to precision techniques that reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Finally, we address architectural approaches that improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
-
 
 ## Structural Optimization {#sec-model-compression-structural-optimization-ee93}
 \index{Model Compression!structural optimization}
@@ -2764,7 +2821,6 @@ Test your understanding of the structural optimization techniques covered so far
 - [ ] Can you identify when to choose Neural Architecture Search over manual architecture design? Consider the trade-offs in computational cost, design space coverage, and hardware-specific optimization.
 :::
 
-
 ## Quantization and Precision {#sec-model-compression-quantization-precision-cd46}
 \index{Model Compression!precision optimization}
 
@@ -3690,44 +3746,57 @@ Compare the two mapping diagrams side by side in @fig-calibration-ranges. Symmet
 # │          zero_point_str, x_val_str, x_q_str, x_recon_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
-from mlsys.constants import KIB_TO_BYTES
 
-# --- Inputs (activation range example) ---
-alpha_value = -1.0
-beta_value = 3.0
-bits_value = 8
-x_val_value = 0.0  # value to quantize
+class QuantizationMathCalc:
+    """Derive affine quantization parameters: scale and zero-point for [-1.0, 3.0] → UINT8."""
 
-# --- Process (calculate affine parameters) ---
-# 1. Calculate Scale (s)
-#    s = (beta - alpha) / (2^b - 1)
-int_steps_value = 2**bits_value - 1
-scale_value = (beta_value - alpha_value) / int_steps_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    alpha = -1.0                                                # activation range min
+    beta = 3.0                                                  # activation range max
+    bits = 8                                                    # target bit-width
+    x_val = 0.0                                                 # value to quantize
 
-# 2. Calculate Zero-Point (z)
-#    z = round(-alpha / s)
-#    Note: z maps the real value 0.0 to an integer
-zero_point_value = round(-alpha_value / scale_value)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # 1. Scale: s = (beta - alpha) / (2^b - 1)
+    int_steps = 2**bits - 1
+    scale = (beta - alpha) / int_steps
 
-# 3. Quantize a value
-#    x_q = clamp(round(x / s) + z, 0, 2^b - 1)
-x_q_raw = round(x_val_value / scale_value) + zero_point_value
-x_q_value = max(0, min(int_steps_value, x_q_raw))
+    # 2. Zero-point: z = round(-alpha / s)
+    zero_point = round(-alpha / scale)
 
-# 4. Dequantize (reconstruct)
-#    x_recon = (x_q - z) * s
-x_recon_value = (x_q_value - zero_point_value) * scale_value
+    # 3. Quantize: x_q = clamp(round(x/s) + z, 0, 2^b - 1)
+    x_q_raw = round(x_val / scale) + zero_point
+    x_q = max(0, min(int_steps, x_q_raw))
 
-# --- Outputs (formatted strings for prose) ---
-alpha_str = fmt(alpha_value, precision=1, commas=False)       # "-1.0"
-beta_str = fmt(beta_value, precision=1, commas=False)         # "3.0"
-range_str = fmt(beta_value - alpha_value, precision=1, commas=False) # "4.0"
-steps_str = f"{int_steps_value}"                              # "255"
-scale_str = fmt(scale_value, precision=4, commas=False)       # "0.0157"
-zero_point_str = f"{int(zero_point_value)}"                   # "64"
-x_val_str = fmt(x_val_value, precision=1, commas=False)       # "0.0"
-x_q_str = f"{int(x_q_value)}"                                 # "64"
-x_recon_str = fmt(x_recon_value, precision=2, commas=False)   # "0.00"
+    # 4. Dequantize: x_recon = (x_q - z) * s
+    x_recon = (x_q - zero_point) * scale
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(scale > 0, "Scale must be positive.")
+    check(0 <= zero_point <= int_steps, "Zero-point must be in valid integer range.")
+    check(abs(x_recon - x_val) < scale, "Reconstruction error must be less than one step size.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    alpha_str = fmt(alpha, precision=1, commas=False)           # "-1.0"
+    beta_str = fmt(beta, precision=1, commas=False)             # "3.0"
+    range_str = fmt(beta - alpha, precision=1, commas=False)    # "4.0"
+    steps_str = f"{int_steps}"                                  # "255"
+    scale_str = fmt(scale, precision=4, commas=False)           # "0.0157"
+    zero_point_str = f"{int(zero_point)}"                       # "64"
+    x_val_str = fmt(x_val, precision=1, commas=False)           # "0.0"
+    x_q_str = f"{int(x_q)}"                                    # "64"
+    x_recon_str = fmt(x_recon, precision=2, commas=False)       # "0.00"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+alpha_str = QuantizationMathCalc.alpha_str
+beta_str = QuantizationMathCalc.beta_str
+range_str = QuantizationMathCalc.range_str
+steps_str = QuantizationMathCalc.steps_str
+scale_str = QuantizationMathCalc.scale_str
+zero_point_str = QuantizationMathCalc.zero_point_str
+x_val_str = QuantizationMathCalc.x_val_str
+x_q_str = QuantizationMathCalc.x_q_str
+x_recon_str = QuantizationMathCalc.x_recon_str
 ```
 
 ::: {.callout-notebook title="Calculating Scale and Zero-Point"}
@@ -4326,7 +4395,6 @@ Yet practitioners often discover a frustrating gap between theory and practice: 
 
 The gap arises from several sources. Sparse matrices stored in dense format waste memory bandwidth loading zeros—the hardware cannot skip what it does not know is zero. Operations that could run in parallel execute sequentially due to data dependencies the compiler cannot resolve. Simple inputs receive the same computational budget as complex ones because the model has no mechanism to exit early. Closing the gap between "optimized on paper" and "optimized in practice" is the domain of our third optimization dimension: **architectural efficiency**. This dimension ensures that structural and precision optimizations translate into real-world speedups by aligning computation patterns with hardware capabilities.
 
-
 ## Architectural Efficiency {#sec-model-compression-architectural-efficiency-8dd3}
 
 Architectural efficiency optimization ensures that computations execute efficiently on target hardware by aligning model operations with processor capabilities and memory hierarchies. Where representation optimization determines *what* computations to perform and precision optimization determines *how precisely* to compute, architectural efficiency addresses *how* operations are scheduled, memory is accessed, and workloads adapt to input characteristics. This third dimension closes the gap between theoretical compression ratios and real-world speedups.
@@ -4452,77 +4520,102 @@ Beyond reducing what data must be stored, substantial efficiency gains emerge fr
 # │          kernels_fused_str, saved_latency_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check
-from mlsys.constants import KIB_TO_BYTES
+from mlsys.constants import KIB_TO_BYTES, MILLION
 
-# --- Inputs (Conv-BN-ReLU) ---
-conv_channels_value = 256
-conv_spatial_value = 28
-bytes_per_element_value = 4
+class FusionCalc:
+    """Quantify latency and bandwidth benefits of Conv-BN-ReLU operator fusion on ResNet-50."""
 
-# GEMM
-gemm_hidden_value = 768
-gemm_seq_value = 512
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Conv-BN-ReLU layer geometry
+    conv_channels = 256
+    conv_spatial = 28
+    bytes_per_element = 4                                        # FP32
 
-# Memory Bandwidth Analysis (ResNet-50 layer)
-# Feature map: 256 channels × 28 × 28 spatial × 4 bytes/element (FP32)
-feat_map_mb_value = conv_channels_value * conv_spatial_value * conv_spatial_value * bytes_per_element_value / MILLION  # SI MB
-weights_mb_value = 2.4
-bn_params_mb_value = 0.002
+    # GEMM geometry
+    gemm_hidden = 768
+    gemm_seq = 512
 
-# Kernel Launch
-kernels_unfused_value = 159
-kernels_fused_value = 53
-latency_per_kernel_us_value = 10
+    # ResNet-50 layer memory baseline
+    weights_mb = 2.4
+    bn_params_mb = 0.002
 
-# --- Process ---
-# Conv-BN-ReLU intermediate
-conv_bn_relu_intermediate_bytes = 2 * conv_channels_value * conv_spatial_value * conv_spatial_value * bytes_per_element_value
-conv_bn_relu_intermediate_mb_value = conv_bn_relu_intermediate_bytes / (1024**2)
+    # Kernel launch overhead
+    kernels_unfused = 159
+    kernels_fused = 53
+    latency_per_kernel_us = 10
 
-# GEMM intermediate
-gemm_intermediate_bytes = gemm_hidden_value * gemm_seq_value * bytes_per_element_value
-gemm_intermediate_mb_value = gemm_intermediate_bytes / (1024**2)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Feature map size (SI MB)
+    feat_map_mb = conv_channels * conv_spatial * conv_spatial * bytes_per_element / MILLION
 
-# Bandwidth Analysis
-unfused_conv_mb_value = feat_map_mb_value * 2 + weights_mb_value
-unfused_bn_mb_value = feat_map_mb_value * 2 + bn_params_mb_value
-unfused_relu_mb_value = feat_map_mb_value * 2
-total_unfused_mb_value = unfused_conv_mb_value + unfused_bn_mb_value + unfused_relu_mb_value
+    # Conv-BN-ReLU intermediate (2 feature maps written: conv→BN boundary)
+    conv_bn_relu_intermediate_mb = (
+        2 * conv_channels * conv_spatial * conv_spatial * bytes_per_element / (1024**2)
+    )
 
-total_fused_mb_value = feat_map_mb_value * 2 + weights_mb_value
-bandwidth_reduction_pct_value = (1 - total_fused_mb_value / total_unfused_mb_value) * 100
+    # GEMM intermediate
+    gemm_intermediate_mb = gemm_hidden * gemm_seq * bytes_per_element / (1024**2)
 
-# Kernel Launch
-saved_latency_us_value = (kernels_unfused_value - kernels_fused_value) * latency_per_kernel_us_value
-saved_latency_ms_value = saved_latency_us_value / 1000
+    # Unfused bandwidth: Conv (feat*2 + weights) + BN (feat*2 + bn) + ReLU (feat*2)
+    unfused_conv_mb = feat_map_mb * 2 + weights_mb
+    unfused_bn_mb = feat_map_mb * 2 + bn_params_mb
+    unfused_relu_mb = feat_map_mb * 2
+    total_unfused_mb = unfused_conv_mb + unfused_bn_mb + unfused_relu_mb
 
-# V100 timing analysis (memory-bound)
-v100_bw_gbs_local_value = v100_bw_gbs_value  # from earlier cell
-unfused_time_us_value = total_unfused_mb_value / v100_bw_gbs_local_value * 1000  # MB / (GB/s) * 1000 = us
-fused_time_us_value = total_fused_mb_value / v100_bw_gbs_local_value * 1000
-fusion_speedup_value = unfused_time_us_value / fused_time_us_value
+    # Fused bandwidth: read input + weights once, write output once
+    total_fused_mb = feat_map_mb * 2 + weights_mb
+    bandwidth_reduction_pct = (1 - total_fused_mb / total_unfused_mb) * 100
 
-# --- Outputs (formatted strings for prose) ---
-conv_bn_relu_intermediate_mb_str = fmt(conv_bn_relu_intermediate_mb_value, precision=1, commas=False)
-gemm_intermediate_mb_str = fmt(gemm_intermediate_mb_value, precision=1, commas=False)
+    # Kernel launch savings
+    saved_latency_us = (kernels_unfused - kernels_fused) * latency_per_kernel_us
+    saved_latency_ms = saved_latency_us / 1000
 
-feat_map_kb_str = fmt(feat_map_mb_value * 1000, precision=0, commas=False)
-weights_mb_str = fmt(weights_mb_value, precision=1, commas=False)
-bn_params_kb_str = fmt(bn_params_mb_value * KIB_TO_BYTES, precision=0, commas=False)
+    # V100 timing (memory-bound): MB / (GB/s) * 1000 = µs
+    unfused_time_us = total_unfused_mb / v100_bw_gbs_value * 1000
+    fused_time_us = total_fused_mb / v100_bw_gbs_value * 1000
+    fusion_speedup = unfused_time_us / fused_time_us
 
-unfused_conv_mb_str = fmt(unfused_conv_mb_value, precision=1, commas=False)
-unfused_bn_mb_str = fmt(unfused_bn_mb_value, precision=1, commas=False)
-unfused_relu_mb_str = fmt(unfused_relu_mb_value, precision=1, commas=False)
-total_unfused_mb_str = fmt(total_unfused_mb_value, precision=1, commas=False)
-total_fused_mb_str = fmt(total_fused_mb_value, precision=1, commas=False)
-bandwidth_reduction_pct_str = fmt(bandwidth_reduction_pct_value, precision=0, commas=False)
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(bandwidth_reduction_pct > 40, "Fusion should reduce bandwidth by more than 40%.")
+    check(fusion_speedup > 1, "Fused execution must be faster than unfused.")
 
-kernels_unfused_str = fmt(kernels_unfused_value, precision=0, commas=False)
-kernels_fused_str = fmt(kernels_fused_value, precision=0, commas=False)
-saved_latency_ms_str = fmt(saved_latency_ms_value, precision=0, commas=False)
-unfused_time_us_str = fmt(unfused_time_us_value, precision=0, commas=False)
-fused_time_us_str = fmt(fused_time_us_value, precision=1, commas=False)
-fusion_speedup_str = fmt(fusion_speedup_value, precision=2, commas=False)
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    conv_bn_relu_intermediate_mb_str = fmt(conv_bn_relu_intermediate_mb, precision=1, commas=False)
+    gemm_intermediate_mb_str = fmt(gemm_intermediate_mb, precision=1, commas=False)
+    feat_map_kb_str = fmt(feat_map_mb * 1000, precision=0, commas=False)
+    weights_mb_str = fmt(weights_mb, precision=1, commas=False)
+    bn_params_kb_str = fmt(bn_params_mb * KIB_TO_BYTES, precision=0, commas=False)
+    unfused_conv_mb_str = fmt(unfused_conv_mb, precision=1, commas=False)
+    unfused_bn_mb_str = fmt(unfused_bn_mb, precision=1, commas=False)
+    unfused_relu_mb_str = fmt(unfused_relu_mb, precision=1, commas=False)
+    total_unfused_mb_str = fmt(total_unfused_mb, precision=1, commas=False)
+    total_fused_mb_str = fmt(total_fused_mb, precision=1, commas=False)
+    bandwidth_reduction_pct_str = fmt(bandwidth_reduction_pct, precision=0, commas=False)
+    kernels_unfused_str = fmt(kernels_unfused, precision=0, commas=False)
+    kernels_fused_str = fmt(kernels_fused, precision=0, commas=False)
+    saved_latency_ms_str = fmt(saved_latency_ms, precision=0, commas=False)
+    unfused_time_us_str = fmt(unfused_time_us, precision=0, commas=False)
+    fused_time_us_str = fmt(fused_time_us, precision=1, commas=False)
+    fusion_speedup_str = fmt(fusion_speedup, precision=2, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+conv_bn_relu_intermediate_mb_str = FusionCalc.conv_bn_relu_intermediate_mb_str
+gemm_intermediate_mb_str = FusionCalc.gemm_intermediate_mb_str
+feat_map_kb_str = FusionCalc.feat_map_kb_str
+weights_mb_str = FusionCalc.weights_mb_str
+bn_params_kb_str = FusionCalc.bn_params_kb_str
+unfused_conv_mb_str = FusionCalc.unfused_conv_mb_str
+unfused_bn_mb_str = FusionCalc.unfused_bn_mb_str
+unfused_relu_mb_str = FusionCalc.unfused_relu_mb_str
+total_unfused_mb_str = FusionCalc.total_unfused_mb_str
+total_fused_mb_str = FusionCalc.total_fused_mb_str
+bandwidth_reduction_pct_str = FusionCalc.bandwidth_reduction_pct_str
+kernels_unfused_str = FusionCalc.kernels_unfused_str
+kernels_fused_str = FusionCalc.kernels_fused_str
+saved_latency_ms_str = FusionCalc.saved_latency_ms_str
+unfused_time_us_str = FusionCalc.unfused_time_us_str
+fused_time_us_str = FusionCalc.fused_time_us_str
+fusion_speedup_str = FusionCalc.fusion_speedup_str
 ```
 
 #### Operator Fusion {#sec-model-compression-operator-fusion-ac1d}
@@ -4594,16 +4687,28 @@ def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt, check, md_math
 
-# --- Inputs (transfer counts) ---
-unfused_transfers_value = 6  # read/write for each of conv, BN, ReLU
-fused_transfers_value = 2    # read input, write output
+class ConvFusionCalc:
+    """Demonstrate 3x memory traffic reduction from Conv-BN-ReLU fusion (6 transfers → 2)."""
 
-# --- Process ---
-transfer_reduction_value = unfused_transfers_value / fused_transfers_value
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    unfused_transfers = 6                                        # read/write for Conv, BN, ReLU
+    fused_transfers = 2                                          # read input, write output
 
-# --- Outputs (formatted strings for prose) ---
-transfer_reduction_str = fmt(transfer_reduction_value, precision=0, commas=False)
-conv_bn_relu_mem_md = md_math(f"2 \\times 256 \\times 28 \\times 28 \\times 4 \\text{{ bytes}} \\approx \\text{{{conv_bn_relu_intermediate_mb_str} MB}}")
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    transfer_reduction = unfused_transfers / fused_transfers
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(transfer_reduction == 3, "Conv-BN-ReLU fusion must yield exactly 3x transfer reduction.")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    transfer_reduction_str = fmt(transfer_reduction, precision=0, commas=False)
+    conv_bn_relu_mem_md = md_math(
+        f"2 \\times 256 \\times 28 \\times 28 \\times 4 \\text{{ bytes}} \\approx \\text{{{conv_bn_relu_intermediate_mb_str} MB}}"
+    )
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+transfer_reduction_str = ConvFusionCalc.transfer_reduction_str
+conv_bn_relu_mem_md = ConvFusionCalc.conv_bn_relu_mem_md
 ```
 
 The arithmetic operations remain identical, but memory traffic drops from 6 transfers to 2 transfers (`{python} transfer_reduction_str` $\times$ reduction). For a ResNet-50 layer with 256 channels and spatial size $28 \times 28$, this eliminates `{python} conv_bn_relu_mem_md` of intermediate memory traffic per layer.
@@ -6276,7 +6381,6 @@ Unlike software functions that compose predictably, optimization techniques inte
 
 With the three optimization dimensions now fully explored, practitioners need systematic guidance for translating this knowledge into deployment decisions.
 
-
 ## Technique Selection {#sec-model-compression-technique-selection-ba16}
 
 An engineer deploying a transformer model faces a concrete decision: the model exceeds the target device's memory by 3 $\times$, inference latency is 4 $\times$ above the SLO, and the power budget allows no more than 2 W sustained. Should she quantize first, prune first, distill to a smaller architecture, or combine techniques? The answer depends on which constraint is binding, what accuracy loss is tolerable, and how much engineering time is available. This section provides structured guidance for navigating that decision.
@@ -6313,7 +6417,6 @@ When energy and power consumption drive the optimization, quantization again lea
 These choices also depend on the available engineering budget. When fine-tuning is feasible, QAT replaces PTQ for better accuracy at the same precision level, knowledge distillation enables maximum accuracy preservation, and NAS can discover hardware-specific architectures that outperform manual designs. When rapid deployment is required, PTQ with a calibration dataset can be completed in hours rather than days, and magnitude-based pruning with brief fine-tuning offers a practical middle ground. Techniques demanding large search budgets, such as NAS or full QAT, are best reserved for production systems with longer optimization timelines.
 
 This decision framework provides starting points for individual technique selection. Validating that a chosen technique actually achieves its intended goal requires systematic profiling and measurement, which @sec-model-compression-efficiency-measurement-2424 formalizes in detail. However, production deployments rarely rely on a single technique. Combining pruning with quantization, or distillation with hardware-aware design, introduces interaction effects that can either amplify benefits or create unexpected accuracy degradation. The following section addresses how to sequence and combine techniques effectively.
-
 
 ## Optimization Strategies {#sec-model-compression-optimization-strategies-f2f6}
 
@@ -6528,7 +6631,6 @@ This example illustrates why sequencing matters: pruning first concentrates impo
 
 With dozens of techniques across three optimization dimensions, rigorous measurement is essential for validating that optimizations achieve their intended goals. A practitioner who prunes, quantizes, and fuses without profiling the actual impact on target hardware is optimizing blindly.
 
-
 ## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
 
 A model quantized to INT8 should be 4 $\times$ smaller and roughly 3 $\times$ faster, but does it actually achieve those gains on the target hardware? Theoretical compression ratios and measured deployment improvements often diverge, sometimes dramatically, because real speedups depend on memory hierarchy effects, kernel implementations, and hardware utilization patterns that theory alone cannot predict. Translating theoretical compression ratios into measurable deployment improvements therefore requires systematic profiling and evaluation.
@@ -6565,7 +6667,6 @@ When quantizing ResNet-50 from FP32 to INT8, baseline metrics show Top-1 accurac
 With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our three-dimensional framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @sec-benchmarking provides additional structured evaluation methods for comprehensive performance assessment.
 
 Rigorous measurement tells practitioners *whether* their optimizations succeeded, but the measurements themselves require tooling to perform. Profiling, quantization, pruning, and deployment all depend on software frameworks that automate otherwise prohibitively complex workflows. We turn now to the implementation tools that make these techniques practical.
-
 
 ## Implementation Tools {#sec-model-compression-implementation-tools-4990}
 
@@ -6655,7 +6756,6 @@ Sparsity heat maps show sparsity distribution across layers (@fig-sparse-heat-ma
 
 With the implementation tools and visualization capabilities established, the natural question is: how do these techniques compare when a practitioner must choose among them? Each optimization approach carries distinct trade-offs in accuracy, training cost, and hardware requirements, and a structured comparison clarifies which to reach for first.
 
-
 ## Technique Comparison {#sec-model-compression-technique-comparison-3142}
 
 A comparative analysis across the three major approaches reveals how each addresses distinct aspects of the efficiency-accuracy trade-off. Pruning works best when sparse computation hardware is available and when reducing floating-point operations is critical. Quantization provides the most versatile approach with broad hardware support, making it ideal for diverse deployment scenarios. Knowledge distillation requires significant computational investment but produces consistently high-quality compressed models, making it the right choice when accuracy preservation is paramount. @tbl-optimization-comparison summarizes these trade-offs for systematic technique selection.
@@ -6672,7 +6772,6 @@ A comparative analysis across the three major approaches reveals how each addres
 These techniques combine synergistically, with quantization often applied after pruning or distillation to achieve compound compression benefits. Production systems frequently employ sequential application: initial pruning reduces parameter count, quantization optimizes numerical representation, and fine-tuning through distillation principles recovers any accuracy loss. Sequential application enables compression ratios of 10–50 $\times$ while maintaining competitive accuracy across diverse deployment scenarios.
 
 With the complete optimization toolkit now surveyed—from individual techniques through combination strategies—the most instructive lessons often come not from what works but from what fails. The following fallacies and pitfalls capture the most common mistakes engineers make when applying these techniques, each grounded in the quantitative trade-offs we have established throughout the chapter.
-
 
 ## Fallacies and Pitfalls {#sec-model-compression-fallacies-pitfalls-1b5e}
 
@@ -6772,7 +6871,6 @@ Teams apply post-training quantization (PTQ) to avoid retraining and achieve 96.
 **Pitfall:** *Assuming compression ratios translate directly into proportional deployment gains.*
 
 Teams achieve `{python} int8_size_reduction_str` $\times$ model size reduction through INT8 quantization and expect `{python} int8_size_reduction_str` $\times$ memory savings in deployment. In practice, runtime overhead erodes compression gains. Dequantization kernels add `{python} dequant_overhead_str`% latency overhead converting INT8 weights back to FP16. Pruned models with irregular sparsity achieve only 12% latency reduction despite `{python} param_removal_str`% parameter removal because hardware cannot skip zeroed weights efficiently. As @sec-model-compression-profiling-opportunity-analysis-477f demonstrates, a BERT model pruned to 50% sparsity and quantized to INT8 achieves `{python} actual_speedup_str`% end-to-end speedup rather than the expected `{python} expected_speedup_str` $\times$, because unstructured sparsity creates irregular memory access. Production workflows must profile *deployed* latency on target hardware, not extrapolate from compression ratios.
-
 
 ## Summary {#sec-model-compression-summary-8229}
 

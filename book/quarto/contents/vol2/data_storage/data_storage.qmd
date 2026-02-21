@@ -27,7 +27,8 @@ from mlsys.constants import (
     CLOUD_EGRESS_PER_GB, USD,
     STORAGE_COST_S3_STD, STORAGE_COST_GLACIER,
     STORAGE_COST_NVME_LOW, STORAGE_COST_NVME_HIGH,
-    Mparam, Bparam, TFLOPs, GFLOPs
+    Mparam, Bparam, TFLOPs, GFLOPs,
+    watt
 )
 from mlsys.formatting import fmt, sci, check
 
@@ -77,13 +78,25 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ STORAGE HIERARCHY AND MODEL SPECIFICATIONS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Used across the chapter for hierarchy tables and bottleneck analysis.
+# │ Context: @sec-data-storage storage hierarchy tables and I/O bottleneck
+# │          analysis paragraphs throughout the chapter.
 # │
-# │ Goal: Provide quantitative specs for hardware and lighthouse models.
-# │ Show: The massive gap between HBM bandwidth and disk I/O.
+# │ Goal: Establish the six-tier storage hierarchy gap by computing H100 HBM
+# │       bandwidth (H100_MEM_BW) vs NVMe sequential bandwidth (NVME_SEQUENTIAL_BW),
+# │       and estimate GPT-3 checkpoint write time (GPT3_PARAMS, FP16, at NVMe
+# │       vs network storage) to show the I/O bottleneck in fault tolerance.
+# │ Show: "3.35" TB/s H100 HBM vs "~7" GB/s NVMe — inline in the storage
+# │       hierarchy tier comparison and checkpoint I/O bottleneck paragraphs.
+# │ How: Direct .m_as() for each unit conversion; H100_TDP .m_as(watt).
 # │
-# │ Imports: mlsys.constants
-# │ Exports: a100_mem, h100_bw_tbs, gpt3_params_b, resnet_params_m, etc.
+# │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY, H100_MEM_BW,
+# │           H100_FLOPS_FP8_TENSOR, H100_FLOPS_FP16_TENSOR, H100_TDP,
+# │           GPT3_PARAMS, RESNET50_PARAMS, NVME_SEQUENTIAL_BW,
+# │           NVLINK_H100_BW, PCIE_GEN5_BW, GiB, TB, TFLOPs, GB, second,
+# │           watt, Bparam, Mparam)
+# │ Exports: a100_mem, h100_mem, h100_bw_tbs, h100_fp8_tflops, h100_fp16_tflops,
+# │          h100_tdp_w, gpt3_params_b, resnet_params_m, nvme_bw,
+# │          nvlink_bw_gbs, pcie5_bw_gbs
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 
@@ -93,21 +106,21 @@ class StorageSetup:
     Namespace for global storage constants and specs.
     """
     # GPU specs
-    a100_mem = A100_MEM_CAPACITY.to(GiB).magnitude
-    h100_mem = H100_MEM_CAPACITY.to(GiB).magnitude
-    h100_bw = H100_MEM_BW.to(TB/second).magnitude
-    h100_fp8 = H100_FLOPS_FP8_TENSOR.to(TFLOPs/second).magnitude
-    h100_fp16 = H100_FLOPS_FP16_TENSOR.to(TFLOPs/second).magnitude
-    h100_tdp = H100_TDP.magnitude
+    a100_mem = A100_MEM_CAPACITY.m_as(GiB)
+    h100_mem = H100_MEM_CAPACITY.m_as(GiB)
+    h100_bw = H100_MEM_BW.m_as(TB/second)
+    h100_fp8 = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second)
+    h100_fp16 = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
+    h100_tdp = H100_TDP.m_as(watt)
 
     # Model specs
-    gpt3_params = GPT3_PARAMS.to(Bparam).magnitude
-    resnet_params = RESNET50_PARAMS.to(Mparam).magnitude
+    gpt3_params = GPT3_PARAMS.m_as(Bparam)
+    resnet_params = RESNET50_PARAMS.m_as(Mparam)
 
     # Storage & Interconnect
-    nvme_bw = NVME_SEQUENTIAL_BW.to(GB/second).magnitude
-    nvlink_bw = NVLINK_H100_BW.to(GB/second).magnitude
-    pcie5_bw = PCIE_GEN5_BW.to(GB/second).magnitude
+    nvme_bw = NVME_SEQUENTIAL_BW.m_as(GB/second)
+    nvlink_bw = NVLINK_H100_BW.m_as(GB/second)
+    pcie5_bw = PCIE_GEN5_BW.m_as(GB/second)
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 a100_mem = f"{StorageSetup.a100_mem:.0f}"
@@ -125,11 +138,11 @@ nvlink_bw_gbs = f"{StorageSetup.nvlink_bw:.0f}"
 pcie5_bw_gbs = f"{StorageSetup.pcie5_bw:.0f}"
 
 # Storage
-nvme_bw = f"{NVME_SEQUENTIAL_BW.to(GB/second).magnitude:.1f}"
+nvme_bw = f"{NVME_SEQUENTIAL_BW.m_as(GB/second):.1f}"
 
 # Interconnect
-nvlink_bw_gbs = f"{NVLINK_H100_BW.to(GB/second).magnitude:.0f}"
-pcie5_bw_gbs = f"{PCIE_GEN5_BW.to(GB/second).magnitude:.0f}"
+nvlink_bw_gbs = f"{NVLINK_H100_BW.m_as(GB/second):.0f}"
+pcie5_bw_gbs = f"{PCIE_GEN5_BW.m_as(GB/second):.0f}"
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class StorageEconomics:
