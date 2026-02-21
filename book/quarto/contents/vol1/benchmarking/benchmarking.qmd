@@ -1,5 +1,5 @@
 ---
-quiz: footnote_context_quizzes.json
+quiz: benchmarking_quizzes.json
 concepts: benchmarking_concepts.yml
 glossary: benchmarking_glossary.json
 engine: jupyter
@@ -2247,9 +2247,29 @@ Tail latency's connection to user experience at scale becomes critical in produc
 
 Service level objectives (SLOs) in production systems therefore focus on tail latency rather than mean latency to ensure consistent user experience. Typical production SLOs specify P95 < 100ms and P99 < 500ms for interactive services, recognizing that occasional slow responses have disproportionate impact on user satisfaction. Large-scale systems like Netflix and Uber optimize for P99.9 latency to handle traffic spikes and infrastructure variations that affect service reliability.
 
+::: {.callout-war-story title="The Tail Latency Death"}
+**The Context**: Discord, a real-time chat platform, used Go for its core services. The system required low latency for millions of concurrent users.
+
+**The Failure**: Engineers observed massive latency spikes every few minutes. The culprit was Go's Garbage Collector (GC). While the average request was fast, the "Stop-the-World" GC pauses (collecting memory from millions of objects) froze the entire server for significant intervals.
+
+**The Consequence**: These spikes caused "lag" for users and instability in the cluster. Discord eventually rewrote the service in Rust (which has no GC) to eliminate these pauses, achieving consistent tail latency.
+
+**The Systems Lesson**: Average latency is a vanity metric. In high-throughput systems, the tail (P99) *is* the experience. Language runtime choices (GC vs. manual memory management) are architectural constraints that determine your tail latency floor [@discord2020rust].
+:::
+
 #### End-to-End vs. Component Latency {#sec-benchmarking-endtoend-vs-component-latency-9952}
 
 A critical distinction in inference benchmarking is between component latency (time spent in model computation) and end-to-end latency (total time from request arrival to response delivery). Many benchmarks report only model inference time, obscuring the remaining overhead that determines actual user experience.
+
+::: {.callout-war-story title="The JSON Serialization Trap"}
+**The Context**: Researchers at Berkeley developed Clipper, a low-latency model serving system. They benchmarked standard serving approaches using Python-based web servers.
+
+**The Failure**: They found that for simple models like linear regression or small CNNs, the API overhead (JSON serialization/deserialization) consumed more CPU time than the actual inference.
+
+**The Consequence**: The system's throughput was capped not by the model's math, but by the text processing of the input data. The GPU sat idle while the CPU parsed JSON strings.
+
+**The Systems Lesson**: Text protocols (JSON/HTTP) are CPU-bound bottlenecks for high-throughput ML. Binary protocols (gRPC/Protobuf) or shared memory (Apache Arrow) are mandatory for high-performance serving. The "wrapper" often costs more than the "gift" [@crankshaw2017clipper_paper].
+:::
 
 @tbl-latency-breakdown quantifies a typical latency breakdown for an inference request. Notice that model inference (the "benchmark" number) may represent only 10–50% of total request time, with queue wait time potentially dominating under load:
 
