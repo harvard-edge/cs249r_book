@@ -46,7 +46,7 @@ start_chapter("vol2:fleet_orchestration")
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{20}{100}{25}{15}
+\mlfleetstack{25}{100}{25}{15}
 \end{marginfigure}
 
 _Why does resource allocation become the primary bottleneck when hardware is plentiful?_
@@ -280,10 +280,11 @@ Production schedulers address fragmentation through several complementary strate
 
 **Defragmentation** periodically migrates or preempts low-priority jobs to consolidate free resources into contiguous blocks, analogous to memory compaction in operating systems. The scheduler identifies nodes where partial allocations leave stranded resources, preempts the jobs occupying those resources, and re-schedules them on nodes where they can be packed more efficiently. The cost of defragmentation (preempting running work, which wastes compute between the last checkpoint and the preemption event) must be weighed against the benefit (enabling large jobs to start sooner, improving overall throughput). Production systems typically run defragmentation during low-demand periods (late night, weekends) when the impact of preemption is minimal.
 
-**Over-subscription** allows more jobs to be admitted than strictly fit, relying on statistical multiplexing to avoid simultaneous peak usage across all resource dimensions. If each job's GPU utilization averages 70 percent (alternating between compute-intensive and data-loading phases), the cluster can support approximately 1.4 $\times$ as many jobs as the strict GPU count would allow. Over-subscription works well when resource utilization is genuinely bursty and jobs' peak usage periods are uncorrelated, but can cause severe performance degradation (thrashing, memory pressure, network congestion) when multiple jobs peak simultaneously. The key to safe over-subscription is monitoring actual utilization in real time and throttling admission when contention is detected.
+**Over-subscription** allows more jobs to be admitted than strictly fit, relying on statistical multiplexing to avoid simultaneous peak usage across all resource dimensions. If each job's GPU utilization averages 70 percent (alternating between compute-intensive and data-loading phases), the cluster can support approximately 1.4$\times$ as many jobs as the strict GPU count would allow. Over-subscription works well when resource utilization is genuinely bursty and jobs' peak usage periods are uncorrelated, but can cause severe performance degradation (thrashing, memory pressure, network congestion) when multiple jobs peak simultaneously. The key to safe over-subscription is monitoring actual utilization in real time and throttling admission when contention is detected.
 
 ::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="The Fragmentation Problem. The heatmap shows a snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Different colors represent distinct active jobs, while gray slots represent free GPUs. Although 19 GPUs (~30% of capacity) are available globally, they are fragmented across nodes. A new job requiring 8 contiguous GPUs (a full node) cannot be scheduled because no single row is completely empty, illustrating how bin-packing inefficiencies reduce effective cluster capacity." fig-alt="8-by-8 heatmap of cluster GPU allocation. Rows are nodes, columns are GPU slots. Colored cells show jobs; gray shows free. Status panel indicates 19 free GPUs but no contiguous block of 8."}
 ```{python}
+#| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FRAGMENTATION PROBLEM (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -388,9 +389,9 @@ The accuracy of runtime estimates determines backfill effectiveness, and this cr
 The cost of poor scheduling compounds rapidly. Consider a `{python} cluster_size_str`-GPU cluster:
 
 - **Operating cost**: $`{python} daily_cost_str`/day ($`{python} annual_cost_str`M/year)
-- **At 60% utilization**: 4,000 GPUs productive, 6,000 idle = $288,000/day wasted
-- **At 80% utilization**: 8,000 GPUs productive, 2,000 idle = $96,000/day wasted
-- **Improvement value**: Moving from 60% to 80% saves $192,000/day, or $70M/year
+- **At 60% utilization**: 4,000 GPUs productive, 6,000 idle = \$288,000/day wasted
+- **At 80% utilization**: 8,000 GPUs productive, 2,000 idle = \$96,000/day wasted
+- **Improvement value**: Moving from 60% to 80% saves \$192,000/day, or \$70M/year
 
 This savings exceeds the cost of a dedicated scheduling engineering team by orders of magnitude. Every percentage point of utilization improvement on a large cluster translates to millions of dollars annually. Scheduling is not overhead; it is one of the highest-leverage engineering investments in ML infrastructure.
 
@@ -404,7 +405,11 @@ The most pernicious of these is **priority inversion**, a scenario borrowed from
 
 ::: {.callout-definition title="Priority Inversion"}
 
-***Priority Inversion***\index{Priority Inversion!definition} is a scheduling pathology in which a high-priority task is forced to wait for a lower-priority task to release a shared resource, effectively reducing the high-priority task's progress rate to that of the low-priority one. In distributed ML clusters, priority inversion typically manifests when a low-priority job holding GPUs is starved of auxiliary resources (CPU or network bandwidth) by medium-priority jobs, preventing it from checkpointing and releasing the resources needed by the high-priority job.
+***Priority Inversion***\index{Priority Inversion!definition} is a scheduling pathology in which a high-priority task is forced to wait for a lower-priority task to release a shared resource.
+
+1.  **Significance (Quantitative):** It reduces the progress rate of the entire fleet to that of the lowest-priority job. In ML clusters, this typically occurs when a low-priority job holding GPUs is starved of auxiliary resources (e.g., $BW$ for checkpointing), preventing it from finishing and releasing the accelerators needed by high-priority workloads.
+2.  **Distinction (Durable):** Unlike **Standard Queuing** (where tasks wait their turn), Priority Inversion involves an **Active Blockage**: the high-priority task is ready to run but is transitively dependent on a task that the scheduler does not prioritize.
+3.  **Common Pitfall:** A frequent misconception is that strict priority levels solve this. In reality, without **Holistic Preemption** (reserving all resources needed for a task to exit), increasing priority levels can actually *increase* the likelihood of inversion by creating more complex dependency chains.
 
 :::
 
@@ -434,10 +439,10 @@ A typical ML cluster configuration defines partitions by accelerator type and in
 
 | **Partition** | **GPUs/Node**   | **Interconnect** | **Typical Use**    |
 |:--------------|:----------------|:-----------------|:-------------------|
-| **dgx-a100**  | 8 $\times$ A100 | NVLink + IB NDR  | Large LLM training |
-| **a100-pcie** | 4 $\times$ A100 | PCIe + IB HDR    | Medium training    |
-| **inference** | 2 $\times$ A10G | Ethernet         | Model serving      |
-| **debug**     | 1 $\times$ V100 | Ethernet         | Development        |
+| **dgx-a100**  | 8$\times$ A100 | NVLink + IB NDR  | Large LLM training |
+| **a100-pcie** | 4$\times$ A100 | PCIe + IB HDR    | Medium training    |
+| **inference** | 2$\times$ A10G | Ethernet         | Model serving      |
+| **debug**     | 1$\times$ V100 | Ethernet         | Development        |
 
 : **Slurm Partition Configuration**: Partitions organize heterogeneous accelerators into logical pools matched to workload characteristics. NVLink-connected partitions support tensor parallelism, while PCIe partitions serve workloads that rely primarily on data parallelism. Separating inference and debug partitions prevents experimental workloads from impacting production serving. {#tbl-fleet-orchestration-slurm-partitions}
 
@@ -721,7 +726,7 @@ The physical location of GPUs on the network switch fabric dramatically impacts 
 *   **Rack-Aware:** Confined to a single rack (Top-of-Rack switch) $\rightarrow$ **85ms**.
 *   **Rail-Optimized:** Aligned to specialized "rails" (dedicated standard IB switches) $\rightarrow$ **40ms**.
 *   **Topology-Optimal:** All GPUs on the same leaf switch $\rightarrow$ **25ms**.
-Proper scheduling yields a **4.8x speedup** purely by respecting the network topology, with zero changes to the model code.
+Proper scheduling yields a **4.8$\times$ speedup** purely by respecting the network topology, with zero changes to the model code.
 :::
 
 The computational cost of topology-aware placement is non-trivial. Evaluating all possible placements for a 256-GPU job across a 10,000-GPU cluster is combinatorially intractable. Production schedulers use heuristic approaches: greedy algorithms that build placements bottom-up (first fill NVLink domains, then fill racks, then spread across racks), tree-search algorithms with pruning that explore the most promising placements first, or scoring-based approaches that evaluate a sample of feasible placements and select the best. The scheduling latency introduced by topology-aware algorithms (milliseconds to seconds, depending on cluster size and algorithm complexity) is negligible compared to job runtimes of hours to weeks, making the throughput improvement worth the scheduling overhead.
@@ -742,12 +747,13 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 - Pipeline stages scattered across racks (2 switch hops instead of 1)
 - Data parallel replicas randomly distributed
 
-The tensor parallel communication alone illustrates the impact. With NVLink at `{python} nvlink_h100_str` GB/s, a 1 GB activation transfer takes approximately 1.1 ms. Over InfiniBand at `{python} ib_ndr_gbs_str` GB/s, the same transfer takes approximately 20 ms, an 18 $\times$ slowdown. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), this difference compounds to 15 to 30 percent total training throughput degradation.
+The tensor parallel communication alone illustrates the impact. With NVLink at `{python} nvlink_h100_str` GB/s, a 1 GB activation transfer takes approximately 1.1 ms. Over InfiniBand at `{python} ib_ndr_gbs_str` GB/s, the same transfer takes approximately 20 ms, an 18$\times$ slowdown. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), this difference compounds to 15 to 30 percent total training throughput degradation.
 
 :::
 
 ::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="Topology Placement Impact: Reducing AllReduce latency by 4.8x through topology-aware scheduling (Rack/Rail optimization) compared to random placement for a 1GB gradient sync on 64 GPUs." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8x speedup from Random to Topology-Optimal."}
 ```{python}
+#| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ TOPOLOGY PLACEMENT (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -828,7 +834,11 @@ The topology-awareness discussed here improves performance for allocated jobs by
 
 ::: {.callout-definition title="Elastic Training"}
 
-***Elastic Training***\index{Elastic Training!definition} is the capability of a distributed training job to dynamically adjust its worker count without restarting, enabling training to continue through node failures or resource reallocation. Elasticity requires **gradient accumulation** recalibration and **learning rate** adjustment whenever the worker count changes, trading additional synchronization complexity for fault tolerance and resource efficiency.
+***Elastic Training***\index{Elastic Training!definition} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
+
+1.  **Significance (Quantitative):** It maximizes the **System Duty Cycle ($\eta$)** by allowing training to continue through node failures and by absorbing idle capacity in the cluster. It requires **Learning Rate Recalibration** and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
+2.  **Distinction (Durable):** Unlike **Standard Fault Tolerance** (which relies on checkpoint-restart), Elastic Training is **Always-Live**: the optimization loop never stops, it only changes its parallel width.
+3.  **Common Pitfall:** A frequent misconception is that elasticity is "automatic." In reality, it is a **Distributed Coordination Problem**: the training framework, the data loader, and the orchestrator must all synchronize their state to ensure that no data samples are lost or double-counted during worker scaling.
 
 :::
 
@@ -890,9 +900,9 @@ Consider a congested cluster where a 128-GPU job waits 8 hours for a full gang a
 
 Approximate work completed during the 8-hour "queue wait":
 
-- Hours 0 to 2: 25% throughput $\times$ 2 hours = 0.5 hours equivalent
-- Hours 2 to 4: 50% throughput $\times$ 2 hours = 1.0 hours equivalent
-- Hours 4 to 8: 100% throughput $\times$ 4 hours = 4.0 hours equivalent
+- Hours 0 to 2: 25% throughput$\times$ 2 hours = 0.5 hours equivalent
+- Hours 2 to 4: 50% throughput$\times$ 2 hours = 1.0 hours equivalent
+- Hours 4 to 8: 100% throughput$\times$ 4 hours = 4.0 hours equivalent
 - Total: 5.5 hours of equivalent full-scale work
 
 The elastic job completes in approximately 26.5 hours (8 hours of scaled-up training plus 18.5 hours at full scale), saving 5.5 hours compared to rigid scheduling. This 17% improvement comes entirely from using resources productively during what would otherwise be idle queue time.
@@ -955,11 +965,11 @@ The placement and elasticity mechanisms discussed so far address individual job 
 
 ## Cost Optimization {#sec-fleet-orchestration-cost-optimization}
 
-A 10,000-GPU cluster represents a capital investment of roughly $300 million and consumes millions more in monthly power and cooling. If poor scheduling leaves 20% of those GPUs idling in fragmentation gaps or waiting for data, the company is incinerating $60 million of compute capacity. Cost optimization forces the fleet orchestrator to treat the cluster not just as a computer, but as a massive financial asset whose ROI must be maximized.
+A 10,000-GPU cluster represents a capital investment of roughly \$300 million and consumes millions more in monthly power and cooling. If poor scheduling leaves 20% of those GPUs idling in fragmentation gaps or waiting for data, the company is incinerating \$60 million of compute capacity. Cost optimization forces the fleet orchestrator to treat the cluster not just as a computer, but as a massive financial asset whose ROI must be maximized.
 
-@fig-cost-idle-gpus makes this waste concrete by plotting annual wasted cost as a function of cluster size and utilization level. At 10,000 GPUs with 50% utilization, the annual waste exceeds $87 million. Published measurements from production clusters suggest this is not hypothetical: Microsoft's Philly cluster study [@jeon2019analysis] measured median utilization of approximately 52%, and Bhatele et al. (2023) found that 50% of jobs on NERSC's Perlmutter supercomputer used less than 25% of allocated GPU memory. The gap between 30% and 70% utilization, shaded in the figure, represents the operational reality for most organizations. Moving from 50% to 70% utilization on a 10,000-GPU cluster saves over $35 million annually without purchasing a single additional GPU, making scheduling optimization one of the highest-leverage investments in ML infrastructure.
+@fig-cost-idle-gpus makes this waste concrete by plotting annual wasted cost as a function of cluster size and utilization level. At 10,000 GPUs with 50% utilization, the annual waste exceeds \$87 million. Published measurements from production clusters suggest this is not hypothetical: Microsoft's Philly cluster study [@jeon2019analysis] measured median utilization of approximately 52%, and Bhatele et al. (2023) found that 50% of jobs on NERSC's Perlmutter supercomputer used less than 25% of allocated GPU memory. The gap between 30% and 70% utilization, shaded in the figure, represents the operational reality for most organizations. Moving from 50% to 70% utilization on a 10,000-GPU cluster saves over \$35 million annually without purchasing a single additional GPU, making scheduling optimization one of the highest-leverage investments in ML infrastructure.
 
-::: {#fig-cost-idle-gpus fig-env="figure" fig-pos="htb" fig-cap="**The Cost of Idle GPUs**. Annual wasted cost as a function of cluster size for different GPU utilization levels, assuming $2/GPU-hour (cloud equivalent). The shaded region between 30% and 70% utilization represents the typical operating range for production clusters. At 10,000 GPUs with 50% utilization, organizations waste $87.6M annually. The Microsoft Philly data point marks the published median cluster utilization of 52%. Data sources: Jeon et al. (ATC 2019), Bhatele et al. (ISC HPC 2023)." fig-alt="Line chart of annual wasted cost in millions versus cluster size with four utilization curves at 30, 50, 70, and 90 percent and shaded typical range."}
+::: {#fig-cost-idle-gpus fig-env="figure" fig-pos="htb" fig-cap="**The Cost of Idle GPUs**. Annual wasted cost as a function of cluster size for different GPU utilization levels, assuming \$2/GPU-hour (cloud equivalent). The shaded region between 30% and 70% utilization represents the typical operating range for production clusters. At 10,000 GPUs with 50% utilization, organizations waste \$87.6M annually. The Microsoft Philly data point marks the published median cluster utilization of 52%. Data sources: Jeon et al. (ATC 2019), Bhatele et al. (ISC HPC 2023)." fig-alt="Line chart of annual wasted cost in millions versus cluster size with four utilization curves at 30, 50, 70, and 90 percent and shaded typical range."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -1084,17 +1094,17 @@ The optimal mix depends on workload characteristics and organizational prioritie
 
 Consider training a 70B parameter model requiring 512 GPUs for 14 days.
 
-**On-demand**: 512 GPUs $\times$ 336 hours $\times$ $2.00/GPU-hour = **$344,064**
+**On-demand**: 512 GPUs$\times$ 336 hours$\times$ \$2.00/GPU-hour = **\$344,064**
 
 **Spot** (65% discount, 5% checkpoint overhead, 1 interruption/day with 30 min restart):
 
-- Base cost: 512 $\times$ 336 $\times$ $0.70 = $120,422
-- Checkpoint overhead: 5% $\times$ 336 hours = 16.8 extra hours
-- Restart overhead: 14 interruptions $\times$ 0.5 hours = 7 hours
+- Base cost: 512$\times$ 336$\times$ \$0.70 = \$120,422
+- Checkpoint overhead: 5%$\times$ 336 hours = 16.8 extra hours
+- Restart overhead: 14 interruptions$\times$ 0.5 hours = 7 hours
 - Total time: 336 + 16.8 + 7 = 359.8 hours
-- Total cost: 512 $\times$ 359.8 $\times$ $0.70 = **$128,872**
+- Total cost: 512$\times$ 359.8$\times$ \$0.70 = **\$128,872**
 
-**Savings**: $215,192 (63%), at the cost of approximately 7% longer wall-clock time.
+**Savings**: \$215,192 (63%), at the cost of approximately 7% longer wall-clock time.
 
 The economics are compelling when fault tolerance infrastructure is already in place. Without checkpointing, a single interruption forces restart from scratch, potentially wasting days of compute and negating all savings.
 
@@ -1102,7 +1112,7 @@ The economics are compelling when fault tolerance infrastructure is already in p
 
 ### Scheduling for Cost Efficiency {#sec-fleet-orchestration-cost-scheduling}
 
-Cost-aware scheduling extends the scheduler's optimization objective beyond utilization and fairness to include financial efficiency. Traditional schedulers minimize a single objective (e.g., average job completion time or maximum wait time), but cost-aware schedulers must navigate multi-objective trade-offs where time, money, and reliability are all decision variables. The scheduler must routinely make decisions such as: Should this job run on reserved A100s now, or wait 2 hours for spot H100s that would complete the job 3 $\times$ faster at half the cost? Should a low-priority hyperparameter sweep be preempted to make room for a high-priority training run on reserved capacity, or should the training run be placed on more expensive on-demand instances? When spot capacity is reclaimed, should the scheduler migrate the job to on-demand (maintaining throughput at higher cost) or scale down elastically (reducing throughput but maintaining low cost)?
+Cost-aware scheduling extends the scheduler's optimization objective beyond utilization and fairness to include financial efficiency. Traditional schedulers minimize a single objective (e.g., average job completion time or maximum wait time), but cost-aware schedulers must navigate multi-objective trade-offs where time, money, and reliability are all decision variables. The scheduler must routinely make decisions such as: Should this job run on reserved A100s now, or wait 2 hours for spot H100s that would complete the job 3$\times$ faster at half the cost? Should a low-priority hyperparameter sweep be preempted to make room for a high-priority training run on reserved capacity, or should the training run be placed on more expensive on-demand instances? When spot capacity is reclaimed, should the scheduler migrate the job to on-demand (maintaining throughput at higher cost) or scale down elastically (reducing throughput but maintaining low cost)?
 
 These decisions require the scheduler to model both the time-value of computation (how much does a 2-hour delay cost the organization in terms of researcher productivity, product launch schedules, or competitive positioning?) and the financial cost of different resource allocations. The time-value varies enormously by workload type: delaying a production model retrain by 2 hours might violate an SLA and cost thousands in penalty fees, while delaying an exploratory experiment by 2 hours costs nothing but researcher patience.
 
@@ -1118,11 +1128,11 @@ For an organization deciding between building a private cluster or renting cloud
 
 $$ \text{TCO}_{3\text{yr}} = C_{cap} + 3 \times C_{ops} + C_{opp} $$ {#eq-fleet-orchestration-tco}
 
-$C_{cap}$ is substantial: a cluster of 1,024 H100 GPUs requires approximately $40M in servers and another $10M in networking and storage fabric. $C_{ops}$ scales with utilization but includes a high fixed baseline for datacenter space, power availability guarantees, and the Site Reliability Engineering teams required to manage the complex software stack.
+$C_{cap}$ is substantial: a cluster of 1,024 H100 GPUs requires approximately \$40M in servers and another \$10M in networking and storage fabric. $C_{ops}$ scales with utilization but includes a high fixed baseline for datacenter space, power availability guarantees, and the Site Reliability Engineering teams required to manage the complex software stack.
 
 The break-even point between cloud and on-premise is strictly a function of utilization. Cloud pricing models charge a premium for elasticity -- the ability to scale to zero. Owning hardware eliminates the premium but introduces the risk of idle silicon. If a cluster runs at 80 percent utilization, the effective hourly cost of on-premise hardware drops to nearly half that of on-demand cloud instances, typically reaching break-even within 12 to 18 months. However, if utilization falters below 40 percent due to poor scheduling or fragmentation, the fixed amortization costs of owned hardware make it significantly more expensive than the cloud, where you only pay for what you use.
 
-Consider our 175B parameter model. Training requires approximately 34 days on 1,024 H100 GPUs. On a cloud provider using reserved instances at approximately $4 per GPU-hour, a single training run costs roughly $3.3 million. Building the cluster requires a $50M upfront investment. To justify this capital outlay, the organization must run this training workload (or equivalent jobs) at least 15 times over the hardware's life just to match the raw cloud cost, before factoring in electricity ($0.10/kWh $\times$ 1.5 MW $\approx$ $100K per run) and engineering salaries. If the team only trains one large model every quarter, the on-premise cluster becomes a financial liability; if they are training continuously, the owned infrastructure eventually yields effectively free compute after the break-even date.
+Consider our 175B parameter model. Training requires approximately 34 days on 1,024 H100 GPUs. On a cloud provider using reserved instances at approximately \$4 per GPU-hour, a single training run costs roughly \$3.3 million. Building the cluster requires a \$50M upfront investment. To justify this capital outlay, the organization must run this training workload (or equivalent jobs) at least 15 times over the hardware's life just to match the raw cloud cost, before factoring in electricity (\$0.10/kWh$\times$ 1.5 MW $\approx$ \$100K per run) and engineering salaries. If the team only trains one large model every quarter, the on-premise cluster becomes a financial liability; if they are training continuously, the owned infrastructure eventually yields effectively free compute after the break-even date.
 
 ::: {.callout-checkpoint title="Cost-Aware Scheduling Trade-offs"}
 
@@ -1142,7 +1152,7 @@ If a scheduler knew that a deep learning model was in the final, diminishing-ret
 
 ### Tiresias: Duration-Agnostic Scheduling {#sec-fleet-orchestration-tiresias}
 
-**Tiresias** [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and backfill scheduling degrades when users cannot provide accurate runtime estimates. Users consistently overestimate or underestimate runtimes by 2 to 5 $\times$, and the game-theoretic incentives encourage overestimation (to avoid being killed before completion), further degrading scheduler performance.
+**Tiresias** [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and backfill scheduling degrades when users cannot provide accurate runtime estimates. Users consistently overestimate or underestimate runtimes by 2 to 5$\times$, and the game-theoretic incentives encourage overestimation (to avoid being killed before completion), further degrading scheduler performance.
 
 Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a **two-dimensional attained service**[^fn-attained-service] scheduler that makes priority decisions based on what a job has already consumed, not what it claims it will consume. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity.
 
@@ -1209,7 +1219,7 @@ While research schedulers like Tiresias and Pollux offer theoretically optimal p
 
 Consider our 175B-parameter model training run. A pure implementation of Pollux might aggressively resize the job based on global cluster load, scaling the number of GPUs up and down to maximize goodput. However, changing the worker count for a synchronous training job requires a checkpoint-restart cycle, which for a model of this size involves writing terabytes of optimizer state to persistent storage. If the re-scaling interval is too short, the I/O overhead of checkpointing negates the throughput gains. In practice, production teams adopt a hybrid approach: they use Pollux-style adaptive allocation primarily during the volatile early phase of training or for hyperparameter sweeps, but lock the 175B model into a static, topology-aware allocation once the learning rate warmup completes and the job enters its months-long steady state.
 
-The build-versus-buy decision for a custom scheduler is a substantial capital investment. Developing a robust, fault-tolerant scheduler that outperforms the default bin-packing behavior of Kubernetes requires a specialized team of 3 to 5 systems engineers working for 6 to 12 months. Is this effort justified? If the team can improve overall cluster utilization by just 10 percent on a fleet of 10,000 H100 GPUs (approximately $25,000 per hour in capital depreciation and power), the savings amount to roughly $22 million per year. This stark return on investment drives the development of internal scheduling platforms at every major AI lab, transforming the scheduler from a mere utility into a primary lever for operational efficiency.
+The build-versus-buy decision for a custom scheduler is a substantial capital investment. Developing a robust, fault-tolerant scheduler that outperforms the default bin-packing behavior of Kubernetes requires a specialized team of 3 to 5 systems engineers working for 6 to 12 months. Is this effort justified? If the team can improve overall cluster utilization by just 10 percent on a fleet of 10,000 H100 GPUs (approximately \$25,000 per hour in capital depreciation and power), the savings amount to roughly \$22 million per year. This stark return on investment drives the development of internal scheduling platforms at every major AI lab, transforming the scheduler from a mere utility into a primary lever for operational efficiency.
 
 ::: {.callout-war-story title="The Scheduler That Optimized the Wrong Metric"}
 A platform team at a major autonomous vehicle company deployed a custom scheduler designed to minimize average job completion time (JCT), a standard academic metric. The logic was sound: by prioritizing shorter jobs, the queue clears faster, and developer velocity increases.
@@ -1279,7 +1289,7 @@ Consider a serving fleet with 10 replicas, each capable of 5 queries per second 
 
 **Scenario**: Traffic ramps from 40 QPS to 80 QPS linearly over 60 seconds. Model load time: 3 minutes (180 seconds).
 
-**Reactive scaling**: HPA detects overload at $t = 15$ s (when traffic hits 50 QPS). It requests 10 new replicas. These replicas become ready at $t = 195$ s (15 + 180). From $t = 15$ s to $t = 195$ s (3 minutes), demand exceeds capacity. At peak (80 QPS), 30 QPS are queued or dropped. Over this 3-minute window, approximately 3,600 requests (30 QPS $\times$ 120 s average excess) violate the SLO.
+**Reactive scaling**: HPA detects overload at $t = 15$ s (when traffic hits 50 QPS). It requests 10 new replicas. These replicas become ready at $t = 195$ s (15 + 180). From $t = 15$ s to $t = 195$ s (3 minutes), demand exceeds capacity. At peak (80 QPS), 30 QPS are queued or dropped. Over this 3-minute window, approximately 3,600 requests (30 QPS$\times$ 120 s average excess) violate the SLO.
 
 **Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t = -180$ s. The 10 new replicas come online at $t = 0$ s, pushing capacity to 100 QPS just as the ramp begins. Zero SLO violations.
 
@@ -1319,11 +1329,11 @@ For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B p
 
 Consider a fleet serving 100 distinct 7B models (26 GB footprint each) and 10 distinct 175B models (350 GB footprint each).
 
-**Strategy A -- Exclusive access (one model per GPU)**: The 7B models require 100 A100 GPUs (80 GB each), achieving only 32 percent memory utilization (100 $\times$ 26 GB used out of 8,000 GB total). The 175B models require 80 GPUs (10 models $\times$ 8 GPUs each for tensor parallelism). Total fleet: 180 GPUs.
+**Strategy A -- Exclusive access (one model per GPU)**: The 7B models require 100 A100 GPUs (80 GB each), achieving only 32 percent memory utilization (100$\times$ 26 GB used out of 8,000 GB total). The 175B models require 80 GPUs (10 models$\times$ 8 GPUs each for tensor parallelism). Total fleet: 180 GPUs.
 
-**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack 2 models per A100 for the 7B models (2 $\times$ 26 = 52 GB, well within 80 GB), requiring only 50 GPUs at 65 percent memory utilization. The 175B models remain unchanged at 80 GPUs. Total fleet: 130 GPUs.
+**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack 2 models per A100 for the 7B models (2$\times$ 26 = 52 GB, well within 80 GB), requiring only 50 GPUs at 65 percent memory utilization. The 175B models remain unchanged at 80 GPUs. Total fleet: 130 GPUs.
 
-Sharing reduces the fleet size by 27 percent (50 fewer GPUs). At $2 per GPU-hour, this saves approximately $876,000 annually in compute costs, purely through scheduling policy.
+Sharing reduces the fleet size by 27 percent (50 fewer GPUs). At \$2 per GPU-hour, this saves approximately \$876,000 annually in compute costs, purely through scheduling policy.
 
 :::
 
@@ -1353,7 +1363,7 @@ Consider a fleet of 1,000 GPUs managed under two regimes:
 
 **Scenario B -- Dynamic Sharing**: Serving claims GPUs strictly as needed (average 150). Training reclaims unused serving GPUs (average 250), minus a safety buffer. The orchestrator shifts 200 GPUs between roles twice daily based on diurnal forecasts. Result: serving (150) + training (600 + 130 reclaimed) = 880 active GPUs. Fleet utilization: **88 percent**.
 
-Dynamic sharing recovers 130 GPUs of effective capacity. At $2 per GPU-hour, this creates approximately $2.3 million per year in value without purchasing a single additional accelerator.
+Dynamic sharing recovers 130 GPUs of effective capacity. At \$2 per GPU-hour, this creates approximately \$2.3 million per year in value without purchasing a single additional accelerator.
 
 :::
 
@@ -1383,11 +1393,11 @@ The preemption dynamics of borrowing require careful integration with the checkp
 
 In a shared GPU cluster, static quotas inevitably lead to the "burst capacity" paradox: Team A has a quota of 64 GPUs but needs 256 for a weekend-long training run, while Team B's allocated 64 GPUs sit idle. The solution requires decoupling "guaranteed quota" from "limit quota." A team is guaranteed 64 GPUs, which they can access instantly, but can burst up to 512 GPUs if the cluster has slack capacity. This "over-subscription" model relies on preemption: if Team B wakes up and reclaims their guaranteed share, the scheduler must immediately terminate Team A's burst jobs.
 
-**Burst capacity** handling enables teams to temporarily exceed their quotas when cluster-wide resources are available, providing a more aggressive sharing mechanism than quota borrowing. Where borrowing reassigns idle capacity from one team to another, burst capacity allows teams to exceed the total allocated capacity by exploiting the gap between *requested* resources and *actual* utilization. Over-commitment ratios of 1.2 to 1.5 $\times$ are common in production clusters, with admission controllers tracking actual versus requested resources and intervening when contention materializes. When contention occurs, jobs using burst capacity face preemption first, ensuring that guaranteed allocations within each team's owned quota are protected.
+**Burst capacity** handling enables teams to temporarily exceed their quotas when cluster-wide resources are available, providing a more aggressive sharing mechanism than quota borrowing. Where borrowing reassigns idle capacity from one team to another, burst capacity allows teams to exceed the total allocated capacity by exploiting the gap between *requested* resources and *actual* utilization. Over-commitment ratios of 1.2 to 1.5$\times$ are common in production clusters, with admission controllers tracking actual versus requested resources and intervening when contention materializes. When contention occurs, jobs using burst capacity face preemption first, ensuring that guaranteed allocations within each team's owned quota are protected.
 
 To manage this safely, clusters must implement strict priority classes. **Production Serving** (Priority 0) is non-preemptible. **Production Training** (Priority 1) handles core model updates and is only preemptible by serving outages. **Interactive/Debug** (Priority 2) gets high scheduling precedence but short time limits. **Batch/Research** (Priority 3) is fully preemptible and fault-tolerant. This hierarchy ensures that a massive hyperparameter sweep fills the cluster's cracks but evaporates instantly when a critical retraining job arrives.
 
-The appropriate over-commitment ratio depends on workload characteristics and requires careful observation of actual resource utilization patterns. If most jobs request 100 percent GPU utilization but actually achieve 70 percent (due to data loading phases, communication overhead, memory allocation gaps, or suboptimal kernel scheduling), a 1.3 $\times$ over-commitment ratio improves cluster-wide utilization without significant contention because the total actual demand (70 percent $\times$ 1.3 = 91 percent) remains below physical capacity. If jobs are genuinely compute-bound and sustain near-100 percent GPU utilization, over-commitment leads to resource contention and performance degradation for all colocated workloads. The over-commitment ratio should therefore be calibrated empirically based on cluster-wide utilization telemetry, not set based on theoretical assumptions about workload behavior.
+The appropriate over-commitment ratio depends on workload characteristics and requires careful observation of actual resource utilization patterns. If most jobs request 100 percent GPU utilization but actually achieve 70 percent (due to data loading phases, communication overhead, memory allocation gaps, or suboptimal kernel scheduling), a 1.3$\times$ over-commitment ratio improves cluster-wide utilization without significant contention because the total actual demand (70 percent$\times$ 1.3 = 91 percent) remains below physical capacity. If jobs are genuinely compute-bound and sustain near-100 percent GPU utilization, over-commitment leads to resource contention and performance degradation for all colocated workloads. The over-commitment ratio should therefore be calibrated empirically based on cluster-wide utilization telemetry, not set based on theoretical assumptions about workload behavior.
 
 ### Resource Accounting and Observability {#sec-fleet-orchestration-resource-accounting}
 
@@ -1397,7 +1407,7 @@ Who pays for the 64 GPUs that sat idle for a weekend because a researcher forgot
 
 Attribution in a shared fleet presents a forensic challenge. A single "training" job might be a shared experiment between three teams, or a platform test run by an SRE. Without granular tagging at the job level, costs default to the "infrastructure" bucket, creating a tragedy of the commons where no one owns the bill. Kubernetes labels and Slurm accounts provide the mechanism for attribution, but the organizational discipline to apply them consistently is the harder problem. Mature organizations enforce "no tag, no schedule" policies, rejecting untagged jobs at the admission controller level.
 
-This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index** -- a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. Our 175B training job consumes 64 GPUs for 34 days. Without proper accounting, this $131,000 cost (64 GPUs $\times$ 816 hours $\times$ $2.50/GPU-hour) is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
+This data feeds the utilization dashboard, the cluster operator's primary instrument for fleet health. This view must synthesize per-team utilization against quotas, queue depth by priority class, and the **fragmentation index** -- a measure of free GPUs that cannot be allocated due to topology constraints. Crucially, it must track the "cost of chaos": preemption rates, spot instance interruption frequencies, and the recovery overhead they induce. When these metrics are visible, they drive behavior. Our 175B training job consumes 64 GPUs for 34 days. Without proper accounting, this \$131,000 cost (64 GPUs$\times$ 816 hours$\times$ \$2.50/GPU-hour) is invisible to the team that requested it. With chargeback, the team must justify this expenditure against the model's expected business value.
 
 Automated anomaly detection turns these metrics into actionable signals. A sudden spike in a team's consumption to 3$\times$ their historical norm might indicate a runaway script spawning infinite jobs. A queue that grows faster than it drains signals a capacity shortfall that auto-scaling must address. Conversely, a sudden drop in cluster-wide power consumption typically precedes a mass job failure event, often due to a shared dependency like a storage outage. These alerts allow operators to intervene before the budget is drained or the queue becomes unmanageable.
 
@@ -1423,7 +1433,7 @@ When a high-priority job enters a saturated cluster, the scheduler faces a criti
 
 The engineering cost of preemption extends far beyond the scheduling latency. The **preemption tax** is the sum of lost computation since the last checkpoint, the overhead of persisting state, and the "cold start" penalty upon resumption. For large-scale distributed training, this tax is non-linear. Consider our 175B parameter model training on 64 GPUs. If preempted, the job loses the work performed since the last snapshot (average 15 minutes). Upon restarting, it requires 20 minutes to reload the massive optimizer state from distributed storage and another 10 minutes of warmup time -- a period where data pipelines refill pre-fetch buffers, JIT compilers re-optimize kernels, and GPU caches re-populate.
 
-During this 45-minute recovery window, the GPUs are active but effectively unproductive. At $2 per GPU-hour, a single preemption event costs $96 in wasted compute capital. If the scheduler allows unlimited preemption, a cluster averaging 12 preemptions per day wastes 8.5 hours -- over 35 percent of total capacity -- on recovery overhead. To mitigate this, production systems enforce **preemption budgets**. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
+During this 45-minute recovery window, the GPUs are active but effectively unproductive. At \$2 per GPU-hour, a single preemption event costs \$96 in wasted compute capital. If the scheduler allows unlimited preemption, a cluster averaging 12 preemptions per day wastes 8.5 hours -- over 35 percent of total capacity -- on recovery overhead. To mitigate this, production systems enforce **preemption budgets**. These rate limits constrain disruption frequency, ensuring that a job cannot be preempted more than once per hour, or that total cluster preemption churn cannot exceed 5 percent of capacity in any 10-minute window. This forces the scheduler to wait for natural job completions rather than triggering a cascade, trading slightly higher pending times for significantly higher aggregate throughput.
 
 ### Quota Governance and Organizational Dynamics {#sec-fleet-orchestration-quota-governance}
 
@@ -1434,7 +1444,7 @@ The central tension in quota management is the **hoarding problem**. Engineering
 Financial accountability further aligns incentives. Organizations typically begin with **showback**, a reporting mechanism that exposes the dollar cost of GPU usage to engineering managers without directly impacting their budgets. This fosters awareness but lacks teeth. As spending scales, organizations transition to **chargeback**, where compute costs are deducted from team budgets. Chargeback creates immediate pressure to optimize code and release unused quota, though it risks discouraging speculative research if the internal pricing model is too aggressive.
 
 ::: {.callout-war-story title="The Quota Hoarding Incident"}
-A computer vision team at a major logistics company reserved a block of 500 GPUs for a "critical" urgent model refresh. Due to upstream data delays, the training jobs were postponed, but the team retained the reservation to ensure availability "when the data arrives." The GPUs sat idle for three weeks -- a capital waste of roughly $500,000 -- while the NLP team's queues overflowed, delaying a chatbot release by a month.
+A computer vision team at a major logistics company reserved a block of 500 GPUs for a "critical" urgent model refresh. Due to upstream data delays, the training jobs were postponed, but the team retained the reservation to ensure availability "when the data arrives." The GPUs sat idle for three weeks -- a capital waste of roughly \$500,000 -- while the NLP team's queues overflowed, delaying a chatbot release by a month.
 
 The infrastructure team implemented a "use it or lose it" policy. Any reserved quota group operating below 20 percent utilization for 72 consecutive hours is now automatically reclaimed and converted to spot capacity for the general pool. Reclaiming the quota requires VP-level approval, effectively eliminating "parking" on idle hardware.
 :::
@@ -1457,6 +1467,7 @@ Imagine opening your cluster dashboard to find that average GPU utilization is s
 
 ::: {#fig-utilization-paradox fig-env="figure" fig-pos="htb" fig-cap="The Utilization Paradox: As cluster utilization approaches saturation (100%), job wait times increase exponentially, not linearly. Operating above 80% utilization (the Danger Zone) causes unpredictable scheduling delays, especially for large jobs, illustrating why 100% utilization is an anti-pattern for interactive research clusters." fig-alt="Semi-log plot of job wait time versus cluster utilization. Three curves for small, mixed, and large jobs. Wait times explode near 100%. Danger Zone shaded above 80%."}
 ```{python}
+#| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ UTILIZATION PARADOX (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1521,9 +1532,9 @@ The **Fleet Stack** framework (@sec-vol2-introduction) provides a structured app
 
 | **GPU Type**  | **Count** | **Memory**  | **Interconnect**    | **Nodes**                |
 |:--------------|----------:|:------------|:--------------------|:-------------------------|
-| **A100-80GB** |       400 | 80 GB HBM2e | NVLink (600 GB/s)   | 50 nodes $\times$ 8 GPUs |
-| **A100-40GB** |       400 | 40 GB HBM2e | NVLink (600 GB/s)   | 50 nodes $\times$ 8 GPUs |
-| **V100-32GB** |       200 | 32 GB HBM2  | PCIe Gen3 (32 GB/s) | 50 nodes $\times$ 4 GPUs |
+| **A100-80GB** |       400 | 80 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
+| **A100-40GB** |       400 | 40 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
+| **V100-32GB** |       200 | 32 GB HBM2  | PCIe Gen3 (32 GB/s) | 50 nodes$\times$ 4 GPUs |
 
 : **Cluster Hardware Inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
@@ -1606,7 +1617,7 @@ debug_annual_str    = DebugValueCalc.debug_annual_str
 
 : **Utilization Recovery Results**: The distinction between "allocated" and "effective" utilization captures the gang scheduling deadlock: before the fix, A100-80GB GPUs showed high allocation in Slurm but low actual compute utilization because allocated jobs could not start. {#tbl-fleet-orchestration-debug-results}
 
-This 40% improvement in effective cluster capacity equals approximately `{python} debug_recovered_str` additional GPUs worth of productive work. At $2 per GPU-hour, this represents approximately $`{python} debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
+This 40% improvement in effective cluster capacity equals approximately `{python} debug_recovered_str` additional GPUs worth of productive work. At \$2 per GPU-hour, this represents approximately \$`{python} debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
 **The Fleet Stack Lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a **mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure**. The scheduler algorithm was not the problem; the policies it implemented were the problem. The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
 
@@ -1674,7 +1685,7 @@ Scheduler configuration requires continuous tuning as workloads evolve. Default 
 
 **Fallacy:** *High utilization means the cluster is well-managed.*
 
-A cluster running at 95% utilization sounds efficient but may indicate a problem: insufficient capacity that is choking experimentation velocity. When utilization consistently exceeds 85 to 90 percent, queue times grow rapidly following the well-known M/M/1 queuing result from stochastic process theory. In this model, average wait time is proportional to $\rho / (1 - \rho)$ where $\rho$ is utilization; at 90% utilization, average wait is 9 $\times$ the service time, and at 95%, it is 19 $\times$. Researchers waiting hours or days for resources conduct fewer experiments, test fewer hypotheses, and iterate more slowly on model designs. This reduced experimentation velocity has real costs that are harder to quantify than GPU-hours but may be larger in aggregate. The optimal utilization target balances resource efficiency against researcher productivity, typically landing between 70 and 85 percent for training clusters where queue responsiveness directly affects research output. Inference clusters, where requests are served immediately or not at all, typically target even lower utilization (50 to 70 percent) to maintain latency headroom for traffic spikes.
+A cluster running at 95% utilization sounds efficient but may indicate a problem: insufficient capacity that is choking experimentation velocity. When utilization consistently exceeds 85 to 90 percent, queue times grow rapidly following the well-known M/M/1 queuing result from stochastic process theory. In this model, average wait time is proportional to $\rho / (1 - \rho)$ where $\rho$ is utilization; at 90% utilization, average wait is 9$\times$ the service time, and at 95%, it is 19$\times$. Researchers waiting hours or days for resources conduct fewer experiments, test fewer hypotheses, and iterate more slowly on model designs. This reduced experimentation velocity has real costs that are harder to quantify than GPU-hours but may be larger in aggregate. The optimal utilization target balances resource efficiency against researcher productivity, typically landing between 70 and 85 percent for training clusters where queue responsiveness directly affects research output. Inference clusters, where requests are served immediately or not at all, typically target even lower utilization (50 to 70 percent) to maintain latency headroom for traffic spikes.
 
 Recognizing these fallacies prevents platform teams from chasing false optimizations that look good on dashboards but degrade developer velocity. We will now summarize the core orchestration principles that successfully navigate these trade-offs to build a productive, high-utilization ML fleet.
 

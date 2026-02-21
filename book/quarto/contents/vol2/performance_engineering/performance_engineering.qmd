@@ -39,7 +39,7 @@ start_chapter("vol2:performance_engineering")
 ## Purpose {.unnumbered}
 
 \begin{marginfigure}
-\mlfleetstack{30}{25}{100}{10}
+\mlfleetstack{35}{30}{100}{10}
 \end{marginfigure}
 
 _How do we make billion-parameter models run on millisecond timescales?_
@@ -184,7 +184,7 @@ This equation decomposes execution time into three terms. The first fraction rep
 
 Standard model compression (pruning, quantization, distillation) reduces the numerators, performing fewer operations on smaller data. System optimization, the focus of this chapter, attacks the *structure* of the equation itself:
 
-**Operator fusion and tiling** (FlashAttention, fused kernels) reduce the Memory Access numerator by eliminating intermediate HBM round-trips. When a sequence of operations keeps its data in SRAM, the effective Memory Access term shrinks dramatically, often by 10--30 $\times$ for attention computation.
+**Operator fusion and tiling** (FlashAttention, fused kernels) reduce the Memory Access numerator by eliminating intermediate HBM round-trips. When a sequence of operations keeps its data in SRAM, the effective Memory Access term shrinks dramatically, often by 10--30$\times$ for attention computation.
 
 **Precision engineering** (FP8, INT4, KV cache compression) reduces the Memory Access numerator by representing each value in fewer bytes. Halving the precision halves the bytes transferred, doubling the effective bandwidth.
 
@@ -290,13 +290,13 @@ To make this concrete, consider two deployment configurations for the same 70B L
 
 **Configuration B (Throughput-optimized)**: INT4 weights (AWQ), batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.002 per 1,000 output tokens.
 
-Configuration B achieves 60 $\times$ lower cost per token than Configuration A, but at 6 $\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. The performance engineering techniques in this chapter are the tools for navigating between these points.
+Configuration B achieves 60$\times$ lower cost per token than Configuration A, but at 6$\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. The performance engineering techniques in this chapter are the tools for navigating between these points.
 
 ### The Memory Wall {#sec-performance-engineering-memory-wall-physics}
 
 The efficiency frontier establishes what we are optimizing *toward*. The physics of memory bandwidth determines where we start. Every performance engineering problem in modern ML begins with the same observation: memory bandwidth, not compute, is the bottleneck. Consider a single autoregressive decoding step in a large language model. The model reads its full weight matrix from High Bandwidth Memory (HBM) to generate a single token, performing only one or two multiply-accumulate operations per weight loaded. An NVIDIA H100 delivers `{python} h100_fp8_str` TFLOPS of FP8 compute but only `{python} h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the **Memory Wall**, and it defines the landscape within which all performance engineering operates.
 
-The memory wall is not a temporary engineering limitation; it is a consequence of physics. Moving data costs energy proportional to distance. Accessing a value from on-chip SRAM (L1 cache) costs approximately 0.5 pJ, while fetching the same value from off-chip HBM costs roughly 640 pJ, a ratio of `{python} energy_ratio_str` $\times$. Manufacturing constraints limit the amount of SRAM that can sit close to the compute units. HBM provides capacity (the H100 offers `{python} h100_mem_str` GB) but at physically greater distance, requiring the data to traverse longer wires. The fundamental tension is that models need gigabytes of parameters and state, but physics dictates that only kilobytes of data can be near the compute units at any given moment.
+The memory wall is not a temporary engineering limitation; it is a consequence of physics. Moving data costs energy proportional to distance. Accessing a value from on-chip SRAM (L1 cache) costs approximately 0.5 pJ, while fetching the same value from off-chip HBM costs roughly 640 pJ, a ratio of `{python} energy_ratio_str`$\times$. Manufacturing constraints limit the amount of SRAM that can sit close to the compute units. HBM provides capacity (the H100 offers `{python} h100_mem_str` GB) but at physically greater distance, requiring the data to traverse longer wires. The fundamental tension is that models need gigabytes of parameters and state, but physics dictates that only kilobytes of data can be near the compute units at any given moment.
 
 This tension shapes every optimization technique in this chapter. Operator fusion reduces the number of trips to HBM by combining operations so that intermediate results stay in SRAM. Precision engineering reduces the number of bytes per trip by representing values in FP8 or INT4 instead of FP16. Tiling strategies restructure algorithms to maximize data reuse within SRAM. Graph compilers automate these transformations. Each technique attacks a different term in the same fundamental equation: minimize the ratio of bytes moved to operations performed.
 
@@ -327,7 +327,7 @@ The memory wall is not static; it grows wider with each hardware generation. Com
 | **H100** | 2022     | 989                    | 3.35              | 295                         |
 | **B200** | 2024     | 4,500                  | 8.0               | 563                         |
 
-: **The Widening Memory Wall**. Compute throughput has increased 36 $\times$ from V100 to B200 over seven years, while memory bandwidth has increased only 8.9 $\times$. The ridge point has increased 4 $\times$, meaning more workloads fall into the memory-bound regime with each generation. {#tbl-widening-gap}
+: **The Widening Memory Wall**. Compute throughput has increased 36$\times$ from V100 to B200 over seven years, while memory bandwidth has increased only 8.9$\times$. The ridge point has increased 4$\times$, meaning more workloads fall into the memory-bound regime with each generation. {#tbl-widening-gap}
 
 @tbl-widening-gap quantifies this trend. The ridge point increased from 139 FLOP/byte on the V100 to 563 FLOP/byte on the B200. An operation with arithmetic intensity of 200 FLOP/byte was compute-bound on the V100 and A100, memory-bound on the H100, and deeply memory-bound on the B200. This means that performance engineering techniques targeting memory efficiency, fusion, precision, and tiling, become *more* important with each hardware generation, not less. The engineering effort invested in FlashAttention and INT4 quantization today will yield even greater returns on future hardware.
 
@@ -337,7 +337,11 @@ The **Roofline Model** provides a quantitative framework for diagnosing whether 
 
 ::: {.callout-definition title="Arithmetic Intensity"}
 
-***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the ratio of floating-point operations (FLOPs) performed to bytes of data moved from off-chip memory (typically HBM) for a given computation, measured in FLOP/byte. This ratio determines a workload's *regime of operation*: when arithmetic intensity falls below the hardware's ridge point ($P/B$, where $P$ is peak compute and $B$ is peak bandwidth), the workload is *bandwidth-bound* and performance scales with memory throughput; when arithmetic intensity exceeds the ridge point, the workload is *compute-bound* and performance scales with arithmetic throughput. Correctly classifying this regime is the first step in any optimization effort, because optimizing for the wrong bottleneck yields no improvement.
+***Arithmetic Intensity ($I$)***\index{Arithmetic Intensity!definition} is the ratio of floating-point operations performed to the number of bytes transferred from memory ($FLOP/\text{byte}$).
+
+1.  **Significance (Quantitative):** It characterizes the **Computational Density** of a workload. It is the independent variable in the **Roofline Model**, determining whether a system operates in the **Bandwidth-Bound** ($BW$) or **Compute-Bound** ($R_{peak}$) regime.
+2.  **Distinction (Durable):** Unlike **Peak Throughput** (a hardware property), Arithmetic Intensity is an **Algorithmic Property** that measures how effectively a workload reuses data once it is loaded into the processor.
+3.  **Common Pitfall:** A frequent misconception is that AI is fixed for a model. In reality, it varies by **Implementation**: techniques like operator fusion increase AI by keeping data in local registers, while increasing batch size increases AI for layers with high parameter reuse.
 
 :::
 
@@ -483,7 +487,7 @@ h100_fp8_ridge_str = RooflineRidgeCalc.h100_fp8_ridge_str
 
 This means that any operation performing fewer than `{python} h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} h100_fp8_str` TFLOPS while bandwidth remains `{python} h100_hbm_bw_str` TB/s, the ridge point rises to approximately `{python} h100_fp8_ridge_str` FLOP/byte. The A100, with `{python} a100_fp16_str` TFLOPS and `{python} a100_hbm_bw_str` TB/s, has a lower ridge point of approximately `{python} a100_ridge_str` FLOP/byte at FP16. Each hardware generation increases compute faster than bandwidth, pushing the ridge point higher and making more workloads memory-bound.
 
-@fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. The ridge point has grown from 139 FLOP/byte on the V100 to 625 FLOP/byte on the B200, a 4.5 $\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, was memory-bound on every generation but falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as large matrix multiplications, transition from compute-bound on V100 to memory-bound on B200. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
+@fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. The ridge point has grown from 139 FLOP/byte on the V100 to 625 FLOP/byte on the B200, a 4.5$\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, was memory-bound on every generation but falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as large matrix multiplications, transition from compute-bound on V100 to memory-bound on B200. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
 
 ::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Shifting Roofline Across GPU Generations**. Overlaid roofline models for V100 through B200 show the ridge point growing from 139 to 625 FLOP/byte. Operations like naive attention, which were compute-bound on V100, become memory-bound on B200 as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked"}
 ```{python}
@@ -654,15 +658,15 @@ elem_intensity_str = WorkloadIntensityCalc.elem_intensity_str
 decode_intensity_str = WorkloadIntensityCalc.decode_intensity_str
 ```
 
-Large matrix multiplications (GEMMs) are the most compute-intensive operations in ML. A square matrix multiplication of dimension 4096 $\times$ 4096 in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.
+Large matrix multiplications (GEMMs) are the most compute-intensive operations in ML. A square matrix multiplication of dimension 4096$\times$ 4096 in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.
 
-Element-wise operations tell the opposite story. A GELU activation applied to a 4096 $\times$ 4096 tensor performs roughly 5 operations per element but must load and store each element, yielding an arithmetic intensity of approximately `{python} elem_intensity_str` FLOP/byte. These operations are profoundly memory-bound, spending almost all their time waiting for data transfers rather than computing.
+Element-wise operations tell the opposite story. A GELU activation applied to a 4096$\times$ 4096 tensor performs roughly 5 operations per element but must load and store each element, yielding an arithmetic intensity of approximately `{python} elem_intensity_str` FLOP/byte. These operations are profoundly memory-bound, spending almost all their time waiting for data transfers rather than computing.
 
 Autoregressive LLM decoding at batch size one represents the extreme case. Each decoding step reads the entire weight matrix (gigabytes of data) to produce a single output token. With a hidden dimension of 4096 and batch size 1, the arithmetic intensity is approximately `{python} decode_intensity_str` FLOP/byte, deep in the memory-bound regime. This explains why LLM token generation achieves a tiny fraction of peak FLOPS: the GPU spends nearly all its time reading weights, not multiplying them.
 
 | **Operation**                      | **Arithmetic Intensity** | **H100 FP16 Regime** | **Primary Bottleneck** |
 |:-----------------------------------|:-------------------------|:---------------------|:-----------------------|
-| **GEMM (4096 $\times$ 4096)**      | ~1,365 FLOP/byte         | Compute-bound        | Tensor core throughput |
+| **GEMM (4096$\times$ 4096)**      | ~1,365 FLOP/byte         | Compute-bound        | Tensor core throughput |
 | **Self-Attention (seq=2048)**      | ~50--200 FLOP/byte       | Memory-bound         | HBM bandwidth          |
 | **Element-wise (GELU, LayerNorm)** | ~1--3 FLOP/byte          | Memory-bound         | HBM bandwidth          |
 | **LLM Decode (batch=1)**           | ~1--2 FLOP/byte          | Memory-bound         | HBM bandwidth          |
@@ -683,21 +687,21 @@ $$
 
 At batch size 1, the denominator is dominated by the weight term ($\text{params} \times \text{bytes\_per\_param}$), and $I \approx 2 / \text{bytes\_per\_param} \approx 1$ FLOP/byte for FP16. At batch size 256, the input term becomes significant, and $I \approx 2 \times 256 / \text{bytes\_per\_param} \approx 256$ FLOP/byte, approaching the compute-bound regime.
 
-This means that at large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving 2% utilization at batch size 1 may achieve 60% utilization at batch size 256. The economic implication is stark: the cost per token decreases by 30 $\times$ as batch size increases from 1 to 256.
+This means that at large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving 2% utilization at batch size 1 may achieve 60% utilization at batch size 256. The economic implication is stark: the cost per token decreases by 30$\times$ as batch size increases from 1 to 256.
 
 The constraint is memory: each additional request in the batch requires its own KV cache, and the total KV cache across all requests must fit in GPU memory alongside the model weights. A 70B model with 80 GB of weights in FP16 leaves almost no room for KV cache on an 80 GB GPU. This is precisely why the precision engineering techniques covered later in this chapter matter: INT4 weight quantization frees 60 GB for KV cache, enabling batch sizes that transform the economics of serving.
 
 The continuous batching systems introduced in @sec-inference-scale manage batch size dynamically, adding and removing requests as they complete. Performance engineering's role is to maximize the effective batch size by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization.
 
-A critical enabler for large batch sizes is **paged KV cache management**, introduced by vLLM (Kwon et al., 2023). Traditional KV cache implementations pre-allocate contiguous memory for each request's maximum possible sequence length. If the maximum is 4,096 tokens but the average is 500, approximately 88% of the allocated memory is wasted. Paged attention divides the KV cache into fixed-size blocks (pages), allocated on demand as the sequence grows. This eliminates memory fragmentation and enables near-100% utilization of the KV cache memory budget. The performance impact is indirect but substantial: by reducing memory waste, paged attention enables 2--4 $\times$ larger effective batch sizes, which in turn improve throughput and GPU utilization through the batch size mechanism described above.
+A critical enabler for large batch sizes is **paged KV cache management**, introduced by vLLM (Kwon et al., 2023). Traditional KV cache implementations pre-allocate contiguous memory for each request's maximum possible sequence length. If the maximum is 4,096 tokens but the average is 500, approximately 88% of the allocated memory is wasted. Paged attention divides the KV cache into fixed-size blocks (pages), allocated on demand as the sequence grows. This eliminates memory fragmentation and enables near-100% utilization of the KV cache memory budget. The performance impact is indirect but substantial: by reducing memory waste, paged attention enables 2--4$\times$ larger effective batch sizes, which in turn improve throughput and GPU utilization through the batch size mechanism described above.
 
-The interaction between paged attention and KV cache quantization is multiplicative. Paged attention reduces memory *waste* (from fragmentation), while quantization reduces memory *usage* (from precision). Together, they can increase the effective batch size by 8--16 $\times$ compared to a baseline system with pre-allocated FP16 KV caches, fundamentally changing the economics of LLM serving.
+The interaction between paged attention and KV cache quantization is multiplicative. Paged attention reduces memory *waste* (from fragmentation), while quantization reduces memory *usage* (from precision). Together, they can increase the effective batch size by 8--16$\times$ compared to a baseline system with pre-allocated FP16 KV caches, fundamentally changing the economics of LLM serving.
 
 ### The Prefill-Decode Decomposition {#sec-performance-engineering-prefill-decode}
 
 Modern LLM serving systems decompose each request into two distinct phases with fundamentally different performance characteristics, a distinction that drives system architecture and optimization strategy.
 
-The **prefill phase** processes the entire input prompt in parallel. If the prompt contains $P$ tokens, the prefill phase executes a single forward pass over all $P$ tokens simultaneously. The GEMM operations have shape [$P$, $d$] $\times$ [$d$, $d$], making the batch dimension equal to $P$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024 / 2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
+The **prefill phase** processes the entire input prompt in parallel. If the prompt contains $P$ tokens, the prefill phase executes a single forward pass over all $P$ tokens simultaneously. The GEMM operations have shape [$P$, $d$]$\times$ [$d$, $d$], making the batch dimension equal to $P$. For a prompt of 1024 tokens, this is arithmetically intensive: the arithmetic intensity is approximately $2 \times 1024 / 2 = 1024$ FLOP/byte for FP16 weights, well into the compute-bound regime. Prefill is therefore limited by Tensor Core throughput, not memory bandwidth.
 
 The **decode phase** generates output tokens one at a time, autoregressively. Each step has a batch dimension of 1 (for a single request) or the number of concurrent requests (for batched serving). At batch size 1, decode is deeply memory-bound as analyzed in @sec-performance-engineering-workload-placement.
 
@@ -709,7 +713,7 @@ The performance characteristics of each phase determine which optimization techn
 
 ::: {.callout-notebook title="The Roofline Diagnostic"}
 
-**Problem**: You are deploying a 70B parameter LLM on 8 $\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
+**Problem**: You are deploying a 70B parameter LLM on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
 
 **The Math**:
 
@@ -870,7 +874,7 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 
 ### FlashAttention: Tiled Attention as a System Primitive {#sec-performance-engineering-flashattention}
 
-Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape [sequence length $\times$ head dimension]. The na\"ive implementation materializes the full $N \times N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 = 128$ MB per attention head. At 32 heads, the materialized attention matrices require 4 GB per layer, dominating memory traffic for the entire forward pass.
+Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape [sequence length$\times$ head dimension]. The na\"ive implementation materializes the full $N \times N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 = 128$ MB per attention head. At 32 heads, the materialized attention matrices require 4 GB per layer, dominating memory traffic for the entire forward pass.
 
 ```{python}
 #| echo: false
@@ -940,7 +944,7 @@ savings_str = FlashAttentionSavings.savings_str
 
 FlashAttention, introduced by Dao et al. (2022), reformulates attention as a **tiled** computation. Instead of materializing the full $N \times N$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads a block of $Q$ rows and iterates over blocks of $K$ and $V$ columns, computing partial attention scores and maintaining running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
 
-The HBM traffic reduction is dramatic. For a sequence length of 8,192, 32 heads, and head dimension 128 in FP16, the na\"ive attention reads and writes approximately `{python} naive_mb_str` MB of attention matrices through HBM. FlashAttention reads $Q$, $K$, $V$ and writes $O$ once each, totaling approximately `{python} flash_mb_str` MB. This is a `{python} savings_str` $\times$ reduction in HBM traffic, translating directly into a proportional speedup for this memory-bound operation.
+The HBM traffic reduction is dramatic. For a sequence length of 8,192, 32 heads, and head dimension 128 in FP16, the na\"ive attention reads and writes approximately `{python} naive_mb_str` MB of attention matrices through HBM. FlashAttention reads $Q$, $K$, $V$ and writes $O$ once each, totaling approximately `{python} flash_mb_str` MB. This is a `{python} savings_str`$\times$ reduction in HBM traffic, translating directly into a proportional speedup for this memory-bound operation.
 
 The key insight behind FlashAttention is the **online softmax** trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $N \times N$ matrix.
 
@@ -959,7 +963,7 @@ A concrete numerical example clarifies the memory savings. Consider one attentio
 
 The na\"ive algorithm computes $S = QK^T$, a matrix of shape $8192 \times 8192$. In FP16, this score matrix occupies $8192 \times 8192 \times 2 = 128$ MB per head. After applying softmax, the result $P = \text{softmax}(S)$ is also $128$ MB. Computing $PV$ requires reading $P$ again. In total, the na\"ive algorithm reads $Q$, $K$, $V$ from HBM (6 MB), writes $S$ (128 MB), reads $S$ for softmax (128 MB), writes $P$ (128 MB), reads $P$ for the final multiply (128 MB), and writes $O$ (2 MB). The total HBM traffic is approximately 520 MB per head, dominated by the quadratic intermediates.
 
-FlashAttention processes the computation in tiles of size $B_r \times B_c$ (typically 128 $\times$ 128 on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192 / 128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65 $\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
+FlashAttention processes the computation in tiles of size $B_r \times B_c$ (typically 128$\times$ 128 on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 = 32$ KB), a block of $K$ ($128 \times 128 \times 2 = 32$ KB), and a block of $V$ (32 KB), totaling 96 KB. This fits comfortably in the H100's 228 KB of shared memory per SM. The tile score $S_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192 / 128 = 64$ column tiles for each of $64$ row tiles, but the total HBM traffic is just the cost of reading $Q$, $K$, $V$ once (6 MB) and writing $O$ once (2 MB), totaling 8 MB per head. This is 65$\times$ less HBM traffic than the na\"ive algorithm, and the ratio grows quadratically with sequence length.
 
 FlashAttention-2 (Dao, 2023) further optimizes the algorithm for modern GPU architectures by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy on GPUs with many streaming multiprocessors. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
@@ -973,6 +977,7 @@ In 2022, Tri Dao challenged the prevailing wisdom that the attention mechanism's
 
 ::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="FlashAttention Memory Savings: O(N²) → O(N). Standard attention allocates the full N × N score matrix in HBM, while FlashAttention maintains only O(N) running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. At long-context lengths (64K+), the savings exceed four orders of magnitude." fig-alt="Log-log plot of attention memory versus sequence length. Standard O(N²) curve rises steeply; FlashAttention O(N) stays flat. Shaded region shows savings, with annotations at 8K and 65K."}
 ```{python}
+#| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLASHATTENTION MEMORY SAVINGS (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -1048,7 +1053,7 @@ The algorithm proceeds in $P - 1$ communication rounds (where $P$ is the number 
 
 This overlaps communication with computation: while GPU $i$ computes attention using $K_j$/$V_j$, it simultaneously receives $K_{j+1}$/$V_{j+1}$ from the ring. If the compute time for one tile exceeds the communication time for transferring one tile over NVLink, the communication is fully hidden. On an H100 with `{python} h100_hbm_bw_str` TB/s HBM bandwidth and 900 GB/s NVLink bandwidth, this overlap is achievable for typical tile sizes.
 
-The practical impact of Ring Attention is measured in context length. Without it, a single GPU's attention computation is limited by HBM capacity: the KV cache for a sequence of length $N$ must fit entirely in one GPU's memory. With Ring Attention across $P$ GPUs, each GPU holds $N/P$ tokens of the KV cache, enabling context lengths of $P \times N_{\text{single}}$. For 8 GPUs, this extends the context window by 8 $\times$. Combined with FlashAttention's efficient tiling within each GPU, Ring Attention enables million-token context windows that would be impossible on single-GPU or even standard tensor-parallel configurations.
+The practical impact of Ring Attention is measured in context length. Without it, a single GPU's attention computation is limited by HBM capacity: the KV cache for a sequence of length $N$ must fit entirely in one GPU's memory. With Ring Attention across $P$ GPUs, each GPU holds $N/P$ tokens of the KV cache, enabling context lengths of $P \times N_{\text{single}}$. For 8 GPUs, this extends the context window by 8$\times$. Combined with FlashAttention's efficient tiling within each GPU, Ring Attention enables million-token context windows that would be impossible on single-GPU or even standard tensor-parallel configurations.
 
 The combination of FlashAttention (intra-GPU tiling) and Ring Attention (inter-GPU distribution) represents a pattern that recurs throughout performance engineering: hierarchical optimization across the memory hierarchy. Within the GPU, FlashAttention tiles across the SRAM-HBM boundary. Across GPUs, Ring Attention tiles across the HBM-NVLink boundary. Each level exploits the same principle (tiling to reduce traffic across a slow link) adapted to a different bandwidth gap.
 
@@ -1107,10 +1112,10 @@ The critical engineering challenge in FP8 training is **dynamic scaling**. FP8's
 The workflow for a single FP8 forward-backward step is:
 
 1. Read FP32 master weights; quantize to E4M3 using the current weight scale factor.
-2. Execute forward pass GEMM in FP8 (E4M3 $\times$ E4M3 $\rightarrow$ FP16 accumulation).
+2. Execute forward pass GEMM in FP8 (E4M3$\times$ E4M3 $\rightarrow$ FP16 accumulation).
 3. Compute loss in FP16 or FP32.
 4. Quantize activation gradients to E5M2 using the current gradient scale factor.
-5. Execute backward pass GEMMs in FP8 (E5M2 $\times$ E4M3 $\rightarrow$ FP16 accumulation).
+5. Execute backward pass GEMMs in FP8 (E5M2$\times$ E4M3 $\rightarrow$ FP16 accumulation).
 6. Update FP32 master weights using the FP16 accumulated gradients.
 7. Update scale factors based on observed value ranges.
 
@@ -1118,19 +1123,21 @@ This three-precision approach (FP32 master weights, FP8 GEMMs, FP16 accumulation
 
 The practical implementation of dynamic scaling introduces a subtle bootstrapping problem: the optimal scale factor for step $t$ depends on the tensor values at step $t$, which are not known until the computation executes. Most implementations use a **delayed scaling** strategy: the scale factor for step $t$ is computed from the running statistics of steps $t-1, t-2, \ldots$, using an exponential moving average of the maximum absolute value. This introduces a one-step lag, which works well when tensor statistics change slowly (as they do during stable training) but can cause transient overflow or underflow when statistics change rapidly (at the beginning of training, after learning rate warmup, or at curriculum transitions).
 
-An alternative is **just-in-time scaling**, where the computation first scans the tensor to find its maximum absolute value, computes the scale factor, then casts and executes the FP8 GEMM. The overhead of the extra scan pass (reading the tensor twice instead of once) is typically 5--10%, which is modest compared to the 2 $\times$ throughput gain from FP8. Just-in-time scaling is more robust but slightly less efficient than delayed scaling.
+An alternative is **just-in-time scaling**, where the computation first scans the tensor to find its maximum absolute value, computes the scale factor, then casts and executes the FP8 GEMM. The overhead of the extra scan pass (reading the tensor twice instead of once) is typically 5--10%, which is modest compared to the 2$\times$ throughput gain from FP8. Just-in-time scaling is more robust but slightly less efficient than delayed scaling.
 
-The energy implications of reduced precision extend beyond throughput. The Horowitz (2014) energy estimates show that an FP32 multiply-accumulate costs approximately 3.7 pJ, while an INT8 operation costs approximately 0.2 pJ, an 18.5 $\times$ reduction. FP8 operations fall between these extremes. At datacenter scale, where thousands of GPUs run continuously, the cumulative energy savings from reduced precision are substantial. The performance benefit (higher throughput) and the energy benefit (lower cost per operation) compound: FP8 delivers twice the throughput at roughly half the energy per operation, resulting in approximately 4 $\times$ improvement in energy efficiency for compute-bound workloads.
+The energy implications of reduced precision extend beyond throughput. The Horowitz (2014) energy estimates show that an FP32 multiply-accumulate costs approximately 3.7 pJ, while an INT8 operation costs approximately 0.2 pJ, an 18.5$\times$ reduction. FP8 operations fall between these extremes. At datacenter scale, where thousands of GPUs run continuously, the cumulative energy savings from reduced precision are substantial. The performance benefit (higher throughput) and the energy benefit (lower cost per operation) compound: FP8 delivers twice the throughput at roughly half the energy per operation, resulting in approximately 4$\times$ improvement in energy efficiency for compute-bound workloads.
 
 ### Block-wise Quantization {#sec-performance-engineering-block-quant}
 
-Post-training quantization to INT8 or INT4 delivers even greater bandwidth savings for inference, but LLMs present a unique challenge: **outlier features**. Dettmers et al. (2022) discovered that large language models develop a small number of hidden dimensions (typically fewer than 1% of all dimensions) with activation magnitudes 10--100 $\times$ larger than the rest. Applying uniform per-tensor INT8 quantization clips these outliers, destroying the information they carry, or expands the quantization range to accommodate them, wasting precision on the majority of near-zero values.
+Post-training quantization to INT8 or INT4 delivers even greater bandwidth savings for inference, but LLMs present a unique challenge: **outlier features**. Dettmers et al. (2022) discovered that large language models develop a small number of hidden dimensions (typically fewer than 1% of all dimensions) with activation magnitudes 10--100$\times$ larger than the rest. Applying uniform per-tensor INT8 quantization clips these outliers, destroying the information they carry, or expands the quantization range to accommodate them, wasting precision on the majority of near-zero values.
 
 ::: {.callout-definition title="Block-wise Quantization"}
 
-***Block-wise Quantization***\index{Block-wise Quantization!definition} is a precision reduction technique that partitions a weight tensor into small blocks (typically 32-128 elements) and applies independent quantization parameters (scale and zero-point) to each block. Unlike per-tensor quantization, which uses a single scale factor for the entire tensor, block-wise quantization adapts to local value distributions, preserving outlier information that per-tensor methods destroy. The quantization error for a block of size $B$ with range $[w_{min}, w_{max}]$ mapped to $b$-bit integers is bounded by:
-$$\epsilon_{block} = \frac{w_{max} - w_{min}}{2^b - 1}$$
-For a 4-bit scheme with $B=32$, this typically achieves less than 1% accuracy degradation on language modeling tasks compared to FP16, while reducing memory footprint by 4x and memory bandwidth demand proportionally.
+***Block-wise Quantization***\index{Block-wise Quantization!definition} is a precision reduction technique that partitions weight tensors into small, independent blocks (typically 32-128 elements) and applies unique quantization parameters to each.
+
+1.  **Significance (Quantitative):** It significantly reduces the **Memory Bandwidth ($BW$)** demand by allowing for aggressive 4-bit or 8-bit compression while maintaining near-FP16 accuracy. By adapting to local value distributions, it minimizes the **Quantization Error** for the entire tensor.
+2.  **Distinction (Durable):** Unlike **Per-Tensor Quantization**, which uses a single scale factor, Block-wise Quantization preserves **Outlier Features**—large activation magnitudes that carry critical information but would be clipped or diluted by coarser methods.
+3.  **Common Pitfall:** A frequent misconception is that smaller blocks are always better. In reality, there is a **Metadata Overhead Trade-off**: each block requires its own scale and zero-point tensors, which consume memory and bandwidth ($D_{vol}$). If blocks are too small, the metadata can exceed the savings from the quantized weights.
 
 :::
 
@@ -1152,7 +1159,7 @@ The storage cost for block-wise quantization is minimal. Storing one FP32 scale 
 
 The trade-off between **Post-Training Quantization (PTQ)** and **Quantization-Aware Training (QAT)** centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the default choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, requiring approximately 4--8 GPU-hours on a single H100 to quantize a 70B model to INT4. While PTQ preserves greater than 99% of accuracy at INT8, aggressive quantization to INT4 or INT3 often incurs a steep penalty: perplexity may degrade by 0.5--1.0 points, and reasoning performance on benchmarks like MMLU can drop significantly (e.g., from 69% to below 64%).
 
-When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. By simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator (STE), the network learns to adjust its weights to be robust to quantization. The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this might mean a 3-day run on 8 $\times$ H100s compared to the 4-hour single-GPU job for PTQ. Emerging techniques like **QLoRA** (Quantized Low-Rank Adaptation) bridge this gap by freezing the base model in 4-bit precision and fine-tuning only a small set of high-precision adapter weights. This hybrid approach offers the quality recovery of QAT with a memory footprint small enough to run on a single consumer GPU, effectively democratizing high-fidelity quantization.
+When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. By simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator (STE), the network learns to adjust its weights to be robust to quantization. The cost is substantial: QAT is effectively a full fine-tuning run, often requiring hundreds of GPU-hours and a distributed training cluster. For a 70B model, this might mean a 3-day run on 8$\times$ H100s compared to the 4-hour single-GPU job for PTQ. Emerging techniques like **QLoRA** (Quantized Low-Rank Adaptation) bridge this gap by freezing the base model in 4-bit precision and fine-tuning only a small set of high-precision adapter weights. This hybrid approach offers the quality recovery of QAT with a memory footprint small enough to run on a single consumer GPU, effectively democratizing high-fidelity quantization.
 
 The practical workflow in most production environments follows a two-stage approach: deploy with PTQ first (because it is fast and requires no training infrastructure), then apply QAT or QLoRA only if the PTQ model fails to meet quality requirements at the target precision. This sequence minimizes engineering effort while preserving the option of higher quality when needed.
 
@@ -1226,13 +1233,13 @@ $$
 
 This is a substantial fraction of the H100's `{python} h100_mem_str` GB of HBM, consumed by a single request's KV cache alone. For a batch of 8 concurrent requests, the KV cache would require `{python} f"{kv_fp16_gb * 8:.0f}"` GB, exceeding single-GPU capacity.
 
-Compressing the KV cache to INT4 reduces it to approximately `{python} kv_int4_gb_str` GB per request, a `{python} kv_compression_str` $\times$ reduction. The freed memory allows either longer sequences or larger batch sizes, directly improving serving throughput. Empirical studies show that KV cache quantization to INT4 with per-channel or per-group scaling factors preserves attention quality with negligible perplexity degradation, because the attention mechanism is relatively robust to small perturbations in cached key and value representations.
+Compressing the KV cache to INT4 reduces it to approximately `{python} kv_int4_gb_str` GB per request, a `{python} kv_compression_str`$\times$ reduction. The freed memory allows either longer sequences or larger batch sizes, directly improving serving throughput. Empirical studies show that KV cache quantization to INT4 with per-channel or per-group scaling factors preserves attention quality with negligible perplexity degradation, because the attention mechanism is relatively robust to small perturbations in cached key and value representations.
 
 ### Grouped Query Attention: Architectural Precision Engineering {#sec-performance-engineering-gqa}
 
 An architectural complement to KV cache quantization is **Grouped Query Attention (GQA)**, introduced by Ainslie et al. (2023). In standard Multi-Head Attention (MHA), every attention head has its own key and value projections. In GQA, multiple query heads share a single key-value head. A model with 32 query heads and 8 KV heads uses a group size of 4: every 4 query heads share one K and one V projection.
 
-The impact on KV cache size is proportional to the KV head reduction. Our earlier calculation assumed 64 KV heads (MHA). With GQA using 8 KV heads instead, the KV cache shrinks by 8 $\times$:
+The impact on KV cache size is proportional to the KV head reduction. Our earlier calculation assumed 64 KV heads (MHA). With GQA using 8 KV heads instead, the KV cache shrinks by 8$\times$:
 
 $$
 \text{KV cache (GQA)} = 2 \times 80 \times 8 \times 128 \times 4096 \times 2 \approx 1.3 \text{ GB (FP16)}
@@ -1258,7 +1265,7 @@ The choice depends on the operational regime. For memory-bound inference (small 
 
 ::: {.callout-notebook title="The Precision Dividend"}
 
-**Problem**: You serve a 70B parameter model on 4 $\times$ H100 GPUs. The model weights in FP16 consume 140 GB (35 GB per GPU). KV cache at FP16 consumes `{python} kv_fp16_gb_str` GB per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
+**Problem**: You serve a 70B parameter model on 4$\times$ H100 GPUs. The model weights in FP16 consume 140 GB (35 GB per GPU). KV cache at FP16 consumes `{python} kv_fp16_gb_str` GB per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
 
 **Before optimization** (all FP16):
 
@@ -1269,12 +1276,12 @@ The choice depends on the operational regime. For memory-bound inference (small 
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
-- Weights: 35 GB $\times$ (4/16) = 8.75 GB/GPU (INT4)
+- Weights: 35 GB$\times$ (4/16) = 8.75 GB/GPU (INT4)
 - Available for KV cache: $80 - 8.75 = 71.25$ GB/GPU
 - KV cache per request (INT8): `{python} f"{kv_fp16_gb / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` GB/GPU
 - Maximum batch size: $\lfloor 71.25 / {kv_fp16_gb / 2 / 4:.1f} \rfloor$ $\approx$ `{python} f"{int(71.25 / (kv_fp16_gb / 2 / 4))}"` requests
 
-**Takeaway**: Precision engineering does not just make individual operations faster; it fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} f"{int(71.25 / (kv_fp16_gb / 2 / 4)) / int(45 / (kv_fp16_gb / 4)):.0f}"` $\times$ or more.
+**Takeaway**: Precision engineering does not just make individual operations faster; it fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} f"{int(71.25 / (kv_fp16_gb / 2 / 4)) / int(45 / (kv_fp16_gb / 4)):.0f}"`$\times$ or more.
 
 :::
 
@@ -1340,7 +1347,7 @@ XLA (Accelerated Linear Algebra) is Google's graph compiler, used as the backend
 
 This global view enables XLA's most powerful feature: the **GSPMD (General Partitioner for SPMD)**. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
 
-For TPU hardware specifically, XLA performs layout optimizations unavailable on other platforms. It maps matrix multiplications onto the TPU's systolic array architecture, padding dimensions to align with the 128 $\times$ 128 hardware units and scheduling instructions to hide the latency of HBM fetches. The impact of these optimizations is visible in MFU metrics. On large-scale LLM training workloads, JAX/XLA on TPUv4 typically achieves 55--65% MFU, significantly outperforming the 40--55% MFU typical of PyTorch/GPU setups without extensive hand-tuning.
+For TPU hardware specifically, XLA performs layout optimizations unavailable on other platforms. It maps matrix multiplications onto the TPU's systolic array architecture, padding dimensions to align with the 128$\times$ 128 hardware units and scheduling instructions to hide the latency of HBM fetches. The impact of these optimizations is visible in MFU metrics. On large-scale LLM training workloads, JAX/XLA on TPUv4 typically achieves 55--65% MFU, significantly outperforming the 40--55% MFU typical of PyTorch/GPU setups without extensive hand-tuning.
 
 The trade-off for XLA's performance is compilation latency and rigidity. Because XLA must analyze the full static graph, initial compilation can take minutes for large models, compared to seconds for `torch.compile`. Any change in input shape triggers a full recompilation. This makes XLA excellent for steady-state production workloads where the graph is static and the model runs for days or weeks, but challenging for research environments involving dynamic shapes or rapid experimental iteration. The choice between `torch.compile` and XLA often depends on the deployment context: organizations using NVIDIA GPUs predominantly use PyTorch with `torch.compile`, while organizations using Google TPUs use JAX with XLA.
 
@@ -1350,7 +1357,7 @@ NVIDIA TensorRT is a specialized inference compiler that treats the model not as
 
 This calibration enables **mixed-precision quantization** at a granular level. For a 70B parameter LLM, blindly quantizing all layers to INT8 often degrades perplexity. TensorRT analyzes the sensitivity of each layer individually. It might determine that the attention layers in the first 3 blocks and the final 3 blocks are highly sensitive to precision loss, keeping them in FP16, while aggressively quantizing the middle 74 layers to INT8. This automated mixed-precision strategy recovers accuracy while capturing the throughput benefits of lower precision. TensorRT also eliminates training-only operations (dropout, batch normalization running statistics updates), optimizes for static shapes by generating kernels tuned for exact dimensions, and plans memory precisely since no gradient tensors are needed.
 
-TensorRT performs **kernel autotuning** far beyond simple heuristics. For every operation in the graph, it benchmarks dozens of candidate kernels, varying tile sizes, thread block configurations, and unrolling factors, on the actual target hardware. It selects the single fastest implementation for that specific GPU and input shape. The performance gap between TensorRT and general-purpose compilers is substantial: in head-to-head comparisons for serving a 70B LLM, TensorRT-LLM typically achieves 1.3--1.8 $\times$ higher throughput than `torch.compile` with TorchInductor.
+TensorRT performs **kernel autotuning** far beyond simple heuristics. For every operation in the graph, it benchmarks dozens of candidate kernels, varying tile sizes, thread block configurations, and unrolling factors, on the actual target hardware. It selects the single fastest implementation for that specific GPU and input shape. The performance gap between TensorRT and general-purpose compilers is substantial: in head-to-head comparisons for serving a 70B LLM, TensorRT-LLM typically achieves 1.3--1.8$\times$ higher throughput than `torch.compile` with TorchInductor.
 
 The trade-off for TensorRT's aggressive optimization is reduced flexibility and high compilation cost. Compilation times are measured in minutes to hours (30--60 minutes for a 70B model), and the resulting engine is strictly tied to the specific GPU architecture and input shape range. Changing any of these requires recompilation. This makes TensorRT the standard for stable, high-volume production deployments, while `torch.compile` remains the preferred choice for development and lower-volume services where rapid iteration matters more than extracting the last percentage of throughput.
 
@@ -1417,7 +1424,7 @@ def fused_gelu_kernel(
 
 The programmer thinks in terms of tiles (`BLOCK_SIZE` elements), not individual threads. Triton compiles this to PTX/SASS instructions, handling thread-to-data mapping, memory coalescing, and register allocation automatically. This makes it feasible for ML engineers (rather than GPU specialists) to write custom fused kernels when the automatic compiler misses a fusion opportunity.
 
-The real power of Triton emerges when fusing multiple operations. A Triton kernel that implements `y = LayerNorm(GELU(x))` loads `x` once from HBM, computes both GELU and LayerNorm in registers/shared memory, and writes `y` once to HBM. Without fusion, this sequence requires three HBM round-trips: read `x`, write `GELU(x)`, read `GELU(x)`, write `norm_input`, read `norm_input`, write `y`. The fused kernel reduces HBM traffic by 3 $\times$, and for memory-bound operations, this translates directly to a 3 $\times$ speedup.
+The real power of Triton emerges when fusing multiple operations. A Triton kernel that implements `y = LayerNorm(GELU(x))` loads `x` once from HBM, computes both GELU and LayerNorm in registers/shared memory, and writes `y` once to HBM. Without fusion, this sequence requires three HBM round-trips: read `x`, write `GELU(x)`, read `GELU(x)`, write `norm_input`, read `norm_input`, write `y`. The fused kernel reduces HBM traffic by 3$\times$, and for memory-bound operations, this translates directly to a 3$\times$ speedup.
 
 Triton's adoption has accelerated rapidly since its integration into PyTorch's TorchInductor backend. When `torch.compile` identifies a fusion opportunity that requires a custom kernel, TorchInductor automatically generates Triton code for the fused operation. This means that many of the fusion benefits described in this section are available to users through a single `torch.compile` call, without writing any Triton code directly. For advanced use cases where the compiler's heuristics are insufficient, hand-written Triton kernels provide a middle ground between the accessibility of PyTorch and the performance of hand-tuned CUDA.
 
@@ -1439,7 +1446,7 @@ Original time per token: $1/120 = 8.33$ ms.
 
 New time per token: $4.17 + 0.87 + 0.25 = 5.29$ ms, yielding approximately 189 tokens/second.
 
-**Takeaway**: torch.compile delivers a 1.58 $\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (79% of step time), indicating that further improvement requires either precision reduction or batching.
+**Takeaway**: torch.compile delivers a 1.58$\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (79% of step time), indicating that further improvement requires either precision reduction or batching.
 
 :::
 
@@ -1549,21 +1556,21 @@ et_low_str = SpeculativeSpeedup.et_low_str
 
 The speedup from speculative decoding depends on two factors: the **acceptance rate** $\alpha$ (probability that the draft model's token matches the target model's distribution) and the **draft length** $K$ (number of speculative tokens per round).
 
-The expected number of accepted tokens per round is approximately $\sum_{i=0}^{K} \alpha^i = \frac{1 - \alpha^{K+1}}{1 - \alpha}$. The time per round is the cost of $K$ draft steps plus one target verification step. Since the draft model is typically 10--20 $\times$ smaller, and verification is a single forward pass over $K$ tokens, the total round time is dominated by the target model's single forward pass.
+The expected number of accepted tokens per round is approximately $\sum_{i=0}^{K} \alpha^i = \frac{1 - \alpha^{K+1}}{1 - \alpha}$. The time per round is the cost of $K$ draft steps plus one target verification step. Since the draft model is typically 10--20$\times$ smaller, and verification is a single forward pass over $K$ tokens, the total round time is dominated by the target model's single forward pass.
 
-For $K = 5$ draft tokens and a draft model that is 20 $\times$ faster than the target:
+For $K = 5$ draft tokens and a draft model that is 20$\times$ faster than the target:
 
-- **High acceptance** ($\alpha = 0.9$): Expected `{python} et_high_str` tokens per round, speedup of `{python} sp_high_str` $\times$.
-- **Medium acceptance** ($\alpha = 0.7$): Expected `{python} et_med_str` tokens per round, speedup of `{python} sp_med_str` $\times$.
-- **Low acceptance** ($\alpha = 0.5$): Expected `{python} et_low_str` tokens per round, speedup of `{python} sp_low_str` $\times$.
+- **High acceptance** ($\alpha = 0.9$): Expected `{python} et_high_str` tokens per round, speedup of `{python} sp_high_str`$\times$.
+- **Medium acceptance** ($\alpha = 0.7$): Expected `{python} et_med_str` tokens per round, speedup of `{python} sp_med_str`$\times$.
+- **Low acceptance** ($\alpha = 0.5$): Expected `{python} et_low_str` tokens per round, speedup of `{python} sp_low_str`$\times$.
 
-The acceptance rate varies dramatically by context. Predictable text (formulaic responses, copying from context, common phrases) achieves $\alpha > 0.9$. Creative text, complex reasoning, or code generation may see $\alpha < 0.5$. In practice, systems observe average acceptance rates of 0.6--0.8 across diverse workloads, yielding 1.5--3 $\times$ latency improvements.
+The acceptance rate varies dramatically by context. Predictable text (formulaic responses, copying from context, common phrases) achieves $\alpha > 0.9$. Creative text, complex reasoning, or code generation may see $\alpha < 0.5$. In practice, systems observe average acceptance rates of 0.6--0.8 across diverse workloads, yielding 1.5--3$\times$ latency improvements.
 
 The acceptance rate also depends on the **temperature** of the sampling distribution. At temperature 0 (greedy decoding), the acceptance criterion is exact match: the draft token is accepted if and only if it is the argmax of the target distribution. At higher temperatures, the rejection sampling scheme allows more diverse tokens to be accepted, generally increasing the acceptance rate. This means speculative decoding provides the largest absolute speedup at low temperatures (where greedy decoding produces highly predictable output) and smaller speedup at high temperatures (where the output is more stochastic and harder to predict).
 
 While it might seem advantageous to increase the draft length $K$ indefinitely, the returns diminish rapidly due to the geometric decay of acceptance probability. The probability of accepting the $i$-th draft token is $\alpha^i$, so for $\alpha = 0.6$, the probability of accepting the 6th token is merely $0.6^6 \approx 0.047$. Increasing $K$ from 5 to 10 only increases the expected tokens from 2.4 to 2.49, yet it doubles the verification cost for the target model. In practice, $K$ is rarely tuned beyond 5--7, as the marginal gain in accepted tokens fails to amortize the linear growth in verification latency.
 
-The selection of the draft model size introduces a critical optimization surface. A tiny draft model (e.g., 150M parameters for a 70B target) is computationally negligible but yields a low $\alpha$ (e.g., 0.4), resulting in frequent rollbacks. Conversely, a large draft model (e.g., 7B parameters) achieves high alignment ($\alpha > 0.8$) but its own latency becomes a bottleneck, consuming time that could have been spent on target model decode steps. For a 70B target, empirical results favor a draft model in the 1B--3B range. A 1.1B draft model might achieve $\alpha = 0.6$ with 2 ms latency per draft step, yielding a 2.3 $\times$ speedup. Upgrading to a 7B draft model might boost $\alpha$ to 0.75, but if the draft latency rises to 10 ms, the net wall-clock speedup drops to 1.5 $\times$. The optimal draft model size shifts with the difficulty of the prompt: code generation ($\alpha$ often above 0.8 due to structural predictability) tolerates smaller draft models better than creative writing.
+The selection of the draft model size introduces a critical optimization surface. A tiny draft model (e.g., 150M parameters for a 70B target) is computationally negligible but yields a low $\alpha$ (e.g., 0.4), resulting in frequent rollbacks. Conversely, a large draft model (e.g., 7B parameters) achieves high alignment ($\alpha > 0.8$) but its own latency becomes a bottleneck, consuming time that could have been spent on target model decode steps. For a 70B target, empirical results favor a draft model in the 1B--3B range. A 1.1B draft model might achieve $\alpha = 0.6$ with 2 ms latency per draft step, yielding a 2.3$\times$ speedup. Upgrading to a 7B draft model might boost $\alpha$ to 0.75, but if the draft latency rises to 10 ms, the net wall-clock speedup drops to 1.5$\times$. The optimal draft model size shifts with the difficulty of the prompt: code generation ($\alpha$ often above 0.8 due to structural predictability) tolerates smaller draft models better than creative writing.
 
 ::: {.callout-notebook title="The Speculation Budget"}
 Is speculative decoding worth the implementation complexity? Consider a draft model that is $10\times$ cheaper per token than the target model, and a verification step that processes a candidate batch for $1.5\times$ the cost of a single target decode step. The break-even acceptance rate $\alpha$ is roughly defined by the ratio of overhead to savings.
@@ -1610,15 +1617,15 @@ $\sum_{i=0}^{5} 0.75^i = 1 + 0.75 + 0.5625 + 0.4219 + 0.3164 + 0.2373 = 3.29$ to
 
 *Speedup*: $164.5 / 50 = 3.29\times$
 
-**But consider the GPU cost**: The draft model consumes GPU memory and may require a dedicated GPU or share the target model's GPU. If the 1.5B draft model consumes 3 GB of HBM on the target GPU, it reduces KV cache budget. If it runs on a separate GPU, it doubles the hardware cost. The profitability of speculation depends on whether the 3.29 $\times$ latency improvement justifies the additional resource cost.
+**But consider the GPU cost**: The draft model consumes GPU memory and may require a dedicated GPU or share the target model's GPU. If the 1.5B draft model consumes 3 GB of HBM on the target GPU, it reduces KV cache budget. If it runs on a separate GPU, it doubles the hardware cost. The profitability of speculation depends on whether the 3.29$\times$ latency improvement justifies the additional resource cost.
 
-**Takeaway**: Speculative decoding provides a 3.29 $\times$ latency improvement when compute is "free" (memory-bound decode). The decision to deploy it depends on the system-level trade-off between per-request latency and per-token resource cost.
+**Takeaway**: Speculative decoding provides a 3.29$\times$ latency improvement when compute is "free" (memory-bound decode). The decision to deploy it depends on the system-level trade-off between per-request latency and per-token resource cost.
 
 :::
 
 ### The Hardware Cost of Speculation {#sec-performance-engineering-speculative-hardware}
 
-Speculative decoding's resource implications extend beyond the compute and latency analysis above. The draft model requires its own GPU memory allocation: weights, KV cache, and activation memory. Consider serving a 70B model on a cluster of 4 $\times$ H100-80GB GPUs (320 GB total). The FP16 weights consume 140 GB, and operational overhead (runtime, buffers) takes another 20 GB, leaving roughly 160 GB for the KV cache. This available memory determines the maximum batch size the system can support.
+Speculative decoding's resource implications extend beyond the compute and latency analysis above. The draft model requires its own GPU memory allocation: weights, KV cache, and activation memory. Consider serving a 70B model on a cluster of 4$\times$ H100-80GB GPUs (320 GB total). The FP16 weights consume 140 GB, and operational overhead (runtime, buffers) takes another 20 GB, leaving roughly 160 GB for the KV cache. This available memory determines the maximum batch size the system can support.
 
 Introducing a 7B parameter draft model requires loading an additional 14 GB of weights plus reserving its own KV cache, consuming approximately 20--25 GB of HBM. This "speculation tax" reduces the primary KV budget by nearly 15%, effectively lowering the maximum concurrent user capacity from approximately 128 to 108 users (assuming 1.25 GB of KV cache per user at 4096-token context). If the draft model generates $K = 5$ tokens per round, it must maintain its own KV cache for the full sequence (including all previously generated tokens). For a long conversation with 4,000 tokens of context, the draft model's KV cache can consume several hundred megabytes per request. When serving many concurrent requests, each with its own draft KV cache, the aggregate memory pressure compounds the reduction in batch capacity.
 
@@ -1640,9 +1647,11 @@ In a standard MoE transformer layer, the feed-forward network (FFN) is replaced 
 
 ::: {.callout-definition title="Mixture of Experts (MoE)"}
 
-***Mixture of Experts (MoE)***\index{Mixture of Experts!definition} is an architecture that replaces a single dense feed-forward layer with $N$ parallel "expert" sub-networks and a lightweight **gating function** (router) that selects the top-$k$ experts for each input token. For a model with $N$ experts and top-$k$ routing, only $k/N$ of the parameters are activated per token, decoupling model capacity (total parameters) from computational cost (FLOPs per token). The gating function $G(x)$ produces a sparse probability distribution:
-$$G(x) = \text{TopK}(\text{Softmax}(W_g \cdot x), k)$$
-where $W_g$ is a learned routing matrix. A model with 8 experts and top-2 routing has 4x the parameters of a dense equivalent but uses only 25% more FLOPs per token (due to the router and load-balancing overhead). The systems challenge is **load balancing**: if the router sends disproportionate traffic to a few experts, those experts become bottlenecks while others sit idle, wasting the parallelism that MoE was designed to exploit.
+***Mixture of Experts (MoE)***\index{Mixture of Experts!definition} is a sparse architecture that replaces dense layers with multiple parallel "expert" sub-networks and a router that selects a subset ($k$) of experts for each input.
+
+1.  **Significance (Quantitative):** It decouples **Model Capacity** (total parameters) from **Compute Cost ($O$)**. For a model with $N$ experts and top-$k$ routing, only $k/N$ of the FFN parameters are activated per token, allowing for trillion-parameter reasoning capabilities with billion-parameter compute budgets.
+2.  **Distinction (Durable):** Unlike **Dense Architectures** (where every parameter is used for every input), MoE is a **Conditional Computation** model that trades **Parameter Density** for **Arithmetic Intensity**.
+3.  **Common Pitfall:** A frequent misconception is that MoE is "cheaper" than dense models. In reality, while FLOPs per token are lower, the **Memory Wall ($BW$)** and **Communication Overhead ($L_{lat}$)** are much higher because the full model state must be sharded across the cluster, requiring all-to-all communication for token routing.
 
 :::
 
@@ -1660,13 +1669,13 @@ $$ {#eq-moe-output}
 
 Typical configurations use $E = 8$ or $E = 16$ experts with $k = 2$ active per token. This means each token uses only $k/E = 25\%$ or $12.5\%$ of the expert parameters. The shared components (attention layers, embedding layers, router) are dense and always active.
 
-The router is typically a single linear layer ($d \rightarrow E$) followed by softmax and top-k selection. Its parameter count is negligible ($d \times E$, typically 8,192 $\times$ 16 = 131,072 parameters), but its computational and system impact is outsized: the router's decisions determine which GPUs receive which tokens, driving the AllToAll communication pattern that dominates MoE system design.
+The router is typically a single linear layer ($d \rightarrow E$) followed by softmax and top-k selection. Its parameter count is negligible ($d \times E$, typically 8,192$\times$ 16 = 131,072 parameters), but its computational and system impact is outsized: the router's decisions determine which GPUs receive which tokens, driving the AllToAll communication pattern that dominates MoE system design.
 
 In an MoE design, the dense Feed-Forward Network (FFN) layers are replaced with a bank of $N$ parallel "expert" networks. A trainable gating mechanism, typically using a Top-$k$ Softmax function, analyzes each incoming token and routes it to only the most relevant experts (usually $k=1$ or $2$). To prevent the gate from collapsing into a pattern where it routes all tokens to a single "super-expert," an auxiliary load-balancing loss is added to the objective function, penalizing uneven distribution and ensuring all experts are utilized. This conditional computation allows for massive increases in model capacity without corresponding increases in inference latency. For example, a 1.6 Trillion parameter MoE model using Top-2 routing might only activate 12 Billion parameters to process any single token, achieving the quality of a dense 1.6T model at the cost of a 12B model.
 
 ### DeepSeek-V3: A Case Study {#sec-performance-engineering-deepseek}
 
-DeepSeek-V3, released in late 2024, exemplifies the state of the art in MoE system design. The model uses 671B total parameters with 256 routed experts per layer and 1 shared expert, activating 8 routed experts plus the shared expert for each token. This yields approximately 37B activated parameters per token, an 18 $\times$ ratio between total and active parameters.
+DeepSeek-V3, released in late 2024, exemplifies the state of the art in MoE system design. The model uses 671B total parameters with 256 routed experts per layer and 1 shared expert, activating 8 routed experts plus the shared expert for each token. This yields approximately 37B activated parameters per token, an 18$\times$ ratio between total and active parameters.
 
 Several architectural innovations in DeepSeek-V3 address the system challenges described above. The model uses **Multi-head Latent Attention (MLA)**, which compresses the KV cache through low-rank projections, dramatically reducing per-token memory. The routing mechanism uses an **auxiliary-loss-free** load-balancing strategy that adjusts expert selection probabilities through a learned bias term rather than an explicit auxiliary loss, avoiding the quality degradation that can accompany auxiliary loss tuning. The training was completed on 2,048 H800 GPUs in approximately 2.8 million GPU-hours, at an estimated cost of approximately \$5.6 million, a fraction of the cost reported for comparable dense models. This cost efficiency demonstrates the economic advantage of MoE architectures: by activating only 37B of 671B parameters per token, the model achieves the quality of a much larger dense model while requiring substantially less compute per training token.
 
@@ -1734,7 +1743,7 @@ compute_ratio_str = MoEEconomics.compute_ratio_str
 bw_ratio_str = MoEEconomics.bw_ratio_str
 ```
 
-The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} dense_mem_str` GB per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} bw_ratio_str` $\times$ reduction in per-token bandwidth. The compute savings are proportional: `{python} compute_ratio_str` $\times$ fewer FLOPs per token.
+The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} dense_mem_str` GB per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} bw_ratio_str`$\times$ reduction in per-token bandwidth. The compute savings are proportional: `{python} compute_ratio_str`$\times$ fewer FLOPs per token.
 
 The trade-off is memory capacity: all experts must reside in memory even though only a fraction are active at any time. DeepSeek-V3's full model in FP16 requires approximately `{python} moe_mem_str` GB, necessitating distribution across many GPUs. This creates a tension between the bandwidth savings from sparse activation and the memory overhead of storing all experts.
 
@@ -1789,7 +1798,7 @@ The economics of MoE serving create a paradox for capacity planning. The model's
 
 ::: {.callout-notebook title="MoE Capacity Planning"}
 
-**Problem**: You are deploying DeepSeek-V3 (671B total parameters, 37B active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). Your cluster has 8-GPU nodes, each with 8 $\times$ H100 (80 GB HBM per GPU, 640 GB per node). How many nodes do you need, and what is the per-token decode latency?
+**Problem**: You are deploying DeepSeek-V3 (671B total parameters, 37B active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). Your cluster has 8-GPU nodes, each with 8$\times$ H100 (80 GB HBM per GPU, 640 GB per node). How many nodes do you need, and what is the per-token decode latency?
 
 **The Math**:
 
@@ -1811,7 +1820,7 @@ The AllToAll overhead adds approximately 0.3 ms for routing token data across NV
 
 Estimated decode latency: approximately 1.0 ms per token, or roughly 1,000 tokens/second at batch size 1.
 
-**Takeaway**: MoE enables a 671B model to achieve latency comparable to a 37B dense model (both read $\sim$37 GB of active weights per step), but requires 2 $\times$ more GPUs for memory capacity. The cost per token is higher than a 37B dense model, but the quality approaches that of a 671B dense model, which would require 4 $\times$ more GPUs and 10 $\times$ more compute per token.
+**Takeaway**: MoE enables a 671B model to achieve latency comparable to a 37B dense model (both read $\sim$37 GB of active weights per step), but requires 2$\times$ more GPUs for memory capacity. The cost per token is higher than a 37B dense model, but the quality approaches that of a 671B dense model, which would require 4$\times$ more GPUs and 10$\times$ more compute per token.
 
 :::
 
@@ -1896,9 +1905,9 @@ Between steps 1 and 2, the GPU is idle waiting for AllReduce. If the FFN for the
 
 The challenge is more severe for inference than for training because the compute-to-communication ratio is less favorable. In training, a large batch means each GPU performs substantial computation (large GEMMs) between communication points. In inference at small batch sizes, each GPU performs minimal computation (small, memory-bound GEMMs) between AllReduce calls. The AllReduce time may exceed the compute time, making full overlap impossible.
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100 $\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
-At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 = 2$ MB, taking approximately 2.2 $\mu$s at NVLink bandwidth. The corresponding GEMM computation on each shard also takes approximately 20 $\mu$s (for a $64 \times 8192 \times 1024$ GEMM, where 1024 is the per-GPU hidden dimension). Here, the compute time exceeds the communication time by 9 $\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
+At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 = 2$ MB, taking approximately 2.2 $\mu$s at NVLink bandwidth. The corresponding GEMM computation on each shard also takes approximately 20 $\mu$s (for a $64 \times 8192 \times 1024$ GEMM, where 1024 is the per-GPU hidden dimension). Here, the compute time exceeds the communication time by 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
 
 ### Quantifying the Overlap Opportunity {#sec-performance-engineering-overlap-quantify}
 
@@ -1999,10 +2008,11 @@ overlap_status = OverlapCalc.overlap_status
 
 Consider a 7B parameter model trained on 8 H100 GPUs within a single node connected by NVLink at 900 GB/s. The gradient tensor contains `{python} gradient_gb_str` GB of FP16 values. A ring AllReduce across 8 GPUs transfers approximately $2 \times (N-1)/N \approx 2$ times this volume, taking approximately `{python} allreduce_ms_str` ms at NVLink bandwidth. The backward pass computation, at 40% Model FLOPs Utilization, takes approximately `{python} backward_ms_str` ms.
 
-Without overlap, the training step requires `{python} step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} overlap_status` behind the backward pass, reducing the step time to `{python} step_overlap_ms_str` ms, a `{python} overlap_speedup_str` $\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. For smaller models or slower interconnects (e.g., PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
+Without overlap, the training step requires `{python} step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} overlap_status` behind the backward pass, reducing the step time to `{python} step_overlap_ms_str` ms, a `{python} overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. For smaller models or slower interconnects (e.g., PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
 ::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="The Overlap Budget: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90% to ~40% due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution versus GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from 90% to 40%."}
 ```{python}
+#| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ OVERLAP BUDGET (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
@@ -2115,7 +2125,7 @@ ML system profiling operates at four levels, each providing different granularit
 
 **Application-level profiling** measures end-to-end metrics: tokens per second, time-to-first-token, P99 latency, and GPU utilization over time. This connects hardware-level observations to user-facing performance metrics and business KPIs.
 
-Diagnosing performance requires a drill-down approach, moving from global symptoms to local causes. When profiling a 70B model serving pipeline, the application level might reveal "end-to-end latency is 150 ms/token, 3 $\times$ above the SLO." Descending to the distributed level, traces might show one GPU consistently lagging in AllReduce operations, pointing to a straggler or network congestion. Zooming into the trace level on that specific GPU reveals the timeline of kernel execution, exposing gaps where the SMs are idle due to scheduling overhead. Finally, kernel-level profiling (using Nsight Compute) inspects the specific instruction mix of a single matrix multiplication, revealing cache misses or register pressure. Skipping levels often leads to optimizing the wrong bottleneck: optimizing a kernel is futile if the GPU is spending 40% of its time waiting on the network.
+Diagnosing performance requires a drill-down approach, moving from global symptoms to local causes. When profiling a 70B model serving pipeline, the application level might reveal "end-to-end latency is 150 ms/token, 3$\times$ above the SLO." Descending to the distributed level, traces might show one GPU consistently lagging in AllReduce operations, pointing to a straggler or network congestion. Zooming into the trace level on that specific GPU reveals the timeline of kernel execution, exposing gaps where the SMs are idle due to scheduling overhead. Finally, kernel-level profiling (using Nsight Compute) inspects the specific instruction mix of a single matrix multiplication, revealing cache misses or register pressure. Skipping levels often leads to optimizing the wrong bottleneck: optimizing a kernel is futile if the GPU is spending 40% of its time waiting on the network.
 
 ### Key Performance Metrics {#sec-performance-engineering-metrics}
 
@@ -2267,7 +2277,7 @@ Profiling reveals several recurring patterns in ML workloads that map directly t
 
 Effective performance engineering follows an iterative cycle: **profile, diagnose, optimize, verify**. The verification step is critical and often skipped. After applying an optimization, reprofile to confirm that the targeted bottleneck was addressed and that no new bottleneck emerged. Performance optimization is a waterbed problem: fixing one bottleneck often exposes the next.
 
-A common trap is optimizing based on microbenchmarks rather than end-to-end traces. A kernel that appears 2 $\times$ faster in isolation may deliver only 5% improvement in end-to-end throughput if it was not the bottleneck, or if the surrounding code cannot take advantage of its speedup due to data dependencies. Always measure impact at the application level (tokens/second, step time, P99 latency) in addition to kernel-level metrics.
+A common trap is optimizing based on microbenchmarks rather than end-to-end traces. A kernel that appears 2$\times$ faster in isolation may deliver only 5% improvement in end-to-end throughput if it was not the bottleneck, or if the surrounding code cannot take advantage of its speedup due to data dependencies. Always measure impact at the application level (tokens/second, step time, P99 latency) in addition to kernel-level metrics.
 
 Another subtlety is that profiling itself can perturb the system being measured. The PyTorch profiler adds approximately 10--20% overhead when recording full traces with memory profiling enabled. Nsight Systems adds less overhead but still affects scheduling. Profile warmup steps before active measurement, and discount the first few profiled iterations where JIT compilation or CUDA context initialization may dominate.
 
@@ -2293,11 +2303,11 @@ When approaching a new ML workload for optimization, follow this sequence:
 
 ::: {.callout-definition title="Model FLOPs Utilization"}
 
-***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the ratio of observed throughput (measured in FLOPs/second based on the model's theoretical FLOP count per sample) to the hardware's peak FLOP/second capacity. Unlike raw hardware utilization, which counts all arithmetic operations including rematerialization, padding, and communication overhead, MFU counts only the FLOPs that directly contribute to the model's forward and backward passes. This distinction is critical: a system can show 90% hardware utilization while wasting half its compute on algorithmic overhead, a failure mode that only MFU exposes. MFU therefore serves as the single metric that captures both hardware efficiency and software overhead.
+***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the ratio of useful model FLOPs performed to the hardware's theoretical peak throughput ($R_{peak}$).
 
-$$
-\text{MFU} = \frac{\text{Model FLOPs per sample} \times \text{Samples per second}}{\text{Peak Hardware FLOPS}}
-$$
+1.  **Significance (Quantitative):** It is the most precise measure of **System Efficiency ($\eta$)** because it excludes "waste" FLOPs from recomputation, padding, or speculative execution. It serves as the primary diagnostic for whether hardware investment is translating into model progress.
+2.  **Distinction (Durable):** Unlike **Hardware Utilization** (which reports how often the GPU is "busy"), MFU reports how much of that busyness contributes to **Model Convergence** or prediction.
+3.  **Common Pitfall:** A frequent misconception is that high GPU utilization implies high efficiency. In reality, a system can show 90% hardware utilization while having a low MFU if it is wasting compute on inefficient kernel implementations or excessive communication overhead ($L_{lat}$).
 
 :::
 
@@ -2318,7 +2328,7 @@ For **compute-bound workloads** (large-batch training):
 
 1. Ensure Tensor Cores are utilized (FP16/BF16/FP8, not FP32).
 2. Apply graph compilation for kernel selection and memory planning.
-3. Consider reduced precision (FP8) for 2 $\times$ compute throughput.
+3. Consider reduced precision (FP8) for 2$\times$ compute throughput.
 4. Optimize communication overlap to avoid compute idle time.
 
 For **communication-bound workloads** (distributed training at scale):
@@ -2342,16 +2352,16 @@ The most performant production systems combine multiple techniques simultaneousl
 - **Continuous batching** with dynamic sequence grouping for high throughput
 - **Tensor parallelism** across GPUs with overlapped AllReduce
 
-These techniques are not additive in their speedup; they interact in complex ways. For instance, INT4 weight quantization reduces per-token HBM traffic by 4 $\times$, which might shift the bottleneck from memory-bound to compute-bound. Once compute-bound, further bandwidth optimizations (KV cache compression) yield diminishing returns, and compute optimizations (FP8 Tensor Cores) become the priority. This is why the iterative profile-optimize-verify loop is essential: the optimal combination depends on the specific model, hardware, and workload characteristics.
+These techniques are not additive in their speedup; they interact in complex ways. For instance, INT4 weight quantization reduces per-token HBM traffic by 4$\times$, which might shift the bottleneck from memory-bound to compute-bound. Once compute-bound, further bandwidth optimizations (KV cache compression) yield diminishing returns, and compute optimizations (FP8 Tensor Cores) become the priority. This is why the iterative profile-optimize-verify loop is essential: the optimal combination depends on the specific model, hardware, and workload characteristics.
 
 The interaction between optimizations creates a dependency graph that the performance engineer must navigate. Some combinations are synergistic: FlashAttention reduces attention memory traffic, and INT8 KV cache compression reduces KV cache memory, together freeing enough memory for larger batch sizes that transform the economics of serving. Other combinations are redundant: applying both CUDA Graphs and the `reduce-overhead` mode of `torch.compile` achieves the same result, since `reduce-overhead` internally uses CUDA Graphs. Still other combinations conflict: speculative decoding benefits most at small batch sizes (where decode is memory-bound), while many throughput optimizations work by increasing batch size. At large batch sizes, speculation adds overhead without proportional benefit.
 
 A practical heuristic for sequencing optimizations is to apply them in order of decreasing "leverage" and increasing "effort":
 
 1. **torch.compile** (1 line of code, 10--40% speedup): Always apply first. No downsides.
-2. **Weight quantization** (INT4/FP8, hours of calibration, 2--4 $\times$ throughput): Apply second. Frees memory for batching.
-3. **FlashAttention** (library swap, 2--32 $\times$ for attention): Apply third. Usually a configuration flag.
-4. **KV cache compression** (INT8, library support, 2 $\times$ cache reduction): Apply fourth. Enables larger batches.
+2. **Weight quantization** (INT4/FP8, hours of calibration, 2--4$\times$ throughput): Apply second. Frees memory for batching.
+3. **FlashAttention** (library swap, 2--32$\times$ for attention): Apply third. Usually a configuration flag.
+4. **KV cache compression** (INT8, library support, 2$\times$ cache reduction): Apply fourth. Enables larger batches.
 5. **Speculative decoding** (requires draft model, engineering effort): Apply last, only if latency target not met. Most complex to deploy.
 
 This ordering reflects the principle that passive optimizations (compiler, library swaps) should precede active ones (algorithmic changes, new model components). Each step is validated by reprofiling before proceeding to the next.
@@ -2394,7 +2404,7 @@ The roofline analysis confirms that decode is deeply memory-bound, with arithmet
 
 The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the weight storage from 140 GB to 35 GB (8.75 GB per GPU from 17.5 GB per GPU). The effective bandwidth for weight reads doubles because the same physical bandwidth now delivers twice as many weight values per second (each value is 4 bits instead of 16 bits, with on-the-fly dequantization to FP16 for the GEMM).
 
-Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2 $\times$. The combined effect on memory budget is transformative: each GPU now has approximately 71 GB available for KV cache, up from 62 GB. At the reduced per-request KV cache size, the maximum batch size increases from 4 to approximately 32.
+Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is transformative: each GPU now has approximately 71 GB available for KV cache, up from 62 GB. At the reduced per-request KV cache size, the maximum batch size increases from 4 to approximately 32.
 
 Post-optimization metrics at batch size 1:
 
@@ -2405,7 +2415,7 @@ The Nsight Systems trace shows that GEMM time decreased by approximately 45% due
 
 #### Optimization Round 2: Operator Fusion {#sec-performance-engineering-case-round2}
 
-The second round targets the 14% of step time consumed by element-wise operations and the 24% consumed by attention. Applying `torch.compile` with the `max-autotune` backend fuses element-wise operations (GELU, LayerNorm, residual additions), reducing their contribution from 14% to approximately 4% of step time. Simultaneously, enabling FlashAttention-2 replaces the standard attention implementation, reducing attention HBM traffic by approximately 16 $\times$ for the prefill phase.
+The second round targets the 14% of step time consumed by element-wise operations and the 24% consumed by attention. Applying `torch.compile` with the `max-autotune` backend fuses element-wise operations (GELU, LayerNorm, residual additions), reducing their contribution from 14% to approximately 4% of step time. Simultaneously, enabling FlashAttention-2 replaces the standard attention implementation, reducing attention HBM traffic by approximately 16$\times$ for the prefill phase.
 
 For the decode phase, FlashAttention's impact is more modest because decode attention is dominated by KV cache reads rather than the $N \times N$ score matrix. However, the combination of INT8 KV cache compression and FlashAttention's efficient paged attention kernel reduces attention decode time by approximately 30%.
 
@@ -2427,7 +2437,7 @@ $$
 \text{ITL}_{\text{effective}} = \frac{4 + 8}{3.5} \approx 3.4 \text{ ms per token}
 $$
 
-This is a 9.4 $\times$ improvement over the Round 2 ITL of 32 ms, providing a remarkably responsive user experience.
+This is a 9.4$\times$ improvement over the Round 2 ITL of 32 ms, providing a remarkably responsive user experience.
 
 However, speculative decoding interacts with batching. At batch size 32, the verification step is no longer "free" because the GPU is closer to compute saturation. The system therefore applies speculation only when the current batch size is below 16, falling back to standard autoregressive decoding at higher loads. This adaptive policy maintains both the latency benefit at low load and the throughput benefit at high load.
 
@@ -2449,7 +2459,7 @@ A team upgrades their inference cluster from A100s to H100s, expecting a massive
 
 **Fallacy:** *More FLOPS means faster inference.*
 
-The roofline model demonstrates that most inference operations are memory-bound, not compute-bound. A GPU with 2 $\times$ the peak FLOPS but the same memory bandwidth will not generate tokens any faster for batch-1 LLM decode. The correct metric for memory-bound workloads is bandwidth, not FLOPS. This fallacy leads organizations to purchase the most expensive compute hardware when a mid-range GPU with equivalent HBM bandwidth would deliver identical inference throughput.
+The roofline model demonstrates that most inference operations are memory-bound, not compute-bound. A GPU with 2$\times$ the peak FLOPS but the same memory bandwidth will not generate tokens any faster for batch-1 LLM decode. The correct metric for memory-bound workloads is bandwidth, not FLOPS. This fallacy leads organizations to purchase the most expensive compute hardware when a mid-range GPU with equivalent HBM bandwidth would deliver identical inference throughput.
 
 **Fallacy:** *FP8 always halves training time compared to FP16.*
 
@@ -2534,13 +2544,13 @@ Performance engineering transforms a model that should be efficient into one tha
 
 The **Roofline Model** provides the diagnostic framework, classifying operations as compute-bound or memory-bound based on their arithmetic intensity relative to the hardware's ridge point. For the NVIDIA H100, this ridge point is approximately `{python} h100_fp16_ridge_str` FLOP/byte at FP16, meaning most transformer operations fall in the memory-bound regime.
 
-**Operator fusion** eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, reducing attention HBM traffic by `{python} savings_str` $\times$ for long sequences through tiling and online softmax. Ring Attention extends this principle across GPUs for extreme sequence lengths.
+**Operator fusion** eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, reducing attention HBM traffic by `{python} savings_str`$\times$ for long sequences through tiling and online softmax. Ring Attention extends this principle across GPUs for extreme sequence lengths.
 
 **Precision engineering** reduces bytes per transaction. FP8 formats (E4M3 for weights, E5M2 for gradients) double effective bandwidth on H100 hardware. Block-wise quantization (LLM.int8(), GPTQ, AWQ) handles the outlier features that defeat uniform quantization. KV cache compression to INT4 or INT8 directly increases serving batch size.
 
 **Graph compilation** automates fusion, kernel selection, and memory planning. torch.compile/TorchInductor generates optimized Triton kernels from standard PyTorch code. XLA provides whole-program optimization for JAX/TPU workloads. TensorRT delivers aggressive inference-specific optimization.
 
-**Speculative decoding** trades compute for latency by using a fast draft model to generate candidate tokens verified in parallel by the target model, with mathematical guarantees on output quality. Speedups of 1.5--3 $\times$ are typical for diverse workloads.
+**Speculative decoding** trades compute for latency by using a fast draft model to generate candidate tokens verified in parallel by the target model, with mathematical guarantees on output quality. Speedups of 1.5--3$\times$ are typical for diverse workloads.
 
 **Mixture of Experts** decouples model capacity from per-token inference cost through sparse activation. DeepSeek-V3 demonstrates the frontier: 671B total parameters with only 37B active per token.
 

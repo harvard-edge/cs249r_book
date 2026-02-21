@@ -119,7 +119,7 @@ Two lines of code: `model = Transformer(...)` followed by `loss.backward()`. Bet
 
 [^fn-chain-rule]: **Chain Rule**: The foundational calculus rule for differentiating composite functions, independently discovered by Leibniz (1676) and formalized by Euler (1748). For a composition $f(g(x))$, the chain rule states $\frac{df}{dx} = \frac{df}{dg} \cdot \frac{dg}{dx}$—the derivative of the whole equals the product of derivatives of each part. This rule is the mathematical engine behind backpropagation: a neural network is a deeply nested composition of functions (layers), and the chain rule decomposes the gradient of the loss with respect to any parameter into a product of local derivatives along the path from output to that parameter. Robert Wengert's 1964 paper showed that this decomposition could be mechanized as a graph algorithm, laying the foundation for automatic differentiation systems in modern frameworks.
 
-The architectures defined in @sec-network-architectures specify *what* computations neural networks perform, but knowing *what* to compute is entirely different from knowing *how* to compute it efficiently. A Transformer's attention mechanism (introduced in @sec-network-architectures) requires coordinating computation across memory hierarchies and accelerator cores in patterns that naive implementations would execute 100 $\times$ slower than optimized ones. Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by translating high-level model definitions into hardware-specific execution plans that extract maximum performance from silicon.
+The architectures defined in @sec-network-architectures specify *what* computations neural networks perform, but knowing *what* to compute is entirely different from knowing *how* to compute it efficiently. A Transformer's attention mechanism (introduced in @sec-network-architectures) requires coordinating computation across memory hierarchies and accelerator cores in patterns that naive implementations would execute 100$\times$ slower than optimized ones. Implementing these operations from scratch for every model would make deep learning economically infeasible. ML frameworks exist to bridge this gap by translating high-level model definitions into hardware-specific execution plans that extract maximum performance from silicon.
 
 \index{ML Framework!compiler analogy}
 A framework is to machine learning *what* a compiler is to traditional programming. A C compiler translates human-readable code into optimized machine instructions, managing register allocation, instruction scheduling, and memory layout. An ML framework translates high-level model definitions into hardware-specific execution plans, managing operator fusion, memory reuse, and device placement. This analogy is more than metaphor: modern frameworks literally include compilers, as we will see throughout this chapter.
@@ -149,7 +149,11 @@ With these three problems in mind, we can now define *what* a machine learning f
 
 ::: {.callout-definition title="Machine Learning Frameworks"}
 
-***Machine Learning Frameworks***\index{ML Framework} are the **Compilers** for the **Silicon Contract**. They translate high-level mathematical definitions into hardware-specific execution plans, managing the **Abstraction Gap** between algorithmic logic and physical silicon constraints (memory layout, kernel dispatch, differentiation).
+***Machine Learning Frameworks***\index{ML Framework!definition} are the **Compilers** for the **Silicon Contract**, translating high-level mathematical definitions into hardware-specific execution plans.
+
+1.  **Significance (Quantitative):** They manage the **Abstraction Gap** between algorithmic logic ($O$) and physical silicon constraints ($BW, R_{peak}$), automating the complex tasks of kernel dispatch, memory management, and automatic differentiation.
+2.  **Distinction (Durable):** Unlike a **Mathematical Library** (e.g., NumPy), a framework manages the **Computational Graph** and the **Hardware State**, allowing for global optimizations like operator fusion and parallel execution.
+3.  **Common Pitfall:** A frequent misconception is that frameworks are just "API wrappers." In reality, they are the primary tool for maximizing the **System Efficiency ($\eta$)** and minimizing the **Administrative Overhead ($L_{lat}$)**.
 
 :::
 
@@ -238,7 +242,7 @@ All modern frameworks converge on the same three core problems: *how* to execute
 ## Execution Problem {#sec-ml-frameworks-execution-problem-e1e1}
 
 \index{Execution Problem!definition}
-Consider two engineers writing the same neural network. The first debugs interactively, printing tensor shapes after each operation, inspecting intermediate values, and stepping through code with `pdb`. The second waits 30 seconds for compilation, then watches the model run 3 $\times$ faster with no ability to inspect any intermediate state. Both are correct; they have simply made different choices about the execution problem, the question of whether operations should execute immediately as written or be recorded for later execution. This choice creates a cascade of engineering trade-offs that shape every aspect of framework behavior, from debugging workflows to deployment options to peak hardware utilization.
+Consider two engineers writing the same neural network. The first debugs interactively, printing tensor shapes after each operation, inspecting intermediate values, and stepping through code with `pdb`. The second waits 30 seconds for compilation, then watches the model run 3$\times$ faster with no ability to inspect any intermediate state. Both are correct; they have simply made different choices about the execution problem, the question of whether operations should execute immediately as written or be recorded for later execution. This choice creates a cascade of engineering trade-offs that shape every aspect of framework behavior, from debugging workflows to deployment options to peak hardware utilization.
 
 ### Why Execution Strategy Matters: The Memory Wall {#sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8}
 
@@ -301,7 +305,7 @@ To understand why execution strategy matters so much, consider the **Memory Wall
 
 This creates a critical classification: operations are either **compute-bound**\index{Compute-bound operations} (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound**\index{Memory-bound operations} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory-bound, though the large matrix multiplications that dominate total compute time can be compute-bound.
 
-The key optimization for memory-bound operations is **kernel fusion**\index{Kernel Fusion!optimizing memory-bound ops}, combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel] to avoid intermediate memory traffic. Fusing a sequence of LayerNorm, Dropout, and ReLU into one kernel can yield 5 $\times$ speedup by eliminating intermediate writes between operations. FlashAttention[^fn-flashattention-frameworks] fuses the entire attention computation, reducing HBM traffic by 10–20 $\times$ and achieving 2–4 $\times$ wall-clock speedup.
+The key optimization for memory-bound operations is **kernel fusion**\index{Kernel Fusion!optimizing memory-bound ops}, combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel] to avoid intermediate memory traffic. Fusing a sequence of LayerNorm, Dropout, and ReLU into one kernel can yield 5$\times$ speedup by eliminating intermediate writes between operations. FlashAttention[^fn-flashattention-frameworks] fuses the entire attention computation, reducing HBM traffic by 10–20$\times$ and achieving 2–4$\times$ wall-clock speedup.
 
 [^fn-kernel]: **Kernel**: From German "Kern" (core/nucleus), borrowed from operating systems where it denotes the core program with full hardware access. In GPU programming, a kernel is the function that executes in parallel across thousands of threads. The metaphor extends: just as an OS kernel mediates between software and hardware, a GPU kernel is the fundamental unit where algorithms meet silicon.
 
@@ -562,7 +566,7 @@ The dynamic autograd tape enables capabilities impossible with static graphs. Co
 
 ##### Systems Implications: Overhead {.unnumbered}
 
-This flexibility comes with performance costs that map directly to the Iron Law (@sec-introduction-iron-law-ml-systems-c32a). Each forward pass rebuilds the autograd tape from scratch, adding Python object creation, reference counting, and node linking overhead to $L_{lat}$ on every iteration. Every operation goes through Python dispatch---function lookup, argument parsing, type checking---costing ~10μs per operation, which becomes significant for models with thousands of operations. Because the graph is built during execution, the framework cannot see across operations to fuse kernels, so each operation launches its own GPU kernel, inflating both $O$ and $D_{vol}$. The autograd tape itself stores references to all intermediate tensors and `Function` nodes, increasing memory consumption by 2–3 $\times$ compared to forward-only execution and adding pressure to $D_{vol}$. Together, these costs create a performance ceiling that becomes visible as models grow smaller and dispatch overhead dominates computation.
+This flexibility comes with performance costs that map directly to the Iron Law (@sec-introduction-iron-law-ml-systems-c32a). Each forward pass rebuilds the autograd tape from scratch, adding Python object creation, reference counting, and node linking overhead to $L_{lat}$ on every iteration. Every operation goes through Python dispatch---function lookup, argument parsing, type checking---costing ~10μs per operation, which becomes significant for models with thousands of operations. Because the graph is built during execution, the framework cannot see across operations to fuse kernels, so each operation launches its own GPU kernel, inflating both $O$ and $D_{vol}$. The autograd tape itself stores references to all intermediate tensors and `Function` nodes, increasing memory consumption by 2–3$\times$ compared to forward-only execution and adding pressure to $D_{vol}$. Together, these costs create a performance ceiling that becomes visible as models grow smaller and dispatch overhead dominates computation.
 
 For a typical ResNet-50 forward pass, eager execution overhead adds approximately 5--10 ms compared to an optimized compiled version, with the majority spent in Python dispatch and tape construction rather than actual computation.
 
@@ -652,7 +656,7 @@ Because the framework has the complete graph before execution, it can perform op
 These optimizations map directly to **Iron Law** terms: kernel fusion reduces $D_{vol}$ by eliminating intermediate memory writes, constant folding reduces $O$ by computing values once, memory pre-allocation reduces $L_{lat}$ by avoiding runtime allocation overhead, and dead code elimination reduces both $O$ and $D_{vol}$. Concretely, in large Transformer models, constant folding and dead code elimination can reduce total FLOPs by `{python} graph_flop_reduction_str` before the first batch even arrives.
 
 \index{XLA (Accelerated Linear Algebra)!definition}
-Compilation frameworks like XLA (Accelerated Linear Algebra)\index{XLA (Accelerated Linear Algebra)!graph compilation}[^fn-xla] [@GoogleXLA] take this further, compiling the TensorFlow graph to optimized machine code for specific hardware. For a transformer encoder block, XLA can achieve 1.5–2 $\times$ speedup over unoptimized execution through aggressive fusion and hardware-specific code generation.
+Compilation frameworks like XLA (Accelerated Linear Algebra)\index{XLA (Accelerated Linear Algebra)!graph compilation}[^fn-xla] [@GoogleXLA] take this further, compiling the TensorFlow graph to optimized machine code for specific hardware. For a transformer encoder block, XLA can achieve 1.5–2$\times$ speedup over unoptimized execution through aggressive fusion and hardware-specific code generation.
 
 ##### Systems Implications {.unnumbered}
 
@@ -922,11 +926,11 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 *   **Execution:**
     1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` µs overhead.
     2.  Read/Write Memory: $2N$ bytes (intermediate result stays in registers).
-*   **Total Overhead:** `{python} FusionSpeedup.compiled_overhead_str` µs (**`{python} FusionSpeedup.overhead_speedup_str` $\times$ speedup**).
-*   **Total Memory Traffic:** 2N bytes (**`{python} FusionSpeedup.bw_efficiency_str` $\times$ bandwidth efficiency**).
+*   **Total Overhead:** `{python} FusionSpeedup.compiled_overhead_str` µs (**`{python} FusionSpeedup.overhead_speedup_str`$\times$ speedup**).
+*   **Total Memory Traffic:** 2N bytes (**`{python} FusionSpeedup.bw_efficiency_str`$\times$ bandwidth efficiency**).
 
 **The Conclusion:**
-Compilation is not magic; it is **overhead amortization**. For small, element-wise operations (like LayerNorm, GELU, Add), overhead often exceeds compute time by 10–100 $\times$. Fusing them is the only way to utilize the hardware.
+Compilation is not magic; it is **overhead amortization**. For small, element-wise operations (like LayerNorm, GELU, Add), overhead often exceeds compute time by 10–100$\times$. Fusing them is the only way to utilize the hardware.
 :::
 
 See this tax play out concretely in @fig-python-tax. Notice how eager execution (top) creates "gaps" where the GPU sits idle while Python dispatches the next kernel. The blue compute regions are short; the red dispatch regions are comparatively long. Compilation (bottom) fuses these operations into a single kernel launch, eliminating the gaps entirely so the GPU spends nearly all its time computing rather than waiting.
@@ -980,7 +984,7 @@ plt.show()
 
 The natural question is: can this fusion happen automatically? PyTorch 2.0's `torch.compile`[^fn-torch-compile] attempts exactly this by capturing eager code and compiling it into fused kernels without requiring users to write custom CUDA.[^fn-cuda-frameworks]
 
-[^fn-torch-compile]: **`torch.compile`**: Introduced in PyTorch 2.0 (March 2023), `torch.compile` represents PyTorch's answer to the eager-vs-graph trade-off that has defined framework design since 2015. Rather than requiring users to rewrite code for a static graph system, `torch.compile` uses Python bytecode interception (via TorchDynamo) to automatically extract computational graphs from existing eager PyTorch code, then compiles them into optimized kernels. The function signature `model = torch.compile(model)` deliberately mirrors Python's `@functools.lru_cache` decorator pattern: a single-line change that transparently optimizes without altering semantics. Typical speedups range from 1.3--2 $\times$ for transformer models, with the compilation overhead amortized over subsequent executions via on-disk caching.
+[^fn-torch-compile]: **`torch.compile`**: Introduced in PyTorch 2.0 (March 2023), `torch.compile` represents PyTorch's answer to the eager-vs-graph trade-off that has defined framework design since 2015. Rather than requiring users to rewrite code for a static graph system, `torch.compile` uses Python bytecode interception (via TorchDynamo) to automatically extract computational graphs from existing eager PyTorch code, then compiles them into optimized kernels. The function signature `model = torch.compile(model)` deliberately mirrors Python's `@functools.lru_cache` decorator pattern: a single-line change that transparently optimizes without altering semantics. Typical speedups range from 1.3--2$\times$ for transformer models, with the compilation overhead amortized over subsequent executions via on-disk caching.
 
 [^fn-cuda-frameworks]: **CUDA (Compute Unified Device Architecture)**: NVIDIA's parallel computing platform, first released in June 2007, which made GPU programming accessible through a C-like language. For ML frameworks, CUDA serves as the foundational layer between high-level Python operations and GPU silicon. When PyTorch executes `torch.matmul(A, B)`, this call traverses the framework's dispatcher, selects a CUDA kernel implementation (often from cuBLAS), and launches it on the GPU. Each kernel launch incurs 5--20 μs of overhead as the CPU assembles parameters and signals the GPU. The framework's ability to fuse multiple operations into fewer kernel launches—reducing these launch overheads and the associated memory traffic—is why compilation (via `torch.compile` or TensorRT) yields significant speedups over eager execution.
 
@@ -1078,7 +1082,7 @@ This prints each break location and reason: `Graph break in user code at file.py
 \index{Graph Compilation!compilation modes}
 As a project matures from prototyping to production, engineers progressively increase compilation aggressiveness. The default mode (`mode='default'`) applies moderate optimization with fast compilation (5--30 seconds for transformer models), making it suitable for development and training where compilation overhead is amortized over many iterations. When deploying an inference server with fixed input shapes, `mode='reduce-overhead'` minimizes Python interpreter overhead by aggressively capturing operations and enabling CUDA graphs that batch kernel launches, improving throughput by 20--40% over the default. For production training that will run for days, `mode='max-autotune'` generates and benchmarks multiple implementation variants for each operation, increasing compilation time (minutes to hours for large models) but improving runtime performance by 10--30%. This progression---default for development, reduce-overhead for inference, max-autotune for long training runs---mirrors the Compilation Continuum principle we formalize below.
 
-The compilation mode controls *how aggressively* to optimize; the backend controls *what target* to optimize for. TorchInductor (the default) generates Triton kernels for CUDA and C++ for CPU, providing the best general-purpose performance for both training and inference. When cross-platform deployment is required, the ONNX Runtime backend\index{ONNX Runtime!compilation backend} exports the FX graph to ONNX format, enabling execution on CPUs, GPUs, mobile, and edge devices---though limited ONNX operation coverage may cause more graph breaks. For maximum inference throughput on NVIDIA GPUs, the TensorRT backend\index{TensorRT!inference compiler} compiles to NVIDIA's inference engine with aggressive int8 quantization, layer fusion, and kernel autotuning, often achieving 1.5–2 $\times$ speedup over TorchInductor. The trade-off is clear: each backend narrows the target to unlock deeper optimization, echoing the flexibility-versus-performance axis that distinguishes eager from graph execution.
+The compilation mode controls *how aggressively* to optimize; the backend controls *what target* to optimize for. TorchInductor (the default) generates Triton kernels for CUDA and C++ for CPU, providing the best general-purpose performance for both training and inference. When cross-platform deployment is required, the ONNX Runtime backend\index{ONNX Runtime!compilation backend} exports the FX graph to ONNX format, enabling execution on CPUs, GPUs, mobile, and edge devices---though limited ONNX operation coverage may cause more graph breaks. For maximum inference throughput on NVIDIA GPUs, the TensorRT backend\index{TensorRT!inference compiler} compiles to NVIDIA's inference engine with aggressive int8 quantization, layer fusion, and kernel autotuning, often achieving 1.5–2$\times$ speedup over TorchInductor. The trade-off is clear: each backend narrows the target to unlock deeper optimization, echoing the flexibility-versus-performance axis that distinguishes eager from graph execution.
 
 ##### Practical Example: Measuring Speedup {.unnumbered}
 
@@ -1116,7 +1120,7 @@ for _ in range(100):
     torch.cuda.synchronize()
 compiled_time = time.time() - start
 
-print(f"Speedup: {eager_time/compiled_time:.2f} $\times$ ")
+print(f"Speedup: {eager_time/compiled_time:.2f}$\times$ ")
 # Typical: 2-5x speedup for matrix operations
 ```
 :::
@@ -1206,7 +1210,7 @@ Where:
 | **ViT-B/16**     |                     620 |                             950 |                      1,650 |                         25--45 |
 | **GPT-2 (124M)** |                     180 |                             260 |                        420 |                         45--90 |
 
-: **Training and Inference Throughput.** Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. torch.compile typically provides 1.4 to 1.5 $\times$ speedup over eager mode, while TensorRT provides 2 to 3 $\times$ speedup but requires longer compilation and is inference only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark}
+: **Training and Inference Throughput.** Representative throughput comparison across execution modes for common model architectures on NVIDIA A100 GPU with batch size 32. torch.compile typically provides 1.4 to 1.5$\times$ speedup over eager mode, while TensorRT provides 2 to 3$\times$ speedup but requires longer compilation and is inference only. Compile times vary based on model complexity and optimization level. {#tbl-training-benchmark}
 
 These throughput differences across execution modes raise a practical question: which *framework execution strategy* best serves each workload archetype?
 
@@ -1227,7 +1231,7 @@ The optimal framework execution strategy depends on which **Iron Law** term domi
 
 : **Framework Execution Strategy by Workload.** Recommended execution strategy for each workload archetype, aligned to the dominant Iron Law term. Compute-bound workloads benefit most from compilation, while irregular access patterns favor eager execution. {#tbl-framework-archetype-strategy}
 
-**Key insight**: Compilation benefits scale with how much of your workload is *optimizable*. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees 2.6 $\times$ speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
+**Key insight**: Compilation benefits scale with how much of your workload is *optimizable*. Compute Beasts (@tbl-training-benchmark: ResNet-50 sees 2.6$\times$ speedup from TensorRT) benefit most. Sparse Scatter workloads gain little because their bottleneck (embedding lookups) is inherently irregular.
 :::
 
 This principle has concrete implications across three regimes. In *research prototyping* ($N_{\text{dev}} \gg N_{\text{prod}}$), teams should stay eager. If the architecture changes every few minutes, compilation overhead dominates. A 30-second compile time with 10 iterations/hour means 5 minutes lost to compilation per hour, often more than the runtime savings.
@@ -1388,9 +1392,9 @@ This cumulative latency creates what is effectively *a dispatch tax* on executio
 
 *   **Compute**: `{python} DispatchTax.dispatch_n_ops_value` small matrix/element-wise operations.
 *   **Hardware Time**: T_hw ≈ `{python} DispatchTax.dispatch_hw_time_us_value` μs (mostly memory latency).
-*   **Software Overhead**: T_sw ≈ `{python} DispatchTax.dispatch_n_ops_value` ops $\times$ `{python} DispatchTax.dispatch_us_per_op_value` μs/op = `{python} DispatchTax.dispatch_sw_time_str` μs.
+*   **Software Overhead**: T_sw ≈ `{python} DispatchTax.dispatch_n_ops_value` ops$\times$ `{python} DispatchTax.dispatch_us_per_op_value` μs/op = `{python} DispatchTax.dispatch_sw_time_str` μs.
 *   **Ratio**: `{python} DispatchTax.dispatch_sw_time_str` / `{python} DispatchTax.dispatch_hw_time_us_value` ≈ **`{python} DispatchTax.dispatch_ratio_small_str`**.
-*   **Conclusion**: You spend `{python} DispatchTax.dispatch_overhead_pct_str`% of time waiting for Python. Compilation yields **`{python} DispatchTax.dispatch_compilation_speedup_str` $\times$ speedup**.
+*   **Conclusion**: You spend `{python} DispatchTax.dispatch_overhead_pct_str`% of time waiting for Python. Compilation yields **`{python} DispatchTax.dispatch_compilation_speedup_str`$\times$ speedup**.
 
 **Scenario 2: GPT-3 Layer (Compute Bound)**
 
@@ -1447,7 +1451,7 @@ class GPT3Context:
 # Note: Use GPT3Context.gpt3_params_b_str directly.
 ```
 
-The principle's implication is that small models benefit *disproportionately* from compilation. A 100-parameter toy model might see 10 $\times$ speedup from torch.compile, while a `{python} GPT3Context.gpt3_params_b_str` B-parameter model sees only 1.3 $\times$. This explains why compilation matters most for efficient inference on smaller, deployed models.
+The principle's implication is that small models benefit *disproportionately* from compilation. A 100-parameter toy model might see 10$\times$ speedup from torch.compile, while a `{python} GPT3Context.gpt3_params_b_str` B-parameter model sees only 1.3$\times$. This explains why compilation matters most for efficient inference on smaller, deployed models.
 
 The dispatch tax analysis reveals that small operations are overhead-bound regardless of hardware capability. This observation matters most at the extreme edge of the deployment spectrum, where the entire Python runtime is itself an unacceptable overhead.
 
@@ -1509,7 +1513,7 @@ The differentiation problem asks: how should frameworks compute gradients[^fn-gr
 
 Building on the backpropagation[^fn-backprop-frameworks] algorithm introduced in @sec-neural-computation (where we established that gradients flow backward through the computation graph via the chain rule),
 
-[^fn-backprop-frameworks]: **Backpropagation**: The algorithm for computing gradients in neural networks, independently discovered multiple times: Paul Werbos (1974 PhD thesis), David Parker (1985), and Yann LeCun (1985), before Rumelhart, Hinton, and Williams popularized it in their landmark 1986 Nature paper "Learning representations by back-propagating errors." The name describes the direction of computation: gradients are "propagated backward" from the output loss through each layer to the input. From a systems perspective, backpropagation's key cost is memory: the forward pass must store all intermediate activations (the "tape") so the backward pass can compute local gradients at each layer. For a transformer with $N_L$ layers and hidden dimension $d$, this requires $O(N_L \cdot d \cdot N)$ memory for batch size $N$—often exceeding the model weights themselves. This memory cost motivates activation checkpointing (@sec-model-training) and is the primary reason training requires 3--4 $\times$ more memory than inference.
+[^fn-backprop-frameworks]: **Backpropagation**: The algorithm for computing gradients in neural networks, independently discovered multiple times: Paul Werbos (1974 PhD thesis), David Parker (1985), and Yann LeCun (1985), before Rumelhart, Hinton, and Williams popularized it in their landmark 1986 Nature paper "Learning representations by back-propagating errors." The name describes the direction of computation: gradients are "propagated backward" from the output loss through each layer to the input. From a systems perspective, backpropagation's key cost is memory: the forward pass must store all intermediate activations (the "tape") so the backward pass can compute local gradients at each layer. For a transformer with $N_L$ layers and hidden dimension $d$, this requires $O(N_L \cdot d \cdot N)$ memory for batch size $N$—often exceeding the model weights themselves. This memory cost motivates activation checkpointing (@sec-model-training) and is the primary reason training requires 3--4$\times$ more memory than inference.
 
 this section shifts focus from the mathematics to the systems engineering of differentiation: how frameworks represent computation graphs, manage memory for intermediate values, and orchestrate the backward pass efficiently across accelerators. The framework's role is not to perform calculus but to manage the bookkeeping at scale, which is required for the training algorithms detailed in @sec-model-training. @lst-auto_diff_intro illustrates the core idea with a simple three-operation function:
 
@@ -1537,11 +1541,11 @@ Neural network training universally uses reverse mode (covered next), but forwar
 \index{Dual Numbers!forward mode AD}
 Forward mode automatic differentiation computes derivatives alongside the original computation, tracking how changes propagate from input to output. This approach mirrors manual derivative computation, making it intuitive to understand and implement.
 
-Forward mode's memory requirements are its strength: the method stores only the original value, a single derivative value, and temporary results. Memory usage stays constant regardless of computation depth, making forward mode particularly suitable for embedded systems, real-time applications, and memory-bandwidth-limited systems. However, this comes with a computational cost. Forward mode doubles the Ops term (in **Iron Law** terms) for each input parameter whose derivative is requested. For a model with $N$ parameters, forward mode multiplies total computation by $N$, because each parameter requires a separate forward pass. Reverse mode, by contrast, adds a constant factor of approximately 2 to 3 $\times$ regardless of $N$. This asymmetry explains why forward mode is never used for training neural networks, where $N$ ranges from millions to hundreds of billions. This combination of computational scaling with input count but constant memory creates a specific niche: forward mode excels in scenarios with few inputs but many outputs, such as sensitivity analysis, feature importance computation, and online learning with single-example updates.
+Forward mode's memory requirements are its strength: the method stores only the original value, a single derivative value, and temporary results. Memory usage stays constant regardless of computation depth, making forward mode particularly suitable for embedded systems, real-time applications, and memory-bandwidth-limited systems. However, this comes with a computational cost. Forward mode doubles the Ops term (in **Iron Law** terms) for each input parameter whose derivative is requested. For a model with $N$ parameters, forward mode multiplies total computation by $N$, because each parameter requires a separate forward pass. Reverse mode, by contrast, adds a constant factor of approximately 2 to 3$\times$ regardless of $N$. This asymmetry explains why forward mode is never used for training neural networks, where $N$ ranges from millions to hundreds of billions. This combination of computational scaling with input count but constant memory creates a specific niche: forward mode excels in scenarios with few inputs but many outputs, such as sensitivity analysis, feature importance computation, and online learning with single-example updates.
 
 To see the mechanism concretely, consider computing both the value and derivative of $f(x) = x^2 \sin(x)$. @lst-forward_mode_ad shows how forward mode propagates derivative computations alongside every operation, applying the chain rule and product rule at each step:
 
-::: {#lst-forward_mode_ad lst-cap="**Forward Mode AD**: Propagates derivatives forward through the computation graph, computing one directional derivative per forward pass with 2 $\times$ computational overhead."}
+::: {#lst-forward_mode_ad lst-cap="**Forward Mode AD**: Propagates derivatives forward through the computation graph, computing one directional derivative per forward pass with 2$\times$ computational overhead."}
 ```{.python}
 def f(x):  # Computing both value and derivative
     # Step 1: x -> x²
@@ -1583,7 +1587,7 @@ dresult = (
 ```
 :::
 
-The dual number trace demonstrates the 2 $\times$ computational overhead per input: every arithmetic operation (multiply, sine, product rule combination) is performed twice, once for the value and once for the derivative. For this single-input function, the overhead is acceptable. For a neural network with $N = 100{,}000{,}000$ parameters, computing all gradients would require 100 million such passes, which is why forward mode is restricted to the few-input applications described above.
+The dual number trace demonstrates the 2$\times$ computational overhead per input: every arithmetic operation (multiply, sine, product rule combination) is performed twice, once for the value and once for the derivative. For this single-input function, the overhead is acceptable. For a neural network with $N = 100{,}000{,}000$ parameters, computing all gradients would require 100 million such passes, which is why forward mode is restricted to the few-input applications described above.
 
 Forward mode's strength in single-input analysis becomes its fatal weakness for training. A neural network has one scalar loss but millions of parameters, and forward mode would require a separate pass for each one---an intractable $O(N)$ cost that explains why no production framework uses forward mode for training. Forward mode remains useful for targeted analyses such as sensitivity analysis (how does changing one pixel affect the prediction?) and feature importance (which input dimensions most influence the output?), where the number of inputs of interest is small.
 
@@ -1743,9 +1747,9 @@ checkpoint2 = save_for_backward(activation4)
 :::
 
 \index{Kernel Fusion!eliminating intermediate allocations}
-The second strategy is *operation fusion*\index{Kernel Fusion}[^fn-operation-fusion]. Rather than executing matrix multiplication, bias addition, and ReLU as three separate operations, each writing intermediate results to memory, frameworks fuse them into a single kernel. This eliminates intermediate memory allocations entirely and achieves 2 to 3 $\times$ speedup on modern GPUs by keeping data in registers and caches.
+The second strategy is *operation fusion*\index{Kernel Fusion}[^fn-operation-fusion]. Rather than executing matrix multiplication, bias addition, and ReLU as three separate operations, each writing intermediate results to memory, frameworks fuse them into a single kernel. This eliminates intermediate memory allocations entirely and achieves 2 to 3$\times$ speedup on modern GPUs by keeping data in registers and caches.
 
-[^fn-operation-fusion]: **Operation Fusion**: Compiler optimization that combines multiple sequential operations into a single kernel to reduce memory bandwidth and latency. For example, fusing matrix multiplication, bias addition, and ReLU activation can eliminate intermediate memory allocations and achieve 2–3 $\times$ speedup on modern GPUs.
+[^fn-operation-fusion]: **Operation Fusion**: Compiler optimization that combines multiple sequential operations into a single kernel to reduce memory bandwidth and latency. For example, fusing matrix multiplication, bias addition, and ReLU activation can eliminate intermediate memory allocations and achieve 2–3$\times$ speedup on modern GPUs.
 
 The backward pass itself benefits from hardware-specific optimization. Rather than directly translating the mathematical definition of a convolution gradient into code, frameworks implement specialized backward kernels that exploit memory access patterns and hardware capabilities of modern accelerators [@chetlur2014cudnn]. These optimizations, checkpointing, fusion, and specialized kernels, work together to make training practical for architectures that would otherwise exhaust GPU memory in a single forward pass.
 
@@ -1757,7 +1761,7 @@ Checkpointing, fusion, and specialized kernels solve the systems problems of AD.
 
 \index{Autograd Engine!internals}
 \index{PyTorch!autograd system}
-The autograd system is the framework component that solves the differentiation problem described in @sec-ml-frameworks-three-problems-every-framework-must-solve-317d. Three systems principles govern its design: the data structure that enables efficient gradient computation, the memory cost of maintaining that data structure, and the control mechanisms that production systems require. Understanding these principles explains why training consumes 100 $\times$ more memory than inference for the same model, and why frameworks provide specific mechanisms to manage that cost.
+The autograd system is the framework component that solves the differentiation problem described in @sec-ml-frameworks-three-problems-every-framework-must-solve-317d. Three systems principles govern its design: the data structure that enables efficient gradient computation, the memory cost of maintaining that data structure, and the control mechanisms that production systems require. Understanding these principles explains why training consumes 100$\times$ more memory than inference for the same model, and why frameworks provide specific mechanisms to manage that cost.
 
 ##### Principle 1: The Reverse-Linked Graph Structure { .unnumbered}
 
@@ -1808,7 +1812,7 @@ Every activation saved for the backward pass persists in memory until consumed b
 # │       ~102 MB FP32 weights, 10–15 GB training footprint) to show the ~100×
 # │       ratio driving the $D_{vol}$ term in the Iron Law.
 # │ Show: "~102 MB inference vs. 10–15 GB training" — inline in Principle 2 prose
-# │       and in "The Administrative Tax" callout (@sec-ml-frameworks-tensor-structure).
+# │       and in "The Administrative Tax" callout (@sec-ml-frameworks-tensor-structure-dimensions-4a14).
 # │ How: model.size_in_bytes() helpers; m_as(MB/Mparam) for unit extraction.
 # │
 # │ Note: PERSISTENT — ResNetMemory reused at line ~2224 (Abstraction section),
@@ -1855,9 +1859,9 @@ class ResNetMemory:
 # Note: Use ResNetMemory.resnet_params_m_str directly.
 ```
 
-For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` M parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` MB in FP32) and processes batch size 64 with 224 $\times$ 224 images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` MB (the same size as the parameters themselves), and Adam optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` MB for its two momentum buffers per parameter. The total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` GB, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` MB for inference alone.
+For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` M parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` MB in FP32) and processes batch size 64 with 224$\times$ 224 images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` MB (the same size as the parameters themselves), and Adam optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` MB for its two momentum buffers per parameter. The total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` GB, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` MB for inference alone.
 
-This `{python} ResNetMemory.resnet_training_ratio_str` $\times$ ratio between training and inference memory quantifies why the Data Movement ($D_{vol}$) term dominates training latency in the **Iron Law**. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. For a complete derivation of the four-component training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$) and worked examples at larger model scales, see @sec-algorithm-foundations-true-cost-training-memory-e54e.
+This `{python} ResNetMemory.resnet_training_ratio_str`$\times$ ratio between training and inference memory quantifies why the Data Movement ($D_{vol}$) term dominates training latency in the **Iron Law**. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. For a complete derivation of the four-component training memory equation ($M_{total} = M_{weights} + M_{gradients} + M_{optimizer} + M_{activations}$) and worked examples at larger model scales, see @sec-algorithm-foundations-true-cost-training-memory-e54e.
 
 Frameworks provide two primary mechanisms to manage this trade-off. **Gradient checkpointing**\index{Gradient Checkpointing!recomputation strategy} [@chen2016training] trades recomputation for memory: instead of saving all activations, the framework saves only a subset and recomputes the rest during the backward pass. This typically reduces activation memory by 50--90% at the cost of 20--33% additional compute (with optimal $\sqrt{n}$ checkpoint placement). In Iron Law terms, checkpointing increases the $O$ term (recomputation) to reduce the $D_{vol}$ term (memory traffic). **Tensor detachment** provides a complementary mechanism: calling `.detach()` on a tensor removes it from the computation graph entirely, preventing the framework from saving activations through that path. This is essential for transfer learning, where pretrained layers should not accumulate gradients, and reduces the $D_{vol}$ term by eliminating unnecessary activation storage.
 
@@ -2017,7 +2021,7 @@ These three principles connect directly to the framework's role as a compiler fo
 #### Mixed-Precision Training Support {#sec-ml-frameworks-mixedprecision-training-support-d31d}
 
 \index{Mixed Precision!FP16 vs. FP32 trade-offs}
-Mixed precision exploits a hardware asymmetry to improve two Iron Law terms simultaneously: Tensor Cores execute FP16 matrix multiplications at 2 $\times$ the throughput of FP32 (increasing effective $O/R_{peak}$), while FP16 activations halve the memory footprint (reducing $D_{vol}$). Improving both terms simultaneously is rare; most optimizations improve one at the expense of the other.
+Mixed precision exploits a hardware asymmetry to improve two Iron Law terms simultaneously: Tensor Cores execute FP16 matrix multiplications at 2$\times$ the throughput of FP32 (increasing effective $O/R_{peak}$), while FP16 activations halve the memory footprint (reducing $D_{vol}$). Improving both terms simultaneously is rare; most optimizations improve one at the expense of the other.
 
 Frameworks exploit this through automatic mixed-precision APIs that select reduced precision for compute-intensive operations while maintaining FP32 where numerical stability demands it. Inside these APIs, frameworks automatically apply precision rules: matrix multiplications and convolutions use FP16 for bandwidth efficiency, while numerically sensitive operations like softmax and layer normalization remain in FP32. This selective precision maintains accuracy while achieving speedups on modern GPUs with specialized hardware units. Because FP16 has a narrower dynamic range than FP32, gradients can underflow to zero during backpropagation. Loss scaling addresses this by multiplying the loss by a large factor before the backward pass, then dividing gradients by the same factor afterward.
 
@@ -2228,7 +2232,7 @@ The execution and differentiation problems together enable the training loop: th
 \index{Abstraction Problem!definition}
 \index{Hardware Abstraction!framework design}
 \index{Hardware Abstraction!two dimensions (data, execution)}
-The hardware diversity described above is not merely inconvenient; it is architecturally fundamental. A GPU offers 1,000 $\times$ the parallelism of a CPU but has different memory semantics. A TPU provides higher throughput but requires static shapes. A microcontroller has kilobytes where a server has gigabytes. The abstraction problem asks: how should frameworks hide this complexity behind a single programming interface while still enabling efficient utilization of each target's unique capabilities?
+The hardware diversity described above is not merely inconvenient; it is architecturally fundamental. A GPU offers 1,000$\times$ the parallelism of a CPU but has different memory semantics. A TPU provides higher throughput but requires static shapes. A microcontroller has kilobytes where a server has gigabytes. The abstraction problem asks: how should frameworks hide this complexity behind a single programming interface while still enabling efficient utilization of each target's unique capabilities?
 
 The problem decomposes into two interacting dimensions. The first is *data representation*: how should frameworks represent tensors, parameters, and computational state in ways that work across hardware? The second is *execution mapping*: how should high-level operations translate to hardware-specific implementations? These dimensions are not independent concerns. The way data is represented (memory layout, precision, device placement) directly affects what execution strategies are possible. A tensor stored in row-major format on a GPU requires different kernels than one in column-major format on a CPU. A model quantized to INT8 enables entirely different execution paths than FP32.
 
@@ -2284,7 +2288,11 @@ At the foundation of every framework's data representation lies a single abstrac
 
 ::: {.callout-definition title="Tensor"}
 
-***Tensors***\index{Tensor!framework abstraction} are the fundamental unit of **Data Parallelism**. By abstracting n-dimensional arrays into a unified data structure with defined **Strides** and **Types**, they enable frameworks to map mathematical operations onto vectorized hardware instructions without exposing memory layout complexity to the user.
+***Tensors***\index{Tensor!definition} are the fundamental unit of **Data Parallelism**—a multi-dimensional array abstraction that maps mathematical operations onto vectorized hardware.
+
+1.  **Significance (Quantitative):** They are the vehicle for maximizing **Arithmetic Intensity**. By grouping scalars into contiguous memory blocks, they minimize **Overhead ($L_{lat}$)** and maximize **Effective Bandwidth ($BW_{eff}$)**.
+2.  **Distinction (Durable):** Unlike a **List** or **Generic Array**, which are defined by their **Flexibility**, a tensor is defined by its **Layout Invariants** (Strides and Dtypes) required for deterministic hardware dispatch.
+3.  **Common Pitfall:** A frequent misconception is that tensors are just "efficient arrays." In a system context, a tensor is a **Contract**: it guarantees that the data can be moved and computed without intermediate CPU intervention.
 
 :::
 
@@ -2369,7 +2377,7 @@ admin_act_calc_md = AdminTax.admin_act_calc_md
 ```
 
 ::: {.callout-notebook title="The Administrative Tax"}
-The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2 showed a concrete ~`{python} ResNetMemory.resnet_training_ratio_str` $\times$ ratio between training and inference memory. Here we generalize that analysis to reveal the full administrative overhead at billion-parameter scale.
+The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2 showed a concrete ~`{python} ResNetMemory.resnet_training_ratio_str`$\times$ ratio between training and inference memory. Here we generalize that analysis to reveal the full administrative overhead at billion-parameter scale.
 
 **Problem**: Why does your GPU utilization drop when training small models?
 
@@ -2381,9 +2389,9 @@ The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompu
 4.  **Activations**: For a batch size of `{python} admin_batch_str` and a `{python} admin_layers_str`-layer network, you must store every intermediate layer output for the backward pass.
 
     $$ \text{Activations} \approx \text{Batch} \times \text{Layers} \times \text{Width}^{2} \times 2 \text{ bytes} $$
-    For a `{python} admin_width_str`-width model: `{python} admin_act_calc_md`. (Each layer's activation is a `Width $\times$ Width` matrix per sample---appropriate for transformer-style models where intermediate projections scale with hidden dimension squared.)
+    For a `{python} admin_width_str`-width model: `{python} admin_act_calc_md`. (Each layer's activation is a `Width$\times$ Width` matrix per sample---appropriate for transformer-style models where intermediate projections scale with hidden dimension squared.)
 
-**The Systems Conclusion**: Your `{python} admin_weights_gb_str` GB model has an **"Administrative Tax"** of ~`{python} admin_tax_gb_str` GB (`{python} admin_grads_gb_str` GB gradients + `{python} admin_opt_gb_str` GB optimizer + `{python} admin_act_gb_str` GB activations) before you even process the first batch. During training, **Data Movement** includes saving and retrieving these activations, which is why training is often 3–4 $\times$ slower than pure inference.
+**The Systems Conclusion**: Your `{python} admin_weights_gb_str` GB model has an **"Administrative Tax"** of ~`{python} admin_tax_gb_str` GB (`{python} admin_grads_gb_str` GB gradients + `{python} admin_opt_gb_str` GB optimizer + `{python} admin_act_gb_str` GB activations) before you even process the first batch. During training, **Data Movement** includes saving and retrieving these activations, which is why training is often 3–4$\times$ slower than pure inference.
 :::
 
 #### Tensor Structure and Dimensions {#sec-ml-frameworks-tensor-structure-dimensions-4a14}
@@ -2440,7 +2448,7 @@ minimum width=18,minimum height=18](3R){0};
 
 This rank hierarchy maps directly onto ML data. A color image is a rank-3 tensor: height x width x 3 channels (red, green, blue). @fig-tensor-data-structure-b breaks this apart, stacking the three color channels so you can see how a single photograph becomes a three-layer numerical grid. Stacking a batch of $N$ images adds a fourth dimension, producing a rank-4 tensor of shape $[N, 3, H, W]$. Every convolutional layer in a vision model consumes and produces tensors of exactly this shape, which is why the tensor abstraction is so central to framework design.
 
-::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor.** Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. *Credit: Niklas Lang [https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff](https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff)*." fig-alt="Three stacked 3 $\times$ 3 grids in red, green, and blue representing RGB color channels. Dimension labels show width 3 pixels, height 3 pixels, and 3 color channels forming a 3D tensor for image data."}
+::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor.** Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. *Credit: Niklas Lang [https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff](https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff)*." fig-alt="Three stacked 3$\times$ 3 grids in red, green, and blue representing RGB color channels. Dimension labels show width 3 pixels, height 3 pixels, and 3 color channels forming a 3D tensor for image data."}
 ```{.tikz}
 \scalebox{0.7}{%
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\Large]
@@ -2493,9 +2501,9 @@ This rank hierarchy maps directly onto ML data. A color image is a rank-3 tensor
 Framework tensors carry more than raw numbers. Each tensor stores metadata that the runtime uses to validate operations and select fast execution paths: a *shape* tuple (e.g., `[64, 3, 224, 224]` for a batch of images), a *dtype* (float32, float16, int8), and a *device* tag (CPU, cuda:0). A matrix multiplication, for instance, checks shape compatibility at dispatch time and uses the dtype to route to the correct hardware kernel, whether a standard FP32 GEMM or a Tensor Core FP16 path.
 
 \index{Memory Layout!stride patterns}
-Memory layout implementation introduces distinct challenges in tensor design. While tensors provide an abstraction of multi-dimensional data, physical computer memory remains linear. Stride patterns\index{Tensor!stride patterns}\index{Memory Layout!row-major vs. column-major} address this disparity by creating mappings between multi-dimensional tensor indices and linear memory addresses. These patterns significantly impact computational performance by determining memory access patterns during tensor operations. @fig-tensor-memory-layout makes this concrete with a 2 $\times$ 3 tensor: follow the same six values as they map into two different linear orderings---row-major and column-major---and note how the stride values change to compensate.
+Memory layout implementation introduces distinct challenges in tensor design. While tensors provide an abstraction of multi-dimensional data, physical computer memory remains linear. Stride patterns\index{Tensor!stride patterns}\index{Memory Layout!row-major vs. column-major} address this disparity by creating mappings between multi-dimensional tensor indices and linear memory addresses. These patterns significantly impact computational performance by determining memory access patterns during tensor operations. @fig-tensor-memory-layout makes this concrete with a 2$\times$ 3 tensor: follow the same six values as they map into two different linear orderings---row-major and column-major---and note how the stride values change to compensate.
 
-::: {#fig-tensor-memory-layout fig-env="figure" fig-pos="htb" fig-cap="**Tensor Memory Layout**: A 2 $\times$ 3 tensor can be stored in linear memory using either row-major (C-style) or column-major (Fortran-style) ordering. Strides define the number of elements to skip in each dimension when moving through memory, enabling frameworks to calculate memory addresses for tensor[i,j] as base_address + i $\times$ stride[0] + j $\times$ stride[1]. The choice of memory layout significantly impacts cache performance and computational efficiency." fig-alt="Left: 2 $\times$ 3 tensor grid with values 1-6. Right: two linear arrays showing row-major layout (1,2,3,4,5,6) and column-major layout (1,4,2,5,3,6). Below: stride calculations for row-major [3,1] and column-major [1,2]."}
+::: {#fig-tensor-memory-layout fig-env="figure" fig-pos="htb" fig-cap="**Tensor Memory Layout**: A 2$\times$ 3 tensor can be stored in linear memory using either row-major (C-style) or column-major (Fortran-style) ordering. Strides define the number of elements to skip in each dimension when moving through memory, enabling frameworks to calculate memory addresses for tensor[i,j] as base_address + i$\times$ stride[0] + j$\times$ stride[1]. The choice of memory layout significantly impacts cache performance and computational efficiency." fig-alt="Left: 2$\times$ 3 tensor grid with values 1-6. Right: two linear arrays showing row-major layout (1,2,3,4,5,6) and column-major layout (1,4,2,5,3,6). Below: stride calculations for row-major [3,1] and column-major [1,2]."}
 ```{.tikz}
 \begin{tikzpicture}[font=\footnotesize\usefont{T1}{phv}{m}{n}]
 % Define colors
@@ -2510,7 +2518,7 @@ Memory layout implementation introduces distinct challenges in tensor design. Wh
           fill=col1!50](B\row\col) at (\col*1.7, 1-\row*1.2) {\val};
   }
 }
-\node[above=2pt of B01]{\textbf{2D Tensor (2 $\times$ 3)}};
+\node[above=2pt of B01]{\textbf{2D Tensor (2$\times$ 3)}};
 \path[red](B02.north east)--++(1.35,0)coordinate(CR);
 \path[red](B12.340)--++(1.35,0)coordinate(ZE);
 % Row-major memory layout (RIGHT SIDE)
@@ -2534,13 +2542,13 @@ Memory layout implementation introduces distinct challenges in tensor design. Wh
 \textbf{Stride Calculation:}\\
 Row-major strides: [3, 1]\\
 Column-major strides: [1, 2]\\
-Element [i,j] offset = i $\times$ stride[0] + j $\times$ stride[1]
+Element [i,j] offset = i$\times$ stride[0] + j$\times$ stride[1]
 };
 \end{tikzpicture}
 ```
 :::
 
-These memory layout patterns are crucial for framework performance optimization. Row-major layout (used by NumPy, PyTorch) stores elements row by row, making row-wise operations more cache-friendly. Column-major layout (used by some BLAS libraries) stores elements column by column, optimizing column-wise access patterns. The stride values encode this layout information: in row-major layout for a 2 $\times$ 3 tensor, moving to the next row requires skipping 3 elements (stride[0]=3), while moving to the next column requires skipping 1 element (stride[1]=1).
+These memory layout patterns are crucial for framework performance optimization. Row-major layout (used by NumPy, PyTorch) stores elements row by row, making row-wise operations more cache-friendly. Column-major layout (used by some BLAS libraries) stores elements column by column, optimizing column-wise access patterns. The stride values encode this layout information: in row-major layout for a 2$\times$ 3 tensor, moving to the next row requires skipping 3 elements (stride[0]=3), while moving to the next column requires skipping 1 element (stride[1]=1).
 
 These memory layout details have direct performance implications. When a convolution kernel accesses weight values, row-major layout means consecutive weights along the output channel dimension are contiguous in memory---enabling efficient vectorized loads. Column-major layout would scatter those same weights across memory, forcing slower gather operations. Careful alignment of stride patterns with hardware memory hierarchies maximizes cache efficiency and memory throughput, with optimal layouts achieving 80--90% of theoretical memory bandwidth (1.5--3.0 TB/s on modern data-center GPUs like the A100 and H100) compared to suboptimal patterns that may achieve only 20--30% utilization.
 
@@ -2553,7 +2561,7 @@ Neural network training typically requires float32 precision to maintain stable 
 
 Type conversions between different numeric representations require careful management. Operating on tensors with different types demands explicit conversion rules to preserve numerical correctness. These conversions introduce computational costs and risk precision loss. Frameworks provide type casting capabilities but rely on developers to maintain numerical precision across operations.
 
-Tensors answer the first question---*what is the data?*---by encoding shape, layout, and precision into a single abstraction. But a perfectly shaped tensor on the wrong device, or one that must cross a 60 $\times$ bandwidth gap to reach the GPU, can erase every layout optimization. The next question is *where* data lives and *how* it moves.
+Tensors answer the first question---*what is the data?*---by encoding shape, layout, and precision into a single abstraction. But a perfectly shaped tensor on the wrong device, or one that must cross a 60$\times$ bandwidth gap to reach the GPU, can erase every layout optimization. The next question is *where* data lives and *how* it moves.
 
 #### Device and Memory Management {#sec-ml-frameworks-device-memory-management-9404}
 
@@ -2643,7 +2651,7 @@ a100_mem_str = DeviceBandwidthHierarchy.a100_mem_str
 \index{Memory Management!device placement}
 Tensors and their memory layouts establish *what* the framework computes with. Where that data physically resides, and how it moves between locations, determines whether computation happens at full speed or crawls.
 
-Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} pcie4_gbs_str` GB/s between CPU and GPU, while HBM2e provides `{python} MemoryWallSpecs.a100_bw_tbs_str` TB/s within the GPU. This bandwidth gap, exceeding 60 $\times$, means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
+Every tensor resides on a specific device, and cross-device operations incur transfer costs that can dominate execution time. PCIe 4.0 delivers `{python} pcie4_gbs_str` GB/s between CPU and GPU, while HBM2e provides `{python} MemoryWallSpecs.a100_bw_tbs_str` TB/s within the GPU. This bandwidth gap, exceeding 60$\times$, means a single misplaced tensor transfer can erase the entire speedup from GPU acceleration.
 
 Why does this matter for framework design? Because the framework must track where every tensor lives and enforce that operations only combine tensors on the same device. When data must move, the framework must decide whether to block execution or overlap the transfer with other work. These decisions, invisible to most users, determine whether a training loop achieves 30% or 80% of theoretical hardware throughput.
 
@@ -2651,18 +2659,18 @@ Three systems principles govern effective device and memory management: understa
 
 ##### Principle 1: The Device Bandwidth Hierarchy { .unnumbered}
 
-The cost of moving data between devices varies by orders of magnitude depending on the interconnect.[^fn-nvlink-frameworks] Before examining optimization strategies, we need to understand these costs quantitatively. @tbl-device-transfer-overhead shows transfer times for a 1000 $\times$ 1000 float32 tensor (4 MB)---roughly the size of a typical activation tensor in a moderately sized model. The numbers reveal why careless device placement can erase any speedup from GPU acceleration:
+The cost of moving data between devices varies by orders of magnitude depending on the interconnect.[^fn-nvlink-frameworks] Before examining optimization strategies, we need to understand these costs quantitatively. @tbl-device-transfer-overhead shows transfer times for a 1000$\times$ 1000 float32 tensor (4 MB)---roughly the size of a typical activation tensor in a moderately sized model. The numbers reveal why careless device placement can erase any speedup from GPU acceleration:
 
-[^fn-nvlink-frameworks]: **NVLink**: NVIDIA's high-bandwidth interconnect for GPU-to-GPU communication (see @sec-hardware-acceleration for architecture details), providing `{python} nvlink_a100_gbs_str` GB/s bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} pcie4_bidir_gbs_str` GB/s bidirectional for PCIe 4.0 x16. Critical for multi-GPU training where gradient synchronization requires moving gigabytes per iteration. NVSwitch extends NVLink to connect 8 GPUs in a fully-connected topology (DGX systems), enabling all-to-all communication without bottlenecks. The ~10 $\times$ bandwidth advantage over PCIe determines whether tensor parallelism is practical for a given model size.
+[^fn-nvlink-frameworks]: **NVLink**: NVIDIA's high-bandwidth interconnect for GPU-to-GPU communication (see @sec-hardware-acceleration for architecture details), providing `{python} nvlink_a100_gbs_str` GB/s bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} pcie4_bidir_gbs_str` GB/s bidirectional for PCIe 4.0 x16. Critical for multi-GPU training where gradient synchronization requires moving gigabytes per iteration. NVSwitch extends NVLink to connect 8 GPUs in a fully-connected topology (DGX systems), enabling all-to-all communication without bottlenecks. The ~10$\times$ bandwidth advantage over PCIe determines whether tensor parallelism is practical for a given model size.
 
 | **Interconnect** |                                     **Bandwidth** |               **Transfer Time** | **Relative to Compute**             |
 |:-----------------|--------------------------------------------------:|--------------------------------:|:------------------------------------|
-| **PCIe 3.0 x16** |                                           16 GB/s |                         0.25 ms | 10 $\times$ slower than GPU compute |
-| **PCIe 4.0 x16** |                     `{python} pcie4_gbs_str` GB/s |  `{python} pcie4_4mb_ms_str` ms | 5 $\times$ slower than GPU compute  |
+| **PCIe 3.0 x16** |                                           16 GB/s |                         0.25 ms | 10$\times$ slower than GPU compute |
+| **PCIe 4.0 x16** |                     `{python} pcie4_gbs_str` GB/s |  `{python} pcie4_4mb_ms_str` ms | 5$\times$ slower than GPU compute  |
 | **NVLink 3.0**   | `{python} nvlink_a100_gbs_str` GB/s bidirectional | `{python} nvlink_4mb_ms_str` ms | Comparable to GPU compute           |
 | **GPU Memory**   |                   `{python} a100_bw_gbs_str` GB/s |    `{python} hbm_4mb_ms_str` ms | Optimal                             |
 
-: **Device Transfer Overhead.** Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2 $\times$ total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead}
+: **Device Transfer Overhead.** Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead}
 
 These numbers connect directly to the **Iron Law** of performance. Every cross-device transfer inflates the data movement term ($D_{vol}/BW$) at a fraction of the available on-device bandwidth. A PCIe 4.0 transfer at `{python} pcie4_gbs_str` GB/s means moving a 1 GB activation tensor adds approximately `{python} pcie4_1gb_ms_str` ms to the data movement cost, equivalent to roughly `{python} pcie4_1gb_equiv_ops_str` trillion operations on a GPU delivering `{python} A100BLAS.dense_tflops_str` TFLOPS. For a model forward pass taking 0.5 ms on GPU, transferring inputs and outputs over PCIe 3.0 doubles the total latency. When batches are small or models are lightweight, transfer overhead can exceed computation time entirely.
 
@@ -2845,13 +2853,13 @@ pcie4_gbs_str = DataloaderThroughput.pcie4_gbs_str
 ```
 
 \index{Data Pipeline!throughput optimization}
-Streams and events answer the second question---*where does data live, and how does it move?*---by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. But scheduling alone cannot help if data arrives too slowly in the first place. The third question is *how does data arrive fast enough?* The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} img_res` $\times$ `{python} img_res` resolution requires approximately `{python} dataloader_mbs_str` MB/s of sustained data throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the **Iron Law** drops below 1.
+Streams and events answer the second question---*where does data live, and how does it move?*---by overlapping transfers with computation so that the GPU rarely stalls on a single tensor. But scheduling alone cannot help if data arrives too slowly in the first place. The third question is *how does data arrive fast enough?* The core systems principle is straightforward: the data pipeline must sustain the accelerator's consumption rate. A GPU processing 1,000 images per second at `{python} img_res`$\times$ `{python} img_res` resolution requires approximately `{python} dataloader_mbs_str` MB/s of sustained data throughput. If the pipeline cannot maintain this rate, the accelerator idles and the effective utilization term in the **Iron Law** drops below 1.
 
 Frameworks address this throughput requirement through three mechanisms. The first is *parallel worker processes*: the DataLoader spawns multiple CPU processes, each independently loading and preprocessing samples. Because data loading involves disk I/O and CPU-bound transformations (decoding, augmentation, normalization), a single process cannot saturate a modern GPU. Multiple workers overlap I/O wait times with preprocessing computation, collectively sustaining throughput that no single process could achieve. When `num_workers > 0`, the DataLoader distributes sample indices across workers through a shared queue, and workers push completed samples to a data queue that the main process assembles into batches.
 
 The second mechanism is *prefetching*. The `prefetch_factor` parameter (default 2) controls how many batches each worker prepares in advance. With 4 workers and `prefetch_factor=2`, the pipeline maintains 8 batches in flight, ensuring the GPU never stalls waiting for data. While the model processes batch $N$ on the GPU, workers simultaneously load and preprocess batch $N+1$ through $N+8$ on CPUs, effectively hiding data loading latency behind computation. The cost is memory consumption proportional to batch size times prefetch depth.
 
-The third mechanism is *pinned memory for DMA transfers*. The `pin_memory=True` option allocates batch data in page-locked (pinned) host memory rather than pageable memory. Pageable memory can be swapped to disk by the operating system, forcing the CUDA runtime to first copy data to a temporary pinned buffer before initiating the GPU transfer. Pinned memory bypasses this intermediate copy, enabling direct memory access (DMA) transfers where the GPU's memory controller reads directly from host memory while the CPU continues other work. For a batch of 64 images at 224 $\times$ 224 $\times$ 3 in FP32 (`{python} batch_mb_str` MB), pinned memory transfer takes approximately `{python} batch_transfer_ms_str` ms over PCIe 4.0 x16 (`{python} pcie4_gbs_str` GB/s) compared to ~3.0 ms with pageable memory, a 2–3 $\times$ speedup. The cost is reduced available system memory, as pinned pages cannot be swapped.
+The third mechanism is *pinned memory for DMA transfers*. The `pin_memory=True` option allocates batch data in page-locked (pinned) host memory rather than pageable memory. Pageable memory can be swapped to disk by the operating system, forcing the CUDA runtime to first copy data to a temporary pinned buffer before initiating the GPU transfer. Pinned memory bypasses this intermediate copy, enabling direct memory access (DMA) transfers where the GPU's memory controller reads directly from host memory while the CPU continues other work. For a batch of 64 images at 224$\times$ 224$\times$ 3 in FP32 (`{python} batch_mb_str` MB), pinned memory transfer takes approximately `{python} batch_transfer_ms_str` ms over PCIe 4.0 x16 (`{python} pcie4_gbs_str` GB/s) compared to ~3.0 ms with pageable memory, a 2–3$\times$ speedup. The cost is reduced available system memory, as pinned pages cannot be swapped.
 
 These three mechanisms appear together in the DataLoader configuration. Understanding how each parameter connects to the underlying systems principle helps practitioners diagnose data pipeline bottlenecks. @lst-dataloader-throughput shows a typical setup where `num_workers` enables parallel loading, `prefetch_factor` controls pipeline depth, and `pin_memory` enables DMA transfers:
 
@@ -2900,7 +2908,7 @@ A final detail is *collation*: the `collate_fn` parameter determines how individ
 # │ How: model_memory() formula; m_as(Bparam) for param count extraction.
 # │
 # │ Note: PERSISTENT — gpt3_params_b_str / gpt3_fp16_gb_str reused again at
-# │       @sec-ml-frameworks-principle-3 (line ~3225) and Fallacies (line ~4082).
+# │       @sec-ml-frameworks-nnmodule-abstraction-2622 (line ~3225) and Fallacies (line ~4082).
 # │       Produces identical values to gpt3-memory-footprint cell (line ~1651).
 # │
 # │ Imports: mlsys.constants (GPT3_PARAMS, BYTES_FP16, GB, Bparam),
@@ -3128,7 +3136,7 @@ The hardware abstraction layer isolates framework code from platform-specific de
 ##### Compute Kernel Management {.unnumbered}
 
 \index{Kernel Dispatch!hardware selection}
-The kernel manager dispatches each operation to the fastest available implementation for the current hardware. When a framework encounters a matrix multiplication, it selects among AVX-512 vector instructions on modern CPUs, [cuBLAS](https://developer.nvidia.com/cublas) on NVIDIA GPUs, or dedicated tensor processing instructions on AI accelerators. The dispatch decision depends on input dimensions, data layout, and hardware capabilities. A 4096 $\times$ 4096 GEMM on an A100 GPU routes to cuBLAS Tensor Core kernels that sustain up to `{python} A100BLAS.dense_tflops_str` TFLOPS in FP16, while the same operation on a CPU falls back to an AVX-512 path at roughly 2 TFLOPS. When no specialized kernel exists, the manager falls back to a generic implementation rather than failing.
+The kernel manager dispatches each operation to the fastest available implementation for the current hardware. When a framework encounters a matrix multiplication, it selects among AVX-512 vector instructions on modern CPUs, [cuBLAS](https://developer.nvidia.com/cublas) on NVIDIA GPUs, or dedicated tensor processing instructions on AI accelerators. The dispatch decision depends on input dimensions, data layout, and hardware capabilities. A 4096$\times$ 4096 GEMM on an A100 GPU routes to cuBLAS Tensor Core kernels that sustain up to `{python} A100BLAS.dense_tflops_str` TFLOPS in FP16, while the same operation on a CPU falls back to an AVX-512 path at roughly 2 TFLOPS. When no specialized kernel exists, the manager falls back to a generic implementation rather than failing.
 
 ##### Memory System Abstraction {.unnumbered}
 
@@ -3182,9 +3190,9 @@ resnet_gflops_str = ResNetGFLOPS.resnet_gflops_str
 \index{GEMM!arithmetic intensity}
 With hardware abstraction managing the platform-specific details, frameworks build a layer of mathematical operations on top. General Matrix Multiply (GEMM)\index{GEMM!matrix multiplication}\index{Tensor Operations!GEMM} dominates ML computation (see @sec-algorithm-foundations-general-matrix-multiply-gemm-b55d for arithmetic intensity analysis and the roofline implications). The operation C = $\alpha$AB + $\beta$C accounts for the vast majority of arithmetic in neural networks: a single ResNet-50 forward pass performs approximately `{python} resnet_gflops_str` billion floating-point operations, nearly all of which reduce to GEMM. Frameworks optimize GEMM through cache-aware tiling (splitting matrices into blocks that fit in L1/L2 cache), loop unrolling for instruction-level parallelism, and shape-specific kernels. Fully connected layers use standard dense GEMM, while convolutional layers use im2col transformations that reshape input patches into matrix columns, converting convolution into GEMM.
 
-Beyond GEMM, frameworks implement BLAS operations\index{BLAS!vector and matrix operations} (AXPY for vector addition, GEMV for matrix-vector products) and element-wise operations\index{Element-wise Operations!memory bandwidth} (activation functions, normalization). Element-wise operations are individually cheap but collectively expensive due to memory bandwidth. Each operation reads and writes the full tensor, so a sequence of five element-wise operations on a 100 MB tensor moves 1 GB of data. Fusing those five operations into a single kernel reduces memory traffic to 200 MB, a 5 $\times$ bandwidth savings that directly translates to faster execution.
+Beyond GEMM, frameworks implement BLAS operations\index{BLAS!vector and matrix operations} (AXPY for vector addition, GEMV for matrix-vector products) and element-wise operations\index{Element-wise Operations!memory bandwidth} (activation functions, normalization). Element-wise operations are individually cheap but collectively expensive due to memory bandwidth. Each operation reads and writes the full tensor, so a sequence of five element-wise operations on a 100 MB tensor moves 1 GB of data. Fusing those five operations into a single kernel reduces memory traffic to 200 MB, a 5$\times$ bandwidth savings that directly translates to faster execution.
 
-Numerical precision adds another dimension. Training in FP32 uses 4 bytes per parameter; quantizing to INT8 reduces this to 1 byte, cutting memory by 4 $\times$ and enabling 2–4 $\times$ throughput improvements on hardware with INT8 acceleration. Training typically requires FP32 for gradient stability, while inference runs at FP16 or INT8 with minimal accuracy loss. Frameworks maintain separate kernel implementations for each precision format and handle mixed-precision workflows where different layers operate at different bit widths within a single forward pass.
+Numerical precision adds another dimension. Training in FP32 uses 4 bytes per parameter; quantizing to INT8 reduces this to 1 byte, cutting memory by 4$\times$ and enabling 2–4$\times$ throughput improvements on hardware with INT8 acceleration. Training typically requires FP32 for gradient stability, while inference runs at FP16 or INT8 with minimal accuracy loss. Frameworks maintain separate kernel implementations for each precision format and handle mixed-precision workflows where different layers operate at different bit widths within a single forward pass.
 
 #### System-Level Operations {#sec-ml-frameworks-systemlevel-operations-6a1c}
 
@@ -3565,7 +3573,7 @@ The preceding sections described each framework's design philosophy in qualitati
 | **Execution Mode**            | Eager (2.x default), Graph       | Eager                   | Just-in-time compilation   |
 | **Automatic Differentiation** | Reverse mode                     | Reverse mode            | Forward and Reverse mode   |
 | **Hardware Acceleration**     | CPU, GPU, TPU                    | CPU, GPU                | CPU, GPU, TPU              |
-| **Compilation Optimization**  | XLA: 3–10 $\times$ speedup       | TorchScript: 2 $\times$ | XLA: 3–10 $\times$ speedup |
+| **Compilation Optimization**  | XLA: 3–10$\times$ speedup       | TorchScript: 2$\times$ | XLA: 3–10$\times$ speedup |
 | **Memory Efficiency**         | 70--90% (workload dependent)     | 70--90% (varies)        | 75--95% (with XLA fusion)  |
 | **Distributed Scalability**   | High (1024+ GPUs)                | High                    | Very High (1024+ GPUs)     |
 
@@ -3632,7 +3640,7 @@ These three implementations solve the same mathematical problem but reveal disti
 
 [^fn-pure-function]: **Pure Function**: Has no side effects and always returns the same output for the same inputs. Pure functions enable mathematical reasoning about code behavior and safe program transformations.
 
-[^fn-xla]: **XLA (Accelerated Linear Algebra)**: Google's domain-specific compiler released in March 2017, optimizing tensor operations across CPUs, GPUs, and TPUs. The name emphasizes that linear algebra operations (matrix multiplies, convolutions) dominate ML computation. Achieves 3–10 $\times$ speedups through operation fusion and hardware-specific codegen. Now part of OpenXLA (2022), a cross-industry effort including Google, Meta, NVIDIA, and Apple.
+[^fn-xla]: **XLA (Accelerated Linear Algebra)**: Google's domain-specific compiler released in March 2017, optimizing tensor operations across CPUs, GPUs, and TPUs. The name emphasizes that linear algebra operations (matrix multiplies, convolutions) dominate ML computation. Achieves 3–10$\times$ speedups through operation fusion and hardware-specific codegen. Now part of OpenXLA (2022), a cross-industry effort including Google, Meta, NVIDIA, and Apple.
 
 [^fn-onnx]: **ONNX (Open Neural Network Exchange)** [@bai2019onnx]: Launched September 2017 by Facebook and Microsoft to solve framework fragmentation. Originally named "Toffee" internally at Facebook, the name change emphasized its role as an exchange format. Became a Linux Foundation project in 2019. Enables training in PyTorch and deploying via TensorFlow Lite or TensorRT without manual conversion.
 
@@ -3647,21 +3655,21 @@ How large are these differences in practice? @tbl-framework-efficiency-matrix co
 | **Framework**             | **Inference** **Latency (ms)** | **Memory** **Usage (MB)** | **Energy** **(mJ/inference)** | **Model Size** **Reduction** | **Hardware** **Utilization (%)** |
 |:--------------------------|-------------------------------:|--------------------------:|------------------------------:|-----------------------------:|---------------------------------:|
 | **TensorFlow**            |                             45 |                     2,100 |                           850 |                         None |                               35 |
-| **TensorFlow Lite**       |                             12 |                       180 |                           120 |       4 $\times$ (quantized) |                               65 |
-| **TensorFlow Lite Micro** |                              8 |                        32 |                            45 |    8 $\times$ (pruned+quant) |                               75 |
+| **TensorFlow Lite**       |                             12 |                       180 |                           120 |       4$\times$ (quantized) |                               65 |
+| **TensorFlow Lite Micro** |                              8 |                        32 |                            45 |    8$\times$ (pruned+quant) |                               75 |
 | **PyTorch**               |                             52 |                     1,800 |                           920 |                         None |                               32 |
-| **PyTorch Mobile**        |                             18 |                       220 |                           180 |       3 $\times$ (quantized) |                               58 |
-| **ONNX Runtime**          |                             15 |                       340 |                           210 |       2 $\times$ (optimized) |                               72 |
-| **TensorRT**              |                              3 |                       450 |                            65 |   2 $\times$ (precision opt) |                               88 |
-| **Apache TVM**            |                              6 |                       280 |                            95 |        3 $\times$ (compiled) |                               82 |
+| **PyTorch Mobile**        |                             18 |                       220 |                           180 |       3$\times$ (quantized) |                               58 |
+| **ONNX Runtime**          |                             15 |                       340 |                           210 |       2$\times$ (optimized) |                               72 |
+| **TensorRT**              |                              3 |                       450 |                            65 |   2$\times$ (precision opt) |                               88 |
+| **Apache TVM**            |                              6 |                       280 |                            95 |        3$\times$ (compiled) |                               82 |
 
 : **Framework Efficiency Comparison.** Quantitative comparison of major ML frameworks across efficiency dimensions using ResNet-50 inference on representative hardware (NVIDIA A100 GPU for server frameworks, ARM Cortex-A78 for mobile). Metrics reflect production workloads with accuracy maintained within 1% of baseline. Hardware utilization represents percentage of theoretical peak performance on typical operations. {#tbl-framework-efficiency-matrix}
 
 \index{TensorRT!hardware utilization}
 \index{Apache TVM!ML compiler}
-The efficiency data reveals several important patterns. First, specialized inference frameworks (TensorRT, Apache TVM) achieve 10–15 $\times$ lower latency than general-purpose training frameworks (PyTorch, TensorFlow) on identical hardware, demonstrating that framework selection has quantitative performance implications beyond qualitative design preferences. Second, mobile-optimized variants (TF Lite, PyTorch Mobile) reduce memory requirements by 10 $\times$ compared to their full counterparts while maintaining accuracy within 1% through quantization and graph optimization. Third, hardware utilization varies dramatically: TensorRT achieves 88% GPU utilization through aggressive kernel fusion while vanilla PyTorch achieves only 32%, a 2.75 $\times$ efficiency gap that directly translates to cost differences in production deployment.
+The efficiency data reveals several important patterns. First, specialized inference frameworks (TensorRT, Apache TVM) achieve 10–15$\times$ lower latency than general-purpose training frameworks (PyTorch, TensorFlow) on identical hardware, demonstrating that framework selection has quantitative performance implications beyond qualitative design preferences. Second, mobile-optimized variants (TF Lite, PyTorch Mobile) reduce memory requirements by 10$\times$ compared to their full counterparts while maintaining accuracy within 1% through quantization and graph optimization. Third, hardware utilization varies dramatically: TensorRT achieves 88% GPU utilization through aggressive kernel fusion while vanilla PyTorch achieves only 32%, a 2.75$\times$ efficiency gap that directly translates to cost differences in production deployment.
 
-These efficiency gaps, significant in the data center, become existential as we move beyond the server room. A 17 $\times$ latency difference between PyTorch and TensorRT is an optimization opportunity on a cloud GPU; on a microcontroller with 256 KB of RAM, a framework that requires 1.8 GB of memory simply cannot run at all. The question shifts from "which framework is fastest?" to "which framework fits?"
+These efficiency gaps, significant in the data center, become existential as we move beyond the server room. A 17$\times$ latency difference between PyTorch and TensorRT is an optimization opportunity on a cloud GPU; on a microcontroller with 256 KB of RAM, a framework that requires 1.8 GB of memory simply cannot run at all. The question shifts from "which framework is fastest?" to "which framework fits?"
 
 ## Deployment Targets {#sec-ml-frameworks-deployment-targets-13f1}
 
@@ -3846,7 +3854,7 @@ When `h = torch.relu(x @ W1 + b1)` executes, PyTorch's eager execution triggers 
 
 1. **Python Dispatch**\index{Python Dispatch!overhead} (~1μs): Python interpreter calls `torch.matmul`, which routes through PyTorch's dispatcher to select the CUDA backend.
 
-2. **Kernel Selection**\index{BLAS Library!kernel selection} (~0.5μs): cuBLAS selects an optimized GEMM kernel based on matrix dimensions (`{python} train_batch` $\times$ `{python} train_input` $\times$ `{python} train_input` $\times$ `{python} train_hidden`). For these dimensions, it might choose a tiled algorithm optimized for L2 cache.
+2. **Kernel Selection**\index{BLAS Library!kernel selection} (~0.5μs): cuBLAS selects an optimized GEMM kernel based on matrix dimensions (`{python} train_batch`$\times$ `{python} train_input`$\times$ `{python} train_input`$\times$ `{python} train_hidden`). For these dimensions, it might choose a tiled algorithm optimized for L2 cache.
 
 3. **Kernel Launch** (~5μs): The selected kernel is queued to the GPU's command buffer. The CPU continues immediately (asynchronous execution).
 
@@ -3981,11 +3989,11 @@ train_bwd_ai_str = TrainingStepCalc.train_bwd_ai_str
 
 | **Component**                     |                                                                **FLOPs** |            **Memory Traffic** |     **Arithmetic Intensity** |
 |:----------------------------------|-------------------------------------------------------------------------:|------------------------------:|-----------------------------:|
-| **MatMul (x @ W1)**               | 2 $\times$ 32 $\times$ 784 $\times$ 256 = `{python} train_mm1_flops_str` |  `{python} train_mm1_mem_str` |  `{python} train_mm1_ai_str` |
-| **ReLU**                          |                        32 $\times$ 256 = `{python} train_relu_flops_str` | `{python} train_relu_mem_str` | `{python} train_relu_ai_str` |
-| **MatMul (h @ W2)**               |  2 $\times$ 32 $\times$ 256 $\times$ 10 = `{python} train_mm2_flops_str` |  `{python} train_mm2_mem_str` |  `{python} train_mm2_ai_str` |
+| **MatMul (x @ W1)**               | 2$\times$ 32$\times$ 784$\times$ 256 = `{python} train_mm1_flops_str` |  `{python} train_mm1_mem_str` |  `{python} train_mm1_ai_str` |
+| **ReLU**                          |                        32$\times$ 256 = `{python} train_relu_flops_str` | `{python} train_relu_mem_str` | `{python} train_relu_ai_str` |
+| **MatMul (h @ W2)**               |  2$\times$ 32$\times$ 256$\times$ 10 = `{python} train_mm2_flops_str` |  `{python} train_mm2_mem_str` |  `{python} train_mm2_ai_str` |
 | **Cross-entropy**                 |                                           ~`{python} train_ce_flops_str` |   `{python} train_ce_mem_str` |   `{python} train_ce_ai_str` |
-| **Backward (2 $\times$ forward)** |                                          ~`{python} train_bwd_flops_str` |  `{python} train_bwd_mem_str` |  `{python} train_bwd_ai_str` |
+| **Backward (2$\times$ forward)** |                                          ~`{python} train_bwd_flops_str` |  `{python} train_bwd_mem_str` |  `{python} train_bwd_ai_str` |
 
 : **Per-Operation Roofline Analysis.** FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations achieve arithmetic intensity above 1.0 (compute-bound on most hardware), while ReLU and cross-entropy are far below 1.0 (memory-bound), quantifying why kernel fusion targets element-wise operations. {#tbl-training-step-roofline}
 
@@ -4050,11 +4058,11 @@ Total: ~`{python} mnist_total_flops_str` FLOPs, ~`{python} mnist_mem_traffic_str
 
 - Tcompute ≈ `{python} mnist_total_flops_str` / `{python} a100_peak_tflops_str` TFLOPS ≈ `{python} mnist_t_compute_us_str`µs
 - Tmemory ≈ `{python} mnist_mem_traffic_str` / `{python} a100_mem_bw_tbs_str` TB/s ≈ `{python} mnist_t_memory_us_str`µs
-- Toverhead ≈ `{python} mnist_n_ops_str` ops $\times$ `{python} mnist_us_per_op_str` μs ≈ `{python} mnist_t_overhead_us_str` μs
+- Toverhead ≈ `{python} mnist_n_ops_str` ops$\times$ `{python} mnist_us_per_op_str` μs ≈ `{python} mnist_t_overhead_us_str` μs
 
 The training step is overhead-bound.\index{Overhead-bound!small model training} For small models, Python dispatch and kernel launch dominate. This explains why:
 
-- `torch.compile` provides 2--3 $\times$ speedup by fusing operations and reducing kernel launches
+- `torch.compile` provides 2--3$\times$ speedup by fusing operations and reducing kernel launches
 - Batch size increases help amortize per-batch overhead
 - Production training uses much larger models where compute dominates
 
@@ -4083,7 +4091,7 @@ This detailed trace through a single training step demonstrates how deeply the t
 
 ## Fallacies and Pitfalls {#sec-ml-frameworks-fallacies-pitfalls-61ef}
 
-Framework selection involves subtle trade-offs where intuitions from conventional software engineering fail. The memory wall, kernel fusion constraints, and deployment target diversity create pitfalls that waste months of engineering effort and cause production systems to miss latency targets by 10 $\times$ or more.
+Framework selection involves subtle trade-offs where intuitions from conventional software engineering fail. The memory wall, kernel fusion constraints, and deployment target diversity create pitfalls that waste months of engineering effort and cause production systems to miss latency targets by 10$\times$ or more.
 
 ```{python}
 #| label: framework-gaps-calc
@@ -4137,15 +4145,15 @@ memory_ratio_str = FrameworkGapsCalc.memory_ratio_str
 
 **Fallacy:** *"All frameworks provide equivalent performance for the same model architecture."*
 
-Engineers assume that ResNet-50 yields identical performance across frameworks since the mathematics is the same. In production, framework implementation matters enormously. @tbl-framework-efficiency-matrix shows PyTorch achieves `{python} pytorch_ms_str` ms inference at 32% hardware utilization while TensorRT delivers `{python} tensorrt_ms_str` ms at 88% utilization---a **`{python} perf_gap_str` $\times$ performance gap** on identical hardware. The difference arises from kernel fusion depth, graph optimization strategies, and memory access patterns that vary dramatically between frameworks. Organizations that assume equivalence miss latency SLAs and require costly last-minute framework migrations.
+Engineers assume that ResNet-50 yields identical performance across frameworks since the mathematics is the same. In production, framework implementation matters enormously. @tbl-framework-efficiency-matrix shows PyTorch achieves `{python} pytorch_ms_str` ms inference at 32% hardware utilization while TensorRT delivers `{python} tensorrt_ms_str` ms at 88% utilization---a **`{python} perf_gap_str`$\times$ performance gap** on identical hardware. The difference arises from kernel fusion depth, graph optimization strategies, and memory access patterns that vary dramatically between frameworks. Organizations that assume equivalence miss latency SLAs and require costly last-minute framework migrations.
 
 **Pitfall:** *Choosing frameworks based on popularity rather than project requirements.*
 
-Engineers assume the most popular framework works for any project. In reality, deployment constraints dominate. @tbl-framework-efficiency-matrix shows PyTorch Mobile requires `{python} pytorch_mobile_mb_str` MB memory while TensorFlow Lite Micro runs in `{python} tflite_micro_kb_str` KB---a **`{python} memory_ratio_str` $\times$ difference**. Teams that prototype edge applications with PyTorch face either memory bloat that exceeds device capacity or 2--3 month framework migrations after development completes. Evaluate deployment targets per @sec-ml-frameworks-deployment-targets-13f1 *before* selecting a training framework.
+Engineers assume the most popular framework works for any project. In reality, deployment constraints dominate. @tbl-framework-efficiency-matrix shows PyTorch Mobile requires `{python} pytorch_mobile_mb_str` MB memory while TensorFlow Lite Micro runs in `{python} tflite_micro_kb_str` KB---a **`{python} memory_ratio_str`$\times$ difference**. Teams that prototype edge applications with PyTorch face either memory bloat that exceeds device capacity or 2--3 month framework migrations after development completes. Evaluate deployment targets per @sec-ml-frameworks-deployment-targets-13f1 *before* selecting a training framework.
 
 **Fallacy:** *"Framework abstractions eliminate the need for systems knowledge."*
 
-Engineers assume high-level APIs handle all optimization automatically. The **Roofline Model** (@sec-machine-foundations-roofline-model-2529) proves otherwise: element-wise operations like ReLU achieve arithmetic intensity of 0.125 FLOPs/byte, utilizing **under 0.1%** of an A100's peak compute regardless of framework sophistication. @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 explains why: memory bandwidth, not compute, is the bottleneck for most operations. Engineers who lack this understanding leave 80--90% of hardware capacity unused, directly translating to 5–10 $\times$ higher inference costs at production scale.
+Engineers assume high-level APIs handle all optimization automatically. The **Roofline Model** (@sec-machine-foundations-roofline-model-2529) proves otherwise: element-wise operations like ReLU achieve arithmetic intensity of 0.125 FLOPs/byte, utilizing **under 0.1%** of an A100's peak compute regardless of framework sophistication. @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 explains why: memory bandwidth, not compute, is the bottleneck for most operations. Engineers who lack this understanding leave 80--90% of hardware capacity unused, directly translating to 5–10$\times$ higher inference costs at production scale.
 
 **Pitfall:** *Ignoring vendor lock-in from framework-specific formats.*
 
@@ -4250,7 +4258,7 @@ eager_total_str = CompilationOverheadCalc.eager_total_str
 compiled_total_str = CompilationOverheadCalc.compiled_total_str
 ```
 
-Engineers assume compilation overhead is a one-time cost that pays off quickly. @tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput but incurs 15--60 seconds compilation overhead per graph change. For a `{python} n_images_str`-image experiment with `{python} n_recompilations_str` code changes: Eager completes in `{python} eager_total_str` seconds while Compiled requires `{python} compiled_total_str` seconds (including `{python} n_recompilations_str` $\times$ `{python} compilation_time_s_str` s recompilation overhead). Teams that enable compilation during rapid prototyping waste hours waiting for recompilations that negate any throughput gains.
+Engineers assume compilation overhead is a one-time cost that pays off quickly. @tbl-training-benchmark shows torch.compile achieves 48% higher ResNet-50 throughput but incurs 15--60 seconds compilation overhead per graph change. For a `{python} n_images_str`-image experiment with `{python} n_recompilations_str` code changes: Eager completes in `{python} eager_total_str` seconds while Compiled requires `{python} compiled_total_str` seconds (including `{python} n_recompilations_str`$\times$ `{python} compilation_time_s_str` s recompilation overhead). Teams that enable compilation during rapid prototyping waste hours waiting for recompilations that negate any throughput gains.
 
 ## Summary {#sec-ml-frameworks-summary-07f0}
 
@@ -4267,10 +4275,10 @@ These problems are interconnected and constrained by the **Iron Law** of perform
 ::: {.callout-takeaways title="The Layer Between Math and Hardware"}
 
 * **Three problems define every framework**: Execution (how to run), differentiation (how to train), and abstraction (how to express). TensorFlow prioritizes abstraction for deployment breadth, PyTorch prioritizes execution for research velocity, and JAX reframes differentiation through composable function transformations. These are infrastructure commitments, not tooling preferences.
-* **The memory wall drives optimization**: Compute has grown approximately 1000 $\times$ faster than memory bandwidth. Kernel fusion, activation checkpointing, mixed-precision training, and data layout optimizations all target the data movement term ($D_{vol}$) in the Iron Law, not the compute term.
+* **The memory wall drives optimization**: Compute has grown approximately 1000$\times$ faster than memory bandwidth. Kernel fusion, activation checkpointing, mixed-precision training, and data layout optimizations all target the data movement term ($D_{vol}$) in the Iron Law, not the compute term.
 * **Compilation pays off only at scale**: The Compilation Continuum principle (@eq-compilation-benefit) quantifies when compilation benefits exceed costs. Research prototyping favors eager mode; production training and inference favor progressive compilation from JIT to AOT. The Dispatch Overhead Law (@eq-dispatch-overhead) explains why small models benefit disproportionately.
 * **The nn.Module pattern is widely adopted**: Automatic parameter discovery, mode-dependent behavior, and hierarchical composition with serialization appear across major frameworks, enabling million-parameter optimization in a single `optimizer.step()` call regardless of API syntax.
-* **Framework choice constrains deployment by orders of magnitude**: A 17 $\times$ latency gap (PyTorch vs. TensorRT) and 7,040 $\times$ memory gap (PyTorch Mobile vs. TFLite Micro) on identical models demonstrate that frameworks are not interchangeable. Deployment target must be evaluated before framework selection.
+* **Framework choice constrains deployment by orders of magnitude**: A 17$\times$ latency gap (PyTorch vs. TensorRT) and 7,040$\times$ memory gap (PyTorch Mobile vs. TFLite Micro) on identical models demonstrate that frameworks are not interchangeable. Deployment target must be evaluated before framework selection.
 
 :::
 

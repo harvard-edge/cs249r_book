@@ -148,6 +148,7 @@ class ValidateCommand:
         ],
         "rendering": [
             ("patterns", "_run_rendering"),
+            ("python-echo", "_run_python_echo"),
             ("indexes", "_run_indexes"),
             ("dropcaps", "_run_dropcaps"),
             ("parts", "_run_parts"),
@@ -1481,6 +1482,14 @@ class ValidateCommand:
             ("quad_asterisks", re.compile(r"\*{4,}"), "Quad asterisks — likely malformed bold/italic", "warning"),
             ("footnote_in_table", re.compile(r"^\|.*\[\^fn-[^\]]+\].*\|"), "Footnote in table cell — may break PDF", "warning"),
             ("double_dollar_python", re.compile(r"\$\$[^$]*`\{python\}"), "Inline Python in display math", "error"),
+            # Currency: unescaped $ before number can be parsed as math. Use \$ for currency (see book-prose.md).
+            # Match: $1,000 (comma), $4.00 (decimal), $50 million/billion/etc.
+            # Exclude: $1.5 \times (math), $0.5$ (inline math), $4.6 / (division).
+            ("unescaped_currency", re.compile(
+                r"(?<!\\)\$[0-9]{1,3}(?:,[0-9]{3})+(?=\s(?!\s*\\times)|,[0-9]|\)|$)"  # $1,000, exclude $25,000 \times
+                r"|(?<!\\)\$[0-9]+\.[0-9]+(?=\s(?!\s*\\times)(?!\s*/)(?!\s*-)(?!\s*\+)(?!\s*\\ll)|,[0-9]|\)|$|/)(?!\\$)"  # $4.00, exclude math
+                r"|(?<!\\)\$[0-9]+(?=\s+(?:million|billion|thousand|M|B|K|per|each|/))"  # $50 million
+            ), "Unescaped dollar before number — use \\$ for currency", "warning"),
         ]
 
         grid_sep_pat = re.compile(r"^\+[-:=+]+\+$")
@@ -1587,6 +1596,68 @@ class ValidateCommand:
         return ValidationRunResult(
             name="rendering",
             description="Check for problematic rendering patterns",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_python_echo(self, root: Path) -> ValidationRunResult:
+        """Ensure every ```{python} block has #| echo: false (code must not appear in output)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start_re = re.compile(r"^```\{python\}")
+        block_end_re = re.compile(r"^```\s*$")
+        # Quarto chunk option: #| echo: false (with optional whitespace)
+        echo_false_re = re.compile(r"#\|\s*echo\s*:\s*false", re.IGNORECASE)
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if not block_start_re.match(line):
+                    i += 1
+                    continue
+                start_line = i + 1
+                found_echo_false = False
+                j = i + 1
+                # Scan option lines: #| key: value, or blank, until we hit code or closing ```
+                while j < len(lines):
+                    next_line = lines[j]
+                    if block_end_re.match(next_line):
+                        break
+                    stripped = next_line.strip()
+                    if echo_false_re.search(stripped):
+                        found_echo_false = True
+                        break
+                    # Option line or blank — keep scanning
+                    if stripped.startswith("#|") or not stripped:
+                        j += 1
+                        continue
+                    # Non-option line (actual code or comment) — options are done
+                    break
+                if not found_echo_false:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=start_line,
+                            code="python_missing_echo_false",
+                            message="Python block must include #| echo: false — code must not appear in rendered output",
+                            severity="error",
+                            context="Add #| echo: false as first line after ```{python}",
+                        )
+                    )
+                # Advance past this block to the line after closing ```
+                k = j
+                while k < len(lines) and not block_end_re.match(lines[k]):
+                    k += 1
+                i = k + 1
+
+        return ValidationRunResult(
+            name="python-echo",
+            description="Check Python blocks have echo: false",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
