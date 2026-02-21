@@ -7,6 +7,14 @@ engine: jupyter
 
 # Model Training {#sec-model-training}
 
+```{python}
+#| echo: false
+#| label: chapter-start
+from mlsys.registry import start_chapter
+
+start_chapter("vol1:training")
+```
+
 ::: {layout-narrow}
 ::: {.column-margin}
 \chapterminitoc
@@ -2768,7 +2776,7 @@ Even well-designed pipeline architectures rarely achieve optimal performance wit
 
 These bottlenecks manifest differently across system scales---a 100 GB model faces different constraints than a 1 GB model---but identification and mitigation follow consistent principles. Data movement latency emerges when training batches cannot flow from storage through preprocessing to compute units fast enough to keep accelerators utilized. Computational throughput limitations occur when mathematical operations execute below hardware peak performance due to suboptimal precision choices or kernel inefficiencies. Memory capacity constraints restrict both the model sizes and batch sizes we can process, directly limiting model complexity and training efficiency.
 
-These bottlenecks interact in complex ways, illustrating the **Conservation of Complexity** thesis from Part I: you cannot eliminate a bottleneck without shifting load elsewhere. When data loading becomes a bottleneck, GPUs sit idle waiting for batches. When computation is suboptimal, memory bandwidth goes underutilized. When memory is constrained, we resort to smaller batches that reduce GPU efficiency. Consider GPT-2: profiling reveals memory-bound attention operations (`{python} TrainingScenarios.gpt2_attn_time_pct_str`% of time), data loading overhead (`{python} TrainingScenarios.gpt2_data_time_pct_str`%), and compute-bound matrix multiplications (`{python} TrainingScenarios.gpt2_compute_time_pct_str`%)—requiring a composition of mixed precision, prefetching, and gradient checkpointing to address all three constraints. The optimization challenge involves identifying which bottleneck currently limits performance, then selecting techniques that address that specific constraint without introducing new bottlenecks elsewhere.
+These bottlenecks interact in complex ways, illustrating the Conservation of Complexity thesis from Part I: you cannot eliminate a bottleneck without shifting load elsewhere. When data loading becomes a bottleneck, GPUs sit idle waiting for batches. When computation is suboptimal, memory bandwidth goes underutilized. When memory is constrained, we resort to smaller batches that reduce GPU efficiency. Consider GPT-2: profiling reveals memory-bound attention operations (`{python} TrainingScenarios.gpt2_attn_time_pct_str`% of time), data loading overhead (`{python} TrainingScenarios.gpt2_data_time_pct_str`%), and compute-bound matrix multiplications (`{python} TrainingScenarios.gpt2_compute_time_pct_str`%)—requiring a composition of mixed precision, prefetching, and gradient checkpointing to address all three constraints. The optimization challenge involves identifying which bottleneck currently limits performance, then selecting techniques that address that specific constraint without introducing new bottlenecks elsewhere.
 
 ### Systematic Optimization Framework {#sec-model-training-systematic-optimization-framework-83b0}
 
@@ -3026,7 +3034,7 @@ Machine learning frameworks (introduced in @sec-ml-frameworks) implement these t
 ::: {#lst-dataloader_usage lst-cap="**Pipeline Optimization**: Machine learning workflows benefit from efficient data handling through batching and prefetching to maintain constant GPU utilization."}
 ```{.python}
 loader = DataLoader(
-    dataset, batch_size=32, num_workers=`{python} TrainingScenarios.num_workers_str`, prefetch_factor=`{python} TrainingScenarios.prefetch_factor_str`
+    dataset, batch_size=32, num_workers=4, prefetch_factor=2
 )
 ```
 :::
@@ -3446,8 +3454,6 @@ FP8 training doubles Tensor Core throughput again (`{python} TrainingHardware.h1
 | **FP16**      | Computer vision, controlled gradients            |               V100, A100 |
 | **FP32**      | Numerical stability critical, small models       |                 All GPUs |
 
-##### Memory Bandwidth Utilization {#sec-model-training-memory-bandwidth-utilization-932c}
-
 Reduced precision not only accelerates computation but also alleviates memory bandwidth bottlenecks. Modern GPUs are increasingly compute-bound rather than bandwidth-bound for large matrix operations, but data movement still limits performance for smaller operations. A100's specifications illustrate this:
 
 - HBM2e bandwidth: `{python} TrainingHardware.a100_bw_gbs_str` GB/s
@@ -3492,8 +3498,6 @@ The `autocast` context automatically selects precision per operation:
 - **FP32**: Softmax, layer normalization, loss computation
 
 This selective precision maximizes hardware utilization while maintaining numerical stability.
-
-##### Hardware-Aware Optimization Strategy {#sec-model-training-hardwareaware-optimization-strategy-5310}
 
 Optimal mixed-precision training requires matching the precision format to hardware capabilities. @tbl-hw-precision-strategy summarizes the recommended precision strategy for each GPU generation, reflecting the evolution from FP16-only support on Volta to native FP8 on Hopper.
 
@@ -4540,7 +4544,7 @@ The optimization toolkit developed in the previous section---mixed precision, Fl
 
 When single-machine optimization has been exhausted, the only remaining option is to spread computation across multiple devices. Multi-device training provides three capabilities unavailable to a single GPU: aggregate memory capacity, aggregate compute throughput, and aggregate storage bandwidth. This section examines when and how to scale beyond single-device training, from multi-GPU configurations within a single machine to the threshold where distributed systems become necessary. We introduce the key parallelism strategies and their trade-offs; the implementation details of multi-node distributed training---collective communication primitives, fault tolerance, and elastic scheduling---are beyond our current scope.
 
-Not all workloads benefit equally from adding more GPUs---the relationship between compute intensity and communication overhead determines whether scaling helps or hurts. This is the **Conservation of Complexity** (introduced in @sec-model-training-pipeline-optimizations-cd9d) at the system level: eliminating single-machine bottlenecks through parallelism introduces new communication bottlenecks across devices. Examine the scaling curves in @fig-communication-tax to see this tradeoff quantified: compute-bound workloads like image classification (blue) maintain high efficiency as GPU count grows, balanced workloads like LLM training with high-speed interconnects (green) show moderate degradation, while bandwidth-bound workloads (red) suffer the full "communication tax" as synchronization overhead accumulates with cluster size. The shaded region reveals this tax---the gap between theoretical linear scaling and actual achieved throughput. Here, $r$ denotes the fraction of step time spent on communication and the curves are illustrative.
+Not all workloads benefit equally from adding more GPUs---the relationship between compute intensity and communication overhead determines whether scaling helps or hurts. This is the Conservation of Complexity (introduced in @sec-model-training-pipeline-optimizations-cd9d) at the system level: eliminating single-machine bottlenecks through parallelism introduces new communication bottlenecks across devices. Examine the scaling curves in @fig-communication-tax to see this tradeoff quantified: compute-bound workloads like image classification (blue) maintain high efficiency as GPU count grows, balanced workloads like LLM training with high-speed interconnects (green) show moderate degradation, while bandwidth-bound workloads (red) suffer the full "communication tax" as synchronization overhead accumulates with cluster size. The shaded region reveals this tax---the gap between theoretical linear scaling and actual achieved throughput. Here, $r$ denotes the fraction of step time spent on communication and the curves are illustrative.
 
 ```{python}
 #| label: fig-communication-tax

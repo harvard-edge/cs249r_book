@@ -3205,21 +3205,13 @@ On multi-socket servers[^fn-numa-serving]\index{NUMA!memory locality}\index{Thre
 
 CPUs often outperform GPUs at batch size 1 for small models\index{Small Batch!CPU advantage}. The overhead of launching a GPU kernel (~10 $\mu$s) and transferring data (~50 $\mu$s) can exceed the compute time for a tiny dense layer. For models under 50 MB serving single requests, a well-optimized CPU runtime often delivers lower latency than a GPU.
 
-### Fast Model Loading {#sec-model-serving-fast-model-loading-1109}
+### Model Serialization and Fast Loading {#sec-model-serving-fast-model-loading-1109}
 
-In autoscaling systems, the time to spin up a new node is critical. A major component of "Cold Start" (@sec-model-serving-model-loading-initialization-cc5a) is simply reading the model weights from disk into memory.
+In autoscaling systems, the time to spin up a new node is critical. A major component of "Cold Start" (@sec-model-serving-model-loading-initialization-cc5a) is simply reading the model weights from disk into memory. The choice of serialization format determines how quickly this loading can occur.
 
-#### The Pickle Problem {#sec-model-serving-pickle-problem-4550}
+The standard PyTorch `torch.load()` uses Python's `pickle` format\index{Pickle!loading overhead}. This approach is inefficient because it requires the CPU to unpickle objects one by one, copy them into memory, and then often copy them *again* to the GPU. A faster alternative is memory mapping\index{mmap!zero-copy loading}, which allows the OS to map a file directly into the process's virtual address space. The data is effectively "loaded" only when accessed, and the OS handles the transfer from disk to RAM efficiently.
 
-The standard PyTorch `torch.load()` uses Python's `pickle` format\index{Pickle!loading overhead}. This approach is inefficient because it requires the CPU to unpickle objects one by one, copy them into memory, and then often copy them *again* to the GPU.
-
-#### Zero-Copy with mmap {#sec-model-serving-zerocopy-mmap-95e4}
-
-Memory mapping\index{mmap!zero-copy loading} allows the OS to map a file directly into the process's virtual address space. The data is effectively "loaded" only when accessed, and the OS handles the transfer from disk to RAM efficiently.
-
-#### Safetensors {#sec-model-serving-safetensors-6461}
-
-Safetensors[^fn-safetensors]\index{Safetensors!zero-copy loading} is a modern format designed specifically for fast loading. It stores tensors as raw bytes with a minimal JSON header. This enables zero-copy\index{Zero-Copy!model loading} loading: the raw bytes on disk are mapped directly into the tensor's memory buffer.
+Building on this zero-copy principle, Safetensors[^fn-safetensors]\index{Safetensors!zero-copy loading} is a modern format designed specifically for fast loading. It stores tensors as raw bytes with a minimal JSON header. This enables zero-copy\index{Zero-Copy!model loading} loading: the raw bytes on disk are mapped directly into the tensor's memory buffer.
 
 ::: {.callout-example title="Loading Speed: Safetensors vs. Pickle"}
 Loading a 5GB Stable Diffusion model:

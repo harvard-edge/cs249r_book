@@ -8,6 +8,14 @@ engine: jupyter
 
 # Network Architectures {#sec-network-architectures}
 
+```{python}
+#| echo: false
+#| label: chapter-start
+from mlsys.registry import start_chapter
+
+start_chapter("vol1:nn_architectures")
+```
+
 ::: {layout-narrow}
 ::: {.column-margin}
 \chapterminitoc
@@ -53,7 +61,7 @@ The previous chapter established the mathematical operators—matrix multiplicat
 
 Every neural network architecture answers one central question: *how should we structure computation to match the structure in our data?* Images have spatial locality, language has sequential dependencies, and tabular records have no inherent structure at all. The architecture encodes assumptions about these patterns directly into the computational graph, and those assumptions determine everything from parameter count to hardware utilization to deployment feasibility. Architecture selection is therefore a systems engineering problem that directly determines the Iron Law terms (the number of operations $O$ and the volume of data movement $D_{vol}$) defined in @sec-introduction-iron-law-ml-systems-c32a.
 
-The structural assumptions that each architecture encodes are known as **inductive biases**[^fn-inductive-bias], and they serve as the *unifying concept* for this entire chapter.
+The structural assumptions that each architecture encodes are known as inductive biases[^fn-inductive-bias], and they serve as the *unifying concept* for this entire chapter.
 
 ::: {.callout-definition title="Inductive Bias"}
 
@@ -817,7 +825,7 @@ This translation from mathematical abstraction to concrete computation exposes h
 
 [^fn-mac]: **Multiply-Accumulate (MAC)**: The atomic operation in neural networks: multiply two values and add to a running sum. Modern accelerators measure performance in MACs per second: datacenter class accelerators can sustain on the order of \(10^{14}\) to \(10^{15}\) MAC/s on dense kernels (e.g., NVIDIA H100 at ~1 PFLOPS), while mobile class chips are often on the order of \(10^{12}\) to \(10^{13}\) MAC/s. At the hardware level, the energy cost of the arithmetic itself is typically in the picojoule range per MAC, while moving data to and from off chip memory can cost orders of magnitude more, which is why data movement is often the dominant systems concern.
 
-In our reference MNIST layer, each output neuron requires `{python} MLPLayerStats.mnist_mlp_macs_str` ÷ 100 = 784 multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). While actual implementations use optimizations through libraries like BLAS[^fn-dnn-blas] or cuBLAS, these patterns drive key system design decisions. The hardware architectures that accelerate these matrix operations, including GPU tensor cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-hardware-acceleration.
+In our reference MNIST layer, each output neuron requires `{python} MLPLayerStats.mnist_mlp_macs_str` divided by 100, or 784, multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). While actual implementations use optimizations through libraries like BLAS[^fn-dnn-blas] or cuBLAS, these patterns drive key system design decisions. The hardware architectures that accelerate these matrix operations, including GPU tensor cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-hardware-acceleration.
 
 ```{python}
 #| label: a100-tensor-core-specs
@@ -1608,15 +1616,79 @@ While using fewer operations per output, the spatial structure creates different
 
 The sliding window and im2col transformations above reveal *how* CNNs compute; the system implications below reveal *what that computation costs* in memory, compute, and data movement.
 
+```{python}
+#| label: cnn-system-implications
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CNN SYSTEM IMPLICATIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Memory Requirements, Computation Needs, and Data Movement
+# │          subsections of §System Implications for CNNs
+# │
+# │ Goal: Derive weight counts, activation counts, and spatial positions
+# │       from architecture parameters so prose values stay consistent.
+# │ Show: 576 weights (3×3×1×64), 3.2M activations (224×224×64), 50,176 positions.
+# │ How:  Direct multiplication of kernel, channel, and spatial dimensions.
+# │
+# │ Imports: mlsys.constants (IMAGE_DIM_RESNET), mlsys.formatting (fmt, check)
+# │ Exports: cnn_weights_single_ch_str, cnn_spatial_positions_str, cnn_activations_m_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+from mlsys.constants import IMAGE_DIM_RESNET
+from mlsys.formatting import fmt, check
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class CNNSysImpl:
+    """
+    Namespace for CNN System Implications calculations.
+    Scenario: ImageNet (224×224) with 3×3 filters and 64 output channels.
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    img_dim = IMAGE_DIM_RESNET          # 224
+    kernel_size = 3
+    c_out = 64                          # output channels
+    c_in_single = 1                     # single input channel (for weight illustration)
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Weight parameters for single input channel: K × K × C_in × C_out
+    weights_single_ch = kernel_size * kernel_size * c_in_single * c_out  # 576
+
+    # Spatial positions in the output feature map
+    spatial_positions = img_dim * img_dim                                # 50,176
+
+    # Activation values: H × W × C_out
+    activations = img_dim * img_dim * c_out                             # 3,211,264
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(weights_single_ch == 576,
+          f"Expected 576 weight params, got {weights_single_ch}")
+    check(spatial_positions == 50_176,
+          f"Expected 50,176 spatial positions, got {spatial_positions}")
+    check(activations == 3_211_264,
+          f"Expected 3,211,264 activations, got {activations}")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    weights_single_ch_str = fmt(weights_single_ch, precision=0, commas=True)
+    spatial_positions_str = fmt(spatial_positions, precision=0, commas=True)
+    activations_str = fmt(activations / 1e6, precision=1)       # "3.2" (millions)
+
+# ┌── EXPORTS (Bridge to Text) ────────────────────────────────────────────────
+cnn_weights_single_ch_str = CNNSysImpl.weights_single_ch_str
+cnn_spatial_positions_str = CNNSysImpl.spatial_positions_str
+cnn_activations_m_str = CNNSysImpl.activations_str
+```
+
 #### Memory Requirements {#sec-network-architectures-memory-requirements-a1a1}
 
-For convolutional layers, memory requirements center around two key components: filter weights and feature maps. Unlike MLPs that require storing full connection matrices, CNNs use small, reusable filters. For a typical CNN processing $224 \times 224$ ImageNet images, a convolutional layer with 64 filters of size $3 \times 3$ applied to a single input channel requires storing only 576 weight parameters ($3 \times 3 \times 1 \times 64$); for $C_{in}$ input channels, this becomes $3 \times 3 \times C_{in} \times 64$ parameters, still dramatically less than the millions of weights needed for equivalent fully-connected processing. The system must store feature maps for all spatial positions, creating a different memory demand. A $224 \times 224$ input with 64 output channels requires storing 3.2 million activation values ($224 \times 224 \times 64$).
+For convolutional layers, memory requirements center around two key components: filter weights and feature maps. Unlike MLPs that require storing full connection matrices, CNNs use small, reusable filters. For a typical CNN processing $224 \times 224$ ImageNet images, a convolutional layer with 64 filters of size $3 \times 3$ applied to a single input channel requires storing only `{python} cnn_weights_single_ch_str` weight parameters ($3 \times 3 \times 1 \times 64$); for $C_{in}$ input channels, this becomes $3 \times 3 \times C_{in} \times 64$ parameters, still dramatically less than the millions of weights needed for equivalent fully-connected processing. The system must store feature maps for all spatial positions, creating a different memory demand. A $224 \times 224$ input with 64 output channels requires storing `{python} cnn_activations_m_str` million activation values ($224 \times 224 \times 64$).
 
 These memory access patterns suggest opportunities for optimization through weight reuse and careful feature map management. Processors optimize these spatial patterns by caching filter weights for reuse across positions while streaming feature map data. CPUs use their cache hierarchy to keep frequently used filters resident, while GPUs employ specialized memory architectures designed for the spatial access patterns of image processing. The detailed architecture design principles for these specialized processors are covered in @sec-hardware-acceleration.
 
 #### Computation Needs {#sec-network-architectures-computation-needs-85cd}
 
-The core computation in CNNs involves repeatedly applying small filters across spatial positions. Each output value requires a local multiply-accumulate operation over the filter region. For ImageNet processing with $3 \times 3$ filters and 64 output channels, computing one spatial position involves $3 \times 3 \times C_{in} \times 64$ multiply-accumulates (576 per input channel), and this must be repeated for all 50,176 spatial positions ($224 \times 224$). While each individual computation involves fewer operations than an MLP layer, the total computational load remains large due to spatial repetition.
+The core computation in CNNs involves repeatedly applying small filters across spatial positions. Each output value requires a local multiply-accumulate operation over the filter region. For ImageNet processing with $3 \times 3$ filters and 64 output channels, computing one spatial position involves $3 \times 3 \times C_{in} \times 64$ multiply-accumulates (`{python} cnn_weights_single_ch_str` per input channel), and this must be repeated for all `{python} cnn_spatial_positions_str` spatial positions ($224 \times 224$). While each individual computation involves fewer operations than an MLP layer, the total computational load remains large due to spatial repetition.
 
 This computational pattern presents different optimization opportunities than MLPs. The regular, repeated nature of convolution operations enables efficient hardware utilization through structured parallelism. Modern processors exploit this pattern in various ways. CPUs use SIMD instructions[^fn-simd] to process multiple filter positions simultaneously, while GPUs parallelize computation across spatial positions and channels. The model optimization techniques that further reduce these computational demands, including specialized convolution optimizations and sparsity patterns, are detailed in @sec-model-compression.
 
@@ -1624,9 +1696,9 @@ This computational pattern presents different optimization opportunities than ML
 
 #### Data Movement {#sec-network-architectures-data-movement-36f6}
 
-The sliding window pattern of convolutions creates a distinctive data movement profile. Unlike MLPs where each weight is used once per forward pass, CNN filter weights are reused many times as the filter slides across spatial positions. For ImageNet processing, each $3 \times 3$ filter weight is reused 50,176 times (once for each position in the $224 \times 224$ feature map). This creates a different challenge: the system must stream input features through the computation unit while keeping filter weights stable.
+The sliding window pattern of convolutions creates a distinctive data movement profile. Unlike MLPs where each weight is used once per forward pass, CNN filter weights are reused many times as the filter slides across spatial positions. For ImageNet processing, each $3 \times 3$ filter weight is reused `{python} cnn_spatial_positions_str` times (once for each position in the $224 \times 224$ feature map). This creates a different challenge: the system must stream input features through the computation unit while keeping filter weights stable.
 
-The predictable spatial access pattern enables strategic data movement optimizations. The CPU/GPU caching strategies described above apply directly to data movement: frameworks orchestrate computation to maximize the 50,176 $\times$ filter weight reuse and minimize redundant feature map accesses, exploiting the same spatial locality that makes CNNs memory-efficient.
+The predictable spatial access pattern enables strategic data movement optimizations. The CPU/GPU caching strategies described above apply directly to data movement: frameworks orchestrate computation to maximize the `{python} cnn_spatial_positions_str` $\times$ filter weight reuse and minimize redundant feature map accesses, exploiting the same spatial locality that makes CNNs memory-efficient.
 
 ### Efficient Architectures: Keyword Spotting {#sec-network-architectures-efficient-architectures-keyword-spotting-0625}
 
@@ -1893,7 +1965,7 @@ RNNs are uniquely memory-efficient for long sequences. They maintain a fixed-siz
 RNNs exhibit high temporal locality for weights (reused every step) but low locality for activations. The weight matrices $W_{hh}$ and $W_{xh}$ stay in the cache (or on-chip memory) for the entire duration of the sequence processing, achieving high arithmetic intensity *if* the batch size is large enough. However, the requirement to read and write the hidden state at every step creates a constant stream of low-intensity updates that can strain memory bandwidth if not carefully managed.
 
 \index{Recurrent Neural Network!sequential dependency bottleneck}
-This tension between memory efficiency and sequential execution defined the pre-Transformer era. While RNNs enabled sequence modeling, their inability to exploit massive parallel hardware ultimately led to their replacement by attention-based architectures. The hardware strategies for managing sequential bottlenecks -- including pipeline parallelism and operator fusion for latency-sensitive workloads -- are analyzed in @sec-hardware-acceleration-dataflow-optimization-strategies-ce52.
+This tension between memory efficiency and sequential execution defined the pre-Transformer era. RNNs compress arbitrarily long histories into a fixed-size hidden state, which is memory efficient but creates two compounding problems: the sequential dependency prevents hardware from parallelizing across time steps, and the fixed-capacity state becomes an information bottleneck where early inputs fade as sequences grow (the vanishing gradient problem). Together, these limitations motivated a fundamental question: could an architecture access any position in a sequence directly, without processing all intervening elements? The answer, as the next section shows, is the attention mechanism. Hardware strategies for managing sequential bottlenecks in RNN workloads that remain in production, including pipeline parallelism and operator fusion, are analyzed in @sec-hardware-acceleration-dataflow-optimization-strategies-ce52.
 
 ## Attention: Dynamic Processing {#sec-network-architectures-attention-mechanisms-dynamic-pattern-processing-22df}
 
@@ -2492,7 +2564,7 @@ The attention mechanism analyzed above provides the computational primitive—dy
 While the attention mechanisms examined above introduced dynamic connectivity, they were initially applied as additions to existing architectures, particularly RNNs for sequence-to-sequence tasks. This hybrid approach still suffered from the inherent limitations of recurrent architectures: sequential processing constraints that prevented efficient parallelization and difficulties with very long sequences. The breakthrough insight was recognizing that attention mechanisms alone could replace both convolutional and recurrent processing entirely -- eliminating the sequential bottleneck while preserving dynamic pattern processing.
 
 \index{Vaswani, Ashish}
-Transformers, introduced in the landmark \"Attention is All You Need\" paper[^fn-attention-is-all-you-need] by @vaswani2017attention, embody a revolutionary inductive bias: **they assume no prior structure but allow the model to learn all pairwise relationships dynamically based on content**. Rather than adding attention to RNNs, Transformers built the entire architecture around attention mechanisms, introducing self-attention as the primary computational pattern. This architectural decision traded the parameter efficiency of CNNs and the sequential coherence of RNNs for maximum flexibility and parallelizability.
+Transformers, introduced in the landmark "Attention is All You Need" paper[^fn-attention-is-all-you-need] by @vaswani2017attention, embody a revolutionary inductive bias: **they assume no prior structure but allow the model to learn all pairwise relationships dynamically based on content**. Rather than adding attention to RNNs, Transformers built the entire architecture around attention mechanisms, introducing self-attention as the primary computational pattern. This architectural decision traded the parameter efficiency of CNNs and the sequential coherence of RNNs for maximum flexibility and parallelizability.
 
 [^fn-attention-is-all-you-need]: **"Attention is All You Need"**\index{Attention Is All You Need (paper)}: This 2017 paper by Google researchers eliminated recurrence entirely, showing that attention mechanisms alone could achieve state-of-the-art results. The paper's eight authors---Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan Gomez, Lukasz Kaiser, and Illia Polosukhin---were researchers at Google Brain and Google Research in Mountain View. Remarkably, nearly all later left to found AI companies: Gomez co-founded Cohere, Parmar and Vaswani co-founded Adept (later Essential AI), Shazeer co-founded Character.AI, Jones co-founded Sakana AI, and Polosukhin co-founded NEAR Protocol. This diaspora illustrates how foundational research at one institution can seed an entire industry.
 
@@ -3594,15 +3666,15 @@ energy_mac_pj_str = f"{energy_mac_pj_value}"                     # e.g. "4.6"
 energy_dram_str = fmt(energy_dram_value, precision=0, commas=False)  # e.g. "26"
 ```
 
-Dense matrix operations in MLPs achieve excellent arithmetic intensity[^fn-arithmetic-intensity-dnn] (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately `{python} energy_mac_pj_str` pJ, while data movement from DRAM costs `{python} energy_dram_str` pJ per 32-bit value [@horowitz2014computing]. For typical MLP inference, 70-80% of energy goes to data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
+Dense matrix operations in MLPs achieve excellent arithmetic intensity[^fn-arithmetic-intensity-dnn] (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately `{python} energy_mac_pj_str` pJ, while data movement from DRAM costs `{python} energy_dram_str` pJ per 32-bit value [@horowitz2014computing]. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
 
 [^fn-arithmetic-intensity-dnn]: **Arithmetic Intensity**\index{Arithmetic Intensity!definition}: The ratio of floating-point operations to memory accesses, measured in FLOPs/byte. High arithmetic intensity (>10 FLOPs/byte) enables efficient hardware utilization, while low intensity (<1 FLOPs/byte) makes workloads memory-bound. Attention mechanisms typically have low arithmetic intensity, explaining their energy inefficiency. See @sec-hardware-acceleration for the roofline model that formalizes this metric.
 
-Convolutional operations reduce energy consumption through data reuse but exhibit variable efficiency depending on implementation. Im2col-based convolution implementations trade memory for simplicity, often doubling memory requirements and energy consumption. Direct convolution implementations achieve 3–5 $\times$ better energy efficiency by eliminating redundant data movement, particularly for larger kernel sizes.
+Convolutional operations reduce energy consumption through data reuse but exhibit variable efficiency depending on implementation. Im2col-based convolution implementations trade memory for simplicity, often doubling memory requirements and energy consumption. Direct convolution implementations can achieve substantially better energy efficiency by eliminating redundant data movement, particularly for larger kernel sizes where im2col duplication is most severe.
 
-Sequential processing in RNNs creates energy efficiency opportunities through temporal data reuse. The constant memory footprint of RNN hidden states allows aggressive caching strategies, reducing DRAM access energy by 80-90% for long sequences. The sequential dependencies limit parallelization opportunities, often resulting in suboptimal hardware utilization and higher energy per operation.
+Sequential processing in RNNs creates energy efficiency opportunities through temporal data reuse. The constant memory footprint of RNN hidden states allows aggressive caching strategies that can dramatically reduce DRAM access energy for long sequences by keeping the recurrent state in on-chip SRAM. The sequential dependencies limit parallelization opportunities, often resulting in suboptimal hardware utilization and higher energy per operation.
 
-Attention mechanisms in Transformers exhibit the highest energy consumption per operation due to irregular memory access patterns and the need to store attention matrices (the quadratic bottleneck from @sec-network-architectures-system-implications-05a3). Self-attention operations consume 2–3 $\times$ more energy per FLOP than standard matrix multiplication, making long-sequence processing energy-prohibitive without architectural modifications such as FlashAttention.
+Attention mechanisms in Transformers exhibit the highest energy consumption per operation due to irregular memory access patterns and the need to store attention matrices (the quadratic bottleneck from @sec-network-architectures-system-implications-05a3). The irregular access patterns of self-attention result in significantly higher energy per useful FLOP compared to standard matrix multiplication, making long-sequence processing energy-prohibitive without architectural modifications such as FlashAttention.
 
 System designers must balance competing trade-offs when supporting different primitives, each with unique characteristics that influence system design and performance. Optimizing for the dense matrix operations common in MLPs and CNNs might come at the cost of flexibility needed for the more dynamic computations in attention mechanisms. Supporting large working sets for Transformers might require sacrificing energy efficiency.
 
@@ -4037,6 +4109,10 @@ a100_8x_mem_str = f"{a100_8x_mem_value}"                         # e.g. "640"
 **Pitfall:** *Optimizing architectural decisions for training hardware without considering deployment constraints.*
 
 Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8 $\times$ A100 GPUs (`{python} a100_8x_mem_str` GB total memory) cannot deploy to edge devices with 4 GB—the 160 $\times$ reduction requires architectural changes, not just quantization. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
+
+**Pitfall:** *Ignoring KV cache growth when estimating Transformer serving costs.*
+
+Teams budget Transformer deployment based on model weight memory alone, overlooking the key-value (KV) cache that self-attention requires during autoregressive generation. The KV cache scales as $O(\text{batch} \times \text{layers} \times \text{heads} \times \text{seq\_len} \times \text{head\_dim})$, and for large models this overhead dominates serving memory. Consider a Transformer with 32 layers and 32 attention heads, each with a 128-dimensional head, serving sequences of length 2048 in FP16. Each concurrent request stores $32 \times 32 \times 2048 \times 128 \times 2$ bytes $\approx$ 537 MB of KV cache. At even modest concurrency of 2--4 users, the KV cache alone consumes 1--2 GB, rivaling or exceeding the memory occupied by model weights. As the quadratic memory analysis in @sec-network-architectures-system-implications-77ac establishes, attention memory grows with sequence length, making the KV cache the binding constraint on serving throughput. Teams that size infrastructure based solely on weight memory discover at deployment that halving the batch size or truncating context length is the only way to fit within device memory, degrading either throughput or output quality.
 
 With these cautionary notes in mind, we now synthesize the key concepts that practitioners should carry forward from this chapter's systematic tour of architectural families, shared building blocks, computational primitives, and selection methodology.
 

@@ -54,7 +54,7 @@ start_chapter("vol1:hw_acceleration")
 ## Acceleration Fundamentals {#sec-hardware-acceleration-ai-hardware-acceleration-fundamentals-9b28}
 
 \index{D·A·M Taxonomy!machine axis}
-We have optimized the **Data** in @sec-data-selection and compressed the **Algorithm** (Model) in @sec-model-compression. Now we turn to the final axis of the D·A·M taxonomy (@sec-introduction): the **Machine**. Hardware acceleration exists because of a striking asymmetry in modern computing: arithmetic is *cheap*, but moving data is *expensive*. In the time a modern GPU computes a thousand floating-point operations, a single value travels from main memory. This inversion, where computation is the abundant resource and bandwidth is the scarce one, is the reason specialized hardware matters for machine learning.
+We have optimized the Data in @sec-data-selection and compressed the Algorithm (Model) in @sec-model-compression. Now we turn to the final axis of the D·A·M taxonomy (@sec-introduction): the Machine. Hardware acceleration exists because of a striking asymmetry in modern computing: arithmetic is *cheap*, but moving data is *expensive*. In the time a modern GPU computes a thousand floating-point operations, a single value travels from main memory. This inversion, where computation is the abundant resource and bandwidth is the scarce one, is the reason specialized hardware matters for machine learning.
 
 ::: {.callout-definition title="Hardware Acceleration"}
 
@@ -4535,12 +4535,14 @@ Understanding runtime adaptation mechanisms helps engineers design systems that 
 
 :::
 
+To see how these runtime mechanisms work together in practice, consider a concrete scenario: a transformer inference request arrives at a production server. The runtime must adapt execution parameters such as tiling and memory allocation to current conditions (dynamic execution), determine which kernel implementation to use for each operation based on real-time hardware state (kernel selection), and schedule the selected kernels across available compute units to maximize utilization (kernel scheduling). These are not independent systems but three interrelated phases of a single runtime pipeline, and the following subsections examine each phase using this transformer inference request as a running example.
+
 ### Dynamic Kernel Execution {#sec-hardware-acceleration-dynamic-kernel-execution-33fc}
 
 \index{Dynamic Kernel Execution!runtime adaptation}
-While static compilation provides a solid foundation, efficient execution of machine learning workloads requires real-time adaptation to fluctuating conditions: available memory, data sizes, and computational loads all change during execution. The runtime continuously adjusts execution strategies to match both hardware constraints and workload characteristics.
+While static compilation provides a solid foundation, efficient execution of machine learning workloads requires real-time adaptation to fluctuating conditions. When our transformer inference request arrives, the runtime cannot simply execute a fixed plan: available memory, input sequence length, and computational load may differ from what the compiler assumed. The runtime continuously adjusts execution strategies to match both hardware constraints and workload characteristics.
 
-Individual computational operations (matrix multiplications, convolutions, activation functions) must be assigned to appropriate processing units, and this mapping is not fixed. As input data, memory availability, and system load change during execution, the runtime makes real-time decisions about kernel selection, execution order, and memory management to keep workloads efficient despite shifting conditions.
+Individual computational operations (matrix multiplications, convolutions, activation functions) must be assigned to appropriate processing units, and this mapping is not fixed. As input data, memory availability, and system load change during execution, the runtime makes real-time decisions about execution order and memory management to keep workloads efficient despite shifting conditions.
 
 For example, consider an AI accelerator executing a deep neural network (DNN) for image classification. If an incoming batch of high-resolution images requires significantly more memory than expected, a statically planned execution may cause cache thrashing or excessive off-chip memory accesses. Instead, a dynamic runtime can adjust tiling strategies on the fly, breaking down tensor operations into smaller tiles that fit within the high-speed on-chip memory. This prevents memory stalls and ensures optimal utilization of caches.
 
@@ -4551,28 +4553,28 @@ Overlapping computation with memory movement mitigates a common performance bott
 
 Consider the execution of convolutional layers in a CNN on a GPU. If multiple convolution kernels need scheduling, static approaches may lead to inefficient resource utilization due to variation in layer sizes and compute requirements. Dynamic scheduling allows AI runtimes to prioritize smaller kernels when compute units are partially occupied, improving hardware utilization. For instance, in NVIDIA's TensorRT runtime, fusion of small kernels into larger execution units is done dynamically to avoid launch overhead, optimizing latency-sensitive inference tasks.
 
-Dynamic adjustment of execution strategies in response to real-time system conditions optimizes both training and inference performance across hardware platforms. Beyond execution strategy adaptation, runtimes must also select which specific kernel implementations to invoke for each operation.
+Dynamic adjustment of execution strategies in response to real-time system conditions optimizes both training and inference performance across hardware platforms. These adaptations, however, depend on having the right kernel in the first place. Returning to our transformer inference example: before the runtime can adjust tiling or memory allocation for a matrix multiplication, it must first decide *which* kernel implementation to invoke.
 
 ### Runtime Kernel Selection {#sec-hardware-acceleration-runtime-kernel-selection-1ffe}
 
-While compilers perform an initial selection of kernels based on static analysis, AI runtimes often need to override these decisions during execution. Real-time factors, such as available memory, hardware utilization, and workload priorities, may differ significantly from the assumptions made during compilation. By dynamically selecting and switching kernels at runtime, AI runtimes can adapt to these changing conditions, ensuring that models continue to perform efficiently.
+While compilers perform an initial selection of kernels based on static analysis, AI runtimes often need to override these decisions during execution. Real-time factors, such as available memory, hardware utilization, and workload priorities, may differ significantly from the assumptions made during compilation. In our transformer example, the compiler may have selected an FP32 matrix multiplication kernel, but the runtime observes that Tensor Cores are available and the operation is numerically stable, prompting a switch to an FP16 kernel for higher throughput. By dynamically selecting and switching kernels at runtime, AI runtimes can adapt to these changing conditions, ensuring that models continue to perform efficiently.
 
 For instance, consider transformer-based language models, where a significant portion of execution time is spent on matrix multiplications. The AI runtime must determine the most efficient way to execute these operations based on the current system state. If the model is running on a GPU with specialized Tensor Cores, the runtime may switch from a standard FP32 kernel to an FP16 kernel to take advantage of hardware acceleration [@Shoeybi2019]. Conversely, if the lower precision of FP16 causes unacceptable numerical instability, the runtime can opt for mixed-precision execution, selectively using FP32 where higher precision is necessary.
 
 Memory constraints also influence kernel selection. When memory bandwidth is limited, the runtime may adjust its execution strategy, reordering operations or changing the tiling strategy to fit computations into the available cache rather than relying on slower main memory. For example, a large matrix multiplication may be broken into smaller chunks, ensuring that the computation fits into the on-chip memory of the GPU, reducing overall latency.
 
-Batch size also influences kernel selection. For workloads that handle a mix of small and large batches, the AI runtime may choose a latency-optimized kernel for small batches and a throughput-optimized kernel for large-scale batch processing. This adjustment ensures that the model continues to operate efficiently across different execution scenarios, without the need for manual tuning. Once the appropriate kernel is selected, the runtime must schedule its execution to maximize hardware utilization.
+Batch size also influences kernel selection. For workloads that handle a mix of small and large batches, the AI runtime may choose a latency-optimized kernel for small batches and a throughput-optimized kernel for large-scale batch processing. This adjustment ensures that the model continues to operate efficiently across different execution scenarios, without the need for manual tuning. With the appropriate kernels selected and their execution parameters adapted, the final pipeline stage determines *when and where* each kernel runs.
 
 ### Kernel Scheduling and Utilization {#sec-hardware-acceleration-kernel-scheduling-utilization-99d6}
 
 \index{Kernel Scheduling!hardware utilization}
-Kernel scheduling ensures that selected kernels execute in a way that maximizes parallelism and resource utilization. Unlike traditional task schedulers that manage CPU threads, AI runtimes coordinate a much larger number of tasks across parallel execution units: GPU cores, tensor processing units, or custom AI accelerators [@jouppi2017datacenter]. Keeping these resources fully engaged prevents bottlenecks and maximizes throughput.
+Kernel scheduling completes the runtime pipeline by determining how selected kernels execute across available hardware to maximize parallelism and resource utilization. Returning to the transformer inference request: the runtime has selected FP16 kernels for the attention matrix multiplications and adapted tiling to fit the current sequence length. Now the scheduler must distribute these operations across GPU streaming multiprocessors, interleave them with layer normalization and activation kernels, and ensure that intermediate data is prefetched before each operation needs it. Unlike traditional task schedulers that manage CPU threads, AI runtimes coordinate a much larger number of tasks across parallel execution units: GPU cores, tensor processing units, or custom AI accelerators [@jouppi2017datacenter]. Keeping these resources fully engaged prevents bottlenecks and maximizes throughput.
 
 For example, in image recognition models that use convolutional layers, operations can be distributed across multiple processing units, enabling different filters to run concurrently. This parallelization ensures that the available hardware is fully utilized, speeding up execution. Similarly, batch normalization and activation functions must be scheduled efficiently to avoid unnecessary delays. If these operations are not interleaved with other computations, they may block the pipeline and reduce overall throughput.
 
 Efficient kernel scheduling can also be influenced by real-time memory management. AI runtimes ensure that intermediate data, such as feature maps in deep neural networks, are preloaded into cache before they are needed. This proactive management helps prevent delays caused by waiting for data to be loaded from slower memory tiers, ensuring continuous execution.
 
-Together, these techniques ensure optimal resource utilization and efficient parallel computation across multiple hardware accelerators.
+Together, kernel selection, dynamic execution adaptation, and scheduling form a tightly coupled runtime pipeline. For our transformer inference request, the pipeline determined the best kernel for each operation, adapted tiling and precision to current memory and hardware conditions, and distributed work across compute units to sustain high utilization. These three phases operate continuously and interdependently: a scheduling decision may trigger re-selection of a different kernel, which in turn requires new execution parameter adaptation.
 
 The compiler and runtime systems examined thus far optimize execution within single accelerators, but the largest AI workloads exceed what any single chip can deliver. Single-chip optimizations achieve impressive results: ResNet-50 inference accelerates from 47 ms to 8 ms through compiler optimization alone, and the dataflow strategies we examined can push GPU utilization from 20% to 80% of peak throughput. Yet for the largest AI workloads, even perfectly optimized single-chip execution proves insufficient.
 
@@ -4647,9 +4649,11 @@ Beyond vertically integrated solutions, IP licensing models allow SoC designers 
 \index{Workload Distribution!heterogeneous processor}
 With multiple specialized processors available on heterogeneous SoCs, the critical challenge becomes intelligently distributing neural network operations across these resources to maximize performance while respecting power and latency constraints.
 
-Modern neural networks require intelligent partitioning across heterogeneous processors based on operation characteristics and current system state. Convolutional layers with regular data access patterns typically execute efficiently on GPU shader cores, while fully connected layers with irregular sparsity patterns may perform better on general-purpose CPU cores with large caches. Attention mechanisms in transformers benefit from NPU matrix engines when sequences are long, but may execute more efficiently on CPU when sequence lengths are small due to the NPU setup overhead.
+Consider a concrete example: an engineer deploying a real-time object detection pipeline on a mobile SoC with a CPU, GPU, and NPU. The pipeline has three stages: a MobileNet backbone for feature extraction, non-maximum suppression (NMS) for post-processing, and a display overlay for rendering bounding boxes. The backbone consists of depthwise separable convolutions with regular, predictable data access patterns and high arithmetic intensity, making it an ideal fit for the NPU's matrix engines, which deliver 10 to 50 $\times$ better energy efficiency than the CPU on these operations. NMS, by contrast, involves conditional branching over variable-length candidate lists, with irregular memory access that maps poorly to the NPU's fixed dataflow. The CPU handles NMS more efficiently because its branch predictor and large caches accommodate the unpredictable control flow. Finally, the display overlay involves pixel-level compositing across the entire frame, a massively parallel but arithmetically simple workload that maps naturally to the GPU's shader cores. This three-way split, NPU for the backbone, CPU for NMS, GPU for the overlay, achieves lower latency and lower power than running the entire pipeline on any single processor.
 
-Beyond static operation-to-processor mapping, heterogeneous SoCs implement dynamic processor selection governed by real-time constraints. Power budget dictates routing: during battery operation, the system may route computations to lower-power DSP cores rather than high-performance GPU cores. Thermal state introduces another dimension: when approaching thermal limits, workloads shift from the power-hungry NPU to more efficient CPU execution. Safety-critical automotive applications add latency requirements that prioritize deterministic CPU execution over potentially faster but variable NPU processing. Finally, concurrent workload interference from multiple AI applications may require load balancing across available processors to maintain Quality of Service.
+This example illustrates the general principle: modern neural networks require intelligent partitioning across heterogeneous processors based on operation characteristics and current system state. Convolutional layers with regular data access patterns typically execute efficiently on GPU shader cores or NPU matrix engines, while operations with irregular sparsity patterns or conditional control flow may perform better on general-purpose CPU cores with large caches. Attention mechanisms in transformers benefit from NPU matrix engines when sequences are long, but may execute more efficiently on CPU when sequence lengths are small due to the NPU setup overhead.
+
+Beyond static operation-to-processor mapping, the optimal assignment can change moment to moment. Returning to the object detection example: during battery operation, the system might shift the MobileNet backbone from the NPU to lower-power DSP cores, accepting higher latency to extend battery life. Power budget dictates routing: during battery operation, the system may route computations to lower-power DSP cores rather than high-performance GPU cores. Thermal state introduces another dimension: when approaching thermal limits, workloads shift from the power-hungry NPU to more efficient CPU execution. Safety-critical automotive applications add latency requirements that prioritize deterministic CPU execution over potentially faster but variable NPU processing. Finally, concurrent workload interference from multiple AI applications may require load balancing across available processors to maintain Quality of Service.
 
 Compounding the processor selection challenge, shared memory architectures require priority-based arbitration when multiple processors access LPDDR simultaneously. The Snapdragon 8 Gen 3's memory controller implements priority-based scheduling where camera processing receives higher priority than background AI tasks, ensuring real-time video processing while background neural networks adapt their execution patterns to available memory bandwidth. This arbitration becomes critical during memory-intensive operations like large language model inference, where parameter streaming from DRAM must be carefully coordinated across processors.
 
@@ -4835,73 +4839,69 @@ Organizations optimize exclusively for specific vendors to maximize performance 
 ```{python}
 #| label: feasibility-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HARDWARE FEASIBILITY ASSESSMENT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Feasibility Assessment: Can You Run It?"
+# │
+# │ Goal: Quantify three deployment feasibility checks.
+# │ Show: Memory headroom, bandwidth-limited latency, and real-time frame budget.
+# │ How: Three independent checks using model_memory() formula.
+# │
+# │ Imports: mlsys.formatting (fmt, check), mlsys.formulas (model_memory),
+# │          mlsys.constants (GB, BYTES_FP16)
+# │ Exports: headroom_str, token_latency_ms_str, frame_budget_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+from mlsys.formulas import model_memory
+from mlsys.constants import GB, BYTES_FP16
+
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class FeasibilityAssessment:
     """
     Namespace for Hardware Feasibility Assessment.
-    Scenario: Deploying a 7B model on 16GB GPU.
+    Check 1: Memory — 7B model (FP16) on 16GB GPU.
+    Check 2: Bandwidth — 70B model on 1TB/s GPU.
+    Check 3: Compute — 30 FPS video processing.
     """
 
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    params_b = 7
+    # Memory check: Llama-7B on 16GB GPU
+    params_7b = 7e9
     gpu_mem_gb = 16
-    mem_bw_gb_s = 500
+
+    # Bandwidth check: 70B model on 1TB/s GPU
+    params_70b = 70e9
+    mem_bw_gb_s = 1000  # 1 TB/s
+
+    # Compute check: video at 30 FPS
     fps_target = 30
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    # Memory fit
-    model_size_gb = params_b * 2 # FP16
-    headroom_gb = gpu_mem_gb - model_size_gb
+    # Memory: does the model fit?
+    model_7b_gb = model_memory(params_7b, BYTES_FP16, GB)
+    headroom_gb = gpu_mem_gb - model_7b_gb
 
-    # Bandwidth Latency (Batch 1)
-    token_latency_ms = (model_size_gb / mem_bw_gb_s) * 1000
+    # Bandwidth: how fast can we generate tokens?
+    model_70b_gb = model_memory(params_70b, BYTES_FP16, GB)
+    token_latency_ms = (model_70b_gb / mem_bw_gb_s) * 1000
 
-    # Real-time frame budget
+    # Compute: real-time frame budget
     frame_budget_ms = 1000 / fps_target
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(headroom_gb > 0, f"Model ({model_size_gb}GB) doesn't fit on GPU ({gpu_mem_gb}GB)!")
+    check(headroom_gb > 0, f"Model ({model_7b_gb}GB) doesn't fit on GPU ({gpu_mem_gb}GB)!")
+    check(token_latency_ms > 0, "Token latency must be positive.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    headroom_str = fmt(headroom_gb, precision=1, commas=False)
-    token_latency_ms_str = fmt(token_latency_ms, precision=1, commas=False)
-    frame_budget_str = fmt(frame_budget_ms, precision=1, commas=False)
+    headroom_str = fmt(headroom_gb, precision=0, commas=False)
+    token_latency_ms_str = fmt(token_latency_ms, precision=0, commas=False)
+    frame_budget_str = fmt(frame_budget_ms, precision=0, commas=False)
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 headroom_str = FeasibilityAssessment.headroom_str
 token_latency_ms_str = FeasibilityAssessment.token_latency_ms_str
-frame_budget_str = FeasibilityAssessment.frame_budget_ms_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt
-from mlsys.formulas import model_memory
-from mlsys.constants import GB, BYTES_FP16
-
-# --- Inputs (model specs and hardware constraints) ---
-# Memory check: Llama-7B on 16GB GPU
-llama7b_params = 7e9                     # 7B parameter model
-gpu_mem_gb = 16                          # 16 GB GPU memory
-
-# Bandwidth check: 70B model on 1TB/s GPU
-model_70b_params = 70e9                  # 70B parameter model
-bw_check_tbps = 1.0                      # 1 TB/s memory bandwidth
-
-# Compute check: video at 30 FPS
-video_fps = 30                           # target frames per second
-
-# --- Outputs (formatted strings for prose) ---
-# Memory check calculation
-llama7b_weights_gb = model_memory(llama7b_params, BYTES_FP16, GB)
-headroom_gb = gpu_mem_gb - llama7b_weights_gb
-headroom_str = f"{headroom_gb}"          # e.g. "2" GB remaining for context
-
-# Bandwidth check calculation
-model_70b_size_gb = model_memory(model_70b_params, BYTES_FP16, GB)
-token_latency_ms = model_70b_size_gb / (bw_check_tbps * 1e3) * 1e3
-token_latency_ms_str = fmt(token_latency_ms, precision=0, commas=False)  # e.g. "140" ms
-
-# Compute check calculation
-frame_budget_ms = 1000 / video_fps
-frame_budget_str = fmt(frame_budget_ms, precision=0, commas=False)  # e.g. "33" ms
+frame_budget_str = FeasibilityAssessment.frame_budget_str
 ```
 
 ::: {.callout-checkpoint title="Feasibility Assessment: Can You Run It?" collapse="false"}
@@ -4935,22 +4935,88 @@ These fallacies and pitfalls reveal a recurring theme: optimizing for the wrong 
 \index{Hardware Sustainability!carbon footprint}
 Beyond raw performance, we must evaluate hardware through the lens of *silicon sustainability*\index{Sustainability!silicon design}. In the era of planetary-scale AI, performance per watt\index{Performance per Watt!efficiency metric}\index{Energy Efficiency!TFLOPS per Watt} is not merely a mobile constraint but a global environmental mandate. Quantifying *the carbon ROI of specialized silicon* makes the case concrete.
 
+```{python}
+#| label: carbon-roi-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CARBON ROI OF SPECIALIZED SILICON
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Carbon ROI of Specialized Silicon" callout
+# │
+# │ Goal: Quantify carbon savings of NPUs vs CPUs for inference fleets.
+# │ Show: The 200× efficiency gap and ~350 metric tons CO2 saved per year.
+# │ How: Compare power consumption and compute efficiency, then project
+# │      daily energy use and annual carbon savings.
+# │
+# │ Imports: mlsys.constants (DAYS_PER_YEAR), mlsys.formatting (fmt)
+# │ Exports: cpu_power_str, npu_power_str, cpu_tflops_str, npu_tflops_str,
+# │          cpu_eff_str, npu_eff_str, eff_gap_str, workload_str,
+# │          cpu_energy_day_str, npu_energy_day_str, carbon_intensity_str,
+# │          co2_saved_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+from mlsys.constants import DAYS_PER_YEAR
+
+# ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────────
+# Power and compute specs (scenario values for illustrative comparison)
+cpu_power_w = 100          # Watts per CPU server doing inference
+cpu_tflops = 1             # Peak TFLOPS for CPU inference
+npu_power_w = 5            # Watts per NPU chip
+npu_tflops = 10            # Peak TFLOPS for NPU inference
+
+# Fleet workload and carbon intensity
+inferences_per_day = 1e9   # 1 billion inferences/day
+carbon_kg_per_kwh = 0.4    # Approximate global grid average (kg CO2/kWh)
+
+# Energy per inference derived from power and throughput
+# CPU energy/day and NPU energy/day are scenario estimates for the fleet
+cpu_energy_kwh_day = 2400  # kWh/day for CPU fleet serving 1B inferences
+npu_energy_kwh_day = 12    # kWh/day for NPU fleet serving 1B inferences
+
+# ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────────
+cpu_eff = cpu_tflops / cpu_power_w        # TFLOPS/W
+npu_eff = npu_tflops / npu_power_w        # TFLOPS/W
+eff_gap = npu_eff / cpu_eff               # Efficiency ratio
+
+energy_savings_kwh_day = cpu_energy_kwh_day - npu_energy_kwh_day
+co2_saved_kg_year = energy_savings_kwh_day * DAYS_PER_YEAR * carbon_kg_per_kwh
+co2_saved_metric_tons = co2_saved_kg_year / 1000
+
+# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────────
+check(eff_gap == 200, f"Efficiency gap should be 200×, got {eff_gap}×")
+check(co2_saved_metric_tons > 300, f"CO2 savings should exceed 300 tons, got {co2_saved_metric_tons}")
+
+# ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────────
+cpu_power_str = fmt(cpu_power_w, precision=0)
+npu_power_str = fmt(npu_power_w, precision=0)
+cpu_tflops_str = fmt(cpu_tflops, precision=0)
+npu_tflops_str = fmt(npu_tflops, precision=0)
+cpu_eff_str = fmt(cpu_eff, precision=2)
+npu_eff_str = fmt(npu_eff, precision=1)
+eff_gap_str = fmt(eff_gap, precision=0)
+workload_str = fmt(inferences_per_day / 1e9, precision=0)
+cpu_energy_day_str = fmt(cpu_energy_kwh_day, precision=0)
+npu_energy_day_str = fmt(npu_energy_kwh_day, precision=0)
+carbon_intensity_str = fmt(carbon_kg_per_kwh, precision=1)
+co2_saved_str = fmt(co2_saved_metric_tons, precision=0)
+```
+
 ::: {.callout-notebook title="The Carbon ROI of Specialized Silicon"}
 
 **The Problem**: Should you run your inference fleet on generic CPUs or invest in specialized NPUs (Neural Processing Units)?
 
 **The Physics**: Specialized hardware achieves higher arithmetic intensity while using fewer transistors for control logic.
 
-*   **CPU Inference**: 100 Watts for 1 TFLOP (Efficiency = 0.01 TFLOPS/W).
-*   **NPU Inference**: 5 Watts for 10 TFLOPS (Efficiency = 2.0 TFLOPS/W).
-*   **The Gap**: The NPU is **200 $\times$ more energy-efficient** per operation.
+*   **CPU Inference**: `{python} cpu_power_str` Watts for `{python} cpu_tflops_str` TFLOP (Efficiency = `{python} cpu_eff_str` TFLOPS/W).
+*   **NPU Inference**: `{python} npu_power_str` Watts for `{python} npu_tflops_str` TFLOPS (Efficiency = `{python} npu_eff_str` TFLOPS/W).
+*   **The Gap**: The NPU is **`{python} eff_gap_str` $\times$ more energy-efficient** per operation.
 
 **The Calculation**:
 
-1.  **Workload**: 1 Billion inferences per day.
-2.  **CPU Energy**: ~2,400 kWh/day.
-3.  **NPU Energy**: ~12 kWh/day.
-4.  **Carbon Savings**: At 0.4 kg CO2/kWh, switching to NPUs saves **~350 metric tons of CO2 per year**.
+1.  **Workload**: `{python} workload_str` Billion inferences per day.
+2.  **CPU Energy**: ~`{python} cpu_energy_day_str` kWh/day.
+3.  **NPU Energy**: ~`{python} npu_energy_day_str` kWh/day.
+4.  **Carbon Savings**: At `{python} carbon_intensity_str` kg CO2/kWh, switching to NPUs saves **~`{python} co2_saved_str` metric tons of CO2 per year**.
 
 **The Systems Conclusion**: Custom silicon is the ultimate "Green" technology for ML. Investing in specialized accelerators is not just about speed; it is the single most effective way to reduce the carbon footprint of intelligence.
 :::
