@@ -293,6 +293,9 @@ Thanks to these wonderful people who helped improve TinyTorch!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/harishb00a"><img src="https://avatars.githubusercontent.com/harishb00a?v=4?s=80" width="80px;" alt="harishb00a"/><br /><sub><b>harishb00a</b></sub></a><br />✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/sotoblanco"><img src="https://avatars.githubusercontent.com/u/46135649?v=4?v=4?s=80" width="80px;" alt="Pastor Soto"/><br /><sub><b>Pastor Soto</b></sub></a><br />✍️</td>
     </tr>
+    <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=80" width="80px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
+    </tr>
   </tbody>
 </table>
 
