@@ -490,14 +490,13 @@ where $k$ typically ranges from 3 to 5 to achieve low false positive rates while
 
 While fail-stop failures are relatively straightforward to handle because the component stops responding, we detect the absence, and we replace it, a far more insidious class exists. What happens when a component continues operating but produces incorrect results? A GPU that returns wrong gradients without throwing errors, a network that delivers corrupted packets that pass CRC checks, or a worker that computes different results for identical inputs? These Byzantine failures represent the most challenging class.
 
-**The Physics of Silent Corruption**
+##### The Physics of Silent Corruption
 
 At the nanometer scale of modern transistors, hardware is not deterministic; it is probabilistic. Two primary mechanisms drive **Silent Data Corruption (SDC)**:
 
 1.  **Single-Event Upsets (SEUs)**: High-energy particles (cosmic rays at sea level, alpha particles from packaging materials) strike memory cells or logic gates, flipping a bit from 0 to 1. At 10,000+ GPUs, this is a statistical certainty.
 2.  **Manufacturing Variances**: "Marginal" chips that pass initial QA may exhibit bit flips only under specific voltage/temperature conditions (e.g., during the intense $di/dt$ swings of a backward pass).
 
-**Case Study: Facebook's Compression SDC**
 Facebook documented a pervasive SDC issue where a hardware fault caused a valid file to be reported as "size zero" during decompression [@dixit2021silent]. As @fig-sdc-example illustrates, the system "worked" (no crash), but data was silently deleted. In ML, this manifests as valid-looking but mathematically garbage gradients.
 
 ::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent Data Corruption Propagation**. Unexpected faults can return incorrect file sizes, leading to data loss during decompression and propagating errors through distributed querying systems. This example from Facebook emphasizes how silent errors bypass standard exception handlers. Source: Facebook (2021)." fig-alt="System diagram showing data flow from compressed storage through defective CPU to database. Arrows indicate processing stages where file size calculation returns zero, causing missing rows in output."}
@@ -620,14 +619,12 @@ Real-world evidence of SDC in production systems confirms these risks. @fig-sdc-
 
 ![**Silent Data Corruption in Spark**. Modern AI systems, particularly those employing large-scale data processing like Spark, are vulnerable to silent data corruption (SDC) accumulating during data transfer and storage. SDC manifests in a shuffle and merge database, highlighting corrupted data blocks (red) amidst healthy data (blue/gray). Source: Jeff Dean at MLSys 2024, Keynote.](./images/jpg/sdc-google-jeff-dean.jpeg){#fig-sdc-jeffdean fig-alt="Database visualization with grid of data blocks. Red blocks indicate corrupted entries scattered among blue and gray healthy blocks in a shuffle and merge database structure."}
 
-**Case Study: Google's Gradient Spikes**
 Google reported that SDC in TPU pods often manifests as sudden, inexplicable spikes in gradient norm (@fig-sdc-training-fault). A single bit flip in an exponent can turn a $10^{-5}$ gradient into $10^{20}$, destroying weeks of training.
 
 ::: {#fig-sdc-training-fault fig-env="figure" fig-pos="htb" fig-cap="**Gradient Norm Deviation**. Transient hardware faults, such as silent data corruption (SDC), disrupt optimization by causing abrupt changes in gradient norms. Real-world data from Google's production fleet confirms that SDC anomalies manifest as visible spikes in gradient norm, indicating a disruption to the expected parameter update process. Source: Jeff Dean, MLSys 2024 Keynote." fig-alt="Line graph of gradient norm over training time showing smooth baseline with sudden spike anomaly caused by silent data corruption event."}
 ![](images/jpg/google_sdc_jeff_dean_anomaly.jpg)
 :::
 
-**Mitigation: Hot Spares and Checksums**
 Google addresses this by maintaining "Hot Spares"—running the same computation on two distinct chips or having a standby ready to take over. If a "Sanity Checker" (monitoring loss/gradients) detects an anomaly, the workload is instantly migrated to the hot spare, and the suspect chip is drained for diagnostics (@fig-sdc-controller). This moves reliability from the *component* (which we cannot trust) to the *system* (which verifies the result).
 
 ::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot Spare Redundancy**. Google's data centers utilize hot spare cores to maintain uninterrupted ML training despite hardware failures, seamlessly transitioning workloads from defective machines to backup resources. This approach contrasts with parallel redundancy techniques like DMR/TMR by providing a reactive fault tolerance mechanism that minimizes downtime and preserves data integrity during ML training. Source: Jeff Dean, MLSys 2024 Keynote." fig-alt="Four-panel sequence: normal training grid, defective machine marked red, SDC checker detecting fault, workload transferred to hot spare while defective unit sent for repair."}

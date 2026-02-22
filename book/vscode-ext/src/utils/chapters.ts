@@ -3,9 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ChapterInfo, ChapterOrderSource, VolumeId, VolumeInfo } from '../types';
 
-const EXCLUDED_CHAPTER_DIRS = new Set(['frontmatter', 'backmatter', 'parts', 'glossary']);
-const APPENDIX_FILE_REGEX = /^appendix[_-].+\.qmd$/i;
-
 function toDisplayName(dirName: string): string {
   return dirName
     .split('_')
@@ -34,9 +31,23 @@ function getConfigCandidates(vol: VolumeId, source: ChapterOrderSource): string[
   ];
 }
 
-function readChapterOrderFromConfig(repoRoot: string, vol: VolumeId, source: ChapterOrderSource): string[] {
+/** Parsed entry from config: relative path (e.g. "frontmatter/dedication.qmd") and order index. */
+interface ConfigEntry {
+  relPath: string;
+  order: number;
+}
+
+/**
+ * Read all buildable file paths from YML configs (chapters, appendices, frontmatter, backmatter).
+ * Returns entries in config order; duplicates are deduplicated by path (first occurrence wins).
+ */
+function readBuildablePathsFromConfig(
+  repoRoot: string,
+  vol: VolumeId,
+  source: ChapterOrderSource,
+): ConfigEntry[] {
   const configDir = path.join(repoRoot, 'book', 'quarto', 'config');
-  const chapterOrderKeys: string[] = [];
+  const entries: ConfigEntry[] = [];
   const seen = new Set<string>();
   const chapterPathRegex = new RegExp(`contents/${vol}/([^\\s]+\\.qmd)`, 'g');
 
@@ -47,49 +58,65 @@ function readChapterOrderFromConfig(repoRoot: string, vol: VolumeId, source: Cha
     }
 
     const text = fs.readFileSync(configPath, 'utf8');
-    let match: RegExpExecArray | null;
-    while ((match = chapterPathRegex.exec(text)) !== null) {
-      const chapterPath = match[1];
-      const segments = chapterPath.split('/');
-      if (segments.length < 2) {
-        continue;
-      }
 
-      // Backmatter appendix files: contents/volX/backmatter/appendix_foo.qmd
-      if (segments[0] === 'backmatter' && segments.length === 2) {
-        const fileNameOnly = segments[1];
-        if (!APPENDIX_FILE_REGEX.test(fileNameOnly)) {
-          continue;
-        }
-        const appendixStem = fileNameOnly.replace(/\.qmd$/i, '');
-        if (seen.has(appendixStem)) {
-          continue;
-        }
-        seen.add(appendixStem);
-        chapterOrderKeys.push(appendixStem);
-        continue;
+    // PDF/book configs use "index.qmd" (no path); add volume-specific index
+    const indexRelPath = `index.qmd`;
+    if (!seen.has(indexRelPath) && /^\s+-\s+index\.qmd\s*$/m.test(text)) {
+      const volIndexPath = `index.qmd`;
+      const volIndexFull = path.join(repoRoot, 'book', 'quarto', 'contents', vol, 'index.qmd');
+      if (fs.existsSync(volIndexFull)) {
+        seen.add(volIndexPath);
+        entries.push({ relPath: volIndexPath, order: entries.length });
       }
-
-      // Regular chapter entries: use the chapter file stem as command key.
-      const dirName = segments[0];
-      if (EXCLUDED_CHAPTER_DIRS.has(dirName)) {
-        continue;
-      }
-      const fileNameOnly = segments[segments.length - 1];
-      const chapterStem = fileNameOnly.replace(/\.qmd$/i, '');
-      if (seen.has(chapterStem)) {
-        continue;
-      }
-      seen.add(chapterStem);
-      chapterOrderKeys.push(chapterStem);
     }
 
-    if (chapterOrderKeys.length > 0) {
-      return chapterOrderKeys;
+    let match: RegExpExecArray | null;
+    while ((match = chapterPathRegex.exec(text)) !== null) {
+      const relPath = match[1];
+      if (seen.has(relPath)) {
+        continue;
+      }
+      seen.add(relPath);
+      entries.push({ relPath, order: entries.length });
+    }
+
+    if (entries.length > 0) {
+      return entries;
     }
   }
 
-  return chapterOrderKeys;
+  return entries;
+}
+
+/**
+ * Convert a config relative path (e.g. "frontmatter/dedication.qmd") to ChapterInfo.
+ * Returns null if the file does not exist.
+ */
+function pathToChapterInfo(
+  repoRoot: string,
+  vol: VolumeId,
+  relPath: string,
+): ChapterInfo | null {
+  const contentsDir = path.join(repoRoot, 'book', 'quarto', 'contents', vol);
+  const fullPath = path.join(contentsDir, relPath);
+  if (!fs.existsSync(fullPath)) {
+    return null;
+  }
+
+  const segments = relPath.split('/');
+  const fileName = segments[segments.length - 1];
+  const name = fileName.replace(/\.qmd$/i, '');
+  const dirPath =
+    segments.length > 1
+      ? path.join(contentsDir, ...segments.slice(0, -1))
+      : contentsDir;
+
+  return {
+    name,
+    volume: vol,
+    dirPath,
+    displayName: toDisplayName(name),
+  };
 }
 
 export function discoverChapters(repoRoot: string): VolumeInfo[] {
@@ -100,70 +127,28 @@ export function discoverChapters(repoRoot: string): VolumeInfo[] {
 
   for (const vol of ['vol1', 'vol2'] as VolumeId[]) {
     const contentsDir = path.join(repoRoot, 'book', 'quarto', 'contents', vol);
-    if (!fs.existsSync(contentsDir)) { continue; }
+    if (!fs.existsSync(contentsDir)) {
+      continue;
+    }
 
-    const entries = fs.readdirSync(contentsDir, { withFileTypes: true });
-    const chapterOrder = readChapterOrderFromConfig(repoRoot, vol, chapterOrderSource);
-    const orderByName = new Map<string, number>(chapterOrder.map((name, index) => [name, index]));
+    const configEntries = readBuildablePathsFromConfig(repoRoot, vol, chapterOrderSource);
+    const orderByPath = new Map<string, number>(
+      configEntries.map((e, i) => [e.relPath, i]),
+    );
 
-    const regularChapters: ChapterInfo[] = entries
-      .filter(e => e.isDirectory() && !EXCLUDED_CHAPTER_DIRS.has(e.name))
-      .filter(e => {
-        // Must contain a .qmd file to count as a chapter
-        const dirPath = path.join(contentsDir, e.name);
-        return fs.readdirSync(dirPath).some(f => f.endsWith('.qmd'));
-      })
-      .map(e => {
-        const dirPath = path.join(contentsDir, e.name);
-        const qmdFiles = fs.readdirSync(dirPath)
-          .filter(f => f.endsWith('.qmd'))
-          .sort();
-
-        const preferredByConfig = qmdFiles.find(file => {
-          const stem = file.replace(/\.qmd$/i, '');
-          return orderByName.has(stem);
-        });
-        const preferredByDirName = qmdFiles.find(file => file.replace(/\.qmd$/i, '') === e.name);
-        const preferredNonHidden = qmdFiles.find(file => !path.basename(file).startsWith('_'));
-        const selected = preferredByConfig ?? preferredByDirName ?? preferredNonHidden ?? qmdFiles[0];
-        const chapterStem = selected.replace(/\.qmd$/i, '');
-
-        return {
-          name: chapterStem,
-          volume: vol,
-          dirPath,
-          displayName: toDisplayName(chapterStem),
-        };
-      });
-
-    const appendixDir = path.join(contentsDir, 'backmatter');
-    const appendixChapters: ChapterInfo[] = fs.existsSync(appendixDir)
-      ? fs.readdirSync(appendixDir, { withFileTypes: true })
-        .filter(entry => entry.isFile() && APPENDIX_FILE_REGEX.test(entry.name))
-        .map(entry => {
-          const appendixStem = entry.name.replace(/\.qmd$/i, '');
-          return {
-            name: appendixStem,
-            volume: vol,
-            dirPath: appendixDir,
-            displayName: toDisplayName(appendixStem),
-          };
-        })
-      : [];
-
-    const chapters: ChapterInfo[] = [...regularChapters, ...appendixChapters]
+    const chapters: ChapterInfo[] = configEntries
+      .map((e) => pathToChapterInfo(repoRoot, vol, e.relPath))
+      .filter((ch): ch is ChapterInfo => ch !== null)
       .sort((a, b) => {
-        const aOrder = orderByName.get(a.name);
-        const bOrder = orderByName.get(b.name);
+        const aPath = path.relative(contentsDir, path.join(a.dirPath, `${a.name}.qmd`));
+        const bPath = path.relative(contentsDir, path.join(b.dirPath, `${b.name}.qmd`));
+        const aOrder = orderByPath.get(aPath.replace(/\\/g, '/'));
+        const bOrder = orderByPath.get(bPath.replace(/\\/g, '/'));
         if (aOrder !== undefined && bOrder !== undefined) {
           return aOrder - bOrder;
         }
-        if (aOrder !== undefined) {
-          return -1;
-        }
-        if (bOrder !== undefined) {
-          return 1;
-        }
+        if (aOrder !== undefined) return -1;
+        if (bOrder !== undefined) return 1;
         return a.displayName.localeCompare(b.displayName);
       });
 

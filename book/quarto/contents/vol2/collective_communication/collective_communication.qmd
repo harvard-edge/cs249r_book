@@ -1367,7 +1367,7 @@ Most gradients are computed in FP32 (32-bit floating point) or BF16 (16-bit brai
 
 3. **1-bit SGD**: The extreme case—transmit only the **sign** of each gradient element (+1 or -1). The receiver reconstructs using a learned or adaptive scaling factor. Provides **32$\times$ compression** over FP32 but introduces substantial noise that typically degrades convergence without additional mechanisms.
 
-**Block Quantization for Gradient Communication:**
+#### Block Quantization for Gradient Communication
 
 The quantization progression above uses a single scaling factor per entire tensor, which implicitly assumes the gradient distribution is uniform across the tensor. In practice, gradient distributions are highly non-uniform: attention layers produce gradients with heavy tails, embedding layers produce extremely sparse gradients, and normalization layers produce gradients concentrated near zero. A single scaling factor per tensor is suboptimal when gradient distributions vary across the tensor. Regions with small gradients lose most of their information when quantized with a scaling factor dominated by the tensor's maximum value. **Block quantization** addresses this by dividing the gradient tensor into blocks of $B$ elements (typically $B = 64$ or $128$) and computing an independent scaling factor per block. Each block's scaling factor adapts to the local gradient distribution, reducing quantization error at the cost of transmitting $d/B$ additional scaling factors.
 
@@ -1379,13 +1379,13 @@ For a gradient vector of dimension $d$ quantized to INT8 with block size $B$:
 
 Block quantization is the default approach in DeepSpeed's communication compression and is supported by NCCL's custom reduction interface for fused quantize-reduce operations.
 
-**Trade-off**: Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by **Error Feedback** (discussed below).
+Each reduction in bit-width introduces quantization noise. This noise acts as a biased perturbation to the true gradient direction. For aggressive quantization (INT8 and especially 1-bit), the systematic bias can prevent convergence unless corrected by **Error Feedback** (discussed below).
 
 ### Sparsification: Transmitting Only Important Gradients {#sec-communication-collective-operations-collective-operations-sparsification-transmitting-important-gradients-2cd2}
 
 Quantization attacks communication volume by reducing the number of bits per gradient element while transmitting every element. An orthogonal approach, **sparsification**, attacks the problem from the other direction: keep full precision but transmit only a subset of gradient elements, setting the rest to zero.
 
-**Top-K Sparsification:**
+#### Top-K Sparsification
 
 The most common method is **Top-K compression**: for a gradient vector $g \in \mathbb{R}^d$, transmit only the $K$ elements with the largest absolute magnitude, setting the rest to zero:
 
@@ -1393,15 +1393,15 @@ $$\text{TopK}(g) = g \odot \mathbf{1}_{|g| \geq |g|_{(K)}}$$
 
 where $|g|_{(K)}$ is the $K$-th largest element by magnitude. With $K = 0.001 \times d$ (keeping only 0.1% of elements), this achieves **1000$\times$ compression**.
 
-**Encoding Sparse Gradients:**
+#### Encoding Sparse Gradients
 
 Transmitting a sparse gradient requires sending both the nonzero values and their indices. For a gradient vector of dimension $d$ with $K$ nonzero elements, the encoded message contains $K$ values (each in FP32 or FP16) plus $K$ indices (typically INT32). The total message size is $K \times (4 + 4) = 8K$ bytes for FP32 values with INT32 indices. The effective compression ratio is therefore $4d / 8K = d / 2K$. For $K = 0.001d$, this yields a compression ratio of 500$\times$ (not 1000$\times$), because the index overhead is significant. Reducing the index size to INT16 (for $d < 65536$) or using run-length encoding for structured sparsity patterns can improve the effective ratio.
 
-**Random-K as an Alternative:**
+#### Random-K as an Alternative
 
 An alternative to Top-K is **Random-K sparsification**, which selects $K$ elements uniformly at random and scales them by $d/K$ to maintain an unbiased gradient estimate. Random-K has the advantage of being an unbiased compressor even without error feedback, because $\mathbb{E}[\text{RandomK}(g)] = g$. However, it introduces higher variance than Top-K because it discards large gradients with the same probability as small ones. In practice, Top-K with error feedback converges faster than Random-K for the same compression ratio, because Top-K preserves the most informative gradient components at each step.
 
-**The Convergence Problem:**
+#### The Convergence Problem
 
 Naively discarding small gradients creates a systematic bias. If a parameter consistently receives small gradients (e.g., 0.01 per step), it will *never* be updated because 0.01 is always below the Top-K threshold. Over thousands of steps, these "lost" gradients accumulate to a significant error that prevents the model from converging to the true optimum.
 
@@ -1420,8 +1420,6 @@ We solve the conflict between compression and convergence with **Error Feedback*
 3.  **Common Pitfall:** A frequent misconception is that Error Feedback is "built into" all compressors. In reality, without explicit error tracking, biased compressors (like Top-K) can lead to **Divergence** or poor generalization because small gradient components are never applied.
 
 :::
-
-**Why Error Feedback Guarantees Convergence:**
 
 The key insight is that error feedback makes compression an **unbiased estimator over time**. Consider what happens over $T$ steps:
 
@@ -1504,7 +1502,7 @@ Gradient compression is not free; it trades reduced communication for increased 
 | **Top-K (1%) + Error FB** |           100$\times$ |    Moderate slowdown (~10-20%) | Cross-datacenter training      |
 | **1-bit + Error FB**      |            32$\times$ | Significant slowdown (~20-30%) | Extreme bandwidth constraints  |
 
-**When to Use Compression:**
+#### When to Use Compression
 
 - **Use aggressive compression** when communication time dominates compute time (high $T_{comm}/T_{compute}$ ratio). This typically occurs with smaller models on large clusters.
 - **Avoid aggressive compression** when compute time dominates—the convergence slowdown isn't worth the communication savings you're not bottlenecked on.
