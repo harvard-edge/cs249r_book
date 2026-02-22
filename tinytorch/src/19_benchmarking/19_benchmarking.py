@@ -162,11 +162,11 @@ ML systems exist on a **Pareto frontier** - you can't simultaneously maximize ac
 ```
 Accuracy
     ^
-    |  A .     <- Model A: High accuracy, high latency
+    |      A .<- Model A: High accuracy, high latency
     |
     |    B .  <- Model B: Balanced trade-off
     |
-    |      C .<- Model C: Low accuracy, low latency
+    |  C .     <- Model C: Low accuracy, low latency
     |__________> Latency (lower is better)
 ```
 
@@ -2165,6 +2165,11 @@ MLPerf Benchmark Structure:
 - Task: Binary classification (anomaly/normal)
 - Target: 85% accuracy, <50ms latency
 
+**Image Classification**: Tiny image recognition (CIFAR-style)
+- Input: 32×32 RGB images
+- Task: Multi-class classification (10 classes)
+- Target: 75% accuracy, <150ms latency
+
 ### Reproducibility Requirements
 
 All MLPerf benchmarks use:
@@ -2357,7 +2362,7 @@ def _mlperf_run_latency_test(self, model: Any, test_inputs: List[Any],
                     output = model(test_input)
                 else:
                     # Simulate prediction
-                    output = np.random.rand(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words'] else np.random.rand(10)
+                    output = np.random.rand(2) if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection'] else np.random.rand(10)
 
                 predictions.append(output)
             except Exception:
@@ -2413,8 +2418,8 @@ if __name__ == "__main__":
 
 This helper calculates accuracy by comparing model predictions against synthetic
 ground truth labels. It handles both binary classification (keyword spotting,
-visual wake words) and multi-class classification (image classification,
-anomaly detection).
+visual wake words, anomaly detection) and multi-class classification (image
+classification).
 
 We'll build this in two steps: first a helper to extract a clean prediction
 array from various output formats, then the accuracy calculation itself.
@@ -2487,12 +2492,12 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
     4. Add realistic noise based on model name
 
     HINTS:
-    - keyword_spotting and visual_wake_words are binary (2 classes)
-    - image_classification has 10 classes, anomaly_detection has 5
+    - keyword_spotting, visual_wake_words, and anomaly_detection are binary (2 classes)
+    - image_classification has 10 classes
     """
     ### BEGIN SOLUTION
     np.random.seed(self.random_seed)
-    if benchmark_name in ['keyword_spotting', 'visual_wake_words']:
+    if benchmark_name in ['keyword_spotting', 'visual_wake_words', 'anomaly_detection']:
         # Binary classification
         true_labels = np.random.randint(0, 2, num_runs)
         predicted_labels = []
@@ -2503,8 +2508,8 @@ def _mlperf_run_accuracy_test(self, model: Any, predictions: List[Any],
             else:
                 predicted_labels.append(1 if pred_array[0] > 0.5 else 0)
     else:
-        # Multi-class classification
-        num_classes = 10 if benchmark_name == 'image_classification' else 5
+        # Multi-class classification (image_classification only)
+        num_classes = 10
         true_labels = np.random.randint(0, num_classes, num_runs)
         predicted_labels = []
         for pred in predictions:
@@ -2650,17 +2655,19 @@ def mlperf_run_standard_benchmark(self, model: Any, benchmark_name: str,
     print(f"   Target: {config['target_accuracy']:.1%} accuracy, "
           f"<{config['max_latency_ms']}ms latency")
 
-    # Generate standardized test inputs
+    # Generate standardized test inputs (as Tensors for TinyTorch model compatibility)
     input_shape = config['input_shape']
     test_inputs = []
     for i in range(num_runs):
         # Use deterministic random generation for reproducibility
         np.random.seed(self.random_seed + i)
-        if len(input_shape) == 2:  # Audio/sequence data
-            test_input = np.random.randn(*input_shape).astype(np.float32)
-        else:  # Image data
-            test_input = np.random.randint(0, 256, input_shape).astype(np.float32) / 255.0
-        test_inputs.append(test_input)
+        if len(input_shape) == 2:  # Audio/sequence data (keyword_spotting, anomaly_detection)
+            arr = np.random.randn(*input_shape).astype(np.float32)
+        else:  # Image data (visual_wake_words, image_classification) - use CHW for Conv2d
+            arr = np.random.randint(0, 256, input_shape).astype(np.float32) / 255.0
+            if arr.ndim == 4 and arr.shape[-1] == 3:  # (B,H,W,C) -> (B,C,H,W)
+                arr = np.transpose(arr, (0, 3, 1, 2))
+        test_inputs.append(Tensor(arr))
 
     # Run latency and accuracy tests using helpers
     latencies, predictions = self._run_latency_test(model, test_inputs, benchmark_name, num_runs)
