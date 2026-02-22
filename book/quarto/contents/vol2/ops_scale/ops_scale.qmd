@@ -84,9 +84,9 @@ This independence vanishes as model count grows. Models begin sharing data sourc
 
 Infrastructure efficiency compounds these coordination challenges. Production ML workloads rarely achieve high GPU utilization because training jobs run intermittently and inference loads fluctuate with user traffic. A single model team might accept 20% GPU utilization because optimizing further is not worth the engineering investment. Multiply by 100 models, and that underutilization represents millions of dollars in wasted infrastructure. Similarly, a single model's occasional production incident is manageable, but 100 models with independent failure modes produce a constant stream of alerts that exhaust on-call engineers and mask genuine emergencies.
 
-These challenges demand a fundamentally different approach. Platform thinking emerges as the organizational response. Rather than treating each model as an independent system with its own infrastructure, platforms provide shared services that amortize operational costs across the entire model portfolio. Feature stores[^fn-feature-store] eliminate redundant feature computation. Unified deployment pipelines ensure consistent rollout practices. Centralized monitoring aggregates signals across models to detect system-wide issues and enable capacity planning. This chapter examines how to design, implement, and operate these platforms.
+These challenges demand a fundamentally different approach. Platform thinking emerges as the organizational response. Rather than treating each model as an independent system with its own infrastructure, platforms provide shared services that amortize operational costs across the entire model portfolio. Feature stores[^fn-feature-store-skew] eliminate redundant feature computation. Unified deployment pipelines ensure consistent rollout practices. Centralized monitoring aggregates signals across models to detect system-wide issues and enable capacity planning. This chapter examines how to design, implement, and operate these platforms.
 
-[^fn-feature-store]: **Feature Store**: A centralized repository that manages the computation, storage, and serving of ML features. Feature stores solve the training-serving skew problem by ensuring identical feature values in both environments. Major implementations include Feast (open source), Tecton (commercial), and internal systems at companies like Uber (Michelangelo) and Airbnb (Zipline).
+[^fn-feature-store-skew]: **Feature Store**: A centralized repository that manages the computation, storage, and serving of ML features. The core systems problem feature stores solve is training-serving skew: when training and serving compute the same feature differently, model accuracy degrades silently because the model receives inputs it never trained on. At fleet scale, where hundreds of models share overlapping features, a single inconsistent computation path can cascade degradation across the entire portfolio. \index{Feature Store!training-serving skew}
 
 ### The N-Models Problem {#sec-ml-operations-scale-nmodels-problem-fcff}
 
@@ -786,9 +786,9 @@ Modern recommendation systems use ensemble architectures for several reasons.
 
 Diverse objectives demand specialized models because a single model cannot optimize for engagement, diversity, freshness, and business constraints simultaneously. Separate models specialize in each objective, and an ensemble combines their outputs.
 
-Staged filtering becomes essential because processing billions of candidates with a single model is computationally infeasible. Multi-stage architectures[^fn-multi-stage-recsys] progressively filter candidates [@covington2016deep; @liu2022neural]. The retrieval stage narrows billions to thousands, coarse ranking reduces thousands to hundreds, fine ranking selects tens from hundreds, and re-ranking produces the final ordering.
+Staged filtering becomes essential because processing billions of candidates with a single model is computationally infeasible. Multi-stage architectures[^fn-multi-stage-recsys-latency] progressively filter candidates [@covington2016deep; @liu2022neural]. The retrieval stage narrows billions to thousands, coarse ranking reduces thousands to hundreds, fine ranking selects tens from hundreds, and re-ranking produces the final ordering.
 
-[^fn-multi-stage-recsys]: **Multi-Stage Recommendation Architecture**: YouTube's 2016 paper on deep neural networks for recommendations established this paradigm, using a candidate generation stage (fast, approximate) followed by a ranking stage (slower, precise). This design reflects a fundamental systems trade-off: compute-intensive models cannot evaluate billions of candidates in real-time, so cheaper models filter down to a manageable set.
+[^fn-multi-stage-recsys-latency]: **Multi-Stage Recommendation Architecture**: YouTube's 2016 deep-recommendation paper established this paradigm: a fast retrieval model narrows billions of candidates to thousands, then a compute-intensive ranking model scores the survivors. The trade-off is latency versus accuracy at each stage -- the retrieval model sacrifices precision for speed (sub-10 ms over the full corpus), while the ranker spends its budget on the reduced set. Updating any single stage without re-validating downstream stages is a primary source of ensemble regression at fleet scale. \index{Multi-Stage Architecture!recommendation}
 
 Experimentation velocity improves because ensemble architectures allow updating individual components without retraining the entire system. Teams can iterate on specific models while others remain stable.
 
@@ -851,9 +851,9 @@ Production is not a terminal state. Models require ongoing maintenance that incl
 
 Models eventually become obsolete as better alternatives emerge or business requirements change. Deprecation involves identifying dependent systems that must migrate, providing migration path and timeline to consumers, maintaining the old model until migration completes, and archiving artifacts for reproducibility and audit purposes.
 
-Organizations often underinvest in deprecation, leading to accumulation of zombie models[^fn-zombie-models] that consume resources but provide questionable value. Platform-level lifecycle enforcement helps address this pattern.
+Organizations often underinvest in deprecation, leading to accumulation of zombie models[^fn-zombie-models-waste] that consume resources but provide questionable value. Platform-level lifecycle enforcement helps address this pattern.
 
-[^fn-zombie-models]: **Zombie Models**: Production models that continue running despite being obsolete, superseded, or providing minimal value. Zombie models consume infrastructure resources, require maintenance, and create security and compliance risks. Industry surveys suggest 20-40% of production models at mature organizations may be candidates for deprecation, representing significant hidden costs.
+[^fn-zombie-models-waste]: **Zombie Models**: Production models that continue serving despite being obsolete or superseded. Industry surveys estimate 20--40% of production models at mature organizations qualify as zombies, each consuming GPU memory, on-call attention, and monitoring budget while delivering negligible business value. The operational cost is not just the wasted compute -- zombie models inflate the dependency graph, making platform-wide upgrades and security patches slower and riskier. \index{Zombie Models!deprecation}
 
 ### Deployment Patterns by Model Count {#sec-ml-operations-scale-deployment-patterns-model-count-e071}
 
@@ -1048,9 +1048,9 @@ Training pipelines require orchestration systems that handle:
 - Caching of intermediate results
 - Logging and artifact storage
 
-Common orchestration choices include Kubeflow Pipelines[^fn-kubeflow] [@bisong2019kubeflow], Airflow with ML extensions, and cloud-native solutions like Vertex AI Pipelines or SageMaker Pipelines. The choice depends on existing infrastructure, team expertise, and scale requirements.
+Common orchestration choices include Kubeflow Pipelines[^fn-kubeflow-orchestration] [@bisong2019kubeflow], Airflow with ML extensions, and cloud-native solutions like Vertex AI Pipelines or SageMaker Pipelines. The choice depends on existing infrastructure, team expertise, and scale requirements.
 
-[^fn-kubeflow]: **Kubeflow**: An open-source ML platform built on Kubernetes, developed by Google and released in 2018. Kubeflow Pipelines provides a domain-specific language (DSL) for defining ML workflows as directed acyclic graphs (DAGs), with built-in support for experiment tracking, artifact versioning, and distributed training orchestration.
+[^fn-kubeflow-orchestration]: **Kubeflow**: An open-source ML platform released by Google in 2018 that couples pipeline orchestration to Kubernetes resource management. The key systems consequence: because Kubeflow DAGs express both computational dependencies and resource requests, the orchestrator can schedule GPU-intensive training steps only when accelerators are available, preventing the resource contention that makes manual scheduling of multi-model training fleets untenable. \index{Kubeflow!orchestration}
 
 #### Pipeline Parameterization
 
@@ -1150,9 +1150,9 @@ In a famous incident at a major e-commerce platform, a product ranking model pas
 
 #### Fairness Gates
 
-For models affecting users, fairness validation[^fn-fairness-validation] ensures equitable treatment across demographic groups [@hardt2016equality]. Two mathematical definitions formalize this requirement. @eq-demographic-parity expresses demographic parity: the probability of positive prediction must differ by less than threshold $\epsilon$ between protected groups $a$ and $b$. @eq-equalized-odds strengthens this to equalized odds: prediction accuracy must be similar across groups for both positive and negative true outcomes:
+For models affecting users, fairness validation[^fn-fairness-validation-tradeoff] ensures equitable treatment across demographic groups [@hardt2016equality]. Two mathematical definitions formalize this requirement. @eq-demographic-parity expresses demographic parity: the probability of positive prediction must differ by less than threshold $\epsilon$ between protected groups $a$ and $b$. @eq-equalized-odds strengthens this to equalized odds: prediction accuracy must be similar across groups for both positive and negative true outcomes:
 
-[^fn-fairness-validation]: **Fairness Validation in ML**: Automated fairness checking gained prominence following high-profile incidents where ML systems exhibited discriminatory behavior. The challenge is that multiple fairness definitions exist (demographic parity, equalized odds, calibration), and satisfying all simultaneously is often mathematically impossible. Organizations must choose which definitions align with their ethical and legal requirements.
+[^fn-fairness-validation-tradeoff]: **Fairness Validation in ML**: Multiple fairness definitions exist -- demographic parity, equalized odds, calibration -- and satisfying all simultaneously is mathematically impossible (the Chouldechova-Kleinberg impossibility result). This forces a systems design choice: automated validation gates must encode which fairness definition the organization prioritizes, making the gate configuration itself a policy decision that cannot be delegated to a generic threshold. \index{Fairness Validation!impossibility trade-off}
 
 $$\text{Demographic Parity: } |P(\hat{Y}=1|A=a) - P(\hat{Y}=1|A=b)| < \epsilon$$ {#eq-demographic-parity}
 
@@ -1184,9 +1184,9 @@ Blue-green is appropriate for low-risk changes or models where gradual rollout p
 
 #### Canary Deployment
 
-[^fn-canary]: **Canary Deployment**: Named after the practice of using canaries in coal mines to detect dangerous gases, canary deployments expose a small percentage of users to new code before full rollout. The term gained popularity in the early 2010s as companies like Google and Facebook formalized gradual rollout practices. For ML systems, canary deployments are particularly valuable because model regressions often manifest as gradual performance degradation rather than immediate failures.
+Canary deployment[^fn-canary-deploy] routes a small percentage of traffic to the new version while monitoring for regressions. If metrics remain acceptable, traffic percentage increases until the new version serves all traffic.
 
-Canary deployment[^fn-canary] routes a small percentage of traffic to the new version while monitoring for regressions. If metrics remain acceptable, traffic percentage increases until the new version serves all traffic.
+[^fn-canary-deploy]: **Canary Deployment**: Named after the coal-mining practice of using canaries to detect toxic gases -- a small sacrifice that protects the whole. For ML systems, the analogy is precise: model regressions typically manifest as gradual accuracy degradation rather than crashes, making them invisible to health checks but detectable through statistical comparison of canary versus control traffic. Without canary stages, a subtly degraded model can reach 100% traffic before anyone notices the loss. \index{Canary Deployment!gradual rollout}
 
 Typical progression: 1% → 5% → 25% → 50% → 100%
 
@@ -1472,9 +1472,9 @@ Shadow deployment is less critical for:
 
 #### Interleaving Experiments
 
-Recommendation systems use interleaving experiments[^fn-interleaving] for more efficient comparison than traditional A/B testing [@chapelle2012large]. Rather than splitting users between variants, interleaving presents items from both variants to each user, then measures which items users engage with.
+Recommendation systems use interleaving experiments[^fn-interleaving-efficiency] for more efficient comparison than traditional A/B testing [@chapelle2012large]. Rather than splitting users between variants, interleaving presents items from both variants to each user, then measures which items users engage with.
 
-[^fn-interleaving]: **Interleaving Experiments**: First developed for search engine evaluation, interleaving combines results from two rankers into a single list shown to users. Credit is assigned based on which ranker's items receive clicks. This approach requires 10-100$\times$ fewer samples than A/B testing because each user provides direct comparison signals rather than contributing to aggregate statistics that must be compared across populations.
+[^fn-interleaving-efficiency]: **Interleaving Experiments**: Originally developed for search engine evaluation, interleaving merges results from two rankers into one list shown to each user, then credits clicks to the originating ranker. This requires 10--100$\times$ fewer samples than A/B testing because each user provides a direct within-subject comparison rather than a between-population signal. For fleet-scale recommendation systems iterating on dozens of model variants, this 10--100$\times$ sample reduction translates directly into faster experiment cycles and lower opportunity cost from suboptimal models in production. \index{Interleaving Experiments!sample efficiency}
 
 The key insight is statistical efficiency. An interleaving experiment requires 10$\times$ to 100$\times$ fewer samples to detect the same effect size compared to A/B testing [@kohavi2009controlled], because each user provides direct comparison signals rather than contributing to aggregate statistics.
 
@@ -1977,9 +1977,9 @@ Rather than alerting on individual metric thresholds, fleet-wide anomaly detecti
 
 #### Statistical Process Control
 
-Control charts[^fn-control-charts] adapted for ML monitoring track whether metric distributions remain stable over time [@shewhart1931economic]. The core idea is distinguishing common cause variation (normal fluctuation) from special cause variation (genuine anomalies).
+Control charts[^fn-spc-ml] adapted for ML monitoring track whether metric distributions remain stable over time [@shewhart1931economic]. The core idea is distinguishing common cause variation (normal fluctuation) from special cause variation (genuine anomalies).
 
-[^fn-control-charts]: **Statistical Process Control (SPC)**: Developed by Walter Shewhart at Bell Labs in the 1920s for manufacturing quality control. Control charts use 3-sigma limits (3 standard deviations from the mean) because this threshold balances false positive rates against detection sensitivity. At 3-sigma, a stable process generates false alarms only 0.27% of the time, making sustained patterns of alerts highly indicative of genuine problems.
+[^fn-spc-ml]: **Statistical Process Control (SPC)**: Invented by Walter Shewhart at Bell Labs in 1924 for manufacturing quality control. The 3-sigma control limit produces false alarms only 0.27% of the time for a stable process. For ML fleet monitoring, this false-alarm rate compounds: 100 models with 10 metrics each generate roughly 3 spurious alerts per day at 3-sigma, making alert-fatigue management an inherent constraint of applying SPC at platform scale. \index{Statistical Process Control!ML monitoring}
 
 For a metric $X$ with established mean $\mu$ and standard deviation $\sigma$:
 
@@ -2040,9 +2040,9 @@ Concept drift occurs when the relationship $P(Y|X)$ changes, such as when users 
 
 Because labels are often delayed, most real-time monitoring systems focus on detecting covariate shift as a leading indicator of potential performance degradation. Statistical tests like the Population Stability Index (PSI) quantify this shift.
 
-For continuous features, the Population Stability Index (PSI)[^fn-psi] quantifies distribution shift [@yurdakul2018statistical]. @eq-psi-monitoring computes PSI as the sum of log-ratio weighted differences between actual and expected bucket proportions, yielding actionable thresholds: values below 0.1 indicate stability, while values at or above 0.25 demand immediate investigation. The mathematical foundation of PSI is established in @sec-robust-ai.
+For continuous features, the Population Stability Index (PSI)[^fn-psi-drift] quantifies distribution shift [@yurdakul2018statistical]. @eq-psi-monitoring computes PSI as the sum of log-ratio weighted differences between actual and expected bucket proportions, yielding actionable thresholds: values below 0.1 indicate stability, while values at or above 0.25 demand immediate investigation. The mathematical foundation of PSI is established in @sec-robust-ai.
 
-[^fn-psi]: **Population Stability Index**: Originally developed in credit scoring to detect shifts in applicant populations, PSI is based on information-theoretic divergence measures. The thresholds (0.1 and 0.25) were established empirically in financial services, where regulatory requirements demand model monitoring. PSI has since become a standard metric across ML domains for detecting when retraining may be necessary.
+[^fn-psi-drift]: **Population Stability Index (PSI)**: Originally developed in credit scoring to detect shifts in loan-applicant populations, where regulators mandated quantitative drift monitoring. The standard thresholds (PSI < 0.1 stable, $\geq$ 0.25 action required) were established empirically in financial services. For ML fleet monitoring, PSI's advantage is computational cheapness -- a single pass over bucketed histograms -- making it feasible to track hundreds of features across hundreds of models without saturating the monitoring budget. \index{Population Stability Index!drift detection}
 
 $$PSI = \sum_{i=1}^{n} (A_i - E_i) \times \ln\left(\frac{A_i}{E_i}\right)$$ {#eq-psi-monitoring}
 
@@ -2114,9 +2114,9 @@ Metrics should be collected at multiple granularities. Real-time streaming suppo
 
 #### Distributed Tracing
 
-In multi-model systems, a single user request may traverse multiple models. Distributed tracing[^fn-distributed-tracing], pioneered by Google's Dapper system [@sigelman2010dapper], tracks requests across model boundaries. Just as @sec-collective-communication established AllReduce, AllGather, and ReduceScatter patterns for coordinating gradient movement during training, distributed tracing coordinates observability across inference services. This enables end-to-end latency decomposition, cross-model dependency analysis, and root cause identification when multi-model interactions fail.
+In multi-model systems, a single user request may traverse multiple models. Distributed tracing[^fn-distributed-tracing-ml], pioneered by Google's Dapper system [@sigelman2010dapper], tracks requests across model boundaries. Just as @sec-collective-communication established AllReduce, AllGather, and ReduceScatter patterns for coordinating gradient movement during training, distributed tracing coordinates observability across inference services. This enables end-to-end latency decomposition, cross-model dependency analysis, and root cause identification when multi-model interactions fail.
 
-[^fn-distributed-tracing]: **Distributed Tracing**: A debugging technique that assigns unique trace IDs to requests and propagates them across service boundaries. Each service records timing and metadata, creating a complete picture of request flow. Open standards like OpenTelemetry have emerged to ensure interoperability. For ML systems, distributed tracing reveals which model in a multi-model pipeline contributes to latency or errors.
+[^fn-distributed-tracing-ml]: **Distributed Tracing**: Google's 2010 Dapper paper established the pattern of propagating unique trace IDs across service boundaries. For multi-model ML pipelines, tracing is the only reliable way to attribute end-to-end latency to a specific model stage -- without it, a 50 ms tail-latency spike in a 10-model pipeline requires investigating all 10 models independently. Dapper achieved this with less than 0.3% CPU overhead per host, setting the performance bar that makes always-on tracing feasible at fleet scale. \index{Distributed Tracing!ML pipelines}
 
 Each request receives a trace ID propagated across all model invocations. Traces capture timing, inputs, outputs, and resource usage for each component.
 
@@ -2360,9 +2360,9 @@ Complete ML platforms provide end-to-end capabilities:
 - Monitoring and alerting
 - Cost attribution and governance
 
-Platforms at this level include Vertex AI, SageMaker, and internal platforms at major technology companies such as TFX[^fn-tfx] at Google [@baylor2017tfx] and MLflow [@zaharia2018accelerating]. Model teams interact through high-level APIs while the platform manages all operational concerns.
+Platforms at this level include Vertex AI, SageMaker, and internal platforms at major technology companies such as TFX[^fn-tfx-production] at Google [@baylor2017tfx] and MLflow [@zaharia2018accelerating]. Model teams interact through high-level APIs while the platform manages all operational concerns.
 
-[^fn-tfx]: **TensorFlow Extended (TFX)**: Google's production ML platform, open-sourced in 2019. TFX emerged from lessons learned deploying ML across Google's products and codifies best practices for data validation, feature engineering, model analysis, and serving. The platform emphasizes reproducibility and the ability to detect data and model quality issues before they reach production.
+[^fn-tfx-production]: **TensorFlow Extended (TFX)**: Google's production ML platform, open-sourced in 2019 after years of internal use. TFX's key architectural insight is that data validation (via TFDV) gates the pipeline before training begins, catching schema violations and distribution drift that would otherwise produce silently degraded models. This "fail before you train" philosophy prevents the most expensive class of ML waste: GPU-hours spent training on corrupted data. \index{TFX!data validation}
 
 ### Self-Service Model Deployment {#sec-ml-operations-scale-selfservice-model-deployment-4753}
 
@@ -2441,9 +2441,9 @@ Effective training resource management includes:
 
 *Job scheduling*: Priority queues, fair sharing across teams, deadline-aware scheduling for urgent jobs.
 
-*Preemption policies*: Low-priority jobs can be preempted[^fn-preemption] for high-priority work, with checkpointing to avoid lost progress.
+*Preemption policies*: Low-priority jobs can be preempted[^fn-preemption-ml] for high-priority work, with checkpointing to avoid lost progress.
 
-[^fn-preemption]: **Job Preemption**: The ability to pause or terminate lower-priority workloads to free resources for higher-priority work. For ML training, preemption requires checkpoint-and-resume capabilities, where model state is saved periodically so training can continue from the last checkpoint rather than restarting from scratch. Cloud providers offer 60-90% discounts on preemptible instances, making this a significant cost optimization lever.
+[^fn-preemption-ml]: **Job Preemption**: The ability to terminate lower-priority workloads to free resources for urgent work. Cloud providers offer 60--90% discounts on preemptible/spot instances, but the trade-off is that ML training must support checkpoint-and-resume: without periodic checkpointing, a preempted 72-hour training run restarts from scratch, converting a 70% cost savings into a net loss. Checkpoint frequency itself is a trade-off between I/O overhead and wasted-compute risk. \index{Job Preemption!checkpoint trade-off}
 
 *Spot/preemptible instances*: Training can often use discounted preemptible compute, with automatic retry on preemption.
 
@@ -2541,9 +2541,9 @@ Platform
 
 Each team receives dedicated namespaces with resource quotas, while shared services operate in common namespaces with appropriate access controls.
 
-**Noisy Neighbor Prevention**[^fn-noisy-neighbor]
+**Noisy Neighbor Prevention**[^fn-noisy-neighbor-ml]
 
-[^fn-noisy-neighbor]: **Noisy Neighbor Problem**: A multi-tenancy issue where one tenant's resource-intensive workload degrades performance for other tenants sharing the same infrastructure. In ML contexts, a training job consuming all available GPU memory or network bandwidth can prevent other jobs from running efficiently. The term originates from cloud computing, where physical isolation was replaced by virtualization.
+[^fn-noisy-neighbor-ml]: **Noisy Neighbor Problem**: A multi-tenancy failure mode where one tenant's workload degrades performance for co-located tenants. ML workloads are particularly prone to this because training jobs allocate GPU memory greedily -- a single job requesting all available HBM on a shared node can starve co-located inference services, causing latency spikes that violate SLOs. Unlike CPU workloads, GPU memory cannot be overcommitted, making physical resource isolation the only reliable prevention. \index{Noisy Neighbor!GPU multi-tenancy}
 
 Without controls, one team's demanding workload can degrade performance for others. Prevention strategies include:
 
@@ -3122,9 +3122,9 @@ The engagement difference between hourly and real-time features is 2.1 percentag
 
 ### Point-in-Time Correctness {#sec-ml-operations-scale-pointintime-correctness-41f4}
 
-Training data must use features as they existed at the time of each training example. @fig-time-travel illustrates the "time travel" problem: a batch job computing `total_clicks_today` at midnight produces a value of 10, but using this to train a model predicting behavior at noon introduces leakage since the true value at noon was only 4. Using current feature values to label historical events creates data leakage[^fn-data-leakage] that inflates offline metrics but fails in production.
+Training data must use features as they existed at the time of each training example. @fig-time-travel illustrates the "time travel" problem: a batch job computing `total_clicks_today` at midnight produces a value of 10, but using this to train a model predicting behavior at noon introduces leakage since the true value at noon was only 4. Using current feature values to label historical events creates data leakage[^fn-data-leakage-pitfall] that inflates offline metrics but fails in production.
 
-[^fn-data-leakage]: **Data Leakage**: A subtle but devastating error where information from the future is inadvertently used to make predictions about the past. In financial models, this might mean using features computed from the full dataset (including future data) to predict historical events. Models with leakage often show spectacular offline performance (sometimes 99%+ accuracy) but fail completely in production where future information is unavailable.
+[^fn-data-leakage-pitfall]: **Data Leakage**: An error where future information contaminates training data. The systems danger is that leakage produces models with spectacular offline metrics -- sometimes 99%+ accuracy -- that fail completely in production where future information is unavailable. At feature-store scale, leakage risk multiplies because batch-computed features may embed temporal information invisible to the model team but exploitable by the optimizer, making point-in-time correctness an infrastructure guarantee rather than a per-team responsibility. \index{Data Leakage!feature store}
 
 ::: {#fig-time-travel fig-env="figure" fig-pos="htb" fig-cap="**Point-in-Time Correctness**. Preventing data leakage by joining training events with feature values as they existed *at the event timestamp*, not the current values. This ensures the model learns from the information actually available at inference time." fig-alt="Timeline from midnight to midnight with inference event at noon. Blue segments show 4 clicks by noon, 10 total by end. Red curved arrow shows leakage path using future value of 10. Green label shows correct point-in-time value of 4."}
 ```{.tikz}
@@ -3784,9 +3784,9 @@ Distributed training and inference introduce debugging challenges absent from si
 
 #### Communication failures
 
-NCCL[^fn-nccl] collective operations can fail silently or hang indefinitely. @lst-nccl-debug shows how to enable debug logging to identify blocked ranks.
+NCCL[^fn-nccl-debug] collective operations can fail silently or hang indefinitely. @lst-nccl-debug shows how to enable debug logging to identify blocked ranks.
 
-[^fn-nccl]: **NVIDIA Collective Communications Library (NCCL)**: A library providing optimized primitives for multi-GPU and multi-node communication. NCCL implements collective operations like AllReduce, AllGather, and ReduceScatter with hardware-aware algorithms that exploit NVLink, NVSwitch, and InfiniBand topologies. Debugging NCCL issues is notoriously difficult because hangs often indicate that one GPU is waiting for data that another never sent.
+[^fn-nccl-debug]: **NVIDIA Collective Communications Library (NCCL)**: NCCL implements AllReduce, AllGather, and ReduceScatter with topology-aware algorithms that exploit NVLink, NVSwitch, and InfiniBand. Debugging NCCL failures is notoriously difficult because collective hangs are deadlocks by another name: one rank waits for data another never sent, producing no error message and no crash -- just silence. At fleet scale with thousands of GPUs, identifying the single blocked rank requires correlating logs across all participants. \index{NCCL!debugging}
 
 ::: {#lst-nccl-debug lst-cap="**NCCL Debug Logging**: Environment variables that enable verbose logging for diagnosing collective communication hangs and identifying blocked ranks."}
 ```{.bash}
@@ -3871,9 +3871,9 @@ The slowest rank determines overall throughput. Straggler causes include:
 
 ### On-Call Practices for ML Teams {#sec-ml-operations-scale-oncall-practices-ml-teams-26e4}
 
-ML systems require specialized on-call practices that build on established Site Reliability Engineering (SRE)[^fn-sre] principles [@beyer2016site]:
+ML systems require specialized on-call practices that build on established Site Reliability Engineering (SRE)[^fn-sre-ml] principles [@beyer2016site]:
 
-[^fn-sre]: **Site Reliability Engineering**: A discipline developed at Google in the early 2000s that applies software engineering principles to operations. SRE introduced concepts like error budgets, service level objectives (SLOs), and blameless postmortems. The core insight is that reliability is a feature that must be engineered, not an afterthought. For ML systems, SRE principles must be extended to handle probabilistic behavior and gradual degradation patterns.
+[^fn-sre-ml]: **Site Reliability Engineering (SRE)**: Founded by Ben Treynor Sloss at Google in 2003, SRE introduced error budgets and SLOs as quantitative reliability contracts. For ML systems, classical SRE must be extended: traditional services fail in binary (up/down), but models degrade probabilistically -- accuracy can drop 5% over weeks without triggering any health check. This demands drift-aware SLOs that treat prediction quality, not just uptime, as a reliability metric. \index{Site Reliability Engineering!ML extension}
 
 **Rotation design**:
 
