@@ -2108,7 +2108,10 @@ if __name__ == "__main__":
 """
 ### MLPerf - Standardized Industry Benchmarking
 
-MLPerf provides standardized benchmarks that enable fair comparison across different systems, similar to how MLPerf works for larger models. This is crucial for reproducible research and industry adoption.
+MLPerf® is a trademark of MLCommons. This module provides MLPerf-style standardized
+benchmarks that enable fair comparison across different systems, similar to how the
+official MLPerf suite works for larger models. This is important for reproducible
+research and industry adoption.
 
 ### Why Standardization Matters
 
@@ -2205,6 +2208,9 @@ Standard MLPerf Benchmarks:
 class MLPerf:
     """
     MLPerf-style standardized benchmarking for edge ML systems.
+
+    MLPerf® is a trademark of MLCommons. This module teaches the principles of
+    MLPerf-style benchmarking through a simplified suite inspired by MLPerf Tiny.
 
     Provides fixed benchmark configurations with target thresholds,
     standardized measurement protocols, and compliance reporting.
