@@ -133,23 +133,10 @@ def _find_chapter_qmd(book_dir: Path, chapter: str, volume: str) -> Path:
     raise FileNotFoundError(f"Chapter '{chapter}' not found in {contents_dir}")
 
 
-def _get_output_path(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
-    """Get the expected output file path for a build.
-
-    For PDF/EPUB, looks for any matching file in the output directory since
-    the filename depends on the book title configured in each volume's YAML.
-    """
-    _TITLES = {
-        "vol1": "Introduction-to-Machine-Learning-Systems",
-        "vol2": "Advanced-Machine-Learning-Systems",
-    }
-    title = _TITLES.get(volume, "Machine-Learning-Systems")
-    if format_type == "pdf":
-        return book_dir / "_build" / f"pdf-{volume}" / f"{title}.pdf"
-    elif format_type == "epub":
-        return book_dir / "_build" / f"epub-{volume}" / f"{title}.epub"
-    elif format_type == "html":
-        return book_dir / "_build" / f"html-{volume}" / "index.html"
+def _get_output_dir(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
+    """Return the build output directory (same for all formats: PDF, EPUB, HTML)."""
+    if format_type in ("pdf", "epub", "html"):
+        return book_dir / "_build" / f"{format_type}-{volume}"
     return None
 
 
@@ -183,12 +170,17 @@ def _build_and_check(
         "-v",
     ]
 
-    output_path = _get_output_path(book_dir, format_type, volume)
+    output_dir = _get_output_dir(book_dir, format_type, volume)
+    if not output_dir:
+        log_file.write_text("Unknown format type\n")
+        return False, 0.0, "Unknown format type"
 
-    # Delete previous output to ensure clean test
-    if output_path and output_path.exists():
+    # Delete previous output to ensure clean test (same rule: any .pdf, any .epub, index.html)
+    from cli.core.config import get_output_file
+    existing = get_output_file(output_dir, format_type)
+    if existing is not None:
         try:
-            output_path.unlink()
+            existing.unlink()
         except Exception:
             pass
 
@@ -212,14 +204,17 @@ def _build_and_check(
         full_output += f"=== DURATION ===\n{duration:.1f}s\n"
         log_file.write_text(full_output)
 
-        if output_path and output_path.exists():
+        # Success = output file present (any .pdf, any .epub, or index.html)
+        resolved = get_output_file(output_dir, format_type)
+
+        if resolved is not None and resolved.exists():
             if artifact_dir is not None:
                 try:
                     artifact_dir.mkdir(parents=True, exist_ok=True)
                     stem = _safe_artifact_stem(artifact_stem or chapter_name)
-                    ext = output_path.suffix or ".artifact"
-                    artifact_path = artifact_dir / f"{stem}{ext}"
-                    shutil.copy2(output_path, artifact_path)
+                    artifact_ext = resolved.suffix or ".artifact"
+                    artifact_path = artifact_dir / f"{stem}{artifact_ext}"
+                    shutil.copy2(resolved, artifact_path)
                     console.print(f"[dim]Saved debug artifact: {artifact_path}[/dim]")
                 except Exception as exc:
                     console.print(

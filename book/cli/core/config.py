@@ -12,6 +12,30 @@ from rich.console import Console
 console = Console()
 
 
+def get_output_file(output_dir: Path, format_type: str) -> Optional[Path]:
+    """Return the primary output file for a build: any .pdf, any .epub, or index.html.
+
+    Used by build (open output) and debug (success check) so all commands use the same
+    rule: PDF = first .pdf in dir, EPUB = first .epub in dir, HTML = index.html.
+    """
+    if not output_dir.exists():
+        return None
+    if format_type == "pdf":
+        for p in sorted(output_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() == ".pdf":
+                return p
+        return None
+    if format_type == "epub":
+        for p in sorted(output_dir.iterdir()):
+            if p.is_file() and p.suffix.lower() == ".epub":
+                return p
+        return None
+    if format_type == "html":
+        index = output_dir / "index.html"
+        return index if index.exists() else None
+    return None
+
+
 class ConfigManager:
     """Manages Quarto configuration files and format switching."""
 

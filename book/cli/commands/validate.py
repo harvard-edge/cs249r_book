@@ -590,36 +590,41 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
+        """Resolve the volume backmatter references.bib for a .qmd from its path."""
+        try:
+            rel = file.relative_to(self.config_manager.book_dir)
+        except ValueError:
+            return None
+        parts = rel.parts
+        if "vol1" in parts:
+            bib_file = self.config_manager.book_dir / "contents" / "vol1" / "backmatter" / "references.bib"
+        elif "vol2" in parts:
+            bib_file = self.config_manager.book_dir / "contents" / "vol2" / "backmatter" / "references.bib"
+        else:
+            return None
+        return bib_file if bib_file.exists() else None
+
     def _run_citations(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        bib_field_pattern = re.compile(r"^bibliography:\s*([^\s]+\.bib)\s*$", re.MULTILINE)
         bib_key_pattern = re.compile(r"@\w+\{([^,\s]+)")
 
         for file in files:
-            content = self._read_text(file)
-            bib_match = bib_field_pattern.search(content)
-            if not bib_match:
-                continue
-            bib_file = file.parent / bib_match.group(1)
-            if not bib_file.exists():
-                issues.append(ValidationIssue(
-                    file=self._relative_file(file),
-                    line=1,
-                    code="missing_bib_file",
-                    message=f"Bibliography file not found: {bib_match.group(1)}",
-                    severity="error",
-                ))
+            bib_file = self._bibliography_for_qmd(file)
+            if bib_file is None:
                 continue
 
+            content = self._read_text(file)
             bib_content = self._read_text(bib_file)
             bib_keys = set(bib_key_pattern.findall(bib_content))
             qmd_content_no_code = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"`[^`]+`", "", qmd_content_no_code)
             refs = set(CITATION_REF_PATTERN.findall(qmd_content_no_code))
             refs = {r.rstrip(".,;:") for r in refs if not r.startswith(EXCLUDED_CITATION_PREFIXES)}
+            refs = {r for r in refs if not re.match(r"^\d+\.\d+", r)}
             missing = sorted(refs - bib_keys)
             for key in missing:
                 line_no = self._line_for_token(content, f"@{key}")

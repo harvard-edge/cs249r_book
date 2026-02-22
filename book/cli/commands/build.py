@@ -36,30 +36,13 @@ class BuildCommand:
     def _open_output(self, output_dir: Path, format_type: str) -> None:
         """Open the build output using the system's default application.
 
-        For PDF/EPUB: finds and opens the first matching file.
-        For HTML: opens index.html in the default browser.
-
-        Args:
-            output_dir: Path to the build output directory
-            format_type: Format type ('html', 'pdf', 'epub')
+        Uses shared rule: PDF = any .pdf, EPUB = any .epub, HTML = index.html.
         """
         if not self.open_after:
             return
 
-        target = None
-
-        if format_type == "pdf":
-            pdf_files = list(output_dir.glob("*.pdf"))
-            if pdf_files:
-                target = pdf_files[0]
-        elif format_type == "epub":
-            epub_files = list(output_dir.glob("*.epub"))
-            if epub_files:
-                target = epub_files[0]
-        elif format_type == "html":
-            index = output_dir / "index.html"
-            if index.exists():
-                target = index
+        from cli.core.config import get_output_file
+        target = get_output_file(output_dir, format_type)
 
         if target is None:
             console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
