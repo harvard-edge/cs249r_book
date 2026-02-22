@@ -2209,8 +2209,9 @@ class MLPerf:
     """
     MLPerf-style standardized benchmarking for edge ML systems.
 
-    MLPerf® is a trademark of MLCommons. This module teaches the principles of
-    MLPerf-style benchmarking through a simplified suite inspired by MLPerf Tiny.
+    MLPerf® is a trademark of MLCommons. Used here purely for educational purposes.
+    This module teaches the principles of MLPerf-style benchmarking through a
+    simplified suite inspired by MLPerf Tiny.
 
     Provides fixed benchmark configurations with target thresholds,
     standardized measurement protocols, and compliance reporting.
