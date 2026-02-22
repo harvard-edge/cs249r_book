@@ -2195,7 +2195,7 @@ Standard MLPerf Benchmarks:
 ┌─────────────────────┬──────────────────┬─────────┬──────────┐
 │ Benchmark           │ Input Shape      │ Acc Tgt │ Lat Tgt  │
 ├─────────────────────┼──────────────────┼─────────┼──────────┤
-│ keyword_spotting     │ (1, 16000)       │ 90%     │ <100ms   │
+│ keyword_spotting    │ (1, 16000)       │ 90%     │ <100ms   │
 │ visual_wake_words   │ (1, 96, 96, 3)   │ 80%     │ <200ms   │
 │ anomaly_detection   │ (1, 640)         │ 85%     │ <50ms    │
 │ image_classification│ (1, 32, 32, 3)   │ 75%     │ <150ms   │
