@@ -65,8 +65,8 @@ It includes the textbook source, TinyTorch, hardware kits, and upcoming co-labs 
 Choose a path based on your goal.
 
 **READ** Start with the [textbook](https://mlsysbook.ai/book/):
-- [📘 Volume I: Foundations](https://mlsysbook.ai/vol1/) covers ML basics, training, optimization, and operations
-- [📙 Volume II: At Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production deployment, and responsible AI
+- [📘 Volume I: Introduction to Machine Learning Systems](https://mlsysbook.ai/vol1/) covers ML basics, development, optimization, and operations
+- [📙 Volume II: Machine Learning Systems at Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production deployment, and responsible AI
 
 **BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
@@ -166,53 +166,33 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
 
-| Volume | Theme | Focus | Link |
+| Volume | Title | Focus | Link |
 |--------|-------|-------|------|
-| **Volume I** | Build, Optimize, Deploy | Single-machine ML systems, foundational principles | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
-| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale | [mlsysbook.ai/vol2](https://mlsysbook.ai/vol2/) |
+| **Volume I** | Introduction to Machine Learning Systems | Single-machine ML systems, foundational principles | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
+| **Volume II** | Machine Learning Systems at Scale | Distributed systems at production scale | [mlsysbook.ai/vol2](https://mlsysbook.ai/vol2/) |
 
 **Volume I** teaches you to *understand* ML systems (like "Computer Organization and Design").
 **Volume II** teaches you to *build* ML systems at scale (like "Computer Architecture").
 
 The [full textbook](https://mlsysbook.ai/book/) combines both volumes for comprehensive coverage.
 
-#### Volume I: Build, Optimize, Deploy
+#### Volume I: Introduction to Machine Learning Systems
 
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **I. ML Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
-| **II. System Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
-| **III. Model Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
-| **IV. System Operations** | Making it work | MLOps, Responsible Engineering |
+| **I. Foundations** | Core concepts | Introduction, ML Systems, ML Workflow, Data Engineering |
+| **II. Development** | Building blocks | Neural Computation, Architectures, Frameworks, Training |
+| **III. Optimization** | Making it fast | Data Selection, Model Compression, HW Acceleration, Benchmarking |
+| **IV. Deployment** | Making it work | Model Serving, MLOps, Responsible Engineering |
 
-### Volume II: Scale, Distribute, Govern
+### Volume II: Machine Learning Systems at Scale
 
-**Part I: Foundations of Scale**
-1.  **Introduction**: The necessity of scale.
-2.  **Distributed Training**: Data, Tensor, and Pipeline parallelism.
-3.  **Communication**: Collectives and synchronization.
-4.  **Fault Tolerance**: Reliability at scale.
-
-**Part II: Building the Fleet**
-5.  **Compute**: The node architecture.
-6.  **Networking**: The fabric.
-7.  **Storage**: Data persistence.
-8.  **Orchestration**: Cluster management.
-
-**Part III: Deployment at Scale**
-9.  **Inference**: Serving architectures.
-10. **Optimization**: Model compression and acceleration.
-11. **Edge Intelligence**: Distributed and mobile AI.
-12. **MLOps**: Operations at scale.
-
-**Part IV: Production Concerns**
-13. **Privacy & Security**: Adversarial ML and confidential computing.
-14. **Robustness**: Hardware faults and reliability.
-15. **Sustainable AI**: Energy, carbon, and efficiency.
-16. **Frontiers**: AGI systems and future directions.
-
-**Conclusion**
-17. **Conclusion**: Synthesis and outlook.
+| Part | Focus | Chapters |
+|------|-------|----------|
+| **V. The Fleet** | Physical infrastructure | Introduction, Compute Infrastructure, Network Fabrics, Data Storage |
+| **VI. Distributed ML** | Algorithms of scale | Distributed Training, Communication, Fault Tolerance, Orchestration |
+| **VII. Deployment at Scale** | Global serving | Performance Engineering, Inference, Edge Intelligence, Ops at Scale |
+| **VIII. The Responsible Fleet** | Safety and governance | Security & Privacy, Robust AI, Sustainable AI, Responsible AI |
 
 ---
 
