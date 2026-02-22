@@ -633,7 +633,7 @@ The most counterintuitive finding in data selection is that training on *less* d
 
 On CIFAR-10, gradient-based selection methods (EL2N, GraNd) [@paul2021deep] have shown that training on 50% of carefully selected samples matches the accuracy of the full dataset, with aggressive pruning reaching 10--30% of samples while retaining 90%+ of original performance. ImageNet-1K presents a harder challenge because it is less redundant, yet researchers have demonstrated that 20--30% of ImageNet can be pruned with negligible loss, and up to 50% reduction is possible with a small accuracy trade-off (~1 percentage point), yielding 2$\times$ fewer training FLOPs [@paul2021deep; @sorscher2022beyond]. The pattern extends to language modeling: web-scraped corpora like The Pile[^fn-the-pile-diversity] and C4[^fn-c4-filtering] contain substantial exact and near-duplicate content, and deduplication studies [@lee2022deduplicating] report 10--30% redundancy ratios, with deduplicated training yielding *better* downstream performance through less memorization and more generalization.
 
-[^fn-the-pile-diversity]: **The Pile**: An 825 GB English text corpus aggregating 22 sub-datasets (PubMed, ArXiv, GitHub, Project Gutenberg, CommonCrawl, Stack Exchange, Wikipedia, USPTO patents). Its design philosophy prioritizes *diversity* over scale, combining curated sources covering different domains and writing styles rather than simply crawling more web pages. For data selection, The Pile established a key systems insight: duplicate-heavy web scrapes produce diminishing returns per token, while diverse multi-source curation yields higher ICR at the same dataset size. \index{The Pile!data diversity}
+[^fn-the-pile-diversity]: **The Pile**: An 825 GB English text corpus aggregating 22 sub-datasets (PubMed, ArXiv, GitHub, Project Gutenberg, CommonCrawl, Stack Exchange, Wikipedia, USPTO patents). Its redundancy profile reveals the data selection problem concretely: CommonCrawl subsets exhibit 10--30% near-duplicate rates, whereas curated sub-corpora like ArXiv and USPTO contribute almost zero redundancy. Multi-source curation thus yields higher ICR at the same dataset size, because each deduplicated token is more likely to carry novel information for the model. \index{The Pile!data diversity}
 
 [^fn-c4-filtering]: **C4 (Colossal Clean Crawled Corpus)**: Applies aggressive filtering to Common Crawl data, removing pages with fewer than 5 sentences, deduplicating at the three-sentence level, and stripping boilerplate, JavaScript, and non-English content to produce approximately 750 GB of cleaned text. C4 demonstrated that filtering web data at scale could match curated dataset quality, establishing the "large-scale-with-filters" paradigm. The systems trade-off is direct: the CPU cost of filtering is negligible compared to the GPU cost of training on the unfiltered equivalent, making quality pruning one of the highest-ROI pre-training investments. \index{C4!quality filtering}
 
@@ -752,12 +752,12 @@ Crucially, these scores transfer across architectures: scores computed on a smal
 
 These gradient-based approaches generally outperform geometry-based methods in selection quality but incur the overhead of proxy model training. This quality advantage justifies the proxy training overhead for most production workloads, as @tbl-coreset-comparison quantifies:
 
-| **Method**     | **Compute Cost**     | **Requires Training** | **Best For**          | **Limitation**            |
-|:---------------|:---------------------|:----------------------|:----------------------|:--------------------------|
-| **k-Center**   | O(N²) or O(NK)       | No                    | Coverage, exploration | Ignores label information |
-| **Herding**    | O(NK)                | No                    | Distribution matching | Assumes Gaussian-like     |
+| **Method**     | **Compute Cost**    | **Requires Training** | **Best For**          | **Limitation**            |
+|:---------------|:--------------------|:----------------------|:----------------------|:--------------------------|
+| **k-Center**   | O(N²) or O(NK)      | No                    | Coverage, exploration | Ignores label information |
+| **Herding**    | O(NK)               | No                    | Distribution matching | Assumes Gaussian-like     |
 | **GraNd**      | O(epochs$\times$ N) | Yes (few epochs)      | Decision boundaries   | Requires proxy training   |
-| **Forgetting** | O(full training)     | Yes (full)            | Hard examples         | Expensive to compute      |
+| **Forgetting** | O(full training)    | Yes (full)            | Hard examples         | Expensive to compute      |
 | **EL2N**       | O(epochs$\times$ N) | Yes (few epochs)      | Uncertainty sampling  | Best with proxy model     |
 
 : **Coreset Selection Algorithm Comparison.** N = dataset size, K = coreset size. The fundamental trade-off is selection quality versus computational cost: gradient-based methods (GraNd, EL2N, Forgetting) outperform geometry-based methods (k-Center, Herding) because they use training dynamics to identify decision-boundary samples, but this advantage requires proxy model training as an upfront investment. {#tbl-coreset-comparison .striped .hover}
@@ -1456,9 +1456,9 @@ cifar10_fixmatch_40_labels_str = FixmatchLabelEfficiency.cifar10_fixmatch_40_lab
 ::: {.callout-example title="FixMatch on CIFAR-10"}
 **FixMatch** [@sohn2020fixmatch] combines pseudo-labeling with consistency regularization to achieve high label efficiency (@tbl-fixmatch-cifar10).
 
-| **Label Budget**                                      | **Method**       |                         **Accuracy** |                                            **Label Efficiency** |
-|:------------------------------------------------------|:-----------------|-------------------------------------:|----------------------------------------------------------------:|
-| **`{python} cifar10_full_labels_str` (100%)**         | Fully Supervised |         `{python} cifar10_full_acc`% |                                                        Baseline |
+| **Label Budget**                                      | **Method**       |                         **Accuracy** |                                           **Label Efficiency** |
+|:------------------------------------------------------|:-----------------|-------------------------------------:|---------------------------------------------------------------:|
+| **`{python} cifar10_full_labels_str` (100%)**         | Fully Supervised |         `{python} cifar10_full_acc`% |                                                       Baseline |
 | **`{python} cifar10_fixmatch_4k_labels_str` (8%)**    | FixMatch         |  `{python} cifar10_fixmatch_4k_acc`% |  **`{python} cifar10_fixmatch_4k_eff`$\times$ more efficient** |
 | **`{python} cifar10_fixmatch_250_labels_str` (0.5%)** | FixMatch         | `{python} cifar10_fixmatch_250_acc`% | **`{python} cifar10_fixmatch_250_eff`$\times$ more efficient** |
 | **`{python} cifar10_fixmatch_40_labels_str` (0.08%)** | FixMatch         |  `{python} cifar10_fixmatch_40_acc`% |      `{python} cifar10_fixmatch_40_eff`$\times$ more efficient |
@@ -1756,7 +1756,7 @@ Rather than hand-designing these augmentation policies, AutoAugment[^fn-autoaugm
 
 [^fn-autoaugment-search]: **AutoAugment**: Treats augmentation policy design as a reinforcement learning search problem: a controller selects operations (rotate, translate, shear, equalize), their magnitudes, and application probabilities to maximize validation accuracy. Learned policies transfer across datasets and architectures, but the search cost is prohibitive: 15,000 GPU-hours to find a single policy. This cost-quality trade-off explains why RandAugment displaced AutoAugment in production: the search overhead exceeded the accuracy gains for most practical training budgets. \index{AutoAugment!search cost}
 
-[^fn-randaugment-simplicity]: **RandAugment**: Achieves this simplification by replacing AutoAugment's reinforcement learning search with random sampling from a fixed set of transformations. This proves an expensive, dataset-specific search is often unnecessary, as the randomized approach reduces the policy discovery cost from 15,000 GPU-hours to a simple grid search while maintaining equivalent model performance. \index{RandAugment!hyperparameter simplicity}
+[^fn-randaugment-simplicity]: **RandAugment**: Collapses AutoAugment's large search space to just two hyperparameters: the number of transformations $N$ and their shared magnitude $M$. This reduction works because augmentation policies exhibit low intrinsic dimensionality: a grid search over $N \in [1,3]$ and $M \in [5,15]$ recovers 95--100% of AutoAugment's accuracy gains at negligible search cost, making RandAugment the default choice for production pipelines where 15,000 GPU-hours of policy search cannot be justified. \index{RandAugment!hyperparameter simplicity}
 
 These learned augmentation policies are particularly effective for resource-constrained models, where overfitting risk is highest. The MobileNet lighthouse illustrates this principle: when model capacity is deliberately reduced for edge deployment, augmentation becomes the primary defense against overfitting.
 
@@ -1890,10 +1890,10 @@ The preceding sections examined selection techniques across all three pipeline s
 
 @tbl-data-selection summarizes the three-stage optimization pipeline introduced at the beginning of this chapter.
 
-| **Stage**                   | **When Applied** | **Techniques**                                        |                      **Typical Gains** |
-|:----------------------------|:-----------------|:------------------------------------------------------|---------------------------------------:|
-| **1. Static Pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   |               30–50% dataset reduction |
-| **2. Dynamic Selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised |              10–30% faster convergence |
+| **Stage**                   | **When Applied** | **Techniques**                                        |                     **Typical Gains** |
+|:----------------------------|:-----------------|:------------------------------------------------------|--------------------------------------:|
+| **1. Static Pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   |              30–50% dataset reduction |
+| **2. Dynamic Selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised |             10–30% faster convergence |
 | **3. Synthetic Generation** | On-demand        | Augmentation, Generative Models, Distillation         | 2–10$\times$ effective data expansion |
 
 : **Three-Stage Data Selection Pipeline.** Each stage increases ICR by different mechanisms: pruning removes low-value samples, dynamic selection focuses compute on high-value samples, and synthesis creates new high-value samples. {#tbl-data-selection .striped .hover}
@@ -2050,7 +2050,7 @@ A technique with high theoretical gains but high implementation cost may deliver
 
 ### Step 4: Combine Techniques {.unnumbered}
 
-The techniques in this chapter are not mutually exclusive; in practice, the most effective pipelines combine multiple approaches. A typical production workflow begins by deduplicating the raw corpus for immediate gains at minimal cost. This cleaned dataset then undergoes coreset selection to identify the most informative samples. During training, curriculum learning orders these samples to optimize gradient quality, while data augmentation increases effective diversity at runtime. Finally, starting from a self-supervised foundation model rather than random initialization allows the pipeline to leverage knowledge learned from massive unlabeled corpora.
+The techniques in this chapter are not mutually exclusive; in practice, the most effective pipelines combine multiple approaches. A typical production workflow begins by deduplicating the raw corpus for immediate gains at minimal cost. This cleaned dataset then undergoes coreset selection to identify the most informative samples. During training, curriculum learning orders these samples to optimize gradient quality, while data augmentation increases effective diversity at runtime. Finally, starting from a self-supervised foundation model rather than random initialization allows the pipeline to use knowledge learned from massive unlabeled corpora.
 
 Each stage compounds the efficiency gains of previous stages, turning individual percentage improvements into multiplicative savings.
 
@@ -2061,7 +2061,7 @@ This gap between algorithmic elegance and practical value raises several systems
 ## Selection Engineering {#sec-data-selection-selection-engineering-a4eb}
 
 \index{Data Selection Systems!engineering patterns}
-Choosing the right data selection technique is necessary but not sufficient. The decision framework identified *which* algorithms to apply; now we must ensure those algorithms actually deliver their promised speedups when deployed on real hardware with real data pipelines. A naive active learning loop that scans the entire dataset every epoch to select the "best" samples will turn a compute-bound training job into an I/O-bound bottleneck. This section examines the architectural patterns required to implement data selection in production.
+Choosing the right data selection technique is necessary but not sufficient. The decision framework identified *which* algorithms to apply; now we must ensure those algorithms actually deliver their promised speedups when deployed on real hardware with real data pipelines. A naive active learning loop that scans the entire dataset every epoch to select the "best" samples will turn a compute-bound training job into an I/O-bound bottleneck. The architectural patterns that prevent this and implement data selection in production are the subject of the following discussion.
 
 ### The Selection Bottleneck {#sec-data-selection-selection-bottleneck-4d00}
 
@@ -2360,9 +2360,9 @@ The selection inequality addresses compute overhead, but data selection introduc
 
 | **Storage Tier** | **Sequential Throughput** | **Random I/O (IOPS)** | **Random Throughput (approx)** | **Random Penalty** |
 |:-----------------|--------------------------:|----------------------:|-------------------------------:|-------------------:|
-| **HDD (7.2k)**   |                 ~150 MB/s |                   ~80 |                      ~0.3 MB/s |   **500$\times$** |
-| **SATA SSD**     |                 ~550 MB/s |                  ~10k |                       ~40 MB/s |    **14$\times$** |
-| **NVMe SSD**     |               ~3,500 MB/s |                 ~500k |                    ~2,000 MB/s |  **1.75$\times$** |
+| **HDD (7.2k)**   |                 ~150 MB/s |                   ~80 |                      ~0.3 MB/s |    **500$\times$** |
+| **SATA SSD**     |                 ~550 MB/s |                  ~10k |                       ~40 MB/s |     **14$\times$** |
+| **NVMe SSD**     |               ~3,500 MB/s |                 ~500k |                    ~2,000 MB/s |   **1.75$\times$** |
 | **Cloud (S3)**   |      ~100 MB/s (per conn) |       ~10–50 ms (lat) |            Very Low (per conn) |        **Extreme** |
 
 : **The Cost of Randomness.** Comparative I/O throughput for sequential vs. random 4 KB reads across different storage tiers. Standard data loaders optimize for sequential throughput, while data selection strategies often incur the random access penalty. {#tbl-io-performance .striped .hover}
@@ -2383,7 +2383,7 @@ The optimizations discussed so far address I/O bandwidth, but modern data select
 \index{Data Echoing!amortizing I/O costs}
 Data echoing[^fn-data-echoing-pipeline] [@choi2020dataechoing] offers an elegant solution to this CPU-GPU imbalance. The technique reuses batches of data multiple times before fetching new samples, effectively trading sample diversity for GPU utilization. When the data pipeline (reading, decoding, augmenting) is slower than GPU processing, the GPU idles waiting for data.
 
-[^fn-data-echoing-pipeline]: **Data Echoing**: This technique resolves the CPU-GPU imbalance by having the GPU re-process the same batch of data 2-4 times, converting idle cycles into useful training. This accepts a minor reduction in sample diversity to prevent the GPU from idling, which wastes 100% of available compute cycles when the data pipeline is the bottleneck. \index{Data Echoing!GPU utilization}
+[^fn-data-echoing-pipeline]: **Data Echoing**: The key subtlety is *where* in the pipeline to insert the echo point. Echoing before augmentation (upstream echoing) applies different random augmentations to each repetition, preserving sample diversity; echoing after augmentation (downstream echoing) feeds identical tensors to the GPU, offering no diversity benefit. Upstream echoing with an echo factor of 2--4 typically matches standard training accuracy while recovering 50--75% of the GPU cycles lost to pipeline stalls. \index{Data Echoing!GPU utilization}
 
 Data echoing fills this gap by "echoing" (repeating) each batch $e$ times, applying different augmentations to each repetition so that the model still sees varied inputs.
 
@@ -2603,14 +2603,14 @@ train_desc_str = CostBreakdown.train_desc_str
 ```
 
 ::: {.callout-example title="Cost Breakdown: ImageNet-Scale Training"}
-| **Cost Component**                                                                 | **Calculation**  | **Amount**                                                       |
-|:-----------------------------------------------------------------------------------|:-----------------|:-----------------------------------------------------------------|
-| **Raw data (`{python} n_labels_str` images)**                                      | Licensed dataset | `{python} c_raw_str`                                             |
+| **Cost Component**                                                                | **Calculation**  | **Amount**                                                       |
+|:----------------------------------------------------------------------------------|:-----------------|:-----------------------------------------------------------------|
+| **Raw data (`{python} n_labels_str` images)**                                     | Licensed dataset | `{python} c_raw_str`                                             |
 | **Labels (`{python} n_labels_str`$\times$ USD `{python} cb_cost_per_label_str`)** | Crowd annotation | `{python} c_label_str`                                           |
-| **Storage (`{python} storage_str`)**                                               | Cloud storage    | `{python} c_store_str`                                           |
-| **Training (`{python} train_desc_str`)**                                           | GPU compute      | `{python} c_train_str`                                           |
-| **Total**                                                                          |                  | **`{python} c_total_str`**                                       |
-| **Data vs. Compute ratio**                                                         |                  | **`{python} p_data_str` data, `{python} p_compute_str` compute** |
+| **Storage (`{python} storage_str`)**                                              | Cloud storage    | `{python} c_store_str`                                           |
+| **Training (`{python} train_desc_str`)**                                          | GPU compute      | `{python} c_train_str`                                           |
+| **Total**                                                                         |                  | **`{python} c_total_str`**                                       |
+| **Data vs. Compute ratio**                                                        |                  | **`{python} p_data_str` data, `{python} p_compute_str` compute** |
 
 This ratio, where data costs dominate, is typical for supervised learning. The ratio inverts for self-supervised learning on web-scraped data, where compute dominates.
 :::
@@ -2630,7 +2630,7 @@ The challenge lies in quantifying both sides accurately. Different techniques of
 |:----------------------|:--------------------------------------------------------|:-------------------------------------------------------------|
 | **Deduplication**     | One-time compute for hashing + infrastructure           | Reduced storage, fewer epochs for same accuracy              |
 | **Coreset Selection** | Proxy model training + selection compute                | Train on 10–50% of data with minimal accuracy loss           |
-| **Active Learning**   | Inference on unlabeled pool + human-in-the-loop latency | 2–10$\times$ reduction in labeling budget for same acc.     |
+| **Active Learning**   | Inference on unlabeled pool + human-in-the-loop latency | 2–10$\times$ reduction in labeling budget for same acc.      |
 | **Data Augmentation** | CPU/GPU cycles for transforms                           | Effective dataset size increase without new data acquisition |
 
 : **ROI Profiles for Data Selection Techniques.** Each technique occupies a different point in the investment-versus-savings space. Deduplication offers the lowest-risk entry point (minimal investment, guaranteed returns), while active learning offers the highest potential savings but requires the most infrastructure. {#tbl-roi-profiles .striped .hover}
