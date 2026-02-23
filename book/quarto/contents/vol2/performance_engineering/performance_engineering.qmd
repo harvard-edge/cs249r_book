@@ -184,15 +184,15 @@ This equation decomposes execution time into three terms. The first fraction rep
 
 Standard model compression (pruning, quantization, distillation) reduces the numerators, performing fewer operations on smaller data. System optimization, the focus of this chapter, attacks the *structure* of the equation itself:
 
-**Operator fusion and tiling** (FlashAttention, fused kernels) reduce the Memory Access numerator by eliminating intermediate HBM round-trips. When a sequence of operations keeps its data in SRAM, the effective Memory Access term shrinks dramatically, often by 10--30$\times$ for attention computation.
+Operator fusion and tiling (FlashAttention, fused kernels) reduce the Memory Access numerator by eliminating intermediate HBM round-trips. When a sequence of operations keeps its data in SRAM, the effective Memory Access term shrinks dramatically, often by 10--30$\times$ for attention computation.
 
-**Precision engineering** (FP8, INT4, KV cache compression) reduces the Memory Access numerator by representing each value in fewer bytes. Halving the precision halves the bytes transferred, doubling the effective bandwidth.
+Precision engineering (FP8, INT4, KV cache compression) reduces the Memory Access numerator by representing each value in fewer bytes. Halving the precision halves the bytes transferred, doubling the effective bandwidth.
 
-**Graph compilation** (torch.compile, XLA, TensorRT) reduces the Overhead term by eliminating kernel launch gaps, fusing operations, and optimizing memory allocation.
+Graph compilation (torch.compile, XLA, TensorRT) reduces the Overhead term by eliminating kernel launch gaps, fusing operations, and optimizing memory allocation.
 
-**Communication-computation overlap** transforms the equation for distributed systems by making the communication overhead concurrent with the compute term, effectively eliminating it from the critical path when the overlap condition (@eq-overlap-condition) holds.
+Communication-computation overlap transforms the equation for distributed systems by making the communication overhead concurrent with the compute term, effectively eliminating it from the critical path when the overlap condition (@eq-overlap-condition) holds.
 
-**Algorithmic innovations** (speculative decoding, MoE) change the Compute numerator itself by performing a fundamentally different, less expensive computation that produces equivalent results.
+Algorithmic innovations (speculative decoding, MoE) change the Compute numerator itself by performing a fundamentally different, less expensive computation that produces equivalent results.
 
 Each technique attacks a different term, and this taxonomy guides optimization strategy: diagnose which term dominates (using the roofline model from @sec-performance-engineering-roofline), then apply the technique targeting that term. Applying a technique that targets the non-dominant term wastes engineering effort.
 
@@ -286,9 +286,9 @@ A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter
 
 To make this concrete, consider two deployment configurations for the same 70B LLM:
 
-**Configuration A (Latency-optimized)**: FP16 weights, batch size 1, speculative decoding enabled. Each H100 GPU serves approximately 80 tokens/second with 20 ms inter-token latency. Cost: 8 GPUs dedicated to a single user stream, approximately \$0.12 per 1,000 output tokens.
+Configuration A is latency-optimized: FP16 weights, batch size 1, speculative decoding enabled. Each H100 GPU serves approximately 80 tokens/second with 20 ms inter-token latency. Cost: 8 GPUs dedicated to a single user stream, approximately \$0.12 per 1,000 output tokens.
 
-**Configuration B (Throughput-optimized)**: INT4 weights (AWQ), batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.002 per 1,000 output tokens.
+Configuration B is throughput-optimized: INT4 weights (AWQ), batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.002 per 1,000 output tokens.
 
 Configuration B achieves 60$\times$ lower cost per token than Configuration A, but at 6$\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. The performance engineering techniques in this chapter are the tools for navigating between these points.
 
@@ -308,13 +308,13 @@ This tension shapes every optimization technique in this chapter. Operator fusio
 
 To understand why the memory wall exists, consider the physical structure of a modern GPU's memory system. The hierarchy spans four levels, each trading capacity for bandwidth and latency.
 
-**Registers** are the fastest storage, located directly within each streaming multiprocessor (SM). The H100 provides 256 KB of register file per SM across its 132 SMs, totaling approximately 33 MB of register space across the entire chip. Register access is essentially free in terms of latency (one clock cycle) and energy (~0.01 pJ per access). But registers are private to individual threads and cannot be shared.
+Registers are the fastest storage, located directly within each streaming multiprocessor (SM). The H100 provides 256 KB of register file per SM across its 132 SMs, totaling approximately 33 MB of register space across the entire chip. Register access is essentially free in terms of latency (one clock cycle) and energy (~0.01 pJ per access). Registers are, however, private to individual threads and cannot be shared.
 
-**Shared memory (SRAM)** is the next level, pooled within each SM. The H100 provides up to 228 KB of configurable shared memory per SM. This memory is shared among all threads in a thread block, enabling cooperative data reuse. Access latency is approximately 20--30 clock cycles (~20 ns), and energy cost is roughly 0.5 pJ per access. Shared memory is the critical resource for operator fusion: if intermediate results fit in shared memory, they never need to traverse the slow HBM bus.
+Shared memory (SRAM) occupies the next level, pooled within each SM. The H100 provides up to 228 KB of configurable shared memory per SM. This memory is shared among all threads in a thread block, enabling cooperative data reuse. Access latency is approximately 20--30 clock cycles (~20 ns), and energy cost is roughly 0.5 pJ per access. Shared memory is the critical resource for operator fusion: if intermediate results fit in shared memory, they never need to traverse the slow HBM bus.
 
-**L2 cache** sits between the SMs and HBM, providing a 50 MB on-chip buffer on the H100. The L2 cache captures reuse patterns automatically (when the same data is accessed by multiple SMs) but cannot be explicitly managed by kernel authors. Access latency is approximately 200 clock cycles (~130 ns). The L2 cache is particularly important for multi-head attention, where multiple attention heads may access the same KV cache entries. If the KV cache for a given sequence position fits in L2, subsequent heads accessing the same position benefit from cache hits rather than paying the full HBM access cost.
+The L2 cache sits between the SMs and HBM, providing a 50 MB on-chip buffer on the H100. It captures reuse patterns automatically (when the same data is accessed by multiple SMs) but cannot be explicitly managed by kernel authors. Access latency is approximately 200 clock cycles (~130 ns). The L2 cache is particularly important for multi-head attention, where multiple attention heads may access the same KV cache entries. If the KV cache for a given sequence position fits in L2, subsequent heads accessing the same position benefit from cache hits rather than paying the full HBM access cost.
 
-**High Bandwidth Memory (HBM)** is the main off-chip memory, providing `{python} h100_mem_str` GB of capacity at `{python} h100_hbm_bw_str` TB/s bandwidth. HBM access latency is approximately 300 ns, and each access costs roughly 640 pJ of energy. Despite the "high bandwidth" designation, the bandwidth-to-capacity ratio means that reading the full `{python} h100_mem_str` GB of HBM takes approximately 24 ms, far longer than the sub-millisecond latency targets of real-time inference.
+High Bandwidth Memory (HBM) is the main off-chip memory, providing `{python} h100_mem_str` GB of capacity at `{python} h100_hbm_bw_str` TB/s bandwidth. HBM access latency is approximately 300 ns, and each access costs roughly 640 pJ of energy. Despite the "high bandwidth" designation, the bandwidth-to-capacity ratio means that reading the full `{python} h100_mem_str` GB of HBM takes approximately 24 ms, far longer than the sub-millisecond latency targets of real-time inference.
 
 The energy cost of data movement has a direct economic consequence at datacenter scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's 700 W TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
 
@@ -679,13 +679,13 @@ Autoregressive LLM decoding at batch size one represents the extreme case. Each 
 
 : **Arithmetic Intensity of Common ML Operations**. Most operations in transformer inference, aside from large batched GEMMs, fall below the H100's ridge point and are therefore memory-bound. Performance engineering focuses on reducing the memory traffic of these operations. {#tbl-arithmetic-intensity}
 
-The central insight from @tbl-arithmetic-intensity is that the majority of operations in a transformer inference pipeline are memory-bound. Training workloads with large batch sizes shift more operations into the compute-bound regime because GEMM dimensions scale with batch size. But inference, especially autoregressive generation, is dominated by memory-bound operations. This is why the techniques in the rest of this chapter, fusion, tiling, reduced precision, and algorithmic shortcuts, all target the same fundamental problem: reducing bytes moved per operation.
+The central insight from @tbl-arithmetic-intensity is that the majority of operations in a transformer inference pipeline are memory-bound. Training workloads with large batch sizes shift more operations into the compute-bound regime because GEMM dimensions scale with batch size. Inference, however, especially autoregressive generation, is dominated by memory-bound operations. This is why the techniques in the rest of this chapter, fusion, tiling, reduced precision, and algorithmic shortcuts, all target the same fundamental problem: reducing bytes moved per operation.
 
 This observation also explains a common source of confusion: why GPU benchmarks (which report peak TFLOPS) often fail to predict real inference performance. Two GPUs with different TFLOPS but identical memory bandwidth will achieve virtually identical LLM decode throughput at batch size 1, because decode is entirely memory-bound. The correct metric for comparing GPUs for LLM inference is not FLOPS but rather the combination of memory bandwidth and memory capacity. Bandwidth determines the token generation rate, and capacity determines the maximum batch size (and therefore throughput). Only at large batch sizes, where decode approaches the compute-bound regime, do the FLOPS differences between GPUs translate into throughput differences.
 
 ### Batch Size as the Universal Control Knob {#sec-performance-engineering-batch-size}
 
-Batch size is the most powerful, and most constrained, lever for performance. Increasing the batch size transforms the arithmetic intensity of every operation. For an LLM decode step, the arithmetic intensity scales linearly with batch size:
+Batch size is the highest-impact, and most constrained, lever for performance. Increasing the batch size transforms the arithmetic intensity of every operation. For an LLM decode step, the arithmetic intensity scales linearly with batch size:
 
 $$
 I_{\text{decode}}(\text{batch}) = \frac{2 \times \text{params} \times \text{batch}}{\text{params} \times \text{bytes\_per\_param} + \text{batch} \times d \times \text{bytes\_per\_elem}}
@@ -717,7 +717,7 @@ The **decode phase** generates output tokens one at a time, autoregressively. Ea
 
 This decomposition has profound implications for system design. A system optimized for prefill (maximizing FLOPS utilization) would use large matrix sizes and high compute throughput. A system optimized for decode (maximizing bandwidth utilization) would use aggressive quantization and memory optimization. A real serving system must handle both phases, often simultaneously across different requests in a continuous batching framework.
 
-**Disaggregated serving** addresses this by running prefill and decode on separate hardware pools. Prefill servers are optimized for compute (fewer, higher-FLOPS GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
+Disaggregated serving addresses this mismatch by running prefill and decode on separate hardware pools. Prefill servers are optimized for compute (fewer, higher-FLOPS GPUs), while decode servers are optimized for memory bandwidth and capacity (more memory per GPU, aggressive quantization). The KV cache computed during prefill is transferred to a decode server, which handles the subsequent autoregressive generation. This disaggregation allows each phase to use hardware and software configurations tuned for its specific bottleneck.
 
 The performance characteristics of each phase determine which optimization techniques apply. FlashAttention provides the largest speedup during prefill, where the quadratic attention computation dominates. KV cache quantization and speculative decoding apply exclusively to the decode phase. Precision engineering (FP8/INT4 weights) benefits both phases, but through different mechanisms: prefill benefits from doubled compute throughput (FP8 Tensor Cores), while decode benefits from doubled effective bandwidth (half the bytes per weight read).
 
@@ -749,7 +749,7 @@ This yields approximately 96 tokens/second per GPU, or about 96 tokens/second fo
 
 :::
 
-The roofline model establishes the physics that constrains all subsequent optimization. With this diagnostic framework in place, we can now examine the first and most impactful strategy for breaking through the memory wall: keeping data in SRAM instead of round-tripping through HBM.
+The roofline model establishes the physics that constrains all subsequent optimization. The first and most impactful strategy for breaking through the memory wall is to keep data in SRAM instead of round-tripping through HBM.
 
 ## Operator Fusion and Kernel Engineering {#sec-performance-engineering-fusion}
 
@@ -860,11 +860,11 @@ In a naive implementation without operator fusion, executing one Transformer lay
 
 GPU kernel fusion falls into three categories, each with different complexity and performance impact.
 
-**Element-wise fusion** is the simplest form: consecutive element-wise operations (add, multiply, activation functions) are combined into a single kernel. Because each output element depends on exactly one input element, this fusion is always legal and straightforward to implement. Every modern deep learning framework performs element-wise fusion automatically.
+Element-wise fusion is the simplest form: consecutive element-wise operations (add, multiply, activation functions) combine into a single kernel. Because each output element depends on exactly one input element, this fusion is always legal and straightforward to implement. Every modern deep learning framework performs element-wise fusion automatically.
 
-**Reduction fusion** combines an element-wise operation with a subsequent reduction (such as summing elements for a loss function, or computing mean and variance for layer normalization). This is more complex because reductions require inter-thread communication within the kernel. Reductions need warp-level shuffle instructions or shared memory to aggregate partial results across threads. Despite this complexity, the memory savings are substantial: the intermediate tensor before the reduction never materializes in HBM. For layer normalization specifically, reduction fusion avoids writing the large pre-normalization tensor to HBM and reading it back for the mean/variance computation.
+Reduction fusion combines an element-wise operation with a subsequent reduction (such as summing elements for a loss function, or computing mean and variance for layer normalization). This category is more complex because reductions require inter-thread communication within the kernel. Reductions need warp-level shuffle instructions or shared memory to aggregate partial results across threads. Despite this complexity, the memory savings are substantial: the intermediate tensor before the reduction never materializes in HBM. For layer normalization specifically, reduction fusion avoids writing the large pre-normalization tensor to HBM and reading it back for the mean/variance computation.
 
-**Operator-specific fusion** is the most impactful and the most difficult. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is transformative: FlashAttention, which we examine next, reduces attention memory traffic from quadratic to linear in sequence length.
+Operator-specific fusion is the most impactful and the most difficult category. These are custom kernels designed for a specific sequence of operations, such as fused attention or fused GEMM-bias-activation. The kernel architect must reason about data flow, shared memory allocation, and thread scheduling simultaneously. The payoff is substantial: FlashAttention, which we examine next, reduces attention memory traffic from quadratic to linear in sequence length.
 
 To appreciate the quantitative impact, consider each category applied to a single transformer layer with hidden dimension 4096 and batch size 2048 in FP16. Element-wise fusion of a bias-GELU-dropout chain eliminates two intermediate tensors of 16 MB each, saving 64 MB of HBM traffic (two writes plus two reads) per layer. Across 80 layers, this reclaims 5.1 GB of memory bandwidth per forward pass. Reduction fusion of LayerNorm avoids materializing the pre-normalization tensor (16 MB) and the intermediate mean/variance statistics, saving an additional 48 MB per layer. Operator-specific attention fusion (FlashAttention) provides the largest single gain: for a sequence length of 8192, it eliminates the 128 MB per-head attention score matrix, saving over 4 GB per layer across 32 heads. The cumulative effect of all three fusion categories can reduce total HBM traffic by 60--80% for a transformer forward pass, translating directly into proportional wall-clock speedup for memory-bound workloads.
 
@@ -973,7 +973,7 @@ The online algorithm avoids this by maintaining running statistics that are upda
 
 After processing all tiles, the running output contains the exact same result as the standard algorithm. The rescaling step (step 3) is the critical innovation: it allows the algorithm to "fix up" previous partial results when a new tile reveals a larger maximum value. This correction is exact, not approximate, so FlashAttention produces bit-identical results to standard attention for a given numerical precision.
 
-The cost of this tiling is additional arithmetic: the rescaling operations in step 3 add FLOPs that the standard algorithm does not perform. But because the operation is profoundly memory-bound (the arithmetic intensity of standard attention is roughly 1--10 FLOP/byte for typical sequence lengths), the additional compute is "free" in the sense that the GPU's arithmetic units would otherwise be idle, waiting for HBM data transfers. Trading extra compute for fewer memory accesses is profitable whenever the operation is memory-bound, the central principle of this entire chapter.
+The cost of this tiling is additional arithmetic: the rescaling operations in step 3 add FLOPs that the standard algorithm does not perform. Because the operation is profoundly memory-bound (the arithmetic intensity of standard attention is roughly 1--10 FLOP/byte for typical sequence lengths), the additional compute is "free" in the sense that the GPU's arithmetic units would otherwise be idle, waiting for HBM data transfers. Trading extra compute for fewer memory accesses is profitable whenever the operation is memory-bound, the central principle of this entire chapter.
 
 A concrete numerical example clarifies the memory savings. Consider one attention head with sequence length $N = 8192$ and head dimension $d = 128$. The $Q$, $K$, $V$ matrices are each $8192 \times 128$ in FP16, occupying $8192 \times 128 \times 2 = 2$ MB each (6 MB total for one head). The output matrix $O$ is the same size (2 MB). The total input/output data is therefore 8 MB per head.
 
@@ -1061,91 +1061,11 @@ fig = plt.gcf()
 ```
 :::
 
-### Ring Attention for Extreme Sequences {#sec-performance-engineering-ring-attention}
-
-FlashAttention eliminates the memory wall within a single GPU. **Ring Attention** extends the tiling principle across multiple GPUs in a distributed system. For sequence lengths that exceed even the memory capacity of a single GPU (e.g., million-token context windows), Ring Attention distributes $K$ and $V$ blocks across GPUs in a ring topology. Each GPU holds a portion of $Q$ and iterates through the ring, receiving $K$/$V$ blocks from its neighbor while simultaneously computing attention on the current block and sending the previous block onward.
-
-The algorithm proceeds in $P - 1$ communication rounds (where $P$ is the number of GPUs). In each round, each GPU computes attention between its local $Q$ block and the currently resident $K$/$V$ block, then sends that $K$/$V$ block to its ring neighbor and receives the next block from its other neighbor.
-
-This overlaps communication with computation: while GPU $i$ computes attention using $K_j$/$V_j$, it simultaneously receives $K_{j+1}$/$V_{j+1}$ from the ring. If the compute time for one tile exceeds the communication time for transferring one tile over NVLink, the communication is fully hidden. On an H100 with `{python} h100_hbm_bw_str` TB/s HBM bandwidth and 900 GB/s NVLink bandwidth, this overlap is achievable for typical tile sizes.
-
-The practical impact of Ring Attention is measured in context length. Without it, a single GPU's attention computation is limited by HBM capacity: the KV cache for a sequence of length $N$ must fit entirely in one GPU's memory. With Ring Attention across $P$ GPUs, each GPU holds $N/P$ tokens of the KV cache, enabling context lengths of $P \times N_{\text{single}}$. For 8 GPUs, this extends the context window by 8$\times$. Combined with FlashAttention's efficient tiling within each GPU, Ring Attention enables million-token context windows that would be impossible on single-GPU or even standard tensor-parallel configurations.
-
-The combination of FlashAttention (intra-GPU tiling) and Ring Attention (inter-GPU distribution) represents a pattern that recurs throughout performance engineering: hierarchical optimization across the memory hierarchy. Within the GPU, FlashAttention tiles across the SRAM-HBM boundary. Across GPUs, Ring Attention tiles across the HBM-NVLink boundary. Each level exploits the same principle (tiling to reduce traffic across a slow link) adapted to a different bandwidth gap.
-
-This hierarchical view extends to the full system stack:
-
-| **Boundary**                        | **Slow Side**       | **Fast Side**    | **Optimization Technique**   |
-|:------------------------------------|:--------------------|:-----------------|:-----------------------------|
-| Registers $\leftrightarrow$ SRAM    | SRAM (20 ns)        | Registers (1 ns) | Kernel register blocking     |
-| SRAM $\leftrightarrow$ HBM          | HBM (300 ns)        | SRAM (20 ns)     | FlashAttention, fusion       |
-| HBM $\leftrightarrow$ NVLink        | NVLink ($\mu$s)     | HBM (300 ns)     | Ring Attention, TP overlap   |
-| NVLink $\leftrightarrow$ InfiniBand | IB (10--100 $\mu$s) | NVLink ($\mu$s)  | Gradient overlap, EP routing |
-
-: **The Memory Hierarchy Optimization Stack**. Each level of the memory hierarchy presents a bandwidth gap that can be addressed by tiling, fusion, or overlap. The techniques in this chapter all target one or more of these boundaries. {#tbl-memory-hierarchy-opt}
-
-At every level, the optimization principle is the same: keep data on the fast side of the boundary for as long as possible, and when data must cross the boundary, transfer it in large contiguous blocks to maximize effective bandwidth. The specific technique differs at each level, but the physics is universal.
-
-::: {.callout-checkpoint title="Fusion Fundamentals" collapse="false"}
-
-Verify your understanding of operator fusion and tiling:
-
-- [ ] Can you explain why element-wise operations (GELU, LayerNorm) are memory-bound despite their computational simplicity?
-- [ ] Can you trace the data flow of an unfused three-operation sequence and identify which HBM reads/writes fusion eliminates?
-- [ ] Can you explain how the online softmax trick enables FlashAttention to compute exact attention without materializing the $N \times N$ score matrix?
-- [ ] Do you understand why Ring Attention requires the overlap of communication and computation to be efficient?
-
-:::
-
-Operator fusion and tiling reduce the number of *trips* to HBM. The next section addresses a complementary strategy: reducing the number of *bytes per trip* by using lower-precision numerical formats.
+FlashAttention eliminates the memory wall within a single GPU by tiling across the SRAM-HBM boundary. For sequence lengths that exceed the memory capacity of a single GPU, the same tiling principle extends across multiple GPUs via **Ring Attention**\index{Ring Attention}. By distributing the KV cache across a ring of accelerators and overlapping communication with computation, Ring Attention enables million-token context windows that would be impossible on single-GPU configurations. We examine the distributed mechanics of Ring Attention in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
 
 ## Precision Engineering {#sec-performance-engineering-precision}
 
-If moving a 2-byte FP16 weight from memory to compute takes 100 nanoseconds, how do we cut that time in half? We shrink the weight to a 1-byte FP8 value. Precision engineering recognizes that machine learning algorithms are surprisingly resilient to numerical noise, allowing us to violently compress our data types to double our effective memory bandwidth and throughput.
-
-### FP8: The Training Frontier {#sec-performance-engineering-fp8}
-
-Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. The NVIDIA H100, introduced in 2022, added hardware support for 8-bit floating point (FP8), offering two formats optimized for different phases of training.
-
-**E4M3** (4-bit exponent, 3-bit mantissa) provides a range of approximately $\pm 448$ with moderate precision. Its tighter range but better precision makes it suitable for representing **weights and activations** in the forward pass, where values cluster in predictable distributions.
-
-**E5M2** (5-bit exponent, 2-bit mantissa) provides a much larger range of approximately $\pm 57344$ but coarser precision. This wider range accommodates **gradients**, which can span many orders of magnitude during backpropagation. Using E4M3 for gradients would cause frequent overflow and underflow, while E5M2's range captures the full gradient distribution at the cost of slightly noisier updates.
-
-| **Format** | **Exponent** | **Mantissa** | **Range**                | **Precision** | **Use Case**               |
-|:-----------|:-------------|:-------------|:-------------------------|:--------------|:---------------------------|
-| **FP32**   | 8 bits       | 23 bits      | $\pm 3.4 \times 10^{38}$ | Very high     | Master weights             |
-| **FP16**   | 5 bits       | 10 bits      | $\pm 65504$              | High          | Mixed-precision            |
-| **BF16**   | 8 bits       | 7 bits       | $\pm 3.4 \times 10^{38}$ | Moderate      | Training                   |
-| **E4M3**   | 4 bits       | 3 bits       | $\pm 448$                | Low           | FP8 forward pass           |
-| **E5M2**   | 5 bits       | 2 bits       | $\pm 57344$              | Very low      | FP8 gradients              |
-| **INT8**   | N/A          | 8 bits       | $-128$ to $+127$         | Uniform       | Post-training quantization |
-| **INT4**   | N/A          | 4 bits       | $-8$ to $+7$             | Uniform       | KV cache, weights          |
-
-: **Numerical Precision Formats for ML**. Each row represents a different precision format. FP8 formats (E4M3, E5M2) occupy the sweet spot between the bandwidth of INT8 and the trainability of FP16. {#tbl-precision-formats}
-
-The critical engineering challenge in FP8 training is **dynamic scaling**. FP8's narrow dynamic range means that a fixed scale factor will cause either overflow (large values clamp to infinity) or underflow (small values round to zero). Per-tensor scaling multiplies each tensor by a scale factor before casting to FP8, then divides by that factor after the FP8 computation. The scale factor is adjusted dynamically, typically by tracking the running maximum absolute value of each tensor and choosing a scale that maps this maximum to near the FP8 maximum representable value.
-
-The workflow for a single FP8 forward-backward step is:
-
-1. Read FP32 master weights; quantize to E4M3 using the current weight scale factor.
-2. Execute forward pass GEMM in FP8 (E4M3$\times$ E4M3 $\rightarrow$ FP16 accumulation).
-3. Compute loss in FP16 or FP32.
-4. Quantize activation gradients to E5M2 using the current gradient scale factor.
-5. Execute backward pass GEMMs in FP8 (E5M2$\times$ E4M3 $\rightarrow$ FP16 accumulation).
-6. Update FP32 master weights using the FP16 accumulated gradients.
-7. Update scale factors based on observed value ranges.
-
-This three-precision approach (FP32 master weights, FP8 GEMMs, FP16 accumulation) achieves near-FP16 training quality while doubling effective throughput on FP8-capable hardware.
-
-The practical implementation of dynamic scaling introduces a subtle bootstrapping problem: the optimal scale factor for step $t$ depends on the tensor values at step $t$, which are not known until the computation executes. Most implementations use a **delayed scaling** strategy: the scale factor for step $t$ is computed from the running statistics of steps $t-1, t-2, \ldots$, using an exponential moving average of the maximum absolute value. This introduces a one-step lag, which works well when tensor statistics change slowly (as they do during stable training) but can cause transient overflow or underflow when statistics change rapidly (at the beginning of training, after learning rate warmup, or at curriculum transitions).
-
-An alternative is **just-in-time scaling**, where the computation first scans the tensor to find its maximum absolute value, computes the scale factor, then casts and executes the FP8 GEMM. The overhead of the extra scan pass (reading the tensor twice instead of once) is typically 5--10%, which is modest compared to the 2$\times$ throughput gain from FP8. Just-in-time scaling is more robust but slightly less efficient than delayed scaling.
-
-The energy implications of reduced precision extend beyond throughput. The Horowitz (2014) energy estimates[^fn-horowitz-energy] show that an FP32 multiply-accumulate costs approximately 3.7 pJ, while an INT8 operation costs approximately 0.2 pJ, an 18.5$\times$ reduction.
-
-[^fn-horowitz-energy]: **Horowitz Energy Model**: From Mark Horowitz's 2014 ISSCC keynote "Computing's Energy Problem (and what we can do about it)," measured at 45 nm CMOS. These figures are widely cited but represent a specific process node; at modern 5 nm nodes, the absolute picojoules differ but the ratios between arithmetic and memory access energy have widened, making data movement an even larger fraction of total system power in current ML accelerators. \index{Horowitz Energy Model!precision engineering}
-
-FP8 operations fall between these extremes. At datacenter scale, where thousands of GPUs run continuously, the cumulative energy savings from reduced precision are substantial. The performance benefit (higher throughput) and the energy benefit (lower cost per operation) compound: FP8 delivers twice the throughput at roughly half the energy per operation, resulting in approximately 4$\times$ improvement in energy efficiency for compute-bound workloads.
+If moving a 2-byte FP16 weight from memory to compute takes 100 nanoseconds, how do we cut that time in half? We shrink the weight to a 1-byte FP8 value. Precision engineering recognizes that machine learning algorithms are surprisingly resilient to numerical noise, allowing us to violently compress our data types to double our effective memory bandwidth and throughput. While we examine 8-bit floating point (FP8) as a training-time primitive in @sec-distributed-training-systems, here we focus on the quantization techniques that enable efficient inference at scale.
 
 ### Block-wise Quantization {#sec-performance-engineering-block-quant}
 
@@ -1161,23 +1081,23 @@ Post-training quantization to INT8 or INT4 delivers even greater bandwidth savin
 
 :::
 
-**LLM.int8()** solves this by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
+LLM.int8() solves this by decomposing each matrix multiplication into two parts: a small set of outlier dimensions processed in FP16, and the remaining dimensions processed in INT8. The system identifies outlier dimensions at runtime (those exceeding a magnitude threshold, typically 6.0), routes them to an FP16 GEMM, and routes the remaining dimensions to an INT8 GEMM. The results are combined to produce the final output. This achieves nearly lossless INT8 inference for models that would otherwise degrade substantially under uniform quantization.
 
-**GPTQ** (Frantar et al., 2023) takes a different approach: weight-only quantization using second-order information. Instead of quantizing each weight independently, GPTQ processes weights column by column, using the Hessian of the layer's loss surface to determine which quantization errors matter most and redistributing those errors across unquantized columns. This produces INT4 weight representations with minimal accuracy loss, even for models with severe outlier features. The key insight is that quantization error in one weight can be compensated by adjusting correlated weights.
+GPTQ (Frantar et al., 2023) takes a different approach: weight-only quantization using second-order information. Instead of quantizing each weight independently, GPTQ processes weights column by column, using the Hessian of the layer's loss surface to determine which quantization errors matter most and redistributing those errors across unquantized columns. This produces INT4 weight representations with minimal accuracy loss, even for models with severe outlier features. The key insight is that quantization error in one weight can be compensated by adjusting correlated weights.
 
-**AWQ** (Activation-Aware Weight Quantization, Lin et al., 2024) observes that not all weights are equally important: weights connected to high-activation channels contribute disproportionately to model output. AWQ identifies these salient weights by analyzing activation magnitudes across a calibration dataset, then applies per-channel scaling to protect them before uniform group quantization. This achieves INT4 weight quantization with quality comparable to GPTQ but with significantly faster quantization time, since it avoids the expensive Hessian computation.
+AWQ (Activation-Aware Weight Quantization, Lin et al., 2024) observes that not all weights are equally important: weights connected to high-activation channels contribute disproportionately to model output. AWQ identifies these salient weights by analyzing activation magnitudes across a calibration dataset, then applies per-channel scaling to protect them before uniform group quantization. This achieves INT4 weight quantization with quality comparable to GPTQ but with 10--100$\times$ faster quantization time (minutes instead of hours), since it avoids the expensive Hessian computation.
 
-**SmoothQuant** (Xiao et al., 2023) takes yet another approach to the outlier problem. Rather than handling outliers at runtime (LLM.int8()) or through weight optimization (GPTQ, AWQ), SmoothQuant smooths the activation distribution *before* quantization by migrating the quantization difficulty from activations to weights. The key observation is that activation outliers are channel-specific: certain hidden dimensions consistently produce large values across all tokens. SmoothQuant applies a per-channel scaling transformation that divides the activation by a smoothing factor and multiplies the corresponding weight by the same factor. This mathematically equivalent transformation reduces activation outlier magnitudes at the cost of slightly increasing weight magnitudes, making both tensors more amenable to uniform INT8 quantization. The result is efficient W8A8 (weight-8-bit, activation-8-bit) quantization that exploits INT8 Tensor Cores for both bandwidth and compute benefits.
+SmoothQuant (Xiao et al., 2023) takes yet another approach to the outlier problem. Rather than handling outliers at runtime (LLM.int8()) or through weight optimization (GPTQ, AWQ), SmoothQuant smooths the activation distribution *before* quantization by migrating the quantization difficulty from activations to weights. The key observation is that activation outliers are channel-specific: certain hidden dimensions consistently produce large values across all tokens. SmoothQuant applies a per-channel scaling transformation that divides the activation by a smoothing factor and multiplies the corresponding weight by the same factor. This mathematically equivalent transformation reduces activation outlier magnitudes at the cost of slightly increasing weight magnitudes, making both tensors more amenable to uniform INT8 quantization. The result is efficient W8A8 (weight-8-bit, activation-8-bit) quantization that exploits INT8 Tensor Cores for both bandwidth and compute benefits.
 
 These four approaches, LLM.int8(), GPTQ, AWQ, and SmoothQuant, represent a progression in the sophistication of quantization techniques for LLMs. LLM.int8() handles outliers at runtime with mixed-precision decomposition but limits compression to INT8. GPTQ uses second-order information for aggressive INT4 weight compression but requires hours of calibration per model. AWQ achieves similar INT4 quality with minutes of calibration by focusing on activation-aware scaling. SmoothQuant enables W8A8 quantization by preprocessing the weight-activation pairs. In practice, AWQ has become the default choice for weight-only quantization in production LLM deployment, while SmoothQuant is preferred when both weight and activation quantization are needed for compute-bound workloads.
 
-The choice among these techniques also depends on the deployment target. For GPU inference with Tensor Core support, GPTQ and AWQ produce INT4 weight representations that are dequantized to FP16 during the GEMM computation, leveraging the GPU's FP16 Tensor Cores. For CPU inference or edge deployment, INT8 representations (LLM.int8() or static per-channel INT8 quantization) can directly exploit integer arithmetic units without dequantization overhead.
+The choice among these techniques also depends on the deployment target. For GPU inference with Tensor Core support, GPTQ and AWQ produce INT4 weight representations that are dequantized to FP16 during the GEMM computation, using the GPU's FP16 Tensor Cores. For CPU inference or edge deployment, INT8 representations (LLM.int8() or static per-channel INT8 quantization) can directly exploit integer arithmetic units without dequantization overhead.
 
 The storage cost for block-wise quantization is minimal. Storing one FP32 scale (32 bits) for every block of 128 INT8 weights (1024 bits) increases total model size by only 3%. This small overhead allows block-wise quantization to isolate the destructive impact of outliers, preserving the effective dynamic range for the 99% of normal weights, without the bandwidth penalty of higher-precision formats.
 
 ### Post-Training vs Quantization-Aware Training {#sec-performance-engineering-ptq-qat}
 
-The trade-off between **Post-Training Quantization (PTQ)** and **Quantization-Aware Training (QAT)** centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the default choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, requiring approximately 4--8 GPU-hours on a single H100 to quantize a 70B model to INT4. While PTQ preserves greater than 99% of accuracy at INT8, aggressive quantization to INT4 or INT3 often incurs a steep penalty: perplexity may degrade by 0.5--1.0 points, and reasoning performance on benchmarks like MMLU can drop significantly (e.g., from 69% to below 64%).
+The trade-off between **Post-Training Quantization (PTQ)** and **Quantization-Aware Training (QAT)** centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the default choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, requiring approximately 4--8 GPU-hours on a single H100 to quantize a 70B model to INT4. While PTQ preserves greater than 99% of accuracy at INT8, aggressive quantization to INT4 or INT3 often incurs a steep penalty: perplexity may degrade by 0.5--1.0 points, and reasoning performance on benchmarks like MMLU can drop from 69% to below 64%.
 
 When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. By simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator[^fn-ste-quantization] (STE), the network learns to adjust its weights to be robust to quantization.
 
@@ -1187,105 +1107,50 @@ The cost is substantial: QAT is effectively a full fine-tuning run, often requir
 
 The practical workflow in most production environments follows a two-stage approach: deploy with PTQ first (because it is fast and requires no training infrastructure), then apply QAT or QLoRA only if the PTQ model fails to meet quality requirements at the target precision. This sequence minimizes engineering effort while preserving the option of higher quality when needed.
 
-### KV Cache Compression {#sec-performance-engineering-kv-cache}
+### KV Cache Compression and Architectural Optimization {#sec-performance-engineering-kv-cache}
 
-During autoregressive generation, the Key-Value (KV) cache stores the key and value projections for all previously generated tokens. This cache grows linearly with sequence length and batch size, often becoming the dominant memory consumer in LLM serving. For a 70B parameter model with 80 layers, 64 heads, head dimension 128, and sequence length 4096 in FP16, the KV cache requires:
+The Key-Value (KV) cache is the primary memory bottleneck in large-scale LLM inference. Strategies to mitigate this pressure include numerical compression (quantization to INT8, FP8, or INT4) and architectural optimizations like Grouped Query Attention (GQA). Because these techniques are fundamental to scaling model serving, we provide a rigorous quantitative analysis of KV cache memory footprints and the performance impact of GQA in @sec-inference-scale-kv-cache-compression-943a.
+
+### Weight-Only vs Weight-Activation Quantization {#sec-performance-engineering-quant-strategies}
+Weight-only quantization (GPTQ, AWQ) reduces weight precision to INT4 or INT3 while keeping activations in FP16. During a GEMM, the INT4 weights are dequantized to FP16 on-the-fly, and the computation proceeds using FP16 Tensor Cores. The benefit is reduced memory for weight storage and reduced HBM bandwidth for weight reads, but the GEMM itself still operates at FP16 precision. This approach is ideal for memory-bound inference (batch size 1 decode), where the bottleneck is reading weights from HBM.
+
+Weight-activation quantization (SmoothQuant, FP8 training) reduces both weights and activations to lower precision, enabling the GEMM to execute using lower-precision arithmetic (INT8 Tensor Cores, FP8 Tensor Cores). This provides both bandwidth and compute benefits but is more challenging to implement without quality degradation, because activation distributions are more dynamic and harder to quantize than weight distributions.
+
+The choice depends on the operational regime. For memory-bound inference (small batch sizes), weight-only INT4 quantization provides the largest speedup per unit of quality degradation. For compute-bound inference (large batch sizes) or training, weight-activation FP8 quantization provides throughput gains that weight-only quantization cannot match. Many production systems use different quantization strategies for different operating points: INT4 weight-only at low batch sizes (for latency) and FP8 weight-activation at high batch sizes (for throughput).
 
 ```{python}
 #| echo: false
-#| label: kv-cache-calc
+#| label: kv-cache-size
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ KV CACHE MEMORY CALCULATION
+# │ KV CACHE MEMORY PER REQUEST
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-kv-cache KV cache compression prose
+# │ Context: Precision Dividend callout — @sec-performance-engineering-kv-cache
 # │
-# │ Goal: Compute FP16 and INT4 KV cache footprint for a 70B MHA model (80 layers,
-# │       64 KV heads, head_dim=128, seq_len=4096) to quantify the memory pressure
-# │       that motivates KV cache quantization and GQA.
-# │ Show: ~84.9 GB FP16 vs ~10.6 GB INT4 → 8x compression, freeing ~74 GB for
-# │       larger batch sizes — inline in KV Cache Compression section.
-# │ How: 2 * layers * heads * head_dim * seq_len * bytes_per_elem; compression
-# │       from FP16 (2 bytes) to INT4 (0.5 bytes) = 4x reduction.
-# │
-# │ Imports: (none — standalone calculation), mlsys.formatting (check)
-# │ Exports: kv_fp16_gb_str, kv_int4_gb_str, kv_savings_gb_str, kv_compression_str
+# │ Goal: Compute KV cache memory per request for a 70B model (Llama-style GQA)
+# │       at FP16, then derive max batch sizes before/after quantization.
+# │ Show: kv_fp16_gb (~1.7 GB), max batch FP16 vs INT8, throughput ratio.
+# │ Exports: kv_fp16_gb_str, max_batch_fp16_str, max_batch_int8_str,
+# │          batch_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
-class KVCacheCalc:
-    """KV cache memory footprint: FP16 vs INT4 for a 70B MHA model."""
+# KV cache size = 2 (K+V) * layers * kv_heads * head_dim * seq_len * bytes
+num_layers = 80
+num_kv_heads = 8       # GQA: 8 KV heads for 70B Llama
+head_dim = 128
+seq_len = 4096
+bytes_fp16 = 2
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    kv_layers = 80
-    kv_heads = 64     # total KV heads (could be GQA, but assume MHA for max)
-    kv_head_dim = 128
-    kv_seq_len = 4096
-    kv_bytes_fp16 = 2
-    kv_bytes_int4 = 0.5
+kv_cache_bytes = 2 * num_layers * num_kv_heads * head_dim * seq_len * bytes_fp16
+kv_fp16_gb = kv_cache_bytes / 1e9        # ~1.07 GB per request in FP16
+kv_fp16_gb_str = f"{kv_fp16_gb:.1f}"
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-    # KV cache = 2 (key+value) * layers * heads * head_dim * seq_len * bytes
-    kv_fp16_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_fp16
-    kv_int4_bytes = 2 * kv_layers * kv_heads * kv_head_dim * kv_seq_len * kv_bytes_int4
-
-    kv_fp16_gb = kv_fp16_bytes / 1e9
-    kv_int4_gb = kv_int4_bytes / 1e9
-    kv_savings_gb = kv_fp16_gb - kv_int4_gb
-    kv_compression = kv_fp16_gb / kv_int4_gb
-
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    check(kv_fp16_gb > 5, f"KV cache should be substantial, got {kv_fp16_gb:.1f} GB")
-    check(kv_compression > 3, f"INT4 should give >3x compression, got {kv_compression:.1f}x")
-
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
-    kv_fp16_gb_str = f"{kv_fp16_gb:.1f}"
-    kv_int4_gb_str = f"{kv_int4_gb:.1f}"
-    kv_savings_gb_str = f"{kv_savings_gb:.1f}"
-    kv_compression_str = f"{kv_compression:.0f}"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-kv_fp16_gb = KVCacheCalc.kv_fp16_gb
-kv_fp16_gb_str = KVCacheCalc.kv_fp16_gb_str
-kv_int4_gb_str = KVCacheCalc.kv_int4_gb_str
-kv_savings_gb_str = KVCacheCalc.kv_savings_gb_str
-kv_compression_str = KVCacheCalc.kv_compression_str
+# Pre-compute batch size results for prose
+max_batch_fp16 = int(45 / (kv_fp16_gb / 4))
+max_batch_fp16_str = str(max_batch_fp16)
+max_batch_int8 = int(71.25 / (kv_fp16_gb / 2 / 4))
+max_batch_int8_str = str(max_batch_int8)
+batch_ratio_str = str(int(max_batch_int8 / max_batch_fp16))
 ```
-
-$$
-\text{KV cache} = 2 \times 80 \times 64 \times 128 \times 4096 \times 2 \text{ bytes} \approx \text{`{python} kv_fp16_gb_str`} \text{ GB (FP16)}
-$$
-
-This is a substantial fraction of the H100's `{python} h100_mem_str` GB of HBM, consumed by a single request's KV cache alone. For a batch of 8 concurrent requests, the KV cache would require `{python} f"{kv_fp16_gb * 8:.0f}"` GB, exceeding single-GPU capacity.
-
-Compressing the KV cache to INT4 reduces it to approximately `{python} kv_int4_gb_str` GB per request, a `{python} kv_compression_str`$\times$ reduction. The freed memory allows either longer sequences or larger batch sizes, directly improving serving throughput. Empirical studies show that KV cache quantization to INT4 with per-channel or per-group scaling factors preserves attention quality with negligible perplexity degradation, because the attention mechanism is relatively robust to small perturbations in cached key and value representations.
-
-### Grouped Query Attention: Architectural Precision Engineering {#sec-performance-engineering-gqa}
-
-An architectural complement to KV cache quantization is **Grouped Query Attention (GQA)**, introduced by Ainslie et al. (2023). In standard Multi-Head Attention (MHA), every attention head has its own key and value projections. In GQA, multiple query heads share a single key-value head. A model with 32 query heads and 8 KV heads uses a group size of 4: every 4 query heads share one K and one V projection.
-
-The impact on KV cache size is proportional to the KV head reduction. Our earlier calculation assumed 64 KV heads (MHA). With GQA using 8 KV heads instead, the KV cache shrinks by 8$\times$:
-
-$$
-\text{KV cache (GQA)} = 2 \times 80 \times 8 \times 128 \times 4096 \times 2 \approx 1.3 \text{ GB (FP16)}
-$$
-
-This is dramatically more manageable than the `{python} kv_fp16_gb_str` GB of the MHA case. Combining GQA with INT8 KV cache quantization yields sub-gigabyte per-request cache sizes, enabling batch sizes of 50 or more on a single GPU.
-
-GQA is not a post-hoc optimization; it must be designed into the model architecture from the start (or applied through fine-tuning). But its performance implications are so significant that nearly all modern LLMs (Llama 3, Mistral, Gemma) use some form of grouped or multi-query attention. From a performance engineering perspective, GQA represents the co-design ideal: an architectural choice driven entirely by system-level performance constraints.
-
-The multi-query extreme (MQA), where all query heads share a single KV head, minimizes KV cache size but can degrade model quality, particularly for tasks requiring fine-grained attention patterns. GQA provides a tunable compromise: the group size $g$ (number of query heads per KV head) controls the trade-off between cache size and attention capacity. Llama 3 uses 8 KV heads with 32 query heads ($g = 4$), while Mistral uses 8 KV heads with 32 query heads ($g = 4$) as well. The convergence on similar GQA configurations across independently developed models suggests that $g = 4$ represents a Pareto-optimal point for current model scales.
-
-The progression from Multi-Head Attention (MHA) through Grouped Query Attention (GQA) to Multi-Query Attention (MQA, where all heads share a single KV pair) illustrates a broader principle: model architecture and system performance are inseparable. Choosing between MHA, GQA-8, GQA-4, and MQA is not purely a model quality decision; it is a system throughput decision. For a 70B model serving at batch size 32 with 4096-token sequences, the KV cache under MHA might consume 80% of available GPU memory, leaving insufficient room for the batch. Under GQA-8, the KV cache shrinks to 10% of MHA's size, enabling the batch to fit and increasing throughput by an order of magnitude. The quality impact of GQA is typically less than 1% on standard benchmarks, making it an overwhelmingly favorable trade-off for production systems.
-
-### Weight-Only vs Weight-Activation Quantization {#sec-performance-engineering-quant-strategies}
-
-An important distinction in precision engineering is between **weight-only quantization** and **weight-activation quantization**, which target different bottlenecks and have different quality implications.
-
-**Weight-only quantization** (GPTQ, AWQ) reduces weight precision to INT4 or INT3 while keeping activations in FP16. During a GEMM, the INT4 weights are dequantized to FP16 on-the-fly, and the computation proceeds using FP16 Tensor Cores. The benefit is reduced memory for weight storage and reduced HBM bandwidth for weight reads, but the GEMM itself still operates at FP16 precision. This approach is ideal for memory-bound inference (batch size 1 decode), where the bottleneck is reading weights from HBM.
-
-**Weight-activation quantization** (SmoothQuant, FP8 training) reduces both weights and activations to lower precision, enabling the GEMM to execute using lower-precision arithmetic (INT8 Tensor Cores, FP8 Tensor Cores). This provides both bandwidth and compute benefits but is more challenging to implement without quality degradation, because activation distributions are more dynamic and harder to quantize than weight distributions.
-
-The choice depends on the operational regime. For memory-bound inference (small batch sizes), weight-only INT4 quantization provides the largest speedup per unit of quality degradation. For compute-bound inference (large batch sizes) or training, weight-activation FP8 quantization provides throughput gains that weight-only quantization cannot match. Many production systems use different quantization strategies for different operating points: INT4 weight-only at low batch sizes (for latency) and FP8 weight-activation at high batch sizes (for throughput).
 
 ::: {.callout-notebook title="The Precision Dividend"}
 
@@ -1296,22 +1161,22 @@ The choice depends on the operational regime. For memory-bound inference (small 
 - Weights: 35 GB/GPU
 - Available for KV cache: $80 - 35 = 45$ GB/GPU
 - KV cache per request: `{python} kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{kv_fp16_gb / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor 45 / {kv_fp16_gb / 4:.1f} \rfloor$ $\approx$ `{python} f"{int(45 / (kv_fp16_gb / 4))}"` requests
+- Maximum batch size: $\lfloor 45 /$ `{python} f"{kv_fp16_gb / 4:.1f}"` $\rfloor \approx$ `{python} max_batch_fp16_str` requests
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
 - Weights: 35 GB$\times$ (4/16) = 8.75 GB/GPU (INT4)
 - Available for KV cache: $80 - 8.75 = 71.25$ GB/GPU
 - KV cache per request (INT8): `{python} f"{kv_fp16_gb / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor 71.25 / {kv_fp16_gb / 2 / 4:.1f} \rfloor$ $\approx$ `{python} f"{int(71.25 / (kv_fp16_gb / 2 / 4))}"` requests
+- Maximum batch size: $\lfloor 71.25 /$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` $\rfloor \approx$ `{python} max_batch_int8_str` requests
 
-**Takeaway**: Precision engineering does not just make individual operations faster; it fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} f"{int(71.25 / (kv_fp16_gb / 2 / 4)) / int(45 / (kv_fp16_gb / 4)):.0f}"`$\times$ or more.
+**Takeaway**: Precision engineering does not just make individual operations faster; it fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} batch_ratio_str`$\times$ or more.
 
 :::
 
 Precision engineering reduces the bytes per memory transaction. Operator fusion reduces the number of transactions. Together, they attack the same fundamental bottleneck from complementary directions: if you must move data across a slow bus, move less of it (precision) and move it fewer times (fusion). The multiplicative interaction between these two techniques explains why modern serving systems deploy both simultaneously: FlashAttention reduces attention HBM traffic from quadratic to linear, and INT8 KV cache compression further halves the linear term. The combined effect exceeds what either technique achieves alone.
 
-The next section examines how graph compilers automate both of these optimizations, applying them systematically across an entire model.
+Graph compilers automate both of these optimizations, applying them systematically across an entire model.
 
 ## Graph Compilation {#sec-performance-engineering-compilation}
 
@@ -1327,9 +1192,9 @@ During **graph-level optimization**, the compiler applies algebraic simplificati
 
 The **operator fusion** pass is the most critical for performance. It identifies sequences of operations that can be combined into single kernels to reduce memory traffic. For the FFN block, the compiler fuses the `GELU` activation into the tail of the first `Linear` kernel (if supported as an epilogue) or fuses the `GELU` and the subsequent `LayerNorm` into a single kernel. Instead of writing the intermediate result of the first `Linear` to HBM and reading it back for `GELU`, the fused kernel keeps the data in the GPU's SRAM or registers. This typically reduces the number of HBM accesses by 30--50%, directly alleviating the memory bandwidth bottleneck.
 
-**Memory planning** determines when to allocate and free tensors. Without optimization, a 24-layer transformer might allocate separate buffers for every intermediate activation. The compiler analyzes tensor lifetimes, recognizing that the input to the first `Linear` is no longer needed after the second `Linear` computes its output, and reuses the same physical memory addresses. For a 70B model where activations can consume gigabytes per layer, this buffer reuse reduces peak memory requirements from $O(L)$ to $O(1)$, where $L$ is the number of layers. For a model where activations consume 10 GB per layer across 80 layers, this optimization reduces peak activation memory from 800 GB (impossible on any single GPU) to approximately 10--20 GB (comfortably within a single H100). Memory planning also interacts with operator fusion: fusing two operations eliminates the intermediate tensor between them, which both removes the HBM traffic and removes the memory allocation. The compiler must reason about both effects jointly to make profitable decisions.
+The memory planning pass determines when to allocate and free tensors. Without optimization, a 24-layer transformer might allocate separate buffers for every intermediate activation. The compiler analyzes tensor lifetimes, recognizing that the input to the first `Linear` is no longer needed after the second `Linear` computes its output, and reuses the same physical memory addresses. For a 70B model where activations can consume gigabytes per layer, this buffer reuse reduces peak memory requirements from $O(L)$ to $O(1)$, where $L$ is the number of layers. For a model where activations consume 10 GB per layer across 80 layers, this optimization reduces peak activation memory from 800 GB (impossible on any single GPU) to approximately 10--20 GB (comfortably within a single H100). Memory planning also interacts with operator fusion: fusing two operations eliminates the intermediate tensor between them, which both removes the HBM traffic and removes the memory allocation. The compiler must reason about both effects jointly to make profitable decisions.
 
-**Kernel selection** maps each fused operation to a specific machine code implementation. For the computationally heavy linear projections, the compiler selects a vendor-optimized cuBLAS or CUTLASS GEMM kernel. For the fused `GELU-LayerNorm` sequence, it generates a custom Triton kernel that keeps data in SRAM. The result for the FFN block is a reduction from 4 separate kernels to 2 highly optimized kernels, with a corresponding reduction in global memory traffic.
+The kernel selection pass maps each fused operation to a specific machine code implementation. For the computationally heavy linear projections, the compiler selects a vendor-optimized cuBLAS or CUTLASS GEMM kernel. For the fused `GELU-LayerNorm` sequence, it generates a custom Triton kernel that keeps data in SRAM. The result for the FFN block is a reduction from 4 separate kernels to 2 highly optimized kernels, with a corresponding reduction in global memory traffic.
 
 ### torch.compile {#sec-performance-engineering-torch-compile}
 
@@ -1373,9 +1238,9 @@ In this example, `torch.compile` will fuse the GELU activation with surrounding 
 
 XLA (Accelerated Linear Algebra) is Google's graph compiler, used as the backend for JAX and TensorFlow. Unlike TorchInductor, which generates Triton code targeting NVIDIA GPUs, XLA generates HLO (High-Level Operations) intermediate representation that targets multiple backends, including Google TPUs, NVIDIA GPUs, and CPUs. Its architecture is fundamentally different from `torch.compile`: while PyTorch prioritizes flexibility by allowing graph breaks for unsupported Python features, XLA enforces **whole-program compilation**, tracing the entire computation as a single static graph and enabling global optimizations that span across layers and even across the forward and backward passes.
 
-This global view enables XLA's most powerful feature: the **GSPMD (General Partitioner for SPMD)**. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
+This global view enables XLA's most distinctive capability: the **GSPMD (General Partitioner for SPMD)**. In distributed training, GSPMD automatically partitions the computation graph across thousands of TPU cores based on a few high-level user annotations. While a PyTorch user must manually wrap models with `DistributedDataParallel` or `FullyShardedDataParallel`, an XLA user defines the computation for a single device and allows the compiler to infer the necessary communication primitives (AllReduce, AllGather) and insert them into the graph. This allows for complex hybrid sharding strategies that are difficult to implement manually.
 
-For TPU hardware specifically, XLA performs layout optimizations unavailable on other platforms. It maps matrix multiplications onto the TPU's systolic array architecture, padding dimensions to align with the 128$\times$ 128 hardware units and scheduling instructions to hide the latency of HBM fetches. The impact of these optimizations is visible in MFU metrics. On large-scale LLM training workloads, JAX/XLA on TPUv4 typically achieves 55--65% MFU, significantly outperforming the 40--55% MFU typical of PyTorch/GPU setups without extensive hand-tuning.
+For TPU hardware specifically, XLA performs layout optimizations unavailable on other platforms. It maps matrix multiplications onto the TPU's systolic array architecture, padding dimensions to align with the 128$\times$ 128 hardware units and scheduling instructions to hide the latency of HBM fetches. The impact of these optimizations is visible in MFU metrics. On large-scale LLM training workloads, JAX/XLA on TPUv4 typically achieves 55--65% MFU, outperforming the 40--55% MFU typical of PyTorch/GPU setups without extensive hand-tuning.
 
 The trade-off for XLA's performance is compilation latency and rigidity. Because XLA must analyze the full static graph, initial compilation can take minutes for large models, compared to seconds for `torch.compile`. Any change in input shape triggers a full recompilation. This makes XLA excellent for steady-state production workloads where the graph is static and the model runs for days or weeks, but challenging for research environments involving dynamic shapes or rapid experimental iteration. The choice between `torch.compile` and XLA often depends on the deployment context: organizations using NVIDIA GPUs predominantly use PyTorch with `torch.compile`, while organizations using Google TPUs use JAX with XLA.
 
@@ -1395,9 +1260,9 @@ Graph compilation is not free. The compilation process itself takes time, rangin
 
 For training workloads that run for hours or days, compilation overhead is negligible. For inference workloads that serve millions of requests, the one-time compilation cost is similarly amortized. The problematic case is dynamic or infrequent workloads: a model that is compiled once but serves only a few hundred requests before being replaced by a new version may not recoup the compilation cost.
 
-**Graph breaks** are a related challenge specific to `torch.compile`. When TorchDynamo encounters Python code it cannot trace (data-dependent control flow, calls to uncompiled libraries, dynamic tensor shapes that change between iterations), it inserts a graph break. Each break produces a separate compiled subgraph with its own compilation overhead and potential optimization boundaries. A model with 50 graph breaks produces 50+ small compiled regions, each potentially too small for meaningful fusion. Reducing graph breaks requires refactoring the model code to be more "compiler-friendly," replacing Python control flow with tensor operations and ensuring static shapes where possible.
+Graph breaks are a related challenge specific to `torch.compile`. When TorchDynamo encounters Python code it cannot trace (data-dependent control flow, calls to uncompiled libraries, dynamic tensor shapes that change between iterations), it inserts a graph break. Each break produces a separate compiled subgraph with its own compilation overhead and potential optimization boundaries. A model with 50 graph breaks produces 50+ small compiled regions, each potentially too small for meaningful fusion. Reducing graph breaks requires refactoring the model code to be more "compiler-friendly," replacing Python control flow with tensor operations and ensuring static shapes where possible.
 
-**Dynamic shapes** present a fundamental tension between compilation and flexibility. A model compiled for input shape [batch=32, seq=512] will recompile when it encounters [batch=16, seq=1024]. TorchInductor supports "dynamic shapes" by generating kernels with symbolic dimensions, but this generality comes at the cost of reduced optimization compared to kernels specialized for exact shapes. TensorRT sidesteps this by requiring the user to specify a range of input shapes at compilation time, generating kernels that handle the specified range but nothing outside it.
+Dynamic shapes present a fundamental tension between compilation and flexibility. A model compiled for input shape [batch=32, seq=512] will recompile when it encounters [batch=16, seq=1024]. TorchInductor supports "dynamic shapes" by generating kernels with symbolic dimensions, but this generality comes at the cost of reduced optimization compared to kernels specialized for exact shapes. TensorRT sidesteps this by requiring the user to specify a range of input shapes at compilation time, generating kernels that handle the specified range but nothing outside it.
 
 Despite these limitations, graph compilation represents the most accessible optimization technique: it requires no model modifications, no custom kernels, and minimal code changes. For most workloads, `torch.compile` with default settings provides 10--40% speedup with a single line of code, making it the natural first optimization to apply before considering more specialized techniques.
 
@@ -1407,11 +1272,11 @@ The accessibility of graph compilation has changed the performance engineering w
 
 `torch.compile` supports multiple optimization levels that trade compilation time for runtime performance:
 
-**`default` mode** applies standard optimizations: element-wise fusion, memory planning, and kernel selection from the pre-tuned library. Compilation is fast (seconds to minutes) and suitable for development iteration.
+The `default` mode applies standard optimizations: element-wise fusion, memory planning, and kernel selection from the pre-tuned library. Compilation is fast (seconds to minutes) and suitable for development iteration.
 
-**`reduce-overhead` mode** additionally wraps the compiled graph in CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs), eliminating kernel launch overhead. This is particularly effective for small models where launch overhead is a significant fraction of execution time.
+The `reduce-overhead` mode additionally wraps the compiled graph in CUDA Graphs (discussed in @sec-performance-engineering-cuda-graphs), eliminating kernel launch overhead. This is particularly effective for small models where launch overhead is a significant fraction of execution time.
 
-**`max-autotune` mode** triggers extensive kernel autotuning, benchmarking multiple kernel variants (different tile sizes, thread block configurations, memory access patterns) for each operation and selecting the fastest. This produces the highest-performance code but may take 10--30 minutes of compilation time, making it suitable for production deployment but impractical during development.
+The `max-autotune` mode triggers extensive kernel autotuning, benchmarking multiple kernel variants (different tile sizes, thread block configurations, memory access patterns) for each operation and selecting the fastest. This produces the highest-performance code but may take 10--30 minutes of compilation time, making it suitable for production deployment but impractical during development.
 
 The choice of backend also matters. TorchInductor (the default) generates Triton kernels for GPU and C++ for CPU. For deployment-specific optimization, the model can be exported through `torch.export` to an intermediate representation that can be consumed by TensorRT, ONNX Runtime, or other inference-specialized runtimes. Each backend applies its own optimization passes on top of the common graph-level transformations.
 
@@ -1480,284 +1345,47 @@ New time per token: $4.17 + 0.87 + 0.25 = 5.29$ ms, yielding approximately 189 t
 
 :::
 
-Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. The next section examines an orthogonal optimization that changes the fundamental algorithm: speculative decoding, which trades cheap compute for expensive latency.
+Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. An orthogonal class of optimizations changes the fundamental algorithm itself: speculative decoding trades cheap compute for expensive latency, and mixture of experts decouples model capacity from per-token cost.
 
 ## Speculative Decoding {#sec-performance-engineering-speculative}
 
-Imagine trying to read a book by asking for one letter at a time, waiting for each letter to be delivered before asking for the next. This is exactly how autoregressive LLMs generate text, making them painfully slow and heavily memory-bound. Speculative decoding breaks this sequential bottleneck by having a small, fast model guess the next several words, allowing the massive main model to verify them all in a single parallel step.
-
-### The Core Algorithm {#sec-performance-engineering-speculative-algorithm}
-
-The speculative decoding algorithm proceeds in three phases:
-
-**Draft phase**: A small, fast model (the "draft model") generates $K$ candidate tokens autoregressively. Because the draft model is much smaller (e.g., 1B parameters versus 70B for the target), each draft step is fast, even though it is still sequential. Generating $K$ draft tokens takes roughly the time of one or two target model decode steps.
-
-**Verification phase**: The target model processes all $K$ draft tokens *in parallel* in a single forward pass. Because this is a forward pass over $K$ known tokens (not autoregressive generation), the batch dimension is $K$, and the operation is a standard GEMM with much higher arithmetic intensity than batch-1 decode. The target model produces probability distributions for positions 1 through $K+1$.
-
-**Acceptance phase**: Starting from the first draft token, compare the draft model's probability distribution with the target model's distribution. If the draft token has sufficiently high probability under the target model's distribution, accept it. Continue accepting tokens until a draft token is rejected or all $K$ are accepted. On rejection, sample a corrected token from a modified distribution that accounts for the draft model's error. This rejection sampling scheme guarantees that the output distribution is *exactly* the same as if the target model had generated tokens autoregressively.
-
-The mathematical guarantee is crucial: speculative decoding is not an approximation. By using rejection sampling, the accepted tokens follow exactly the target model's distribution. The draft model only determines the speed of generation, not the quality. This is a remarkable property: the system generates tokens faster without any change in output quality.
-
-This guarantee distinguishes speculative decoding from every other optimization technique in this chapter. Operator fusion changes the order of floating-point operations, which can alter results at the level of floating-point rounding. Precision reduction explicitly sacrifices numerical precision for speed. Quantization approximates weights and activations. Graph compilation may apply algebraically equivalent but numerically different transformations. In each case, the differences are typically negligible, but they exist. Speculative decoding is provably lossless[^fn-speculative-lossless]: the output distribution is mathematically identical to standard autoregressive generation, regardless of the draft model's quality.
-
-[^fn-speculative-lossless]: **Lossless Guarantee Scope**: The guarantee holds in expectation over the rejection sampling process for a fixed target model. In practice, the guarantee can be weakened by floating-point non-determinism: if the target model's logits differ by even one ULP between standalone decoding and batched verification (due to different GEMM tiling or reduction order), the accepted distribution shifts slightly. Systems requiring bit-exact reproducibility must enforce deterministic CUDA operations, which can reduce throughput by 5--15%. \index{Speculative Decoding!lossless guarantee}
-
-A terrible draft model simply produces no speedup (all tokens are rejected), but the output is still correct.
-
-The rejection sampling scheme works as follows. Let $p(x)$ be the target model's probability for token $x$ and $q(x)$ be the draft model's probability. A draft token $x$ is accepted with probability $\min(1, p(x)/q(x))$. If rejected, a corrected token is sampled from the distribution $\max(0, p(x) - q(x))$ normalized to sum to 1. This ensures that the marginal distribution of the accepted token exactly matches $p(x)$, regardless of how different $q(x)$ is from $p(x)$. The closer $q$ is to $p$, the higher the acceptance rate and the greater the speedup, but even a poorly matched draft model produces correct output, just more slowly.
-
-```{python}
-#| echo: false
-#| label: speculative-speedup
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ SPECULATIVE DECODING SPEEDUP
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-speculative-speedup speedup analysis prose
-# │
-# │ Goal: Compute expected latency speedup from speculative decoding at K=5 draft
-# │       tokens with a 20x-faster draft model, across three acceptance rates
-# │       (α=0.9 high, 0.7 medium, 0.5 low), to show the α-sensitivity of the gain.
-# │ Show: ~3.5x (α=0.9), ~2.2x (α=0.7), ~1.4x (α=0.5) — inline speedup bullets
-# │       in @sec-performance-engineering-speculative-speedup.
-# │ How: E[accepted tokens] = Σ αⁱ for i in 0..K (geometric sum); speedup =
-# │       (E[tokens] * t_target) / (t_draft_total + t_target).
-# │
-# │ Imports: (none — standalone calculation), mlsys.formatting (check)
-# │ Exports: sp_high_str, sp_med_str, sp_low_str, et_high_str, et_med_str, et_low_str
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
-class SpeculativeSpeedup:
-    """Speculative decoding latency speedup across acceptance rates."""
-
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    alpha_high = 0.9    # acceptance rate for "easy" text (continuation, common patterns)
-    alpha_med = 0.7     # medium-difficulty text
-    alpha_low = 0.5     # "hard" text (reasoning, code)
-    K = 5               # draft length
-
-    # Target model: time for 1 forward pass
-    t_target = 1.0      # normalized
-    # Draft model: time for K drafts
-    t_draft_per_token = 0.05  # draft is ~20x faster
-    t_draft_total = t_draft_per_token * K  # 0.25
-
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-    # Expected tokens per speculation round: 1 + sum(alpha^i for i=1..K)
-    # = (1 - alpha^(K+1)) / (1 - alpha) for geometric distribution
-
-    def _expected_tokens(alpha, k):
-        """Expected accepted tokens per round."""
-        return sum(alpha**i for i in range(k + 1))
-
-    def _speedup(alpha, k, t_target_norm, t_draft_total_norm):
-        """Speedup over standard autoregressive."""
-        et = sum(alpha**i for i in range(k + 1))
-        time_per_round = t_draft_total_norm + t_target_norm
-        baseline_time = et * t_target_norm
-        return baseline_time / time_per_round
-
-    sp_high = _speedup(alpha_high, K, t_target, t_draft_total)
-    sp_med = _speedup(alpha_med, K, t_target, t_draft_total)
-    sp_low = _speedup(alpha_low, K, t_target, t_draft_total)
-
-    et_high = _expected_tokens(alpha_high, K)
-    et_med = _expected_tokens(alpha_med, K)
-    et_low = _expected_tokens(alpha_low, K)
-
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    check(sp_high > 2.0, f"High acceptance speedup should be >2x, got {sp_high:.1f}x")
-    check(sp_low > 1.0, f"Even low acceptance should give speedup, got {sp_low:.1f}x")
-
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
-    sp_high_str = f"{sp_high:.1f}"
-    sp_med_str = f"{sp_med:.1f}"
-    sp_low_str = f"{sp_low:.1f}"
-    et_high_str = f"{et_high:.1f}"
-    et_med_str = f"{et_med:.1f}"
-    et_low_str = f"{et_low:.1f}"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-sp_high_str = SpeculativeSpeedup.sp_high_str
-sp_med_str = SpeculativeSpeedup.sp_med_str
-sp_low_str = SpeculativeSpeedup.sp_low_str
-et_high_str = SpeculativeSpeedup.et_high_str
-et_med_str = SpeculativeSpeedup.et_med_str
-et_low_str = SpeculativeSpeedup.et_low_str
-```
-
-### Speedup Analysis {#sec-performance-engineering-speculative-speedup}
-
-The speedup from speculative decoding depends on two factors: the **acceptance rate** $\alpha$ (probability that the draft model's token matches the target model's distribution) and the **draft length** $K$ (number of speculative tokens per round).
-
-The expected number of accepted tokens per round is approximately $\sum_{i=0}^{K} \alpha^i = \frac{1 - \alpha^{K+1}}{1 - \alpha}$. The time per round is the cost of $K$ draft steps plus one target verification step. Since the draft model is typically 10--20$\times$ smaller, and verification is a single forward pass over $K$ tokens, the total round time is dominated by the target model's single forward pass.
-
-For $K = 5$ draft tokens and a draft model that is 20$\times$ faster than the target:
-
-- **High acceptance** ($\alpha = 0.9$): Expected `{python} et_high_str` tokens per round, speedup of `{python} sp_high_str`$\times$.
-- **Medium acceptance** ($\alpha = 0.7$): Expected `{python} et_med_str` tokens per round, speedup of `{python} sp_med_str`$\times$.
-- **Low acceptance** ($\alpha = 0.5$): Expected `{python} et_low_str` tokens per round, speedup of `{python} sp_low_str`$\times$.
-
-The acceptance rate varies dramatically by context. Predictable text (formulaic responses, copying from context, common phrases) achieves $\alpha > 0.9$. Creative text, complex reasoning, or code generation may see $\alpha < 0.5$. In practice, systems observe average acceptance rates of 0.6--0.8 across diverse workloads, yielding 1.5--3$\times$ latency improvements.
-
-The acceptance rate also depends on the **temperature** of the sampling distribution. At temperature 0 (greedy decoding), the acceptance criterion is exact match: the draft token is accepted if and only if it is the argmax of the target distribution. At higher temperatures, the rejection sampling scheme allows more diverse tokens to be accepted, generally increasing the acceptance rate. This means speculative decoding provides the largest absolute speedup at low temperatures (where greedy decoding produces highly predictable output) and smaller speedup at high temperatures (where the output is more stochastic and harder to predict).
-
-While it might seem advantageous to increase the draft length $K$ indefinitely, the returns diminish rapidly due to the geometric decay of acceptance probability. The probability of accepting the $i$-th draft token is $\alpha^i$, so for $\alpha = 0.6$, the probability of accepting the 6th token is merely $0.6^6 \approx 0.047$. Increasing $K$ from 5 to 10 only increases the expected tokens from 2.4 to 2.49, yet it doubles the verification cost for the target model. In practice, $K$ is rarely tuned beyond 5--7, as the marginal gain in accepted tokens fails to amortize the linear growth in verification latency.
-
-The selection of the draft model size introduces a critical optimization surface. A tiny draft model (e.g., 150M parameters for a 70B target) is computationally negligible but yields a low $\alpha$ (e.g., 0.4), resulting in frequent rollbacks. Conversely, a large draft model (e.g., 7B parameters) achieves high alignment ($\alpha > 0.8$) but its own latency becomes a bottleneck, consuming time that could have been spent on target model decode steps. For a 70B target, empirical results favor a draft model in the 1B--3B range. A 1.1B draft model might achieve $\alpha = 0.6$ with 2 ms latency per draft step, yielding a 2.3$\times$ speedup. Upgrading to a 7B draft model might boost $\alpha$ to 0.75, but if the draft latency rises to 10 ms, the net wall-clock speedup drops to 1.5$\times$. The optimal draft model size shifts with the difficulty of the prompt: code generation ($\alpha$ often above 0.8 due to structural predictability) tolerates smaller draft models better than creative writing.
-
-::: {.callout-notebook title="The Speculation Budget"}
-Is speculative decoding worth the implementation complexity? Consider a draft model that is $10\times$ cheaper per token than the target model, and a verification step that processes a candidate batch for $1.5\times$ the cost of a single target decode step. The break-even acceptance rate $\alpha$ is roughly defined by the ratio of overhead to savings.
-$$ \text{Break-Even } \alpha \approx \frac{\text{Verification Cost}}{\text{Draft Savings Ratio}} \approx \frac{1.5}{10} = 15\% $$
-Since modern draft models (e.g., sheared Llama-2) typically achieve acceptance rates of 60-80% on standard prose, the arbitrage is highly profitable, often yielding $2\text{-}3\times$ end-to-end latency reductions.
-:::
-
-### System Design Considerations {#sec-performance-engineering-speculative-system}
-
-Deploying speculative decoding in production requires solving several system-level challenges.
-
-**Draft model selection** balances speed against acceptance rate. A larger draft model achieves higher acceptance but is slower per step. Common choices include: a distilled version of the target model (sharing architecture and vocabulary), the target model with early exit (computing only the first few transformer layers), or a separate small model trained on the same data distribution. Self-speculative decoding uses the target model itself with layer skipping, avoiding the need for a separate draft model entirely. The trade-off is that the "draft" (early layers of the target model) may produce lower-quality predictions than a dedicated small model trained specifically for this purpose.
-
-**Online adaptation** addresses a subtle problem: the draft model's acceptance rate depends on the similarity between the draft and target model distributions, which varies across contexts. An adaptive system monitors the acceptance rate in real time and adjusts the speculation depth $K$. When acceptance is high (predictable text like formulaic responses or quoting from context), $K$ is increased to generate more tokens per round. When acceptance is low (creative writing, complex reasoning, or code generation), $K$ is decreased to avoid wasting draft compute. Some implementations maintain a running exponential average of the acceptance rate and use it as the decision threshold for dynamically adjusting $K$.
-
-**Batch-level speculation** adds complexity. In a continuous batching system serving multiple concurrent requests, some requests may be in the draft phase while others are in verification. The system must manage separate KV caches for draft and target models, schedule verification forward passes to maintain high GPU utilization, and handle the variable number of accepted tokens per request, which changes the effective batch size for subsequent iterations.
-
-The interaction between speculative decoding and continuous batching deserves particular attention. In a standard continuous batching system, all active requests advance by exactly one token per iteration, maintaining a predictable batch size. With speculation, different requests accept different numbers of tokens per round, creating jagged advances that complicate memory management and batch scheduling. Some systems address this by running speculation only for requests that are not batch-limited (i.e., when the batch is small enough that decode is still memory-bound), falling back to standard autoregressive generation when the batch grows large enough to be compute-bound. This adaptive strategy applies speculation where it provides the greatest benefit while avoiding overhead where batching alone provides sufficient throughput.
-
-**Tree-structured speculation** extends beyond linear draft sequences. Instead of generating a single chain of $K$ tokens, the draft model generates a tree of possible continuations at each position. For instance, after drafting token $t_1$, the draft model might explore the top-3 most likely next tokens, generating three branches. Each branch is extended further, producing a tree of potential continuations.
-
-The target model verifies all paths in a single batched forward pass using an attention mask that encodes the tree structure. Each node in the tree attends only to its ancestors, not to tokens on sibling branches. The longest valid path from root to leaf is accepted, and the remaining branches are discarded. For a tree with branching factor $b$ and depth $d$, the total number of candidate tokens is $\sum_{i=1}^{d} b^i$, but the memory and compute cost of verification grows correspondingly. In practice, implementations use narrow trees (branching factor 2--3, depth 3--5) to balance the increased acceptance probability against the verification overhead.
-
-**Medusa** (Cai et al., 2024) represents a particularly efficient variant of tree-structured speculation. Instead of using a separate draft model, Medusa adds lightweight prediction heads to the target model itself. Each head predicts a token at a different future position (head 1 predicts position $t+1$, head 2 predicts position $t+2$, etc.). The heads are small MLPs trained on top of the target model's final hidden states. Because the heads share the same backbone computation, their overhead is minimal. The target model then verifies the tree of candidates formed by combining the top-$k$ predictions from each head.
-
-**Eagle** (Li et al., 2024) extends the Medusa concept by using a lightweight autoregressive draft head instead of independent prediction heads. The draft head receives the target model's hidden states from the previous position and generates candidate tokens autoregressively, but at a fraction of the target model's cost. Because the draft head sees previous hidden states (which encode the target model's "intention"), its predictions are better aligned with the target model, achieving higher acceptance rates than Medusa's independent heads. The trade-off is that Eagle's draft head is sequential (unlike Medusa's parallel heads), but its improved acceptance rate typically compensates for the additional sequential steps.
-
-**Lookahead decoding** takes yet another approach: it uses Jacobi iteration to solve the autoregressive generation problem in parallel. Rather than generating tokens one by one, it maintains a window of $n$-grams from previous generations and attempts to place them at future positions. The target model's forward pass is modified to simultaneously verify multiple candidate positions, accepting those where the n-gram prediction matches the model's output. This approach requires no draft model at all, avoiding the complexity of model selection and deployment.
-
-::: {.callout-notebook title="The Speculation Budget"}
-
-**Problem**: You serve a 70B LLM that achieves 50 tokens/second at batch size 1 (memory-bound decode). You consider adding speculative decoding with a 1.5B draft model. The draft model generates 5 tokens in 8 ms. The target model's verification pass over 5 tokens takes 12 ms (slightly more than a single decode step due to KV cache setup overhead). Average acceptance rate is $\alpha = 0.75$. Is speculation profitable?
-
-**The Math**:
-
-*Expected tokens per round*:
-$\sum_{i=0}^{5} 0.75^i = 1 + 0.75 + 0.5625 + 0.4219 + 0.3164 + 0.2373 = 3.29$ tokens
-
-*Time per round*: $8 \text{ ms (draft)} + 12 \text{ ms (verify)} = 20$ ms
-
-*Effective throughput*: $3.29 / 0.020 = 164.5$ tokens/second
-
-*Baseline*: 50 tokens/second (one token per 20 ms decode step)
-
-*Speedup*: $164.5 / 50 = 3.29\times$
-
-**But consider the GPU cost**: The draft model consumes GPU memory and may require a dedicated GPU or share the target model's GPU. If the 1.5B draft model consumes 3 GB of HBM on the target GPU, it reduces KV cache budget. If it runs on a separate GPU, it doubles the hardware cost. The profitability of speculation depends on whether the 3.29$\times$ latency improvement justifies the additional resource cost.
-
-**Takeaway**: Speculative decoding provides a 3.29$\times$ latency improvement when compute is "free" (memory-bound decode). The decision to deploy it depends on the system-level trade-off between per-request latency and per-token resource cost.
-
-:::
-
-### The Hardware Cost of Speculation {#sec-performance-engineering-speculative-hardware}
-
-Speculative decoding's resource implications extend beyond the compute and latency analysis above. The draft model requires its own GPU memory allocation: weights, KV cache, and activation memory. Consider serving a 70B model on a cluster of 4$\times$ H100-80GB GPUs (320 GB total). The FP16 weights consume 140 GB, and operational overhead (runtime, buffers) takes another 20 GB, leaving roughly 160 GB for the KV cache. This available memory determines the maximum batch size the system can support.
-
-Introducing a 7B parameter draft model requires loading an additional 14 GB of weights plus reserving its own KV cache, consuming approximately 20--25 GB of HBM. This "speculation tax" reduces the primary KV budget by nearly 15%, effectively lowering the maximum concurrent user capacity from approximately 128 to 108 users (assuming 1.25 GB of KV cache per user at 4096-token context). If the draft model generates $K = 5$ tokens per round, it must maintain its own KV cache for the full sequence (including all previously generated tokens). For a long conversation with 4,000 tokens of context, the draft model's KV cache can consume several hundred megabytes per request. When serving many concurrent requests, each with its own draft KV cache, the aggregate memory pressure compounds the reduction in batch capacity.
-
-This creates a fundamental tension between **latency** and **throughput**: speculative decoding improves the latency for individual users (reducing time-per-token) but degrades the aggregate throughput of the serving node by reducing the maximum batch size. In throughput-bound scenarios, such as offline batch processing or high-traffic API endpoints, operators often disable speculation to maximize parallel concurrency, reserving the technique for latency-sensitive, real-time interactive applications.
-
-Some implementations mitigate this by sharing architectural components between the draft and target models. If the draft model is a distilled version of the target (same vocabulary, same tokenizer, smaller hidden dimension), the embedding layers can be shared. If the draft model is the first $n$ layers of the target (self-speculation), no additional weight memory is needed at all, though the KV cache for the draft "model" overlaps with the first $n$ layers of the target's KV cache. Furthermore, during the verification phase, the target model processes $K+1$ tokens in parallel; while this is efficient for the target model's arithmetic intensity, it spikes the instantaneous memory bandwidth demand. If the system is already bandwidth-bound serving a large batch, the verification step may contend with other active requests, degrading aggregate throughput.
-
-The decision to deploy speculation therefore requires a system-level cost-benefit analysis: does the latency improvement from speculation justify the memory and throughput cost of maintaining draft model state? For latency-sensitive applications (real-time chatbots, interactive coding assistants), the answer is typically yes. For throughput-sensitive applications (batch document processing, offline summarization), the resources consumed by the draft model are better allocated to serving larger batches of the target model alone.
-
-The transition from individual operation optimization (fusion, precision) through model-level compilation to algorithmic innovation (speculative decoding) reveals a spectrum of optimization strategies. The next section examines the most architecturally impactful innovation: Mixture of Experts, which changes the fundamental relationship between model size and inference cost.
-
-## Mixture of Experts {#sec-performance-engineering-moe}
-
-If we want the reasoning capabilities of a 1-trillion parameter model, but only have the latency budget and compute budget to run a 100-billion parameter model, how do we bridge the gap? We train a massive model but only activate a tiny, relevant fraction of it for any given word. The Mixture of Experts (MoE) architecture routes inputs only to specialized sub-networks, breaking the iron link between model size and compute cost.
-
-### MoE Architecture {#sec-performance-engineering-moe-architecture}
-
-In a standard MoE transformer layer, the feed-forward network (FFN) is replaced by multiple parallel "expert" FFNs and a lightweight **router** (also called a gating network) that selects which experts process each token.
-
-::: {.callout-definition title="Mixture of Experts (MoE)"}
-
-***Mixture of Experts (MoE)***\index{Mixture of Experts!definition} is a sparse architecture that replaces dense layers with multiple parallel "expert" sub-networks and a router that selects a subset ($k$) of experts for each input.
-
-1.  **Significance (Quantitative):** It decouples **Model Capacity** (total parameters) from **Compute Cost ($O$)**. For a model with $N$ experts and top-$k$ routing, only $k/N$ of the FFN parameters are activated per token, allowing for trillion-parameter reasoning capabilities with billion-parameter compute budgets.
-2.  **Distinction (Durable):** Unlike **Dense Architectures** (where every parameter is used for every input), MoE is a **Conditional Computation** model that trades **Parameter Density** for **Arithmetic Intensity**.
-3.  **Common Pitfall:** A frequent misconception is that MoE is "cheaper" than dense models. In reality, while FLOPs per token are lower, the **Memory Wall ($BW$)** and **Communication Overhead ($L_{lat}$)** are much higher because the full model state must be sharded across the cluster, requiring all-to-all communication for token routing.
-
-:::
-
-For a token $x$, the router produces a probability distribution over $E$ experts:
-
-$$
-g(x) = \text{Softmax}(\text{TopK}(W_g \cdot x, k))
-$$ {#eq-moe-router}
-
-where $W_g$ is a small learnable gating matrix and TopK selects the $k$ highest-scoring experts. The layer output is the weighted sum of the selected experts' outputs:
-
-$$
-y = \sum_{i \in \text{TopK}} g_i(x) \cdot \text{Expert}_i(x)
-$$ {#eq-moe-output}
-
-Typical configurations use $E = 8$ or $E = 16$ experts with $k = 2$ active per token. This means each token uses only $k/E = 25\%$ or $12.5\%$ of the expert parameters. The shared components (attention layers, embedding layers, router) are dense and always active.
-
-The router is typically a single linear layer ($d \rightarrow E$) followed by softmax and top-k selection. Its parameter count is negligible ($d \times E$, typically 8,192$\times$ 16 = 131,072 parameters), but its computational and system impact is outsized: the router's decisions determine which GPUs receive which tokens, driving the AllToAll communication pattern that dominates MoE system design.
-
-In an MoE design, the dense Feed-Forward Network (FFN) layers are replaced with a bank of $N$ parallel "expert" networks. A trainable gating mechanism, typically using a Top-$k$ Softmax function, analyzes each incoming token and routes it to only the most relevant experts (usually $k=1$ or $2$). To prevent the gate from collapsing into a pattern where it routes all tokens to a single "super-expert," an auxiliary load-balancing loss is added to the objective function, penalizing uneven distribution and ensuring all experts are used. This conditional computation allows for massive increases in model capacity without corresponding increases in inference latency. For example, a 1.6 Trillion parameter MoE model using Top-2 routing might only activate 12 Billion parameters to process any single token, achieving the quality of a dense 1.6T model at the cost of a 12B model.
-
-### DeepSeek-V3: A Case Study {#sec-performance-engineering-deepseek}
-
-DeepSeek-V3, released in late 2024, exemplifies the state of the art in MoE system design. The model uses 671B total parameters with 256 routed experts per layer and 1 shared expert, activating 8 routed experts plus the shared expert for each token. This yields approximately 37B activated parameters per token, an 18$\times$ ratio between total and active parameters.
-
-Several architectural innovations in DeepSeek-V3 address the system challenges described above. The model uses **Multi-head Latent Attention (MLA)**, which compresses the KV cache through low-rank projections, dramatically reducing per-token memory. The routing mechanism uses an **auxiliary-loss-free** load-balancing strategy that adjusts expert selection probabilities through a learned bias term rather than an explicit auxiliary loss, avoiding the quality degradation that can accompany auxiliary loss tuning. The training was completed on 2,048 H800 GPUs in approximately 2.8 million GPU-hours, at an estimated cost of approximately \$5.6 million, a fraction of the cost reported for comparable dense models. This cost efficiency demonstrates the economic advantage of MoE architectures: by activating only 37B of 671B parameters per token, the model achieves the quality of a much larger dense model while requiring substantially less compute per training token.
+Speculative decoding is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model. Because this technique is primarily employed to meet strict latency SLAs during model serving, we examine the core algorithm, speedup analysis, and hardware resource implications in detail in @sec-inference-scale-speculative-decoding-c438.
 
 ```{python}
 #| echo: false
 #| label: moe-economics
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOE ECONOMICS
+# │ MOE VS DENSE ECONOMICS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-moe MoE performance advantages prose
+# │ Context: @sec-performance-engineering-moe MoE economics prose
 # │
-# │ Goal: Quantify per-token bandwidth and compute savings of a DeepSeek-V3 MoE
-# │       (671B total, 37B active) versus a dense 400B model in FP16, to show that
-# │       sparse activation delivers dense-quality inference at 10x lower cost.
-# │ Show: 800 GB/step (dense 400B) vs ~74 GB/step (37B active) → ~11x BW reduction;
-# │       ~11x FLOP reduction per token — inline in MoE performance paragraph.
-# │ How: Per-token bandwidth = active_params * bytes_fp16; FLOPs = 2 * active_params;
-# │       ratio = dense / active for both metrics.
-# │
-# │ Imports: (none — standalone calculation), mlsys.formatting (check)
+# │ Goal: Quantify compute and bandwidth savings from MoE vs dense for a
+# │       1T-parameter dense model vs a 370B total / 37B active MoE model,
+# │       showing MoE decouples capacity from inference cost.
+# │ Show: ~2 TB vs ~74 GB memory bandwidth per decode step → >5x reduction
 # │ Exports: dense_mem_str, moe_mem_str, compute_ratio_str, bw_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsys.formatting import check
+
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class MoEEconomics:
-    """MoE vs dense model bandwidth and compute comparison."""
+    """MoE vs dense model memory and compute economics."""
 
     # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    dense_params_b = 400     # Dense model: 400B parameters
-    moe_total_params_b = 671 # DeepSeek-V3 total
-    moe_active_params_b = 37 # Active per token
-    bytes_fp16 = 2
-    bytes_int4 = 0.5
+    dense_params_b = 1000          # 1T dense model parameters (billions → bytes below)
+    moe_total_params_b = 370       # MoE total parameters (billions)
+    moe_active_params_b = 37       # MoE active parameters per token (10% sparsity)
+    bytes_fp16 = 2                 # FP16: 2 bytes per parameter
+    experts_per_layer = 8
+    active_experts = 1             # top-1 routing
 
     # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-
-    # Memory: all parameters must be in memory (even MoE stores all experts)
-    dense_mem_fp16 = dense_params_b * bytes_fp16   # 800 GB
-    moe_mem_fp16 = moe_total_params_b * bytes_fp16 # 1342 GB
-
-    # Per-token compute (FLOPs ~ 2 * active_params for forward pass)
-    dense_flops_per_token = 2 * dense_params_b     # 800B FLOPs
-    moe_flops_per_token = 2 * moe_active_params_b  # 74B FLOPs
-    compute_ratio = dense_flops_per_token / moe_flops_per_token
-
-    # Memory bandwidth per decode step (batch=1): read active weights
-    dense_decode_bytes = dense_params_b * bytes_fp16  # 800 GB
-    moe_decode_bytes = moe_active_params_b * bytes_fp16  # 74 GB
+    dense_mem_fp16 = dense_params_b * bytes_fp16          # 2000 GB (2 TB)
+    moe_mem_fp16 = moe_total_params_b * bytes_fp16        # 740 GB total
+    dense_decode_bytes = dense_params_b * bytes_fp16      # ~2 TB bandwidth per decode
+    compute_ratio = dense_params_b / moe_active_params_b  # ~27x compute reduction
+    moe_decode_bytes = moe_active_params_b * bytes_fp16   # 74 GB
     bw_ratio = dense_decode_bytes / moe_decode_bytes
 
     # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
@@ -1777,167 +1405,15 @@ compute_ratio_str = MoEEconomics.compute_ratio_str
 bw_ratio_str = MoEEconomics.bw_ratio_str
 ```
 
-The performance advantages are striking. During autoregressive decode at batch size 1, the dominant cost is reading weights from HBM. A dense 400B model in FP16 reads `{python} dense_mem_str` GB per step. DeepSeek-V3, despite having more total parameters, reads only the 37B active parameters per step (approximately 74 GB in FP16), a `{python} bw_ratio_str`$\times$ reduction in per-token bandwidth. The compute savings are proportional: `{python} compute_ratio_str`$\times$ fewer FLOPs per token.
+## Mixture of Experts {#sec-performance-engineering-moe}
 
-The trade-off is memory capacity: all experts must reside in memory even though only a fraction are active at any time. DeepSeek-V3's full model in FP16 requires approximately `{python} moe_mem_str` GB, necessitating distribution across many GPUs. This creates a tension between the bandwidth savings from sparse activation and the memory overhead of storing all experts.
+If we want the reasoning capabilities of a 1-trillion parameter model, but only have the latency budget and compute budget to run a 100-billion parameter model, how do we bridge the gap? We train a massive model but only activate a tiny, relevant fraction of it for any given word. The Mixture of Experts (MoE) architecture routes inputs only to specialized sub-networks, breaking the iron link between model size and compute cost.
 
-### Expert Parallelism and Load Balancing {#sec-performance-engineering-moe-parallelism}
+### MoE Architecture {#sec-performance-engineering-moe-architecture}
 
-Distributing MoE models across GPUs introduces **expert parallelism**: each GPU holds a subset of experts, and tokens are routed to the GPU holding their assigned expert. This creates a distinctive communication pattern: instead of the AllReduce used in data parallelism, MoE requires **AllToAll** communication, where each GPU sends different data to every other GPU.
-
-The AllToAll pattern creates a critical system challenge: **load balancing**. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. In the worst case, a single "popular" expert receives a disproportionate share of tokens, serializing computation through one GPU.
-
-Three mechanisms address load imbalance:
-
-**Auxiliary loss**: An additional term in the training loss penalizes uneven expert utilization. The standard auxiliary loss (from Switch Transformer, Fedus et al., 2022) adds a term proportional to the product of the fraction of tokens routed to each expert and the fraction of the routing probability assigned to that expert:
-
-$$
-\mathcal{L}_{\text{aux}} = \alpha \cdot N \cdot \sum_{i=1}^{N} f_i \cdot P_i
-$$
-
-where $f_i$ is the fraction of tokens dispatched to expert $i$, $P_i$ is the fraction of routing probability assigned to expert $i$, $N$ is the number of experts, and $\alpha$ is a balancing coefficient (typically 0.01--0.1). This loss is minimized when tokens and probabilities are uniformly distributed. DeepSeek-V3 uses a refined variant that decouples the auxiliary loss from the primary model quality loss, preventing the load-balancing objective from interfering with learning.
-
-**Capacity factor**: Each expert has a maximum number of tokens it will accept per batch, typically expressed as a multiple of the "fair share" ($\text{batch tokens} / E$). A capacity factor of 1.25 means each expert's buffer can hold 25% more tokens than the perfectly balanced share. Tokens exceeding the capacity are either dropped (reducing model quality) or rerouted to a second-choice expert. Setting the capacity factor too low causes token dropping; setting it too high wastes memory. The optimal capacity factor depends on the natural imbalance of the data distribution and typically requires tuning per dataset.
-
-**Expert buffering**: Some tokens are buffered and processed in the next iteration if their assigned expert is currently at capacity. This smooths out load spikes but introduces latency variance. Expert buffering is more suitable for training (where throughput matters more than per-sample latency) than for inference (where buffering delays individual responses).
-
-### Routing Failure Modes {#sec-performance-engineering-moe-routing-failures}
-
-The router is a small learned component, but its behavior has outsized impact on system performance and model quality. Several failure modes can occur during training and serving that the performance engineer must anticipate.
-
-**Expert collapse** occurs when the router converges to sending most tokens to a small subset of experts, leaving the remaining experts undertrained. In a 64-expert model, if the router sends 90% of tokens to just 4 experts, the effective parameter count available for any given inference step drops precipitously: the remaining 60 experts sit idle, consuming memory but contributing no intelligence. The model effectively degrades to a small dense model with a massive memory footprint. The auxiliary loss (@eq-moe-router) addresses this, but if the auxiliary loss coefficient $\alpha$ is too small, the quality-driven gradient overwhelms the load-balancing signal. If $\alpha$ is too large, the model prioritizes uniform routing over quality, degrading outputs. Finding the right balance typically requires hyperparameter sweeps, and the optimal coefficient often differs between the early and late stages of training.
-
-**Routing instability** manifests as oscillating expert assignments during training, where the same token type is sent to different experts in consecutive training steps. This instability prevents experts from specializing, because each expert sees a random assortment of token types rather than a consistent subset. Routing instability is particularly common in the early stages of training, before the router has learned meaningful token representations. Some implementations address this by using a warm-up period where the auxiliary loss coefficient starts high (forcing uniform routing) and gradually decreases, allowing specialization to emerge gradually.
-
-**Distribution shift** between training and serving creates a more subtle problem. A router trained primarily on clean, formal text (like Wikipedia and books) may learn to associate specific experts with formal grammar patterns. When deployed to a chat application receiving colloquial, multilingual, or messy input, the router may forcefully direct all traffic to those "grammar experts," overloading them while leaving domain-specific experts underutilized. Even if load balancing was excellent during training, the serving distribution can create hotspots that degrade both latency and quality. Monitoring expert utilization in production and fine-tuning the router on representative serving data addresses this gap.
-
-**Expert fragmentation** is a related but distinct failure mode where experts become hyper-specialized on narrow syntactic features rather than broad semantic categories. An expert that only activates for Python `import` statements or HTML tags provides no value for the vast majority of tokens. While computationally efficient in isolation, this fragmentation makes the model brittle: slight variations in the prompt can cause the router to switch experts erratically, leading to incoherent generation as the model struggles to maintain context across expert boundaries.
-
-**Token dropping** occurs when a capacity-limited expert receives more tokens than its buffer can hold. The excess tokens are either routed to a second-choice expert (potentially less specialized) or dropped entirely (skipping the expert computation). While a small amount of token dropping is tolerable (typical capacity factors allow 10--20% overflow), excessive dropping indicates a routing or load-balancing problem that degrades model quality.
-
-### MoE Serving Architecture {#sec-performance-engineering-moe-serving}
-
-Serving MoE models introduces unique system challenges beyond those of dense models. The primary distinction is that different tokens in the same batch may route to different subsets of experts, creating irregular memory access patterns and variable compute loads per GPU.
-
-In a typical deployment, expert parallelism is combined with tensor parallelism and data parallelism in a multi-dimensional layout. For example, DeepSeek-V3 with 256 experts might be deployed across 32 GPUs:
-
-- **Expert parallelism (EP=8)**: 256 experts distributed across 8 expert-parallel groups, with 32 experts per GPU.
-- **Tensor parallelism (TP=4)**: Each expert is sharded across 4 GPUs for reduced per-GPU memory and latency.
-
-This hierarchical layout means that token routing involves both intra-node NVLink transfers (for tensor parallelism) and inter-node InfiniBand transfers (for expert parallelism). The AllToAll communication pattern creates a challenging traffic matrix: each GPU sends different amounts of data to every other GPU depending on the router's decisions. Unlike AllReduce, where every GPU sends and receives the same volume, AllToAll traffic is inherently unbalanced. Network congestion on individual links can create hotspots that affect overall throughput.
-
-Prefetching offers a partial solution: if the router's decisions can be predicted or computed slightly ahead of the actual expert execution, the system can pre-stage the required expert weights in SRAM or initiate data transfers before they are needed. Some implementations maintain all expert weights in HBM but cache the most frequently accessed experts in L2 or shared memory.
-
-The economics of MoE serving create a paradox for capacity planning. The model's total parameter count determines the minimum number of GPUs (for memory), while the active parameter count determines the compute requirement per token. A 671B MoE model requires far more GPUs than a 37B dense model, even though the per-token compute is comparable. This means the cost per token is higher than for a similarly capable dense model unless the MoE model's superior quality justifies the additional infrastructure cost.
-
-::: {.callout-notebook title="MoE Capacity Planning"}
-
-**Problem**: You are deploying DeepSeek-V3 (671B total parameters, 37B active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). Your cluster has 8-GPU nodes, each with 8$\times$ H100 (80 GB HBM per GPU, 640 GB per node). How many nodes do you need, and what is the per-token decode latency?
-
-**The Math**:
-
-*Step 1: Memory requirements.*
-Total weight memory: $671 \times 10^9 \times 1 = 671$ GB.
-A single 8-GPU node has 640 GB of HBM, insufficient for the weights alone.
-Two nodes provide 1,280 GB, leaving approximately 609 GB for KV caches and activations.
-
-*Step 2: Decode latency at batch size 1.*
-Each decode step reads the 37B active parameters (37 GB in FP8). With 16 GPUs across 2 nodes, the active parameters are distributed across expert-hosting GPUs. The AllToAll communication routes tokens to the correct experts.
-
-Local weight reads per GPU: approximately $37 / 16 \approx 2.3$ GB. At `{python} h100_hbm_bw_str` TB/s HBM bandwidth, this takes:
-
-$$
-t_{\text{read}} = \frac{2.3 \text{ GB}}{3.35 \text{ TB/s}} \approx 0.69 \text{ ms per GPU}
-$$
-
-The AllToAll overhead adds approximately 0.3 ms for routing token data across NVLink (within nodes) and InfiniBand (across nodes).
-
-Estimated decode latency: approximately 1.0 ms per token, or roughly 1,000 tokens/second at batch size 1.
-
-**Takeaway**: MoE enables a 671B model to achieve latency comparable to a 37B dense model (both read $\sim$37 GB of active weights per step), but requires 2$\times$ more GPUs for memory capacity. The cost per token is higher than a 37B dense model, but the quality approaches that of a 671B dense model, which would require 4$\times$ more GPUs and 10$\times$ more compute per token.
-
-:::
-
-::: {.callout-checkpoint title="MoE System Design" collapse="false"}
-
-Test your understanding of MoE trade-offs:
-
-- [ ] Can you explain why MoE reduces per-token compute and bandwidth but *increases* total memory requirements?
-- [ ] Can you describe why AllToAll communication is required for expert parallelism, and how it differs from AllReduce?
-- [ ] Can you identify why load imbalance is more dangerous in MoE than uneven batch sizes in data parallelism?
-- [ ] Can you explain why expert parallelism is typically combined with data and tensor parallelism in production deployments?
-
-:::
-
-The co-evolution of MoE architectures and system software illustrates a broader principle in performance engineering: the boundary between "model design" and "system design" is dissolving. Decisions about expert count, routing strategy, and capacity factors are simultaneously model quality decisions and system throughput decisions. The performance engineer must understand both domains to make informed trade-offs.
-
-MoE models demonstrate how architectural innovation creates system-level optimization opportunities. But even the most efficient model still generates communication traffic between GPUs. The next section examines how to hide that communication cost behind computation.
+In a standard MoE transformer layer, the feed-forward network (FFN) is replaced by multiple parallel "expert" FFNs and a lightweight **router** (also called a gating network) that selects which experts process each token. Because the serving logic for these models—including Expert Parallelism (EP), AllToAll communication patterns, and load-balancing strategies—is fundamental to large-scale inference, we provide a rigorous quantitative treatment of MoE serving in @sec-inference-scale-expert-parallelism-moe-models-55f6.
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
-
-Picture an assembly line where workers stop building every time a delivery truck arrives, wait for it to unload, and only then resume their tasks. In a distributed ML cluster, GPUs behave exactly this way if communication and computation are strictly sequential. By overlapping these operations—forcing the GPU to calculate the next layer's activations while simultaneously broadcasting the previous layer's gradients—we can effectively hide the network latency entirely.
-
-### The Overlap Principle {#sec-performance-engineering-overlap-principle}
-
-Modern GPUs have independent hardware engines for computation (streaming multiprocessors, or SMs) and communication (NVLink engines, PCIe DMA engines, network interface controllers). These engines can operate simultaneously. If we can schedule a communication operation on the NVLink engine while the SMs execute a compute kernel, the communication time is "free" from the perspective of the critical path, as long as it completes before its result is needed.
-
-The overlap is effective when:
-
-$$
-t_{\text{communicate}}(L_i) \leq t_{\text{compute}}(L_{i+1})
-$$ {#eq-overlap-condition}
-
-where $L_i$ and $L_{i+1}$ are consecutive layers. If the communication time for layer $i$'s gradients is less than the compute time for layer $i+1$'s backward pass, the communication is completely hidden. When this condition holds for every layer, the distributed training or inference step achieves the same throughput as a hypothetical zero-latency network.
-
-To make this concrete, consider the backward pass of a 70B parameter model distributed across H100 GPUs. For a typical transformer layer, the gradient computation takes approximately 5 ms. This is the time window available to hide the communication of gradients from the previous layer. If the system is connected via NVLink with 900 GB/s bidirectional bandwidth, an AllReduce operation for a 500 MB gradient buffer takes roughly $t_{\text{comm}} \approx 2 \times 0.5 \text{ GB} / 900 \text{ GB/s} \approx 1.1$ ms. Since 1.1 ms is well within the 5 ms compute window, the communication is entirely hidden. However, if the same system uses 100 Gbps Ethernet (12.5 GB/s effective), the transfer time balloons to approximately 80 ms. The compute finishes in 5 ms, and the GPU sits idle for 75 ms waiting for data. Even with partial overlap, the system is network-bound.
-
-When the overlap condition fails ($t_{\text{comm}} > t_{\text{comp}}$), only a fraction of the communication is hidden. The exposed communication time is $t_{\text{exposed}} = t_{\text{comm}} - t_{\text{comp}}$, and the effective step time includes this residual. For the Ethernet example, the exposed time is $80 - 5 = 75$ ms per layer, making the interconnect the dominant bottleneck. This analysis explains why high-bandwidth interconnects like NVLink and InfiniBand are not luxuries but necessities for distributed training: they determine whether communication can be hidden behind computation or whether it serializes the training loop.
-
-### Overlap in Distributed Training {#sec-performance-engineering-overlap-training}
-
-In data-parallel training, each GPU computes gradients for the entire model, then synchronizes gradients across all GPUs using AllReduce (as described in @sec-collective-communication). Without overlap, the training step time is:
-
-$$
-t_{\text{step}} = t_{\text{forward}} + t_{\text{backward}} + t_{\text{AllReduce}}
-$$
-
-With gradient overlap, the backward pass is structured so that as soon as the gradients for the last layer ($L_N$) are computed, the AllReduce for $L_N$ begins while the backward pass continues computing gradients for $L_{N-1}$. This "pipelining" of communication and computation overlaps the AllReduce with the backward pass:
-
-$$
-t_{\text{step}} = t_{\text{forward}} + \max(t_{\text{backward}}, t_{\text{AllReduce}})
-$$
-
-In practice, overlapping gradient AllReduce with the backward pass is straightforward because gradients are produced in reverse layer order and consumed only after the full AllReduce completes. Most distributed training frameworks (PyTorch DDP, Horovod) implement this overlap automatically by registering backward hooks that trigger AllReduce as soon as each layer's gradients are ready.
-
-The implementation in PyTorch DDP uses **gradient bucketing** to balance communication granularity against overlap opportunity. Rather than launching a separate AllReduce for each parameter's gradient (which would incur excessive launch overhead) or waiting for all gradients to accumulate (which would prevent overlap entirely), DDP groups gradients into fixed-size buckets (default 25 MB). As soon as all gradients in a bucket are computed during the backward pass, the bucket's AllReduce begins. The bucket size is a tunable parameter: smaller buckets enable earlier communication start (better overlap) but increase the number of AllReduce operations (more overhead); larger buckets reduce overhead but delay communication start (worse overlap). For models with many small parameters (e.g., transformers with many LayerNorm layers), the default 25 MB bucket size works well. For models with a few very large parameters (e.g., large embedding tables), increasing the bucket size avoids fragmenting those parameters across multiple AllReduce calls.
-
-The gradient computation order matters for overlap effectiveness. The backward pass computes gradients in reverse layer order: the last layer's gradients are computed first, and the first layer's gradients are computed last. If the model's largest parameters (typically the embedding layer) are in the first layer, their gradients are computed last, giving them the least time for overlapped communication. PyTorch DDP addresses this by allowing the user to specify gradient computation order or by automatically reordering buckets based on the observed backward pass order during the first iteration.
-
-### Zero-Bubble Pipeline Parallelism {#sec-performance-engineering-zero-bubble}
-
-Pipeline parallelism, introduced in @sec-distributed-training-systems, divides the model into stages assigned to different GPUs. The classic problem with pipeline parallelism is the **pipeline bubble**: GPUs at the beginning of the pipeline are idle while waiting for gradients to flow back from the end, and vice versa. These bubbles represent wasted compute.
-
-The **1F1B** (one forward, one backward) schedule reduces the bubble by interleaving forward and backward microbatches. Once the pipeline is filled, each GPU alternates between executing one forward microbatch and one backward microbatch, keeping SMs busy most of the time.
-
-**Zero-bubble pipeline schedules** further reduce idle time by overlapping weight gradient computation with activation gradient communication. In a standard backward pass, the GPU computes $\partial L / \partial W$ (weight gradient) and $\partial L / \partial X$ (activation gradient, sent to the previous stage) together. Zero-bubble scheduling splits these into separate kernels: a **B** kernel that computes only the activation gradient $\partial L / \partial X$ and sends it to the previous stage, and a **W** kernel that computes the weight gradient $\partial L / \partial W$ locally. The B kernel must execute promptly (it is on the critical path), but the W kernel can be scheduled opportunistically to fill bubbles.
-
-The scheduling freedom provided by this B/W split is substantial. In a 4-stage pipeline with 8 microbatches, the standard 1F1B schedule has a bubble fraction of approximately $(p-1)/(m+p-1)$ where $p$ is the number of stages and $m$ is the number of microbatches. For $p=4, m=8$, this is $3/11 \approx 27\%$ idle time. Zero-bubble scheduling can reduce this to near zero by filling the startup and teardown bubbles with W computations.
-
-The trade-off is memory: zero-bubble scheduling requires storing intermediate activations for longer (because the W computation is deferred), increasing peak memory usage. Some implementations address this by combining zero-bubble scheduling with activation checkpointing, selectively recomputing certain activations rather than storing them. The interaction between these techniques creates a three-way trade-off among pipeline bubble size, memory consumption, and recomputation overhead.
-
-### Overlap in Inference {#sec-performance-engineering-overlap-inference}
-
-Communication-computation overlap in inference manifests differently than in training. In tensor-parallel inference, a single forward pass involves multiple AllReduce operations (after each attention and FFN layer). Overlapping these communications requires splitting the computation at each layer into a communication-independent portion and a communication-dependent portion.
-
-For example, in a two-GPU tensor-parallel transformer layer:
-
-1. Each GPU computes its shard of the attention output.
-2. AllReduce synchronizes the partial attention outputs.
-3. Each GPU computes its shard of the FFN output.
-
-Between steps 1 and 2, the GPU is idle waiting for AllReduce. If the FFN for the *previous* token (in a pipelined serving system) is available, the GPU can begin computing it while the AllReduce for the current token proceeds. This requires careful token-level pipelining and separate CUDA streams for communication and computation.
-
-The challenge is more severe for inference than for training because the compute-to-communication ratio is less favorable. In training, a large batch means each GPU performs substantial computation (large GEMMs) between communication points. In inference at small batch sizes, each GPU performs minimal computation (small, memory-bound GEMMs) between AllReduce calls. The AllReduce time may exceed the compute time, making full overlap impossible.
 
 Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d \times \text{batch} \times 2$ bytes at FP16 (where $d = 8192$ for a 70B model). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 = 32$ KB per AllReduce. At 900 GB/s NVLink bandwidth, this transfer takes approximately 36 ns. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
@@ -2141,23 +1617,23 @@ In practice, achieving effective overlap requires attention to several details. 
 
 PyTorch's Distributed Data Parallel (DDP) module implements gradient overlap by registering backward hooks on each parameter. When a parameter's gradient is computed during the backward pass, the hook triggers an asynchronous AllReduce on a separate NCCL stream. The optimizer step includes an implicit synchronization point that waits for all AllReduce operations to complete. This design overlaps gradient communication with gradient computation automatically, without requiring user intervention.
 
-The techniques covered so far, fusion, precision, compilation, speculative decoding, MoE, and communication overlap, address different aspects of the performance equation. Identifying which technique to apply in a given situation requires systematic measurement. The next section examines the profiling tools that make this diagnosis possible.
+The techniques covered so far -- fusion, precision, compilation, speculative decoding, MoE, and communication overlap -- address different aspects of the performance equation. Identifying which technique to apply in a given situation requires systematic measurement, and the profiling tools that make this diagnosis possible are the final piece of the optimization toolkit.
 
 ## System Profiling {#sec-performance-engineering-profiling}
 
-An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it 5x faster, only to discover the overall model latency didn't budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
+An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it 5x faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
 
 ### The Profiling Hierarchy {#sec-performance-engineering-profiling-hierarchy}
 
 ML system profiling operates at four levels, each providing different granularity and answering different questions.
 
-**Operation-level profiling** measures the execution time and resource utilization of individual GPU kernels. Tools like NVIDIA Nsight Compute provide detailed metrics for a single kernel: achieved memory bandwidth, compute utilization, occupancy (fraction of available threads active), and instruction mix. This level answers questions like: "Is this GEMM achieving peak throughput?" and "Is this kernel memory-bound or compute-bound?"
+Operation-level profiling measures the execution time and resource utilization of individual GPU kernels. Tools like NVIDIA Nsight Compute provide detailed metrics for a single kernel: achieved memory bandwidth, compute utilization, occupancy (fraction of available threads active), and instruction mix. This level answers questions like: "Is this GEMM achieving peak throughput?" and "Is this kernel memory-bound or compute-bound?"
 
-**Trace-level profiling** captures the timeline of all GPU kernels, CPU operations, and data transfers across the full execution of a training step or inference request. NVIDIA Nsight Systems and the PyTorch Profiler provide trace views showing exactly when each kernel executes, when data transfers occur, and where GPU idle gaps (bubbles) exist. This level reveals the overall structure of execution: sequential bottlenecks, launch gaps between kernels, and opportunities for overlap.
+Trace-level profiling captures the timeline of all GPU kernels, CPU operations, and data transfers across the full execution of a training step or inference request. NVIDIA Nsight Systems and the PyTorch Profiler provide trace views showing exactly when each kernel executes, when data transfers occur, and where GPU idle gaps (bubbles) exist. This level reveals the overall structure of execution: sequential bottlenecks, launch gaps between kernels, and opportunities for overlap.
 
-**Distributed profiling** extends the trace across multiple GPUs and nodes, showing communication patterns alongside computation. This reveals whether communication is overlapped with compute, which collective operations dominate step time, and whether load imbalance exists across GPUs.
+Distributed profiling extends the trace across multiple GPUs and nodes, showing communication patterns alongside computation. This reveals whether communication is overlapped with compute, which collective operations dominate step time, and whether load imbalance exists across GPUs.
 
-**Application-level profiling** measures end-to-end metrics: tokens per second, time-to-first-token, P99 latency, and GPU utilization over time. This connects hardware-level observations to user-facing performance metrics and business KPIs.
+Application-level profiling measures end-to-end metrics: tokens per second, time-to-first-token, P99 latency, and GPU utilization over time. This connects hardware-level observations to user-facing performance metrics and business KPIs.
 
 Diagnosing performance requires a drill-down approach, moving from global symptoms to local causes. When profiling a 70B model serving pipeline, the application level might reveal "end-to-end latency is 150 ms/token, 3$\times$ above the SLO." Descending to the distributed level, traces might show one GPU consistently lagging in AllReduce operations, pointing to a straggler or network congestion. Zooming into the trace level on that specific GPU reveals the timeline of kernel execution, exposing gaps where the SMs are idle due to scheduling overhead. Finally, kernel-level profiling (using Nsight Compute) inspects the specific instruction mix of a single matrix multiplication, revealing cache misses or register pressure. Skipping levels often leads to optimizing the wrong bottleneck: optimizing a kernel is futile if the GPU is spending 40% of its time waiting on the network.
 
@@ -2165,15 +1641,15 @@ Diagnosing performance requires a drill-down approach, moving from global sympto
 
 ML system performance is characterized by a family of metrics, each capturing a different aspect of system behavior. Understanding their relationships and trade-offs is essential for performance engineering.
 
-**Model FLOPs Utilization (MFU)** measures what fraction of the hardware's theoretical peak is being productively used by the model's computation. MFU captures the combined effect of all inefficiencies: memory bandwidth limitations, kernel launch overhead, communication wait time, and software stack overhead. For large-scale LLM training, MFU of 40--60% is typical; values above 60% indicate excellent optimization.
+Model FLOPs Utilization (MFU) measures what fraction of the hardware's theoretical peak is being productively used by the model's computation. MFU captures the combined effect of all inefficiencies: memory bandwidth limitations, kernel launch overhead, communication wait time, and software stack overhead. For large-scale LLM training, MFU of 40--60% is typical; values above 60% indicate excellent optimization.
 
-**Hardware FLOPs Utilization (HFU)** is the simpler metric: total arithmetic operations executed (including overhead like activation recomputation) divided by peak FLOPS. HFU is always higher than MFU because it counts recomputed operations that do not directly advance the model's computation. The gap between HFU and MFU quantifies the "wasted" compute from techniques like activation checkpointing.
+Hardware FLOPs Utilization (HFU) is the simpler metric: total arithmetic operations executed (including overhead like activation recomputation) divided by peak FLOPS. HFU is always higher than MFU because it counts recomputed operations that do not directly advance the model's computation. The gap between HFU and MFU quantifies the "wasted" compute from techniques like activation checkpointing.
 
-**Time-to-first-token (TTFT)** measures the latency from when a request arrives to when the first output token is generated. TTFT includes queue waiting time, prefill computation, and any initialization overhead. For interactive applications, TTFT below 500 ms is generally acceptable; below 200 ms feels responsive.
+Time-to-first-token (TTFT) measures the latency from when a request arrives to when the first output token is generated. TTFT includes queue waiting time, prefill computation, and any initialization overhead. For interactive applications, TTFT below 500 ms is generally acceptable; below 200 ms feels responsive.
 
-**Inter-token latency (ITL)** measures the time between consecutive output tokens during the decode phase. ITL directly determines the perceived generation speed. For a comfortable reading experience, ITL should be below 50 ms (20 tokens/second); for real-time speech synthesis, ITL below 25 ms may be required.
+Inter-token latency (ITL) measures the time between consecutive output tokens during the decode phase. ITL directly determines the perceived generation speed. For a comfortable reading experience, ITL should be below 50 ms (20 tokens/second); for real-time speech synthesis, ITL below 25 ms may be required.
 
-**Throughput** (tokens/second for the system, or tokens/second/GPU for per-device efficiency) measures aggregate production capacity. Throughput is maximized by large batch sizes and high utilization, often at the expense of increased per-request latency. The fundamental trade-off between throughput and latency is captured by queuing theory, as explored in @sec-inference-scale.
+Throughput (tokens/second for the system, or tokens/second/GPU for per-device efficiency) measures aggregate production capacity. Throughput is maximized by large batch sizes and high utilization, often at the expense of increased per-request latency. The fundamental trade-off between throughput and latency is captured by queuing theory, as explored in @sec-inference-scale.
 
 While MFU is the standard metric for training efficiency, it is often misleading for inference. Inference is predominantly memory-bound, meaning the Tensor Cores spend most cycles waiting for data. For these workloads, **Model Bandwidth Utilization (MBU)** is the more informative metric: the ratio of achieved memory bandwidth to the hardware's peak bandwidth. A decoding step on an H100 might show a dismal 2% MFU (using a fraction of the compute capability) but achieve 85% MBU (saturating the HBM3 memory bandwidth). In this context, 85% MBU indicates a highly optimized system; no amount of code optimization can squeeze more tokens per second without faster memory hardware. The choice of primary metric, MFU for training and MBU for inference, reflects the fundamental bottleneck shift between these two regimes.
 
@@ -2187,7 +1663,7 @@ The roofline model from @sec-performance-engineering-roofline becomes a diagnost
 
 A kernel that falls far below both the compute ceiling and the bandwidth ceiling has an implementation problem: launch overhead, poor memory access patterns, or low occupancy. A kernel that reaches the bandwidth ceiling but falls below the compute ceiling is memory-bound, and further optimization requires reducing memory traffic (fusion, precision) rather than improving compute efficiency. A kernel at the compute ceiling is compute-bound and can only be improved by algorithmic changes (reducing FLOPs) or faster hardware.
 
-Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 TFLOPS of achieved compute and 2.8 TB/s of achieved memory bandwidth. Its arithmetic intensity is $15 \text{ TFLOPS} / 2.8 \text{ TB/s} \approx 5.4$ FLOP/byte. The H100's ridge point is approximately 295 FLOP/byte at FP16. Since 5.4 is far below 295, the kernel is strictly memory-bound. The fact that it achieves 2.8 TB/s (84% of the H100's 3.35 TB/s peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield zero gain; performance can only be improved by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
+Consider a concrete example: a LayerNorm kernel profiled on an H100 reports 15 TFLOPS of achieved compute and 2.8 TB/s of achieved memory bandwidth. Its arithmetic intensity is $15 \text{ TFLOPS} / 2.8 \text{ TB/s} \approx 5.4$ FLOP/byte. The H100's ridge point is approximately 295 FLOP/byte at FP16. Since 5.4 is far below 295, the kernel is strictly memory-bound. Its achieved 2.8 TB/s (84% of the H100's 3.35 TB/s peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield zero gain; performance can only be improved by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
 
 ### PyTorch Profiler Workflow {#sec-performance-engineering-pytorch-profiler}
 
@@ -2246,13 +1722,13 @@ The `--trace` flags control which activities are recorded. The `cuda` flag captu
 
 The resulting `.nsys-rep` file is opened in the Nsight Systems GUI, which presents a multi-row timeline. The most important rows are:
 
-The **CUDA HW** row shows the actual kernel execution on the GPU. Each colored bar represents a kernel, with width proportional to execution time. Gaps between bars indicate GPU idle time, which represents wasted potential. For a well-optimized inference pipeline, the CUDA HW row should show nearly continuous kernel execution with minimal gaps.
+The CUDA HW row shows the actual kernel execution on the GPU. Each colored bar represents a kernel, with width proportional to execution time. Gaps between bars indicate GPU idle time, which represents wasted potential. For a well-optimized inference pipeline, the CUDA HW row should show nearly continuous kernel execution with minimal gaps.
 
-The **CUDA API** row shows CPU-side CUDA API calls (kernel launches, memory allocations, synchronization). If CUDA API bars are significantly wider than the corresponding CUDA HW bars, the CPU is the bottleneck: it cannot launch kernels fast enough to keep the GPU busy. This is the kernel launch overhead problem that CUDA Graphs and `torch.compile` address.
+The CUDA API row shows CPU-side CUDA API calls (kernel launches, memory allocations, synchronization). If CUDA API bars are significantly wider than the corresponding CUDA HW bars, the CPU is the bottleneck: it cannot launch kernels fast enough to keep the GPU busy. This is the kernel launch overhead problem that CUDA Graphs and `torch.compile` address.
 
-The **NCCL** row (for distributed workloads) shows collective communication operations. Comparing the NCCL row with the CUDA HW row reveals whether communication overlaps with computation. If NCCL bars appear during gaps in the CUDA HW row, communication is serialized. If NCCL bars overlap with CUDA HW bars, overlap is working correctly.
+The NCCL row (for distributed workloads) shows collective communication operations. Comparing the NCCL row with the CUDA HW row reveals whether communication overlaps with computation. If NCCL bars appear during gaps in the CUDA HW row, communication is serialized. If NCCL bars overlap with CUDA HW bars, overlap is working correctly.
 
-The **NVTX** row shows user-annotated regions, which PyTorch maps to module names (`Linear`, `LayerNorm`, `Attention`). This connects low-level kernel names (often cryptic strings like `volta_fp16_s1688gemm_fp16_256x128_ldg8_f2f_nn`) to the model-level operations that produced them.
+The NVTX row shows user-annotated regions, which PyTorch maps to module names (`Linear`, `LayerNorm`, `Attention`). This connects low-level kernel names (often cryptic strings like `volta_fp16_s1688gemm_fp16_256x128_ldg8_f2f_nn`) to the model-level operations that produced them.
 
 The key patterns to look for in a Nsight Systems trace are:
 
@@ -2268,19 +1744,19 @@ Experienced performance engineers develop pattern recognition for these traces, 
 
 Profiling reveals several recurring patterns in ML workloads that map directly to the optimization techniques in this chapter.
 
-**Pattern: Small kernel gaps.** Many short GPU idle periods between small kernels. *Diagnosis*: Kernel launch overhead dominates. *Fix*: Graph compilation (`torch.compile`) to fuse small kernels.
+Small kernel gaps manifest as many short GPU idle periods between small kernels, indicating that kernel launch overhead dominates. Graph compilation (`torch.compile`) fuses these small kernels to reclaim the lost cycles.
 
-**Pattern: Large intermediate tensors.** Memory timeline shows spikes corresponding to attention score matrices or other intermediate results. *Diagnosis*: Unfused operations materializing intermediates in HBM. *Fix*: Operator fusion (FlashAttention for attention, custom Triton kernels for other sequences).
+Large intermediate tensors appear as memory timeline spikes corresponding to attention score matrices or other intermediate results. Unfused operations are materializing intermediates in HBM, and operator fusion (FlashAttention for attention, custom Triton kernels for other sequences) eliminates the unnecessary round-trips.
 
-**Pattern: Low FLOPS utilization with high memory bandwidth.** GPU achieves near-peak bandwidth but single-digit FLOPS utilization. *Diagnosis*: Memory-bound operations dominating execution time. *Fix*: Precision reduction (FP16 to FP8, INT4 KV cache), or algorithmic changes (batching, speculative decoding).
+Low FLOPS utilization combined with high memory bandwidth means the GPU achieves near-peak bandwidth but single-digit FLOPS utilization. Memory-bound operations dominate execution time, and the remedy is precision reduction (FP16 to FP8, INT4 KV cache) or algorithmic changes (batching, speculative decoding).
 
-**Pattern: Communication bubbles.** GPU idle periods coinciding with NCCL AllReduce or AllToAll operations. *Diagnosis*: Communication not overlapped with compute. *Fix*: Enable gradient overlap in DDP, restructure pipeline schedule for zero-bubble execution.
+Communication bubbles appear as GPU idle periods coinciding with NCCL AllReduce or AllToAll operations. Communication is not overlapped with compute, and the fix is to enable gradient overlap in DDP or restructure the pipeline schedule for zero-bubble execution.
 
-**Pattern: Load imbalance.** Some GPUs finish earlier and wait for stragglers. *Diagnosis*: Uneven work distribution. *Fix*: For MoE, adjust auxiliary loss and capacity factors. For tensor parallelism, ensure even dimension splitting.
+Load imbalance causes some GPUs to finish earlier and wait for stragglers. Uneven work distribution is the root cause. For MoE, adjusting auxiliary loss and capacity factors rebalances the load; for tensor parallelism, ensuring even dimension splitting eliminates the skew.
 
-**Pattern: Memory allocation thrashing.** The memory timeline shows repeated allocations and deallocations of large tensors, with peak memory far exceeding the steady-state usage. *Diagnosis*: The framework is creating new tensors for each forward pass instead of reusing buffers. *Fix*: Enable torch.compile's memory planning, use pre-allocated buffer pools, or apply activation checkpointing to reduce peak memory.
+Memory allocation thrashing shows repeated allocations and deallocations of large tensors, with peak memory far exceeding the steady-state usage. The framework is creating new tensors for each forward pass instead of reusing buffers. Enabling torch.compile's memory planning, using pre-allocated buffer pools, or applying activation checkpointing addresses this waste.
 
-**Pattern: CPU-bound data loading.** GPU utilization drops periodically to zero while the CPU prepares the next batch. *Diagnosis*: Data preprocessing or tokenization is not pipelined with GPU computation. *Fix*: Increase the number of data loading workers, move tokenization to a dedicated preprocessing service, or pre-tokenize the dataset. This pattern is more common in training than in inference, but can occur in inference when input preprocessing (image resizing, text tokenization) is expensive.
+CPU-bound data loading causes GPU utilization to drop periodically to zero while the CPU prepares the next batch. Data preprocessing or tokenization is not pipelined with GPU computation. Increasing the number of data loading workers, moving tokenization to a dedicated preprocessing service, or pre-tokenizing the dataset resolves this bottleneck. This pattern is more common in training than in inference but can occur in inference when input preprocessing (image resizing, text tokenization) is expensive.
 
 ::: {.callout-notebook title="The Profiler Detective"}
 
@@ -2345,11 +1821,11 @@ When approaching a new ML workload for optimization, follow this sequence:
 
 :::
 
-**Step 1: Baseline measurement.** Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as defined above. An MFU below 30% indicates substantial optimization opportunity; above 50% is good; above 60% is excellent for large models.
+The first step is baseline measurement: measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as defined above. An MFU below 30% indicates substantial optimization opportunity; above 50% is good; above 60% is excellent for large models.
 
-**Step 2: Roofline classification.** For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
+The second step is roofline classification. For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
 
-**Step 3: Select the primary bottleneck.** The primary bottleneck falls into one of three categories, each with a different optimization path:
+The third step is selecting the primary bottleneck. The primary bottleneck falls into one of three categories, each with a different optimization path:
 
 For **memory-bound workloads** (the common case for inference):
 
@@ -2372,11 +1848,11 @@ For **communication-bound workloads** (distributed training at scale):
 3. Restructure pipeline schedules for zero-bubble execution.
 4. Consider topology-aware placement to minimize cross-node traffic.
 
-**Step 4: Apply and verify.** Implement the highest-impact optimization, reprofile, and verify improvement. Then iterate from Step 2 with the new profile, as the bottleneck may have shifted.
+The fourth step is to apply and verify. Implement the highest-impact optimization, reprofile, and verify improvement. Then iterate from the roofline classification step with the new profile, as the bottleneck may have shifted.
 
 ### Combining Techniques {#sec-performance-engineering-combining}
 
-The most performant production systems combine multiple techniques simultaneously. A state-of-the-art LLM serving system might employ all of the following:
+The most performant production systems combine multiple techniques simultaneously. A highly optimized LLM serving system might employ all of the following:
 
 - **FlashAttention-2** or **FlashAttention-3** for memory-efficient attention computation
 - **INT4 weight quantization** (GPTQ or AWQ) with FP16 dequantization during GEMM
@@ -2390,7 +1866,7 @@ These techniques are not additive in their speedup; they interact in complex way
 
 The interaction between optimizations creates a dependency graph that the performance engineer must navigate. Some combinations are synergistic: FlashAttention reduces attention memory traffic, and INT8 KV cache compression reduces KV cache memory, together freeing enough memory for larger batch sizes that transform the economics of serving. Other combinations are redundant: applying both CUDA Graphs and the `reduce-overhead` mode of `torch.compile` achieves the same result, since `reduce-overhead` internally uses CUDA Graphs. Still other combinations conflict: speculative decoding benefits most at small batch sizes (where decode is memory-bound), while many throughput optimizations work by increasing batch size. At large batch sizes, speculation adds overhead without proportional benefit.
 
-A practical heuristic for sequencing optimizations is to apply them in order of decreasing "leverage" and increasing "effort":
+A practical heuristic for sequencing optimizations is to apply them in order of decreasing impact and increasing effort:
 
 1. **torch.compile** (1 line of code, 10--40% speedup): Always apply first. No downsides.
 2. **Weight quantization** (INT4/FP8, hours of calibration, 2--4$\times$ throughput): Apply second. Frees memory for batching.
@@ -2438,7 +1914,7 @@ The roofline analysis confirms that decode is deeply memory-bound, with arithmet
 
 The first optimization targets the largest opportunity: reducing the bytes per weight read from HBM. Applying AWQ INT4 weight quantization reduces the weight storage from 140 GB to 35 GB (8.75 GB per GPU from 17.5 GB per GPU). The effective bandwidth for weight reads doubles because the same physical bandwidth now delivers twice as many weight values per second (each value is 4 bits instead of 16 bits, with on-the-fly dequantization to FP16 for the GEMM).
 
-Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is transformative: each GPU now has approximately 71 GB available for KV cache, up from 62 GB. At the reduced per-request KV cache size, the maximum batch size increases from 4 to approximately 32.
+Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately 71 GB available for KV cache, up from 62 GB. At the reduced per-request KV cache size, the maximum batch size increases from 4 to approximately 32.
 
 Post-optimization metrics at batch size 1:
 
@@ -2501,7 +1977,7 @@ FP8 doubles the peak TFLOPS and doubles the effective memory bandwidth, but thes
 
 **Pitfall:** *Optimizing the largest kernel while ignoring the long tail.*
 
-The profiling case study above illustrates this pitfall. Engineers naturally focus on the single largest kernel, which is often the GEMM in a transformer layer. But when the GEMM is already near-optimal, the remaining performance budget is distributed across dozens of smaller operations: normalization, activation, attention scoring, KV cache management, and kernel launch overhead. Collectively, these "small" operations can consume more than half of total execution time. Graph compilation and systematic fusion address this long tail more effectively than further GEMM optimization.
+The profiling case study above illustrates this pitfall. Engineers naturally focus on the single largest kernel, which is often the GEMM in a transformer layer. When the GEMM is already near-optimal, however, the remaining performance budget is distributed across dozens of smaller operations: normalization, activation, attention scoring, KV cache management, and kernel launch overhead. Collectively, these "small" operations can consume more than half of total execution time. Graph compilation and systematic fusion address this long tail more effectively than further GEMM optimization.
 
 **Pitfall:** *Applying speculative decoding without considering batch dynamics.*
 
@@ -2509,7 +1985,7 @@ Speculative decoding excels at batch size 1, where decode is deeply memory-bound
 
 **Pitfall:** *Treating MoE expert count as a free scaling knob.*
 
-Increasing the number of experts in an MoE model increases total parameters (capacity) without proportionally increasing per-token compute, which seems like a free lunch. But each additional expert increases: (1) total memory requirements, requiring more GPUs; (2) AllToAll communication volume for expert routing; (3) load balancing difficulty, since the router must distribute tokens across more experts; and (4) training instability, as more experts compete for activation. Beyond approximately 64--256 experts, the system-level costs often outweigh the capacity benefits.
+Increasing the number of experts in an MoE model increases total parameters (capacity) without proportionally increasing per-token compute, which seems like a free lunch. Each additional expert, however, increases: (1) total memory requirements, requiring more GPUs; (2) AllToAll communication volume for expert routing; (3) load balancing difficulty, since the router must distribute tokens across more experts; and (4) training instability, as more experts compete for activation. Beyond approximately 64--256 experts, the system-level costs often outweigh the capacity benefits.
 
 **Fallacy:** *Graph compilers eliminate the need for manual kernel engineering.*
 
@@ -2578,19 +2054,19 @@ Performance engineering transforms a model that should be efficient into one tha
 
 The **Roofline Model** provides the diagnostic framework, classifying operations as compute-bound or memory-bound based on their arithmetic intensity relative to the hardware's ridge point. For the NVIDIA H100, this ridge point is approximately `{python} h100_fp16_ridge_str` FLOP/byte at FP16, meaning most transformer operations fall in the memory-bound regime.
 
-**Operator fusion** eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, reducing attention HBM traffic by `{python} savings_str`$\times$ for long sequences through tiling and online softmax. Ring Attention extends this principle across GPUs for extreme sequence lengths.
+Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, reducing attention HBM traffic by `{python} savings_str`$\times$ for long sequences through tiling and online softmax. Ring Attention extends this principle across GPUs for extreme sequence lengths.
 
-**Precision engineering** reduces bytes per transaction. FP8 formats (E4M3 for weights, E5M2 for gradients) double effective bandwidth on H100 hardware. Block-wise quantization (LLM.int8(), GPTQ, AWQ) handles the outlier features that defeat uniform quantization. KV cache compression to INT4 or INT8 directly increases serving batch size.
+Precision engineering reduces bytes per transaction. FP8 formats (E4M3 for weights, E5M2 for gradients) double effective bandwidth on H100 hardware. Block-wise quantization (LLM.int8(), GPTQ, AWQ) handles the outlier features that defeat uniform quantization. KV cache compression to INT4 or INT8 directly increases serving batch size.
 
-**Graph compilation** automates fusion, kernel selection, and memory planning. torch.compile/TorchInductor generates optimized Triton kernels from standard PyTorch code. XLA provides whole-program optimization for JAX/TPU workloads. TensorRT delivers aggressive inference-specific optimization.
+Graph compilation automates fusion, kernel selection, and memory planning. torch.compile/TorchInductor generates optimized Triton kernels from standard PyTorch code. XLA provides whole-program optimization for JAX/TPU workloads. TensorRT delivers aggressive inference-specific optimization.
 
-**Speculative decoding** trades compute for latency by using a fast draft model to generate candidate tokens verified in parallel by the target model, with mathematical guarantees on output quality. Speedups of 1.5--3$\times$ are typical for diverse workloads.
+Speculative decoding trades compute for latency by using a fast draft model to generate candidate tokens verified in parallel by the target model, with mathematical guarantees on output quality. Speedups of 1.5--3$\times$ are typical for diverse workloads.
 
-**Mixture of Experts** decouples model capacity from per-token inference cost through sparse activation. DeepSeek-V3 demonstrates the frontier: 671B total parameters with only 37B active per token.
+Mixture of Experts decouples model capacity from per-token inference cost through sparse activation. DeepSeek-V3 demonstrates the frontier: 671B total parameters with only 37B active per token.
 
-**Communication-computation overlap** hides network latency by executing communication and computation concurrently on separate hardware engines. Zero-bubble pipeline schedules approach the theoretical minimum idle time.
+Communication-computation overlap hides network latency by executing communication and computation concurrently on separate hardware engines. Zero-bubble pipeline schedules approach the theoretical minimum idle time.
 
-**System profiling** provides the measurement infrastructure to identify which bottleneck dominates and which optimization to apply, closing the loop between diagnosis and treatment.
+System profiling provides the measurement infrastructure to identify which bottleneck dominates and which optimization to apply, closing the loop between diagnosis and treatment.
 
 Together, these techniques compose a coherent optimization stack. Precision engineering and operator fusion attack the **Iron Law** at the hardware level, reducing the memory and compute terms. Graph compilation automates these hardware-level optimizations across the full model. Communication overlap attacks the distributed overhead term. Speculative decoding and MoE change the algorithm itself, fundamentally restructuring the terms of the equation.
 

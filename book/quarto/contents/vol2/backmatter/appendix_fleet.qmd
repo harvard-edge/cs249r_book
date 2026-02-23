@@ -245,6 +245,10 @@ The transition from single-machine to fleet-scale reasoning requires extending t
 
 Just as the preceding book provided "Numbers Every ML Systems Engineer Should Know" (@sec-machine-foundations-numbers-know-b531), this section provides the fleet-scale counterparts. The single-machine numbers still apply within each node, but a new set of numbers governs the spaces *between* nodes. While absolute values evolve with hardware generations, the *ratios* between communication tiers and the *scaling behavior* of failure rates remain remarkably stable. **Memorize the ratios and scaling trends; use the specific numbers as sanity checks.**
 
+::: {.callout-note title="Node-level numbers fleet engineers need"}
+Fleet reasoning often depends on a few *node-level* numbers; the full single-machine reference is @sec-machine-foundations-numbers-know-b531. The subset that directly affects fleet design: **16 bytes per parameter** (checkpoint sizing, ZeRO partitioning, memory budgets); **NVLink vs HBM bandwidth** (intra-node parallelism placement); **peak FLOPS and HBM capacity** (MFU and effective FLOPS, batch and model sharding). This appendix's hardware table and Communication numbers above give the inter-node and current-generation values; use Vol I for the full memory hierarchy and roofline ridge points within a node.
+:::
+
 ::: {.callout-takeaways title="Three Fleet Numbers That Matter Most"}
 If you memorize nothing else from this section, memorize these:
 
@@ -254,6 +258,43 @@ If you memorize nothing else from this section, memorize these:
 
 3. **~`{python} fmt(FF.eff_fraction * 100, precision=0)`% effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a 1,024-GPU cluster delivers roughly `{python} fmt(FF.eff_fraction * 100, precision=0)`% of its peak FLOPS as useful training work.
 :::
+
+**Quick reference** --- @tbl-fleet-numbers-quick-ref condenses the numbers below into one place. Use it for back-of-envelope checks; use the detailed tables in each subsection when designing or debugging.
+
+```{python}
+#| label: fleet-quick-ref
+#| echo: false
+# Formatting for @tbl-fleet-numbers-quick-ref only; values from FF.
+_nvlink_ib = fmt(FF.nvlink_to_ib, precision=0, commas=False)
+_ib_ndr_gbs = fmt(FF.ib_ndr_bw, precision=0, commas=False)
+_ib_ndr_us = fmt(FF.ib_ndr_lat, precision=0, commas=False)
+_eff_1024 = fmt(FF.eff_1024, precision=0, commas=False)
+_eff_8192 = fmt(FF.eff_8192, precision=0, commas=False)
+_mtbf_8k_min = fmt(FF.mtbf_8192_min, precision=0, commas=False)
+_mtbf_100k_min = fmt(FF.mtbf_100k_min, precision=0, commas=False)
+_ckpt_175 = fmt(FF.ckpt_175b_gb, precision=0, commas=False)
+_goodput = fmt(FF.goodput_ratio * 100, precision=0, commas=False)
+_mfu_lo = fmt(FF.mfu_low, precision=0, commas=False)
+_mfu_hi = fmt(FF.mfu_high, precision=0, commas=False)
+_rack_ai = fmt(FF.rack_ai, precision=0, commas=False)
+_air_limit = fmt(FF.air_limit, precision=0, commas=False)
+_pue_liq = fmt(FF.pue_liquid, precision=2, commas=False)
+_pue_typ = fmt(FF.pue_typical, precision=2, commas=False)
+_h100_tdp = fmt(FF.h100_tdp, precision=0, commas=False)
+```
+
+| **Category**      | **Number**                                                                 | **Use** |
+|:------------------|:---------------------------------------------------------------------------|:--------|
+| **Communication** | NVLink ~`{python} _nvlink_ib`× IB NDR                                      | Parallelism boundary (in-node vs cross-node) |
+| **Communication** | IB NDR ~`{python} _ib_ndr_gbs` GB/s, ~`{python} _ib_ndr_us` μs one-way     | Inter-node bandwidth and latency |
+| **Computation**   | MFU `{python} _mfu_lo`--`{python} _mfu_hi`%, η ~`{python} _eff_1024`% @ 1K, ~`{python} _eff_8192`% @ 8K | Effective FLOPS and scaling sanity checks |
+| **Coordination**  | MTBF 8K: ~`{python} _mtbf_8k_min` min; 100K: ~`{python} _mtbf_100k_min` min | Failure expectation and checkpoint cadence |
+| **Coordination**  | 175B checkpoint ~`{python} _ckpt_175` GB (16 B/param)                      | Recovery and storage sizing |
+| **Coordination**  | Goodput ~`{python} _goodput`% after overheads                              | Wall-clock utilization |
+| **Power & sustainability** | AI rack ~`{python} _rack_ai` kW; air limit ~`{python} _air_limit` kW      | Cooling feasibility (liquid required above air limit) |
+| **Power & sustainability** | PUE liquid ~`{python} _pue_liq`, typical ~`{python} _pue_typ`; H100 `{python} _h100_tdp` W → 10K GPUs ≈ 7 MW IT × PUE | Facility load and carbon (see @sec-fleet-foundations-thermal-power) |
+
+: **Numbers every fleet engineer should know (quick reference)**: One-page summary of the fleet-scale reference numbers in this section. See the detailed Communication, Computation, and Coordination tables below for full context. {#tbl-fleet-numbers-quick-ref}
 
 ### The Invariants: Ratios That Will Not Change {.unnumbered}
 
@@ -457,6 +498,23 @@ At fleet scale, four categories of overhead consume wall-clock time that is not 
 | **Maintenance windows** | ~`{python} FF.oh_maintenance`% | Rolling upgrades, live migration         |
 
 : **Overhead Budgets for Fleet-Scale Training**: These are fractions of wall-clock time. At 10,000+ GPUs, failure recovery dominates. The compound effect is multiplicative: total goodput ratio $\approx (1 - 0.05)(1 - 0.03)(1 - 0.10)(1 - 0.05) \approx$ `{python} fmt(FF.goodput_ratio * 100, precision=0)`%. {#tbl-fleet-overhead-budgets}
+
+#### Power and Sustainability Numbers {.unnumbered}
+
+Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. Vol I covers per-device energy ratios (e.g., DRAM vs compute); at fleet scale, the critical numbers are **rack power density**, **PUE**, and the **air-cooling limit**---they determine where you can build and what your facility load will be.
+
+| **Quantity**                    | **Typical value**                    | **Use** |
+|:--------------------------------|:-------------------------------------|:--------|
+| **Traditional rack**            | `{python} FF.rack_trad` kW           | Baseline for non-AI datacenters |
+| **AI rack (current gen)**      | `{python} FF.rack_ai` kW              | Liquid cooling required |
+| **AI rack (high-density)**     | `{python} FF.rack_ai_high` kW         | Direct-to-chip liquid |
+| **Air cooling limit**          | ~`{python} FF.air_limit` kW per rack  | Physics ceiling; above this, liquid is mandatory |
+| **PUE (liquid-cooled AI)**     | ~`{python} fmt(FF.pue_liquid, precision=2, commas=False)` | Best case: facility load ≈ IT load |
+| **PUE (best air-cooled)**      | ~`{python} fmt(FF.pue_air, precision=2, commas=False)`    | Hyperscale best practice |
+| **PUE (industry average)**     | ~`{python} fmt(FF.pue_typical, precision=2, commas=False)` | Sanity check for cost/carbon |
+| **H100 TDP**                   | `{python} FF.h100_tdp` W per GPU      | IT load: 10K GPUs × 700 W = 7 MW |
+
+Rule of thumb: **IT load (MW) = (number of GPUs × TDP per GPU) / 10⁶**; **facility load = IT load × PUE**. A 10,000-GPU H100 cluster at 700 W each is 7 MW IT; at PUE 1.4 that is 9.8 MW facility draw. For carbon and cost, see @sec-fleet-foundations-thermal-power and @sec-sustainable-ai.
 
 ### Current Hardware Reference (c. 2024--2025) {.unnumbered}
 
