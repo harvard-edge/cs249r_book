@@ -179,7 +179,11 @@ Three distinct signals indicate when distributed inference becomes necessary rat
 |:---------------|:-------------------------|---------------------:|:----------------------------|
 | **Memory**     | 80GB (H100)              |       GPT-4 (400GB+) | Tensor/pipeline parallelism |
 | **Throughput** | ~10K QPS (vision)        |      100K QPS RecSys | Horizontal replication      |
-| **Latency**    | Model execution time     |       500ms LLM TTFT | Model sharding              |
+| **Latency**    | Model execution time     |       500ms LLM **TTFT** | Model sharding              |
+
+The perceived responsiveness of interactive systems depends on both **Time to First Token (TTFT)**[^fn-ttft-tpot] and **Time Per Output Token (TPOT)**.
+
+[^fn-ttft-tpot]: **TTFT vs. TPOT**: **Time to First Token** (prefill) determines the perceived responsiveness; **Time Per Output Token** (decode) determines the perceived reading speed. Humans read at 5--10 tokens/sec; if TPOT exceeds 50 ms, the user perceives the system as "stuttering," even if TTFT was fast. This dual-SLA requirement forces schedulers to prioritize decode tokens over new prefill prompts. \index{TTFT!responsiveness}\index{TPOT!reading speed}
 
 : **Triggers for Distributed Inference**. Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
 
@@ -770,7 +774,9 @@ This relationship reveals the **Batching Efficiency Curve**:
 2.  **Large $B$**: As $B \to \infty$, the $T_{fixed}$ term becomes negligible. Throughput asymptotically approaches the hardware limit $1/T_{variable}$. The system becomes **compute-bound** (or bandwidth-bound for LLMs).
 3.  **The Knee**: The optimal batch size is the point where throughput gains diminish while latency continues to grow linearly.
 
-The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{variable}$) saturate at smaller batches than LLMs (high $T_{fixed}$ due to weight loading), requiring different tuning strategies. Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: *Little's Law*, which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
+The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{variable}$) saturate at smaller batches than LLMs (high $T_{fixed}$ due to weight loading), requiring different tuning strategies. Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
+
+[^fn-littles-law]: **Little's Law**: From queuing theory ($L = \lambda W$): Concurrency = Arrival Rate $\times$ Latency. For a serving fleet, this defines the **Capacity Envelope**: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues build up exponentially, and tail latency ($L_{lat}$) collapses. \index{Little's Law!capacity planning}
 
 | **Model Type**    | **Batching Strategy** | **Typical Batch Size** | **Key Constraint** | **Throughput Scaling** |
 |:------------------|:----------------------|-----------------------:|:-------------------|:-----------------------|

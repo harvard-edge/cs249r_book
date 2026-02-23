@@ -4,15 +4,11 @@ engine: jupyter
 
 # Collective Communication {#sec-collective-communication}
 
-::: {layout-narrow}
-::: {.column-margin}
 \chapterminitoc
-:::
 
 \noindent
 ![](images/png/cover_communication_ops.png){fig-alt="Three communication topologies: parameter server (top) with nodes connecting through aggregators to central server, ring AllReduce (bottom left) with 8 GPUs in circular data flow, and all-to-all mesh (bottom right) with fully connected nodes." width=100%}
 
-:::
 
 ## Purpose {.unnumbered}
 
@@ -24,11 +20,8 @@ _Why does communication between machines become the fundamental constraint that 
 
 Computation scales by adding processors; communication scales by moving data between them. These scale differently: adding a processor increases aggregate compute linearly, but coordinating that processor with all others increases communication quadratically or worse depending on the synchronization pattern. At sufficient scale, the time spent exchanging gradients, activations, and parameters exceeds the time spent computing them. This crossover point is not a bug to be fixed but a fundamental property of distributed systems that determines which parallelization strategies work, which model sizes are trainable, and which organizations can operate at frontier scale. The physics of light-speed delays, bandwidth limits, and energy costs of data movement constrain communication as firmly as transistor physics constrains computation—yet communication is far less intuitive to reason about, making it the hidden bottleneck that undermines systems designed by those who understand only the compute side.
 
-::: {.content-visible when-format="pdf"}
 \newpage
-:::
 
-::: {.callout-tip title="Learning Objectives"}
 
 - Apply the **$\alpha$-$\beta$ model** to quantify when communication becomes the dominant bottleneck by deriving the bandwidth and latency bounds for distributed training at different cluster scales.
 - Compare **AllReduce** algorithms (ring, tree, hierarchical) by analyzing their time complexity and identifying the crossover points where each becomes optimal based on message size and cluster scale.
@@ -37,7 +30,6 @@ Computation scales by adding processors; communication scales by moving data bet
 - Design **topology-aware communication** strategies by mapping collective operations to network architectures (**fat-tree**, **rail-optimized**, **torus**) to maximize **bisection bandwidth** utilization.
 - Implement **communication-computation overlap** using pipelining and asynchronous operations to hide network latency behind gradient computation.
 
-:::
 
 ```{python}
 #| label: communication-setup
@@ -92,7 +84,6 @@ The parallelism strategies introduced in @sec-distributed-training-systems—dat
 
 This transition reveals a fundamental asymmetry in how computation and communication scale. Computation is inherently local: each GPU operates on its own data independently, so adding GPUs increases aggregate compute capacity proportionally. Communication, however, is inherently global: ensuring all GPUs converge on the same synchronized state requires information to traverse physical distances between them. Adding more independent workers scales local work linearly, but coordinating those workers requires moving data across physical space. The most critical instance of this coordination is *gradient synchronization*.
 
-::: {.callout-definition title="Gradient Synchronization"}
 
 ***Gradient Synchronization***\index{Gradient Synchronization!definition} is the collective communication phase where workers exchange and aggregate their locally computed gradients to maintain a consistent global model state.
 
@@ -100,9 +91,8 @@ This transition reveals a fundamental asymmetry in how computation and communica
 2.  **Distinction (Durable):** Unlike **Asynchronous Updates**, which allow workers to proceed with stale weights, Gradient Synchronization (BSP) requires a **Global Barrier** where all workers must reach the same state before continuing.
 3.  **Common Pitfall:** A frequent misconception is that synchronization is "just communication." In reality, it is a **Synchronization Barrier**: the total time $T$ is governed by the **Slowest Worker** (Straggler), making the system highly sensitive to hardware jitter.
 
-:::
 
-The requirement for gradient synchronization is not a design choice; it is a mathematical necessity for convergence. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm.[^fn-ps-bottleneck]
+The requirement for gradient synchronization is not a design choice; it is a mathematical necessity for convergence. If different GPUs apply different gradient updates to their local copies of the model, the copies diverge. After enough steps, the models on different GPUs represent entirely different functions, and the training process no longer approximates stochastic gradient descent on the global loss. Synchronization ensures that all copies remain identical (within floating-point precision) at every step, preserving the theoretical convergence guarantees of the optimization algorithm via the **AllReduce**[^fn-allreduce-etymology] primitive.[^fn-ps-bottleneck]
 
 [^fn-ps-bottleneck]: **Parameter Server (PS)**: Google's DistBelief (2012) used a star topology where all workers sent gradients to a central server whose bandwidth had to match the aggregate bandwidth of all workers. As clusters scaled from 10 to 1,000 nodes, the central server's NIC saturated, making per-step communication cost grow as $O(N)$ and forcing the transition to peer-to-peer collectives where per-node cost is constant. \index{Parameter Server!bottleneck}
 
@@ -116,13 +106,13 @@ At frontier scale (hundreds of billions of parameters across thousands of GPUs),
 
 Before designing algorithms, we must understand the physical constraints governing data movement. Unlike software, which can be optimized almost indefinitely, communication is bound by the speed of light and the Shannon limit of channel capacity.
 
-The speed of light sets the latency floor for all communication. In a vacuum, light travels at $c \approx 300,000$ km/s. In optical fiber, the refractive index ($n \approx 1.5$) slows this to $\approx 200,000$ km/s, or 5 microseconds per kilometer. A datacenter spanning 500 meters introduces a minimum 2.5 $\mu s$ round-trip propagation delay. While negligible for human perception, this is thousands of clock cycles for a GPU operating at 1.5 GHz.
+The speed of light sets the latency floor for all communication. In a vacuum, light travels at $c \approx 300,000$ km/s. In optical fiber, the refractive index ($n \approx 1.5$)[^fn-speed-of-light-latency] slows this to $\approx 200,000$ km/s, or 5 microseconds per kilometer. A datacenter spanning 500 meters introduces a minimum 2.5 $\mu s$ round-trip propagation delay. While negligible for human perception, this is thousands of clock cycles for a GPU operating at 1.5 GHz.
 
 Higher bandwidth demands more signaling energy per bit, creating a bandwidth-distance product constraint. Modern InfiniBand NDR operates at 100 Gbps per lane using PAM4 signaling (4 voltage levels per symbol), which requires more precise analog circuits than the simpler NRZ (2 levels) used by earlier generations. This precision comes at a cost: the maximum reach of a copper cable at NDR rates is approximately 2 meters before the signal degrades below recoverable levels. Longer distances require active optical cables (AOCs) or fiber transceivers that convert electrical signals to light and back, adding both cost (hundreds of dollars per link) and latency (nanoseconds per conversion). The bandwidth-distance product is a fundamental constraint: you can have high bandwidth or long distance, but not both cheaply.
 
 Moving data also costs energy that scales with distance. Accessing data from local SRAM costs roughly 0.5 pJ/bit. Moving it across a PCB (NVLink) costs 5--10 pJ/bit. Moving it across a datacenter via InfiniBand optical links costs 20--50 pJ/bit. At the exascale (tens of thousands of GPUs), the power budget for communication rivals the power budget for computation itself. A 10,000-GPU cluster exchanging 1 GB of gradients per step at 30 pJ/bit consumes approximately 2.4 kJ per AllReduce, a non-trivial fraction of the total per-step energy budget.
 
-Beyond these physical limits, protocol overhead adds a per-message software tax. Traditional TCP/IP stacks incur microseconds of OS kernel overhead per packet: the CPU must process socket calls, traverse the kernel networking stack, copy data between user and kernel buffers, and interact with the NIC through device drivers. High-performance ML networks bypass the kernel entirely using **RDMA (Remote Direct Memory Access)**, allowing the network card (NIC) to read directly from GPU memory via the PCIe bus. RDMA eliminates the kernel traversal, reducing per-message overhead from 10--20 $\mu$s (TCP) to 1--3 $\mu$s (RDMA). The most advanced configuration, **GPUDirect RDMA**, further eliminates the CPU from the data path: the NIC reads from GPU HBM through a direct PCIe peer-to-peer transfer, without the data ever touching CPU DRAM.
+Beyond these physical limits, protocol overhead adds a per-message software tax. Traditional TCP/IP stacks incur microseconds of OS kernel overhead per packet: the CPU must process socket calls, traverse the kernel networking stack, copy data between user and kernel buffers, and interact with the NIC through device drivers. High-performance ML networks bypass the kernel entirely using **RDMA (Remote Direct Memory Access)**[^fn-zerocopy-rdma], allowing the network card (NIC) to read directly from GPU memory via the PCIe bus. RDMA eliminates the kernel traversal, reducing per-message overhead from 10--20 $\mu$s (TCP) to 1--3 $\mu$s (RDMA). The most advanced configuration, **GPUDirect RDMA**, further eliminates the CPU from the data path: the NIC reads from GPU HBM through a direct PCIe peer-to-peer transfer, without the data ever touching CPU DRAM.
 
 These three constraints interact multiplicatively. Latency sets the floor for every message regardless of size. Bandwidth caps the throughput for large transfers. Protocol overhead adds a per-message tax that penalizes fine-grained communication. The following napkin math exercise quantifies how these constraints combine for a realistic training scenario.
 
@@ -193,7 +183,6 @@ n_gpus_napkin_str = AllReduceCost.n_gpus_napkin_str
 ring_bw_factor_str = AllReduceCost.ring_bw_factor_str
 ```
 
-::: {.callout-notebook title="AllReduce Cost for a 70B Model" collapse="false"}
 
 **Problem**: You are training a 70 billion parameter model using data parallelism across `{python} n_gpus_napkin_str` GPUs connected by InfiniBand NDR (50 GB/s per port). Each GPU computes gradients in FP32 (4 bytes per parameter). How long does one AllReduce take?
 
@@ -219,21 +208,17 @@ Total: $T_{AllReduce} \approx$ `{python} ring_bw_time_ms_str` + `{python} ring_l
 
 **The Systems Insight**: The gradient AllReduce alone takes over 11 seconds. This is pure communication overhead added to every training step. At this scale, communication dominates the step time unless overlapped with backward pass computation. This is why production systems pipeline AllReduce with the backward pass, launching communication for early layers while later layers are still computing.
 
-:::
 
 The exercise above reveals why data movement, not computation, becomes the governing constraint at scale. A single AllReduce on a 70B model's gradients consumes seconds of wall-clock time, during which all GPUs would otherwise sit idle. This asymmetry between local computation (which parallelizes perfectly) and global coordination (which requires physical data movement) motivates every algorithm in the remainder of this chapter. Reducing those 11 seconds by even 50% would save thousands of GPU-hours over a typical training campaign, translating directly to reduced cost and faster time to deployment.
 
 This cost analysis also explains why the choice of collective algorithm matters far more than most practitioners realize. Using a suboptimal algorithm that achieves only 60% of theoretical bandwidth (a common outcome with poor topology mapping) would inflate the 11-second AllReduce to nearly 19 seconds, adding 8 seconds of pure waste to every training step.
 
-::: {.callout-fleet-stack title="Fleet Stack Connection"}
 
 Communication algorithms operate at the **Distribution Layer** of the Fleet Stack. The **Infrastructure Layer** below provides the raw bandwidth through NVLink, InfiniBand, and network topologies (covered in @sec-network-fabrics). The **Serving Layer** above depends on efficient gradient synchronization to complete training runs that produce deployable models. When communication algorithms fail to saturate the available bandwidth, the bottleneck propagates upward: training takes longer, serving models are delivered later, and the entire fleet operates below its economic potential. The algorithms in this chapter are the bridge between physical infrastructure and distributed ML workloads.
 
-:::
 
 @fig-compute-comm-timeline quantifies how this communication overhead compounds as the fleet grows. At 8 GPUs within a single NVLink-connected node, communication consumes roughly 25% of each training step because the 900 GB/s interconnect bandwidth keeps pace with gradient volume. As the cluster expands to 64 GPUs across 8 nodes, the transition to InfiniBand (50 GB/s per port) shifts the balance: communication now dominates at approximately 50% of step time, with an additional 5% lost to synchronization barriers. At frontier scale (4,096 GPUs), communication and synchronization overhead together consume 80% of the training step, leaving only 20% for useful computation. This progression explains why every algorithm in this chapter exists: without hierarchical collectives, gradient compression, and communication-computation overlap, large-scale training would spend the vast majority of its multi-million-dollar compute budget waiting for data to arrive.
 
-::: {#fig-compute-comm-timeline fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Communication Timeline**. As training scales from 8 GPUs (one node) to 4,096 GPUs, communication grows from approximately 25% to over 65% of each training step. This shift from NVLink-dominated to InfiniBand-limited communication drives the design of all collective optimization strategies. Proportions derived from H100 cluster measurements with a 70B parameter model using data parallelism with Ring AllReduce." fig-alt="Stacked horizontal bar chart showing compute, communication, and sync fractions at 8, 64, 512, and 4096 GPUs with communication growing from 25 to 65 percent."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -303,7 +288,6 @@ ax.legend(loc='upper right', fontsize=8, ncol=3)
 plt.tight_layout()
 plt.show()
 ```
-:::
 
 ### The Gradient's Travel Manifest {#sec-communication-parallelism-patterns}
 
@@ -340,20 +324,16 @@ If you ask a datacenter engineer how long it takes to send ten megabytes across 
 
 Every step our gradient takes is governed by the linear cost model $T(n) = \alpha + n/\beta$. This is not just a formula; it is the "Physics of Failure" for distributed systems.
 
-::: {.callout-definition title="α-β Model (Hockney Model)"}
 
-::: {#nte-alpha-beta-model .callout-principle icon=false title="The Bandwidth-Latency Trade-off ($\alpha$-$\beta$ Model)"}
 **The Invariant**: Communication time is a function of fixed latency ($\alpha$) and message-dependent bandwidth ($\beta$).
 $$ T(n) = \alpha + \frac{n}{\beta} $$
 
 **The Implication**: Small messages (e.g., MoE routing, pipeline bubbles) are **latency-bound**; large messages (e.g., gradients) are **bandwidth-bound**. Optimization strategies must match the regime: fuse small messages to amortize $\alpha$, compress large messages to improve $\beta$.
-:::
 
 1.  **Significance (Quantitative):** It maps directly to the **Iron Law**, where **α** (alpha) represents the fixed **Startup Latency ($L_{lat}$)** and **β** (beta) represents the **Network Bandwidth ($BW$)**. It separates the **Latency-Bound Regime** (small messages) from the **Bandwidth-Bound Regime** (large messages).
 2.  **Distinction (Durable):** Unlike **Idealized Throughput Models**, the α-β model captures the **Fixed Penalty** of communication, explaining why many small messages are 100$\times$ more expensive than one large message of the same total size.
 3.  **Common Pitfall:** A frequent misconception is that $\alpha$ is just "network delay." In reality, $\alpha$ includes **Software Overhead** (kernel context switches, stack traversal, and library synchronization) that can often exceed the physical wire delay.
 
-:::
 
 The two parameters have distinct physical meanings:
 
@@ -376,14 +356,12 @@ The **critical message size** $n^* = \alpha \cdot \beta$ marks the crossover poi
 
 The following example illustrates how to apply the critical message size formula to determine which optimization strategy matters most for a given workload:
 
-::: {.callout-notebook title="The Critical Message Size"}
 **Problem**: Your cluster uses InfiniBand NDR 400G with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
 
 **The Math**:
 $$n^* = \alpha \cdot \beta = 2 \times 10^{-6}\ \text{s} \times 50 \times 10^9\ \text{B/s} = 100\ \text{KB}$$
 
 **The Systems Insight**: Messages under 100 KB (like MoE tokens, pipeline activations) are **latency-bound**—buy lower-latency switches, reduce software overhead. Messages over 100 KB (like LLM gradients) are **bandwidth-bound**—buy more bandwidth, compress the data. Applying the wrong optimization wastes money without improving performance.
-:::
 
 This reveals two distinct operating regimes:
 
@@ -392,7 +370,6 @@ This reveals two distinct operating regimes:
 
 The following comparison shows how the bottleneck shifts between these regimes:
 
-::: {.callout-notebook title="Latency vs. Bandwidth Dominance"}
 **Problem**: You are synchronizing a 1 MB buffer versus a 1 GB buffer on InfiniBand NDR with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. How does the bottleneck shift?
 
 **Case A: 1 MB Message**
@@ -408,7 +385,6 @@ The following comparison shows how the bottleneck shifts between these regimes:
 *   **Total: 20,002 μs**. Latency is 0.01%—completely negligible.
 
 **The Systems Conclusion**: For Data Parallelism (large gradients), we optimize for $\beta$—compress gradients, add NICs. For Pipeline/Expert Parallelism (small activations), we fight for every microsecond of $\alpha$—kernel bypass, topology optimization. The α-β model tells you *which fight to pick*.
-:::
 
 ### The LogP Model {#sec-communication-collective-operations-collective-operations-logp-model-e45d}
 
@@ -421,7 +397,6 @@ The α-β model assumes the processor is idle during communication. For **pipeli
 
 The key insight of LogP is distinguishing **network latency** (L, which can be hidden) from **processor overhead** (o, which cannot). A system can overlap communication with computation only if the compute kernel runs longer than the overhead. The following example demonstrates this distinction in practice:
 
-::: {.callout-notebook title="Can You Hide the Communication?"}
 **Problem**: You want to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes 500 μs. The AllReduce has network latency $L = 100\ \mu s$ but processor overhead $o = 50\ \mu s$ to initiate and $o = 50\ \mu s$ to receive. Can you hide the communication?
 
 **The Math**:
@@ -435,7 +410,6 @@ The key insight of LogP is distinguishing **network latency** (L, which can be h
 **Effective time**: $\max(500, 100 + 100) = 500\ \mu s$ (communication hidden!).
 
 **The Systems Insight**: α-β tells you the total communication time. LogP tells you **how much of it you can hide**. When designing pipelined training, optimize for low $o$ (kernel bypass, GPUDirect) rather than just high $\beta$.
-:::
 
 The choice between models depends on the analysis context:
 
@@ -567,7 +541,6 @@ This reality gap has practical consequences for algorithm selection. The crossov
 
 If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, our gradient must now choose its vehicle: strictly choreographed group exchanges known as Collective Operations.
 
-::: {.callout-definition title="Collective Operation"}
 
 ***Collective Operation***\index{Collective Operation!definition} is a communication primitive where a group of processes engage in a coordinated data exchange to aggregate, broadcast, or redistribute information.
 
@@ -575,7 +548,6 @@ If a GPU simply opens a socket and sends a massive gradient to another GPU, the 
 2.  **Distinction (Durable):** Unlike **Point-to-Point Communication** (one-to-one), Collective Operations are **Group-Aware** (one-to-all or all-to-all), using optimized algorithms (e.g., Ring, Tree) to minimize redundant transfers.
 3.  **Common Pitfall:** A frequent misconception is that collectives are "just library calls." In reality, they are **Synchronization Barriers**: every participant must reach the collective call point before the operation can complete, making them the primary source of **Straggler-Induced Stalls**.
 
-:::
 
 Understanding these primitives is essential because different model architectures stress different operations.
 
@@ -617,17 +589,14 @@ A key insight is that AllReduce can be decomposed into ReduceScatter followed by
 
 The contrast between AllToAll and AllReduce highlights a fundamental difference in how collective operations scale with cluster size.
 
-::: {.callout-perspective title="AlltoAll vs AllReduce: Why Scale Differs"}
 While **AllReduce** scales efficiently because it can be pipelined in a ring (where each node only talks to its neighbor), **AlltoAll** is fundamentally harder to scale.
 
 In an AlltoAll, every process has a unique piece of data for every other process. This creates $O(N^2)$ logical connections. At the hardware level, this leads to **network contention**: if 1024 GPUs all try to send data to different targets simultaneously, the "Fat-Tree" or "Spine" switches in the datacenter become the bottleneck.
 
 This is why **Expert Parallelism (MoE)** and large-scale **Recommendation Systems** often hit a "communication wall" much earlier than standard data-parallel models. The algorithm choice (AllReduce vs AlltoAll) determines the scaling ceiling.
-:::
 
 To make the AllToAll pattern concrete, consider a Mixture of Experts model with 64 experts distributed across 8 GPUs (8 experts per GPU). During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
 
-::: {.callout-notebook title="AllToAll for MoE Token Routing" collapse="false"}
 
 **Problem**: A MoE model processes a batch of 4096 tokens across 8 GPUs (512 tokens per GPU). Each token is a 2048-dimensional hidden state in BF16 (4 KB per token). The gating network assigns each token to exactly 1 of 64 experts (8 experts per GPU). Assuming uniform routing (each expert receives $4096/64 = 64$ tokens), how much data does each GPU send and receive?
 
@@ -647,7 +616,6 @@ If serialized: $7 \times 8\ \mu\text{s} = 56\ \mu\text{s}$. If all 7 transfers r
 
 **The Systems Insight**: The per-message sizes in MoE are small (hundreds of KB), placing them firmly in the latency-bound regime. This is why MoE scaling is constrained by alpha (latency), not beta (bandwidth), and why MoE systems benefit from low-latency switches and RDMA rather than raw bandwidth upgrades. The AllToAll also runs *twice per layer* (once for token dispatch, once for result collection), doubling the latency tax.
 
-:::
 
 In practice, MoE routing is rarely perfectly uniform. Popular experts receive more tokens than unpopular ones, creating load imbalance that translates to communication imbalance. If one expert receives 3$\times$ more tokens than average, the GPU hosting that expert receives 3$\times$ more incoming data, creating a hotspot that can stall the entire collective (since AllToAll is a barrier operation). Production MoE systems address this through **auxiliary load-balancing losses** that penalize the gating network for routing too many tokens to any single expert, and through **capacity factors** that cap the maximum number of tokens an expert can accept (dropping overflow tokens). These techniques trade a small amount of model quality for communication balance, which is the right trade-off at scale.
 
@@ -717,7 +685,6 @@ The algorithm splits the vector of size $M$ into $N$ chunks and proceeds in two 
 
 The data flow during Step 1 proceeds as follows:
 
-::: {.callout-note title="Figure: Ring AllReduce Data Flow" collapse="false"}
 ```{.tikz fig-alt="Three GPUs arranged in ring topology. Each GPU holds three colored data chunks. Blue arrows show Step 1 clockwise transfers between neighbors."}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \definecolor{GreenLine}{RGB}{34,139,34}
@@ -750,11 +717,9 @@ The data flow during Step 1 proceeds as follows:
   \node[anchor=north, font=\footnotesize, text=gray] at (0,-3.2) {Message divided into $N$ chunks; each step $N-1$ transfers data to neighbor.};
 \end{tikzpicture}
 ```
-:::
 
 To make the ring algorithm concrete, consider a step-by-step trace with 4 GPUs reducing a vector of 4 elements by summation. Each GPU $i$ starts with a local gradient vector $g_i = [a_i, b_i, c_i, d_i]$. The vector is split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
 
-::: {.callout-notebook title="Ring AllReduce: Step-by-Step Trace (4 GPUs)" collapse="false"}
 
 **Setup**: 4 GPUs in a ring ($0 \to 1 \to 2 \to 3 \to 0$). Each GPU holds a vector of 4 values. We use concrete numbers for clarity:
 
@@ -791,7 +756,6 @@ Each GPU sends its fully reduced chunk around the ring so all GPUs receive all r
 
 **Total data movement per GPU**: In each of the $2(N-1) = 6$ steps, each GPU sends exactly $M/N = 1$ element. Total per GPU: $6 \times 1 = 6$ elements sent, $6$ received.
 
-:::
 
 The trace above illustrates the key property of Ring AllReduce: at every step, every link in the ring is active, with data flowing in the same direction. No GPU ever sits idle, and no link is underutilized. This uniform link utilization is what makes Ring bandwidth-optimal.
 
@@ -867,7 +831,6 @@ The following table summarizes the four algorithms and their performance charact
 
 : **AllReduce Algorithm Comparison**: Each algorithm occupies a different point in the latency-bandwidth trade-off space. Ring and Butterfly achieve bandwidth optimality with different latency characteristics, while Double Binary Tree provides the best practical compromise. {#tbl-allreduce-comparison}
 
-::: {#fig-allreduce-crossover fig-env="figure" fig-pos="htb" fig-cap="Algorithm Crossover in Collective Communication: Performance analysis of Ring, Tree, and Double Binary Tree AllReduce algorithms across message sizes (1KB to 10GB) for a 256-GPU cluster with 200 Gbps interconnect." fig-alt="Log-log plot of AllReduce time versus message size for Ring, Tree, and Double Binary Tree algorithms showing latency-dominated and bandwidth-dominated crossover regions."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -923,7 +886,6 @@ ax.set_xticklabels(['1 KB', '1 MB', '1 GB'])
 
 fig = plt.gcf()
 ```
-:::
 
 ### The Algorithm Crossover Point {#sec-communication-collective-operations-algorithm-crossover}
 
@@ -971,7 +933,6 @@ Gradients smaller than 25 MB use Tree; larger use Ring. In practice, NCCL's algo
 
 Nevertheless, the crossover formula remains the essential mental model for understanding *why* libraries make the choices they do. When a library selects an unexpected algorithm, the crossover analysis provides the reasoning framework to evaluate whether the choice is correct or whether manual override is warranted. The following worked example applies this framework to a concrete scenario:
 
-::: {.callout-notebook title="The Ring vs. Tree Crossover"}
 **Problem**: You are synchronizing a **1 MB** buffer across **64 GPUs**. The network has latency $\alpha = 10 \mu s$ and bandwidth $\beta = 10 \text{ GB/s}$. Should you use Ring or Tree?
 
 **The Math**:
@@ -996,11 +957,9 @@ Nevertheless, the crossover formula remains the essential mental model for under
 **Tree wins**, but only by 10%. For this 1 MB message, we are near the crossover point.
 
 **The Systems Insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The crossover formula predicts: $M_{crossover} = N \cdot \alpha \cdot \beta = 64 \times 10\ \mu s \times 10\ \text{GB/s} = 6.4\ \text{MB}$. At 1 MB, we are below crossover—Tree wins. At 10 MB, Ring would dominate.
-:::
 
 The crossover analysis demonstrates that algorithm selection is not a static choice but depends on the specific combination of message size, cluster scale, and network parameters. In practice, communication libraries like NCCL maintain internal lookup tables that map (message size, GPU count) pairs to the optimal algorithm, selecting Ring, Tree, or hybrid approaches automatically. Understanding the underlying crossover math allows engineers to predict when the library's defaults may be suboptimal and to override them when necessary.
 
-::: {.callout-checkpoint title="AllReduce Algorithm Selection" collapse="false"}
 
 Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 
@@ -1009,7 +968,6 @@ Verify your understanding of Ring vs. Tree AllReduce trade-offs:
 - [ ] Can you trace through the Scatter-Reduce phase of Ring AllReduce for 3 GPUs with a 3-element vector and verify that each GPU ends with the correct partial sum?
 - [ ] Can you explain why Ring AllReduce's $O(N)$ latency makes it impractical for tensor parallelism (where message sizes are small and latency dominates)?
 
-:::
 
 [^fn-moe-sparsity]: **Mixture of Experts (MoE)**: An architecture where each token activates only a subset of specialized subnetworks (experts), reducing per-token FLOPs while maintaining total model capacity. The systems trade-off is stark: MoE replaces the bandwidth-bound AllReduce of dense models with latency-bound AllToAll, shifting the communication bottleneck from $\beta$ to $\alpha$ and creating $O(N^2)$ contention that limits practical cluster size. \index{Mixture of Experts!communication}
 
@@ -1110,7 +1068,6 @@ hier_total_ms_str = HierarchicalAllreduceCalc.hier_total_ms_str
 speedup_str       = HierarchicalAllreduceCalc.speedup_str
 ```
 
-::: {.callout-notebook title="The Hierarchical Bandwidth Multiplier"}
 **Problem**: You have a cluster of 8 nodes, each with 8 GPUs (64 GPUs total). You need to AllReduce a 1 GB gradient buffer. Compare flat Ring AllReduce vs. Hierarchical AllReduce.
 
 **Flat Ring AllReduce (ignoring hierarchy)**:
@@ -1131,11 +1088,9 @@ speedup_str       = HierarchicalAllreduceCalc.speedup_str
 - **Total Time**: $\approx 1 + 5 + 1 = 7\ \text{ms}$
 
 **The Systems Insight**: Hierarchical AllReduce achieves a **`{python} speedup_str`$\times$ speedup** by reducing inter-node traffic from 1 GB to `{python} inter_data_mb_str` MB per GPU. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
-:::
 
 These three phases confine most traffic within each node before crossing the slower inter-node fabric.
 
-::: {.callout-note title="Hierarchical AllReduce Phases" collapse="false"}
 ```{.tikz fig-alt="Three-phase hierarchical AllReduce showing two nodes with 4 GPUs each. Phase 1 shows intra-node ReduceScatter via NVLink. Phase 2 shows inter-node AllReduce via InfiniBand between corresponding GPUs. Phase 3 shows intra-node AllGather via NVLink."}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \definecolor{NodeColor}{RGB}{245,245,250}
@@ -1201,7 +1156,6 @@ These three phases confine most traffic within each node before crossing the slo
 
 \end{tikzpicture}
 ```
-:::
 
 The hierarchical approach generalizes beyond two levels. Large clusters with multiple racks connected through spine switches introduce a third bandwidth tier (rack-to-rack at reduced bisection bandwidth). The following exercise extends the two-level analysis to quantify the impact of this additional hierarchy.
 
@@ -1286,7 +1240,6 @@ flat_3l_ms_str       = ThreeLevelNapkin.flat_3l_ms_str
 reduction_factor_str = ThreeLevelNapkin.reduction_factor_str
 ```
 
-::: {.callout-notebook title="Three-Level Hierarchical Bandwidth Budget" collapse="false"}
 
 **Problem**: You operate a `{python} total_gpus_3l_str`-GPU cluster arranged as 4 racks of 4 nodes of 8 GPUs. Cross-rack bandwidth is oversubscribed 2:1 (effective 25 GB/s). How much does 3-level hierarchical AllReduce reduce cross-rack traffic for a `{python} gradient_3l_gb_str` GB gradient?
 
@@ -1298,7 +1251,6 @@ reduction_factor_str = ThreeLevelNapkin.reduction_factor_str
 
 **Result**: Cross-rack traffic per GPU is reduced by `{python} reduction_factor_str`$\times$ compared to the original gradient. Total time: `{python} total_3l_ms_str` ms versus `{python} flat_3l_ms_str` ms for flat AllReduce. The hierarchical decomposition concentrates traffic where bandwidth is abundant and minimizes traffic where bandwidth is scarce.
 
-:::
 
 ### In-Network Reduction: SHARP and Beyond {#sec-communication-sharp}
 
@@ -1355,11 +1307,9 @@ Rail alignment is critical because without it, all 8 GPUs on a node might try to
 
 The interaction between rail-optimized routing and hierarchical AllReduce is worth emphasizing. In the hierarchical decomposition described above, Step 2 (inter-node AllReduce) naturally aligns with rail topology. GPU $i$ on each node communicates only with GPU $i$ on other nodes, which is precisely the rail pattern. This alignment is not coincidental; NVIDIA designed the DGX hardware with rail-optimized communication in mind, and NCCL's hierarchical algorithms exploit this structure by default. When the logical communication pattern matches the physical topology, every NIC operates at full line rate with zero contention, and the cluster achieves its theoretical peak bisection bandwidth.
 
-::: {.callout-war-story}
 ## The NCCL Topology Discovery
 
 How does a software library running deep inside a GPU actually know whether another GPU is sitting right next to it on a high-speed NVLink switch, or sitting 100 meters away across an InfiniBand fabric? NVIDIA's Collective Communications Library (NCCL) performs a critical "topology detection" phase at initialization to map these physical realities.
-:::
 
 Misalignment between logical and physical topology is a common source of performance degradation that is difficult to diagnose without careful profiling. If process ranks are assigned arbitrarily (for example, by the job scheduler without topology awareness), the hierarchical AllReduce may route cross-node traffic through the wrong NICs, creating hotspots that reduce effective bandwidth by 2--4$\times$. Production deployments use topology-aware rank assignment (configured through NCCL's `CUDA_VISIBLE_DEVICES` and the scheduler's GPU binding policies) to ensure alignment.
 
@@ -1427,7 +1377,6 @@ This is not merely a practical concern; it is a fundamental mathematical obstacl
 
 We solve the conflict between compression and convergence with **Error Feedback**. Like a traveler who can only carry 10kg but has 100kg of gear, we leave the excess behind but *remember* it. We maintain a local error accumulator $e_t$ that stores the compression residual.
 
-::: {.callout-definition title="Error Feedback Mechanism"}
 
 ***Error Feedback***\index{Error Feedback!definition} is a convergence-preserving technique that maintains a local accumulator to store the residual information lost during gradient compression.
 
@@ -1435,7 +1384,6 @@ We solve the conflict between compression and convergence with **Error Feedback*
 2.  **Distinction (Durable):** Unlike **Lossy Compression** (which permanently discards information), Error Feedback is a **Delayed Transmission** strategy: it ensures that information is not lost, but simply deferred until it accumulates above the compression threshold.
 3.  **Common Pitfall:** A frequent misconception is that Error Feedback is "built into" all compressors. In reality, without explicit error tracking, biased compressors (like Top-K) can lead to **Divergence** or poor generalization because small gradient components are never applied.
 
-:::
 
 The key insight is that error feedback makes compression an **unbiased estimator over time**. Consider what happens over $T$ steps:
 
@@ -1449,7 +1397,6 @@ The long-run average of transmitted gradients equals the long-run average of tru
 
 This property—that compression error telescopes across time—is why error feedback transforms a biased, non-convergent method into an unbiased, convergent one. Theoretical analysis shows that with error feedback, compressed SGD converges at the same asymptotic rate as uncompressed SGD, with only constant-factor slowdowns [@stich2018sparsified; @karimireddy2019error]. The following step-by-step trace illustrates how error feedback preserves gradient information that naive compression would lose:
 
-::: {.callout-notebook title="Error Feedback Mechanism" collapse="false"}
 **Scenario**: We have a single parameter receiving small gradients over 5 training steps. We use aggressive compression that only transmits values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.).
 
 **Without Error Feedback** (Naive Compression):
@@ -1482,7 +1429,6 @@ This property—that compression error telescopes across time—is why error fee
 2. **Small gradients accumulate**: Individual gradients of 0.3–0.4 were too small to transmit alone, but they accumulated until crossing the threshold.
 3. **Error oscillates around zero**: The error buffer $e_t$ does not grow unboundedly—it oscillates as gradients are "paid back" through transmission.
 4. **Convergence preserved**: Over time, the model receives approximately the correct total gradient, just with some delay.
-:::
 
 ### 1-bit Adam: Compression-Aware Optimization {#sec-communication-1bit-adam}
 
@@ -1496,7 +1442,6 @@ Microsoft reported that 1-bit Adam achieves 3.5$\times$ communication volume red
 
 The success of 1-bit Adam illustrates a broader principle: compression is most effective when it is co-designed with the optimization algorithm. Compressing raw gradients discards information indiscriminately. Compressing optimizer states exploits the structure of the optimization trajectory, achieving higher compression ratios with less convergence impact.
 
-::: {.callout-checkpoint title="Gradient Compression Decisions" collapse="false"}
 
 Verify your understanding of when and how to apply gradient compression:
 
@@ -1505,7 +1450,6 @@ Verify your understanding of when and how to apply gradient compression:
 - [ ] Can you derive the steady-state behavior of the error accumulator $e_t$ when the true gradient is constant at $g = 0.3$ and the compression threshold is 0.5?
 - [ ] When would you choose Top-K sparsification over quantization? Consider the trade-off between compression ratio and the overhead of encoding sparse indices.
 
-:::
 
 ### Compression Trade-offs: Bandwidth vs. Convergence {#sec-communication-collective-operations-compression-tradeoffs}
 
@@ -1608,7 +1552,6 @@ In practice, the distinction between these libraries is often less about choosin
 
 The existence of multiple communication libraries for different hardware platforms reinforces a central theme of this chapter: the algorithms (Ring, Tree, hierarchical) and the techniques (compression, overlap) are universal, but their efficient implementation requires intimate knowledge of the underlying hardware. The $\alpha$-$\beta$ parameters that govern algorithm selection differ between NVLink, Infinity Fabric, and Intel's interconnects, and the optimal bucket sizes, channel counts, and overlap strategies differ accordingly. The communication library is the layer that bridges this gap, translating universal algorithmic principles into hardware-specific execution plans.
 
-::: {.callout-perspective title="Debugging Communication Bottlenecks"}
 
 When a distributed training job runs slower than expected, the communication library provides the first diagnostic signals. The following systematic approach isolates whether the bottleneck is in computation, communication, or their interaction:
 
@@ -1622,7 +1565,6 @@ When a distributed training job runs slower than expected, the communication lib
 
 5. **Isolate network vs. host overhead**: If `nccl-tests` shows low bandwidth, the issue is network-level (bad cables, congestion, misconfigured routing). If `nccl-tests` shows full bandwidth but training is slow, the issue is host-level (insufficient overlap, small bucket sizes, CPU bottlenecks in data loading).
 
-:::
 
 ## Communication-Computation Overlap {#sec-communication-overlap}
 
@@ -1724,7 +1666,6 @@ overlap_savings_pct_str    = OverlapBudgetCalc.overlap_savings_pct_str
 exposed_per_layer_ms_str   = OverlapBudgetCalc.exposed_per_layer_ms_str
 ```
 
-::: {.callout-notebook title="Overlap Budget for a 7B Transformer" collapse="false"}
 
 **Problem**: A 32-layer transformer model (7B parameters) is trained on 64 GPUs. Each layer's backward pass takes 15 ms. The hierarchical AllReduce for each layer's gradients (~880 MB per layer) takes `{python} allreduce_per_layer_ms_str` ms using 100 MB buckets. What is the step time with and without overlap?
 
@@ -1740,11 +1681,9 @@ $T_{pipelined} = T_{backward} + T_{first\_layer\_comm} + (N_{layers} - 1) \times
 
 **The Systems Insight**: Overlap reduces total step time by `{python} overlap_savings_pct_str`%. The remaining exposed communication comes from the AllReduce being slower than the per-layer backward pass. To eliminate this residual, either increase the backward pass computation (larger batch size) or reduce AllReduce time (more aggressive compression, better topology). The overlap is most effective when $T_{backward\_per\_layer} > T_{AllReduce\_per\_layer}$.
 
-:::
 
 The combination of hierarchical AllReduce (reducing the volume of data to communicate), rail-optimized routing (maximizing the throughput of each communication operation), and layer-by-layer overlap (hiding the remaining communication behind computation) forms the complete communication optimization stack for production distributed training. Each technique addresses a different term in the performance equation: hierarchical algorithms reduce $M$, topology-aware routing maximizes effective $\beta$, and overlap amortizes $\alpha$ by running communication concurrently with computation. When all three are applied together, the communication overhead for a well-configured system falls to 5--15% of total step time, down from the 50--80% that a naive flat, synchronous approach would impose.
 
-::: {.callout-notebook}
 ## Napkin Math: The Overlap Budget
 Can we hide the communication cost of a 70B parameter model on 8 GPUs? Let's check the physics.
 1.  **Gradient Size:** 70B params$\times$ 2 bytes (FP16) = 140 GB.
@@ -1752,7 +1691,6 @@ Can we hide the communication cost of a 70B parameter model on 8 GPUs? Let's che
 3.  **Compute Time:** A typical forward/backward pass for a block of this size takes $\approx 2.1\text{s}$.
 4.  **Overlap Ratio:** $\frac{0.31\text{s}}{2.1\text{s}} \approx 15\%$.
 Since communication takes only 15% of the compute time, it fits comfortably within the backward pass "overlap budget," meaning the network cost effectively disappears.
-:::
 
 ## Fallacies and Pitfalls {#sec-communication-collective-operations-collective-operations-fallacies-pitfalls-9cd0}
 
@@ -1790,7 +1728,6 @@ We followed the gradient's journey through **Ring** and **Tree AllReduce** algor
 
 When even the fastest wires are not enough, **Gradient Compression** provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like **1-bit Adam** reduce communication volume by 4--1000$\times$. **Error Feedback** ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, **communication-computation overlap** through layer-by-layer pipelining and bucket fusion hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15% of total step time in well-configured systems.
 
-::: {.callout-takeaways title="Every Byte Has a Travel Cost"}
 
 * **The $\alpha$-$\beta$ model reveals the bottleneck**: The critical message size $n^* = \alpha \cdot \beta$ determines whether you should optimize software latency (small messages) or hardware bandwidth (large payloads). In practice, NCCL's effective $\alpha$ is 5--10$\times$ higher than wire-level latency.
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $O(N)$ latency; Tree AllReduce is latency-optimal ($O(\log N)$) but bandwidth-inefficient. Use the crossover formula $M_{crossover} \approx N \alpha \beta$ to choose.
@@ -1800,11 +1737,9 @@ When even the fastest wires are not enough, **Gradient Compression** provides th
 * **Overlap is the final multiplier**: Communication-computation pipelining through gradient hooks and bucket fusion can hide 90--95% of communication time behind backward pass computation for deep models.
 * **Topology discovery is not optional**: Modern libraries like NCCL dynamically map logical rings to physical wires to avoid "hot spots" and maximize bisection bandwidth. Misaligned rank-to-GPU mapping can degrade performance by 2--4$\times$.
 
-:::
 
 Throughout this chapter, we have seen how these communication traffic patterns change across our Lighthouse Archetypes.
 
-::: {.callout-lighthouse title="Communication Archetype Patterns"}
 The "Travel Manifest" for a gradient depends on the system's objective function and constraint regime. Each lighthouse archetype faces a distinct communication challenge, and the techniques developed in this chapter map to those challenges differently:
 
 | **Archetype**                        | **Primary Collective** | **Dominant Friction**           | **Optimization Strategy**                    |
@@ -1815,19 +1750,23 @@ The "Travel Manifest" for a gradient depends on the system's objective function 
 
 The key insight is that Archetype A and Archetype B, despite both operating at datacenter scale, face fundamentally different bottlenecks. **Archetype A (GPT-4 / Llama-3)** is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. **Archetype B (DLRM at Scale)** is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
 
-:::
 
 The communication patterns established in this chapter reveal that distributed training is fundamentally a network engineering problem disguised as a machine learning problem. The $\alpha$-$\beta$ model provides the analytical framework for reasoning about this problem: every communication design decision, from algorithm selection to compression to overlap, can be evaluated in terms of its effect on the latency and bandwidth terms. Understanding these models and techniques transforms practitioners from users of distributed frameworks into engineers who can diagnose bottlenecks, optimize topology configurations, and achieve the scaling efficiency that determines whether trillion-parameter training runs complete in weeks or months.
 
 As clusters grow from hundreds to tens of thousands of accelerators, the communication challenges intensify. The algorithms and techniques in this chapter remain the foundation, but their interaction with fault tolerance, scheduling, and multi-tenancy introduces additional complexity that the following chapters address.
 
-::: {.callout-chapter-connection title="From Logic to Resilience"}
 
 We have established the *logic* of the fleet (Parallelism) and the *traffic patterns* that sustain it (Communication). We have the map and the vehicles. In the real world, however, the "roads" are constantly crumbling. GPUs overheat, networks drop packets, and nodes fail mid-calculation.
 
 In **Fault Tolerance** (@sec-fault-tolerance-reliability), we examine how to maintain the illusion of a perfect supercomputer on imperfect hardware. We move from the logic of movement to the mechanics of survival, exploring checkpointing, recovery, and elastic training.
 
-:::
+
+
+[^fn-allreduce-etymology]: **AllReduce**: A compound term from MPI (Message Passing Interface) indicating a **Reduce** operation (summing data from all nodes to one) followed by a **Broadcast** (sending the sum to all nodes). Ring-based AllReduce optimizes this by performing both phases simultaneously in $2(N-1)$ steps, ensuring that every GPU ends with the global sum without any single node becoming a bottleneck. \index{AllReduce!etymology}
+
+[^fn-zerocopy-rdma]: **Zero-Copy Communication**: RDMA (Remote Direct Memory Access) allows the NIC to transfer data directly from the application's memory on one node to the application's memory on another, bypassing the operating system's kernel buffers. For a 350 GB gradient exchange, zero-copy avoids moving 700 GB of data between the CPU and main memory, reclaiming significant memory bandwidth ($BW$). \index{Zero-Copy!RDMA}
+
+[^fn-speed-of-light-latency]: **The Speed of Light Constraint**: Light travels through optical fiber at approximately 200,000 km/s, or 200 meters per microsecond. In a massive datacenter where cables between racks span 100 meters, the "wire delay" alone contributes 500 ns to every message—a physical limit that no amount of better networking hardware can overcome. \index{Speed of Light!latency bound}
 
 ::: { .quiz-end }
 :::
