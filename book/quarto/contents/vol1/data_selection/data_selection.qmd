@@ -58,7 +58,7 @@ The practical consequences are enormous: compressing models and accelerating har
 ## Data Selection Fundamentals {#sec-data-selection-data-selection-fundamentals-e839}
 
 \index{Iron Law!Total Operations reduction via data selection}
-Data selection asks a deceptively simple question with profound engineering consequences: given a clean, well-engineered dataset, which examples contribute the most learning per unit of compute cost? The preceding chapter on data engineering (@sec-data-engineering) established the infrastructure for collecting, cleaning, and preparing data, producing pipelines that ingest raw signals and yield well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples, directly shrinking the **Total Operations ($O$)** term in the **Iron Law** (@sec-introduction-iron-law-ml-systems-c32a). The distinction matters: quality asks *whether* data is correct, while value asks *whether* correct data is worth the compute spent processing it.
+Data selection asks a deceptively simple question with profound engineering consequences: given a clean, well-engineered dataset, which examples contribute the most learning per unit of compute cost? The preceding chapter on data engineering (@sec-data-engineering) established the infrastructure for collecting, cleaning, and preparing data, producing pipelines that ingest raw signals and yield well-governed, versioned datasets ready for training. That chapter ensured data *quality* through correct labels, consistent schemas, and clean records. Data selection optimizes data *value* by extracting maximum learning from minimum samples, directly shrinking the **Total Operations ($O$)** term in the **Iron Law** (@pri-iron-law). The distinction matters: quality asks *whether* data is correct, while value asks *whether* correct data is worth the compute spent processing it.
 
 \index{Scaling Laws!data-compute asymmetry}
 For decades, the dominant strategy was straightforward: more data, better models. Scaling laws [@kaplan2020scaling; @hoffmann2022training] confirmed that model performance improves predictably with dataset size, and teams responded rationally by scraping more web pages, labeling more images, and generating more synthetic examples. A critical asymmetry has since emerged. Hardware acceleration (@sec-hardware-acceleration) has outpaced the growth of high-quality data. GPU compute capacity has increased faster than traditional Moore's Law projections (architectural innovations like Tensor Cores and reduced-precision arithmetic stack on top of process-node gains, yielding effective throughput improvements faster than every two years) while the supply of novel, high-quality human-generated text and images grows at roughly 2$\times$ every five years (@tbl-scaling-asymmetry). The internet has already been scraped. Domain experts cannot label faster. This asymmetry, which researchers call the **Data Wall**\index{Data Wall!definition}[^fn-data-wall-scaling] [@villalobos2022will], has inverted the optimization priority from "get more data" to "get more from existing data."
@@ -195,7 +195,7 @@ Each stage increases the *information density* of the data that reaches the mode
 
 1.  **Significance (Quantitative):** It identifies the smallest subset of data sufficient to define the decision boundary, reducing the **Total Operations ($O$)** of the Iron Law by eliminating redundant or noisy samples ($D_{vol}$) before they consume GPU cycles.
 2.  **Distinction (Durable):** Unlike **Data Engineering**, which focuses on the **Cleanliness** and **Consistency** of data, Data Selection focuses on the **Informativeness** and **Diversity** of the samples.
-3.  **Common Pitfall:** A frequent misconception is that more data is always better. In reality, it is the **Quality of the Samples** that matters: adding $10\times$ more low-quality data may yield less accuracy than $1.1\times$ carefully selected, high-quality data.
+3.  **Common Pitfall:** A frequent misconception is that more data is always better. In reality, it is the **Quality of the Samples** that matters: adding 10$\times$ more low-quality data may yield less accuracy than 1.1$\times$ carefully selected, high-quality data.
 
 :::
 
@@ -357,7 +357,7 @@ Consider training cost reduction: a `{python} dataset_reduction_pct_str`% reduct
 \index{Deduplication!storage and I/O cost reduction}
 \index{Active Learning!labeling cost reduction}
 \index{Green AI!data selection as energy reduction}
-These compute savings cascade through the entire infrastructure stack. Large datasets consume petabytes of storage and saturate network bandwidth during distributed training; deduplication and coreset selection reduce storage costs while eliminating I/O bottlenecks that can idle expensive GPU clusters. The savings extend to labeling economics: expert labeling costs (\$5--100+ per sample in domains like medical imaging) often exceed compute costs, and active learning and semi-supervised methods reduce labeling budgets by 10–100$\times$. The environmental implications compound further: training a large language model can emit hundreds of tons of CO₂, making data selection the most direct lever for Green AI, since halving the dataset halves training energy with no accuracy trade-off if done correctly. Smaller curated datasets also enable faster iteration velocity. A team that can iterate in hours rather than days has a compounding advantage in model development.
+These compute savings cascade through the entire infrastructure stack. Large datasets consume petabytes of storage and saturate network bandwidth during distributed training; deduplication and coreset selection reduce storage costs while eliminating I/O bottlenecks that can idle expensive GPU clusters. The savings extend to labeling economics: expert labeling costs (\$5--100+ per sample in domains like medical imaging) often exceed compute costs, and active learning and semi-supervised methods reduce labeling budgets by 10--100$\times$. The environmental implications compound further: training a large language model can emit hundreds of tons of CO₂, making data selection the most direct lever for Green AI, since halving the dataset halves training energy with no accuracy trade-off if done correctly. Smaller curated datasets also enable faster iteration velocity. A team that can iterate in hours rather than days has a compounding advantage in model development.
 
 These cascading benefits illustrate a broader point: where the ML researcher asks "what is the sample complexity of this learning problem?", the systems engineer asks "what is the cost-per-accuracy-point across the entire pipeline, from data acquisition through deployment?" This chapter equips you with the systems engineer's toolkit for that question: techniques to minimize total cost, metrics to quantify efficiency gains, and architectural patterns to implement data selection at scale.
 
@@ -439,9 +439,19 @@ plt.show()
 
 We can formalize this as the ICR:
 
-$$
+$
 \text{ICR} = \frac{\Delta \text{Model Performance}}{\Delta \text{FLOPs}}
-$$
+$
+
+### The ICR Frontier: When Data Becomes a Tax {#sec-data-selection-icr-frontier}
+
+The Information-Compute Ratio is not constant; it follows a law of diminishing returns. We define the **ICR Frontier**\index{ICR Frontier!diminishing returns} as the point where the marginal learning signal from additional data drops toward zero. 
+
+Mathematically, let $I(D)$ be the information content of a dataset of size $D$. In a redundant dataset, $I(D)$ often scales logarithmically ($\log D$) while the compute cost $C(D)$ scales linearly ($O \cdot D$). The resulting ICR follows @eq-icr-decay:
+
+$ \text{ICR}(D) = \frac{\frac{d}{dD} I(D)}{\frac{d}{dD} C(D)} \approx \frac{1/D}{O} = \frac{1}{O \cdot D} $ {#eq-icr-decay}
+
+This decay creates what we call **The Data Wall**\index{Data Wall!zero learning signal}. Beyond the frontier, adding more data yields near-zero learning but still costs linear compute. In this regime, data is no longer an asset; it is a **Data Tax**\index{Data Tax!redundant compute cost} that inflates the $O$ term of the **Iron Law** without improving the accuracy numerator of the **RoC** (Return on Compute, see @sec-introduction-roc-invariant). A systems engineer's goal is to keep the system operating at the "Knee" of the ICR curve, where the learning signal per FLOP is maximized. This motivates the static and dynamic selection techniques that follow.
 
 \index{Information-Compute Ratio!equivalence to hardware speedup}
 As detailed in the "Data Selection and the Iron Law" callout above, data selection turns the Total Operations ($O$) term from a fixed constant into a variable. By maximizing ICR, we reduce the total FLOPs required to reach a target performance level. A 2$\times$ improvement in ICR is mathematically equivalent to a 2$\times$ improvement in hardware Peak Throughput ($R_{peak}$), but often much cheaper to achieve. Note that ICR focuses specifically on the compute component of the broader Selection Efficiency metric defined earlier, which also accounts for acquisition, labeling, and storage costs.
@@ -1118,7 +1128,7 @@ The table reveals an important pattern: curriculum learning gains are *inversely
 
 Curriculum learning optimizes the order in which samples are presented but assumes all samples are already labeled. This assumption breaks down in specialized fields such as medical diagnosis, autonomous driving, and scientific research, where labeling requires domain expertise and can cost \$5–\$100 or more per sample. Rather than labeling everything upfront, **active learning**\index{Dynamic Selection!active learning}[^fn-active-learning-queries] [@settles2009active; @ren2021survey] shifts the optimization target: instead of choosing which labeled samples to train on, it chooses which unlabeled samples are worth labeling at all.
 
-[^fn-active-learning-queries]: **Active Learning**: The "active" component is the learning algorithm itself selecting which unlabeled samples a human expert should label next. This reframes the problem from a computational optimization (training on given data) to a financial one: maximizing model improvement per dollar spent on expert labeling. Forcing the model to query only the most informative examples can yield a 10–100$\times$ reduction in labeling costs compared to random sampling. \index{Active Learning!label cost reduction}
+[^fn-active-learning-queries]: **Active Learning**: The "active" component is the learning algorithm itself selecting which unlabeled samples a human expert should label next. This reframes the problem from a computational optimization (training on given data) to a financial one: maximizing model improvement per dollar spent on expert labeling. Forcing the model to query only the most informative examples can yield a 10--100$\times$ reduction in labeling costs compared to random sampling. \index{Active Learning!label cost reduction}
 
 Unlike static pruning, which discards samples permanently, active learning maintains an unlabeled pool and queries it strategically over time. Follow the cycle in @fig-active-learning-loop: the model's current uncertainty determines what gets labeled next, creating a feedback loop where each labeling round improves the model's ability to identify what it still needs to learn.
 
@@ -1353,7 +1363,7 @@ Consistency regularization[^fn-consistency-reg-ssl] takes a different angle by e
 \index{Label Propagation!graph-based semi-supervised}
 Label propagation offers a third paradigm through graph-based reasoning: construct a similarity graph over all samples and propagate labels from labeled nodes to their neighbors. This approach works particularly well when the feature space exhibits clear cluster structure.
 
-The systems trade-off in semi-supervised learning is straightforward: it typically achieves the same accuracy as fully supervised training with 5–10$\times$ fewer labels but requires more compute because training processes both labeled and unlabeled samples. Since labeling costs often dominate compute costs in production settings, this trade-off is usually favorable. The results of *FixMatch on CIFAR-10* illustrate this label efficiency concretely.
+The systems trade-off in semi-supervised learning is straightforward: it typically achieves the same accuracy as fully supervised training with 5--10$\times$ fewer labels but requires more compute because training processes both labeled and unlabeled samples. Since labeling costs often dominate compute costs in production settings, this trade-off is usually favorable. The results of *FixMatch on CIFAR-10* illustrate this label efficiency concretely.
 
 ```{python}
 #| label: fixmatch-calc
@@ -1477,7 +1487,7 @@ An `{python} cost_reduction_str`$\times$ cost reduction for ~`{python} acc_loss_
 
 These gains are substantial, but semi-supervised learning is not universally applicable. The technique assumes that unlabeled data comes from the same distribution as labeled data, and it struggles when unlabeled data contains out-of-distribution samples (the model confidently mislabels them), when class imbalance is severe (pseudo-labels amplify majority class bias), or when the labeled set does not cover all classes (preventing label propagation for unseen classes). Always validate on a held-out set with true labels to catch distribution mismatch.
 
-Despite these limitations, semi-supervised learning reduces label requirements by 5–10$\times$ while maintaining accuracy. We have now progressively reduced labeling demands through a clear trajectory: coreset selection and deduplication prune low-value samples before training; curriculum learning optimizes the order of presentation during training; active learning queries only the most informative samples for human annotation; and semi-supervised learning exploits unlabeled data to stretch those annotations further. Each technique has pushed the label requirement lower, but none has eliminated it. This raises a deeper question: do we need *any* task-specific labels at all? What if the structure of data itself---that cat images resemble other cat images and coherent sentences follow grammatical patterns---could provide the supervision signal?
+Despite these limitations, semi-supervised learning reduces label requirements by 5--10$\times$ while maintaining accuracy. We have now progressively reduced labeling demands through a clear trajectory: coreset selection and deduplication prune low-value samples before training; curriculum learning optimizes the order of presentation during training; active learning queries only the most informative samples for human annotation; and semi-supervised learning exploits unlabeled data to stretch those annotations further. Each technique has pushed the label requirement lower, but none has eliminated it. This raises a deeper question: do we need *any* task-specific labels at all? What if the structure of data itself---that cat images resemble other cat images and coherent sentences follow grammatical patterns---could provide the supervision signal?
 
 ## Self-Supervised Learning {#sec-data-selection-selfsupervised-learning-7518}
 
@@ -1602,7 +1612,7 @@ Training each classifier from scratch would require substantial investment in bo
 
 The fine-tuning approach restructures these costs. Pre-training requires a one-time investment of `{python} cost_pretrain_value_str` GPU-hours on unlabeled data, but this cost is paid only once. Fine-tuning each task then requires just `{python} labels_per_task_finetune_str` labels (`{python} label_cost_finetune_total_str` total across all ten tasks) and only `{python} cost_finetune_value_str` GPU-hours of compute. Each task reaches deployment in 1–2 weeks after pre-training completes.
 
-The return on investment is substantial across every dimension: labeling costs drop by **`{python} label_cost_drop_str`$\times$** (from `{python} label_cost_scratch_total_str` to `{python} label_cost_finetune_total_str`), per-task marginal compute decreases by **`{python} marginal_compute_reduction_str`$\times$**, and time to deployment accelerates by **20–50$\times$** per task.
+The return on investment is substantial across every dimension: labeling costs drop by **`{python} label_cost_drop_str`$\times$** (from `{python} label_cost_scratch_total_str` to `{python} label_cost_finetune_total_str`), per-task marginal compute decreases by **`{python} marginal_compute_reduction_str`$\times$**, and time to deployment accelerates by **20--50$\times$** per task.
 
 This explains *why* the fine-tuning paradigm dominates production ML. The pre-training cost is high but amortized across many downstream applications, while fine-tuning cost remains low on a per-task basis.
 
@@ -1761,7 +1771,7 @@ Rather than hand-designing these augmentation policies, AutoAugment[^fn-autoaugm
 These learned augmentation policies are particularly effective for resource-constrained models, where overfitting risk is highest. The MobileNet lighthouse illustrates this principle: when model capacity is deliberately reduced for edge deployment, augmentation becomes the primary defense against overfitting.
 
 ::: {.callout-lighthouse title="MobileNet and Aggressive Augmentation"}
-Our **MobileNet Lighthouse model** (@sec-network-architectures) exemplifies how data augmentation compensates for model capacity constraints. MobileNet's depthwise separable convolutions reduce parameters by 8–9$\times$ compared to standard convolutions, but this efficiency comes at a cost: smaller models are more prone to overfitting on limited data.
+Our **MobileNet Lighthouse model** (@sec-network-architectures) exemplifies how data augmentation compensates for model capacity constraints. MobileNet's depthwise separable convolutions reduce parameters by 8--9$\times$ compared to standard convolutions, but this efficiency comes at a cost: smaller models are more prone to overfitting on limited data.
 
 The solution is **aggressive augmentation**. MobileNet training typically uses stronger augmentation than ResNet-50 training, including RandAugment with higher magnitude, more aggressive cropping, and longer training schedules. The augmentation effectively increases dataset diversity without increasing model capacity, allowing MobileNet to achieve near-ResNet accuracy at a fraction of the parameter count. For edge deployment where both data collection and model size are constrained, augmentation is essential rather than optional.
 :::
@@ -1894,7 +1904,7 @@ The preceding sections examined selection techniques across all three pipeline s
 |:----------------------------|:-----------------|:------------------------------------------------------|--------------------------------------:|
 | **1. Static Pruning**       | Before training  | Coreset Selection, Deduplication, Quality Filtering   |              30–50% dataset reduction |
 | **2. Dynamic Selection**    | During training  | Curriculum Learning, Active Learning, Semi-Supervised |             10–30% faster convergence |
-| **3. Synthetic Generation** | On-demand        | Augmentation, Generative Models, Distillation         | 2–10$\times$ effective data expansion |
+| **3. Synthetic Generation** | On-demand        | Augmentation, Generative Models, Distillation         | 2--10$\times$ effective data expansion |
 
 : **Three-Stage Data Selection Pipeline.** Each stage increases ICR by different mechanisms: pruning removes low-value samples, dynamic selection focuses compute on high-value samples, and synthesis creates new high-value samples. {#tbl-data-selection .striped .hover}
 
@@ -2176,7 +2186,7 @@ trap_pct_str = SelectionInequalityCalc.trap_pct_str
 **Option A: Full Model Selection**
 
 - Score all 1M images with your target ResNet-50: 1M$\times$ 0.01 s = **`{python} score_a_str` seconds** (`{python} score_a_hrs_str` hours)
-- Train on 100k coreset for 100 epochs: 100k$\times$ 100$\times$ 0.01 s = **`{python} train_a_str` seconds** (`{python} train_a_hrs_str` hours)
+- Train on 100k coreset for 100 epochs: 100k$\times$ $100\times0.01$ s = **`{python} train_a_str` seconds** (`{python} train_a_hrs_str` hours)
 - **Total: `{python} total_a_hrs_str` hours**
 
 **Option B: Proxy Model Selection**
@@ -2187,7 +2197,7 @@ trap_pct_str = SelectionInequalityCalc.trap_pct_str
 
 **Baseline: No Selection**
 
-- Train on full 1M dataset for 100 epochs: 1M$\times$ 100$\times$ 0.01 s = **`{python} baseline_str` seconds** (`{python} baseline_hrs_str` hours)
+- Train on full 1M dataset for 100 epochs: 1M$\times$ $100\times0.01$ s = **`{python} baseline_str` seconds** (`{python} baseline_hrs_str` hours)
 
 **Analysis**:
 
@@ -2478,7 +2488,7 @@ effective_throughput_str = DataEchoingRoi.effective_throughput_str
 **Without Echoing**:
 
 - Effective throughput: `{python} pipeline_throughput_str` images/second (limited by data pipeline)
-- Training time for 90 epochs: 90$\times$ 1.28M / `{python} pipeline_throughput_str` = **`{python} no_echo_sec_str` seconds (`{python} no_echo_hrs_str` hours)**
+- Training time for 90 epochs: $90\times1.28$M / `{python} pipeline_throughput_str` = **`{python} no_echo_sec_str` seconds (`{python} no_echo_hrs_str` hours)**
 - GPU utilization: ~`{python} gpu_util_str`%
 
 **With Echo Factor $e$ = `{python} echo_factor_str`**:
@@ -2486,7 +2496,7 @@ effective_throughput_str = DataEchoingRoi.effective_throughput_str
 - Each batch is processed twice with different augmentations
 - Effective throughput: `{python} effective_throughput_str` images/second (still below GPU capacity)
 - Unique images per second: `{python} pipeline_throughput_str` (unchanged)
-- Training time: 90$\times$ 1.28M / `{python} effective_throughput_str` = **`{python} echo_sec_str` seconds (`{python} echo_hrs_str` hours)** if echoed data is equally valuable
+- Training time: $90\times1.28$M / `{python} effective_throughput_str` = **`{python} echo_sec_str` seconds (`{python} echo_hrs_str` hours)** if echoed data is equally valuable
 
 **Echoed data has diminishing returns**: Research shows echoed samples provide approximately 70–90% of the value of fresh samples, depending on augmentation diversity. Empirically, Choi et al. measured a **3.25$\times$ speedup** on ResNet-50 ImageNet training when reading data over a network, with minimal accuracy degradation.
 
@@ -2494,7 +2504,7 @@ effective_throughput_str = DataEchoingRoi.effective_throughput_str
 
 1. Augmentation is diverse (each echo sees different transforms)
 2. The dataset is already somewhat redundant
-3. The echo factor $e$ stays below the critical threshold (~$4\times$ for ImageNet)
+3. The echo factor $e$ stays below the critical threshold (~4$\times$ for ImageNet)
 
 Above this threshold, the model starts memorizing and accuracy degrades.
 :::
@@ -2630,7 +2640,7 @@ The challenge lies in quantifying both sides accurately. Different techniques of
 |:----------------------|:--------------------------------------------------------|:-------------------------------------------------------------|
 | **Deduplication**     | One-time compute for hashing + infrastructure           | Reduced storage, fewer epochs for same accuracy              |
 | **Coreset Selection** | Proxy model training + selection compute                | Train on 10–50% of data with minimal accuracy loss           |
-| **Active Learning**   | Inference on unlabeled pool + human-in-the-loop latency | 2–10$\times$ reduction in labeling budget for same acc.      |
+| **Active Learning**   | Inference on unlabeled pool + human-in-the-loop latency | 2--10$\times$ reduction in labeling budget for same acc.      |
 | **Data Augmentation** | CPU/GPU cycles for transforms                           | Effective dataset size increase without new data acquisition |
 
 : **ROI Profiles for Data Selection Techniques.** Each technique occupies a different point in the investment-versus-savings space. Deduplication offers the lowest-risk entry point (minimal investment, guaranteed returns), while active learning offers the highest potential savings but requires the most infrastructure. {#tbl-roi-profiles .striped .hover}
@@ -2994,13 +3004,13 @@ t_total_overhead_str = DistributedOverheadCalc.t_total_overhead_str
 4. **Selection phase** (centralized): Coordinator collects top-20% scores from each worker, re-ranks globally, selects final 10%
 5. **Broadcast**: Selected indices distributed to all workers for training
 
-**Performance** (measured on $8\times$ A100 cluster):
+**Performance** (measured on 8$\times$ A100 cluster):
 
 - Embedding: `{python} t_embed_str` (parallel)
 - Deduplication: `{python} t_dedup_str` (distributed hash join)
 - Scoring: `{python} t_score_str` (parallel, 5 epochs proxy training)
 - Selection: `{python} t_select_str` (centralized)
-- **Total overhead: `{python} t_total_overhead_str`** for $10\times$ training speedup
+- **Total overhead: `{python} t_total_overhead_str`** for 10$\times$ training speedup
 
 **System Implication:** The `{python} t_total_overhead_str` selection overhead pays for itself if full training takes >12 hours. For ImageNet with modern architectures, full training is ~24 hours, so coreset selection has clear positive ROI.
 :::

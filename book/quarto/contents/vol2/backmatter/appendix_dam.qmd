@@ -1,0 +1,259 @@
+---
+engine: jupyter
+---
+
+# Single-Machine Foundations (D·A·M) {#sec-dam-taxonomy}
+
+## Purpose {.unnumbered}
+
+_Before engineering the fleet, we must master the single machine. Where do you look first when a single node fails: the data path, the algorithm, or the machine?_
+
+In production, "it's slow" and "it's wrong" are rarely informative symptoms. A serving stack can miss its latency Service Level Objective (SLO) because the GPU is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). The **C$^3$ Taxonomy** (@sec-c3-taxonomy) extends these diagnostics to the distributed fleet, but it relies on a firm foundation of single-node performance. Without understanding the D·A·M taxonomy, teams often optimize the wrong thing—buying faster GPUs to fix a slow input pipeline, or rewriting kernels when the model is simply too large for the latency budget.
+
+This appendix provides a compact diagnostic framework—**Data · Algorithm · Machine (D·A·M)**—and shows how to map single-machine symptoms and measurements to the term of the Iron Law that dominates. Use it as your foundational checklist before moving to fleet-scale optimization.
+
+## How to Use This Appendix {.unnumbered}
+
+This appendix is designed as a reference for single-node performance. Start with the scorecard-style metrics, form a hypothesis about which axis dominates, and then pick the tool that can confirm (or falsify) that hypothesis.
+
+When training is slow on a single GPU, check utilization, data wait time, and MFU, then map each to its Data, Algorithm, or Machine axis. When serving misses a latency target, identify whether you are latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure you are improving the dominant term, not polishing a non-bottleneck.
+
+```{python}
+#| echo: false
+#| label: appendix-dam-setup
+from mlsys.constants import (
+    H100_FLOPS_FP16_TENSOR, TFLOPs, second, flop, GB, byte,
+    BILLION, MILLION, THOUSAND, MS_PER_SEC
+)
+from mlsys.formatting import fmt, md, md_frac, md_math, sci_latex, check
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# Scenarios: GPU Utilization, Iron Law Analysis, Scaling Discrepancy
+
+class DAMTaxonomy:
+    """
+    Namespace for D·A·M Taxonomy diagnostic examples.
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Exercise 1: Starving GPU
+    ex1_gpu_util_pct = 25
+    ex1_disk_sat_pct = 100
+
+    # Exercise 2: Iron Law (7B Model Inference)
+    ex2_params = 7 * BILLION
+    ex2_latency_s = 0.050
+    ex2_bytes_per_param = 2 # FP16
+    ex2_flops_per_param = 2 # Fwd pass
+    h100_fp16_tflops_peak = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+
+    # Exercise 3: Scaling Law
+    ex3_loss_start = 0.45
+    ex3_loss_end = 0.42
+    ex3_chin_pred_pct = 15
+
+    # Exercise 4: Hardware Upgrade
+    ex4_gpu_old_n = 4
+    ex4_gpu_new_n = 8
+    ex4_cost_k = 200
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Exercise 2 logic
+    ex2_flops_per_pass = (ex2_params * ex2_flops_per_param * flop).m_as(TFLOPs)
+    ex2_achieved_tflops = ex2_flops_per_pass / ex2_latency_s
+    ex2_util = (ex2_achieved_tflops / h100_fp16_tflops_peak) * 100
+    ex2_model_size_gb = (ex2_params * ex2_bytes_per_param * byte).m_as(GB)
+
+    # Exercise 3 logic
+    ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    ex1_gpu_util_str = f"{ex1_gpu_util_pct}"
+    ex1_disk_sat_str = f"{ex1_disk_sat_pct}"
+
+    ex2_params_str = "7B"
+    ex2_flops_per_pass_str = f"{ex2_flops_per_pass:.3f}"
+    ex2_latency_ms_str = f"{int(ex2_latency_s * MS_PER_SEC)}"
+    ex2_achieved_str = fmt(ex2_achieved_tflops, precision=2, commas=False)
+    ex2_util_str = fmt(ex2_util, precision=2, commas=False)
+    h100_fp16_tflops_str = f"{int(h100_fp16_tflops_peak)}"
+    ex2_model_size_gb_str = f"{ex2_model_size_gb:.0f}"
+
+    ex2_achieved_eq = md(
+        f"$$	ext{{Achieved FLOP/s}} = \frac{{{ex2_flops_per_pass_str} 	ext{{ TFLOPs}}}}"
+        f"{{0.050 	ext{{ s}}}} = {ex2_achieved_str} 	ext{{ TFLOP/s}}$$"
+    )
+    ex2_util_eq = md(
+        f"$$\eta = \frac{{{ex2_achieved_str}}}{{{int(h100_fp16_tflops_peak)}}} \approx {ex2_util_str}\%$$"
+    )
+
+    ex3_params_start_str = "125M"
+    ex3_params_end_str = "1B"
+    ex3_scale_factor = 8
+    ex3_imp_str = f"{ex3_imp_pct:.1f}"
+    ex3_chin_pred_str = f"{ex3_chin_pred_pct}"
+
+    ex4_gpu_old_str = f"{ex4_gpu_old_n}$	imes$ A100"
+    ex4_gpu_new_str = f"{ex4_gpu_new_n}$	imes$ H100"
+    ex4_cost_str = f"${ex4_cost_k}K"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+ex1_gpu_util_str = DAMTaxonomy.ex1_gpu_util_str
+ex1_disk_sat_str = DAMTaxonomy.ex1_disk_sat_str
+ex2_params_str = DAMTaxonomy.ex2_params_str
+ex2_flops_per_pass_str = DAMTaxonomy.ex2_flops_per_pass_str
+ex2_latency_ms_str = DAMTaxonomy.ex2_latency_ms_str
+ex2_achieved_str = DAMTaxonomy.ex2_achieved_str
+ex2_util_str = DAMTaxonomy.ex2_util_str
+h100_fp16_tflops_str = DAMTaxonomy.h100_fp16_tflops_str
+ex2_model_size_gb_str = DAMTaxonomy.ex2_model_size_gb_str
+ex2_achieved_eq = DAMTaxonomy.ex2_achieved_eq
+ex2_util_eq = DAMTaxonomy.ex2_util_eq
+ex3_params_start_str = DAMTaxonomy.ex3_params_start_str
+ex3_params_end_str = DAMTaxonomy.ex3_params_end_str
+ex3_scale_factor = DAMTaxonomy.ex3_scale_factor
+ex3_imp_str = DAMTaxonomy.ex3_imp_str
+ex3_chin_pred_str = DAMTaxonomy.ex3_chin_pred_str
+ex3_loss_start = DAMTaxonomy.ex3_loss_start
+ex3_loss_end = DAMTaxonomy.ex3_loss_end
+ex4_gpu_old_str = DAMTaxonomy.ex4_gpu_old_str
+ex4_gpu_new_str = DAMTaxonomy.ex4_gpu_new_str
+ex4_cost_str = DAMTaxonomy.ex4_cost_str
+```
+
+::: {.callout-tip title="Learning Objectives"}
+By the end of this appendix, you will be able to:
+
+- **Classify** any single-machine bottleneck into one of three MECE categories: Data, Algorithm, or Machine.
+- **Map** optimization techniques to their D·A·M intersection zone to understand which axes they span.
+- **Apply** the **Iron Law** equation to quantitatively diagnose performance problems.
+- **Distinguish** between memory-bound and compute-bound workloads using **Arithmetic Intensity**.
+- **Select** appropriate profiling tools and optimization strategies for each D·A·M axis.
+- **Evaluate** system health using the D·A·M Scorecard metrics (I/O Overhead, Active Params, MFU).
+:::
+
+The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, ask: *where is the flow blocked?* This taxonomy enables practitioners to isolate the bottleneck to one of three mutually exclusive and collectively exhaustive (MECE[^fn-mece]) axes.
+
+[^fn-mece]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. Applied to systems engineering, MECE ensures that every bottleneck maps to exactly one D·A·M axis, preventing both diagnostic gaps and double-counting.
+
+## Diagnostic Summary {#sec-dam-taxonomy-diagnostic-summary}
+
+The taxonomy maps directly to the **Iron Law of ML Systems**, introduced in @sec-vol2-introduction-notation. @tbl-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
+
+| **Axis**          | **Role**                   | **Physical Constraint** | **High-Leverage Optimization**                     |
+|:------------------|:---------------------------|:------------------------|:---------------------------------------------------|
+| **Data (D)**      | **Information** (The Fuel) | Bandwidth ($BW$)        | I/O Pipeline Optimization                          |
+| **Algorithm (A)** | **Logic** (The Blueprint)  | Operations ($O$)        | Model Compression                                  |
+| **Machine (M)**   | **Physics** (The Engine)   | Throughput ($R_{peak}$) | Hardware Acceleration                              |
+
+: **D·A·M Axis Reference.** Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint is binding, then follow the optimization lever. {#tbl-dam-components-ref}
+
+## Iron Law Mapping {#sec-dam-taxonomy-iron-law-mapping}
+
+The performance of any ML task is governed by the distribution of work across the D·A·M axes. The Iron Law Mapping reveals which component's variables dominate the execution time:
+
+$$ T = \underbrace{ \frac{D_{vol}}{BW} }_{	ext{Data (D)}} + \underbrace{ \frac{O}{R_{peak} \cdot \eta} }_{	ext{Algorithm (A) / Machine (M)}} + \underbrace{ L_{lat} }_{	ext{Overhead}} $$
+
+Note that Algorithm and Machine share the compute term; they are separated by which variable you control. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{peak}$) or utilization ($\eta$) is a **Machine** lever.
+
+### D·A·M Coordination: From Sum to Max {#sec-dam-taxonomy-dam-coordination-sum-max}
+
+The additive Iron Law represents **sequential execution**—the worst case where Data, Algorithm, and Machine take turns. Skilled systems engineering transforms the sum into a max:
+
+$$ T_{sequential} = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat} \quad \xrightarrow{	ext{overlap}} \quad T_{pipelined} = \max\left(\frac{D_{vol}}{BW}, \frac{O}{R_{peak} \cdot \eta}ight) + L_{lat} $$
+
+The systems engineer's job is to make these components run in parallel, not in series. @tbl-dam-overlap summarizes key D·A·M Coordination techniques:
+
+| **Technique**           | **D·A·M Axes Overlapped**    | **Implementation**                                   |
+|:------------------------|:-----------------------------|:-----------------------------------------------------|
+| **Prefetching**         | D overlaps M                 | DataLoader with `prefetch_factor`, `pin_memory=True` |
+| **CUDA Streams**        | D overlaps M                 | Separate streams for H2D transfer and compute        |
+| **Async Gradient Sync** | M (communication) overlaps A | Overlap AllReduce with next forward pass             |
+| **Double Buffering**    | D overlaps M                 | Fill buffer N+1 while computing on buffer N          |
+
+: **D·A·M Overlap Techniques.** Each technique allows one D·A·M axis to execute while another is in flight, converting the Iron Law's additive terms into overlapped terms. {#tbl-dam-overlap}
+
+## Arithmetic Intensity Boundary {#sec-dam-taxonomy-arithmetic-intensity-boundary}
+
+The boundary between **Data** (Memory-Bound) and **Machine** (Compute-Bound) is not arbitrary; it is defined mathematically by the **Arithmetic Intensity**[^fn-arith-intensity] ($I$) of the workload.
+
+[^fn-arith-intensity]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOPs/byte). It determines whether a workload is memory-bound or compute-bound by comparison against the hardware's *ridge point* ($R_{peak}/BW$).
+
+*   **If GPU Utilization $<$ 80%**: You are likely **Data Bound** (or CPU bound). The accelerator is starving.
+*   **If GPU Utilization $>$ 95%**: You are likely **Machine Bound**. The accelerator is fully saturated.
+*   **If Batch Size is 1**: You are likely **Latency Bound** (Algorithm overhead dominates).
+*   **If Arithmetic Intensity $<$ 100 FLOPs/byte**: You are likely **Memory Bound** (Data/Machine boundary).
+
+### Bottleneck Diagnostic {#sec-dam-taxonomy-bottleneck-diagnostic}
+
+Once you identify the bottleneck, @tbl-bottleneck-actions tells you what to do—and what NOT to do:
+
+| **If You're...**  | **Dominant Term**         | **Optimization That Works**                               | **Optimization That's Wasted**                     |
+|:------------------|:--------------------------|:----------------------------------------------------------|:---------------------------------------------------|
+| **Memory-Bound**  | $D_{vol}/BW$              | Quantization, pruning, batching, kernel fusion            | Faster GPU (more FLOP/s won't help)                |
+| **Compute-Bound** | $O/(R_{peak} \cdot \eta)$ | Better kernels, Tensor Cores, faster GPU, lower precision | More memory bandwidth (already saturated)          |
+| **Latency-Bound** | $L_{lat}$                 | Batching requests, kernel fusion, async dispatch          | Neither compute nor bandwidth (overhead dominates) |
+
+: **What Works vs. What's Wasted.** Optimizing the wrong term yields exactly zero improvement. A memory-bound model will not speed up from a faster GPU; the GPU will simply idle faster while waiting for memory. {#tbl-bottleneck-actions}
+
+## Tooling Map {#sec-dam-taxonomy-tooling-map}
+
+| **Axis**      | **Key Metric**                | **Primary Tool**        | **Secondary Tool**             |
+|:--------------|:------------------------------|:------------------------|:-------------------------------|
+| **Data**      | Batch Load Time               | `tqdm` (iterations/sec) | `iotop`, `dstat` (Disk I/O)    |
+| **Algorithm** | FLOPs, Model Depth            | PyTorch Profiler        | DeepSpeed Flops Profiler       |
+| **Machine**   | GPU Utilization, SM Occupancy | `nvidia-smi`            | Nsight Compute, Nsight Systems |
+
+: **D·A·M Tooling Map.** Profiling utilities for diagnosing bottlenecks along each D·A·M axis. {#tbl-dam-tooling}
+
+## D·A·M Scorecard {#sec-dam-taxonomy-dam-scorecard}
+
+Use the efficiency ratios in @tbl-dam-scorecard to grade your system's performance against its theoretical limit. This "Report Card" is anchored by **MFU**[^fn-mfu-scorecard]—the ratio of achieved model FLOPs to the hardware's theoretical peak FLOPs.
+
+[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: Measures only *useful* model computation, excluding overhead like gradient synchronization and memory management.
+
+| **Axis**      | **Metric**        | **Definition**                                         | **Failing Grade** | **Passing Grade** |
+|:--------------|:------------------|:-------------------------------------------------------|------------------:|------------------:|
+| **Data**      | **I/O Overhead**  | $\frac{	ext{Data Wait Time}}{	ext{Total Step Time}}$ |           $>$ 10% |            $<$ 1% |
+| **Algorithm** | **Active Params** | $\frac{	ext{Non-Zero Params}}{	ext{Total Params}}$   |      100% (Dense) |  $<$ 50% (Sparse) |
+| **Machine**   | **MFU**           | $\frac{	ext{Achieved FLOPs}}{	ext{Peak FLOPs}}$      |           $<$ 30% |           $>$ 50% |
+
+: **The D·A·M Efficiency Rubric.** Use these three numbers to characterize single-machine maturity. {#tbl-dam-scorecard}
+
+## Scaling the Taxonomy: From Node to Fleet {#sec-dam-taxonomy-scaling}
+
+The D·A·M taxonomy is the diagnostic baseline for a single machine. However, as we move from a single node to the **Machine Learning Fleet**, each axis undergoes a qualitative transformation. Understanding these "tie-ins" is essential for transitioning from local optimization to fleet-scale engineering.
+
+### The Evolution of Constraints {.unnumbered}
+
+| **Axis**          | **Node-Level Focus (D·A·M)** | **Fleet-Scale Transformation**                                                                                                   |
+|:------------------|:-----------------------------|:---------------------------------------------------------------------------------------------------------------------------------|
+| **Data (D)**      | I/O Bandwidth (Disk/PCIe)    | **The Communication Wall**: The bottleneck shifts from local storage to the **Bisection Bandwidth** of the network fabric.       |
+| **Algorithm (A)** | Model Depth/Ops Count        | **The Parallelism Strategy**: The logic now includes *how* we partition the math across $N$ devices (3D Parallelism).           |
+| **Machine (M)**   | Peak TFLOPS / HBM            | **The Power & Reliability Wall**: The constraint is no longer just silicon speed, but **Watts per rack** and cluster-wide **MTBF**. |
+
+### Bridging to C$^3$ {.unnumbered}
+
+While D·A·M diagnoses the *components* of a single node, the **C$^3$ Taxonomy** (@sec-c3-taxonomy) diagnoses the *interactions* of the fleet. 
+
+1.  **Computation ($C_1$)** inherits the **Algorithm** and **Machine** axes, but adds the loss of **Scaling Efficiency**.
+2.  **Communication ($C_2$)** inherits the **Data** axis, but is governed by the speed of light and network topology rather than just local I/O.
+3.  **Coordination ($C_3$)** is the "at scale" tie-in that has no single-node equivalent. It represents the **Coordination Tax**—the time spent on synchronization, checkpoints, and failure recovery that only emerges when you have a fleet.
+
+This progression ensures that single-node efficiency (high MFU) is never traded off for fleet-scale inefficiency (low scaling efficiency). We optimize the node to serve the fleet.
+
+## Summary {#sec-dam-taxonomy-summary}
+
+The D·A·M taxonomy provides the diagnostic baseline for every ML systems analysis. By isolating the bottleneck to Data, Algorithm, or Machine, practitioners ensure that optimization efforts target the binding constraint. This single-node discipline is the prerequisite for the fleet-scale engineering addressed in the rest of this volume.
+
+::: {.callout-takeaways title="Single-Machine Diagnostic Heuristics"}
+
+* **Identify the dominant axis** (Data, Algorithm, or Machine) before proposing any optimization.
+* **Profile Arithmetic Intensity** to quantitatively distinguish between Data-bound and Machine-bound regimes.
+* **Use the Iron Law** to transform vague symptoms into specific term-based bottlenecks.
+* **Grade with the D·A·M Scorecard** to standardize "good" performance before moving to fleet scale.
+
+:::

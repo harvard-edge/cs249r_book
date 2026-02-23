@@ -220,6 +220,13 @@ plt.show()
 
 *When* failure is inevitable, the key engineering decision is how often to save progress. Checkpointing too frequently wastes time on I/O; checkpointing too rarely wastes time re-computing work after a failure.
 
+::: {#nte-young-daly .callout-principle icon=false title="The Young-Daly Checkpoint Law"}
+**The Invariant**: The optimal checkpoint frequency balances the cost of writing the checkpoint ($T_{write}$) against the expected cost of reworking lost progress due to failures ($\text{MTBF}$).
+$$ \tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}} $$
+
+**The Implication**: Checkpointing is not "free." As cluster size grows, MTBF drops, forcing more frequent checkpoints. This demands high-bandwidth storage (Burst Buffers) to prevent I/O from dominating training time.
+:::
+
 The **Young-Daly formula**[^fn-young-daly-history] identifies the "sweet spot" that minimizes total wasted work.
 
 [^fn-young-daly-history]: **Young-Daly Formula**: J. W. Young derived the first-order optimal checkpoint interval in a 1974 *Communications of the ACM* paper; John Daly independently refined it in 2006 with tighter second-order bounds. The formula's square-root relationship ($\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}}$) means that halving MTBF only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth. \index{Young-Daly Formula!history}
@@ -2012,7 +2019,7 @@ To survive these inevitable hardware failures without catastrophic loss of compu
 
 If a training cluster loses power, how do we avoid losing the millions of dollars worth of gradient updates computed over the last month? We must periodically write the model's brain to durable storage. Checkpointing captures sufficient state to resume training from a recorded point: model parameters, optimizer state,[^fn-adam-state-memory] training progress indicators, and random state for reproducibility.
 
-[^fn-adam-state-memory]: **Adam Optimizer State**: Adam maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla SGD ($3\times$: parameters + two state vectors). For a `{python} gpt3_params_b`B parameter model, optimizer state alone reaches `{python} gpt3_adam_tb` TB, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design. \index{Adam Optimizer!checkpoint memory}
+[^fn-adam-state-memory]: **Adam Optimizer State**: Adam maintains per-parameter first-moment ($m$) and second-moment ($v$) estimates, tripling memory requirements compared to vanilla SGD (3$\times$: parameters + two state vectors). For a `{python} gpt3_params_b`B parameter model, optimizer state alone reaches `{python} gpt3_adam_tb` TB, which typically dominates checkpoint size and recovery time, making optimizer state the primary bottleneck in checkpoint I/O design. \index{Adam Optimizer!checkpoint memory}
 
 #### Checkpoint Interval from Failure Analysis {#sec-fault-tolerance-reliability-reliability-checkpoint-interval-failure-analysis-c28d}
 
@@ -2115,8 +2122,8 @@ This result demonstrates why failure analysis matters: without knowing the syste
 The Young-Daly formula provides valuable intuition but rests on assumptions that may not hold in practice:
 
 1. **Exponentially distributed failures**: Assumes constant failure rate. Real systems exhibit "bathtub curve" behavior with higher rates during burn-in and wear-out phases.
-2. **Deterministic checkpoint time**: Assumes $T_{save}$ is constant. In practice, checkpoint time varies 2–3$\times$ due to storage contention, network congestion, and memory pressure.
-3. **Recovery time equals checkpoint time**: Assumes recovery reads same data written during checkpoint. Often recovery takes 3–5$\times$ longer due to job scheduling delays, topology reconstruction, and warmup.
+2. **Deterministic checkpoint time**: Assumes $T_{save}$ is constant. In practice, checkpoint time varies 2--3$\times$ due to storage contention, network congestion, and memory pressure.
+3. **Recovery time equals checkpoint time**: Assumes recovery reads same data written during checkpoint. Often recovery takes 3--5$\times$ longer due to job scheduling delays, topology reconstruction, and warmup.
 4. **Single failure mode**: Assumes one failure at a time. Correlated failures (power, cooling, shared switch) violate this assumption.
 5. **Infinite timeline**: Optimal for long training runs. Short runs (where total time is comparable to MTBF) require different analysis.
 
@@ -2415,7 +2422,7 @@ The synchronous and asynchronous checkpointing approaches create different failu
 
 **Asynchronous checkpointing** reduces training disruption but requires tracking which workers have completed which checkpoints, adding complexity to recovery coordination. Workers snapshot their state to CPU memory or staging storage, then continue training while a background process writes the snapshot to persistent storage.[^fn-async-checkpoint-pipeline]
 
-[^fn-async-checkpoint-pipeline]: **Asynchronous Checkpointing**: Pipelines the checkpoint write behind training computation by staging GPU state to CPU memory via CUDA streams, then writing to storage on a background thread. DeepSpeed's implementation achieves near-zero checkpoint overhead when sufficient CPU staging memory is available, decoupling the checkpoint I/O latency from the training critical path at the cost of $2\times$ peak host memory consumption. \index{Asynchronous Checkpointing!pipeline overhead}
+[^fn-async-checkpoint-pipeline]: **Asynchronous Checkpointing**: Pipelines the checkpoint write behind training computation by staging GPU state to CPU memory via CUDA streams, then writing to storage on a background thread. DeepSpeed's implementation achieves near-zero checkpoint overhead when sufficient CPU staging memory is available, decoupling the checkpoint I/O latency from the training critical path at the cost of 2$\times$ peak host memory consumption. \index{Asynchronous Checkpointing!pipeline overhead}
 
 #### Checkpoint Storage and Recovery {#sec-fault-tolerance-reliability-reliability-checkpoint-storage-recovery-6634}
 
@@ -3416,7 +3423,7 @@ Organizations commonly set checkpoint intervals based on "feels right": "every h
 
 $$T_{opt} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \text{ minutes}$$
 
-The intuitive "every hour" is close but suboptimal. More critically, if checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2–3$\times$ from optimal in either direction.
+The intuitive "every hour" is close but suboptimal. More critically, if checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
 
 **Fallacy: MTBF assumes independent failures.**
 
@@ -3443,7 +3450,7 @@ While the Young-Daly formula accounts for checkpoint save time, practitioners of
 
 4. **Communication re-establishment**: NCCL ring topology reconstruction
 
-Total restart time can be 3–5$\times$ checkpoint save time. A 5-minute checkpoint save followed by 20-minute restart means effective failure cost is 25 minutes, not 5 minutes. The modified Young-Daly formula should use $T_{save} + T_{restart}$ for the overhead term, significantly increasing optimal checkpoint intervals.
+Total restart time can be 3--5$\times$ checkpoint save time. A 5-minute checkpoint save followed by 20-minute restart means effective failure cost is 25 minutes, not 5 minutes. The modified Young-Daly formula should use $T_{save} + T_{restart}$ for the overhead term, significantly increasing optimal checkpoint intervals.
 
 **Pitfall: Treating all failures as "restarts".**
 

@@ -204,7 +204,7 @@ The Deep Learning Recommendation Model (DLRM) was open-sourced by Meta to expose
 
 \index{Depthwise Separable Convolution!MobileNet}
 **MobileNet (Google, 2017)**\index{MobileNet}
-MobileNet [@howard2017mobilenets] challenged the trend of ever-larger models by prioritizing efficiency. It introduced depthwise separable convolutions, an architectural innovation that reduced computational cost (FLOPs) by 8–9$\times$ for $3 \times 3$ kernels with minimal accuracy loss, making it a prime candidate for quantization techniques covered in @sec-model-compression. It proved that model architecture could be co-designed with hardware constraints, becoming the standard for running vision models on smartphones and embedded devices where battery life and latency are critical.
+MobileNet [@howard2017mobilenets] challenged the trend of ever-larger models by prioritizing efficiency. It introduced depthwise separable convolutions, an architectural innovation that reduced computational cost (FLOPs) by 8--9$\times$ for $3 \times 3$ kernels with minimal accuracy loss, making it a prime candidate for quantization techniques covered in @sec-model-compression. It proved that model architecture could be co-designed with hardware constraints, becoming the standard for running vision models on smartphones and embedded devices where battery life and latency are critical.
 
 **Keyword Spotting (KWS) (Google/Arm, 2017)**\index{Keyword Spotting (KWS)}
 Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represent the extreme end of efficiency. Designed to run on "always-on" microcontrollers with kilobyte-scale memory and milliwatt power budgets, these models (often Depthwise Separable CNNs) exemplify the constraints of TinyML. They force engineers to count every byte and cycle, driving innovations in extreme quantization (int8/int4) and specialized hardware.
@@ -212,6 +212,76 @@ Keyword Spotting models (like those detecting "Hey Siri" or "Ok Google") represe
 ### Arithmetic Intensity Spectrum {#sec-network-architectures-understanding-arithmetic-intensity-ade5}
 
 The quantitative characteristics of these Lighthouse models expose a critical engineering constraint established in @sec-neural-computation: **arithmetic intensity**\index{Arithmetic Intensity!ops-per-byte ratio}. As we saw, this ratio of operations performed per byte of data moved determines whether a workload is compute-bound or memory-bound.
+
+```{python}
+#| label: workload-signatures-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WORKLOAD SIGNATURES: ARITHMETIC INTENSITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Workload Signatures" section
+# │
+# │ Goal: Quantify the Arithmetic Intensity (I) for Lighthouse Models.
+# │ Show: Why Transformers are memory-bound (I < 1) vs CNNs (I > 20).
+# │ How: Calculate FLOPs/byte ratio using FP32 sizes for consistency.
+# │
+# │ Imports: mlsys.formatting (fmt)
+# │ Exports: resnet_intensity_str, gpt2_intensity_str, mobilenet_intensity_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class WorkloadSignatures:
+    """
+    Namespace for Workload Signature calculation.
+    Scenario: Comparing Arithmetic Intensity across architectures (FP32).
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Values from LighthouseSpecs (approximated for pedagogical clarity)
+    resnet_flops = 4.1e9
+    resnet_bytes = 102e6 
+    
+    gpt2_flops_token = 3.0e9
+    gpt2_bytes = 6.0e9 # FP32 weights
+    
+    mobilenet_flops = 300e6
+    mobilenet_bytes = 14e6
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    resnet_i = resnet_flops / resnet_bytes
+    gpt2_i = gpt2_flops_token / gpt2_bytes
+    mobilenet_i = mobilenet_flops / mobilenet_bytes
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(resnet_i > gpt2_i * 50, f"ResNet intensity ({resnet_i:.1f}) should be >> GPT-2 ({gpt2_i:.1f}).")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    resnet_intensity_str = fmt(resnet_i, precision=1, commas=False)
+    gpt2_intensity_str = fmt(gpt2_i, precision=2, commas=False)
+    mobilenet_intensity_str = fmt(mobilenet_i, precision=1, commas=False)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+resnet_intensity_str = WorkloadSignatures.resnet_intensity_str
+gpt2_intensity_str = WorkloadSignatures.gpt2_intensity_str
+mobilenet_intensity_str = WorkloadSignatures.mobilenet_intensity_str
+```
+
+### Workload Signatures: The Arithmetic Intensity Table {#sec-network-architectures-workload-signatures}
+
+These bottlenecks are not accidental; they are the "signatures" of the underlying math. We quantify these signatures using **Arithmetic Intensity ($I$)**\index{Arithmetic Intensity ($I$)!lighthouse signatures}, defined as the ratio of floating-point operations performed per byte of data moved from main memory.
+
+@tbl-workload-signatures compares the signatures of our three primary Lighthouses. Notice the three-order-of-magnitude gap between ResNet and GPT-2:
+
+| **Model Family**     | **Lighthouse** | **Intensity ($I$)**              | **Hardware Affinity**         |
+|:---------------------|:---------------|:---------------------------------|:------------------------------|
+| **Dense CNN**        | **ResNet-50**  | ~`{python} resnet_intensity_str` | **Compute-Rich** (GPUs/TPUs)  |
+| **Efficient Vision** | **MobileNetV2**| ~`{python} mobilenet_intensity_str` | **Balanced** (Mobile NPUs)    |
+| **Transformer**      | **GPT-2 (Inf)**| ~`{python} gpt2_intensity_str`   | **Bandwidth-Rich** (HBM3/H100)|
+
+: **Lighthouse Workload Signatures**: The arithmetic intensity ($I$) of a model family determines its "natural" hardware home. High-intensity models like ResNet saturate the ALUs of a GPU, while low-intensity models like GPT-2 are perpetually "starved" for data, making memory bandwidth the only metric that matters for their performance. {#tbl-workload-signatures}
+
+This table provides the quantitative justification for architecture selection: you choose a Transformer not because it is "better" in the abstract, but because you are willing to pay the **Bandwidth Tax** (Invariant 6) in exchange for its relational flexibility. Conversely, you choose MobileNet when your "Machine" axis lacks the bandwidth to sustain a denser signature.
 
 ```{python}
 #| label: lighthouse-table-specs
@@ -456,13 +526,13 @@ The UAT sounds definitive: if MLPs are universal, *why* do we need specialized a
 
 *Representation capacity*\index{Representation Capacity} refers to the functions an architecture can express given unlimited resources; the UAT established above guarantees MLPs have universal representation capacity. This capacity is particularly effective because of the *manifold hypothesis*[^fn-manifold-hypothesis], which suggests that high-dimensional data actually occupies a much simpler structure. *Learnability*\index{Learnability} refers to whether gradient descent can find good weights given finite training samples and computational budgets. A function may be representable yet practically unlearnable.
 
-[^fn-manifold-hypothesis]: **Manifold Hypothesis**\index{Manifold Hypothesis}: The assumption that high-dimensional data lies on a low-dimensional surface embedded within the full space. A 256$\times$256 image lives in a `{python} MLPDim.mlp_256_dim_str`-dimensional space, but "valid cat images" occupy a tiny structured region. Deep networks progressively unfold this crumpled manifold into linearly separable representations. The systems consequence: if data truly occupied the full space, no architecture could learn from feasible dataset sizes -- the manifold structure is what makes finite training budgets sufficient. \index{Manifold Hypothesis!learnability}
+[^fn-manifold-hypothesis]: **Manifold Hypothesis**\index{Manifold Hypothesis}: The assumption that high-dimensional data lies on a low-dimensional surface embedded within the full space. A $256\times256$ image lives in a `{python} MLPDim.mlp_256_dim_str`-dimensional space, but "valid cat images" occupy a tiny structured region. Deep networks progressively unfold this crumpled manifold into linearly separable representations. The systems consequence: if data truly occupied the full space, no architecture could learn from feasible dataset sizes -- the manifold structure is what makes finite training budgets sufficient. \index{Manifold Hypothesis!learnability}
 
 This distinction resolves what appears to be a paradox: if MLPs are universal approximators, *why* has architectural innovation (ResNets, Transformers) driven deep learning progress? Specialized architectures improve learnability by embedding inductive biases that match data structure, even when doing so restricts representational capacity.
 
 Three factors create the learnability gap:
 
-1. **Sample complexity**\index{Sample Complexity}: The UAT provides no bounds on training examples needed. For 28$\times$ 28 images, an MLP treats `{python} MLPDim.mlp_28_dim_str` pixels independently, requiring exponentially many samples to learn spatial correlations. A CNN embeds locality bias, drastically reducing sample requirements. Mathematically, sample complexity can scale as $O(\exp(d))$ for MLPs but $O(\text{poly}(d))$ for architectures matching data structure.
+1. **Sample complexity**\index{Sample Complexity}: The UAT provides no bounds on training examples needed. For $28\times28$ images, an MLP treats `{python} MLPDim.mlp_28_dim_str` pixels independently, requiring exponentially many samples to learn spatial correlations. A CNN embeds locality bias, drastically reducing sample requirements. Mathematically, sample complexity can scale as $O(\exp(d))$ for MLPs but $O(\text{poly}(d))$ for architectures matching data structure.
 
 2. **Parameter efficiency**\index{Network Width}: The UAT guarantees *some* width suffices, but provides no constructive bounds. Required width can be exponential in input dimension: approximating $\sin(x_1) + \cdots + \sin(x_d)$ may require $O(\exp(d))$ MLP neurons versus $O(d)$ for architectures processing dimensions independently.
 
@@ -538,15 +608,15 @@ Consider classifying $28 \times 28$ MNIST digits (784 input pixels, 10 output cl
 **MLP Approach**:
 
 - Architecture: 784 → 4096 → 4096 → 10
-- Parameters: (784$\times$ 4096) + (4096$\times$ 4096) + (4096$\times$ 10) ≈ `{python} MLPvsCNN.mlp_params_str` parameters
+- Parameters: ($784\times4096$) + ($4096\times4096$) + ($4096\times10$) ≈ `{python} MLPvsCNN.mlp_params_str` parameters
 - Training: 60,000 examples (standard MNIST training set)
 - Test Accuracy: ~97-98%
 - Rationale: Treats every pixel independently. Must learn all spatial correlations from data alone. No prior knowledge about spatial structure.
 
 **CNN Approach**:
 
-- Architecture: Conv(32, 3$\times$ 3) → Pool → Conv(64, 3$\times$ 3) → Pool → FC(128) → 10
-- Parameters: (3$\times$ 3$\times$ 1$\times$ 32) + (3$\times$ 3$\times$ 32$\times$ 64) + (64$\times$ 7$\times$ 7$\times$ 128) + (128$\times$ 10) ≈ `{python} MLPvsCNN.cnn_params_str` parameters
+- Architecture: Conv(32, $3\times3$) → Pool → Conv(64, $3\times3$) → Pool → FC(128) → 10
+- Parameters: (3$\times$ 3$\times$ $1\times32$) + (3$\times$ 3$\times$ $32\times64$) + (64$\times$ 7$\times$ $7\times128$) + ($128\times10$) ≈ `{python} MLPvsCNN.cnn_params_str` parameters
 - Training: 60,000 examples (same data)
 - Test Accuracy: ~99%+
 - Rationale: Embeds locality bias (nearby pixels are related) and translation invariance (digit patterns are meaningful regardless of position). These structural assumptions reduce parameter count and improve generalization.
@@ -743,11 +813,11 @@ Consider a simplified 4-pixel image processed by a 3-neuron hidden layer:
 
 **Input**: $\mathbf{h}^{(0)} = [0.8, 0.2, 0.9, 0.1]$ (4 pixel intensities)
 
-**Weight matrix**: $\mathbf{W}^{(1)} = \begin{bmatrix} 0.5 & 0.1 & -0.2 \\ -0.3 & 0.8 & 0.4 \\ 0.2 & -0.4 & 0.6 \\ 0.7 & 0.3 & -0.1 \end{bmatrix}$ (4$\times$ 3 matrix)
+**Weight matrix**: $\mathbf{W}^{(1)} = \begin{bmatrix} 0.5 & 0.1 & -0.2 \\ -0.3 & 0.8 & 0.4 \\ 0.2 & -0.4 & 0.6 \\ 0.7 & 0.3 & -0.1 \end{bmatrix}$ ($4\times3$ matrix)
 
 **Computation**:
 \begin{gather*}
-\mathbf{z}^{(1)} = \mathbf{h}^{(0)}\mathbf{W}^{(1)} = \begin{bmatrix} 0.5$\times$ 0.8 + (-0.3)$\times$ 0.2 + 0.2$\times$ 0.9 + 0.7$\times$ 0.1 \\ 0.1$\times$ 0.8 + 0.8$\times$ 0.2 + (-0.4)$\times$ 0.9 + 0.3$\times$ 0.1 \\ (-0.2)$\times$ 0.8 + 0.4$\times$ 0.2 + 0.6$\times$ 0.9 + (-0.1)$\times$ 0.1 \end{bmatrix}
+\mathbf{z}^{(1)} = \mathbf{h}^{(0)}\mathbf{W}^{(1)} = \begin{bmatrix} $0.5\times0.8$ + (-0.3)$\times$ 0.2 + $0.2\times0.9$ + $0.7\times0.1$ \\ $0.1\times0.8$ + $0.8\times0.2$ + (-0.4)$\times$ 0.9 + $0.3\times0.1$ \\ (-0.2)$\times$ 0.8 + $0.4\times0.2$ + $0.6\times0.9$ + (-0.1)$\times$ 0.1 \end{bmatrix}
 \\
 = \begin{bmatrix} 0.59 \\ -0.09 \\ 0.45 \end{bmatrix}
 \end{gather*}
@@ -1305,7 +1375,7 @@ This equation describes how CNNs process spatial data. $\mathbf{H}^{(l)}_{i,j,k}
 
 Breaking down the notation further, $(i,j)$ corresponds to spatial positions, $k$ indexes output channels, $c$ indexes input channels, and $(di,dj)$ spans the local receptive field[^fn-receptive-field]. Unlike the dense matrix multiplication of MLPs, this operation:
 
-[^fn-receptive-field]: **Receptive Field**\index{Receptive Field}: The input region influencing a particular output neuron. With $3 \times 3$ filters, receptive fields grow by 2 pixels per layer, so a neuron at layer 3 "sees" a $7 \times 7$ region. This growth rate constrains architecture depth: detecting objects spanning 100+ pixels in a 224$\times$224 image requires either deep stacks of small filters (more layers, more memory for activations) or larger kernels (more parameters per layer), a fundamental depth-versus-width trade-off in CNN design. \index{Receptive Field!depth trade-off}
+[^fn-receptive-field]: **Receptive Field**\index{Receptive Field}: The input region influencing a particular output neuron. With $3 \times 3$ filters, receptive fields grow by 2 pixels per layer, so a neuron at layer 3 "sees" a $7 \times 7$ region. This growth rate constrains architecture depth: detecting objects spanning 100+ pixels in a $224\times224$ image requires either deep stacks of small filters (more layers, more memory for activations) or larger kernels (more parameters per layer), a fundamental depth-versus-width trade-off in CNN design. \index{Receptive Field!depth trade-off}
 
 Convolutional layers process local neighborhoods (typically $3 \times 3$ or $5 \times 5$), reuse the same weights at each spatial position, and maintain spatial structure in the output.
 
@@ -1441,7 +1511,7 @@ The feature activation shifts by the same amount as the input, demonstrating equ
 
 :::
 
-Equivariance carries systems implications that extend beyond mathematical elegance. Parameter efficiency is the most immediate benefit: equivariance through parameter sharing produces dramatic reductions in model size. Consider processing a 224$\times$ 224 RGB image. An MLP would require each hidden neuron to connect to all 224$\times$ 224$\times$ 3 = `{python} CNNSharing.mlp_img_params_str` input pixels. A CNN with a 3$\times$ 3 filter needs only 3$\times$ 3$\times$ 3 = `{python} CNNSharing.cnn_filter_params_str` parameters per filter, reused across all 224$\times$ 224 positions. This represents approximately `{python} CNNSharing.cnn_param_reduction_str`$\times$ fewer parameters per feature detector, and the memory savings enable larger models and bigger batches on fixed hardware.
+Equivariance carries systems implications that extend beyond mathematical elegance. Parameter efficiency is the most immediate benefit: equivariance through parameter sharing produces dramatic reductions in model size. Consider processing a $224\times224$ RGB image. An MLP would require each hidden neuron to connect to all 224$\times$ $224\times3$ = `{python} CNNSharing.mlp_img_params_str` input pixels. A CNN with a $3\times3$ filter needs only 3$\times$ $3\times3$ = `{python} CNNSharing.cnn_filter_params_str` parameters per filter, reused across all $224\times224$ positions. This represents approximately `{python} CNNSharing.cnn_param_reduction_str`$\times$ fewer parameters per feature detector, and the memory savings enable larger models and bigger batches on fixed hardware.
 
 The computational structure created by equivariance proves equally valuable for systems optimization. The sliding window pattern applies the same operation at every spatial position, creating regular computation that hardware can exploit. Input pixels are used by multiple filter positions, enabling im2col optimizations that restructure data for efficient matrix operations. The resulting computation is inherently SIMD-friendly, as modern GPUs can execute identical instructions across spatial positions simultaneously. This structural regularity explains why TPUs and AI accelerators include specialized units for convolution: the operation maps efficiently to silicon precisely because equivariance creates predictable, parallelizable patterns.
 
@@ -1487,7 +1557,7 @@ These architectural properties make CNNs highly amenable to systems-level analys
 | **Property**    | **Value**                                                             | **System Implication**                                                                               |
 |:----------------|:----------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
 | **Parameters**  | `{python} LighthouseSpecs.resnet_params_m_str` million                | `{python} LighthouseSpecs.resnet_fp32_mb_str` MB model size at FP32; fits comfortably in GPU memory. |
-| **FLOPs/Image** | `{python} LighthouseSpecs.resnet_gflops_str` GFLOPs (224$\times$ 224) | Dominated by 3$\times$ 3 convolutions (~90% of compute).                                             |
+| **FLOPs/Image** | `{python} LighthouseSpecs.resnet_gflops_str` GFLOPs ($224\times224$) | Dominated by $3\times3$ convolutions (~90% of compute).                                             |
 | **Constraint**  | Compute Bound                                                         | Limited by raw FLOPs, not memory bandwidth.                                                          |
 | **Bottleneck**  | FP Throughput                                                         | Benefits maximally from specialized Matrix Units (Tensor Cores).                                     |
 | **Profile**     | High Arithmetic Intensity                                             | High ratio of math-to-memory operations (~100 FLOPs/byte).                                           |
@@ -1603,7 +1673,7 @@ def conv_layer_spatial(input, kernel, bias):
     Single call dispatches to optimized kernel (often via im2col + GEMM).
     """
     # Convolution applies shared weights across all positions
-    # For a 3$\times$ 3 kernel on 28$\times$ 28 input (padded):
+    # For a $3\times3$ kernel on $28\times28$ input (padded):
     # 9 MACs per position x 784 positions
     output = convolution(input, kernel) + bias
     return activation(output)
@@ -2114,7 +2184,7 @@ In this equation, $\mathbf{Q}$ (queries), $\mathbf{K}$ (keys), and $\mathbf{V}$ 
 
 The attention operation involves several key steps. First, it computes query, key, and value projections for each position in the sequence. Next, examine the $N\times N$ attention matrix in @fig-attention — each cell represents a query-key interaction, and the color intensity reveals which positions attend most strongly to which others. Finally, these attention weights combine value vectors to produce the output.
 
-::: {#fig-attention fig-env="figure" fig-pos="htb" fig-cap="**Query-Key-Value Attention Mechanism**: For a 6-token sequence, queries (cyan) match against keys (red) to produce a $6 \times 6$ attention matrix with $O(N^2)$ entries. Color intensity indicates attention weight: darker cells show stronger relationships. Each output position aggregates information from all values (green) weighted by its attention row. The matrix structure reveals both the computational pattern (36 similarity computations) and the memory bottleneck (storing $N^2$ attention weights). Source: Transformer Explainer [@transformer_explainer]." fig-alt="6$\times$ 6 attention matrix with gradient coloring from blue to red indicating attention weights. Cyan query vectors enter from left, red key vectors from top, green value vectors from below. Output vectors exit right, showing weighted aggregation pattern."}
+::: {#fig-attention fig-env="figure" fig-pos="htb" fig-cap="**Query-Key-Value Attention Mechanism**: For a 6-token sequence, queries (cyan) match against keys (red) to produce a $6 \times 6$ attention matrix with $O(N^2)$ entries. Color intensity indicates attention weight: darker cells show stronger relationships. Each output position aggregates information from all values (green) weighted by its attention row. The matrix structure reveals both the computational pattern (36 similarity computations) and the memory bottleneck (storing $N^2$ attention weights). Source: Transformer Explainer [@transformer_explainer]." fig-alt="$6\times6$ attention matrix with gradient coloring from blue to red indicating attention weights. Cyan query vectors enter from left, red key vectors from top, green value vectors from below. Output vectors exit right, showing weighted aggregation pattern."}
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
 \tikzset{%
@@ -2433,7 +2503,7 @@ class AttentionComputeCosts:
 attn_score_macs_m_str = AttentionComputeCosts.attn_score_macs_m_str
 ```
 
-::: {#lst-attention_layer_compute lst-cap="**Attention Computation**: Two implementations showing the same O(N^2$\times$ d) complexity. The matrix form (top) uses optimized GEMM, while the nested loops (bottom) expose the quadratic pairwise comparisons: for sequence length 512 and dimension 64, computing attention scores requires 512$\times$ 512$\times$ 64 = `{python} attn_score_macs_m_str` million MACs per attention head, plus another `{python} attn_score_macs_m_str`M for value aggregation."}
+::: {#lst-attention_layer_compute lst-cap="**Attention Computation**: Two implementations showing the same O(N^2$\times$ d) complexity. The matrix form (top) uses optimized GEMM, while the nested loops (bottom) expose the quadratic pairwise comparisons: for sequence length 512 and dimension 64, computing attention scores requires 512$\times$ $512\times64$ = `{python} attn_score_macs_m_str` million MACs per attention head, plus another `{python} attn_score_macs_m_str`M for value aggregation."}
 ```{.python}
 def attention_layer_matrix(Q, K, V):
     # Q, K, V: (batch_size$\times$ seq_len$\times$ d_model)
@@ -3472,7 +3542,7 @@ Three operations serve as the irreducible building blocks for all deep learning 
 
 Matrix multiplication represents the basic form of transforming sets of features. Multiplying a matrix of inputs by a matrix of weights computes weighted combinations -- the core operation of neural networks (recall our reference MLP layer from @sec-network-architectures-algorithmic-structure-99f2). This pattern appears everywhere: MLPs use it directly for layer computations, CNNs reshape convolutions into matrix multiplications, and Transformers use it extensively in their attention mechanisms. To understand why, examine the im2col (image to column) transformation in @fig-im2col-diagram: follow how a convolution over $3\times 3$ input feature maps converts into a matrix operation as each sliding window position unfolds into a column of the transformed matrix.
 
-::: {#fig-im2col-diagram fig-env="figure" fig-pos="htb" fig-cap="**im2col Transformation**: Converts convolution to GEMM by rearranging image patches into columns. The input feature maps (cyan/orange grids, $3 \times 3$) are unfolded so each sliding window position becomes a matrix column, while filter kernels (green/yellow, $2 \times 2$) become rows. The resulting $4 \times 8$ matrix multiplication produces all output positions in one operation. This transformation trades 2$\times$ memory overhead (duplicating overlapping pixels) for 5–10$\times$ speedup by exploiting decades of BLAS optimizations and enabling efficient GPU parallelization." fig-alt="Left: two 3$\times$ 3 input feature maps in cyan and orange. Center: 4$\times$ 8 transformed matrix with unfolded patches as columns. Right: 8$\times$ 1 filter kernel vector. Red boxes highlight how sliding windows become matrix columns for GEMM."}
+::: {#fig-im2col-diagram fig-env="figure" fig-pos="htb" fig-cap="**im2col Transformation**: Converts convolution to GEMM by rearranging image patches into columns. The input feature maps (cyan/orange grids, $3 \times 3$) are unfolded so each sliding window position becomes a matrix column, while filter kernels (green/yellow, $2 \times 2$) become rows. The resulting $4 \times 8$ matrix multiplication produces all output positions in one operation. This transformation trades 2$\times$ memory overhead (duplicating overlapping pixels) for 5--10$\times$ speedup by exploiting decades of BLAS optimizations and enabling efficient GPU parallelization." fig-alt="Left: two $3\times3$ input feature maps in cyan and orange. Center: $4\times8$ transformed matrix with unfolded patches as columns. Right: $8\times1$ filter kernel vector. Red boxes highlight how sliding windows become matrix columns for GEMM."}
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
 \tikzset{
@@ -3585,7 +3655,7 @@ The detailed analysis of sparse computation patterns, including structured and u
 
 The im2col[^fn-im2col] (image to column) technique accomplishes matrix reshaping by unfolding overlapping image patches into columns of a matrix (@fig-im2col-diagram). Each sliding window position in the convolution becomes a column in the transformed matrix, while the filter kernels are arranged as rows. This allows the convolution operation to be expressed as a standard GEMM (General Matrix Multiply) operation.
 
-The insight behind this transformation is pragmatic: decades of engineering effort have produced extraordinarily optimized GEMM implementations (cuBLAS, MKL, OpenBLAS), while convolution-specific code would need to be written from scratch. By converting convolutions into matrix multiplications, we inherit all that optimization work for free. The transformation trades memory consumption (duplicating data where windows overlap) for computational efficiency, enabling CNNs to use these mature BLAS libraries and achieving 5–10$\times$ speedups on CPUs. In modern systems, these matrix multiplications map to specific hardware and software implementations. Datacenter accelerators can deliver on the order of hundreds of TFLOPS on mixed-precision matrix operations, and software frameworks like PyTorch and TensorFlow automatically map these high-level operations to optimized matrix libraries (for example, NVIDIA cuBLAS and Intel oneMKL) that exploit available hardware capabilities.
+The insight behind this transformation is pragmatic: decades of engineering effort have produced extraordinarily optimized GEMM implementations (cuBLAS, MKL, OpenBLAS), while convolution-specific code would need to be written from scratch. By converting convolutions into matrix multiplications, we inherit all that optimization work for free. The transformation trades memory consumption (duplicating data where windows overlap) for computational efficiency, enabling CNNs to use these mature BLAS libraries and achieving 5--10$\times$ speedups on CPUs. In modern systems, these matrix multiplications map to specific hardware and software implementations. Datacenter accelerators can deliver on the order of hundreds of TFLOPS on mixed-precision matrix operations, and software frameworks like PyTorch and TensorFlow automatically map these high-level operations to optimized matrix libraries (for example, NVIDIA cuBLAS and Intel oneMKL) that exploit available hardware capabilities.
 
 [^fn-im2col]: **im2col (Image to Column)**\index{im2col!memory trade-off}: First widely adopted in Caffe (2014), im2col converts convolutions into standard GEMM calls by unfolding overlapping patches into matrix columns. The trade-off is memory: im2col duplicates input data wherever receptive fields overlap, roughly doubling memory usage for $3 \times 3$ filters. This memory-for-simplicity exchange explains why mobile frameworks (TFLite, NNAPI) prefer direct convolution, while datacenter GPUs with abundant HBM default to im2col for its GEMM-library efficiency. \index{im2col!datacenter vs. mobile}
 
@@ -3605,7 +3675,7 @@ These building blocks explain why certain hardware features exist (tensor cores 
 The efficiency of deep learning models depends heavily on memory access and management. Memory access often constitutes the primary bottleneck in modern ML systems: even a matrix multiplication unit capable of thousands of operations per cycle will remain idle if data is not available in time. Accessing data from DRAM typically requires hundreds of cycles, while on-chip computation requires only a few—a disparity that reveals *the energy cost of data movement* as a first-order design constraint.
 
 ::: {.callout-notebook title="The Energy Cost of Data Movement"}
-A core systems principle: **moving data costs more than computing on it**. A floating-point multiply-accumulate operation consumes approximately 1–5 pJ depending on process node (e.g., ~4.6 pJ at 45nm [@horowitz2014computing]), while fetching a 32-bit operand from DRAM costs ~26 pJ per access — and full cache-line fetches can reach hundreds of pJ. Even at conservative estimates, this 5–100$\times$ energy ratio explains why memory access patterns, not just FLOP counts, determine real-world efficiency.
+A core systems principle: **moving data costs more than computing on it**. A floating-point multiply-accumulate operation consumes approximately 1–5 pJ depending on process node (e.g., ~4.6 pJ at 45nm [@horowitz2014computing]), while fetching a 32-bit operand from DRAM costs ~26 pJ per access — and full cache-line fetches can reach hundreds of pJ. Even at conservative estimates, this 5--100$\times$ energy ratio explains why memory access patterns, not just FLOP counts, determine real-world efficiency.
 
 Revisit the architectures above through this energy lens: MLPs have low data reuse (each weight loaded once per sample) and are therefore energy-dominated by DRAM traffic. CNNs reuse filter weights across spatial positions, amortizing load cost over $H \times W$ applications -- the very locality that makes them compute-bound also makes them energy-efficient. RNNs reuse weights across time steps (high temporal reuse) but pay repeated hidden-state read/write costs at each step. Transformers exhibit the worst case: attention matrices require fresh loads of unique key-value pairs at every position, making long-sequence attention both compute-quadratic and energy-quadratic. These energy profiles directly track the bottleneck column in @tbl-lighthouse-comparison.
 
@@ -3675,7 +3745,7 @@ Four data movement patterns are prevalent in deep learning architectures: broadc
 
 Scatter operations distribute different elements to different destinations. When parallelizing a $512\times 512$ matrix multiplication across accelerator cores, each core receives a subset of the computation. This parallelization is important for performance but challenging, as memory conflicts and load imbalance can reduce efficiency substantially. Hardware provides flexible high-bandwidth interconnects (often in the hundreds of GB/s class within a node), while software frameworks employ specialized work distribution algorithms to maintain high utilization.
 
-Gather operations collect data from multiple sources. In Transformer attention with sequence length 512, each query must gather information from 512 different key-value pairs. These irregular access patterns are challenging: random gathering can be $10\times$ slower than sequential access, and the energy cost compounds due to the DRAM access penalty established above. Hardware supports this through high-bandwidth interconnects and large caches, while software frameworks employ techniques like attention pattern pruning to reduce gathering overhead.
+Gather operations collect data from multiple sources. In Transformer attention with sequence length 512, each query must gather information from 512 different key-value pairs. These irregular access patterns are challenging: random gathering can be 10$\times$ slower than sequential access, and the energy cost compounds due to the DRAM access penalty established above. Hardware supports this through high-bandwidth interconnects and large caches, while software frameworks employ techniques like attention pattern pruning to reduce gathering overhead.
 
 Reduction operations combine multiple values into a single result through operations like summation. When computing attention scores in Transformers or layer outputs in MLPs, efficient reduction is essential. Hardware implements tree-structured reduction networks (reducing latency from $O(n)$ to $O(\log n)$), while software frameworks use optimized parallel reduction algorithms that can achieve near-theoretical peak performance.
 
@@ -4039,7 +4109,7 @@ tc_objdet_headroom_str = ThroughputCeilingCalc.tc_objdet_headroom_str
 
 **The Math**:
 
-1.  **Model Cost**: ResNet-50 requires ~`{python} tc_resnet_gflops_str` GFLOPs per 224$\times$ 224 image.
+1.  **Model Cost**: ResNet-50 requires ~`{python} tc_resnet_gflops_str` GFLOPs per $224\times224$ image.
 2.  **Frame Rate**: `{python} tc_fps_str` FPS required.
 3.  **Sustained Throughput**: `{python} tc_fps_str`$\times$ `{python} tc_resnet_gflops_str` GFLOPs = **`{python} tc_sustained_gflops_str` GFLOPs/sec**.
 
@@ -4138,7 +4208,7 @@ With the throughput ceiling established, we can now apply the complete decision 
 
 #### Step 1: Data Characterization {.unnumbered}
 
-The input is spatial data (images from camera traps, typically 1920$\times$ 1080 resolution, downsampled to 224$\times$ 224 for processing). The task requires recognizing visual patterns (fur textures, body shapes, distinctive markings) that are:
+The input is spatial data (images from camera traps, typically $1920\times1080$ resolution, downsampled to $224\times224$ for processing). The task requires recognizing visual patterns (fur textures, body shapes, distinctive markings) that are:
 
 - **Spatially local**: Species identification relies on local features (ear shape, stripe patterns)
 - **Translation invariant**: A deer in the top-left is still a deer in the bottom-right
@@ -4167,7 +4237,7 @@ Compare candidates against our Lighthouse models:
 **Architecture Selection:** MobileNetV2 variant with width multiplier 0.75
 
 - **Parameters:** ~`{python} mnv2_params_str` M (~`{python} mnv2_fp32_str` MB FP32, ~`{python} mnv2_int8_str` MB INT8)
-- **FLOPs:** ~`{python} mnv2_flops_str` MFLOPs at 224$\times$ 224
+- **FLOPs:** ~`{python} mnv2_flops_str` MFLOPs at $224\times224$
 - **Rationale:** Sufficient capacity for 50-class problem; fits memory budget with margin; depthwise separable convolutions are power-efficient
 
 #### Step 4: Systems Validation {.unnumbered}
@@ -4206,7 +4276,7 @@ This worked example demonstrates the systematic approach that transforms archite
 
 **Fallacy:** *More complex architectures always perform better than simpler ones.*
 
-Engineers often assume that Transformers outperform simpler architectures on all tasks. In production, architectural sophistication must match problem complexity. As demonstrated in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e, a CNN achieves 99% accuracy on MNIST with `{python} MLPvsCNN.cnn_params_str` parameters while an MLP requires `{python} MLPvsCNN.mlp_params_str` parameters for 98% accuracy—a `{python} MLPvsCNN.param_ratio_str`$\times$ parameter reduction with higher accuracy. For problems with spatial locality, CNNs exploit inductive biases that MLPs cannot match. Teams defaulting to Transformers for tabular data or small-image classification waste 5–10$\times$ resources. A \$1,000 training job becomes \$10,000 with no accuracy benefit.
+Engineers often assume that Transformers outperform simpler architectures on all tasks. In production, architectural sophistication must match problem complexity. As demonstrated in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e, a CNN achieves 99% accuracy on MNIST with `{python} MLPvsCNN.cnn_params_str` parameters while an MLP requires `{python} MLPvsCNN.mlp_params_str` parameters for 98% accuracy—a `{python} MLPvsCNN.param_ratio_str`$\times$ parameter reduction with higher accuracy. For problems with spatial locality, CNNs exploit inductive biases that MLPs cannot match. Teams defaulting to Transformers for tabular data or small-image classification waste 5--10$\times$ resources. A \$1,000 training job becomes \$10,000 with no accuracy benefit.
 
 **Pitfall:** *Selecting architectures based solely on accuracy metrics without analyzing computational requirements.*
 

@@ -297,14 +297,11 @@ Traditional storage systems evolved to serve transactional databases, workloads 
 
 ML workloads systematically invert these assumptions. Training data access is predominantly sequential, streaming through datasets that span hundreds of terabytes. Individual accesses are large (megabytes rather than kilobytes) because models consume batches of images or text sequences. Consistency requirements are relaxed; slightly stale features rarely affect model quality. But bandwidth demands are extreme: hundreds of gigabytes per second, sustained for days or weeks. The mismatch between what storage was optimized for and what ML actually needs creates what we call the **I/O Wall**.
 
-::: {.callout-definition title="I/O Wall"}
+::: {#nte-io-wall .callout-principle icon=false title="The I/O Wall"}
+**The Invariant**: When storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power.
+$$ \text{Utilization} = \min\!\left(1,\;\frac{B_{storage}}{N_{GPU} \times R_{consumption}}\right) $$
 
-***I/O Wall***\index{I/O Wall!definition} is the storage-compute bandwidth mismatch that occurs when accelerator consumption rates ($R_{peak}$) exceed the sustainable throughput of the storage subsystem.
-
-1.  **Significance (Quantitative):** It manifests as **Accelerator Starvation**, where the **System Efficiency ($\eta$)** collapses because the $D_{vol}/BW_{io}$ term of the Iron Law becomes larger than the computation time. The compute-to-storage ratio has worsened by $5\times$ in recent years, making data movement the dominant constraint.
-2.  **Distinction (Durable):** Unlike the **Memory Wall** (which describes the latency gap to DRAM), the I/O Wall describes the **Throughput Gap** to non-volatile storage (SSD/HDD) across the network.
-3.  **Common Pitfall:** A frequent misconception is that the I/O wall is "fixed" by faster disks. In reality, it is a **Scalability Problem**: a single disk may be fast, but when 1,000 nodes simultaneously demand data (**Thundering Herd**), the shared network and filesystem metadata become the bottleneck.
-
+**The Implication**: A storage system that was adequate for 8 GPUs becomes the bottleneck at 64. **The I/O Wall** scales with the number of accelerators: every GPU added to the cluster raises the throughput floor that storage must sustain, making the data pipeline — not the model — the limiting factor.
 :::
 
 ::: {.callout-perspective title="The Widening I/O Wall"}
@@ -569,7 +566,7 @@ $$2{,}048 \text{ GPUs} \times 4{,}096 \text{ tokens/GPU} \times 4 \text{ bytes/t
 
 This is easily served by a single network-attached storage node.
 
-For **image training**, the picture changes dramatically. Using a common batch size of 256 images (ImageNet at 224$\times$ 224, roughly 150 KB/image), the aggregate bandwidth explodes:
+For **image training**, the picture changes dramatically. Using a common batch size of 256 images (ImageNet at $224\times224,$ roughly 150 KB/image), the aggregate bandwidth explodes:
 
 $$2{,}048 \text{ GPUs} \times 256 \text{ images/GPU} \times 150 \text{ KB/image} \div 0.2\text{s} \approx \mathbf{393 \text{ GB/s}}$$
 
@@ -999,7 +996,7 @@ If I/O at the 99th percentile takes `{python} prefetch_t_io_p99_str` ms and comp
 
 \index{prefetch buffer!depth calculation}To illustrate with our running example: the 175B model on 256 GPUs processes each batch in roughly 200 ms. Reading from local NVMe, the P99 I/O latency for a batch of tokenized text (roughly 40 MB per GPU) is approximately 50 ms. The minimum prefetch depth is $\lceil 50 / 200 \rceil = 1$ batch, and a safety margin of 2 is adequate. Reading from a parallel file system, the P99 I/O latency rises to roughly 200 ms due to network jitter and contention, requiring a minimum depth of $\lceil 200 / 200 \rceil = 1$, with a safety margin of 3 to account for occasional multi-hundred-millisecond outliers. Reading from object storage, the P99 latency can exceed 500 ms, requiring a depth of at least 3, with a safety margin of 5 or more. These numbers translate directly into host DRAM consumption: at 40 MB per batch, a depth-5 prefetch buffer per GPU consumes 200 MB, and 8 GPUs per node consume 1.6 GB. At 40 MB per batch with a depth of 1, the same node needs only 320 MB. The storage tier directly determines the memory cost of the prefetch buffer.
 
-The cost of deep prefetching is memory: each buffered batch occupies host DRAM. A batch of 256 images at 224$\times$ 224$\times$ 3 bytes (after decoding) occupies roughly 37 MB. A prefetch buffer of 8 such batches consumes 300 MB, which is negligible for a node with 512 GB of DRAM. But for large-batch language model training where each batch contains millions of tokens, the prefetch buffer can grow to several gigabytes, competing with embedding tables and other DRAM consumers.
+The cost of deep prefetching is memory: each buffered batch occupies host DRAM. A batch of 256 images at 224$\times$ $224\times3$ bytes (after decoding) occupies roughly 37 MB. A prefetch buffer of 8 such batches consumes 300 MB, which is negligible for a node with 512 GB of DRAM. But for large-batch language model training where each batch contains millions of tokens, the prefetch buffer can grow to several gigabytes, competing with embedding tables and other DRAM consumers.
 
 The interaction between prefetching and the storage hierarchy creates a layered defense against stalls. The first layer is the prefetch buffer in host DRAM, absorbing I/O variance from NVMe reads. The second layer is the local NVMe warm cache, absorbing network variance from the parallel file system. The third layer is the parallel file system read-ahead cache, absorbing variance from disk seeks across the OSS cluster. Each layer adds latency tolerance at the cost of memory or storage capacity. The system designer's task is to ensure that the combined depth of all layers exceeds the worst-case latency spike at the lowest tier in regular use. For our running example, if the parallel file system occasionally exhibits a 500 ms latency spike and compute takes 200 ms per batch, the NVMe warm cache eliminates this risk entirely by serving reads locally, so the prefetch buffer only needs to absorb the much smaller NVMe latency variance of microseconds rather than milliseconds.
 
@@ -1015,7 +1012,7 @@ A training cluster runs 1,024 GPUs with 128-image batches (150 KB per image afte
 
 ### Multi-Worker Data Loading {#sec-storage-multi-worker}
 
-Why can a single CPU core not keep a modern accelerator fed, even when the storage hardware is fast enough? The answer lies in the CPU work required between the storage read and the GPU transfer. Consider the throughput required for image training: decoding a 150 KB JPEG image into a 224$\times$ 224$\times$ 3 raw tensor requires decompressing the Huffman-coded frequency coefficients, applying the inverse discrete cosine transform (DCT), upsampling chroma channels, and converting to the target pixel format. This process takes roughly 1 to 5 ms per image on a modern CPU core. After decoding, augmentation adds further CPU work: a random crop requires computing crop coordinates and copying the sub-region; horizontal flip requires copying with reversed column order; color jitter requires per-pixel multiplication and addition. Each augmentation adds 0.5 to 2 ms per image.
+Why can a single CPU core not keep a modern accelerator fed, even when the storage hardware is fast enough? The answer lies in the CPU work required between the storage read and the GPU transfer. Consider the throughput required for image training: decoding a 150 KB JPEG image into a 224$\times$ $224\times3$ raw tensor requires decompressing the Huffman-coded frequency coefficients, applying the inverse discrete cosine transform (DCT), upsampling chroma channels, and converting to the target pixel format. This process takes roughly 1 to 5 ms per image on a modern CPU core. After decoding, augmentation adds further CPU work: a random crop requires computing crop coordinates and copying the sub-region; horizontal flip requires copying with reversed column order; color jitter requires per-pixel multiplication and addition. Each augmentation adds 0.5 to 2 ms per image.
 
 At 1,000 images per second per GPU and 8 GPUs per node, a single core would need to decode and augment 8,000 images per second, a throughput 10$\times$ to 40$\times$ beyond what a single core can sustain. The solution is **multi-worker data loading**, where $W$ worker processes each read from storage, decode, augment, and enqueue batches independently. The effective I/O throughput scales approximately linearly with $W$ until one of three bottlenecks is reached: the storage device's bandwidth saturates, the PCIe bus between host and device saturates, or the workers exhaust host CPU cycles.
 

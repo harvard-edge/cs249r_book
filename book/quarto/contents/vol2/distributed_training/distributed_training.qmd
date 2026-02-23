@@ -154,14 +154,14 @@ If you could purchase a single GPU with 100 terabytes of memory and an exaflop o
 
 ### The Physics of the Cluster
 
-Before optimizing algorithms, we must understand the physical constraints of the **Machine Learning Fleet**. The performance of any distributed training job is governed by the **Law of Distributed Efficiency** introduced in @sec-vol2-law-distributed-efficiency:
+Before optimizing algorithms, we must understand the physical constraints of the **Machine Learning Fleet**. The performance of any distributed training job is governed by the **Iron Law of Scale** introduced in @sec-vol2-law-distributed-efficiency:
 
-$$ \text{Throughput}_{\text{fleet}} = (N \times \text{Peak}) \times \left( 1 - \frac{T_{\text{sync}}}{T_{\text{compute}}} \right) $$
+$$ T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) - T_{\text{overlap}} $$
 
-The critical term here is the **Communication-Computation Ratio** ($T_{\text{sync}}/T_{\text{compute}}$). This ratio determines whether your cluster behaves as a supercomputer or a collection of idling heaters.
+The critical term here is the **Communication-Computation Ratio** ($T_{\text{comm}}/T_{\text{compute}}$). This ratio determines whether your cluster behaves as a supercomputer or a collection of idling heaters.
 
-*   **Compute-Bound (Low Ratio)**: $T_{\text{compute}} \gg T_{\text{sync}}$. The GPUs spend most of their time multiplying matrices. This is the ideal state, typical for large batch sizes on dense models (like ResNet).
-*   **Bandwidth-Bound (High Ratio)**: $T_{\text{sync}} \approx T_{\text{compute}}$. The GPUs spend significant time waiting for gradients to arrive. This is the common state for Large Language Models (LLMs) and Recommendation Systems (DLRMs), where parameter synchronization saturates the network.
+*   **Compute-Bound (Low Ratio)**: $T_{\text{compute}} \gg T_{\text{comm}}$. The GPUs spend most of their time multiplying matrices. This is the ideal state, typical for large batch sizes on dense models (like ResNet).
+*   **Communication-Bound (High Ratio)**: $T_{\text{comm}} \approx T_{\text{compute}}$. The GPUs spend significant time waiting for gradients or activations to arrive. This is the common state for Large Language Models (LLMs) and Recommendation Systems (DLRMs), where parameter synchronization saturates the network.
 
 ::: {.callout-note title="Connection: The Fleet Stack"}
 In the **Fleet Stack** framework (@fig-fleet-stack in @sec-vol2-introduction), Distributed Training represents the **Distribution Layer**. We are defining *how* to split the math. The actual execution of these split workloads happens on the **Infrastructure Layer**, which we built in Part I. The algorithms defined here (Ring AllReduce, Tensor Parallelism) dictate the bandwidth requirements for the physical interconnects (NVLink, InfiniBand) discussed in @sec-network-fabrics.
@@ -1283,6 +1283,13 @@ Where:
 
 This leads to the **Scaling Efficiency** metric:
 
+::: {#nte-scaling-efficiency .callout-principle icon=false title="The Scaling Efficiency Bound"}
+**The Invariant**: Adding nodes to a distributed training job yields diminishing returns because communication overhead grows with cluster size while per-node computation remains constant.
+$$ \eta_{scaling} = \frac{T_1}{N \times T_N} \leq 1 $$
+
+**The Implication**: Perfect linear scaling ($\eta = 1.0$) is a theoretical limit, not a practical target. Real systems achieve $\eta = 0.85$–$0.95$ at moderate scale and degrade further as $N$ grows. The gap between $\eta = 1.0$ and the achieved efficiency is the **communication tax** — the price of coordination.
+:::
+
 $$ \text{Efficiency}(N) = \frac{T_{compute}}{N \times T_{step}(N)} = \frac{1}{1 + \frac{N(T_{comm}(N) - T_{overlap})}{T_{compute}}} $$
 
 This equation reveals the **Scaling Wall**: as $N$ increases, the compute term ($T_{compute}/N$) shrinks, but the communication term ($T_{comm}$) remains constant or grows. Eventually, the denominator is dominated by communication, driving efficiency toward zero. Beyond wall-clock time, this communication overhead imposes an *energy tax* that scales with physical distance between devices.
@@ -2060,7 +2067,7 @@ The primary advantage is decoupling model size from compute budget. A trillion-p
 
 At the heart of expert parallelism lies the All-to-All communication primitive, which shuffles tokens across the cluster based on dynamic routing decisions. Consider a configuration with $E=64$ experts distributed across 64 GPUs, processing a batch of $B=4$ sequences at length $S=2048$ with hidden dimension $H=4096$. For every MoE layer, the system must dispatch $B \times S$ tokens to their assigned experts. In FP16, this moves $B \cdot S \cdot H \cdot 2$ bytes—approximately 67 MB—in a single direction. Since the processed embeddings must return to their original device for the residual connection, the total network overhead is roughly 134 MB per transformer block. While manageable in isolation, this latency accumulates rapidly in deep, sparse architectures like the Switch Transformer [@fedus2022switch] (up to 2,048 experts) or GShard [@lepikhin2021gshard].
 
-Network efficiency relies on the assumption of uniform token distribution, but natural language is inherently skewed: specific experts handling common syntax or connector words may receive 3–5$\times$ their fair share of traffic. To prevent memory overflows on these "hot" experts, systems enforce a hard limit defined by the **capacity factor** $C$, typically set between 1.25 and 1.5. This parameter caps the maximum number of tokens an expert processes at $C \cdot S/E$. If the routing gate assigns more tokens than this buffer allows, the excess tokens are dropped, passing through the layer unprocessed via the residual connection. To mitigate this data loss, training objectives include an **auxiliary load balancing loss**, weighted at 0.01–0.1 relative to the main cross-entropy loss, that penalizes the router for favoring specific experts. Modern implementations like Mixtral 8$\times$7B use top-2 routing across 8 experts, achieving a favorable balance between capacity scaling and routing stability.
+Network efficiency relies on the assumption of uniform token distribution, but natural language is inherently skewed: specific experts handling common syntax or connector words may receive 3--5$\times$ their fair share of traffic. To prevent memory overflows on these "hot" experts, systems enforce a hard limit defined by the **capacity factor** $C$, typically set between 1.25 and 1.5. This parameter caps the maximum number of tokens an expert processes at $C \cdot S/E$. If the routing gate assigns more tokens than this buffer allows, the excess tokens are dropped, passing through the layer unprocessed via the residual connection. To mitigate this data loss, training objectives include an **auxiliary load balancing loss**, weighted at 0.01–0.1 relative to the main cross-entropy loss, that penalizes the router for favoring specific experts. Modern implementations like Mixtral $8\times7$B use top-2 routing across 8 experts, achieving a favorable balance between capacity scaling and routing stability.
 
 This sparse communication pattern distinguishes recommendation and MoE workloads (*Archetype B (DLRM at Scale)*) from dense LLM training (*Archetype A (GPT-4 / Llama-3)*) (@sec-vol2-introduction-archetypes), producing fundamentally different scaling behaviors.
 
@@ -2568,9 +2575,7 @@ daily_savings_str = YoungDaly.daily_savings_str
 
 ```
 
-The Young-Daly formula establishes the optimal checkpoint interval as $T_{opt} = \sqrt{2 \times C \times MTBF}$, where $C$ is checkpoint time and MTBF is mean time between failures. For a 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is approximately **`{python} t_opt_min_str` minutes**.
-
- Checkpointing every 15 minutes "to be safe" wastes `{python} total_loss_pct_str` % of compute time on unnecessary checkpoint overhead, while checkpointing every 2 hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} daily_savings_str` per day** to excessive checkpointing when using arbitrary intervals instead of the Young-Daly optimal.
+The Young-Daly formula establishes the optimal checkpoint interval as $T_{opt} = \sqrt{2 \times C \times MTBF}$, where $C$ is checkpoint time and MTBF is mean time between failures. For a 1024-GPU cluster with 4-hour MTBF and 5-minute checkpoint time, the optimal interval is approximately **`{python} t_opt_min_str` minutes**. Checkpointing every 15 minutes "to be safe" wastes `{python} total_loss_pct_str`% of compute time on unnecessary checkpoint overhead, while checkpointing every 2 hours risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts significantly. The cost of suboptimal checkpointing scales with cluster size: a 1024-GPU cluster loses approximately **USD `{python} daily_savings_str` per day** to excessive checkpointing when using arbitrary intervals instead of the Young-Daly optimal.
 
 ## Summary {#sec-distributed-training-systems-summary}
 

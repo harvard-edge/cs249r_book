@@ -371,10 +371,84 @@ Before any of these pipeline stages can be designed well, however, we need to un
 $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Data Gravity}} $$ {#eq-data-selection-gain}
 \index{Data Selection!gain formula}
 
+```{python}
+#| label: feeding-tax-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE FEEDING TAX CALCULATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Feeding Problem" section
+# │
+# │ Goal: Demonstrate the mismatch between accelerator compute and disk bandwidth.
+# │ Show: That a standard cloud disk causes 80%+ idle time for an A100.
+# │ How: Calculate required bandwidth for ResNet-50 inference at peak TFLOPS.
+# │
+# │ Imports: mlsys.constants, mlsys.formatting
+# │ Exports: req_bw_gbs_str, disk_bw_mbs_str, feeding_tax_pct_str, img_per_sec_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    A100_FLOPS_FP16_TENSOR, RESNET50_FLOPs, 
+    IMAGE_DIM_RESNET, IMAGE_CHANNELS_RGB, BYTES_FP32,
+    TFLOPs, second, GB, MB, MILLION
+)
+from mlsys.formatting import fmt, check
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class FeedingProblem:
+    """
+    Namespace for The Feeding Problem calculation.
+    Scenario: Saturating an A100 with ResNet-50 images from a standard disk.
+    """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    gpu_flops = A100_FLOPS_FP16_TENSOR
+    model_flops = RESNET50_FLOPs
+    
+    # Image: 224x224x3 @ FP32
+    img_size_bytes = IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * BYTES_FP32.m_as('B')
+    
+    # Standard Cloud Disk (e.g. AWS gp3 baseline)
+    disk_bw_mbs = 250.0 
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Throughput (Images/sec) = GPU_Peak / Model_FLOPs
+    img_per_sec = (gpu_flops / model_flops).to_base_units().m_as('count/second')
+    
+    # Required Bandwidth (Bytes/sec) = img_per_sec * img_size_bytes
+    req_bw_bytes_sec = img_per_sec * img_size_bytes
+    req_bw_gbs = req_bw_bytes_sec / GB.m_as('B')
+    
+    # Efficiency (eta) = Disk_BW / (Required_BW in MB/s)
+    eta = min(disk_bw_mbs / (req_bw_bytes_sec / MB.m_as('B')), 1.0)
+    feeding_tax_pct = (1.0 - eta) * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(req_bw_gbs > 1.0, f"Required bandwidth ({req_bw_gbs:.1f} GB/s) is lower than expected.")
+    check(feeding_tax_pct > 50, f"Feeding tax ({feeding_tax_pct:.1f}%) should be significant for standard disks.")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    req_bw_gbs_str = fmt(req_bw_gbs, precision=1, commas=False)
+    disk_bw_mbs_str = fmt(disk_bw_mbs, precision=0, commas=False)
+    feeding_tax_pct_str = fmt(feeding_tax_pct, precision=0, commas=False)
+    img_per_sec_str = fmt(img_per_sec, precision=0, commas=True)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+req_bw_gbs_str = FeedingProblem.req_bw_gbs_str
+disk_bw_mbs_str = FeedingProblem.disk_bw_mbs_str
+feeding_tax_pct_str = FeedingProblem.feeding_tax_pct_str
+img_per_sec_str = FeedingProblem.img_per_sec_str
+```
+
+### The Feeding Problem: Flow Rate and the "Feeding Tax" {#sec-data-engineering-feeding-problem}
+
+Data Gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!data pipeline throughput} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate** problem: the struggle to saturate a high-throughput "Machine" from a low-bandwidth "Data" source.
+
+According to the **Iron Law**, the system is only as fast as its slowest term. If a modern accelerator can process `{python} img_per_sec_str` samples per second, but the storage pipeline delivers only `{python} disk_bw_mbs_str` MB/s, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!I/O wait cost}: the wall-clock time lost to I/O wait, which directly reduces the **System Efficiency ($\eta$)** term. For a standard cloud volume, the feeding tax can exceed **`{python} feeding_tax_pct_str`%**, meaning the GPU spends the majority of its time waiting for bits. This tax transforms the Data Pipeline from a simple storage concern into the primary regulator of the system's Duty Cycle. To saturate a 300 TFLOPS processor, the pipeline must often sustain **`{python} req_bw_gbs_str` GB/s** transfer rates—a requirement that forces the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-storage-architectures-ml-workloads-96ab.
+
 Underlying these physical properties is a fundamental constraint we call the *energy-movement invariant*: moving data always dominates the energy budget.
 
 ::: {.callout-perspective title="The Energy-Movement Invariant"}
-A corollary of the **Iron Law** (@sec-introduction-iron-law-ml-systems-c32a) for data engineering is that **moving a bit costs 100–1,000$\times$ more energy than computing on it.** While @sec-model-compression examines the energy cost inside the processor, we must also consider the cost of the information flow from the external world. The following table quantifies just how dramatic these differences are:
+A corollary of the **Iron Law** (@sec-introduction-iron-law-ml-systems-c32a) for data engineering is that **moving a bit costs 100--1,000$\times$ more energy than computing on it.** While @sec-model-compression examines the energy cost inside the processor, we must also consider the cost of the information flow from the external world. The following table quantifies just how dramatic these differences are:
 
 | **Operation**                      |                    **Energy (pJ)** |                    **Relative Cost** |
 |:-----------------------------------|-----------------------------------:|-------------------------------------:|
@@ -1166,7 +1240,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 
 The contrast matters: **weeks** for human labeling, **hours** for GPU training, **milliseconds** for serving. Labeling is the bottleneck.
 
-**The 1000$\times$ Rule**: Labeling typically costs 1,000–3,000$\times$ more than the compute to train on that data. A \$100K labeling budget buys data that trains on \$30–100 of GPU time.
+**The 1000$\times$ Rule**: Labeling typically costs 1,000--3,000$\times$ more than the compute to train on that data. A \$100K labeling budget buys data that trains on \$30–100 of GPU time.
 
 **The 80/20 Split**: 80% of data engineering effort goes to 20% of features: the "long tail" of edge cases, rare categories, and quality exceptions.
 :::
@@ -2592,7 +2666,7 @@ Data locality becomes critical at this scale. At 10 GB/s peak throughput, transf
 
 Single-machine processing\index{Single-Machine Processing!scalability} suffices for surprisingly large workloads when engineered carefully. Modern servers with 256 gigabytes RAM can process datasets of several terabytes using out-of-core processing that streams data from disk. Libraries like Dask\index{Dask!out-of-core processing} or Vaex\index{Lazy Evaluation!data processing} enable pandas-like APIs that automatically stream and parallelize computations across multiple cores. Before investing in distributed processing infrastructure, teams should exhaust single-machine optimization: using efficient data formats (Parquet[^fn-parquet-columnar-io] instead of CSV), minimizing memory allocations, leveraging vectorized operations, and exploiting multi-core parallelism. The operational simplicity of single-machine processing—no network coordination, no partial failures, simple debugging—makes it preferable when performance is adequate.
 
-[^fn-parquet-columnar-io]: **Parquet**: A columnar storage format that organizes data by column, not by row. For the single-machine optimizations described, this is critical; instead of wastefully reading an entire CSV row to access a few columns, a Parquet reader loads only the specific data needed for a computation. This selective I/O can reduce data movement from disk by 5–10$\times$ for typical feature-selection workloads, enabling terabyte-scale analysis on a single machine. \index{Parquet!I/O reduction}
+[^fn-parquet-columnar-io]: **Parquet**: A columnar storage format that organizes data by column, not by row. For the single-machine optimizations described, this is critical; instead of wastefully reading an entire CSV row to access a few columns, a Parquet reader loads only the specific data needed for a computation. This selective I/O can reduce data movement from disk by 5--10$\times$ for typical feature-selection workloads, enabling terabyte-scale analysis on a single machine. \index{Parquet!I/O reduction}
 
 Distributed processing frameworks become necessary when data volumes or computational requirements exceed single-machine capacity, but the speedup achievable through parallelization faces inherent limits described by **Amdahl's Law**. Let $S$ be the serial fraction, $p$ the parallelizable fraction, and $N$ the number of workers. @eq-amdahl-data gives the bound:
 
@@ -2636,9 +2710,9 @@ Building effective labeling systems requires understanding how different label t
 
 Classification labels\index{Classification Labels!storage requirements} represent the simplest form, categorizing images with a specific tag or (in multi-label classification) tags such as labeling an image as "car" or "pedestrian." While conceptually straightforward, a production system processing millions of video frames must efficiently store and retrieve these labels. Storage requirements are modest (a single integer or string per image), but retrieval patterns matter: training often samples random subsets while validation requires sequential access to all labels, driving different indexing strategies.
 
-Bounding boxes\index{Bounding Box Annotation!localization}\index{Object Detection!bounding boxes} extend beyond simple classification by identifying object locations, drawing a box around each object of interest. Our system now needs to track not just what objects exist, but where they are in each frame. This spatial information introduces new storage and processing challenges, especially when tracking moving objects across video frames. Each bounding box requires storing four coordinates (x, y, width, height) plus the object class, multiplying storage by 5$\times$ compared to classification. Bounding box annotation requires pixel-precise positioning that takes 10–20$\times$ longer than classification, dramatically affecting labeling throughput and cost.
+Bounding boxes\index{Bounding Box Annotation!localization}\index{Object Detection!bounding boxes} extend beyond simple classification by identifying object locations, drawing a box around each object of interest. Our system now needs to track not just what objects exist, but where they are in each frame. This spatial information introduces new storage and processing challenges, especially when tracking moving objects across video frames. Each bounding box requires storing four coordinates (x, y, width, height) plus the object class, multiplying storage by 5$\times$ compared to classification. Bounding box annotation requires pixel-precise positioning that takes 10--20$\times$ longer than classification, dramatically affecting labeling throughput and cost.
 
-Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a 1920$\times$ 1080 image requires 2 million labels (one per pixel), compared to perhaps 10 bounding boxes or a single classification label. This ~200,000$\times$ storage increase relative to bounding boxes—and the hours required per image for manual segmentation—make this approach suitable only when pixel-level precision is essential.
+Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the most comprehensive information by classifying objects at the pixel level, highlighting each object in a distinct color. For our traffic monitoring system, this might mean precisely outlining each vehicle, pedestrian, and road sign. These detailed annotations significantly increase our storage and processing requirements. A segmentation mask for a $1920\times1080$ image requires 2 million labels (one per pixel), compared to perhaps 10 bounding boxes or a single classification label. This ~200,000$\times$ storage increase relative to bounding boxes—and the hours required per image for manual segmentation—make this approach suitable only when pixel-level precision is essential.
 
 ![**Data Annotation Granularity**: Three versions of the same street scene show increasing annotation detail: a simple classification label, bounding boxes around vehicles and pedestrians, and pixel-level semantic segmentation with distinct colors. Each level increases labeling cost and storage requirements while providing richer training signal.](images/png/cs249r_labels_new.png){#fig-labels width=90% fig-alt="Three versions of same street scene showing increasing annotation detail: simple classification label, bounding boxes around vehicles and pedestrians, and pixel-level semantic segmentation with distinct colors."}
 
@@ -2661,7 +2735,7 @@ Beyond random sampling approaches, collecting multiple labels per data point, of
 
 [^fn-fleiss-kappa-crowdsourced]: **Fleiss' Kappa**: Generalizes Cohen's kappa from two raters to any number of annotators, which is essential for crowdsourced labeling where different subsets of workers label each example. The generalization matters because crowdsourced labeling quality cannot be assessed pairwise -- with thousands of annotators, each labeling a different subset, only a multi-rater agreement metric reveals whether the labeling pool as a whole produces consistent training data. Values below 0.4 signal that the resulting labels will inject noise into model training. \index{Fleiss' Kappa!crowdsourced labeling}
 
-The consensus approach reflects an economic trade-off essential for scalable systems. Expert review costs 10–50$\times$ more per example than crowdsourced labeling, but forcing agreement on ambiguous examples through majority voting of non-experts produces systematically biased labels. By routing only genuinely ambiguous cases to experts—often 5-15% of examples identified through low inter-annotator agreement—systems balance cost against quality. This tiered approach enables processing millions of examples economically while maintaining quality standards through targeted expert intervention.
+The consensus approach reflects an economic trade-off essential for scalable systems. Expert review costs 10--50$\times$ more per example than crowdsourced labeling, but forcing agreement on ambiguous examples through majority voting of non-experts produces systematically biased labels. By routing only genuinely ambiguous cases to experts—often 5-15% of examples identified through low inter-annotator agreement—systems balance cost against quality. This tiered approach enables processing millions of examples economically while maintaining quality standards through targeted expert intervention.
 
 While technical infrastructure provides the foundation for quality control, successful labeling systems must also consider human factors. When working with annotators, organizations need reliable systems for training and guidance. This includes good documentation with clear examples of correct labeling, visual demonstrations of edge cases and how to handle them, regular feedback mechanisms showing annotators their accuracy on gold standard examples, and calibration sessions where annotators discuss ambiguous cases to develop shared understanding. For complex or domain-specific tasks, the system might implement tiered access levels, routing challenging cases to annotators with appropriate expertise based on their demonstrated accuracy on similar examples.
 
@@ -2779,7 +2853,7 @@ Methods such as active learning\index{Active Learning!label prioritization}[^fn-
 
 **The Physics**:
 
-1.  **Sample Efficiency**: Active learning typically achieves target accuracy with **5–10$\times$ fewer samples** than random selection.
+1.  **Sample Efficiency**: Active learning typically achieves target accuracy with **5--10$\times$ fewer samples** than random selection.
 2.  **Cost per Point**: Random sampling = \$0.50/label. Active learning adds compute cost (~\$0.01/image for inference) to find hard examples.
 3.  **The Multiplier**:
     *   **Random**: To reach 95%, you might need 1M labels (\$500K). **Budget Exceeded.**
@@ -3640,7 +3714,7 @@ The technical architecture of data systems demonstrates how engineering decision
 
 * **Pipeline architecture choices have large cost implications.** Real-time streaming increases operational cost and complexity relative to batch, while ETL reduces storage footprint at the expense of higher engineering overhead during schema changes. Select ingestion patterns based on the value of latency, not the appeal of real-time.
 
-* **Labeling costs dominate and require substantial resource allocation.** Labeling typically costs 1,000–3,000$\times$ more than model training compute. Labeling is the serial bottleneck that parallelization cannot solve.
+* **Labeling costs dominate and require substantial resource allocation.** Labeling typically costs 1,000--3,000$\times$ more than model training compute. Labeling is the serial bottleneck that parallelization cannot solve.
 
 * **Storage hierarchy determines iteration speed.** The 70$\times$ throughput gap between local NVMe (7 GB/s) and cloud object storage (100 MB/s) determines whether iterations occur daily or weekly.
 
