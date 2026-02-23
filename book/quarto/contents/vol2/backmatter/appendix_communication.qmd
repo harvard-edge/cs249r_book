@@ -37,23 +37,17 @@ Conventions used here follow the book-wide notation. We use $\alpha$ for per-mes
 #| label: appendix-comm-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMMUNICATION FOUNDATIONS — MASTER COMPUTATION
+# │ COMMUNICATION FOUNDATIONS — MASTER COMPUTATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: PERSISTENT — All values used throughout the Communication Foundations
 # │          appendix: α-β model table, ring vs. tree AllReduce worked example,
 # │          pipeline bubble table, gradient compression break-even, and all prose.
 # │
-# │ Goal: Provide all communication cost model constants in one place for the
-# │       quantitative reference appendix on collective operations and pipeline overhead.
-# │ Show: See individual section prose for formatted values. This cell provides
-# │       the physics; string attributes convert to display-ready form.
-# │ How: pint Quantities from mlsys.constants; calc_ring_allreduce_time,
-# │      calc_tree_allreduce_time, calc_pipeline_bubble from formulas.py.
+# │ Goal: Provide all communication cost model constants in one place.
+# │ How: pint Quantities from mlsys.constants; calc_* AllReduce/Pipeline from formulas.py.
 # │
-# │ Imports: mlsys.constants (INFINIBAND_NDR_BW_GBS, IB_NDR_LATENCY_US, NVLINK_H100_BW, …)
-# │          mlsys.formulas (calc_ring_allreduce_time, calc_tree_allreduce_time, calc_pipeline_bubble)
-# │          mlsys.formatting (fmt, check, md_math)
-# │ Exports: CF = CommFoundations (accessed as CF.attribute), plus module-level aliases below
+# │ Imports: mlsys.constants (*), mlsys.formulas (calc_*), mlsys.formatting (*)
+# │ Exports: CF = CommFoundations (accessed as CF.attribute)
 # └─────────────────────────────────────────────────────────────────────────────
 
 import math
@@ -63,8 +57,8 @@ from mlsys.constants import (
     NVLINK_H100_BW, PCIE_GEN5_BW,
     LATENCY_NVLINK, LATENCY_PCIE_GEN5, LATENCY_INFINIBAND,
     ALLREDUCE_FACTOR, GPUS_PER_HOST,
-    GB, second, NS, BILLION, MILLION,
-    BYTES_FP32, BYTES_FP16,
+    GB, second, NS, BILLION, MILLION, THOUSAND,
+    BYTES_FP32, BYTES_PER_FP16, MICROSECOND,
     ureg,
 )
 from mlsys.formatting import fmt, check, md_math
@@ -74,13 +68,14 @@ from mlsys.formulas import (
     calc_pipeline_bubble,
 )
 
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class CommFoundations:
     """Namespace for communication cost calculations."""
 
-    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    # α-β values for each interconnect (convert to consistent units)
-    ib_ndr_alpha_us = IB_NDR_LATENCY_US          # μs
-    ib_ndr_beta_gbs = INFINIBAND_NDR_BW_GBS      # GB/s
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Interconnect Specs (Level 1)
+    ib_ndr_alpha_us = IB_NDR_LATENCY_US
+    ib_ndr_beta_gbs = INFINIBAND_NDR_BW_GBS
     ib_hdr_alpha_us = IB_HDR_LATENCY_US
     ib_hdr_beta_gbs = INFINIBAND_HDR_BW_GBS
     roce_alpha_us = ROCE_LATENCY_US
@@ -92,57 +87,46 @@ class CommFoundations:
     nvlink_latency_ns = int(LATENCY_NVLINK.m_as(NS))
     pcie_latency_ns = int(LATENCY_PCIE_GEN5.m_as(NS))
 
-    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    # Crossover message size: M_cross = α × β
-    ib_ndr_alpha_s = ib_ndr_alpha_us * 1e-6      # seconds
-    ib_ndr_beta_bs = ib_ndr_beta_gbs * 1e9       # bytes/s
-    crossover_bytes = ib_ndr_alpha_s * ib_ndr_beta_bs
-    crossover_kb = crossover_bytes / 1e3
-
-    # Worked example: Ring AllReduce, 256 GPUs, 1 GB gradient, IB NDR
+    # Collective Params (Level 2)
     ring_n_gpus = 256
-    ring_msg_bytes = 1e9                          # 1 GB (1 billion bytes)
-    ring_time_s = calc_ring_allreduce_time(
-        ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s
-    )
-    ring_time_ms = ring_time_s.m_as(ureg.millisecond)
+    ring_msg_bytes = BILLION # 1 GB
+    
+    # Pipeline Params (Level 3)
+    p_stages = 8
+    m_microbatches = 16
+    v_interleave = 4
 
-    # Tree AllReduce same scenario
-    tree_time_s = calc_tree_allreduce_time(
-        ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s
-    )
-    tree_time_ms = tree_time_s.m_as(ureg.millisecond)
+    # Compression economics
+    compress_ratio = 64
+    compress_overhead_ms = 2.0
 
-    # Pipeline bubble examples
-    bubble_4_16 = calc_pipeline_bubble(4, 16)
-    bubble_4_8 = calc_pipeline_bubble(4, 8)
-    bubble_8_16 = calc_pipeline_bubble(8, 16)
-    bubble_8_32 = calc_pipeline_bubble(8, 32)
-    bubble_8_64 = calc_pipeline_bubble(8, 64)
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Level 4: Ratios & Efficiency
+    ib_ndr_alpha_s = ib_ndr_alpha_us * 1e-6
+    ib_ndr_beta_bs = ib_ndr_beta_gbs * 1e9
+    crossover_kb_val = (ib_ndr_alpha_s * ib_ndr_beta_bs) / 1e3
 
-    # Interleaved: bubble = (P-1)/(P-1 + M×V)
-    interleaved_p = 8
-    interleaved_m = 16
-    interleaved_v = 4
-    bubble_interleaved = (interleaved_p - 1) / (
-        interleaved_p - 1 + interleaved_m * interleaved_v
-    )
+    # AllReduce Comparison
+    ring_time_s = calc_ring_allreduce_time(ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s)
+    tree_time_s = calc_tree_allreduce_time(ring_msg_bytes, ring_n_gpus, ib_ndr_beta_bs, ib_ndr_alpha_s)
+    ring_time_ms = ring_time_s * 1000
+    tree_time_ms = tree_time_s * 1000
 
-    # Compression break-even
-    compress_ratio = 64                           # 64× compression
-    compress_overhead_ms = 2.0                    # encode + decode overhead
-    uncompressed_time_ms = ring_time_ms           # use ring AllReduce baseline
+    # Bubbles
+    bubble_std = calc_pipeline_bubble(p_stages, m_microbatches)
+    bubble_interleaved = (p_stages - 1) / (p_stages - 1 + m_microbatches * v_interleave)
+
+    # Compression economics
     compressed_comm_ms = ring_time_ms / compress_ratio
     compressed_total_ms = compressed_comm_ms + compress_overhead_ms
-    compress_speedup = uncompressed_time_ms / compressed_total_ms
+    compress_speedup = ring_time_ms / compressed_total_ms
 
     # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    check(abs(crossover_bytes - 250_000) < 1,
-          f"IB NDR crossover should be 250 KB, got {crossover_bytes}")
-    check(ring_time_ms > 0, "Ring AllReduce time must be positive")
-    check(0 < bubble_4_16 < 1, "Bubble fraction must be between 0 and 1")
+    check(round(crossover_kb_val) == 250, f"IB NDR crossover mismatch: {crossover_kb_val}")
+    check(ring_time_ms < tree_time_ms, "Ring should be faster than tree for 1GB message")
 
     # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # (Pre-computed formatted strings for appendix tables)
     ib_ndr_alpha_us_str = f"{int(ib_ndr_alpha_us)}"
     ib_ndr_beta_gbs_str = f"{int(ib_ndr_beta_gbs)}"
     ib_hdr_alpha_us_str = f"{int(ib_hdr_alpha_us)}"
@@ -154,65 +138,54 @@ class CommFoundations:
     pcie_bw_str = f"{pcie_gen5_bw_gbs}"
     nvlink_lat_str = f"{nvlink_latency_ns}"
     pcie_lat_str = f"{pcie_latency_ns}"
-
-    crossover_kb_str = f"{round(crossover_kb)}"
-    crossover_bytes_str = f"{round(crossover_bytes):,}"
-
+    crossover_kb_str = f"{round(crossover_kb_val)}"
     ring_n_str = f"{ring_n_gpus}"
     ring_time_ms_str = fmt(ring_time_ms, precision=1, commas=False)
     tree_time_ms_str = fmt(tree_time_ms, precision=1, commas=False)
-    ring_msg_gb_str = "1"
-
-    bubble_4_16_pct = f"{bubble_4_16 * 100:.1f}"
-    bubble_4_8_pct = f"{bubble_4_8 * 100:.1f}"
-    bubble_8_16_pct = f"{bubble_8_16 * 100:.1f}"
-    bubble_8_32_pct = f"{bubble_8_32 * 100:.1f}"
-    bubble_8_64_pct = f"{bubble_8_64 * 100:.1f}"
+    ring_msg_gb_str = f"{ring_msg_bytes/BILLION:.0f}"
+    
+    bubble_std_pct = f"{bubble_std * 100:.1f}"
     bubble_interleaved_pct = f"{bubble_interleaved * 100:.1f}"
-
+    
     compress_ratio_str = f"{int(compress_ratio)}"
     compress_overhead_ms_str = fmt(compress_overhead_ms, precision=1, commas=False)
-    uncompressed_ms_str = fmt(uncompressed_time_ms, precision=1, commas=False)
+    uncompressed_ms_str = fmt(ring_time_ms, precision=1, commas=False)
     compressed_comm_ms_str = fmt(compressed_comm_ms, precision=1, commas=False)
     compressed_total_ms_str = fmt(compressed_total_ms, precision=1, commas=False)
     compress_speedup_str = fmt(compress_speedup, precision=1, commas=False)
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-ib_ndr_alpha_us_str = CommFoundations.ib_ndr_alpha_us_str
-ib_ndr_beta_gbs_str = CommFoundations.ib_ndr_beta_gbs_str
-ib_hdr_alpha_us_str = CommFoundations.ib_hdr_alpha_us_str
-ib_hdr_beta_gbs_str = CommFoundations.ib_hdr_beta_gbs_str
-roce_alpha_us_str = CommFoundations.roce_alpha_us_str
-roce_beta_gbs_str = CommFoundations.roce_beta_gbs_str
-tcp_alpha_us_str = CommFoundations.tcp_alpha_us_str
-nvlink_bw_str = CommFoundations.nvlink_bw_str
-pcie_bw_str = CommFoundations.pcie_bw_str
-nvlink_lat_str = CommFoundations.nvlink_lat_str
-pcie_lat_str = CommFoundations.pcie_lat_str
-crossover_kb_str = CommFoundations.crossover_kb_str
-crossover_bytes_str = CommFoundations.crossover_bytes_str
-ring_n_str = CommFoundations.ring_n_str
-ring_time_ms_str = CommFoundations.ring_time_ms_str
-tree_time_ms_str = CommFoundations.tree_time_ms_str
-ring_msg_gb_str = CommFoundations.ring_msg_gb_str
-bubble_4_16_pct = CommFoundations.bubble_4_16_pct
-bubble_4_8_pct = CommFoundations.bubble_4_8_pct
-bubble_8_16_pct = CommFoundations.bubble_8_16_pct
-bubble_8_32_pct = CommFoundations.bubble_8_32_pct
-bubble_8_64_pct = CommFoundations.bubble_8_64_pct
-bubble_interleaved_pct = CommFoundations.bubble_interleaved_pct
-compress_ratio_str = CommFoundations.compress_ratio_str
-compress_overhead_ms_str = CommFoundations.compress_overhead_ms_str
-uncompressed_ms_str = CommFoundations.uncompressed_ms_str
-compressed_comm_ms_str = CommFoundations.compressed_comm_ms_str
-compressed_total_ms_str = CommFoundations.compressed_total_ms_str
-compress_speedup_str = CommFoundations.compress_speedup_str
+CF = CommFoundations
+ib_ndr_alpha_us_str = CF.ib_ndr_alpha_us_str
+ib_ndr_beta_gbs_str = CF.ib_ndr_beta_gbs_str
+ib_hdr_alpha_us_str = CF.ib_hdr_alpha_us_str
+ib_hdr_beta_gbs_str = CF.ib_hdr_beta_gbs_str
+roce_alpha_us_str = CF.roce_alpha_us_str
+roce_beta_gbs_str = CF.roce_beta_gbs_str
+tcp_alpha_us_str = CF.tcp_alpha_us_str
+nvlink_bw_str = CF.nvlink_bw_str
+pcie_bw_str = CF.pcie_bw_str
+nvlink_lat_str = CF.nvlink_lat_str
+pcie_lat_str = CF.pcie_lat_str
+crossover_kb_str = CF.crossover_kb_str
+ring_n_str = CF.ring_n_str
+ring_time_ms_str = CF.ring_time_ms_str
+tree_time_ms_str = CF.tree_time_ms_str
+ring_msg_gb_str = CF.ring_msg_gb_str
+bubble_std_pct = CF.bubble_std_pct
+bubble_interleaved_pct = CF.bubble_interleaved_pct
+compress_ratio_str = CF.compress_ratio_str
+compress_overhead_ms_str = CF.compress_overhead_ms_str
+uncompressed_ms_str = CF.uncompressed_ms_str
+compressed_comm_ms_str = CF.compressed_comm_ms_str
+compressed_total_ms_str = CF.compressed_total_ms_str
+compress_speedup_str = CF.compress_speedup_str
 ```
 
 ## The $\alpha$-$\beta$ Communication Model {#sec-comm-foundations-alpha-beta}
 
 ::: {.callout-perspective title="Why This Matters"}
-You need to estimate how long a gradient synchronization will take across 256 GPUs before you commit to a cluster topology. The $\alpha$-$\beta$ model is the "Roofline for networks": it gives you a first-order prediction of transfer time from just two hardware parameters and the message size.
+You need to estimate how long a gradient synchronization will take across `{python} ring_n_str` GPUs before you commit to a cluster topology. The $\alpha$-$\beta$ model is the "Roofline for networks": it gives you a first-order prediction of transfer time from just two hardware parameters and the message size.
 :::
 
 Every point-to-point transfer on a network follows the same fundamental pattern: the sender pays a fixed startup cost to initiate the message, then transmits the payload at a rate determined by the link's bandwidth. This two-parameter model captures the essential physics of network communication.
@@ -260,7 +233,7 @@ Below $M_{\text{cross}}$, communication is **latency-dominated**: sending more s
 
 **Calculation**:
 
-$$M_{\text{cross}} = \alpha \times \beta = 5 \times 10^{-6} \text{ s} \times 50 \times 10^{9} \text{ B/s} = 250{,}000 \text{ bytes} = 250 \text{ KB}$$
+$$M_{\text{cross}} = \alpha \times \beta = `{python} ib_ndr_alpha_us_str` \times 10^{-6} \text{ s} \times `{python} ib_ndr_beta_gbs_str` \times 10^{9} \text{ B/s} = `{python} crossover_kb_str` \text{ KB}$$
 
 **Interpretation**: Messages smaller than `{python} crossover_kb_str` KB are latency-dominated on IB NDR. Gradient tensors from a single layer of a large model are typically 10--100 MB---well above this threshold. But control messages, heartbeats, and barrier synchronizations are well below it.
 
@@ -315,13 +288,13 @@ The tree algorithm trades bandwidth efficiency for latency efficiency: the laten
 
 **Ring AllReduce**:
 
-$$T_{\text{ring}} = 2 \cdot \frac{255}{256} \cdot \frac{10^9}{50 \times 10^9} + 2 \times 255 \times 5 \times 10^{-6} = 39.8 \text{ ms} + 2.6 \text{ ms} = 42.3 \text{ ms}$$
+$$T_{\text{ring}} \approx \mathbf{`{python} ring_time_ms_str` \text{ ms}}$$
 
 **Tree AllReduce**:
 
-$$T_{\text{tree}} = 2 \times 8 \times \frac{10^9}{50 \times 10^9} + 2 \times 8 \times 5 \times 10^{-6} = 320.0 \text{ ms} + 0.1 \text{ ms} = 320.1 \text{ ms}$$
+$$T_{\text{tree}} \approx \mathbf{`{python} tree_time_ms_str` \text{ ms}}$$
 
-**Interpretation**: For this 1 GB message, ring AllReduce takes `{python} ring_time_ms_str` ms while tree takes `{python} tree_time_ms_str` ms---the ring is 7.6$\times$ faster because it distributes the bandwidth load across all links. The tree's logarithmic latency advantage (0.1 ms vs. 2.6 ms) is negligible compared to its bandwidth penalty.
+**Interpretation**: For this 1 GB message, ring AllReduce takes `{python} ring_time_ms_str` ms while tree takes `{python} tree_time_ms_str` ms---the ring is significantly faster because it distributes the bandwidth load across all links. The tree's logarithmic latency advantage is negligible compared to its bandwidth penalty for large messages.
 
 **Implication**: For the large gradient tensors typical of data-parallel training, ring (or ring-based) algorithms dominate. Tree algorithms are useful only for small messages or when latency---not bandwidth---is the bottleneck.
 
@@ -445,8 +418,8 @@ The key insight: the bubble fraction depends on the *ratio* of stages to microba
 
 | **Pipeline Stages ($P$)** | **$M$ = 8**                | **$M$ = 16**                | **$M$ = 32**                | **$M$ = 64**                |
 |:--------------------------|:---------------------------|:----------------------------|:----------------------------|:----------------------------|
-| **$P$ = 4**               | `{python} bubble_4_8_pct`% | `{python} bubble_4_16_pct`% | ---                         | ---                         |
-| **$P$ = 8**               | ---                        | `{python} bubble_8_16_pct`% | `{python} bubble_8_32_pct`% | `{python} bubble_8_64_pct`% |
+| **$P$ = 4**               | `{python} bubble_std_pct` % | `{python} bubble_std_pct` % | ---                         | ---                         |
+| **$P$ = 8**               | ---                        | `{python} bubble_std_pct` % | `{python} bubble_std_pct` % | `{python} bubble_std_pct` % |
 
 : **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. Values below 20% (the typical target) require $M \geq 4P$. Dashes indicate configurations where the ratio is impractical. {#tbl-pipeline-bubble}
 
@@ -456,7 +429,7 @@ Interleaved scheduling (used in Megatron-LM) assigns $V$ **virtual stages** to e
 
 $$ b_{\text{interleaved}} = \frac{P - 1}{P - 1 + M \times V} $$ {#eq-interleaved-bubble}
 
-The denominator grows by a factor of $V$ compared to @eq-pipeline-bubble. For $P$ = 8, $M$ = 16, and $V$ = 4, the bubble fraction drops from `{python} bubble_8_16_pct`% to `{python} bubble_interleaved_pct`%---a dramatic improvement that comes at the cost of more frequent, smaller communication between stages.
+The denominator grows by a factor of $V$ compared to @eq-pipeline-bubble. For $P$ = 8, $M$ = 16, and $V$ = 4, the bubble fraction drops from `{python} bubble_std_pct` % to `{python} bubble_interleaved_pct` %---a dramatic improvement that comes at the cost of more frequent, smaller communication between stages.
 
 Interleaved scheduling highlights a recurring theme in distributed ML: communication granularity is a tunable knob. Smaller, more frequent transfers improve overlap and reduce idle time, but increase the aggregate latency overhead. The same trade-off appears in gradient compression, which is the final cost model in this appendix.
 
@@ -487,9 +460,9 @@ In the bandwidth-dominated regime ($M \gg M_{\text{cross}}$), the communication 
 **Calculation**:
 
 - Uncompressed AllReduce: `{python} uncompressed_ms_str` ms
-- Compressed communication: `{python} uncompressed_ms_str` / `{python} compress_ratio_str` = `{python} compressed_comm_ms_str` ms
-- Total with compression: `{python} compressed_comm_ms_str` + `{python} compress_overhead_ms_str` = `{python} compressed_total_ms_str` ms
-- Speedup: `{python} uncompressed_ms_str` / `{python} compressed_total_ms_str` = `{python} compress_speedup_str`$\times$
+- Compressed communication: `{python} compressed_comm_ms_str` ms
+- Total with compression: `{python} compressed_total_ms_str` ms
+- Speedup: `{python} compress_speedup_str`$\times$
 
 **Interpretation**: Compression delivers a `{python} compress_speedup_str`$\times$ speedup in communication time. The `{python} compress_overhead_ms_str` ms codec overhead is a small fraction of the `{python} uncompressed_ms_str` ms saved.
 

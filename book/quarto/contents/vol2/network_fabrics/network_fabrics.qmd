@@ -527,17 +527,76 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 
 :::
 
+```{python}
+#| echo: false
+#| label: network-alpha-beta-refactor
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NETWORK ALPHA-BETA MODEL (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-performance-model
+# │
+# │ Goal: Quantify the latency-bandwidth crossover for InfiniBand vs Ethernet.
+# │ Show: Crossover points (~75KB for IB); impact on small vs large messages.
+# │ How: T = alpha + n/beta. Small msg: 4KB; Large msg: 350MB.
+# │
+# │ Imports: mlsys.constants (INFINIBAND_NDR_BW, Gbps, MILLION, TRILLION)
+# │ Exports: n_cross_ib_kb_str, t_small_ib_us_str, small_bw_pct_str,
+# │          t_large_ib_ms_str, ib_alpha_us_str, ib_beta_gbs_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import INFINIBAND_NDR_BW, Gbps, MILLION, TRILLION, MICROSECOND
+from mlsys.formatting import fmt, check
+
+class NetworkAlphaBeta:
+    """Namespace for the alpha-beta communication model."""
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    # Level 1: Hardware Specs
+    alpha_ib = 1.5e-6 # 1.5 us (typical for IB NDR)
+    beta_ib = INFINIBAND_NDR_BW.m_as('byte/second') # ~50 GB/s
+
+    # Level 2: Messages
+    n_small = 4000 # 4 KB
+    n_large = 350 * MILLION # 350 MB
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    n_cross_ib = alpha_ib * beta_ib
+    
+    t_small_ib = alpha_ib + (n_small / beta_ib)
+    small_bw_term_pct = ((n_small / beta_ib) / t_small_ib) * 100
+    
+    t_large_ib = alpha_ib + (n_large / beta_ib)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(n_cross_ib < 100000, f"Crossover ({n_cross_ib:.0f}) should be < 100KB for IB")
+    check(small_bw_term_pct < 10, f"Small msg should be latency-bound, got {small_bw_term_pct:.1f}% BW share")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    n_cross_ib_kb_str = f"{n_cross_ib/1000:.0f}"
+    t_small_ib_us_str = f"{t_small_ib * 1e6:.2f}"
+    small_bw_pct_str = f"{small_bw_term_pct:.0f}"
+    t_large_ib_ms_str = f"{t_large_ib * 1e3:.1f}"
+    ib_alpha_us_str = f"{alpha_ib * 1e6:.1f}"
+    ib_beta_gbs_str = f"{beta_ib / 1e9:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_cross_ib_kb_str = NetworkAlphaBeta.n_cross_ib_kb_str
+t_small_ib_us_str = NetworkAlphaBeta.t_small_ib_us_str
+small_bw_pct_str = NetworkAlphaBeta.small_bw_pct_str
+t_large_ib_ms_str = NetworkAlphaBeta.t_large_ib_ms_str
+ib_alpha_us_str = NetworkAlphaBeta.ib_alpha_us_str
+ib_beta_gbs_str = NetworkAlphaBeta.ib_beta_gbs_str
+```
+
 The model reveals two regimes:
 1. **Latency-dominated ($n < \alpha\beta$):** Transfer time is dominated by the startup cost $\alpha$. Small control messages and pipeline bubbles fall here.
 2. **Bandwidth-dominated ($n > \alpha\beta$):** Transfer time scales with $n/\beta$. Gradient AllReduce typically falls here.
 
-For NDR InfiniBand with $\alpha \approx 1.5 \mu\text{s}$ and $\beta \approx 50 \text{GB/s}$, the crossover point $n^* = \alpha\beta \approx 75$ KB. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency.
+For NDR InfiniBand with $\alpha \approx `{python} ib_alpha_us_str` \mu\text{s}$ and $\beta \approx `{python} ib_beta_gbs_str` \text{GB/s}$, the crossover point $n^* = \alpha\beta \approx `{python} n_cross_ib_kb_str` \text{ KB}$. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency.
 
-To see why this distinction matters in practice, consider two messages that our 175B model training job sends every iteration. The first is a 4 KB pipeline-scheduling control message that coordinates microbatch handoffs between pipeline stages. Applying the model: $T(4\text{ KB}) = 1.5\;\mu\text{s} + 4\text{ KB} / 50\text{ GB/s} \approx 1.5\;\mu\text{s} + 0.08\;\mu\text{s} = 1.58\;\mu\text{s}$. The bandwidth term contributes only 5% of the total. Doubling the link speed to 100 GB/s would save a negligible 0.04 $\mu$s. For this message, the only way to reduce transfer time is to reduce the hop count (which lowers $\alpha$), not to buy faster links.
+To see why this distinction matters in practice, consider two messages that our 175B model training job sends every iteration. The first is a 4 KB pipeline-scheduling control message that coordinates microbatch handoffs between pipeline stages. Applying the model: $T(4\text{ KB}) \approx \mathbf{`{python} t_small_ib_us_str` \mu\text{s}}$. The bandwidth term contributes only `{python} small_bw_pct_str`% of the total. Doubling the link speed would save a negligible fraction of a microsecond. For this message, the only way to reduce transfer time is to reduce the hop count (which lowers $\alpha$), not to buy faster links.
 
-The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T(350\text{ MB}) = 1.5\;\mu\text{s} + 350\text{ MB} / 50\text{ GB/s} \approx 0.0015\text{ ms} + 7.0\text{ ms} = 7.0\text{ ms}$. The latency term is invisible. Doubling bandwidth to 100 GB/s would halve this to 3.5 ms, a direct and proportional gain. These two cases illustrate why network design must address both $\alpha$ and $\beta$ simultaneously: topology and hop count control the latency-dominated regime, while link speed and path diversity control the bandwidth-dominated regime.
+The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T(350\text{ MB}) \approx \mathbf{`{python} t_large_ib_ms_str` \text{ ms}}$. The latency term is invisible. Doubling bandwidth to 100 GB/s would halve this transfer time, a direct and proportional gain. These two cases illustrate why network design must address both $\alpha$ and $\beta$ simultaneously: topology and hop count control the latency-dominated regime, while link speed and path diversity control the bandwidth-dominated regime.
 
-@fig-alpha-beta-crossover makes these two regimes visible across the full range of message sizes. For InfiniBand, the crossover occurs at approximately 50 KB: messages smaller than this are latency-dominated (the flat region on the left), while larger messages are bandwidth-dominated (the linear region on the right). The 5$\times$ latency gap between InfiniBand and Ethernet RoCE dominates for small messages but becomes irrelevant for the multi-megabyte gradient transfers that dominate training communication.
+@fig-alpha-beta-crossover makes these two regimes visible across the full range of message sizes. For InfiniBand, the crossover occurs at approximately `{python} n_cross_ib_kb_str` KB: messages smaller than this are latency-dominated (the flat region on the left), while larger messages are bandwidth-dominated (the linear region on the right). The 5$\times$ latency gap between InfiniBand and Ethernet RoCE dominates for small messages but becomes irrelevant for the multi-megabyte gradient transfers that dominate training communication.
 
 ::: {#fig-alpha-beta-crossover fig-env="figure" fig-pos="htb" fig-cap="**The Alpha-Beta Crossover**. Transfer time as a function of message size for InfiniBand NDR and Ethernet RoCE. Small messages are latency-dominated (flat region), while large messages are bandwidth-dominated (linear region). The crossover point marks where investing in bandwidth begins to pay off more than reducing latency." fig-alt="Log-log plot showing transfer time versus message size for InfiniBand and Ethernet, with latency-dominated and bandwidth-dominated regions labeled."}
 ```{python}
@@ -550,20 +609,20 @@ The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T
 # │
 # │ Goal: Visualize transfer time vs message size for InfiniBand NDR vs Ethernet
 # │       RoCE; show latency-dominated (flat) vs bandwidth-dominated (linear).
-# │ Show: Log-log plot with crossover points (~50 KB for IB); alpha/beta model.
+# │ Show: Log-log plot with crossover points (~75 KB for IB); alpha/beta model.
 # │ How: T = alpha + n/beta; plot for both fabrics; annotate crossover.
 # │
-# │ Imports: matplotlib.pyplot (plt), numpy (np), matplotlib.ticker
+# │ Imports: matplotlib.pyplot (plt), numpy (np), mlsys.constants
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import matplotlib.pyplot as plt
 import numpy as np
-import matplotlib.ticker as ticker
+from mlsys.constants import INFINIBAND_NDR_BW, ETH_100G_BW
 
-alpha_ib = 1e-6
-beta_ib = 50e9
-alpha_eth = 5e-6
-beta_eth = 25e9
+alpha_ib = 1.5e-6
+beta_ib = INFINIBAND_NDR_BW.m_as('byte/second')
+alpha_eth = 5.0e-6
+beta_eth = ETH_100G_BW.m_as('byte/second')
 
 n = np.logspace(0, 10, 1000)
 t_ib = alpha_ib + n / beta_ib
@@ -576,8 +635,8 @@ t_cross_eth = 2 * alpha_eth
 
 fig, ax = plt.subplots(figsize=(9, 5))
 
-ax.plot(n, t_ib, label=r'InfiniBand NDR (1$\mu$s, 50 GB/s)', color='#006395', linewidth=2.5)
-ax.plot(n, t_eth, label=r'Ethernet RoCE (5$\mu$s, 25 GB/s)', color='#CB202D', linewidth=2.5, linestyle='--')
+ax.plot(n, t_ib, label=f'InfiniBand NDR ({alpha_ib*1e6:.1f}us, {beta_ib/1e9:.0f} GB/s)', color='#006395', linewidth=2.5)
+ax.plot(n, t_eth, label=f'Ethernet RoCE ({alpha_eth*1e6:.1f}us, {beta_eth/1e9:.0f} GB/s)', color='#CB202D', linewidth=2.5, linestyle='--')
 
 ax.scatter([n_cross_ib], [t_cross_ib], color='#006395', s=80, zorder=5, edgecolors='white')
 ax.scatter([n_cross_eth], [t_cross_eth], color='#CB202D', s=80, zorder=5, edgecolors='white')
@@ -819,7 +878,12 @@ However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod
 
 In distributed training, **tensor parallelism** creates a deterministic and highly stratified communication pattern that standard topologies fail to exploit. Because large models partition individual matrix multiplications across GPUs, GPU 0 on one node must frequently exchange activations with GPU 0 on other nodes, but rarely with GPU 1. A **rail-optimized topology** physically hardwires this logic by isolating these communication paths into dedicated networks. Instead of connecting all 8 GPUs in a node to a single ToR switch, the network connects all GPU 0s across the entire cluster to a dedicated "Rail 0" switch fabric, all GPU 1s to "Rail 1," and so on.
 
-For our 1,000-GPU cluster spanning 125 nodes, this creates 8 parallel networks of 125 GPUs each, allowing tensor-parallel traffic to traverse a single switch hop rather than the multi-hop leaf-spine-leaf path required by a standard fat-tree. The latency benefit is significant for the frequent, small activation exchanges that tensor parallelism demands. However, this architecture introduces a sharp trade-off: data parallelism requires global synchronization across *all* GPUs, crossing all rails. Modern clusters therefore employ a hybrid approach, using rail-optimized leaves for tensor-parallel traffic while bridging the rails with a full fat-tree spine to support the global AllReduce patterns of data parallelism.
+::: {.callout-lighthouse title="Archetype A (GPT-4 / Llama-3): The Rail-Optimized Fleet"}
+**Archetype A (GPT-4)** is the primary driver for rail-optimized fabrics. Because it uses **3D Parallelism**, it generates two distinct traffic patterns: (1) high-frequency, latency-sensitive activation exchanges for tensor parallelism, and (2) massive, bandwidth-hungry gradient averaging for data parallelism. The rail-optimized design ensures that tensor-parallel traffic traverses only a single switch hop between nodes, minimizing the latency that would otherwise stall the synchronous training loop.
+:::
+
+For our 1,000-GPU cluster spanning 125 nodes, this creates 8 parallel networks of 125 GPUs each, allowing tensor-parallel traffic to traverse a single switch hop rather than the multi-hop leaf-spine-leaf path required by a standard fat-tree. 
+ The latency benefit is significant for the frequent, small activation exchanges that tensor parallelism demands. However, this architecture introduces a sharp trade-off: data parallelism requires global synchronization across *all* GPUs, crossing all rails. Modern clusters therefore employ a hybrid approach, using rail-optimized leaves for tensor-parallel traffic while bridging the rails with a full fat-tree spine to support the global AllReduce patterns of data parallelism.
 
 ### Dragonfly and Torus Alternatives {#sec-network-fabrics-dragonfly}
 

@@ -76,191 +76,176 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 #| label: storage-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ STORAGE HIERARCHY AND MODEL SPECIFICATIONS
+# │ STORAGE HIERARCHY AND PIPELINE ECONOMICS (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-data-storage storage hierarchy tables and I/O bottleneck
-# │          analysis paragraphs throughout the chapter.
+# │ Context: @sec-data-storage — storage hierarchy, I/O bottlenecks, and TCO
 # │
-# │ Goal: Establish the six-tier storage hierarchy gap by computing H100 HBM
-# │       bandwidth (H100_MEM_BW) vs NVMe sequential bandwidth (NVME_SEQUENTIAL_BW),
-# │       and estimate GPT-3 checkpoint write time (GPT3_PARAMS, FP16, at NVMe
-# │       vs network storage) to show the I/O bottleneck in fault tolerance.
-# │ Show: "3.35" TB/s H100 HBM vs "~7" GB/s NVMe — inline in the storage
-# │       hierarchy tier comparison and checkpoint I/O bottleneck paragraphs.
-# │ How: Direct .m_as() for each unit conversion; H100_TDP .m_as(watt).
+# │ Goal: Quantify the 1000x+ gap between accelerator HBM and shared storage,
+# │       derive required pipeline bandwidth, and model checkpoint storm impact.
+# │ Show: ~3.35 TB/s HBM vs ~7 GB/s NVMe; ~20% data stall without pipelining;
+# │       ~1 TB checkpoint save in <1s via tiered staging.
+# │ How: 6NP pipeline eqn; max(T_comp, T_io) for stalls; tiered write latency.
 # │
-# │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY, H100_MEM_BW,
-# │           H100_FLOPS_FP8_TENSOR, H100_FLOPS_FP16_TENSOR, H100_TDP,
-# │           GPT3_PARAMS, RESNET50_PARAMS, NVME_SEQUENTIAL_BW,
-# │           NVLINK_H100_BW, PCIE_GEN5_BW, GiB, TB, TFLOPs, GB, second,
-# │           watt, Bparam, Mparam)
-# │ Exports: a100_mem, h100_mem, h100_bw_tbs, h100_fp8_tflops, h100_fp16_tflops,
-# │          h100_tdp_w, gpt3_params_b, resnet_params_m, nvme_bw,
-# │          nvlink_bw_gbs, pcie5_bw_gbs
+# │ Imports: mlsys.constants (H100_MEM_BW, GPT3_PARAMS, NVME_SEQUENTIAL_BW, ...)
+# │ Exports: h100_bw_tbs, nvme_bw, gpt3_params_b, req_bw_imagenet,
+# │          data_stall_pct_str, stall_pct_display_math, s3_annual_cost,
+# │          ckpt_total_gb, ckpt_nvme_s, ckpt_pfs_s, tier_cost_ratio,
+# │          egress_100tb_cost, prob_tail_all_str, fail_rate_pct_str, n_tail_servers_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, NVME_SEQUENTIAL_BW,
+    GPT3_PARAMS, BILLION, MILLION, TRILLION, THOUSAND,
+    GB, TB, second, byte, flop, USD, kilowatt, hour,
+    GPUS_PER_NODE, SEC_PER_MONTH, SEC_PER_YEAR,
+    H100_MEM_CAPACITY, BYTES_PER_FP16, BYTES_PER_FP32,
+    MICROSECOND, GiB, Mparam, RESNET50_PARAMS,
+    NVLINK_H100_BW, PCIE_GEN5_BW
+)
+from mlsys.formatting import fmt, check, md
 import math
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
-class StorageSetup:
+class StorageHierarchyAnalysis:
     """
-    Namespace for global storage constants and specs.
-    """
-    # GPU specs
-    a100_mem = A100_MEM_CAPACITY.m_as(GiB)
-    h100_mem = H100_MEM_CAPACITY.m_as(GiB)
-    h100_bw = H100_MEM_BW.m_as(TB/second)
-    h100_fp8 = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second)
-    h100_fp16 = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second)
-    h100_tdp = H100_TDP.m_as(watt)
-
-    # Model specs
-    gpt3_params = GPT3_PARAMS.m_as(Bparam)
-    resnet_params = RESNET50_PARAMS.m_as(Mparam)
-
-    # Storage & Interconnect
-    nvme_bw = NVME_SEQUENTIAL_BW.m_as(GB/second)
-    nvlink_bw = NVLINK_H100_BW.m_as(GB/second)
-    pcie5_bw = PCIE_GEN5_BW.m_as(GB/second)
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-a100_mem = f"{StorageSetup.a100_mem:.0f}"
-h100_mem = f"{StorageSetup.h100_mem:.0f}"
-h100_bw_tbs = f"{StorageSetup.h100_bw:.2f}"
-h100_fp8_tflops = f"{StorageSetup.h100_fp8:,.0f}"
-h100_fp16_tflops = f"{StorageSetup.h100_fp16:,.0f}"
-h100_tdp_w = f"{StorageSetup.h100_tdp:.0f}"
-
-gpt3_params_b = f"{StorageSetup.gpt3_params:.0f}"
-resnet_params_m = f"{StorageSetup.resnet_params:.1f}"
-
-nvme_bw = f"{StorageSetup.nvme_bw:.1f}"
-nvlink_bw_gbs = f"{StorageSetup.nvlink_bw:.0f}"
-pcie5_bw_gbs = f"{StorageSetup.pcie5_bw:.0f}"
-
-# Storage
-nvme_bw = f"{NVME_SEQUENTIAL_BW.m_as(GB/second):.1f}"
-
-# Interconnect
-nvlink_bw_gbs = f"{NVLINK_H100_BW.m_as(GB/second):.0f}"
-pcie5_bw_gbs = f"{PCIE_GEN5_BW.m_as(GB/second):.0f}"
-
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
-class StorageEconomics:
-    """
-    Namespace for all mid-chapter storage calculations.
+    Namespace for global storage hierarchy and pipeline calculations.
+    Hierarchy:
+    - Level 1: Accelerator & Media Specs (The Silicon Contract)
+    - Level 2: Workload Profiles (Archetype A/B)
+    - Level 3: Pipeline Tiers (Node, Rack, PFS, Object)
+    - Level 4: Efficiency Metrics (Stall %, MFU impact)
     """
 
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    # General
-    h100_bw_tb_s = StorageSetup.h100_bw
-    gpt3_params_b = StorageSetup.gpt3_params
+    # Level 1: Media & Accelerator
+    h100_bw = H100_MEM_BW
+    h100_flops_fp16 = H100_FLOPS_FP16_TENSOR
+    h100_cap = H100_MEM_CAPACITY
+    nvme_bw_raw = NVME_SEQUENTIAL_BW # ~7 GB/s
+    pfs_node_bw = (4.0 * GB / second) # Typical per-node PFS share
+    s3_bw = (1.0 * GB / second) # Typical single-stream object BW
+
+    # Level 2: Workload (Archetype A: 175B LLM)
+    gpt3_params = GPT3_PARAMS.m_as('param')
+    batch_tokens_gpu = 4096
+    t_step_ms = 200
 
     # ImageNet Scenario
-    n_gpus = 256
+    n_gpus_image = 256
+    img_size = 150 * THOUSAND # 150 KB
+    batch_img_gpu = 256
     util_target = 0.80
-    img_size_kb = 150
-    batch_per_gpu = 256
-    iter_time_s = 0.2
-    ips_target = 1000 # images per sec target for random access comparison
-    hdd_iops = 100
 
-    # Data Stall Scenario
-    t_compute_ms = 200
-    t_io_ms = 250
-
-    # Prefetch Scenario
-    t_io_p99_ms = 200
-    t_compute_prefetch_ms = 100
-
-    # GDS Scenario
-    gds_trad_us = 120
-    gds_bypass_us = 30
-
-    # Cost Scenario
+    # Cost Parameters
     dataset_size_tb = 100
-    s3_cost_gb_mo = 0.02
-    nvme_cost_gb_mo = 0.10
-    glacier_cost_gb_mo = 0.004
-    egress_cost_gb = 0.09 # Standard AWS egress
+    cost_s3_gb_mo = 0.02
+    cost_nvme_gb_mo = 0.10
+    cost_glacier_gb_mo = 0.004
+    cost_egress_gb = 0.09
 
-    # Checkpoint Scenario
-    ckpt_params_b = 175
-    n_nodes_ckpt = 256
-    pfs_bandwidth_node_gbs = 4.0
-    nvme_bandwidth_gbs = 14.0
+    # Tail Latency Scenario
+    n_tail_servers = 100
+    p_tail_fail = 0.01
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    # ImageNet Throughput
-    batch_size_mb = (batch_per_gpu * img_size_kb) / 1024
-    # Aggregate = n_gpus * img_size * util / iter
-    req_bw_imagenet = (n_gpus * batch_per_gpu * util_target * (img_size_kb / 1024 / 1024)) / iter_time_s # in GB/s
+    # ImageNet Pipeline Equation (Level 4)
+    # B = N * U * (S_batch / T_iter)
+    t_step_s = t_step_ms / 1000
+    req_bw_imagenet_val = (n_gpus_image * util_target * (batch_img_gpu * img_size)) / t_step_s # bytes/s
+    req_bw_imagenet_gbs = req_bw_imagenet_val / BILLION
 
-    # HDD Bottleneck
-    raw_bw_mbs = (ips_target * img_size_kb) / 1024
-    hdd_slowdown = ips_target / hdd_iops
+    # Data Stall (Level 4)
+    t_comp_val = 200
+    t_io_val = 250
+    stall_max_t = max(t_comp_val, t_io_val)
+    data_stall_pct_val = ((stall_max_t - t_comp_val) / stall_max_t) * 100
 
-    # Data Stall
-    stall_max_t = max(t_compute_ms, t_io_ms)
-    data_stall_pct = ((stall_max_t - t_compute_ms) / stall_max_t) * 100
+    # Checkpoint Storm (Archetype A)
+    # Weights (FP16) + Optimizer (FP32 x 2)
+    bytes_per_param_ckpt = BYTES_PER_FP16 + (2 * BYTES_PER_FP32)
+    ckpt_total_gb_val = (gpt3_params * bytes_per_param_ckpt) / BILLION
+    
+    # Per-node shard (assume 256 nodes)
+    n_nodes = 256
+    node_shard_gb = ckpt_total_gb_val / n_nodes
+    ckpt_nvme_s_val = node_shard_gb / (4 * nvme_bw_raw.m_as(GB/second)) # 4-drive RAID
+    ckpt_pfs_s_val = node_shard_gb / pfs_node_bw.m_as(GB/second)
 
-    # Prefetch
-    prefetch_min_depth = math.ceil(t_io_p99_ms / t_compute_prefetch_ms)
-    prefetch_safe_depth = prefetch_min_depth + 1
+    # Economics
+    s3_annual_val = dataset_size_tb * 1000 * cost_s3_gb_mo * 12
+    nvme_annual_val = dataset_size_tb * 1000 * cost_nvme_gb_mo * 12
+    glacier_annual_val = dataset_size_tb * 1000 * cost_glacier_gb_mo * 12
+    tier_cost_ratio_val = cost_nvme_gb_mo / cost_s3_gb_mo
+    egress_100tb_val = dataset_size_tb * 1000 * cost_egress_gb
 
-    # GDS
-    gds_speedup = gds_trad_us / gds_bypass_us
-
-    # Annual Costs (100 TB)
-    s3_annual = dataset_size_tb * 1000 * s3_cost_gb_mo * 12
-    nvme_annual = dataset_size_tb * 1000 * nvme_cost_gb_mo * 12
-    glacier_annual = dataset_size_tb * 1000 * glacier_cost_gb_mo * 12
-    tier_cost_ratio = (15.00 / glacier_cost_gb_mo) # Approx based on HBM access cost
-    egress_100tb = dataset_size_tb * 1000 * egress_cost_gb
-
-    # Checkpoints (GPT-3 175B)
-    ckpt_weights_gb = ckpt_params_b * 2
-    ckpt_opt_gb = ckpt_params_b * 8
-    ckpt_total_gb = ckpt_weights_gb + ckpt_opt_gb
-
-    ckpt_nvme_s = (ckpt_total_gb / n_nodes_ckpt) / nvme_bandwidth_gbs
-    ckpt_pfs_s = (ckpt_total_gb / n_nodes_ckpt) / pfs_bandwidth_node_gbs
+    # Tail Latency Physics
+    prob_tail_all = (1.0 - p_tail_fail) ** n_tail_servers
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(req_bw_imagenet > 10, "Required aggregate bandwidth seems too low.")
-    check(data_stall_pct == 20, f"Stall % mismatch: {data_stall_pct}")
-    check(ckpt_total_gb >= 1000, "175B Checkpoint should be >1TB")
+    check(req_bw_imagenet_gbs > 10, f"ImageNet aggregate BW should be high, got {req_bw_imagenet_gbs:.1f} GB/s")
+    check(ckpt_total_gb_val > 1000, "175B checkpoint must be > 1TB")
+    check(data_stall_pct_val == 20, "Data stall calculation mismatch")
+    check(prob_tail_all < 0.4, f"Tail latency should dominate, got {prob_tail_all:.2f}")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    # (Strings handled in exports below)
+    h100_bw_tbs = f"{h100_bw.m_as(TB/second):.2f}"
+    nvme_bw_str = f"{nvme_bw_raw.m_as(GB/second):.1f}"
+    gpt3_params_b = f"{gpt3_params / BILLION:.0f}"
+    h100_hbm_cap_gb = f"{h100_cap.m_as(GB):.0f}"
+
+    req_bw_imagenet_str = f"{req_bw_imagenet_gbs:.1f}"
+    data_stall_pct_str = f"{data_stall_pct_val:.0f}"
+
+    ckpt_total_gb_str = f"{ckpt_total_gb_val:,.0f}"
+    ckpt_nvme_s_str = f"{ckpt_nvme_s_val:.1f}"
+    ckpt_pfs_s_str = f"{ckpt_pfs_s_val:.1f}"
+
+    s3_annual_str = f"{s3_annual_val:,.0f}"
+    nvme_annual_str = f"{nvme_annual_val:,.0f}"
+    glacier_annual_str = f"{glacier_annual_val:,.0f}"
+    tier_cost_ratio_str = f"{tier_cost_ratio_val:.0f}"
+    egress_100tb_str = f"{egress_100tb_val:,.0f}"
+
+    prob_tail_all_str = f"{prob_tail_all:.3f}"
+    fail_rate_pct_str = f"{p_tail_fail * 100:.0f}"
+    n_tail_servers_str = f"{n_tail_servers}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-req_bw_imagenet = f"{StorageEconomics.req_bw_imagenet:.1f}"
-raw_bw_str = f"{StorageEconomics.raw_bw_mbs:.0f}"
-hdd_slowdown_factor = f"{StorageEconomics.hdd_slowdown:.0f}"
-t_comp_stall_str = f"{StorageEconomics.t_compute_ms}"
-t_io_stall_str = f"{StorageEconomics.t_io_ms}"
-data_stall_pct_str = f"{StorageEconomics.data_stall_pct:.0f}"
+h100_bw_tbs = StorageHierarchyAnalysis.h100_bw_tbs
+nvme_bw = StorageHierarchyAnalysis.nvme_bw_str
+gpt3_params_b = StorageHierarchyAnalysis.gpt3_params_b
+h100_hbm_cap_gb = StorageHierarchyAnalysis.h100_hbm_cap_gb
+
+req_bw_imagenet = StorageHierarchyAnalysis.req_bw_imagenet_str
+data_stall_pct_str = StorageHierarchyAnalysis.data_stall_pct_str
 stall_pct_display_math = md(
-    f"$$\\text{{Stall \\%}} = \\frac{{250 - 200}}{{250}} = "
+    f"$$\\text{{Stall \\%}} = \\frac{{{StorageHierarchyAnalysis.t_io_val} - {StorageHierarchyAnalysis.t_comp_val}}}{{{StorageHierarchyAnalysis.t_io_val}}} = "
     f"\\mathbf{{{data_stall_pct_str}\\%}}$$"
 )
-prefetch_t_io_p99_str = f"{StorageEconomics.t_io_p99_ms}"
-prefetch_t_compute_str = f"{StorageEconomics.t_compute_prefetch_ms}"
-prefetch_min_depth = f"{StorageEconomics.prefetch_min_depth}"
-prefetch_safe_depth = f"{StorageEconomics.prefetch_safe_depth}"
-gds_trad_us = f"{StorageEconomics.gds_trad_us}"
-gds_bypass_us = f"{StorageEconomics.gds_bypass_us}"
-gds_speedup = f"{StorageEconomics.gds_speedup:.0f}"
-s3_annual_cost = f"{StorageEconomics.s3_annual:,.0f}"
-nvme_annual_cost = f"{StorageEconomics.nvme_annual:,.0f}"
-glacier_annual_cost = f"{StorageEconomics.glacier_annual:,.0f}"
-tier_cost_ratio = f"{StorageEconomics.tier_cost_ratio:,.0f}"
-egress_100tb_cost = f"{StorageEconomics.egress_100tb:,.0f}"
-ckpt_total_gb = f"{StorageEconomics.ckpt_total_gb:,.0f}"
-ckpt_weights_gb_str = f"{StorageEconomics.ckpt_weights_gb:,.0f}"
-ckpt_optimizer_gb_str = f"{StorageEconomics.ckpt_opt_gb:,.0f}"
-ckpt_nvme_s = f"{StorageEconomics.ckpt_nvme_s:.1f}"
-ckpt_pfs_s = f"{StorageEconomics.ckpt_pfs_s:.1f}"
+
+ckpt_total_gb = StorageHierarchyAnalysis.ckpt_total_gb_str
+ckpt_nvme_s = StorageHierarchyAnalysis.ckpt_nvme_s_str
+ckpt_pfs_s = StorageHierarchyAnalysis.ckpt_pfs_s_str
+
+s3_annual_cost = StorageHierarchyAnalysis.s3_annual_str
+nvme_annual_cost = StorageHierarchyAnalysis.nvme_annual_str
+glacier_annual_cost = StorageHierarchyAnalysis.glacier_annual_str
+tier_cost_ratio = StorageHierarchyAnalysis.tier_cost_ratio_str
+egress_100tb_cost = StorageHierarchyAnalysis.egress_100tb_str
+
+prob_tail_all_str = StorageHierarchyAnalysis.prob_tail_all_str
+fail_rate_pct_str = StorageHierarchyAnalysis.fail_rate_pct_str
+n_tail_servers_str = StorageHierarchyAnalysis.n_tail_servers_str
+
+# GPU Specs for setup
+a100_mem = f"{A100_MEM_CAPACITY.m_as(GiB):.0f}"
+h100_mem = f"{H100_MEM_CAPACITY.m_as(GiB):.0f}"
+h100_fp8_tflops = f"{H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second):,.0f}"
+h100_fp16_tflops = f"{H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second):,.0f}"
+h100_tdp_w = f"{H100_TDP.m_as(watt):.0f}"
+resnet_params_m = f"{RESNET50_PARAMS.m_as(Mparam):.1f}"
+nvlink_bw_gbs = f"{NVLINK_H100_BW.m_as(GB/second):.0f}"
+pcie5_bw_gbs = f"{PCIE_GEN5_BW.m_as(GB/second):.0f}"
+```
 
 # (Calculations handled in StorageEconomics class above)
 ```
@@ -504,7 +489,7 @@ To resolve the tensions between bandwidth, latency, capacity, and cost, ML syste
 
 : **Extended Memory Hierarchy for ML Systems**: The 300,000$\times$ bandwidth gap between HBM and object storage drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
-::: {.callout-principle title="The Storage Hierarchy Principle"}
+::: {.callout-principle #nte-storage-hierarchy title="The Storage Hierarchy Principle"}
 
 Storage performance decreases and capacity increases as data moves further from the accelerator. Each tier in @tbl-storage-hierarchy-merged drops bandwidth by 10--100$\times$ while increasing capacity by 10--100$\times$. The systems engineer's task is to ensure that the *right data* is on the *right tier* at the *right time*. This principle governs every design decision in this chapter: data format choices, caching strategies, prefetch buffer sizing, and tiering policies all exist to manage the movement of data upward through the hierarchy so that the accelerator never starves.
 :::
@@ -1041,6 +1026,10 @@ A more advanced approach is **locality-aware scheduling**. The fleet orchestrato
 For our 3 TB dataset distributed across 256 nodes, each node is responsible for approximately 12 GB of data. If a node fails, its replacement must stage that 12 GB from the PFS. At a typical PFS read speed of 4 GB/s, this staging takes 3 seconds. If the orchestrator can instead schedule the replacement workload on an idle node that already has the data cached from a previous run, staging time is zero and training resumes instantly. At scale, this optimization compounds: in a 10,000-node cluster experiencing 10 node failures per day, locality-aware scheduling saves 30 seconds of staging time per failure, or 5 minutes per day of aggregate cluster idle time.
 
 Knowing where data lives is only half the story; at scale we must also pin *which* version of the data each run uses and how it flows through the pipeline.
+
+::: {.callout-lighthouse title="Archetype B (DLRM at Scale): Feature Store Latency"}
+While **Archetype A (GPT-4)** deals with static, versioned datasets of trillions of tokens, **Archetype B (DLRM at Scale)** deals with dynamic, high-velocity feature streams. For a recommendation system, the "ground truth" changes every second as users click and interact. This forces a move from simple file-based storage to a **Feature Store** architecture that must solve the **Point-in-Time Correctness** problem: ensuring that the features retrieved for training exactly match what the model would have seen at the moment of inference, without "leaking" future information.
+:::
 
 ### Data Versioning and Pipeline Orchestration at Scale {#sec-storage-data-versioning-orchestration}
 

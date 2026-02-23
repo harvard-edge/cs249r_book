@@ -2284,7 +2284,7 @@ While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, re
 #| echo: false
 #| label: checkpoint-debug-calc
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHECKPOINT DEBUG CALCULATION
+# │ CHECKPOINT DEBUG CALCULATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "Debugging Checkpoint Overhead" callout in §Checkpoint Overhead.
 # │
@@ -2298,71 +2298,71 @@ While @tbl-checkpoint-overhead-by-model suggests modest overhead percentages, re
 # │   GB/s (10 Gbps / 8); calculate min write time and per-node bandwidth
 # │   under contention from 64 concurrent nodes.
 # │
-# │ Imports: (none — pure Python arithmetic, no pint quantities)
+# │ Imports: (none)
 # │ Exports: weights_gb_str, optimizer_gb_str, total_ckpt_gb_str, nfs_gbs_str,
 # │   min_write_s_str, min_write_min_str, per_node_mbs_str, serialized_min_str,
 # │   extended_weeks_str, extra_cost_k_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-class CheckpointDebugCalc:
-    """Diagnose 70B checkpoint overhead on NFS-backed cluster."""
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class CheckpointDebug:
+    """
+    Namespace for 70B checkpoint overhead diagnosis.
+    Scenario: 64-node cluster with 10 Gbps shared storage.
+    """
 
     # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    model_params_b = 70     # 70B parameter model
-    bytes_per_param = 2     # BF16 weights
-    nfs_gbps = 10           # NFS network attachment bandwidth in Gbps
-    n_nodes = 64            # nodes writing simultaneously
-    overhead_pct = 30       # observed training throughput loss %
-    base_weeks = 2          # baseline training duration (weeks)
-    extra_cost_k = 500      # additional cost from extended training ($K)
+    model_params_b = 70
+    bytes_per_param = 2 # BF16
+    nfs_gbps = 10
+    n_nodes = 64
+    overhead_pct = 30
+    base_weeks = 2
+    extra_cost_k = 500
 
     # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-    # Model state sizing
-    weights_gb = model_params_b * bytes_per_param          # 140 GB
-    optimizer_gb = weights_gb * 2                           # Adam m + v moments
-    total_ckpt_gb = weights_gb + optimizer_gb               # 420 GB
+    weights_gb = model_params_b * bytes_per_param
+    optimizer_gb = weights_gb * 2 # Adam m + v
+    total_ckpt_gb_val = weights_gb + optimizer_gb
 
-    # Storage bandwidth limits
-    nfs_gbs = nfs_gbps / 8                                 # 1.25 GB/s
-    min_write_s = total_ckpt_gb / nfs_gbs                  # theoretical minimum seconds
-    min_write_min = min_write_s / 60                        # convert to minutes
+    nfs_gbs_val = nfs_gbps / 8
+    min_write_s_val = total_ckpt_gb_val / nfs_gbs_val
+    min_write_min_val = min_write_s_val / 60
 
-    # Contention: 64 nodes sharing the NFS bandwidth
-    per_node_gbs = nfs_gbs / n_nodes                        # GB/s per node under contention
-    per_node_mbs = per_node_gbs * 1000                      # MB/s per node
-    serialized_min = (total_ckpt_gb / per_node_gbs) / 60   # worst-case serialized write time
+    per_node_gbs_val = nfs_gbs_val / n_nodes
+    per_node_mbs_val = per_node_gbs_val * 1000
+    serialized_min_val = (total_ckpt_gb_val / per_node_gbs_val) / 60
 
-    # Training schedule impact
-    extended_weeks = base_weeks * (1 + overhead_pct / 100)
+    extended_weeks_val = base_weeks * (1 + overhead_pct / 100)
 
     # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    assert min_write_min < 10, "Theoretical minimum must be less than observed 10 minutes"
-    assert serialized_min > min_write_min, "Contention time must exceed theoretical minimum"
+    check(total_ckpt_gb_val == 420, f"Expected 420GB checkpoint, got {total_ckpt_gb_val}")
+    check(serialized_min_val > 5000, "Serialized time should be massive due to contention")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
-    weights_gb_str     = f"{weights_gb:.0f}"
-    optimizer_gb_str   = f"{optimizer_gb:.0f}"
-    total_ckpt_gb_str  = f"{total_ckpt_gb:.0f}"
-    nfs_gbs_str        = f"{nfs_gbs}"
-    min_write_s_str    = f"{min_write_s:.0f}"
-    min_write_min_str  = f"{min_write_min:.1f}"
-    per_node_mbs_str   = f"{per_node_mbs:.0f}"
-    serialized_min_str = f"{serialized_min:.0f}"
-    extended_weeks_str = f"{extended_weeks:.1f}"
-    extra_cost_k_str   = f"{extra_cost_k}"
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    weights_gb_str = f"{weights_gb:.0f}"
+    optimizer_gb_str = f"{optimizer_gb:.0f}"
+    total_ckpt_gb_str = f"{total_ckpt_gb_val:.0f}"
+    nfs_gbs_str = f"{nfs_gbs_val}"
+    min_write_s_str = f"{min_write_s_val:.0f}"
+    min_write_min_str = f"{min_write_min_val:.1f}"
+    per_node_mbs_str = f"{per_node_mbs_val:.0f}"
+    serialized_min_str = f"{serialized_min_val:,.0f}"
+    extended_weeks_str = f"{extended_weeks_val:.1f}"
+    extra_cost_k_str = f"{extra_cost_k}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-weights_gb_str     = CheckpointDebugCalc.weights_gb_str
-optimizer_gb_str   = CheckpointDebugCalc.optimizer_gb_str
-total_ckpt_gb_str  = CheckpointDebugCalc.total_ckpt_gb_str
-nfs_gbs_str        = CheckpointDebugCalc.nfs_gbs_str
-min_write_s_str    = CheckpointDebugCalc.min_write_s_str
-min_write_min_str  = CheckpointDebugCalc.min_write_min_str
-per_node_gbs       = CheckpointDebugCalc.per_node_gbs
-per_node_mbs_str   = CheckpointDebugCalc.per_node_mbs_str
-serialized_min_str = CheckpointDebugCalc.serialized_min_str
-extended_weeks_str = CheckpointDebugCalc.extended_weeks_str
-extra_cost_k_str   = CheckpointDebugCalc.extra_cost_k_str
+weights_gb_str     = CheckpointDebug.weights_gb_str
+optimizer_gb_str   = CheckpointDebug.optimizer_gb_str
+total_ckpt_gb_str  = CheckpointDebug.total_ckpt_gb_str
+nfs_gbs_str        = CheckpointDebug.nfs_gbs_str
+min_write_s_str    = CheckpointDebug.min_write_s_str
+min_write_min_str  = CheckpointDebug.min_write_min_str
+per_node_mbs_str   = CheckpointDebug.per_node_mbs_str
+serialized_min_str = CheckpointDebug.serialized_min_str
+extended_weeks_str = CheckpointDebug.extended_weeks_str
+extra_cost_k_str   = CheckpointDebug.extra_cost_k_str
+per_node_gbs       = CheckpointDebug.per_node_gbs_val
 ```
 
 ::: {.callout-example title="Debugging Checkpoint Overhead"}

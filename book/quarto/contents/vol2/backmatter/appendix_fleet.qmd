@@ -16,20 +16,16 @@ This appendix collects the reference numbers and compact models for fleet-scale 
 #| label: appendix-fleet-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FLEET FOUNDATIONS — MASTER COMPUTATION
+# │ FLEET FOUNDATIONS — MASTER COMPUTATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: PERSISTENT — All values used throughout the Fleet Foundations
 # │          appendix: hardware reference table, MTBF tables, checkpoint sizing,
 # │          effective FLOPS, comm-compute ratio, and all prose inline values.
 # │
-# │ Goal: Provide all quantitative fleet engineering constants in one place
-# │       for the "Numbers Every Fleet Engineer Should Know" reference appendix.
-# │ Show: See individual section cells for formatted values. This cell provides
-# │       the physics; formatting cells convert to display strings.
-# │ How: pint Quantities from mlsys.constants; fleet formulas from formulas.py;
-# │      all results as typed Quantities or raw floats via .m_as().
+# │ Goal: Provide all quantitative fleet engineering constants in one place.
+# │ How: pint Quantities from mlsys.constants; fleet formulas from formulas.py.
 # │
-# │ Imports: mlsys.constants (*), mlsys.formulas (calc_*), mlsys.formatting (fmt, check)
+# │ Imports: mlsys.constants (*), mlsys.formulas (calc_*), mlsys.formatting (*)
 # │ Exports: FF = FleetFoundations (accessed as FF.attribute in downstream cells)
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -43,135 +39,84 @@ from mlsys.formulas import (
     calc_young_daly_interval, calc_checkpoint_size
 )
 
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class FleetFoundations:
     """Namespace for fleet-scale reference calculations."""
 
-    # ── Communication Numbers ────────────────────────────────────────────────
-    # Bandwidth hierarchy (GB/s)
-    nvlink_h100_bw = int(NVLINK_H100_BW.m_as(GB / second))
-    pcie5_bw = int(PCIE_GEN5_BW.m_as(GB / second))
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Level 1: Interconnect & Memory
+    h100_qty = H100_FLOPS_FP16_TENSOR
+    h100_bw_qty = H100_MEM_BW
+    nvlink_h100_qty = NVLINK_H100_BW
+    pcie5_qty = PCIE_GEN5_BW
     ib_ndr_bw = INFINIBAND_NDR_BW_GBS
-    ib_hdr_bw = INFINIBAND_HDR_BW_GBS
-    ib_xdr_bw = INFINIBAND_XDR_BW_GBS
-    roce_bw = ROCE_100G_BW_GBS
-    eth_400g_bw = ETHERNET_400G_BW_GBS
-
-    # Latency hierarchy (microseconds)
     ib_ndr_lat = IB_NDR_LATENCY_US
-    ib_hdr_lat = IB_HDR_LATENCY_US
-    roce_lat = ROCE_LATENCY_US
-    tcp_lat = TCP_LATENCY_US
 
-    # Key ratios
-    nvlink_to_ib = int(nvlink_h100_bw / ib_ndr_bw)  # NVLink vs IB NDR
-    ib_to_tcp_lat = int(tcp_lat / ib_ndr_lat)  # TCP vs IB latency ratio
+    # Level 2: Node
+    gpus_per_node = GPUS_PER_HOST
+    node_mtbf_params = {
+        "gpu_mttf": GPU_MTTF_HOURS,
+        "nic_mttf": NIC_MTTF_HOURS,
+        "psu_mttf": PSU_MTTF_HOURS,
+    }
 
-    # ── Computation Numbers ──────────────────────────────────────────────────
-    # MFU ranges
-    mfu_low = int(MFU_TRAINING_LOW * 100)
-    mfu_high = int(MFU_TRAINING_HIGH * 100)
+    # Level 3: Cluster
+    cluster_sizes = [CLUSTER_SMALL_GPUS, CLUSTER_MEDIUM_GPUS, CLUSTER_LARGE_GPUS, CLUSTER_MEGA_GPUS]
+    
+    # Efficiency & Budgets
+    mfu_range = (MFU_TRAINING_LOW, MFU_TRAINING_HIGH)
+    oh_pipeline = OVERHEAD_PIPELINE_BUBBLE
+    oh_checkpoint = OVERHEAD_CHECKPOINT
+    oh_failure = OVERHEAD_FAILURE_RECOVERY
+    oh_maintenance = OVERHEAD_MAINTENANCE
 
-    # Scaling efficiency
-    eff_32 = int(SCALING_EFF_32GPU * 100)
-    eff_256 = int(SCALING_EFF_256GPU * 100)
-    eff_1024 = int(SCALING_EFF_1024GPU * 100)
-    eff_8192 = int(SCALING_EFF_8192GPU * 100)
-
-    # ── Coordination Numbers ─────────────────────────────────────────────────
-    # Cluster sizes
-    cl_small = CLUSTER_SMALL_GPUS
-    cl_medium = CLUSTER_MEDIUM_GPUS
-    cl_large = CLUSTER_LARGE_GPUS
-    cl_mega = CLUSTER_MEGA_GPUS
-
-    # MTBF calculations: single node
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Level 4: Ratios & Rework
+    nvlink_h100_bw_val = int(nvlink_h100_qty.m_as(GB / second))
+    nvlink_to_ib = int(nvlink_h100_bw_val / ib_ndr_bw)
+    
     node_mtbf_h = calc_mtbf_node(
-        GPU_MTTF_HOURS, 8,        # 8 GPUs per node
-        NIC_MTTF_HOURS, 8,        # 8 NICs per node
-        PSU_MTTF_HOURS, 4         # 4 PSUs per node
+        node_mtbf_params["gpu_mttf"], 8,
+        node_mtbf_params["nic_mttf"], 8,
+        node_mtbf_params["psu_mttf"], 4
     )
 
-    # Cluster MTBF (GPU-only, simplified)
-    mtbf_256_h = calc_mtbf_cluster(GPU_MTTF_HOURS, cl_small)
-    mtbf_2048_h = calc_mtbf_cluster(GPU_MTTF_HOURS, cl_medium)
-    mtbf_8192_h = calc_mtbf_cluster(GPU_MTTF_HOURS, cl_large)
-    mtbf_100k_h = calc_mtbf_cluster(GPU_MTTF_HOURS, cl_mega)
-
-    # Convert to minutes for readability
-    mtbf_256_min = mtbf_256_h.m_as(ureg.minute)
-    mtbf_2048_min = mtbf_2048_h.m_as(ureg.minute)
+    mtbf_8192_h = calc_mtbf_cluster(GPU_MTTF_HOURS, 8192)
+    mtbf_100k_h = calc_mtbf_cluster(GPU_MTTF_HOURS, CLUSTER_MEGA_GPUS)
     mtbf_8192_min = mtbf_8192_h.m_as(ureg.minute)
     mtbf_100k_min = mtbf_100k_h.m_as(ureg.minute)
 
-    # Failure probability for a 24-hour job
-    _24h = 24 * ureg.hour
-    pfail_256_24h = calc_failure_probability(mtbf_256_h, _24h)
-    pfail_2048_24h = calc_failure_probability(mtbf_2048_h, _24h)
-    pfail_8192_24h = calc_failure_probability(mtbf_8192_h, _24h)
-    pfail_100k_24h = calc_failure_probability(mtbf_100k_h, _24h)
-
-    # Checkpoint sizes
-    ckpt_7b = calc_checkpoint_size(7e9)    # Quantity[byte]
-    ckpt_70b = calc_checkpoint_size(70e9)
-    ckpt_175b = calc_checkpoint_size(175e9)
-    ckpt_1t = calc_checkpoint_size(1e12)
-
-    # Extract in GB/TB
-    ckpt_7b_gb = ckpt_7b.m_as(GB)
-    ckpt_70b_gb = ckpt_70b.m_as(GB)
-    ckpt_175b_gb = ckpt_175b.m_as(GB)
-    ckpt_1t_tb = ckpt_1t.m_as(TB)
-
-    # Overhead budgets
-    oh_pipeline = int(OVERHEAD_PIPELINE_BUBBLE * 100)
-    oh_checkpoint = int(OVERHEAD_CHECKPOINT * 100)
-    oh_failure = int(OVERHEAD_FAILURE_RECOVERY * 100)
-    oh_maintenance = int(OVERHEAD_MAINTENANCE * 100)
-
-    # ── Hardware Reference ───────────────────────────────────────────────────
-    h100_flops = int(H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
-    h100_bw_tbs = f"{H100_MEM_BW.m_as(TB / second):.2f}"
-    h100_cap = int(H100_MEM_CAPACITY.m_as(GiB))
-    h100_tdp = int(H100_TDP.m_as(watt))
-
-    b200_flops = int(B200_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
-    b200_bw_tbs = f"{B200_MEM_BW.m_as(TB / second):.0f}"
-    b200_cap = int(B200_MEM_CAPACITY.m_as(GiB))
-    b200_tdp = int(B200_TDP.m_as(watt))
-
-    tpuv5_flops = int(TPUV5P_FLOPS_BF16.m_as(TFLOPs / second))
-    tpuv5_bw_tbs = f"{TPUV5P_MEM_BW.m_as(TB / second):.2f}"
-    tpuv5_cap = int(TPUV5P_MEM_CAPACITY.m_as(GiB))
-    tpuv5_ici = int(TPUV5P_ICI_BW.m_as(GB / second))
-
-    # ── Power and Sustainability ─────────────────────────────────────────────
-    rack_trad = RACK_POWER_TRADITIONAL_KW
-    rack_ai = RACK_POWER_AI_TYPICAL_KW
-    rack_ai_high = RACK_POWER_AI_HIGH_KW
-    air_limit = AIR_COOLING_LIMIT_KW
-    rack_ratio = round(rack_ai / rack_trad, 1)
-
-    pue_liquid = PUE_LIQUID_COOLED
-    pue_air = PUE_BEST_AIR
-    pue_typical = PUE_TYPICAL
-    pue_legacy = PUE_LEGACY
-
-    # ── Effective FLOPS Example ──────────────────────────────────────────────
-    # 1024-GPU cluster, H100, realistic overheads
-    _peak_1024_qty = 1024 * H100_FLOPS_FP16_TENSOR        # Quantity[TFLOPs/s]
-    peak_1024 = _peak_1024_qty.m_as(TFLOPs / second)      # raw float for display
-    goodput_ratio = 1.0 - (OVERHEAD_PIPELINE_BUBBLE +
-                           OVERHEAD_CHECKPOINT +
-                           OVERHEAD_FAILURE_RECOVERY +
-                           OVERHEAD_MAINTENANCE)
+    # Effective FLOPS (1024-GPU cluster)
+    _peak_1024_qty = 1024 * h100_qty
+    goodput_ratio = 1.0 - (oh_pipeline + oh_checkpoint + oh_failure + oh_maintenance)
     _eff_flops_1024_qty = calc_effective_flops(
         _peak_1024_qty,
-        MFU_TRAINING_HIGH,
+        mfu_range[1],
         SCALING_EFF_1024GPU,
         goodput_ratio
-    )  # Quantity[flop/second]
-    eff_flops_1024 = _eff_flops_1024_qty.m_as(TFLOPs / second)  # raw float for display
-    eff_fraction = eff_flops_1024 / peak_1024
+    )
+    eff_fraction = _eff_flops_1024_qty / _peak_1024_qty
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(nvlink_to_ib > 10, "NVLink must be >10x IB for hierarchy to hold")
+    check(mtbf_100k_min < 60, "100K GPU cluster MTBF must be <1 hour")
+    check(eff_fraction < 0.25, "Effective fraction must be <25% at 1024 GPUs")
+
+    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # (Attributes kept for downstream cell access)
+    peak_1024 = _peak_1024_qty.m_as(TFLOPs / second)
+    eff_flops_1024 = _eff_flops_1024_qty.m_as(TFLOPs / second)
+    
+    # Pre-computed formatted strings
+    mfu_low = int(MFU_TRAINING_LOW * 100)
+    mfu_high = int(MFU_TRAINING_HIGH * 100)
+    oh_pipeline_pct = int(oh_pipeline * 100)
+    oh_checkpoint_pct = int(oh_checkpoint * 100)
+    oh_failure_pct = int(oh_failure * 100)
+    oh_maintenance_pct = int(oh_maintenance * 100)
+
+# ── EXPORTS (Bridge to Text) ────────────────────────────────────────────────
+FF = FleetFoundations
 
     # ── Invariant Checks ─────────────────────────────────────────────────────
     check(nvlink_to_ib > 10, "NVLink must be >10x IB for hierarchy to hold")

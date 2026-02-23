@@ -157,6 +157,12 @@ class ValidateCommand:
             ("grid-tables", "_run_grid_tables"),
             ("tables", "_run_table_content"),
             ("ascii", "_run_ascii"),
+            ("percent-spacing", "_run_percent_spacing"),
+            ("unit-spacing", "_run_unit_spacing"),
+            ("binary-units", "_run_binary_units"),
+            ("contractions", "_run_contractions"),
+            ("unblended-prose", "_run_unblended_prose"),
+            ("times-spacing", "_run_times_spacing"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
@@ -2297,6 +2303,276 @@ class ValidateCommand:
         return ValidationRunResult(
             name="ascii",
             description="Detect non-ASCII characters in QMD files",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Percent spacing  (no space between number/str and %)
+    # ------------------------------------------------------------------
+
+    PERCENT_SPACING_PATTERN = re.compile(r"`[^`]*`\s+%")
+
+    def _run_percent_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag space between inline expression and % (e.g. `{python} x` % → use `{python} x`%)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.PERCENT_SPACING_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 5) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="percent_spacing",
+                            message="Remove space between value and % (use e.g. `{python} x`% not `{python} x` %)",
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="percent-spacing",
+            description="No space between inline value and % in QMD prose",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Unit spacing  (style: "100 ms", "4 GB" — never "100ms" or "4GB")
+    # ------------------------------------------------------------------
+
+    # Number (optional decimal) immediately followed by unit with no space (invalid per book-prose.md).
+    UNIT_SPACING_PATTERN = re.compile(
+        r"\d+(?:\.\d+)?"
+        r"(?:ms|GB|TB|MB|KB|Gbps|Mbps|Tbps|TFLOPS|GFLOPS|W)\b"
+    )
+
+    def _run_unit_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag number+unit with no space (e.g. 100ms → 100 ms, 4GB → 4 GB)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.UNIT_SPACING_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 5)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="unit_spacing",
+                            message="Insert space between number and unit (e.g. 100 ms not 100ms, 4 GB not 4GB)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="unit-spacing",
+            description="Require space between number and unit (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Binary units  (style: "GB" and "TB", not "GiB" or "TiB" in prose)
+    # ------------------------------------------------------------------
+
+    BINARY_UNITS_PATTERN = re.compile(r"\b(GiB|TiB|MiB|KiB)\b")
+
+    def _run_binary_units(self, root: Path) -> ValidationRunResult:
+        """Flag GiB/TiB in prose — use GB/TB per book-prose.md."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.BINARY_UNITS_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 3) : min(len(line), m.end() + 3)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="binary_units",
+                            message="Use GB/TB not GiB/TiB in prose (book-prose.md)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="binary-units",
+            description="No GiB/TiB in prose — use GB/TB",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Contractions  (forbidden in body prose per book-prose.md)
+    # ------------------------------------------------------------------
+
+    CONTRACTIONS_PATTERN = re.compile(
+        r"\b(can't|don't|it's|we'll|won't|hasn't|haven't|isn't|aren't|wasn't|weren't|"
+        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's)\b",
+        re.IGNORECASE,
+    )
+
+    def _run_contractions(self, root: Path) -> ValidationRunResult:
+        """Flag contractions in prose — use full forms (cannot, do not, etc.)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("|") or stripped.startswith("<!--"):
+                    continue
+                for m in self.CONTRACTIONS_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 2)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="contractions",
+                            message="Contractions forbidden in body prose — use full form (e.g. cannot, do not)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="contractions",
+            description="No contractions in body prose (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Unblended prose  (paragraph split with leading space after period)
+    # ------------------------------------------------------------------
+
+    def _run_unblended_prose(self, root: Path) -> ValidationRunResult:
+        """Flag line starting with single space after previous line ended with period."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for i in range(1, len(lines)):
+                if lines[i - 1].strip().startswith("```"):
+                    in_code = not in_code
+                if in_code:
+                    continue
+                prev = lines[i - 1].strip()
+                curr = lines[i]
+                if not prev.endswith("."):
+                    continue
+                if not (len(curr) > 1 and curr[0] == " " and curr[1].isupper()):
+                    continue
+                context = (curr[:60] + "…") if len(curr) > 60 else curr
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=i + 1,
+                        code="unblended_prose",
+                        message="Paragraph likely split: line starts with space after period — merge into one paragraph",
+                        severity="warning",
+                        context=context.strip(),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="unblended-prose",
+            description="Detect wrongly split paragraphs (leading space after period)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Times spacing  (space after $\\times$ before word/unit per book-prose.md)
+    # ------------------------------------------------------------------
+
+    # $\times$ or $\times$ followed immediately by letter or ( with no space.
+    TIMES_SPACING_PATTERN = re.compile(r"\$\\times\s*\$\s*[a-zA-Z\(]")
+
+    def _run_times_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag $\\times$ immediately followed by word/paren with no space."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.TIMES_SPACING_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="times_spacing",
+                            message="Add space after $\\times$ before word or unit (e.g. $\\times$ speedup)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="times-spacing",
+            description="Space after $\\times$ before word/unit (book-prose.md)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

@@ -198,7 +198,7 @@ This equation reveals why platform investments make sense only at sufficient sca
 #| label: platform-roi-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ PLATFORM ROI CALCULATION
+# │ PLATFORM ROI CALCULATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-ml-operations-scale-quantifying-platform-economics-2026
 # │
@@ -212,10 +212,9 @@ This equation reveals why platform investments make sense only at sufficient sca
 # │      using the ROI formula from @eq-platform-roi.
 # │
 # │ Imports: mlsys.constants (MILLION), mlsys.formatting (fmt, check)
-# │ Exports: annual_savings_str, savings_pct_str
+# │ Exports: annual_savings_str, savings_pct_str, annual_cost_before_str,
+# │          annual_cost_after_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import MILLION
-from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class PlatformEconomics:
@@ -235,29 +234,33 @@ class PlatformEconomics:
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Before platform
-    annual_cost_before = n_models * hours_per_model_month * months_per_year * engineer_cost_hr
+    annual_cost_before_val = n_models * hours_per_model_month * months_per_year * engineer_cost_hr
 
     # After platform
     hours_after = hours_per_model_month - hours_saved_per_model  # 10 hrs/model/month
     annual_ops_after = n_models * hours_after * months_per_year * engineer_cost_hr
     annual_platform_amort = platform_cost / amortization_years
-    annual_cost_after = annual_ops_after + annual_platform_amort
+    annual_cost_after_val = annual_ops_after + annual_platform_amort
 
     # Savings
-    annual_savings = annual_cost_before - annual_cost_after
-    savings_pct = (annual_savings / annual_cost_before) * 100
+    annual_savings = annual_cost_before_val - annual_cost_after_val
+    savings_pct = (annual_savings / annual_cost_before_val) * 100
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
     check(annual_savings > 0, "Platform must generate savings.")
     check(savings_pct > 50, f"Expected >50% savings, got {savings_pct:.1f}%")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    annual_savings_str = fmt(annual_savings, precision=0, commas=True)
-    savings_pct_str = fmt(savings_pct, precision=0, commas=False)
+    annual_cost_before_str = f"{annual_cost_before_val:,.0f}"
+    annual_cost_after_str = f"{annual_cost_after_val:,.0f}"
+    annual_savings_str = f"{annual_savings:,.0f}"
+    savings_pct_str = f"{savings_pct:.0f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 annual_savings_str = PlatformEconomics.annual_savings_str
 savings_pct_str = PlatformEconomics.savings_pct_str
+annual_cost_before_str = PlatformEconomics.annual_cost_before_str
+annual_cost_after_str = PlatformEconomics.annual_cost_after_str
 ```
 
 Consider an organization evaluating whether to build a centralized ML platform. Current state:
@@ -269,10 +272,10 @@ Consider an organization evaluating whether to build a centralized ML platform. 
 - Expected time savings: 30 hours per model per month post-platform
 
 Before platform (annual operational cost):
-$$C_{current} = 50 \times 40 \times 12 \times \$150 = \$3,600,000$$
+$$C_{current} = 50 \times 40 \times 12 \times \$150 = \$`{python} annual_cost_before_str`$$
 
 After platform (annual operational cost plus amortized platform cost):
-$$C_{after} = 50 \times 10 \times 12 \times \$150 + \frac{\$2,000,000}{3} = \$900,000 + \$667,000 = \$1,567,000$$
+$$C_{after} = 50 \times 10 \times 12 \times \$150 + \frac{\$2,000,000}{3} = \$900,000 + \$667,000 = \$`{python} annual_cost_after_str`$$
 
 This yields annual savings of \$`{python} annual_savings_str`, representing a `{python} savings_pct_str`% reduction in operational costs. The platform pays for itself within the first year.
 
@@ -1864,15 +1867,60 @@ Successful navigation through CI/CD pipelines marks the beginning, not the end, 
 
 The mathematical reality of monitoring at scale exposes the limitations of per-model alerting. Consider the mathematics of monitoring 100 models with independent alerting. If each model has 10 monitored metrics, and each metric generates alerts at a 5% false positive rate, the expected number of false alerts is substantial.
 
+```{python}
+#| label: false-alarm-tax-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ THE FALSE ALARM TAX (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-ml-operations-scale-alert-fatigue-problem-038c
+# │
+# │ Goal: Quantify the daily volume of false alerts in a large ML fleet.
+# │ Show: ~864 alerts/day for 100 models with 10 metrics at 3-sigma thresholds.
+# │ How: Daily alerts = n_models * n_metrics * (1 - specificity) * checks_per_day.
+# │
+# │ Imports: (none)
+# │ Exports: n_models_fat, n_metrics_fat, specificity_fat, daily_alerts_fat_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class FalseAlarmTax:
+    """Quantify the impact of scale on monitoring noise."""
+
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_models = 100
+    n_metrics = 10
+    specificity = 0.997 # 3-sigma
+    check_interval_min = 5
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    n_monitors = n_models * n_metrics
+    fpr = 1 - specificity
+    checks_per_day = (24 * 60) / check_interval_min
+    daily_alerts = n_monitors * checks_per_day * fpr
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(daily_alerts > 800, f"Expected high alert volume at scale, got {daily_alerts:.1f}")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    daily_alerts_str = f"{daily_alerts:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_models_fat = FalseAlarmTax.n_models
+n_metrics_fat = FalseAlarmTax.n_metrics
+specificity_fat = "3-sigma"
+daily_alerts_fat_str = FalseAlarmTax.daily_alerts_str
+```
+
 ::: {.callout-notebook title="The False Alarm Tax"}
-**Problem**: You monitor **100 models**. Each model has **10 metrics** (latency, accuracy, drift, etc.). You set alert thresholds at **3-sigma** (99.7% specificity). How many false alarms does the on-call engineer wake up to per week?
+**Problem**: You monitor **`{python} n_models_fat` models**. Each model has **`{python} n_metrics_fat` metrics** (latency, accuracy, drift, etc.). You set alert thresholds at **`{python} specificity_fat`** (99.7% specificity). How many false alarms does the on-call engineer wake up to per week?
 
 **The Math**:
 
-1.  **Total Monitors**: $100 \text{ models} \times 10 \text{ metrics} = 1,000 \text{ monitors}$.
+1.  **Total Monitors**: `{python} n_models_fat` models $\times$ `{python} n_metrics_fat` metrics = **1,000 monitors**.
 2.  **False Positive Rate**: $1 - 0.997 = 0.003$ (0.3%).
-3.  **Checks per Day**: Assume checks every 5 minutes ($288 \text{ checks/day}$).
-4.  **Daily False Alarms**: $1,000 \times 288 \times 0.003 \approx \mathbf{864 \text{ alerts/day}}$.
+3.  **Checks per Day**: Assume checks every 5 minutes (**288 checks/day**).
+4.  **Daily False Alarms**: $1,000 \times 288 \times 0.003 \approx \mathbf{`{python} daily_alerts_fat_str` alerts/day}$.
 
 **The Systems Conclusion**: Even with "high precision" (3-sigma) alerts, scale kills you. You cannot alert on raw metrics. You *must* use **hierarchical aggregation** (e.g., "Cluster Health" instead of "Node Health") to survive the false alarm tax.
 :::

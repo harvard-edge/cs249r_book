@@ -66,44 +66,35 @@ Power is not merely an operational expense but a hard physical constraint that l
 #| label: sustainable-ai-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ SUSTAINABLE AI: CHAPTER-WIDE CONSTANTS
+# │ SUSTAINABLE AI: CHAPTER-WIDE CONSTANTS (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-sustainable-ai — chapter-wide energy and carbon reference values
 # │
-# │ Goal: Establish GPU TDP (H100 700 W, A100 400 W), grid carbon intensities
-# │       (US avg 429 gCO₂/kWh, Quebec 20 gCO₂/kWh), and the 350,000× compute
-# │       growth vs ~80% battery/grid efficiency gain mismatch to ground the
-# │       sustainability paradox argument throughout the chapter.
-# │ Show: H100 ~700 W, A100 ~400 W; GPT-3 ~175B params; battery 12-yr gain ~80%
-# │       vs compute growth 350,000× → energy wall gap ~195,000× — inline prose.
-# │ How: Compound growth (1 + r)^12 for battery/grid; gap = compute_growth /
-# │       battery_gain; format TDP via .to(watt).magnitude (class-level attribute).
+# │ Goal: Establish GPU TDP, grid carbon intensities, and scaling mismatches.
+# │ Show: ~700W H100; ~195,000x energy wall gap; US vs Quebec grid intensity.
+# │ How: Compound growth (1 + r)^12; Gap = compute_growth / battery_gain.
 # │
-# │ Imports: mlsys.constants (H100_TDP, A100_TDP, GPT3_PARAMS, watt, BILLION,
-# │           param, second, hour, TFLOPs, MILLION)
-# │ Imports: mlsys.formatting (fmt, sci, check)
+# │ Imports: mlsys.constants (H100_TDP, GPT3_PARAMS, GPT3_TRAINING_OPS, ...)
 # │ Exports: h100_tdp_w, h100_tdp_kw, a100_tdp_w, gpt3_params_b,
-# │          energy_wall_gap_str, battery_gain_pct, grid_gain_pct
+# │          energy_wall_gap_str, battery_gain_pct, grid_gain_pct,
+# │          grid_us_avg_str, grid_quebec_str, compute_growth_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     H100_TDP, A100_TDP, GPT3_PARAMS, GPT3_TRAINING_OPS,
-    watt, BILLION, param, second, hour, TFLOPs, MILLION
+    watt, BILLION, param, second, hour, TFLOPs, MILLION,
+    THOUSAND, SEC_PER_YEAR, MICROSECOND
 )
 from mlsys.formatting import fmt, sci, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class SustainableAISetup:
-    """
-    Namespace for Sustainability reference parameters.
-    Scenario: Mapping the AI Energy Wall vs. Grid/Battery scaling.
-    """
+    """Namespace for Sustainability reference parameters."""
 
     # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    # Hardware
     h100_tdp_raw = H100_TDP
     a100_tdp_raw = A100_TDP
 
-    # Grid & Carbon
+    # Grid & Carbon (gCO2/kWh)
     grid_us_avg_g_kwh = 429
     grid_quebec_g_kwh = 20
     grid_coal_g_kwh = 1000
@@ -115,8 +106,9 @@ class SustainableAISetup:
 
     # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     # Compound growth over 12 years: (1 + r)^12
-    battery_12yr_gain = (1 + battery_density_growth_annual) ** 12
-    grid_12yr_gain = (1 + grid_efficiency_growth_annual) ** 12
+    n_years = 12
+    battery_12yr_gain = (1 + battery_density_growth_annual) ** n_years
+    grid_12yr_gain = (1 + grid_efficiency_growth_annual) ** n_years
 
     # The Gap: Compute Growth / Energy Infrastructure Growth
     energy_wall_gap = compute_growth_factor / battery_12yr_gain
@@ -134,6 +126,10 @@ class SustainableAISetup:
     energy_wall_gap_str = fmt(energy_wall_gap, precision=0)
     battery_gain_pct = f"{(battery_12yr_gain - 1) * 100:.0f}"
     grid_gain_pct = f"{(grid_12yr_gain - 1) * 100:.0f}"
+    
+    grid_us_avg_str = f"{grid_us_avg_g_kwh}"
+    grid_quebec_str = f"{grid_quebec_g_kwh}"
+    compute_growth_factor_str = fmt(compute_growth_factor, precision=0)
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 h100_tdp_w = SustainableAISetup.h100_tdp_w
@@ -143,6 +139,10 @@ gpt3_params_b = SustainableAISetup.gpt3_params_b
 energy_wall_gap_str = SustainableAISetup.energy_wall_gap_str
 battery_gain_pct = SustainableAISetup.battery_gain_pct
 grid_gain_pct = SustainableAISetup.grid_gain_pct
+grid_us_avg_str = SustainableAISetup.grid_us_avg_str
+grid_quebec_str = SustainableAISetup.grid_quebec_str
+compute_growth_factor_str = SustainableAISetup.compute_growth_factor_str
+```
 ```
 
 This chapter's position in the book's organizing framework, *the Fleet Stack*, clarifies why energy and environmental constraints are not external concerns but physical limits that bound what the entire system can achieve.
@@ -185,22 +185,79 @@ The measurement, modeling, and mitigation frameworks presented in this chapter r
 
 The numbers become visceral when translated into familiar physical quantities. To appreciate the scale of the problem, consider the *carbon cost of training* a single frontier model.
 
+```{python}
+#| label: carbon-cost-training-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CARBON COST OF TRAINING (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-sustainable-ai-scale-environmental-impact-ac9a
+# │
+# │ Goal: Quantify carbon emissions for GPT-3 training and compare to flights.
+# │ Show: ~552,000 kg CO2 (~552 flights) at US avg grid intensity.
+# │ How: Energy * Grid_Intensity; Flight_equiv = Emissions / 1000.
+# │
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: training_mwh_gpt3, grid_ci_us_kg, total_emissions_gpt3_kg_str,
+# │          flight_ratio_gpt3_str, emissions_ratio_low_carbon_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class CarbonCostGPT3:
+    """Quantify the environmental impact of a frontier model training run."""
+
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    energy_mwh = 1287
+    grid_ci_us_kg = 0.429 # kg CO2 / kWh
+    grid_ci_low_kg = 0.02 # kg CO2 / kWh
+    kg_per_flight = 1000 # NY to London round trip
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    energy_kwh = energy_mwh * 1000
+    total_emissions_kg = energy_kwh * grid_ci_us_kg
+    flight_ratio = total_emissions_kg / kg_per_flight
+
+    low_carbon_emissions = energy_kwh * grid_ci_low_kg
+    emissions_ratio = total_emissions_kg / low_carbon_emissions
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(total_emissions_kg > 500000, f"Expected >500k kg CO2, got {total_emissions_kg:.0f}")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    training_mwh_str = f"{energy_mwh:,}"
+    total_emissions_kg_str = f"{total_emissions_kg:,.0f}"
+    flight_ratio_str = f"{flight_ratio:,.0f}"
+    emissions_ratio_str = f"{emissions_ratio:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+training_mwh_gpt3 = CarbonCostGPT3.training_mwh_str
+grid_ci_us_kg = CarbonCostGPT3.grid_ci_us_kg
+total_emissions_gpt3_kg_str = CarbonCostGPT3.total_emissions_kg_str
+flight_ratio_gpt3_str = CarbonCostGPT3.flight_ratio_str
+emissions_ratio_low_carbon_str = CarbonCostGPT3.emissions_ratio_str
+```
+
 ::: {.callout-notebook title="The Carbon Cost of Training"}
-**Problem**: You train a large model (GPT-3 size) consuming **1,287 MWh**. How much CO2 did you emit, and how does that compare to a trans-Atlantic flight?
+**Problem**: You train a large model (GPT-3 size) consuming **`{python} training_mwh_gpt3` MWh**. How much CO2 did you emit, and how does that compare to a trans-Atlantic flight?
 
 **The Math**:
 
-1.  **Energy**: 1,287 MWh = 1,287,000 kWh.
-2.  **Carbon Intensity (US Average)**: $\approx 0.429 \text{ kg CO}_2\text{/kWh}$.
-3.  **Total Emissions**: $1,287,000 \times 0.429 \approx \mathbf{552,000 \text{ kg CO}_2}$.
+1.  **Energy**: `{python} training_mwh_gpt3` MWh = 1,287,000 kWh.
+2.  **Carbon Intensity (US Average)**: $\approx `{python} grid_ci_us_kg` \text{ kg CO}_2\text{/kWh}$.
+3.  **Total Emissions**: $1,287,000 \times 0.429 \approx \mathbf{`{python} total_emissions_gpt3_kg_str` \text{ kg CO}_2}$.
 4.  **Comparison**:
     *   One passenger, NY to London (round trip): $\approx 1,000 \text{ kg CO}_2$.
-    *   **Ratio**: $552,000 / 1,000 = \mathbf{552 \text{ flights}}$.
+    *   **Ratio**: `{python} total_emissions_gpt3_kg_str` / 1,000 = \mathbf{`{python} flight_ratio_gpt3_str` \text{ flights}}$.
 
-**The Systems Conclusion**: A single training run emits as much carbon as flying a Boeing 747 full of passengers across the Atlantic. **Optimization matters.** Moving this job to a hydro-powered region (0.02 kg/kWh) would reduce emissions by **20x** to just ~25 flights.
+**The Systems Conclusion**: A single training run emits as much carbon as flying a Boeing 747 full of passengers across the Atlantic. **Optimization matters.** Moving this job to a hydro-powered region (0.02 kg/kWh) would reduce emissions by **`{python} emissions_ratio_low_carbon_str`x** to just ~25 flights.
 :::
 
-AI systems consume resources at industrial scales that rival traditional heavy industries. Training a single large language model consumes thousands of megawatt-hours of electricity, equivalent to powering hundreds of households for months.[^fn-household-energy] Data centers that include AI workloads are projected to account for 8% of global power consumption by 2030, surpassing aviation at 2.1% and approaching cement production at 4% [@oecd2023blueprint].[^fn-datacenter-industrial-scale] Computational demands increased 350,000$\times$ from 2012 to 2019 [@schwartz2020green], while hardware efficiency improved at a far slower rate, creating an unsustainable growth trajectory.
+::: {.callout-lighthouse title="Archetype A (GPT-4 / Llama-3): The Energy Wall"}
+**Archetype A (GPT-4)** is the primary driver of the industry's exponential energy growth. A single 25,000-GPU cluster drawing 700 W per chip requires 17.5 MW of continuous power for training. This is not just a cost problem; it is a **Grid Capacity** problem. Organizations operating Archetype A models are increasingly forced to build their own power infrastructure or relocate to regions with excess renewable energy, making **Carbon-Aware Scheduling** and **Geographic Optimization** as critical as learning rate tuning.
+:::
+
+AI systems consume resources at industrial scales that rival traditional heavy industries. 
+ Training a single large language model consumes thousands of megawatt-hours of electricity, equivalent to powering hundreds of households for months.[^fn-household-energy] Data centers that include AI workloads are projected to account for 8% of global power consumption by 2030, surpassing aviation at 2.1% and approaching cement production at 4% [@oecd2023blueprint].[^fn-datacenter-industrial-scale] Computational demands increased 350,000$\times$ from 2012 to 2019 [@schwartz2020green], while hardware efficiency improved at a far slower rate, creating an unsustainable growth trajectory.
 
 [^fn-household-energy]: **Household Energy Baseline**: The average U.S. household consumes 10,500 kWh annually. GPT-3's verified 1,287 MWh training run equals 122 households' annual electricity, and frontier models have grown 25$\times$ in compute since then. This comparison anchors an otherwise abstract energy figure to physical infrastructure: a single training run draws more grid capacity than a residential neighborhood. \index{Household Energy!sustainability baseline}
 
@@ -228,9 +285,9 @@ This geographic concentration of environmental burden creates questions of envir
 
 ### Exponential Growth vs Physical Constraints {#sec-sustainable-ai-exponential-growth-vs-physical-constraints-0f4e}
 
-Exponential growth in computational demands challenges the long-term sustainability of AI training and deployment. Over the past decade, AI systems have scaled faster than any prior computing workload, with compute requirements increasing 350,000$\times$ from 2012 to 2019 [@schwartz2020green].[^fn-ai-compute-growth] This trend continues as machine learning systems prioritize larger models with more parameters, larger training datasets, and higher computational complexity. Sustaining this trajectory poses sustainability challenges, as hardware efficiency gains fail to keep pace with rising AI workload demands.
+Exponential growth in computational demands challenges the long-term sustainability of AI training and deployment. Over the past decade, AI systems have scaled faster than any prior computing workload, with compute requirements increasing `{python} compute_growth_factor_str`$\times$ from 2012 to 2019 [@schwartz2020green].[^fn-ai-compute-growth] This trend continues as machine learning systems prioritize larger models with more parameters, larger training datasets, and higher computational complexity. Sustaining this trajectory poses sustainability challenges, as hardware efficiency gains fail to keep pace with rising AI workload demands.
 
-[^fn-ai-compute-growth]: **AI Compute Growth Rate**: The 350,000$\times$ increase from 2012 to 2019 implies a doubling time of approximately 3.4 months, roughly 7$\times$ faster than Moore's Law's 2-year doubling. This divergence is the root cause of the Energy Wall: no physically realizable improvement in silicon efficiency can match a 3.4-month doubling, making algorithmic efficiency and carbon-aware scheduling the only viable sustainability levers at scale. \index{AI Compute Growth!doubling time}
+[^fn-ai-compute-growth]: **AI Compute Growth Rate**: The `{python} compute_growth_factor_str`$\times$ increase from 2012 to 2019 implies a doubling time of approximately 3.4 months, roughly 7$\times$ faster than Moore's Law's 2-year doubling. This divergence is the root cause of the Energy Wall: no physically realizable improvement in silicon efficiency can match a 3.4-month doubling, making algorithmic efficiency and carbon-aware scheduling the only viable sustainability levers at scale. \index{AI Compute Growth!doubling time}
 
 Historically, computational efficiency improved with advances in semiconductor technology. Moore's Law predicted that the number of transistors on a chip would double approximately every two years, leading to continuous improvements in processing power and energy efficiency.[^fn-moores-law-sustainability] However, Moore's Law is now reaching core physical limits, making further transistor scaling difficult and costly. Dennard scaling, which once ensured that smaller transistors would operate at lower power levels, has also ended, leading to stagnation in energy efficiency improvements per transistor.[^fn-dennard-scaling-end]
 
@@ -1139,38 +1196,32 @@ where $E_{total}$ is the energy consumed by IT equipment, $CI_{grid}$ is the car
 #| label: training-emissions-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ TRAINING EMISSIONS CALCULATION
+# │ TRAINING EMISSIONS CALCULATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-sustainable-ai-scale-environmental-impact-ac9a Training Emissions
-# │          Calculation callout example
+# │ Context: @sec-sustainable-ai-scale-environmental-impact-ac9a
 # │
-# │ Goal: Compute step-by-step operational carbon for 64 A100 GPUs training for
-# │       14 days at US average grid intensity (429 gCO₂/kWh) and compare to
-# │       a low-carbon alternative (Quebec, 20 gCO₂/kWh) to quantify the geographic
-# │       multiplier argument.
-# │ Show: ~21,504 kWh GPU energy → ~25,805 kWh facility (PUE 1.2) → ~4,428 kg CO₂
-# │       US vs ~516 kg CO₂ Quebec → ~21x reduction — inline in callout example.
-# │ How: GPU energy = n_gpus × A100_TDP × hours; facility = GPU × PUE;
-# │       emissions = facility_kwh × grid_intensity / 1000.
+# │ Goal: Compute operational carbon for 64 A100 GPUs training for 14 days.
+# │ Show: ~21,504 kWh GPU energy → ~25,805 kWh facility (PUE 1.2) → ~4,428 kg CO2.
+# │ How: GPU energy = n_gpus * A100_TDP * hours; facility = GPU * PUE.
 # │
-# │ Imports: mlsys.constants (A100_TDP, watt — via SustainableAISetup cell)
+# │ Imports: mlsys.constants (A100_TDP, watt)
 # │ Exports: training_hours_str, gpu_energy_wh_str, gpu_energy_kwh_str,
 # │          facility_energy_kwh_str, emissions_kg_str, emissions_tons_str,
-# │          quebec_emissions_kg_str, emissions_ratio_str
+# │          quebec_emissions_kg_str, emissions_ratio_str, a100_tdp_w
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class TrainingEmissions:
-    """Namespace for GPT-3 training emissions worked example."""
+    """Namespace for 7B model training emissions worked example."""
 
     # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
     n_gpus = 64
     training_days = 14
     training_hours = training_days * 24
-    gpu_power_w = A100_TDP.m_as(watt)  # 400
+    gpu_power_w = A100_TDP.m_as(watt)
     pue = 1.2
-    grid_ci_g_per_kwh = 429  # US average gCO2/kWh
-    quebec_ci = 20            # gCO2/kWh
+    grid_ci_g_per_kwh = 429 # US average
+    quebec_ci = 20
 
     # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
     gpu_energy_wh = n_gpus * gpu_power_w * training_hours
@@ -1182,9 +1233,9 @@ class TrainingEmissions:
     emissions_ratio = emissions_kg / quebec_emissions_kg
 
     # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    # No check() calls needed — values are monotone functions of inputs.
+    check(gpu_power_w == 400, f"Expected 400W for A100, got {gpu_power_w}")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
     training_hours_str = f"{training_hours:,}"
     gpu_energy_wh_str = f"{gpu_energy_wh:,.0f}"
     gpu_energy_kwh_str = f"{gpu_energy_kwh:,.0f}"
@@ -1193,6 +1244,7 @@ class TrainingEmissions:
     emissions_tons_str = f"{emissions_tons:.1f}"
     quebec_emissions_kg_str = f"{quebec_emissions_kg:,.0f}"
     emissions_ratio_str = f"{emissions_ratio:.0f}"
+    a100_tdp_w_str = f"{gpu_power_w:.0f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 training_hours_str = TrainingEmissions.training_hours_str
@@ -1203,6 +1255,7 @@ emissions_kg_str = TrainingEmissions.emissions_kg_str
 emissions_tons_str = TrainingEmissions.emissions_tons_str
 quebec_emissions_kg_str = TrainingEmissions.quebec_emissions_kg_str
 emissions_ratio_str = TrainingEmissions.emissions_ratio_str
+a100_tdp_w = TrainingEmissions.a100_tdp_w_str
 ```
 
 ::: {.callout-example title="Training Emissions Calculation"}
@@ -1243,21 +1296,82 @@ $$C_{embodied,daily} = \frac{C_{manufacturing}}{L_{lifetime} \times 365}$$ {#eq-
 
 Understanding how embodied carbon accumulates over time reveals why hardware utilization and lifetime dominate total lifecycle emissions.
 
+```{python}
+#| label: embodied-carbon-amort-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ EMBODIED CARBON AMORTIZATION (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-sustainable-ai-embodied-carbon-assessment-9de0
+# │
+# │ Goal: Quantify the hourly carbon "rent" of an H100 GPU and its impact
+# │       on total training footprint in clean vs dirty grids.
+# │ Show: ~$0.46 kg CO2 embodied cost for 10hr run; ~30-40% share in clean grids.
+# │ How: Hourly_amort = Mfg_cost / (lifetime_yrs * 8760).
+# │
+# │ Imports: (none)
+# │ Exports: n_gpus_amort, t_job_hr, op_carbon_dirty_kg, embodied_carbon_job_kg,
+# │          op_carbon_clean_kg, share_clean_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class EmbodiedCarbonAmort:
+    """Quantify the hidden carbon cost of hardware manufacturing."""
+
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    n_gpus = 8
+    h100_tdp_kw = 0.7
+    t_job_hr = 10
+    mfg_carbon_per_gpu = 150 # kg CO2
+    lifetime_years = 3
+    ci_dirty = 0.4 # kg/kWh (gas)
+    ci_clean = 0.02 # kg/kWh (hydro)
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    op_energy_kwh = n_gpus * h100_tdp_kw * t_job_hr
+    op_carbon_dirty = op_energy_kwh * ci_dirty
+    op_carbon_clean = op_energy_kwh * ci_clean
+
+    total_mfg_carbon = n_gpus * mfg_carbon_per_gpu
+    total_lifetime_hr = lifetime_years * 365 * 24
+    hourly_rent_kg = total_mfg_carbon / total_lifetime_hr
+    embodied_carbon_job = hourly_rent_kg * t_job_hr
+
+    share_clean_pct = (embodied_carbon_job / (op_carbon_clean + embodied_carbon_job)) * 100
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(embodied_carbon_job < 1.0, f"Expected small amortized cost, got {embodied_carbon_job:.2f}")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    op_carbon_dirty_str = f"{op_carbon_dirty:.1f}"
+    op_carbon_clean_str = f"{op_carbon_clean:.1f}"
+    embodied_carbon_job_str = f"{embodied_carbon_job:.2f}"
+    share_clean_pct_str = f"{share_clean_pct:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_gpus_amort = EmbodiedCarbonAmort.n_gpus
+t_job_hr = EmbodiedCarbonAmort.t_job_hr
+op_carbon_dirty_kg = EmbodiedCarbonAmort.op_carbon_dirty_str
+embodied_carbon_job_kg = EmbodiedCarbonAmort.embodied_carbon_job_str
+op_carbon_clean_kg = EmbodiedCarbonAmort.op_carbon_clean_str
+share_clean_pct_str = EmbodiedCarbonAmort.share_clean_pct_str
+```
+
 ::: {.callout-perspective title="Embodied Carbon Amortization"}
 **The Hidden Cost**: When you rent a GPU for an hour, you are not just paying for electricity; you are "paying off" the carbon debt of its manufacturing.
 
 **Formula**:
 $$ C_{total} = C_{operational} + \left( \frac{C_{manufacturing}}{T_{lifetime}} \times T_{job} \right) $$
 
-**Scenario**: Training a model for **10 hours** on **8 NVIDIA H100s**.
+**Scenario**: Training a model for **`{python} t_job_hr` hours** on **`{python} n_gpus_amort` NVIDIA H100s**.
 
-*   **Operational**: 8 GPUs$\times$ `{python} h100_tdp_kw` kW$\times$ 10h = 56 kWh. At 0.4 kg/kWh (gas grid) = **22.4 kg CO₂**.
+*   **Operational**: 8 GPUs$\times$ `{python} h100_tdp_kw` kW$\times$ 10h = 56 kWh. At 0.4 kg/kWh (gas grid) = **`{python} op_carbon_dirty_kg` kg CO₂**.
 *   **Embodied**: 8 GPUs$\times$ 150 kg/GPU = 1200 kg total.
 *   **Amortization**: Lifetime = 3 years (26,280 hours).
     *   Hourly "Rent" = $1200 / 26280 \approx 0.046$ kg/hour.
-    *   Job Cost = $0.046 \times 10 = \mathbf{0.46 \text{ kg } CO_2}$.
+    *   Job Cost = $0.046 \times 10 = \mathbf{`{python} embodied_carbon_job_kg` \text{ kg } CO_2}$.
 
-**Conclusion**: For long-lived hardware in dirty grids, **electricity dominates** (22.4 vs 0.46). However, in **clean grids** (hydro, 0.02 kg/kWh), operational drops to 1.1 kg, making embodied carbon a significant fraction (~30-40%) of the total footprint.
+**Conclusion**: For long-lived hardware in dirty grids, **electricity dominates** (`{python} op_carbon_dirty_kg` vs `{python} embodied_carbon_job_kg`). However, in **clean grids** (hydro, 0.02 kg/kWh), operational drops to **`{python} op_carbon_clean_kg` kg**, making embodied carbon a significant fraction (~`{python} share_clean_pct_str`%) of the total footprint.
 :::
 
 For an H100 with 175 kg embodied carbon and 4-year datacenter lifetime:

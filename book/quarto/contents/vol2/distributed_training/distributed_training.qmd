@@ -936,75 +936,185 @@ This example demonstrates how data parallelism scales in practice, including eff
 Configuration:
 
 - Per-GPU batch: 16, global batch: 128
-- Gradient synchronization: 3GB @ `{python} nvlink_a100` GB/s (NVLink) = 5ms
+- Gradient synchronization: `{python} gpt2_sync_size_gb_str`GB @ `{python} nvlink_h100_gbs` GB/s (NVLink) $\approx$ `{python} comm_8gpu_ms_str`ms
 
 Performance results:
 
-- Computation: 180ms per step
-- Communication: 5ms per step
+- Computation: `{python} compute_8gpu_ms_str`ms per step
+- Communication: `{python} comm_8gpu_ms_str`ms per step
 ```{python}
 #| label: scaling-8gpu-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ 8-GPU SCALING ANALYSIS (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-distributed-training-systems-systems-data-parallelism-tradeoffs
+# │
+# │ Goal: Quantify intra-node scaling efficiency using NVLink.
+# │ Show: >95% efficiency despite communication overhead.
+# │ How: Speedup = T_base / (T_compute + T_comm).
+# │
+# │ Imports: mlsys.constants (NVLINK_H100_BW, MILLION, BILLION, GB, byte, ...)
+# │ Exports: total_8gpu_str, speedup_8gpu_str, efficiency_8gpu_str,
+# │          training_8gpu_str, gpt2_sync_size_gb_str, nvlink_h100_gbs,
+# │          comm_8gpu_ms_str, compute_8gpu_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    NVLINK_H100_BW, INFINIBAND_HDR_BW, MILLION, BILLION, GB, byte, second,
+    GPUS_PER_NODE, BITS_PER_BYTE
+)
+from mlsys.formatting import fmt, check
 
-# 8-GPU scaling worked example
-single_gpu_step_s = 1.8   # single GPU step time
-compute_8gpu_ms = 180      # ms
-comm_8gpu_ms = 5           # NVLink overhead
-total_8gpu_ms = compute_8gpu_ms + comm_8gpu_ms
-speedup_8gpu = single_gpu_step_s / (total_8gpu_ms / 1000)
-efficiency_8gpu = speedup_8gpu / 8 * 100
-training_hours_1gpu = 25
-training_hours_8gpu = training_hours_1gpu / speedup_8gpu
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class Scaling8GPU:
+    """Scenario: 8-GPU scaling within a single node."""
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    single_gpu_step_s = 1.8
+    compute_8gpu_ms = 180
+    params_b = 1.5 # GPT-2
+    nvlink_bw = NVLINK_H100_BW.m_as(GB/second)
+    gpus_per_node = GPUS_PER_NODE
 
-total_8gpu_str = f"{total_8gpu_ms}"
-single_gpu_step_s_str = f"{single_gpu_step_s}"
-total_8gpu_s_str = f"{total_8gpu_ms/1000}"
-speedup_8gpu_str = f"{speedup_8gpu:.1f}"
-efficiency_8gpu_str = f"{efficiency_8gpu:.0f}"
-training_8gpu_str = f"{training_hours_8gpu:.1f}"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Ring All-Reduce: 2*(N-1)/N * Params * 2 bytes (FP16)
+    # For large N, ~2 * Params * 2 = 4 * Params.
+    sync_size_gb = (params_b * BILLION * 4) / BILLION
+    comm_8gpu_ms_val = (sync_size_gb / nvlink_bw) * 1000
+    
+    total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
+    speedup_8gpu_val = single_gpu_step_s / (total_8gpu_ms_val / 1000)
+    efficiency_8gpu_val = speedup_8gpu_val / gpus_per_node * 100
+    training_hours_1gpu = 25
+    training_hours_8gpu_val = training_hours_1gpu / speedup_8gpu_val
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(efficiency_8gpu_val > 90, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    total_8gpu_str = f"{total_8gpu_ms_val:.0f}"
+    single_gpu_step_s_str = f"{single_gpu_step_s}"
+    total_8gpu_s_str = f"{total_8gpu_ms_val/1000:.3f}"
+    speedup_8gpu_str = f"{speedup_8gpu_val:.1f}"
+    efficiency_8gpu_str = f"{efficiency_8gpu_val:.0f}"
+    training_8gpu_str = f"{training_hours_8gpu_val:.1f}"
+    gpt2_sync_size_gb_str = f"{sync_size_gb:.1f}"
+    nvlink_h100_gbs = f"{nvlink_bw:.0f}"
+    comm_8gpu_ms_str = f"{comm_8gpu_ms_val:.1f}"
+    compute_8gpu_ms_str = f"{compute_8gpu_ms}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+total_8gpu_str = Scaling8GPU.total_8gpu_str
+single_gpu_step_s_str = Scaling8GPU.single_gpu_step_s_str
+total_8gpu_s_str = Scaling8GPU.total_8gpu_s_str
+speedup_8gpu_str = Scaling8GPU.speedup_8gpu_str
+efficiency_8gpu_str = Scaling8GPU.efficiency_8gpu_str
+training_8gpu_str = Scaling8GPU.training_8gpu_str
+gpt2_sync_size_gb_str = Scaling8GPU.gpt2_sync_size_gb_str
+nvlink_h100_gbs = Scaling8GPU.nvlink_h100_gbs
+comm_8gpu_ms_str = Scaling8GPU.comm_8gpu_ms_str
+compute_8gpu_ms_str = Scaling8GPU.compute_8gpu_ms_str
 ```
 
 - Total: `{python} total_8gpu_str`ms per step
-- Speedup: `{python} single_gpu_step_s_str`s ÷ `{python} total_8gpu_s_str`s = `{python} speedup_8gpu_str`$\times$ (not quite 8$\times$)
+- Speedup: `{python} single_gpu_step_s_str`s ÷ `{python} total_8gpu_s_str`s = `{python} speedup_8gpu_str`$\times$
 - Parallel efficiency: `{python} speedup_8gpu_str` ÷ 8 = `{python} efficiency_8gpu_str`%
 
-Why over 100% efficiency? Larger global batch (128 vs 16) improves GPU utilization from 72% to 89%. This "super-linear" speedup is common in ML at small scales when the baseline has poor utilization.
-
-Training time: `{python} training_hours_1gpu` hours ÷ `{python} speedup_8gpu_str` = **`{python} training_8gpu_str` hours**
+Training time: 25 hours ÷ `{python} speedup_8gpu_str` = **`{python} training_8gpu_str` hours**
 
 **32 GPUs: 4 Nodes with InfiniBand**
 
 Configuration:
 
 - Per-GPU batch: 16, global batch: 512
-- Intra-node communication: 5ms (NVLink)
-- Inter-node communication: 3GB @ 12.5 GB/s (InfiniBand) = 240ms
+- Intra-node communication: `{python} comm_8gpu_ms_str`ms (NVLink)
+- Inter-node communication: `{python} gpt2_sync_size_gb_str`GB @ `{python} ib_hdr_gbs` GB/s (InfiniBand HDR) $\approx$ `{python} inter_node_ms_str`ms
 
 Performance results:
 
 ```{python}
 #| label: scaling-32gpu-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ 32-GPU SCALING ANALYSIS (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Inter-node scaling using InfiniBand.
+# │
+# │ Goal: Show how inter-node communication collapses scaling efficiency.
+# │ Show: ~30% efficiency when communication overhead dominates.
+# │ How: Comm_pct = T_comm / (T_comp + T_comm).
+# │
+# │ Imports: mlsys.constants (INFINIBAND_HDR_BW, GB, second, ...)
+# │ Exports: compute_pct_str, comm_pct_str, total_32gpu_str, speedup_32gpu_str,
+# │          efficiency_32gpu_str, training_32gpu_str, inter_node_ms_str, ib_hdr_gbs
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import INFINIBAND_HDR_BW, GB, second, BILLION
 
-# 32-GPU scaling worked example
-compute_32gpu_ms = 180
-inter_node_ms = 240
-intra_node_ms = 5
-comm_32gpu_ms = inter_node_ms + intra_node_ms
-total_32gpu_ms = compute_32gpu_ms + comm_32gpu_ms
-compute_pct = compute_32gpu_ms / total_32gpu_ms * 100
-comm_pct = comm_32gpu_ms / total_32gpu_ms * 100
-speedup_32gpu = single_gpu_step_s / (total_32gpu_ms / 1000)
-efficiency_32gpu = speedup_32gpu / 32 * 100
-training_32gpu_hours = training_hours_1gpu / speedup_32gpu
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class Scaling32GPU:
+    """Scenario: 32-GPU scaling across 4 nodes."""
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    single_gpu_step_s = 1.8
+    compute_32gpu_ms = 180
+    params_b = 1.5 # GPT-2
+    ib_bw = INFINIBAND_HDR_BW.m_as(GB/second)
+    intra_node_ms = Scaling8GPU.comm_8gpu_ms_val
+    training_hours_1gpu = 25
 
-compute_pct_str = f"{compute_pct:.0f}"
-comm_pct_str = f"{comm_pct:.0f}"
-total_32gpu_str = f"{total_32gpu_ms}"
-total_32gpu_s_str = f"{total_32gpu_ms/1000}"
-speedup_32gpu_str = f"{speedup_32gpu:.1f}"
-efficiency_32gpu_str = f"{efficiency_32gpu:.0f}"
-training_32gpu_str = f"{training_32gpu_hours:.1f}"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    sync_size_gb = (params_b * BILLION * 4) / BILLION
+    inter_node_ms_val = (sync_size_gb / ib_bw) * 1000
+    
+    comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms
+    total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
+    
+    compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
+    comm_pct_val = comm_32gpu_ms_val / total_32gpu_ms_val * 100
+    
+    speedup_32gpu_val = single_gpu_step_s / (total_32gpu_ms_val / 1000)
+    efficiency_32gpu_val = speedup_32gpu_val / 32 * 100
+    training_32gpu_hours_val = training_hours_1gpu / speedup_32gpu_val
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(comm_pct_val > 50, f"Communication should dominate ({comm_pct_val:.1f}%) 32-GPU scenario")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    compute_pct_str = f"{compute_pct_val:.0f}"
+    comm_pct_str = f"{comm_pct_val:.0f}"
+    total_32gpu_str = f"{total_32gpu_ms_val:.0f}"
+    total_32gpu_s_str = f"{total_32gpu_ms_val/1000:.3f}"
+    speedup_32gpu_str = f"{speedup_32gpu_val:.1f}"
+    efficiency_32gpu_str = f"{efficiency_32gpu_val:.0f}"
+    training_32gpu_str = f"{training_32gpu_hours_val:.1f}"
+    inter_node_ms_str = f"{inter_node_ms_val:.0f}"
+    ib_hdr_gbs = f"{ib_bw:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+compute_pct_str = Scaling32GPU.compute_pct_str
+comm_pct_str = Scaling32GPU.comm_pct_str
+total_32gpu_str = Scaling32GPU.total_32gpu_str
+total_32gpu_s_str = Scaling32GPU.total_32gpu_s_str
+speedup_32gpu_str = Scaling32GPU.speedup_32gpu_str
+efficiency_32gpu_str = Scaling32GPU.efficiency_32gpu_str
+training_32gpu_str = Scaling32GPU.training_32gpu_str
+inter_node_ms_str = Scaling32GPU.inter_node_ms_str
+ib_hdr_gbs = Scaling32GPU.ib_hdr_gbs
+```
+    speedup_32gpu_str = f"{speedup_32gpu_val:.1f}"
+    efficiency_32gpu_str = f"{efficiency_32gpu_val:.0f}"
+    training_32gpu_str = f"{training_32gpu_hours_val:.1f}"
+    compute_32gpu_ms_str = f"{compute_32gpu_ms}"
+    comm_32gpu_ms_str = f"{comm_32gpu_ms_val}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+compute_pct_str = Scaling32GPU.compute_pct_str
+comm_pct_str = Scaling32GPU.comm_pct_str
+total_32gpu_str = Scaling32GPU.total_32gpu_str
+total_32gpu_s_str = Scaling32GPU.total_32gpu_s_str
+speedup_32gpu_str = Scaling32GPU.speedup_32gpu_str
+efficiency_32gpu_str = Scaling32GPU.efficiency_32gpu_str
+training_32gpu_str = Scaling32GPU.training_32gpu_str
+compute_32gpu_ms = Scaling32GPU.compute_32gpu_ms_str
+comm_32gpu_ms = Scaling32GPU.comm_32gpu_ms_str
 ```
 
 - Computation: `{python} compute_32gpu_ms`ms (`{python} compute_pct_str`% of time)
@@ -1020,28 +1130,59 @@ Communication dominates and becomes the bottleneck.
 ```{python}
 #| label: grad-accum-calc
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GRADIENT ACCUMULATION ALTERNATIVE (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Overcoming the Communication Wall.
+# │
+# │ Goal: Show how gradient accumulation recovers efficiency.
+# │ Show: Drastic reduction in communication overhead and cost.
+# │ How: effective_batch = N * b * steps; overhead = T_comm / (steps * T_comp).
+# └─────────────────────────────────────────────────────────────────────────────
 
-# Gradient accumulation alternative
-n_gpus_ga = 8
-batch_per_gpu = 16
-accum_steps = 4
-effective_batch = n_gpus_ga * batch_per_gpu * accum_steps
-comm_overhead_pct = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
-ga_training_hours = 3.8  # empirical
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class GradAccumScenario:
+    """Scenario: 8 GPUs with 4-step gradient accumulation."""
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    n_gpus_ga = 8
+    batch_per_gpu = 16
+    accum_steps = 4
+    compute_8gpu_ms = 180
+    comm_8gpu_ms = 5
+    ga_training_hours = 3.8
+    cost_per_hour_8gpu = 128
+    cost_32gpu_reference = 3021 # from earlier calc
 
-effective_batch_str = f"{effective_batch}"
-comm_overhead_pct_str = f"{comm_overhead_pct:.1f}"
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    effective_batch_val = n_gpus_ga * batch_per_gpu * accum_steps
+    comm_overhead_pct_val = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
+    ga_cost_val = cost_per_hour_8gpu * ga_training_hours
+    ga_savings_val = cost_32gpu_reference - ga_cost_val
+    ga_savings_pct_val = ga_savings_val / cost_32gpu_reference * 100
 
-# Cost comparison
-cost_per_hour_8gpu = 128  # dollars
-ga_cost = cost_per_hour_8gpu * ga_training_hours
-cost_32gpu = 3021  # reference from earlier calculation
-ga_savings = cost_32gpu - ga_cost
-ga_savings_pct = ga_savings / cost_32gpu * 100
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(comm_overhead_pct_val < 1.0, "Accumulation should minimize overhead to <1%")
 
-ga_cost_str = f"{ga_cost:.0f}"
-ga_savings_str = f"{ga_savings:,.0f}"
-ga_savings_pct_str = f"{ga_savings_pct:.0f}"
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    effective_batch_str = f"{effective_batch_val}"
+    comm_overhead_pct_str = f"{comm_overhead_pct_val:.1f}"
+    ga_training_hours_str = f"{ga_training_hours}"
+    ga_cost_str = f"{ga_cost_val:.0f}"
+    ga_savings_str = f"{ga_savings_val:,.0f}"
+    ga_savings_pct_str = f"{ga_savings_pct_val:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+n_gpus_ga = GradAccumScenario.n_gpus_ga
+batch_per_gpu = GradAccumScenario.batch_per_gpu
+accum_steps = GradAccumScenario.accum_steps
+effective_batch_str = GradAccumScenario.effective_batch_str
+comm_overhead_pct_str = GradAccumScenario.comm_overhead_pct_str
+ga_training_hours = GradAccumScenario.ga_training_hours_str
+ga_cost_str = GradAccumScenario.ga_cost_str
+ga_savings_str = GradAccumScenario.ga_savings_str
+ga_savings_pct_str = GradAccumScenario.ga_savings_pct_str
+comm_8gpu_ms = GradAccumScenario.comm_8gpu_ms
+compute_8gpu_ms = GradAccumScenario.compute_8gpu_ms
 ```
 
 - Configuration: `{python} n_gpus_ga` GPUs$\times$ batch `{python} batch_per_gpu`$\times$ `{python} accum_steps` accumulation steps = `{python} effective_batch_str` effective batch
@@ -2158,16 +2299,18 @@ Each parallelism dimension imposes a distinct traffic profile on the network. Te
 
 The primary efficiency penalty in pipeline parallelism is the "bubble"—the periods at the start and end of a training step where GPUs sit idle waiting for the pipeline to fill or drain. For a naive GPipe schedule, the pipeline must completely fill with micro-batches before the first backward pass begins, and completely drain at the end. The fraction of time spent in this bubble is given by the ratio $\frac{P-1}{M + P - 1}$, where $P$ is the number of pipeline stages and $M$ is the number of micro-batches per global batch. For a GPT-175B configuration with $P=16$ stages and $M=32$ micro-batches, the bubble fraction is $\frac{15}{47} \approx 31.9\%$, meaning nearly one-third of the theoretical compute capacity is wasted. To mitigate this, modern systems employ 1F1B (One-Forward-One-Backward) scheduling. 1F1B interleaves forward and backward passes once the pipeline enters the steady state, allowing memory to be freed earlier. This reduction in peak memory pressure allows practitioners to increase $M$, which drives the bubble fraction down asymptotically, improving hardware utilization.
 
-### Trade-offs: Complexity vs. Scale {#sec-distributed-training-systems-systems-hybrid-parallelism-tradeoffs}
+### Blackwell and the Scaling Frontier {#sec-distributed-training-systems-systems-hybrid-parallelism-blackwell}
 
-Hybrid parallelism is the only viable path for training frontier models (100B+ parameters), but it introduces a three-dimensional configuration space whose complexity compounds at each level.
+The transition to the **Blackwell** architecture (2024) introduces two architectural shifts that redefine the 3D parallelism trade-offs. First, **NVLink 5** provides 1.8 TB/s of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for even larger **Tensor Parallelism ($t$)** groups (e.g., $t=16$ or $t=32$ across multiple nodes) with negligible latency overhead. Second, the introduction of native **FP4 support** enables 4-bit training for specific workloads, effectively doubling the arithmetic throughput ($R_{peak}$) and halving the memory footprint ($D_{vol}$) compared to FP8.
 
-Hybrid parallelism offers three principal advantages. Orthogonal scaling addresses all three bottlenecks simultaneously: tensor parallelism fits the layer in memory, pipeline parallelism fits the depth, and data parallelism scales the throughput. Hierarchical bandwidth matching maps logical communication patterns to physical hardware topology, with high-bandwidth NVLink handling tensor parallelism and medium-bandwidth InfiniBand handling pipeline and data parallelism. By overlapping pipeline stages with data parallel communication, hybrid systems can achieve 50-55% Model FLOPS Utilization (MFU) at scale, compared to less than 40% for pure strategies.
-
-These advantages come with three limitations that scale with system size. Debugging requires tracing errors through a 3D coordinate system (data rank, pipeline stage, tensor slice), and a NaN in one microbatch can propagate backward and crash a different GPU in a different pipeline stage. Straggler amplification compounds this complexity: in a synchronous 3D mesh, a single slow GPU stalls the entire cluster, and the probability of a straggler event approaches 100% as $N \rightarrow 10,000$. The topology itself must be rigid and homogeneous, because mixing accelerator generations (A100s and H100s) or varying network bandwidths destroys efficiency.
+For a 1-trillion parameter model, Blackwell enables a configuration of $t=16$ (spanning two 8-GPU nodes via NVLink Switch) and $p=32$, reducing the total number of pipeline stages and associated bubble overhead. The 10 TB/s die-to-die interconnect within the B200 package further collapses the distinction between intra-chip and intra-package communication, allowing the two dies to function as a single high-bandwidth tensor parallel unit. These advancements shift the bottleneck from intra-node communication to the inter-pod optical fabric, making **Rail-Optimized** topologies (@sec-network-fabrics-rail-optimized) and **All-to-All** optimization even more critical for the next generation of the Machine Learning Fleet.
 
 ::: {.callout-notebook title="Configuring 3D Parallelism for GPT-175B"}
+**Scenario A: Hopper Cluster (H100)**
 Designing the training topology for GPT-3 (175B parameters) requires balancing memory, bandwidth, and compute across three dimensions. A standard configuration uses **Tensor Parallelism (TP=8)** to shard layers within a single node, exploiting the 900 GB/s NVLink bandwidth. **Pipeline Parallelism (PP=16)** then splits the model depth across 16 nodes, tolerant of the slower inter-node bandwidth (InfiniBand) due to bubble overhead. Finally, **Data Parallelism (DP=128)** replicates this entire 16-node pipeline 128 times to scale throughput. The total hardware requirement is massive: $8 \text{ GPUs} \times 16 \text{ Stages} \times 128 \text{ Replicas} = 16,384 \text{ GPUs}$.
+
+**Scenario B: Blackwell Cluster (B200)**
+With the Blackwell architecture, we can exploit the 1.8 TB/s NVLink 5 and FP4 precision. For a 175B model, we can increase **Tensor Parallelism to TP=16** (across two nodes) while maintaining the same low latency. This reduces the required **Pipeline Parallelism to PP=8**, cutting the pipeline bubble fraction by half ($P=8$ vs $P=16$). The resulting fleet is not only faster due to higher TFLOPS but also more efficient due to reduced coordination overhead ($T_{coord}$).
 :::
 
 The MFU values cited above raise a natural question: how did the field arrive at 50% utilization, and what trajectory brought it there? @fig-mfu-progression traces the evolution of Model FLOPs Utilization across published training systems from 2020 to 2024. The progression from GPT-3's 21% MFU to PaLM's 46% MFU reflects not improvements in raw hardware speed but advances in the parallelism strategies, communication overlap techniques, and scheduling optimizations discussed throughout this chapter. The plateau near 40-46% reveals that the theoretical ceiling imposed by communication overhead, pipeline bubbles, and memory management remains formidable even with the most advanced hybrid parallelism techniques available. Notably, Meta's Llama 3 training at 16,384 H100 GPUs achieved slightly lower MFU (41%) than the same model at 8,192 GPUs (43%), confirming that the Scaling Tax described in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f is not merely theoretical but measurable in production.
@@ -2498,32 +2641,20 @@ Engineers checkpoint distributed training "every hour" or "every 1000 steps" bas
 
 #| label: young-daly-calc
 
+#| label: young-daly-calc
 #| echo: false
-
 # ┌─────────────────────────────────────────────────────────────────────────────
-
-# │ YOUNG-DALY OPTIMAL CHECKPOINT CALCULATION
-
+# │ YOUNG-DALY OPTIMAL CHECKPOINT CALCULATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
-
-# │ Context: "Optimal Checkpointing" section
-
+# │ Context: @sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc
 # │
-
 # │ Goal: Quantify the optimal tradeoff between checkpoint overhead and rework.
-
 # │ Show: That frequent checkpointing wastes compute while rare ones risk work.
-
 # │ How: Apply Young-Daly formula (sqrt(2*C*MTBF)) for a 1024-GPU cluster.
-
 # │
-
-# │ Imports: mlsys.constants, mlsys.formatting
-
-# │ Exports: t_opt_min_str, total_loss_pct_str
-
+# │ Imports: mlsys.formatting
+# │ Exports: t_opt_min_str, total_loss_pct_str, daily_savings_str
 # └─────────────────────────────────────────────────────────────────────────────
-
 import math
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
@@ -2545,12 +2676,12 @@ class YoungDaly:
     c_min = t_save_min
     mtbf_min = cluster_mtbf_hr * 60
 
-    t_opt_min = math.sqrt(2 * c_min * mtbf_min)
+    t_opt_min_val = math.sqrt(2 * c_min * mtbf_min)
 
     # Overhead: (C / T_opt) + (T_opt / 2 * MTBF)
     # (Simplified Young-Daly first-order approximation)
-    ckpt_overhead = c_min / t_opt_min
-    rework_overhead = (t_opt_min / 2) / mtbf_min
+    ckpt_overhead = c_min / t_opt_min_val
+    rework_overhead = (t_opt_min_val / 2) / mtbf_min
     total_overhead = ckpt_overhead + rework_overhead
 
     # Daily dollar loss due to suboptimal (30 min) vs optimal
@@ -2561,10 +2692,10 @@ class YoungDaly:
     diff_daily = loss_30min - loss_opt
 
     # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(40 <= t_opt_min <= 60, f"Optimal interval ({t_opt_min:.1f}m) out of expected range.")
+    check(40 <= t_opt_min_val <= 60, f"Optimal interval ({t_opt_min_val:.1f}m) out of expected range.")
 
     # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    t_opt_min_str = fmt(t_opt_min, precision=0)
+    t_opt_min_str = fmt(t_opt_min_val, precision=0)
     loss_pct_str = fmt(total_overhead * 100, precision=1)
     daily_savings_str = fmt(diff_daily, precision=0, commas=True)
 
@@ -2572,6 +2703,7 @@ class YoungDaly:
 t_opt_min_str = YoungDaly.t_opt_min_str
 total_loss_pct_str = YoungDaly.loss_pct_str
 daily_savings_str = YoungDaly.daily_savings_str
+```
 
 ```
 

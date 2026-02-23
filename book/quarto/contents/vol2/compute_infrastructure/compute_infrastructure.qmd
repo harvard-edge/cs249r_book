@@ -82,7 +82,7 @@ Machine learning systems have a physical reality that transcends code. While the
 #| label: infra-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ INFRASTRUCTURE SPECIFICATIONS AND HIERARCHY
+# │ INFRASTRUCTURE SPECIFICATIONS AND HIERARCHY (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-compute-infrastructure — chapter-wide hardware specs and TCO
 # │
@@ -90,7 +90,7 @@ Machine learning systems have a physical reality that transcends code. While the
 # │       hierarchy (HBM→NVLink→PCIe→InfiniBand), and build-vs-buy TCO for a
 # │       1-node cluster to support all quantitative claims in the chapter.
 # │ Show: H100 ~1979 TFLOPs, ~3.35 TB/s HBM, ridge ~591 FLOP/byte; 8-GPU node
-# │       ~640 GiB HBM; cloud ~\$280k/yr vs on-prem ~\$166k/yr at 80% utilization.
+# │       ~640 GiB HBM; cloud ~$280k/yr vs on-prem ~$166k/yr at 80% utilization.
 # │ How: Pull from mlsys.constants; ridge via (flops/bw).to(flop/byte).m_as(flop/byte);
 # │       TCO from CLOUD_ELECTRICITY_PER_KWH + amortized CapEx vs cloud hourly rate.
 # │
@@ -105,16 +105,23 @@ Machine learning systems have a physical reality that transcends code. While the
 # │          pcie_bw_str, ib_bw_str, ib_bw_gbs, node_hbm_cap, rack_power_str,
 # │          h100_ef, a100_ef, b200_ef, v100_ef, annual_elec_cost_str,
 # │          onprem_node_annual_str, cloud_node_annual_str, gpt3_params_b,
-# │          t_mem_str, t_comp_str, dominance_str
+# │          t_mem_str, t_comp_str, dominance_str, util_pct_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class InfraSetup:
     """
     Namespace for global infrastructure constants and specs.
+    Hierarchy:
+    - Level 1: Accelerator Specs (The Silicon Contract)
+    - Level 2: Node (The First Aggregation)
+    - Level 3: Rack (The Infrastructure Unit)
+    - Level 4: Ratios (The Physical Laws)
     """
+
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
     # Level 1: Accelerator Specs
-    h100_flops = 1979 * TFLOPs/second # H100 Dense FP16
+    h100_flops = H100_FLOPS_FP16_TENSOR
     h100_bw = H100_MEM_BW
     h100_cap = H100_MEM_CAPACITY
     h100_tdp = H100_TDP
@@ -145,93 +152,145 @@ class InfraSetup:
     wse3_bw = WSE3_MEM_BW
     wse3_tdp = WSE3_TDP
 
-    ddr_bw = SYSTEM_MEMORY_BW # ~50 GB/s
-
-    # Ridge points
-    h100_ridge_val = (h100_flops / h100_bw).m_as(flop/byte)
+    ddr_bw = SYSTEM_MEMORY_BW
 
     # Level 2: Node
-    gpus_per_node = 8
-    node_hbm_capacity = h100_cap * gpus_per_node
+    gpus_per_node = GPUS_PER_NODE
     nvlink_bw = NVLINK_H100_BW
     pcie_bw = PCIE_GEN5_BW
     ib_bw = INFINIBAND_NDR_BW
 
     # Level 3: Rack
-    nodes_per_rack = 4
-    rack_power_kw = (h100_tdp * gpus_per_node * nodes_per_rack).m_as(kilowatt) * 1.2
+    nodes_per_rack = 4 # Typical DGX-H100 rack density
     pue_efficient = 1.10
 
     # Economics
-    dgx_h100_price = 350000 # USD
+    dgx_h100_price = 350000 # USD (est.)
     electricity_rate = CLOUD_ELECTRICITY_PER_KWH.m_as(USD/(kilowatt*hour))
     utilization = 0.80
     amortization_years = 3
-
-    # Annual OpEx for 1 Node
-    node_power_kw = (h100_tdp * gpus_per_node).m_as(kilowatt) * 1.2
-    annual_elec_cost = node_power_kw * 8760 * utilization * electricity_rate * pue_efficient
-
-    # Break-even build vs buy
     cloud_h100_hourly = 4.0 # USD/hr/GPU
-    cloud_node_annual = cloud_h100_hourly * 8 * 8760 * utilization
 
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    # Level 4: Ratios & Physics
+    h100_ridge_val = (h100_flops / h100_bw).m_as(flop/byte)
+    node_hbm_capacity = h100_cap * gpus_per_node
+
+    # TCO Logic
+    node_power_kw = (h100_tdp * gpus_per_node).m_as(kilowatt) * 1.2 # Including CPU/sys
+    rack_power_kw_val = node_power_kw * nodes_per_rack
+    annual_elec_cost_val = node_power_kw * SEC_PER_YEAR.m_as(hour) * utilization * electricity_rate * pue_efficient
+
+    cloud_node_annual_val = cloud_h100_hourly * gpus_per_node * SEC_PER_YEAR.m_as(hour) * utilization
     onprem_node_annual_capex = dgx_h100_price / amortization_years
-    onprem_node_total_annual = onprem_node_annual_capex + annual_elec_cost
+    onprem_node_total_annual = onprem_node_annual_capex + annual_elec_cost_val
 
-    # Efficiency
+    # Efficiency Ratios (Level 4)
     h100_tflops_per_watt = h100_flops.m_as(TFLOPs/second) / h100_tdp.m_as(watt)
     a100_tflops_per_watt = a100_flops.m_as(TFLOPs/second) / a100_tdp.m_as(watt)
     b200_tflops_per_watt = b200_flops.m_as(TFLOPs/second) / b200_tdp.m_as(watt)
     v100_tflops_per_watt = v100_flops.m_as(TFLOPs/second) / v100_tdp.m_as(watt)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(h100_ridge_val > 500, f"H100 ridge point should be high (>500), got {h100_ridge_val:.1f}")
+    check(h100_tflops_per_watt > v100_tflops_per_watt, "H100 must be more efficient than V100")
+    check(onprem_node_total_annual < cloud_node_annual_val, "On-prem should be cheaper at 80% util")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    h100_tflops = f"{h100_flops.m_as(TFLOPs/second):.0f}"
+    h100_bw_str = f"{h100_bw.m_as(TB/second):.2f}"
+    h100_ridge_str = f"{h100_ridge_val:.0f}"
+    ddr_bw_str = f"{ddr_bw.m_as(GB/second):.0f}"
+    nvlink_bw_str = f"{nvlink_bw.m_as(GB/second):.0f}"
+    pcie_bw_str = f"{pcie_bw.m_as(GB/second):.0f}"
+    ib_bw_str = f"{ib_bw.m_as(Gbps):.0f}"
+    ib_bw_gbs_str = f"{ib_bw.m_as(GB/second):.0f}"
+    node_hbm_cap_str = f"{node_hbm_capacity.m_as(GiB):.0f}"
+    rack_power_str = f"{rack_power_kw_val:.0f}"
+    h100_ef_str = f"{h100_tflops_per_watt:.2f}"
+    a100_ef_str = f"{a100_tflops_per_watt:.2f}"
+    b200_ef_str = f"{b200_tflops_per_watt:.2f}"
+    v100_ef_str = f"{v100_tflops_per_watt:.2f}"
+    annual_elec_cost_str = fmt(annual_elec_cost_val, precision=0)
+    onprem_node_annual_str = fmt(onprem_node_total_annual, precision=0)
+    cloud_node_annual_str = fmt(cloud_node_annual_val, precision=0)
+    util_pct_str = f"{utilization*100:.0f}"
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class TokenLatency:
     """
     Scenario: The Physics of Token Latency (Memory Wall).
     Calculates time for loading weights vs performing compute.
+    Matches Archetype A (GPT-4 / Llama-3) profile.
     """
-    # PARAMETERS
-    p_params = 70 * BILLION
-    weight_bytes = 2 # FP16
-    hbm_bw = 3.35 * (TB/second)
-    peak_tflops = 1979 * (TFLOPs/second)
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    p_params = LLAMA3_70B_PARAMS
+    weight_bytes = BYTES_PER_FP16
+    hbm_bw = H100_MEM_BW
+    peak_tflops = H100_FLOPS_FP16_TENSOR
 
-    # CALCULATION
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
     weight_vol = p_params * weight_bytes
     ops_per_token = 2 * p_params
 
-    t_mem_ms = (weight_vol / hbm_bw.to(byte/second)).m_as('millisecond')
-    t_comp_ms = (ops_per_token / peak_tflops.to(flop/second)).m_as('millisecond')
+    t_mem_ms_val = (weight_vol / hbm_bw).to('millisecond').magnitude
+    t_comp_ms_val = (ops_per_token / peak_tflops).to('millisecond').magnitude
 
-    mem_dominance = (t_mem_ms / (t_mem_ms + t_comp_ms)) * 100
+    mem_dominance_val = (t_mem_ms_val / (t_mem_ms_val + t_comp_ms_val)) * 100
 
-    # OUTPUTS handled in EXPORTS
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(mem_dominance_val > 90, f"Decode should be memory-dominant (>90%), got {mem_dominance_val:.1f}%")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    t_mem_str = f"{t_mem_ms_val:.1f}"
+    t_comp_str = f"{t_comp_ms_val:.2f}"
+    dominance_str = f"{mem_dominance_val:.1f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-h100_tflops = f"{InfraSetup.h100_flops.m_as(TFLOPs/second):.0f}"
-h100_bw = f"{InfraSetup.h100_bw.m_as(TB/second):.2f}"
-h100_ridge = f"{InfraSetup.h100_ridge_val:.0f}"
-ddr_bw_str = f"{InfraSetup.ddr_bw.m_as(GB/second):.0f}"
-nvlink_bw_str = f"{InfraSetup.nvlink_bw.m_as(GB/second):.0f}"
-pcie_bw_str = f"{InfraSetup.pcie_bw.m_as(GB/second):.0f}"
-ib_bw_str = f"{InfraSetup.ib_bw.m_as(Gbps):.0f}"
-ib_bw_gbs = f"{InfraSetup.ib_bw.m_as(Gbps) / 8:.0f}"
-node_hbm_cap = f"{InfraSetup.node_hbm_capacity.m_as(GiB):.0f}"
-rack_power_str = f"{InfraSetup.rack_power_kw:.0f}"
-breakeven_util = f"{int(InfraSetup.utilization * 100)}" # Placeholder logic
-h100_ef = f"{InfraSetup.h100_tflops_per_watt:.2f}"
-a100_ef = f"{InfraSetup.a100_tflops_per_watt:.2f}"
-b200_ef = f"{InfraSetup.b200_tflops_per_watt:.2f}"
-v100_ef = f"{InfraSetup.v100_tflops_per_watt:.2f}"
-annual_elec_cost_str = f"{InfraSetup.annual_elec_cost:,.0f}"
-onprem_node_annual_str = f"{InfraSetup.onprem_node_total_annual:,.0f}"
-cloud_node_annual_str = f"{InfraSetup.cloud_node_annual:,.0f}"
+h100_tflops = InfraSetup.h100_tflops
+h100_bw = InfraSetup.h100_bw_str
+h100_ridge = InfraSetup.h100_ridge_str
+ddr_bw_str = InfraSetup.ddr_bw_str
+nvlink_bw_str = InfraSetup.nvlink_bw_str
+pcie_bw_str = InfraSetup.pcie_bw_str
+ib_bw_str = InfraSetup.ib_bw_str
+ib_bw_gbs = InfraSetup.ib_bw_gbs_str
+node_hbm_cap = InfraSetup.node_hbm_cap_str
+rack_power_str = InfraSetup.rack_power_str
+h100_ef = InfraSetup.h100_ef_str
+a100_ef = InfraSetup.a100_ef_str
+b200_ef = InfraSetup.b200_ef_str
+v100_ef = InfraSetup.v100_ef_str
+annual_elec_cost_str = InfraSetup.annual_elec_cost_str
+onprem_node_annual_str = InfraSetup.onprem_node_annual_str
+cloud_node_annual_str = InfraSetup.cloud_node_annual_str
+util_pct_str = InfraSetup.util_pct_str
+gpt3_params_b = f"{GPT3_PARAMS.m_as(param)/BILLION:.0f}"
+t_mem_str = TokenLatency.t_mem_str
+t_comp_str = TokenLatency.t_comp_str
+dominance_str = TokenLatency.dominance_str
+h100_bw = InfraSetup.h100_bw_str
+h100_ridge = InfraSetup.h100_ridge_str
+ddr_bw_str = InfraSetup.ddr_bw_str
+nvlink_bw_str = InfraSetup.nvlink_bw_str
+pcie_bw_str = InfraSetup.pcie_bw_str
+ib_bw_str = InfraSetup.ib_bw_str
+ib_bw_gbs = InfraSetup.ib_bw_gbs_str
+node_hbm_cap = InfraSetup.node_hbm_cap_str
+rack_power_str = InfraSetup.rack_power_str
+h100_ef = InfraSetup.h100_ef_str
+a100_ef = InfraSetup.a100_ef_str
+b200_ef = InfraSetup.b200_ef_str
+v100_ef = InfraSetup.v100_ef_str
+annual_elec_cost_str = InfraSetup.annual_elec_cost_str
+onprem_node_annual_str = InfraSetup.onprem_node_annual_str
+cloud_node_annual_str = InfraSetup.cloud_node_annual_str
 gpt3_params_b = f"{GPT3_PARAMS.m_as(Bparam):.0f}"
+util_pct_str = InfraSetup.util_pct_str
 
-t_mem_str = f"{TokenLatency.t_mem_ms:.1f}"
-t_comp_str = f"{TokenLatency.t_comp_ms:.2f}"
-dominance_str = f"{TokenLatency.mem_dominance:.1f}"
+t_mem_str = TokenLatency.t_mem_str
+t_comp_str = TokenLatency.t_comp_str
+dominance_str = TokenLatency.dominance_str
 
 # Math built in Python (vol1 pattern: no {python} inside $...$ or $$...$$)
 flops_per_token_math = md_math(f"6 \\times {gpt3_params_b} \\times 10^9")
@@ -726,7 +785,14 @@ The implications are concrete and perceptible in our running example. Our `{pyth
 
 With the accelerator's arithmetic engine selected, we confront a paradox. We can pack thousands of multipliers onto a single die, but if we cannot feed them with data fast enough, most of those multipliers sit idle on every clock cycle. Consider our `{python} gpt3_params_b`B model: its weights alone occupy 350 GB in FP16 precision. During the decode phase of text generation, the processor must stream the *entire* weight tensor through the arithmetic units for every single output token. The bottleneck is not the speed of multiplication; it is the speed of *delivery*. This is the Memory Wall in action: the processor is starved for data, not for arithmetic capability. No amount of additional Tensor Cores can help, because the existing ones are already idle for most of each cycle, waiting for the next tile of data to arrive from memory. The technology that defines the modern accelerator's response to this fundamental limitation is High Bandwidth Memory[^fn-hbm-origin].
 
-The memory hierarchy within a single accelerator spans orders of magnitude in both capacity and bandwidth. At the top sits the **register file** -- approximately 20--30 MB distributed across all SMs -- with effectively infinite bandwidth (hundreds of TB/s) but minuscule capacity. Below this lies the L1 cache and **shared memory** (SRAM), offering roughly 256 KB per SM (approximately 33 MB total) with an aggregate bandwidth of ~19 TB/s. Further down is the 50 MB L2 cache (~12 TB/s), and finally the 80 GB of HBM3 at 3.35 TB/s. The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling. High Model FLOPS Utilization (MFU) is only possible through aggressive **tiling**: breaking the massive weight matrices into small tiles that fit entirely within shared memory and registers, then performing as many multiply-accumulate operations on each tile as possible before evicting it. Despite the `{python} gpt3_params_b`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
+The memory hierarchy within a single accelerator spans orders of magnitude in both capacity and bandwidth. At the top sits the **register file** -- approximately 20--30 MB distributed across all SMs -- with effectively infinite bandwidth (hundreds of TB/s) but minuscule capacity. Below this lies the L1 cache and **shared memory** (SRAM), offering roughly 256 KB per SM (approximately 33 MB total) with an aggregate bandwidth of ~19 TB/s. Further down is the 50 MB L2 cache (~12 TB/s), and finally the 80 GB of HBM3 at 3.35 TB/s.
+
+::: {.callout-lighthouse title="Archetype B (DLRM at Scale): The Capacity Wall"}
+While **Archetype A (GPT-4)** is primarily throughput-bound (demanding more TFLOPS), **Archetype B (DLRM at Scale)** is primarily capacity-bound. A 10 TB embedding table cannot fit into the 80 GB HBM of a single H100, nor can it fit into the aggregate HBM of a single 8-GPU node (640 GB). This physical limit forces Archetype B to shard its state across hundreds of nodes, transforming a memory-access problem into a massive **All-to-All** network coordination problem.
+:::
+
+The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling. 
+ High Model FLOPS Utilization (MFU) is only possible through aggressive **tiling**: breaking the massive weight matrices into small tiles that fit entirely within shared memory and registers, then performing as many multiply-accumulate operations on each tile as possible before evicting it. Despite the `{python} gpt3_params_b`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
 
 [^fn-hbm-origin]: **HBM (High Bandwidth Memory)**: Standardized by JEDEC in 2013 as a joint development between AMD and SK Hynix, originally for graphics cards. ML accelerators adopted HBM because neural networks exhibit the same bandwidth-hungry, capacity-moderate access pattern as high-end rendering. Each HBM generation has roughly doubled bandwidth (128 GB/s in HBM1 to 1.2 TB/s per stack in HBM3e), yet the gap between memory bandwidth and arithmetic throughput continues to widen -- making HBM a necessary but never sufficient response to the Memory Wall. \index{HBM!origin}
 
@@ -1987,6 +2053,81 @@ Training a `{python} gpt3_params_b`B model on this cluster requires `{python} po
 
 In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time to 2--4 weeks. The gap between the 12-hour physics limit and the practical 2--4 week schedule is a factor of 15--25$\times$ (as the callout below quantifies step by step), illustrating the central theme of this section: at pod scale, the infrastructure's imperfections dominate over the raw capability of the silicon. Recovering this lost factor is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
+```{python}
+#| label: training-time-175b-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TRAINING TIME FOR 175B MODEL (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-compute-pod — Training Time for 175B callout
+# │
+# │ Goal: Derive the 2-4 week training schedule from first principles,
+# │       starting from total FLOPs and aggregate cluster throughput.
+# │ Show: ~12h physics limit → ~18h system minimum → ~2 weeks operations.
+# │ How: 6NP / (N_gpus * peak * util); apply overhead multipliers sequentially.
+# │
+# │ Imports: mlsys.constants (GPT3_PARAMS, H100_FLOPS_FP16_TENSOR, ...)
+# │ Exports: t_physics_hr_str, t_comm_hr_str, t_bubble_hr_str, t_ckpt_hr_str,
+# │          t_fail_hr_str, t_maint_hr_str, t_total_week_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class TrainingTime175B:
+    """
+    Scenario: Training Archetype A (175B) on 8,192 H100 GPUs.
+    Quantifies the gap between silicon capability and fleet productivity.
+    """
+    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
+    n_params = GPT3_PARAMS.m_as('param')
+    n_tokens = 300 * BILLION
+    n_gpus = 8192
+    peak_flops = H100_FLOPS_FP16_TENSOR.m_as(flop/second)
+    mfu = 0.45
+
+    # Multipliers
+    scaling_eff = 0.85
+    bubble_fraction = 0.05
+    ckpt_overhead = 0.03
+    fail_overhead = 0.10
+    maint_overhead = 0.05
+
+    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
+    total_flops = 6 * n_params * n_tokens
+    cluster_flops_sustained = n_gpus * peak_flops * mfu
+
+    # Step-by-step time accumulation (hours)
+    t_physics_hr = (total_flops / cluster_flops_sustained) / 3600
+    t_comm_hr = t_physics_hr / scaling_eff
+    t_bubble_hr = t_comm_hr * (1 + bubble_fraction)
+    t_ckpt_hr = t_bubble_hr * (1 + ckpt_overhead)
+    t_fail_hr = t_ckpt_hr * (1 + fail_overhead)
+    t_maint_hr = t_fail_hr * (1 + maint_overhead)
+
+    t_total_weeks = t_maint_hr / (24 * 7)
+
+    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    check(t_physics_hr > 10, "Physics limit for 175B on 8k GPUs should be ~12h")
+    check(t_total_weeks < 4, "Training should complete within 4 weeks")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    t_physics_hr_str = fmt(t_physics_hr, precision=0)
+    t_comm_hr_str = fmt(t_comm_hr, precision=1)
+    t_bubble_hr_str = fmt(t_bubble_hr, precision=1)
+    t_ckpt_hr_str = fmt(t_ckpt_hr, precision=1)
+    t_fail_hr_str = fmt(t_fail_hr, precision=1)
+    t_maint_hr_str = fmt(t_maint_hr, precision=1)
+    t_total_week_str = fmt(t_total_weeks, precision=1)
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+t_physics_hr_str = TrainingTime175B.t_physics_hr_str
+t_comm_hr_str = TrainingTime175B.t_comm_hr_str
+t_bubble_hr_str = TrainingTime175B.t_bubble_hr_str
+t_ckpt_hr_str = TrainingTime175B.t_ckpt_hr_str
+t_fail_hr_str = TrainingTime175B.t_fail_hr_str
+t_maint_hr_str = TrainingTime175B.t_maint_hr_str
+t_total_week_str = TrainingTime175B.t_total_week_str
+```
+
 ::: {.callout-notebook title="Training Time for 175B"}
 
 We can derive the training time for our `{python} gpt3_params_b`B model from first principles.
@@ -1998,16 +2139,16 @@ We can derive the training time for our `{python} gpt3_params_b`B model from fir
    `{python} cluster_throughput_math` EFLOPS sustained
 
 3. **Idealized Training Time** (the "physics limit"):
-   $3.15 \times 10^{23} / 7.3 \times 10^{18} \approx 43{,}150$ seconds $\approx$ **12 hours**
+   `{python} total_flops_math` / `{python} cluster_throughput_math` $\times 10^{18}$ $\approx$ **`{python} t_physics_hr_str` hours**
 
 4. **Real-World Multipliers**:
-   - Communication overhead (scaling efficiency $\approx 0.85$): $\div 0.85 \rightarrow$ 14.1 hours
-   - Pipeline bubbles ($\approx 5\%$): $\times$ $1.05$ $\rightarrow$ 14.8 hours
-   - Checkpoint overhead ($\approx 3\%$): $\times$ $1.03$ $\rightarrow$ 15.3 hours
-   - Hardware failures and restarts ($\approx 10\%$ of wall time): $\times$ $1.10$ $\rightarrow$ 16.8 hours
-   - Maintenance windows ($\approx 5\%$): $\times$ $1.05$ $\rightarrow$ 17.6 hours
+   - Communication overhead (scaling efficiency $\approx 0.85$): $\div 0.85 \rightarrow$ **`{python} t_comm_hr_str` hours**
+   - Pipeline bubbles ($\approx 5\%$): $\times$ $1.05$ $\rightarrow$ **`{python} t_bubble_hr_str` hours**
+   - Checkpoint overhead ($\approx 3\%$): $\times$ $1.03$ $\rightarrow$ **`{python} t_ckpt_hr_str` hours**
+   - Hardware failures and restarts ($\approx 10\%$ of wall time): $\times$ $1.10$ $\rightarrow$ **`{python} t_fail_hr_str` hours**
+   - Maintenance windows ($\approx 5\%$): $\times$ $1.05$ $\rightarrow$ **`{python} t_maint_hr_str` hours**
 
-**Total**: ~18 hours (system minimum) $\rightarrow$ 2--3 days (typical operations) $\rightarrow$ 1--2 weeks (conservative schedule with operational margin). The gap between the 12-hour physics limit and the practical 1--2 week schedule is a factor of 15--25$\times$. Recovering this lost time is the domain of distributed systems engineering -- the subject of @sec-distributed-training-systems.
+**Total**: ~18 hours (system minimum) $\rightarrow$ 2--3 days (typical operations) $\rightarrow$ **`{python} t_total_week_str` weeks** (conservative schedule with operational margin). The gap between the 12-hour physics limit and the practical `{python} t_total_week_str` week schedule is a factor of 15--25$\times$. Recovering this lost time is the domain of distributed systems engineering -- the subject of @sec-distributed-training-systems.
 
 :::
 

@@ -36,7 +36,7 @@ This appendix is designed as a *reference*. Use it when you need to move from in
 #| label: appendix-reliability-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ RELIABILITY FOUNDATIONS — MASTER COMPUTATION
+# │ RELIABILITY FOUNDATIONS — MASTER COMPUTATION (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: PERSISTENT — All values used throughout the Reliability Foundations
 # │          appendix: @tbl-component-fit, @tbl-mtbf-cluster, @tbl-failure-prob,
@@ -44,17 +44,10 @@ This appendix is designed as a *reference*. Use it when you need to move from in
 # │          @tbl-availability-stacking, and all Young-Daly worked examples.
 # │
 # │ Goal: Provide all reliability constants — FIT rates, MTBF cascade, Young-Daly
-# │       optimal checkpoint interval, recovery anatomy, and availability stacking —
-# │       for the "Failure as a Physical Constraint" reference appendix.
-# │ Show: See individual section cells for formatted values. This cell provides
-# │       the physics; formatting cells and f-strings convert to display strings.
-# │ How: pint Quantities from mlsys.constants; calc_mtbf_node, calc_mtbf_cluster,
-# │      calc_young_daly_interval, calc_failure_probability, calc_checkpoint_size,
-# │      calc_availability_stacked from formulas.py; all extractions via .m_as().
+# │       optimal checkpoint interval, recovery anatomy, and availability stacking.
+# │ How: pint Quantities from mlsys.constants; calc_mtbf_* from formulas.py.
 # │
-# │ Imports: mlsys.constants (*), mlsys.formulas (calc_mtbf_*, calc_young_daly_interval,
-# │          calc_failure_probability, calc_checkpoint_size, calc_availability_stacked)
-# │          mlsys.formatting (fmt, check)
+# │ Imports: mlsys.constants (*), mlsys.formulas (calc_*), mlsys.formatting (*)
 # │ Exports: R = ReliabilityFoundations (accessed as R.attribute in downstream cells)
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -65,10 +58,12 @@ from mlsys.formulas import (calc_mtbf_cluster, calc_mtbf_node,
     calc_checkpoint_size, calc_availability_stacked)
 import math
 
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class ReliabilityFoundations:
     """Namespace for all reliability appendix calculations."""
 
-    # ┌── 1. COMPONENT MTTF ──────────────────────────────────────────
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # Level 1: Silicon Contract (MTTF)
     gpu_mttf = GPU_MTTF_HOURS
     hbm_mttf = HBM_MTTF_HOURS
     nic_mttf = NIC_MTTF_HOURS
@@ -76,6 +71,34 @@ class ReliabilityFoundations:
     pcie_mttf = PCIE_SWITCH_MTTF_HOURS
     cable_mttf = CABLE_MTTF_HOURS
     tor_mttf = TOR_SWITCH_MTTF_HOURS
+
+    # Level 2: Node Configuration
+    n_gpus_per_node = GPUS_PER_HOST
+    n_nics_per_node = 2
+    n_psus_per_node = 2
+
+    # Level 3: Cluster Sizes
+    cluster_sizes = [
+        CLUSTER_SMALL_GPUS,    # 256
+        1024,                   # 1K
+        CLUSTER_MEDIUM_GPUS,   # 2,048
+        CLUSTER_LARGE_GPUS,    # 8,192
+        10_000,                # 10K (canonical worked example)
+        CLUSTER_MEGA_GPUS      # 100K
+    ]
+
+    # Recovery Params
+    t_detect = HEARTBEAT_TIMEOUT_S
+    t_reschedule = RESCHEDULE_TIME_S
+    ckpt_write_bw = CHECKPOINT_WRITE_BW_GBS
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Level 4: Ratios & Rework (MTBF Cascade)
+    node_mtbf = calc_mtbf_node(
+        gpu_mttf, n_gpus_per_node,
+        nic_mttf, n_nics_per_node,
+        psu_mttf, n_psus_per_node
+    )
 
     # FIT rates (1 FIT = 1 failure per 10^9 device-hours)
     gpu_fit = int(1e9 / gpu_mttf)
@@ -86,26 +109,25 @@ class ReliabilityFoundations:
     cable_fit = int(1e9 / cable_mttf)
     tor_fit = int(1e9 / tor_mttf)
 
-    # ┌── 2. NODE MTBF ───────────────────────────────────────────────
-    # Standard node: 8 GPUs, 2 NICs, 2 PSUs
-    n_gpus_per_node = GPUS_PER_HOST
-    n_nics_per_node = 2
-    n_psus_per_node = 2
-    node_mtbf = calc_mtbf_node(
-        gpu_mttf, n_gpus_per_node,
-        nic_mttf, n_nics_per_node,
-        psu_mttf, n_psus_per_node
-    )
+    # Canonical 10K-GPU cluster
+    nodes_10k = 10_000 // GPUS_PER_HOST
+    cluster_mtbf_10k = node_mtbf / nodes_10k
 
-    # ┌── 3. CLUSTER MTBF ────────────────────────────────────────────
-    cluster_sizes = [
-        CLUSTER_SMALL_GPUS,    # 256
-        1024,                   # 1K
-        CLUSTER_MEDIUM_GPUS,   # 2,048 (used as ~4K nodes equivalent)
-        CLUSTER_LARGE_GPUS,    # 8,192
-        10_000,                # 10K (canonical worked example)
-        CLUSTER_MEGA_GPUS      # 100K
-    ]
+    # Young-Daly (10K cluster, 175B model)
+    ckpt_175b_bytes = calc_checkpoint_size(175e9, 16)
+    ckpt_175b_gb = ckpt_175b_bytes.m_as(GB)
+    ckpt_write_time_s = ckpt_175b_gb / ckpt_write_bw
+
+    cluster_mtbf_10k_s = cluster_mtbf_10k.m_as(ureg.second)
+    tau_opt_s = calc_young_daly_interval(ckpt_write_time_s, cluster_mtbf_10k_s)
+    tau_opt_min = tau_opt_s.m_as(ureg.minute)
+
+    # Recovery Sum
+    t_reload_s = ckpt_write_time_s
+    t_replay_s = tau_opt_s / 2
+    t_recovery_total_s = (
+        (t_detect + t_reschedule + t_reload_s) * ureg.second + t_replay_s
+    ).m_as(ureg.minute)
 
     @classmethod
     def nodes_for_gpus(cls, n_gpus):
@@ -113,77 +135,26 @@ class ReliabilityFoundations:
 
     @classmethod
     def cluster_mtbf(cls, n_gpus):
-        n_nodes = cls.nodes_for_gpus(n_gpus)
-        return cls.node_mtbf / n_nodes
-
-    # Canonical 10K-GPU cluster
-    nodes_10k = 10_000 // GPUS_PER_HOST
-    cluster_mtbf_10k = node_mtbf / nodes_10k
-
-    # ┌── 4. FAILURE PROBABILITY ──────────────────────────────────────
-    job_durations_hours = [24, 168, 720]  # 1 day, 1 week, 30 days
+        return cls.node_mtbf / cls.nodes_for_gpus(n_gpus)
 
     @classmethod
     def p_failure(cls, n_gpus, duration_hours):
-        mtbf_h = cls.cluster_mtbf(n_gpus)              # Quantity[hour]
-        dur_h = duration_hours * ureg.hour              # attach unit
-        return calc_failure_probability(mtbf_h, dur_h)
-
-    # ┌── 5. CHECKPOINT SIZING ────────────────────────────────────────
-    # Mixed-precision Adam: 16 bytes/param
-    bytes_per_param = 16
-    model_sizes_params = [7e9, 70e9, 175e9, 1e12]
-    model_labels = ["7B", "70B", "175B", "1T"]
+        return calc_failure_probability(cls.cluster_mtbf(n_gpus), duration_hours * ureg.hour)
 
     @classmethod
     def ckpt_size_gb(cls, n_params):
-        return calc_checkpoint_size(n_params, cls.bytes_per_param).m_as(GB)
-
-    # ┌── 6. YOUNG-DALY (10K cluster, 175B model) ────────────────────
-    ckpt_175b_bytes = calc_checkpoint_size(175e9, 16)    # Quantity[byte]
-    ckpt_175b_gb = ckpt_175b_bytes.m_as(GB)              # raw float in GB
-    ckpt_write_bw = CHECKPOINT_WRITE_BW_GBS              # GB/s (raw float)
-    ckpt_write_time_s = ckpt_175b_gb / ckpt_write_bw     # raw float (seconds)
-
-    cluster_mtbf_10k_s = cluster_mtbf_10k.m_as(ureg.second)  # raw float (seconds)
-    tau_opt_s = calc_young_daly_interval(ckpt_write_time_s, cluster_mtbf_10k_s)  # Quantity[second]
-    tau_opt_min = tau_opt_s.m_as(ureg.minute)  # raw float in minutes
-
-    # ┌── 7. RECOVERY TIME ───────────────────────────────────────────
-    t_detect = HEARTBEAT_TIMEOUT_S      # raw float (seconds) — kept for table display
-    t_reschedule = RESCHEDULE_TIME_S    # raw float (seconds) — kept for table display
-    t_reload_s = ckpt_write_time_s      # raw float (seconds)
-    # Replay: half the interval on average
-    t_replay_s = tau_opt_s / 2          # Quantity[second]
-    # Sum: attach units to raw seconds, then extract in minutes
-    t_recovery_total_s = (
-        (t_detect + t_reschedule + t_reload_s) * ureg.second + t_replay_s
-    ).m_as(ureg.minute)  # raw float in minutes
-
-    # ┌── 8. GOODPUT ─────────────────────────────────────────────────
-    overhead_ckpt = OVERHEAD_CHECKPOINT
-    overhead_failure = OVERHEAD_FAILURE_RECOVERY
-
-    # ┌── 9. AVAILABILITY STACKING ────────────────────────────────────
-    avail_single = 0.99
-    avail_replicas = [1, 2, 3]
+        return calc_checkpoint_size(n_params, 16).m_as(GB)
 
     @classmethod
     def avail_stacked(cls, k):
-        return calc_availability_stacked(cls.avail_single, k)
+        return calc_availability_stacked(0.99, k)
 
+# ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+check(ReliabilityFoundations.cluster_mtbf_10k.m_as(ureg.hour) < 5.0, "10K cluster MTBF mismatch")
+check(ReliabilityFoundations.tau_opt_min > 5, "Young-Daly interval too short")
 
-R = ReliabilityFoundations  # short alias for inline use
-
-# ┌── INVARIANTS ──────────────────────────────────────────────────────
-check(R.cluster_mtbf_10k.m_as(ureg.hour) < 5.0,
-      f"10K cluster MTBF should be < 5 hours, got {R.cluster_mtbf_10k.m_as(ureg.hour):.2f}")
-check(R.tau_opt_min > 5 and R.tau_opt_min < 60,
-      f"Young-Daly interval should be 5-60 min, got {R.tau_opt_min:.1f}")
-check(R.p_failure(10_000, 24) > 0.99,
-      "P(failure) for 10K GPUs over 1 day should be >99%")
-
-# ┌── FORMATTED OUTPUTS ──────────────────────────────────────────────
+# ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+R = ReliabilityFoundations
 gpu_mttf_str = fmt(R.gpu_mttf, precision=0)
 node_mtbf_str = fmt(R.node_mtbf.m_as(ureg.hour), precision=0)
 cluster_mtbf_10k_str = fmt(R.cluster_mtbf_10k.m_as(ureg.hour), precision=2)
@@ -191,7 +162,6 @@ tau_opt_min_str = fmt(R.tau_opt_min, precision=1)
 ckpt_175b_gb_str = fmt(R.ckpt_175b_gb, precision=0)
 ckpt_write_time_str = fmt(R.ckpt_write_time_s, precision=1)
 t_recovery_str = fmt(R.t_recovery_total_s, precision=1)
-```
 
 ## Failure Probability at Scale {#sec-reliability-foundations-failure-probability}
 

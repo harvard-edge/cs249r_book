@@ -614,54 +614,129 @@ Different ML operations have vastly different arithmetic intensities. Understand
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+```{python}
+#| label: workload-intensity-refactor
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ WORKLOAD INTENSITY ANALYSIS (P.I.C.O.)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-workload-placement — classify ML ops
+# │
+# │ Goal: Compute arithmetic intensity (FLOP/byte) for a 4096×4096 FP16 GEMM,
+# │       a GELU element-wise op, and LLM decode at batch=1 on a 4096-dim model
+# │       to show why inference is predominantly memory-bound.
+# │ Show: ~1365 FLOP/byte (GEMM, compute-bound), ~1.25 (GELU, memory-bound),
+# │       ~1 (LLM decode batch=1, deeply memory-bound) — inline and in table.
+# │ How: FLOP count / byte count; GEMM uses 2*M*N*K / (M*K + K*N + M*N)*bytes;
+# │       element-wise uses ~5 FLOPs per element / (load + store) bytes.
+# │
+# │ Imports: mlsys.constants (H100_MEM_BW, H100_FLOPS_FP16_TENSOR, ...)
+# │ Exports: gemm_intensity_str, elem_intensity_str, decode_intensity_str,
+# │          h100_ridge_str, prefill_intensity_str, decode_t_ms_str,
+# │          decode_util_pct_str, decode_tokens_sec_str,
+# │          gemm_flops_str, gemm_data_mb_str,
+# │          gelu_flops_per_val, decode_step_param_b_str,
+# │          decode_step_weight_gb_str, decode_step_flops_str,
+# │          decode_step_bytes_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, BYTES_PER_FP16,
+    BILLION, MILLION, TRILLION, THOUSAND,
+    GB, TB, second, byte, flop, MICROSECOND
+)
+from mlsys.formatting import fmt, check, md
+
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
     # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    # GEMM: C = A*B where A is MxK, B is KxN (FP16: 2 bytes/element)
+    # Level 1: Hardware
+    h100_flops = H100_FLOPS_FP16_TENSOR
+    h100_bw = H100_MEM_BW
+    bytes_per_elem = BYTES_PER_FP16
+
+    # Level 2: Workload
+    # GEMM: C = A*B where A is MxK, B is KxN
     M, K, N = 4096, 4096, 4096
-    bytes_per_elem = 2  # FP16
-
-    # Element-wise (e.g., GELU): 1 op per element, load + store
+    # Element-wise (e.g., GELU): ~5 ops per element
+    elem_flops_per_val = 5
     elem_count = M * K
-
-    # LLM decode: batch=1, read full weight matrix
+    # LLM decode: batch=1, hidden=4096
     decode_batch = 1
     decode_hidden = 4096
+    # Prefill: batch=1024
+    prefill_batch = 1024
 
     # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-
     # GEMM: 2*M*N*K FLOPs, load A (M*K*2) + B (K*N*2) + store C (M*N*2)
     gemm_flops = 2 * M * N * K
     gemm_bytes = (M * K + K * N + M * N) * bytes_per_elem
     gemm_intensity = gemm_flops / gemm_bytes
 
-    # Element-wise: ~5 FLOPs per element (GELU approximation), load+store
-    elem_flops = 5 * elem_count
+    # Element-wise: load+store
+    elem_flops = elem_flops_per_val * elem_count
     elem_bytes = 2 * elem_count * bytes_per_elem  # load + store
     elem_intensity = elem_flops / elem_bytes
 
     # LLM decode step: batch=1, weight matrix is hidden*hidden
-    decode_flops = 2 * decode_batch * decode_hidden * decode_hidden
-    decode_weight_bytes = decode_hidden * decode_hidden * bytes_per_elem
-    decode_activation_bytes = decode_batch * decode_hidden * bytes_per_elem
-    decode_bytes = decode_weight_bytes + decode_activation_bytes
-    decode_intensity = decode_flops / decode_bytes
+    decode_flops_val = 2 * decode_batch * decode_hidden * decode_hidden
+    decode_bytes_val = (decode_hidden * decode_hidden + decode_batch * decode_hidden) * bytes_per_elem
+    decode_intensity_val = decode_flops_val / decode_bytes_val
+
+    # Level 4: Ratios
+    h100_ridge = (h100_flops / h100_bw).m_as(flop/byte)
+    prefill_intensity = (2 * prefill_batch) / (2 * bytes_per_elem) # Approx for large hidden
+
+    # Token Rate Physics (Llama-3 70B sharded across 8 GPUs)
+    p_shard = 17.5 * BILLION 
+    weight_bytes_val = p_shard * bytes_per_elem
+    decode_step_flops_val = 2 * p_shard
+    t_decode_ms = (weight_bytes_val / h100_bw.m_as(byte/second)) * 1000
+    achieved_tflops = (decode_step_flops_val / (t_decode_ms / 1000)) / TRILLION
+    util_pct = (achieved_tflops / h100_flops.m_as(TFLOPs/second)) * 100
+    tokens_sec = 1000 / t_decode_ms
 
     # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity}")
-    check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity}")
-    check(decode_intensity < 5, f"Decode should be memory-bound, got {decode_intensity}")
+    check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity:.1f}")
+    check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity:.1f}")
+    check(decode_intensity_val < 5, f"Decode should be memory-bound, got {decode_intensity_val:.1f}")
+    check(h100_ridge > 200, f"H100 ridge point mismatch, got {h100_ridge:.1f}")
 
     # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
     gemm_intensity_str = f"{gemm_intensity:.0f}"
+    gemm_flops_str = f"{gemm_flops/BILLION:.0f} billion"
+    gemm_data_mb_str = f"{gemm_bytes/MILLION:.0f} MB"
+    
     elem_intensity_str = f"{elem_intensity:.1f}"
-    decode_intensity_str = f"{decode_intensity:.1f}"
+    gelu_flops_per_val_str = f"{elem_flops_per_val}"
+    
+    decode_intensity_str = f"{decode_intensity_val:.1f}"
+    h100_ridge_str = f"{h100_ridge:.0f}"
+    prefill_intensity_str = f"{prefill_intensity:.0f}"
+    decode_t_ms_str = f"{t_decode_ms:.1f}"
+    decode_util_pct_str = f"{util_pct:.1f}"
+    decode_tokens_sec_str = f"{tokens_sec:.0f}"
+    
+    decode_step_param_b_str = f"{p_shard/BILLION:.1f}"
+    decode_step_weight_gb_str = f"{weight_bytes_val/BILLION:.0f}"
+    decode_step_flops_str = f"{decode_step_flops_val/BILLION:.0f}"
+    decode_step_bytes_str = f"{weight_bytes_val/BILLION:.0f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 gemm_intensity_str = WorkloadIntensityCalc.gemm_intensity_str
 elem_intensity_str = WorkloadIntensityCalc.elem_intensity_str
+gelu_flops_per_val = WorkloadIntensityCalc.gelu_flops_per_val_str
 decode_intensity_str = WorkloadIntensityCalc.decode_intensity_str
+h100_ridge_str = WorkloadIntensityCalc.h100_ridge_str
+prefill_intensity_str = WorkloadIntensityCalc.prefill_intensity_str
+decode_t_ms_str = WorkloadIntensityCalc.decode_t_ms_str
+decode_util_pct_str = WorkloadIntensityCalc.decode_util_pct_str
+decode_tokens_sec_str = WorkloadIntensityCalc.decode_tokens_sec_str
+decode_step_param_b_str = WorkloadIntensityCalc.decode_step_param_b_str
+decode_step_weight_gb_str = WorkloadIntensityCalc.decode_step_weight_gb_str
+decode_step_flops_str = WorkloadIntensityCalc.decode_step_flops_str
+decode_step_bytes_str = WorkloadIntensityCalc.decode_step_bytes_str
 ```
 
 Large matrix multiplications (GEMMs) are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096\times4096$ in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.
@@ -889,51 +964,48 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape [sequence length$\times$ head dimension]. The na\"ive implementation materializes the full $N \times N$ attention matrix $S = QK^T$ in HBM, where $N$ is the sequence length. For $N = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 = 128$ MB per attention head. At 32 heads, the materialized attention matrices require 4 GB per layer, dominating memory traffic for the entire forward pass.
 
 ```{python}
+#| label: flash-attention-savings-refactor
 #| echo: false
-#| label: flash-attention-savings
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FLASHATTENTION MEMORY SAVINGS
+# │ FLASHATTENTION MEMORY SAVINGS (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-performance-engineering-operator-fusion FlashAttention prose
 # │
 # │ Goal: Quantify HBM traffic reduction from tiling attention for a 32-head,
-# │       seq_len=8192, head_dim=128, FP16 configuration to make the O(N²)→O(N)
-# │       memory savings concrete and motivate the algorithm.
-# │ Show: ~8,590 MB naive vs ~134 MB FlashAttention → ~64x HBM traffic reduction,
-# │       inline in the paragraph after FlashAttention is introduced.
-# │ How: Naive: 2*N²*heads*bytes (write+read score matrix); FA: 4*N*d*heads*bytes
-# │       (read Q,K,V + write O once); savings = naive / fa.
+# │       seq_len=8192, head_dim=128, FP16 configuration.
+# │ Show: ~65x reduction in HBM traffic by avoiding NxN materialization.
+# │ How: Naive = 2*N^2 * h; Flash = 4*N*d * h. (bytes)
 # │
-# │ Imports: (none — standalone calculation), mlsys.formatting (check)
-# │ Exports: naive_mb_str, flash_mb_str, savings_str
+# │ Imports: mlsys.constants (BYTES_PER_FP16, MILLION, BILLION)
+# │ Exports: naive_mb_str, flash_mb_str, savings_str,
+# │          head_n_str, head_d_str, head_bytes_str,
+# │          naive_head_traffic_mb_str, flash_head_traffic_mb_str,
+# │          flash_savings_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import BYTES_PER_FP16, MILLION, BILLION
+from mlsys.formatting import fmt, check
 
 # ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
 class FlashAttentionSavings:
-    """HBM traffic comparison: naive attention vs FlashAttention."""
+    """Memory traffic analysis for tiled attention vs naive."""
 
     # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
     seq_len = 8192
     head_dim = 128
     num_heads = 32
-    bytes_per_elem_fp16 = 2
-
-    # SRAM block size (typical for H100)
-    sram_block = 128  # tile size in sequence dimension
+    bytes_per_elem = BYTES_PER_FP16
 
     # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-
     # Naive attention HBM traffic per head:
     # Write S = Q*K^T (N*N), read S for softmax, write P = softmax(S), read P for P*V
-    # Approximately: 4 * N^2 * bytes (read Q, K for GEMM; write S; read S; write P; read P, V)
     # Simplified: dominant term is materializing NxN matrix
-    naive_attn_bytes_per_head = 2 * seq_len * seq_len * bytes_per_elem_fp16  # write + read S
+    naive_attn_bytes_per_head = 2 * seq_len * seq_len * bytes_per_elem  # write + read S
     naive_attn_bytes_total = naive_attn_bytes_per_head * num_heads
 
     # FlashAttention HBM traffic per head:
     # Read Q, K, V once (3 * N * d * bytes), write O once (N * d * bytes)
     # No NxN materialization
-    flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem_fp16
+    flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem
     flash_attn_bytes_total = flash_attn_bytes_per_head * num_heads
 
     # Savings ratio
@@ -944,19 +1016,32 @@ class FlashAttentionSavings:
           f"FlashAttention should save >10x HBM traffic, got {savings_ratio:.1f}x")
 
     # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
-    naive_mb_str = f"{naive_attn_bytes_total / 1e6:.0f}"
-    flash_mb_str = f"{flash_attn_bytes_total / 1e6:.0f}"
+    naive_mb_str = f"{naive_attn_bytes_total / MILLION:.0f}"
+    flash_mb_str = f"{flash_attn_bytes_total / MILLION:.0f}"
     savings_str = f"{savings_ratio:.0f}"
+    
+    head_n_str = f"{seq_len}"
+    head_d_str = f"{head_dim}"
+    head_bytes_str = f"{head_dim * bytes_per_elem / MILLION * seq_len:.0f}"
+    naive_head_traffic_mb_str = f"{naive_attn_bytes_per_head / MILLION:.0f}"
+    flash_head_traffic_mb_str = f"{flash_attn_bytes_per_head / MILLION:.0f}"
+    flash_savings_factor_str = f"{savings_ratio:.0f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 naive_mb_str = FlashAttentionSavings.naive_mb_str
 flash_mb_str = FlashAttentionSavings.flash_mb_str
 savings_str = FlashAttentionSavings.savings_str
+head_n_str = FlashAttentionSavings.head_n_str
+head_d_str = FlashAttentionSavings.head_d_str
+head_bytes_str = FlashAttentionSavings.head_bytes_str
+naive_head_traffic_mb_str = FlashAttentionSavings.naive_head_traffic_mb_str
+flash_head_traffic_mb_str = FlashAttentionSavings.flash_head_traffic_mb_str
+flash_savings_factor_str = FlashAttentionSavings.flash_savings_factor_str
 ```
 
 FlashAttention, introduced by Dao et al. (2022), reformulates attention as a **tiled** computation. Instead of materializing the full $N \times N$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads a block of $Q$ rows and iterates over blocks of $K$ and $V$ columns, computing partial attention scores and maintaining running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
 
-The HBM traffic reduction is dramatic. For a sequence length of 8,192, 32 heads, and head dimension 128 in FP16, the na\"ive attention reads and writes approximately `{python} naive_mb_str` MB of attention matrices through HBM. FlashAttention reads $Q$, $K$, $V$ and writes $O$ once each, totaling approximately `{python} flash_mb_str` MB. This is a `{python} savings_str`$\times$ reduction in HBM traffic, translating directly into a proportional speedup for this memory-bound operation.
+The HBM traffic reduction is dramatic. For a sequence length of `{python} head_n_str`, 32 heads, and head dimension `{python} head_d_str` in FP16, the na\"ive attention reads and writes approximately `{python} naive_mb_str` MB of attention matrices through HBM. FlashAttention reads $Q$, $K$, $V$ and writes $O$ once each, totaling approximately `{python} flash_mb_str` MB. This is a `{python} savings_str`$\times$ reduction in HBM traffic, translating directly into a proportional speedup for this memory-bound operation.
 
 The key insight behind FlashAttention is the **online softmax**[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information.
 
@@ -1095,6 +1180,10 @@ The choice among these techniques also depends on the deployment target. For GPU
 
 The storage cost for block-wise quantization is minimal. Storing one FP32 scale (32 bits) for every block of 128 INT8 weights (1024 bits) increases total model size by only 3%. This small overhead allows block-wise quantization to isolate the destructive impact of outliers, preserving the effective dynamic range for the 99% of normal weights, without the bandwidth penalty of higher-precision formats.
 
+::: {.callout-lighthouse title="Archetype C (Federated MobileNet): TinyML Survival"}
+For **Archetype C (Federated MobileNet)**, quantization is not just an optimization; it is a prerequisite for survival. On a microcontroller with only 512 KB of SRAM, an FP16 model is physically impossible to load. **Binary Neural Networks (BNN)** and **1-bit Quantization** push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the memory footprint by 32$\times$ and the energy per operation by up to 100$\times$, enabling intelligence on devices that operate on harvested energy (microwatts).
+:::
+
 ### Post-Training vs Quantization-Aware Training {#sec-performance-engineering-ptq-qat}
 
 The trade-off between **Post-Training Quantization (PTQ)** and **Quantization-Aware Training (QAT)** centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is the default choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, requiring approximately 4--8 GPU-hours on a single H100 to quantize a 70B model to INT4. While PTQ preserves greater than 99% of accuracy at INT8, aggressive quantization to INT4 or INT3 often incurs a steep penalty: perplexity may degrade by 0.5--1.0 points, and reasoning performance on benchmarks like MMLU can drop from 69% to below 64%.
@@ -1122,34 +1211,73 @@ The choice depends on the operational regime. For memory-bound inference (small 
 #| echo: false
 #| label: kv-cache-size
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ KV CACHE MEMORY PER REQUEST
+# │ KV CACHE MEMORY PER REQUEST (P.I.C.O.)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Precision Dividend callout — @sec-performance-engineering-kv-cache
 # │
 # │ Goal: Compute KV cache memory per request for a 70B model (Llama-style GQA)
 # │       at FP16, then derive max batch sizes before/after quantization.
 # │ Show: kv_fp16_gb (~1.7 GB), max batch FP16 vs INT8, throughput ratio.
+# │ How: 2 (K+V) * layers * kv_heads * head_dim * seq_len * bytes.
+# │
+# │ Imports: mlsys.formatting (check)
 # │ Exports: kv_fp16_gb_str, max_batch_fp16_str, max_batch_int8_str,
 # │          batch_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# KV cache size = 2 (K+V) * layers * kv_heads * head_dim * seq_len * bytes
-num_layers = 80
-num_kv_heads = 8       # GQA: 8 KV heads for 70B Llama
-head_dim = 128
-seq_len = 4096
-bytes_fp16 = 2
+# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+class KVCacheAnalysis:
+    """KV cache sizing and max batch capacity."""
 
-kv_cache_bytes = 2 * num_layers * num_kv_heads * head_dim * seq_len * bytes_fp16
-kv_fp16_gb = kv_cache_bytes / 1e9        # ~1.07 GB per request in FP16
-kv_fp16_gb_str = f"{kv_fp16_gb:.1f}"
+    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    num_layers = 80
+    num_kv_heads = 8       # GQA: 8 KV heads for 70B Llama
+    head_dim = 128
+    seq_len = 4096
+    bytes_fp16 = 2
+    bytes_int8 = 1
 
-# Pre-compute batch size results for prose
-max_batch_fp16 = int(45 / (kv_fp16_gb / 4))
-max_batch_fp16_str = str(max_batch_fp16)
-max_batch_int8 = int(71.25 / (kv_fp16_gb / 2 / 4))
-max_batch_int8_str = str(max_batch_int8)
-batch_ratio_str = str(int(max_batch_int8 / max_batch_fp16))
+    # Capacity per GPU (H100 80GB)
+    gpu_total_gb = 80
+    weight_fp16_shard_gb = 35 # 140 / 4 GPUs
+    weight_int4_shard_gb = 8.75
+
+    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # Base size in GB per request
+    kv_cache_bytes = 2 * num_layers * num_kv_heads * head_dim * seq_len * bytes_fp16
+    kv_fp16_gb_val = kv_cache_bytes / 1e9
+
+    # Max batch calculations
+    # FP16 case: 45GB available for KV
+    avail_fp16_gb = gpu_total_gb - weight_fp16_shard_gb
+    max_batch_fp16_val = int(avail_fp16_gb / (kv_fp16_gb_val / 4)) # shared across 4 GPUs?
+    # Wait, the callout text says "available for KV cache: 80 - 35 = 45 GB/GPU"
+    # and "KV cache per request: 1.1 GB / 4 GPUs = 0.27 GB/GPU".
+    # Max batch = 45 / 0.27 = 166.
+    max_batch_fp16_val = int(avail_fp16_gb / (kv_fp16_gb_val / 4))
+
+    # INT8 case
+    avail_int8_gb = gpu_total_gb - weight_int4_shard_gb
+    kv_int8_per_gpu = (kv_fp16_gb_val / 2) / 4
+    max_batch_int8_val = int(avail_int8_gb / kv_int8_per_gpu)
+
+    batch_ratio = max_batch_int8_val / max_batch_fp16_val
+
+    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    check(kv_fp16_gb_val > 1.0, f"KV cache size too low, got {kv_fp16_gb_val:.2f}")
+    check(max_batch_int8_val > max_batch_fp16_val, "INT8 should increase batch size")
+
+    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    kv_fp16_gb_str = f"{kv_fp16_gb_val:.1f}"
+    max_batch_fp16_str = f"{max_batch_fp16_val}"
+    max_batch_int8_str = f"{max_batch_int8_val}"
+    batch_ratio_str = f"{int(batch_ratio)}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+kv_fp16_gb_str = KVCacheAnalysis.kv_fp16_gb_str
+max_batch_fp16_str = KVCacheAnalysis.max_batch_fp16_str
+max_batch_int8_str = KVCacheAnalysis.max_batch_int8_str
+batch_ratio_str = KVCacheAnalysis.batch_ratio_str
 ```
 
 ::: {.callout-notebook title="The Precision Dividend"}
