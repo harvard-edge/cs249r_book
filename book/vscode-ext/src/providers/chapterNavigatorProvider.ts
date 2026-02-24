@@ -49,7 +49,10 @@ class NavigatorSectionItem extends vscode.TreeItem {
     const countsText = counts.length > 0 ? ` · ${counts.join(' · ')}` : '';
     this.description = `${depthLabel} · L${section.line + 1} · ${entryCount} items${countsText}`;
     this.contextValue = 'navigator-section';
-    this.iconPath = new vscode.ThemeIcon(section.level === 0 ? 'note' : 'list-tree');
+    this.iconPath = new vscode.ThemeIcon(
+      section.level === 0 ? 'note' : 'list-tree',
+      new vscode.ThemeColor('descriptionForeground'),
+    );
     this.command = {
       command: 'mlsysbook.openNavigatorLocation',
       title: 'Open Section',
@@ -60,21 +63,31 @@ class NavigatorSectionItem extends vscode.TreeItem {
   readonly sectionId: string;
 }
 
+/** ThemeColor keys for colored entry icons (figures, tables, equations, callouts, listings). */
+const ENTRY_ICON_COLORS: Record<NavigatorEntryKind, string> = {
+  figure: 'charts.blue',
+  table: 'charts.purple',
+  listing: 'charts.green',
+  equation: 'charts.orange',
+  callout: 'charts.yellow',
+};
+
+const ENTRY_ICONS: Record<NavigatorEntryKind, string> = {
+  figure: 'symbol-field',
+  table: 'table',
+  listing: 'code',
+  equation: 'symbol-operator',
+  callout: 'comment-discussion',
+};
+
 class NavigatorEntryItem extends vscode.TreeItem {
   constructor(uri: vscode.Uri, entry: NavigatorEntry) {
     super(`${entry.id}  ·  L${entry.line + 1}`, vscode.TreeItemCollapsibleState.None);
     this.description = entry.preview;
     this.tooltip = `${entry.id}\n${entry.preview}`;
-    const icon = entry.kind === 'figure'
-      ? 'symbol-field'
-      : entry.kind === 'table'
-        ? 'table'
-        : entry.kind === 'listing'
-          ? 'code'
-          : entry.kind === 'equation'
-            ? 'symbol-operator'
-            : 'comment-discussion';
-    this.iconPath = new vscode.ThemeIcon(icon);
+    const iconId = ENTRY_ICONS[entry.kind];
+    const colorKey = ENTRY_ICON_COLORS[entry.kind];
+    this.iconPath = new vscode.ThemeIcon(iconId, new vscode.ThemeColor(colorKey));
     this.command = {
       command: 'mlsysbook.openNavigatorLocation',
       title: 'Open Location',
