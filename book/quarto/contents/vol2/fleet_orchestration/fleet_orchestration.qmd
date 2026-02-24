@@ -96,87 +96,7 @@ A thousand GPUs sitting idle waiting for scheduling decisions cost the same as a
 # │          a100_mem_str, h100_mem_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-class FleetOrchestrationSetup:
-    """Cluster economics, fragmentation, and hardware specs for Fleet Orchestration chapter."""
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    a100_mem    = A100_MEM_CAPACITY.m_as(GB)
-    h100_mem    = H100_MEM_CAPACITY.m_as(GB)
-    nvlink_a100 = NVLINK_A100_BW.m_as(GB / second)
-    nvlink_h100 = NVLINK_H100_BW.m_as(GB / second)
-    ib_ndr      = INFINIBAND_NDR_BW.m_as(Gbps)
-    ib_ndr_gbs  = ib_ndr / BITS_PER_BYTE
-
-    cluster_size       = 10000   # GPUs in reference cluster
-    gpu_hour_cost_usd  = 2.0     # $/GPU-hour (cloud equivalent)
-    hours_per_day      = 24
-    days_per_year      = 365
-
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-    daily_cost  = cluster_size * gpu_hour_cost_usd * hours_per_day
-    annual_cost = daily_cost * days_per_year
-
-    idle_fraction = 0.30
-    daily_waste   = daily_cost * idle_fraction
-    annual_waste  = daily_waste * days_per_year
-
-    util_low  = 0.50
-    util_high = 0.80
-    equivalent_gpus = cluster_size * (util_high - util_low) / util_low
-
-    spot_discount = 0.65
-    spot_price    = gpu_hour_cost_usd * (1 - spot_discount)
-
-    nodes_total    = 64
-    gpus_per_node  = 8
-    total_gpus     = nodes_total * gpus_per_node
-    job_gpus       = 6
-    wasted_per_node = gpus_per_node - job_gpus
-    frag_pct       = wasted_per_node / gpus_per_node * 100
-
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
-    _c1 = check(daily_cost > 0, "Daily cost must be positive")
-    _c2 = check(annual_waste > 1_000_000, "Annual waste should be millions at this scale")
-    _c3 = check(0 < frag_pct < 100, "Fragmentation must be a valid percentage")
-
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
-    cluster_size_str    = fmt(cluster_size, precision=0)
-    daily_cost_str      = fmt(daily_cost, precision=0)
-    annual_cost_str     = f"{annual_cost / 1e6:.0f}"
-    daily_waste_str     = fmt(daily_waste, precision=0)
-    annual_waste_str    = f"{annual_waste / 1e6:.0f}"
-    equivalent_gpus_str = fmt(equivalent_gpus, precision=0)
-    spot_price_str      = f"{spot_price:.2f}"
-    frag_pct_str        = f"{frag_pct:.0f}"
-    total_gpus_str      = fmt(total_gpus, precision=0)
-    nvlink_a100_str     = fmt(nvlink_a100, precision=0)
-    nvlink_h100_str     = fmt(nvlink_h100, precision=0)
-    ib_ndr_str          = fmt(ib_ndr, precision=0)
-    ib_ndr_gbs_str      = fmt(ib_ndr_gbs, precision=0)
-    a100_mem_str        = fmt(a100_mem, precision=0)
-    h100_mem_str        = fmt(h100_mem, precision=0)
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-cluster_size_str    = FleetOrchestrationSetup.cluster_size_str
-daily_cost_str      = FleetOrchestrationSetup.daily_cost_str
-annual_cost_str     = FleetOrchestrationSetup.annual_cost_str
-daily_waste_str     = FleetOrchestrationSetup.daily_waste_str
-annual_waste_str    = FleetOrchestrationSetup.annual_waste_str
-equivalent_gpus_str = FleetOrchestrationSetup.equivalent_gpus_str
-spot_price_str      = FleetOrchestrationSetup.spot_price_str
-frag_pct_str        = FleetOrchestrationSetup.frag_pct_str
-total_gpus_str      = FleetOrchestrationSetup.total_gpus_str
-nvlink_a100_str     = FleetOrchestrationSetup.nvlink_a100_str
-nvlink_h100_str     = FleetOrchestrationSetup.nvlink_h100_str
-ib_ndr_str          = FleetOrchestrationSetup.ib_ndr_str
-ib_ndr_gbs_str      = FleetOrchestrationSetup.ib_ndr_gbs_str
-a100_mem_str        = FleetOrchestrationSetup.a100_mem_str
-h100_mem_str        = FleetOrchestrationSetup.h100_mem_str
-# Also export gpu_hour_cost_usd and idle_fraction for inline use in prose
-gpu_hour_cost_usd   = FleetOrchestrationSetup.gpu_hour_cost_usd
-idle_fraction       = FleetOrchestrationSetup.idle_fraction
-util_low            = FleetOrchestrationSetup.util_low
-util_high           = FleetOrchestrationSetup.util_high
-```
+## The Scheduling Problem {#sec-fleet-orchestration-introduction}```
 
 ## The Scheduling Problem {#sec-fleet-orchestration-introduction}
 
@@ -185,6 +105,72 @@ The preceding chapters established how to distribute computation (@sec-distribut
 Imagine two research teams sharing a 1,000-GPU cluster: Team A submits a 512-GPU job that will run for a month, while Team B submits hundreds of 8-GPU experiments that each run for an hour. If the scheduler simply processes jobs as they arrive, Team B's tiny experiments might indefinitely block Team A's massive training run. The scheduling problem is the challenge of navigating this multi-dimensional conflict between throughput, fairness, and cluster utilization.
 
 In the **Fleet Stack** (@sec-vol2-introduction), orchestration operates at the Distribution Layer, but its decisions are fundamentally constrained by the Infrastructure Layer. The scheduler must reason about physical realities: GPU heterogeneity, NVLink topology, rack power limits, and network bisection bandwidth. When scheduling goes wrong, debugging requires examining all four layers to identify whether the root cause is infrastructure (hardware constraints), distribution (algorithm limitations), serving (workload mismatch), or governance (policy misconfiguration). Orchestration is where physical infrastructure meets the demands of distributed algorithms, translating resource requests into placement decisions that respect both hardware topology and organizational policy.
+
+```{python}
+#| label: cluster-economics-context
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CLUSTER ECONOMICS CONTEXT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-fleet-orchestration-introduction
+# │
+# │ Goal: Provide cluster scale and economic statistics for orchestration.
+# │ Show: 10,000-GPU cluster; ~$480k/day operating cost.
+# │ How: GPU_Count * hourly_rate * 24.
+# │
+# │ Imports: mlsys.constants (GPUS_PER_HOST, A100_MEM_CAPACITY, H100_MEM_CAPACITY,
+# │          GB), mlsys.formatting (fmt, check)
+# │ Exports: cluster_size_str, daily_cost_str, annual_cost_str,
+# │          daily_waste_str, annual_waste_str, equivalent_gpus_str,
+# │          gpu_hour_cost_usd, idle_fraction, util_low, util_high,
+# │          a100_mem_str, h100_mem_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import GPUS_PER_HOST, A100_MEM_CAPACITY, H100_MEM_CAPACITY, GB
+from mlsys.formatting import fmt, check
+
+class ClusterEconomicsContext:
+    """Namespace for cluster orchestration economics."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cluster_size = 10000
+    gpu_hour_cost_usd = 2.0
+    idle_fraction = 0.30
+    util_low = 0.50
+    util_high = 0.80
+    a100_mem = A100_MEM_CAPACITY
+    h100_mem = H100_MEM_CAPACITY
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    daily_cost = cluster_size * gpu_hour_cost_usd * 24
+    annual_cost_m = (daily_cost * 365) / 1e6
+    daily_waste = daily_cost * idle_fraction
+    annual_waste_m = (daily_waste * 365) / 1e6
+    gpu_gain = cluster_size * (util_high - util_low) / util_low
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    cluster_size_str = fmt(cluster_size, precision=0)
+    daily_cost_str = fmt(daily_cost, precision=0)
+    annual_cost_str = f"{annual_cost_m:.0f}"
+    daily_waste_str = fmt(daily_waste, precision=0)
+    annual_waste_str = f"{annual_waste_m:.0f}"
+    equivalent_gpus_str = fmt(gpu_gain, precision=0)
+    a100_mem_str = f"{a100_mem.m_as(GB):.0f}"
+    h100_mem_str = f"{h100_mem.m_as(GB):.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cluster_size_str = ClusterEconomicsContext.cluster_size_str
+daily_cost_str = ClusterEconomicsContext.daily_cost_str
+annual_cost_str = ClusterEconomicsContext.annual_cost_str
+daily_waste_str = ClusterEconomicsContext.daily_waste_str
+annual_waste_str = ClusterEconomicsContext.annual_waste_str
+equivalent_gpus_str = ClusterEconomicsContext.equivalent_gpus_str
+gpu_hour_cost_usd = ClusterEconomicsContext.gpu_hour_cost_usd
+idle_fraction = ClusterEconomicsContext.idle_fraction
+util_low = ClusterEconomicsContext.util_low
+util_high = ClusterEconomicsContext.util_high
+a100_mem_str = ClusterEconomicsContext.a100_mem_str
+h100_mem_str = ClusterEconomicsContext.h100_mem_str
+```
 
 To make the scheduling problem concrete, consider a research organization operating a `{python} cluster_size_str`-GPU cluster. Training GPT-3 required 1,024 A100 GPUs running continuously for 34 days [@brown2020language]. Imagine 100 such training jobs queued, alongside thousands of smaller experiments and inference workloads all competing for the same resources. How should the system decide which jobs run, when they run, and where they run? A naive first-come-first-served policy would let the first few large jobs monopolize the cluster for weeks, starving smaller experiments that researchers need to iterate quickly. A strict fair-share policy would fragment GPUs across many small allocations, preventing any large job from assembling the contiguous thousand-GPU block it needs. Neither extreme works. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
 
@@ -718,10 +704,10 @@ A **hierarchical placement** algorithm assigns resources in layers that match th
 ## Napkin Math: The Topology Placement Impact
 The physical location of GPUs on the network switch fabric dramatically impacts collective performance. Consider an AllReduce operation across 8 GPUs:
 
-*   **Random Placement:** Spread across 8 different racks $\rightarrow$ Traffic traverses core switches $\rightarrow$ **120ms** latency.
-*   **Rack-Aware:** Confined to a single rack (Top-of-Rack switch) $\rightarrow$ **85ms**.
-*   **Rail-Optimized:** Aligned to specialized "rails" (dedicated standard IB switches) $\rightarrow$ **40ms**.
-*   **Topology-Optimal:** All GPUs on the same leaf switch $\rightarrow$ **25ms**.
+*   **Random Placement:** Spread across 8 different racks $\rightarrow$ Traffic traverses core switches $\rightarrow$ **120 ms** latency.
+*   **Rack-Aware:** Confined to a single rack (Top-of-Rack switch) $\rightarrow$ **85 ms**.
+*   **Rail-Optimized:** Aligned to specialized "rails" (dedicated standard IB switches) $\rightarrow$ **40 ms**.
+*   **Topology-Optimal:** All GPUs on the same leaf switch $\rightarrow$ **25 ms**.
 Proper scheduling yields a **4.8$\times$ speedup** purely by respecting the network topology, with zero changes to the model code.
 :::
 
@@ -747,7 +733,7 @@ The tensor parallel communication alone illustrates the impact. With NVLink at `
 
 :::
 
-::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="Topology Placement Impact: Reducing AllReduce latency by 4.8x through topology-aware scheduling (Rack/Rail optimization) compared to random placement for a 1GB gradient sync on 64 GPUs." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8x speedup from Random to Topology-Optimal."}
+::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="Topology Placement Impact: Reducing AllReduce latency by 4.8x through topology-aware scheduling (Rack/Rail optimization) compared to random placement for a 1 GB gradient sync on 64 GPUs." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8x speedup from Random to Topology-Optimal."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -756,7 +742,7 @@ The tensor parallel communication alone illustrates the impact. With NVLink at `
 # │ Context: @fig-topology-placement — AllReduce latency vs placement strategy
 # │
 # │ Goal: Bar chart comparing Random, Rack-Aware, Rail-Optimized, Topology-
-# │       Optimal; show 4.8× speedup for 1GB gradient sync on 64 GPUs.
+# │       Optimal; show 4.8× speedup for 1 GB gradient sync on 64 GPUs.
 # │ Show: Four bars with latency (ms) and effective bandwidth labels.
 # │ How: strategies/times; ax.bar; matplotlib.
 # │
@@ -779,7 +765,7 @@ bars = ax.bar(strategies, times, color=colors, alpha=0.85, width=0.6, edgecolor=
 
 ax.set_ylabel('AllReduce Latency (ms)\n(Lower is Better)', fontsize=12, fontweight='bold')
 ax.set_xlabel('Placement Strategy', fontsize=12, fontweight='bold')
-ax.set_title('Impact of Topology-Aware Job Placement\n(64 GPUs, 1GB Gradient Sync)', fontsize=14, pad=15)
+ax.set_title('Impact of Topology-Aware Job Placement\n(64 GPUs, 1 GB Gradient Sync)', fontsize=14, pad=15)
 ax.set_ylim(0, 150)
 
 for bar, time, bw in zip(bars, times, bandwidths):
@@ -1259,7 +1245,7 @@ LLM inference requires specialized scaling considerations that neither HPA nor V
 
 This dual resource dimension (compute and memory) suggests that effective LLM autoscaling should monitor both GPU compute utilization and GPU memory pressure, scaling out when either approaches critical thresholds. Some production systems define a composite scaling metric that combines these dimensions, triggering scale-out when the maximum of normalized compute utilization and normalized memory pressure exceeds a threshold. This composite approach prevents the system from being surprised by either type of resource exhaustion.
 
-Autoscaling for inference must also handle **cold start latency**, which creates a tension between cost efficiency and responsiveness that has no simple resolution. The "cold start" problem in serving is quantitatively more severe than in standard web services due to the sheer mass of model weights. Loading a large model into GPU memory takes 30 seconds to several minutes, depending on model size, quantization level, and storage bandwidth (NVMe SSD versus network storage). A 70B parameter model stored in FP16 occupies approximately 140 GB on disk and requires transferring all weights to GPU memory before the first inference request can be served. Loading a 70B parameter model (approx. 140GB in FP16) into VRAM is bound by PCIe or NVLink bandwidth. Even at a high-end PCIe Gen4 speed of 64GB/s, simple data transfer takes over 2 seconds; in practice, model initialization, graph compilation, and safety checks often extend this to 60-120 seconds. Even with NVMe SSDs delivering 7 GB/s read bandwidth, loading takes approximately 20 seconds; with network storage, it can exceed 2 minutes.
+Autoscaling for inference must also handle **cold start latency**, which creates a tension between cost efficiency and responsiveness that has no simple resolution. The "cold start" problem in serving is quantitatively more severe than in standard web services due to the sheer mass of model weights. Loading a large model into GPU memory takes 30 seconds to several minutes, depending on model size, quantization level, and storage bandwidth (NVMe SSD versus network storage). A 70B parameter model stored in FP16 occupies approximately 140 GB on disk and requires transferring all weights to GPU memory before the first inference request can be served. Loading a 70B parameter model (approx. 140 GB in FP16) into VRAM is bound by PCIe or NVLink bandwidth. Even at a high-end PCIe Gen4 speed of 64 GB/s, simple data transfer takes over 2 seconds; in practice, model initialization, graph compilation, and safety checks often extend this to 60-120 seconds. Even with NVMe SSDs delivering 7 GB/s read bandwidth, loading takes approximately 20 seconds; with network storage, it can exceed 2 minutes.
 
 Aggressive scale-down policies that terminate replicas during brief traffic lulls create painful cold starts when traffic returns minutes later, producing latency spikes that violate SLOs and degrade user experience. The fundamental problem is that inference traffic exhibits burstiness at multiple timescales (seconds, minutes, hours), and short-term lulls do not reliably predict sustained low demand. A five-minute quiet period might be followed by a traffic spike, and the cost of a cold start during that spike (degraded latency for all requests while the model loads) can exceed the cost savings from the few minutes of freed GPU capacity.
 
@@ -1524,9 +1510,9 @@ The **Fleet Stack** framework (@sec-vol2-introduction) provides a structured app
 
 | **GPU Type**  | **Count** | **Memory**  | **Interconnect**    | **Nodes**               |
 |:--------------|----------:|:------------|:--------------------|:------------------------|
-| **A100-80GB** |       400 | 80 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
-| **A100-40GB** |       400 | 40 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
-| **V100-32GB** |       200 | 32 GB HBM2  | PCIe Gen3 (32 GB/s) | 50 nodes$\times$ 4 GPUs |
+| **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
+| **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
+| **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (32 GB/s) | 50 nodes$\times$ 4 GPUs |
 
 : **Cluster Hardware Inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
@@ -1534,24 +1520,24 @@ The physical topology creates three distinct resource pools with different capab
 
 **Distribution Layer Analysis**: The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
 
-- 15 large training jobs requesting 64+ A100-80GB GPUs (total demand: 1,200 A100-80GB GPUs)
-- 8 medium jobs requesting 32 A100-40GB GPUs (total demand: 256 A100-40GB)
+- 15 large training jobs requesting 64+ A100-80 GB GPUs (total demand: 1,200 A100-80 GB GPUs)
+- 8 medium jobs requesting 32 A100-40 GB GPUs (total demand: 256 A100-40 GB)
 - Zero jobs explicitly requesting V100 resources
 
-The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400), but with only 5 jobs actually running because gang scheduling holds resources for jobs that cannot yet be fully satisfied. The remaining 10 large jobs each hold partial allocations (64 to 96 GPUs reserved) while waiting for additional A100-80GB resources that never become available, creating a **hold-and-wait deadlock pattern**.
+The scheduler's allocation log shows A100-80 GB GPUs at 95% allocation (380/400), but with only 5 jobs actually running because gang scheduling holds resources for jobs that cannot yet be fully satisfied. The remaining 10 large jobs each hold partial allocations (64 to 96 GPUs reserved) while waiting for additional A100-80 GB resources that never become available, creating a **hold-and-wait deadlock pattern**.
 
 **Diagnosis**: Multiple pathologies compound to create low utilization:
 
-1. **Over-specification**: Model memory analysis reveals that 12 of the 15 large jobs actually require only 45 GB peak memory per GPU, well within A100-40GB capacity. Users copied job templates specifying A100-80GB without recalculating requirements.
-2. **Pool fragmentation**: The strict homogeneity requirement means a 64-GPU job requesting "A100-80GB" cannot use any A100-40GB GPUs, even when 300 A100-40GB GPUs sit idle.
+1. **Over-specification**: Model memory analysis reveals that 12 of the 15 large jobs actually require only 45 GB peak memory per GPU, well within A100-40 GB capacity. Users copied job templates specifying A100-80 GB without recalculating requirements.
+2. **Pool fragmentation**: The strict homogeneity requirement means a 64-GPU job requesting "A100-80 GB" cannot use any A100-40 GB GPUs, even when 300 A100-40 GB GPUs sit idle.
 3. **Stranded resources**: No jobs target V100 hardware because researchers perceive it as "legacy." The 200 V100 GPUs contribute zero productive work despite consuming power and cooling.
 4. **Gang scheduling deadlock**: Without a timeout or preemption policy, partially-satisfied jobs hold resources indefinitely, blocking other work.
 
-**Root Cause (Policy-Infrastructure Mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
+**Root Cause (Policy-Infrastructure Mismatch)**: Job templates and organizational practices evolved for a homogeneous A100-80 GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
 
 **Solution**: Implement tiered resource matching with topology awareness. The fix addresses all four pathologies through complementary policy changes:
 
-1. **Capability-based scheduling**: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs specify `--constraint="gpu_mem>=40GB"` and let the scheduler select appropriate hardware. This eliminates over-specification by expressing what the job *needs* rather than what hardware it *prefers*. The scheduler can then match jobs to the cheapest available hardware that meets their requirements.
+1. **Capability-based scheduling**: Replace exact GPU type requests with capability requirements. Instead of `--gres=gpu:a100-80g:64`, jobs specify `--constraint="gpu_mem>=40 GB"` and let the scheduler select appropriate hardware. This eliminates over-specification by expressing what the job *needs* rather than what hardware it *prefers*. The scheduler can then match jobs to the cheapest available hardware that meets their requirements.
 2. **Topology-aware placement**: For jobs requiring tensor parallelism (identified by requesting more than 1 GPU per node), add constraint `--constraint="nvlink"` to ensure placement on NVLink-connected nodes. Data-parallel jobs that request only 1 GPU per node can omit this constraint, enabling scheduling on V100 nodes where NVLink is absent but data parallelism works efficiently over any network.
 3. **Gang scheduling with timeout**: Configure `SchedulerParameters=bf_continue,bf_window=7200` to enable backfill scheduling and prevent indefinite resource holding. Jobs waiting more than 2 hours for gang completion release their partial allocations back to the free pool. This timeout prevents the accumulating deadlock where partially-satisfied jobs hold resources indefinitely.
 4. **V100 workload seeding**: Create a "legacy-gpu" queue with lower cost accounting (reflecting V100's lower capability) to incentivize researchers to submit appropriate workloads to V100 hardware. Small-scale experiments, single-GPU development, and data-parallel training of models under 30B parameters can run effectively on V100s.
@@ -1561,7 +1547,7 @@ The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400),
 #| label: debug-value-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ DEBUGGING EXAMPLE: UTILIZATION RECOVERY (P.I.C.O.)
+# │ DEBUGGING EXAMPLE: UTILIZATION RECOVERY (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-fleet-orchestration-debugging worked example (callout)
 # │
@@ -1576,25 +1562,25 @@ The scheduler's allocation log shows A100-80GB GPUs at 95% allocation (380/400),
 # │ Exports: debug_recovered_str, debug_annual_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class DebugValueCalc:
     """Annual dollar value recovered by raising a 1,000-GPU cluster from 60% to 84% utilization."""
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     debug_cluster      = 1000
     debug_util_before  = 0.60
     debug_util_after   = 0.84
     _gpu_rate          = gpu_hour_cost_usd   # from fleet-orchestration-setup exports
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     debug_improvement  = debug_util_after - debug_util_before
     debug_recovered    = debug_cluster * debug_improvement / debug_util_before
     debug_annual       = debug_recovered * _gpu_rate * 8760
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(debug_improvement > 0, "Utilization should improve in this scenario")
     check(debug_recovered == 400, f"Expected 400 recovered GPUs, got {debug_recovered}")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     debug_recovered_str = f"{int(debug_recovered)}"
     debug_annual_str    = f"{debug_annual / 1e6:.0f}"
 
@@ -1607,18 +1593,18 @@ debug_annual_str    = DebugValueCalc.debug_annual_str
 
 | **Pool**         | **Before**                   | **After**                    | **Change**    |
 |:-----------------|:-----------------------------|:-----------------------------|:--------------|
-| **A100-80GB**    | 95% allocated, 72% effective | 89% allocated, 94% effective | +5% effective |
-| **A100-40GB**    | 64% allocated                | 88% allocated                | +24%          |
+| **A100-80 GB**    | 95% allocated, 72% effective | 89% allocated, 94% effective | +5% effective |
+| **A100-40 GB**    | 64% allocated                | 88% allocated                | +24%          |
 | **V100**         | 0% allocated                 | 71% allocated                | +71%          |
 | **Cluster-wide** | **60%**                      | **84%**                      | **+40%**      |
 
-: **Utilization Recovery Results**: The distinction between "allocated" and "effective" utilization captures the gang scheduling deadlock: before the fix, A100-80GB GPUs showed high allocation in Slurm but low actual compute utilization because allocated jobs could not start. {#tbl-fleet-orchestration-debug-results}
+: **Utilization Recovery Results**: The distinction between "allocated" and "effective" utilization captures the gang scheduling deadlock: before the fix, A100-80 GB GPUs showed high allocation in Slurm but low actual compute utilization because allocated jobs could not start. {#tbl-fleet-orchestration-debug-results}
 
 This 40% improvement in effective cluster capacity equals approximately `{python} debug_recovered_str` additional GPUs worth of productive work. At \$2 per GPU-hour, this represents approximately \$`{python} debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
 **The Fleet Stack Lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a **mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure**. The scheduler algorithm was not the problem; the policies it implemented were the problem. The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
 
-Effective debugging required examining both layers and their interaction, recognizing that infrastructure evolution (adding A100-40GB and V100 nodes to an originally homogeneous A100-80GB cluster) had invalidated assumptions embedded in job templates and scheduling configuration. The fix addressed the policy layer, not the algorithm layer, and was implemented through configuration changes requiring zero code modifications and zero additional hardware investment. This pattern recurs across production ML infrastructure: the most common root cause of scheduling problems is not algorithmic insufficiency but policy-infrastructure mismatch, where operational policies designed for one infrastructure configuration are applied without adaptation to a changed infrastructure.
+Effective debugging required examining both layers and their interaction, recognizing that infrastructure evolution (adding A100-40 GB and V100 nodes to an originally homogeneous A100-80 GB cluster) had invalidated assumptions embedded in job templates and scheduling configuration. The fix addressed the policy layer, not the algorithm layer, and was implemented through configuration changes requiring zero code modifications and zero additional hardware investment. This pattern recurs across production ML infrastructure: the most common root cause of scheduling problems is not algorithmic insufficiency but policy-infrastructure mismatch, where operational policies designed for one infrastructure configuration are applied without adaptation to a changed infrastructure.
 
 :::
 
@@ -1736,3 +1722,10 @@ In **Performance Engineering** (@sec-performance-engineering), we examine the te
 [^fn-taints-tolerations]: **Taints and Tolerations**: Kubernetes primitives for restricting pod placement. A **Taint** on a node repels all pods that do not explicitly **Tolerate** it. For ML fleets, this is the primary mechanism for isolating specialized hardware: by tainting A100 nodes, the orchestrator prevents general-purpose web services from "stealing" expensive GPU capacity, ensuring those nodes are reserved for training jobs that tolerate the taint. \index{Taints and Tolerations!GPU isolation}
 
 [^fn-placement-groups]: **Placement Group**: A cloud-native abstraction (AWS, GCP) that requests instances be placed within a single high-bandwidth, low-latency network domain. For the ML Fleet, placement groups are the **Topology Contract**: they guarantee the bisection bandwidth ($\text{BW}_{\text{bisect}}$) required for AllReduce, preventing the "topology lottery" where nodes are scattered across different datacenter racks. \index{Placement Group!topology}
+
+```{python}
+#| echo: false
+#| label: chapter-end
+from mlsys.registry import end_chapter
+end_chapter("vol2:fleet_orchestration")
+```

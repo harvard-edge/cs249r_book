@@ -96,75 +96,7 @@ Performance Engineering is the **Optimization Layer** of the Fleet Stack. While 
 # │          b200_fp8_str, b200_hbm_bw_str, b200_mem_str, energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
-class PerformanceSetup:
-    """
-    Namespace for Performance Engineering reference hardware specs.
-    """
-
-    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    # H100 specs
-    h100_hbm_bw = H100_MEM_BW
-    h100_fp16 = H100_FLOPS_FP16_TENSOR
-    h100_fp8 = H100_FLOPS_FP8_TENSOR
-    h100_mem = H100_MEM_CAPACITY
-    h100_tdp = H100_TDP
-
-    # A100 specs
-    a100_hbm_bw = A100_MEM_BW
-    a100_fp16 = A100_FLOPS_FP16_TENSOR
-    a100_mem = A100_MEM_CAPACITY
-
-    # B200 specs
-    b200_fp8 = B200_FLOPS_FP8_TENSOR
-    b200_hbm_bw = B200_MEM_BW
-    b200_mem = B200_MEM_CAPACITY
-
-    # Energy
-    energy_dram_pj = ENERGY_DRAM_ACCESS_PJ
-    energy_sram_pj = ENERGY_SRAM_L1_PJ
-
-    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    # Roofline ridge points (FLOPS / BW = ops/byte at the knee)
-    h100_ridge_fp16 = h100_fp16 / h100_hbm_bw
-    h100_ridge_fp8 = h100_fp8 / h100_hbm_bw
-    a100_ridge_fp16 = a100_fp16 / a100_hbm_bw
-
-    # Energy ratio
-    energy_ratio_val = energy_dram_pj / energy_sram_pj
-
-    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
-    check(h100_hbm_bw.m_as(TB / second) > 3.0, "H100 HBM BW mismatch")
-    check(h100_fp16.m_as(TFLOPs / second) > 900, "H100 FP16 mismatch")
-
-    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
-    # Exports handled below...
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-# H100
-h100_hbm_bw_str = fmt(PerformanceSetup.h100_hbm_bw, "TB/s", precision=2)
-h100_hbm_bw_gbs_str = fmt(PerformanceSetup.h100_hbm_bw, "GB/s", precision=0)
-h100_fp16_str = fmt(PerformanceSetup.h100_fp16, "TFLOPs/s", precision=0)
-h100_fp8_str = fmt(PerformanceSetup.h100_fp8, "TFLOPs/s", precision=0)
-h100_mem_str = fmt(PerformanceSetup.h100_mem, "GB", precision=0)
-h100_tdp_str = fmt(PerformanceSetup.h100_tdp, "W", precision=0)
-h100_ridge_fp16_str = f"{PerformanceSetup.h100_ridge_fp16.m_as(flop/byte):.0f}"
-h100_ridge_fp8_str = f"{PerformanceSetup.h100_ridge_fp8.m_as(flop/byte):.0f}"
-
-# A100
-a100_hbm_bw_str = fmt(PerformanceSetup.a100_hbm_bw, "TB/s", precision=0)
-a100_hbm_bw_gbs_str = fmt(PerformanceSetup.a100_hbm_bw, "GB/s", precision=0)
-a100_fp16_str = fmt(PerformanceSetup.a100_fp16, "TFLOPs/s", precision=0)
-a100_ridge_fp16_str = f"{PerformanceSetup.a100_ridge_fp16.m_as(flop/byte):.0f}"
-
-# B200
-b200_fp8_str = fmt(PerformanceSetup.b200_fp8, "TFLOPs/s", precision=0)
-b200_hbm_bw_str = fmt(PerformanceSetup.b200_hbm_bw, "TB/s", precision=0)
-b200_mem_str = fmt(PerformanceSetup.b200_mem, "GB", precision=0)
-
-# Energy ratio
-energy_ratio_str = f"{PerformanceSetup.energy_ratio_val.m_as(''):.0f}"
-```
+## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}```
 
 ## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}
 
@@ -299,6 +231,59 @@ Configuration B achieves 60$\times$ lower cost per token than Configuration A, b
 The efficiency frontier establishes what we are optimizing *toward*. The physics of memory bandwidth determines where we start. Every performance engineering problem in modern ML begins with the same observation: memory bandwidth, not compute, is the bottleneck. Consider a single autoregressive decoding step in a large language model. The model reads its full weight matrix from High Bandwidth Memory (HBM)[^fn-hbm-perf] to generate a single token, performing only one or two multiply-accumulate operations per weight loaded.
 
 [^fn-hbm-perf]: **HBM (High Bandwidth Memory)**: Achieves its bandwidth by vertically stacking DRAM dies connected through thousands of through-silicon vias (TSVs), a 3D packaging technique first commercialized by SK Hynix in 2013. Despite the "high bandwidth" label, HBM's 3.35 TB/s on the H100 is still 200--600$\times$ slower than on-chip SRAM access, making the memory hierarchy gap the central constraint of every optimization technique in this chapter. \index{HBM!memory hierarchy}
+
+```{python}
+#| label: memory-wall-scenario
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MEMORY WALL HARDWARE SPECS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-memory-wall-physics
+# │
+# │ Goal: Provide H100 hardware specs for memory wall discussion.
+# │ Show: ~1,979 TFLOPS FP8; ~3.35 TB/s BW; ~1280x energy ratio.
+# │ How: pulling constants from mlsys.constants.
+# │
+# │ Imports: mlsys.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
+# │          H100_MEM_CAPACITY, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
+# │          TFLOPs, TB, GB, second, flop, byte)
+# │ Exports: h100_fp8_str, h100_hbm_bw_str, h100_ridge_fp8_str,
+# │          energy_ratio_str, h100_mem_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY,
+    ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
+    TFLOPs, TB, GB, second, flop, byte
+)
+
+class MemoryWallScenario:
+    """H100 specs for memory wall discussion."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    flops_fp8 = H100_FLOPS_FP8_TENSOR
+    bw = H100_MEM_BW
+    mem = H100_MEM_CAPACITY
+    energy_dram = ENERGY_DRAM_ACCESS_PJ
+    energy_sram = ENERGY_SRAM_L1_PJ
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    ridge_fp8 = (flops_fp8 / bw).m_as(flop/byte)
+    energy_ratio = energy_dram / energy_sram
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    h100_fp8_str = f"{flops_fp8.m_as(TFLOPs/second):.0f}"
+    h100_hbm_bw_str = f"{bw.m_as(TB/second):.2f}"
+    h100_ridge_fp8_str = f"{ridge_fp8:.0f}"
+    energy_ratio_str = f"{energy_ratio.m_as(''):.0f}"
+    h100_mem_str = f"{mem.m_as(GB):.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+h100_fp8_str = MemoryWallScenario.h100_fp8_str
+h100_hbm_bw_str = MemoryWallScenario.h100_hbm_bw_str
+h100_ridge_fp8_str = MemoryWallScenario.h100_ridge_fp8_str
+energy_ratio_str = MemoryWallScenario.energy_ratio_str
+h100_mem_str = MemoryWallScenario.h100_mem_str
+```
 
 An NVIDIA H100 delivers `{python} h100_fp8_str` TFLOPS of FP8 compute but only `{python} h100_hbm_bw_str` TB/s of memory bandwidth. If every byte loaded from memory does fewer than `{python} h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the **Memory Wall**, and it defines the landscape within which all performance engineering operates.
 
@@ -467,34 +452,53 @@ $$
 # │ Exports: a100_ridge_str, h100_fp16_ridge_str, h100_fp8_ridge_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class RooflineRidgeCalc:
     """Ridge point comparison across A100/H100 FP16/FP8."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Already computed in setup cell
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
-    # Ridge points already computed; verify
-    a100_ridge_val = PerformanceSetup.a100_ridge_fp16.m_as(flop/byte)
-    h100_ridge_fp16_val = PerformanceSetup.h100_ridge_fp16.m_as(flop/byte)
-    h100_ridge_fp8_val = PerformanceSetup.h100_ridge_fp8.m_as(flop/byte)
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    from mlsys.constants import (
+        A100_FLOPS_FP16_TENSOR, A100_MEM_BW,
+        H100_FLOPS_FP16_TENSOR, H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
+        TFLOPs, TB, second, flop, byte
+    )
+    a100_f16 = A100_FLOPS_FP16_TENSOR
+    a100_bw = A100_MEM_BW
+    h100_f16 = H100_FLOPS_FP16_TENSOR
+    h100_f8 = H100_FLOPS_FP8_TENSOR
+    h100_bw = H100_MEM_BW
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    a100_ridge_val = (a100_f16 / a100_bw).m_as(flop/byte)
+    h100_ridge_fp16_val = (h100_f16 / h100_bw).m_as(flop/byte)
+    h100_ridge_fp8_val = (h100_f8 / h100_bw).m_as(flop/byte)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(h100_ridge_fp16_val > a100_ridge_val,
           "H100 FP16 ridge should exceed A100 FP16 ridge")
     check(h100_ridge_fp8_val > h100_ridge_fp16_val,
           "H100 FP8 ridge should exceed H100 FP16 ridge")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     a100_ridge_str = f"{a100_ridge_val:.0f}"
     h100_fp16_ridge_str = f"{h100_ridge_fp16_val:.0f}"
     h100_fp8_ridge_str = f"{h100_ridge_fp8_val:.0f}"
+    
+    a100_fp16_str = f"{a100_f16.m_as(TFLOPs/second):.0f}"
+    a100_hbm_bw_str = f"{a100_bw.m_as(TB/second):.0f}"
+    h100_fp8_str = f"{h100_f8.m_as(TFLOPs/second):.0f}"
+    h100_hbm_bw_str = f"{h100_bw.m_as(TB/second):.2f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 a100_ridge_str = RooflineRidgeCalc.a100_ridge_str
 h100_fp16_ridge_str = RooflineRidgeCalc.h100_fp16_ridge_str
 h100_fp8_ridge_str = RooflineRidgeCalc.h100_fp8_ridge_str
+a100_fp16_str = RooflineRidgeCalc.a100_fp16_str
+a100_hbm_bw_str = RooflineRidgeCalc.a100_hbm_bw_str
+h100_fp8_str = RooflineRidgeCalc.h100_fp8_str
+h100_hbm_bw_str = RooflineRidgeCalc.h100_hbm_bw_str
 ```
 
 This means that any operation performing fewer than `{python} h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} h100_fp8_str` TFLOPS while bandwidth remains `{python} h100_hbm_bw_str` TB/s, the ridge point rises to approximately `{python} h100_fp8_ridge_str` FLOP/byte. The A100, with `{python} a100_fp16_str` TFLOPS and `{python} a100_hbm_bw_str` TB/s, has a lower ridge point of approximately `{python} a100_ridge_str` FLOP/byte at FP16. Each hardware generation increases compute faster than bandwidth, pushing the ridge point higher and making more workloads memory-bound.
@@ -619,12 +623,12 @@ Different ML operations have vastly different arithmetic intensities. Understand
 # │ Exports: gemm_intensity_str, elem_intensity_str, decode_intensity_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 ```{python}
 #| label: workload-intensity-refactor
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ WORKLOAD INTENSITY ANALYSIS (P.I.C.O.)
+# │ WORKLOAD INTENSITY ANALYSIS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-performance-engineering-workload-placement — classify ML ops
 # │
@@ -652,11 +656,11 @@ from mlsys.constants import (
 )
 from mlsys.formatting import fmt, check, md
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Level 1: Hardware
     h100_flops = H100_FLOPS_FP16_TENSOR
     h100_bw = H100_MEM_BW
@@ -674,7 +678,7 @@ class WorkloadIntensityCalc:
     # Prefill: batch=1024
     prefill_batch = 1024
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # GEMM: 2*M*N*K FLOPs, load A (M*K*2) + B (K*N*2) + store C (M*N*2)
     gemm_flops = 2 * M * N * K
     gemm_bytes = (M * K + K * N + M * N) * bytes_per_elem
@@ -703,13 +707,13 @@ class WorkloadIntensityCalc:
     util_pct = (achieved_tflops / h100_flops.m_as(TFLOPs/second)) * 100
     tokens_sec = 1000 / t_decode_ms
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity:.1f}")
     check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity:.1f}")
     check(decode_intensity_val < 5, f"Decode should be memory-bound, got {decode_intensity_val:.1f}")
     check(h100_ridge > 200, f"H100 ridge point mismatch, got {h100_ridge:.1f}")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gemm_intensity_str = f"{gemm_intensity:.0f}"
     gemm_flops_str = f"{gemm_flops/BILLION:.0f} billion"
     gemm_data_mb_str = f"{gemm_bytes/MILLION:.0f} MB"
@@ -973,7 +977,7 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 #| label: flash-attention-savings-refactor
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FLASHATTENTION MEMORY SAVINGS (P.I.C.O.)
+# │ FLASHATTENTION MEMORY SAVINGS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-performance-engineering-operator-fusion FlashAttention prose
 # │
@@ -991,17 +995,17 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 from mlsys.constants import BYTES_PER_FP16, MILLION, BILLION
 from mlsys.formatting import fmt, check
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionSavings:
     """Memory traffic analysis for tiled attention vs naive."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     seq_len = 8192
     head_dim = 128
     num_heads = 32
     bytes_per_elem = BYTES_PER_FP16
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Naive attention HBM traffic per head:
     # Write S = Q*K^T (N*N), read S for softmax, write P = softmax(S), read P for P*V
     # Simplified: dominant term is materializing NxN matrix
@@ -1017,11 +1021,11 @@ class FlashAttentionSavings:
     # Savings ratio
     savings_ratio = naive_attn_bytes_total / flash_attn_bytes_total
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(savings_ratio > 10,
           f"FlashAttention should save >10x HBM traffic, got {savings_ratio:.1f}x")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     naive_mb_str = f"{naive_attn_bytes_total / MILLION:.0f}"
     flash_mb_str = f"{flash_attn_bytes_total / MILLION:.0f}"
     savings_str = f"{savings_ratio:.0f}"
@@ -1220,7 +1224,7 @@ The choice depends on the operational regime. For memory-bound inference (small 
 #| echo: false
 #| label: kv-cache-size
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ KV CACHE MEMORY PER REQUEST (P.I.C.O.)
+# │ KV CACHE MEMORY PER REQUEST (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Precision Dividend callout — @sec-performance-engineering-kv-cache
 # │
@@ -1234,11 +1238,11 @@ The choice depends on the operational regime. For memory-bound inference (small 
 # │          batch_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class KVCacheAnalysis:
     """KV cache sizing and max batch capacity."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     num_layers = 80
     num_kv_heads = 8       # GQA: 8 KV heads for 70B Llama
     head_dim = 128
@@ -1246,18 +1250,18 @@ class KVCacheAnalysis:
     bytes_fp16 = 2
     bytes_int8 = 1
 
-    # Capacity per GPU (H100 80GB)
+    # Capacity per GPU (H100 80 GB)
     gpu_total_gb = 80
     weight_fp16_shard_gb = 35 # 140 / 4 GPUs
     weight_int4_shard_gb = 8.75
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Base size in GB per request
     kv_cache_bytes = 2 * num_layers * num_kv_heads * head_dim * seq_len * bytes_fp16
     kv_fp16_gb_val = kv_cache_bytes / 1e9
 
     # Max batch calculations
-    # FP16 case: 45GB available for KV
+    # FP16 case: 45 GB available for KV
     avail_fp16_gb = gpu_total_gb - weight_fp16_shard_gb
     max_batch_fp16_val = int(avail_fp16_gb / (kv_fp16_gb_val / 4)) # shared across 4 GPUs?
     # Wait, the callout text says "available for KV cache: 80 - 35 = 45 GB/GPU"
@@ -1272,11 +1276,11 @@ class KVCacheAnalysis:
 
     batch_ratio = max_batch_int8_val / max_batch_fp16_val
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(kv_fp16_gb_val > 1.0, f"KV cache size too low, got {kv_fp16_gb_val:.2f}")
     check(max_batch_int8_val > max_batch_fp16_val, "INT8 should increase batch size")
 
-    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     kv_fp16_gb_str = f"{kv_fp16_gb_val:.1f}"
     max_batch_fp16_str = f"{max_batch_fp16_val}"
     max_batch_int8_str = f"{max_batch_int8_val}"
@@ -1505,11 +1509,11 @@ Speculative decoding is a latency optimization that breaks the sequential bottle
 
 from mlsys.formatting import check
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class MoEEconomics:
     """MoE vs dense model memory and compute economics."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     dense_params_b = 1000          # 1T dense model parameters (billions → bytes below)
     moe_total_params_b = 370       # MoE total parameters (billions)
     moe_active_params_b = 37       # MoE active parameters per token (10% sparsity)
@@ -1517,7 +1521,7 @@ class MoEEconomics:
     experts_per_layer = 8
     active_experts = 1             # top-1 routing
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dense_mem_fp16 = dense_params_b * bytes_fp16          # 2000 GB (2 TB)
     moe_mem_fp16 = moe_total_params_b * bytes_fp16        # 740 GB total
     dense_decode_bytes = dense_params_b * bytes_fp16      # ~2 TB bandwidth per decode
@@ -1525,11 +1529,11 @@ class MoEEconomics:
     moe_decode_bytes = moe_active_params_b * bytes_fp16   # 74 GB
     bw_ratio = dense_decode_bytes / moe_decode_bytes
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(compute_ratio > 5, f"MoE should give >5x compute reduction, got {compute_ratio:.1f}x")
     check(bw_ratio > 5, f"MoE should give >5x BW reduction, got {bw_ratio:.1f}x")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     dense_mem_str = f"{dense_mem_fp16:.0f}"
     moe_mem_str = f"{moe_mem_fp16:.0f}"
     compute_ratio_str = f"{compute_ratio:.0f}"
@@ -1582,11 +1586,11 @@ The potential benefit of communication-computation overlap depends on the relati
 # │          overlap_status
 # └─────────────────────────────────────────────────────────────────────────────
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class OverlapCalc:
     """Communication-computation overlap speedup for 7B model on 8 H100s."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     model_params = 7e9           # 7B parameter model
     bytes_per_param_fp16 = 2     # FP16 gradients
     num_gpus = 8
@@ -1602,7 +1606,7 @@ class OverlapCalc:
     h100_fp16_tflops = 989e12    # Tensor core TFLOPS
     mfu = 0.40                   # Realistic MFU
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
 
     # Gradient size
     gradient_bytes = model_params * bytes_per_param_fp16
@@ -1628,11 +1632,11 @@ class OverlapCalc:
     # Can we fully overlap?
     can_overlap = backward_time_s > allreduce_time_s
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(overlap_speedup > 1.0,
           f"Overlap should provide speedup, got {overlap_speedup:.2f}x")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gradient_gb_str = f"{gradient_bytes / 1e9:.0f}"
     allreduce_ms_str = f"{allreduce_time_s * 1000:.1f}"
     backward_ms_str = f"{backward_time_s * 1000:.1f}"
@@ -1940,13 +1944,13 @@ The most challenging profiling scenario is intermittent stragglers: GPUs that ar
 
 The profiling tools and techniques described in this section provide the measurement foundation for all optimization work. Without measurement, performance engineering degenerates into guesswork. With measurement, it becomes a systematic discipline guided by quantitative evidence.
 
-## The Optimization Playbook: A 70B LLM Case Study {#sec-performance-engineering-playbook}
+## Measurement at Scale {#sec-performance-engineering-measurement-scale}
 
-You are handed a raw, unoptimized 70-billion parameter PyTorch model and told it must serve 1,000 tokens per second in production by next week. Where do you start? You cannot simply throw every technique at the wall. The optimization playbook requires a systematic, prioritized attack: first unblocking the memory wall, then fusing operators, and finally applying algorithmic techniques like speculative decoding in a specific, compounding sequence.
+Optimizing a single node is a prerequisite, but the ultimate test of performance engineering is efficiency at fleet scale. When we move from 8 GPUs to 1,024 GPUs, new sources of overhead emerge that are invisible in local traces. Measurement at scale requires shifting from kernel-level micro-benchmarks to global efficiency metrics that capture the interaction of computation, communication, and hardware variability.
 
-### The Diagnostic Sequence {#sec-performance-engineering-diagnostic-sequence}
+### The Fleet Efficiency Metric
 
-When approaching a new ML workload for optimization, follow this sequence:
+While Hardware Utilization reports how often GPUs are busy, it fails to distinguish between useful work and wasted cycles (such as activation recomputation or communication bubbles). The gold standard for fleet measurement is **Model FLOPs Utilization (MFU)**. By focusing on the "useful" FLOPs required by the model architecture, MFU provides an invariant measure of system efficiency that remains comparable across different software stacks and parallelization strategies.
 
 ::: {.callout-definition title="Model FLOPs Utilization"}
 
@@ -1958,11 +1962,111 @@ When approaching a new ML workload for optimization, follow this sequence:
 
 :::
 
-The first step is baseline measurement: measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the Model FLOPs Utilization (MFU) as defined above. An MFU below 30% indicates substantial optimization opportunity; above 50% is good; above 60% is excellent for large models.
+```{python}
+#| label: fleet-efficiency-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLEET EFFICIENCY ANALYSIS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-performance-engineering-measurement-scale
+# │
+# │ Goal: Calculate MFU for a 70B model distributed across a 128-GPU cluster.
+# │ Show: How the "Scaling Tax" reduces MFU from a 65% local peak to 48% fleet avg.
+# │ How: MFU = (6 * P * D) / (N * R_peak * Time).
+# │
+# │ Imports: mlsys.constants (BILLION, TRILLION, H100_FLOPS_FP16_TENSOR)
+# │ Exports: fleet_params_b_str, fleet_nodes_str, fleet_t_step_ms_str,
+# │          fleet_local_mfu_str, fleet_global_mfu_str, fleet_scaling_tax_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import BILLION, TRILLION, H100_FLOPS_FP16_TENSOR, second, TFLOPs
+from mlsys.formatting import fmt, check
 
-The second step is roofline classification. For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
+class FleetEfficiencyCalc:
+    """Calculates Fleet MFU and identifies the Scaling Tax."""
 
-The third step is selecting the primary bottleneck. The primary bottleneck falls into one of three categories, each with a different optimization path:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    p_params = 70 * BILLION
+    n_gpus = 128
+    r_peak_per_gpu = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second) * TRILLION
+    tokens_per_step = 2048 * 32 # seq_len * global_batch
+    
+    # Observed times
+    t_local_step_ms = 180.0  # 8-GPU node baseline
+    t_fleet_step_ms = 245.0  # 128-GPU cluster observed
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Useful FLOPs per step = 6 * P * Tokens
+    flops_per_step = 6 * p_params * tokens_per_step
+    
+    # MFU = useful_flops / (n_gpus * r_peak * time)
+    local_mfu = flops_per_step / (8 * r_peak_per_gpu * (t_local_step_ms / 1000))
+    global_mfu = flops_per_step / (n_gpus * r_peak_per_gpu * (t_fleet_step_ms / 1000))
+    
+    scaling_tax = (1 - (global_mfu / local_mfu)) * 100
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(global_mfu < local_mfu, "Fleet MFU must be lower than local node MFU due to scaling overhead.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    fleet_params_b_str = "70B"
+    fleet_nodes_str = f"{n_gpus}"
+    fleet_t_step_ms_str = f"{t_fleet_step_ms:.0f}"
+    fleet_local_mfu_str = f"{local_mfu*100:.1f}"
+    fleet_global_mfu_str = f"{global_mfu*100:.1f}"
+    fleet_scaling_tax_str = f"{scaling_tax:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+fleet_params_b_str = FleetEfficiencyCalc.fleet_params_b_str
+fleet_nodes_str = FleetEfficiencyCalc.fleet_nodes_str
+fleet_t_step_ms_str = FleetEfficiencyCalc.fleet_t_step_ms_str
+fleet_local_mfu_str = FleetEfficiencyCalc.fleet_local_mfu_str
+fleet_global_mfu_str = FleetEfficiencyCalc.fleet_global_mfu_str
+fleet_scaling_tax_str = FleetEfficiencyCalc.fleet_scaling_tax_str
+```
+
+::: {.callout-notebook title="The Scaling Tax"}
+**Scenario**: Training a **`{python} fleet_params_b_str`** parameter model across a cluster of **`{python} fleet_nodes_str` H100 GPUs**. 
+
+*   **Local Node Baseline**: A single 8-GPU node achieves **`{python} fleet_local_mfu_str`% MFU**.
+*   **Fleet Performance**: At 128 GPUs, the step time increases to **`{python} fleet_t_step_ms_str` ms**, dropping MFU to **`{python} fleet_global_mfu_str`%**.
+
+**The Diagnosis**: The **`{python} fleet_scaling_tax_str`% Scaling Tax** represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**—typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
+:::
+
+### Detecting Scaling Regressions
+
+At scale, the system is non-linear. A code change that introduces a minor memory overhead on a single GPU can trigger a catastrophic performance collapse at 1,000 GPUs due to increased garbage collection pauses or exhausted InfiniBand credit buffers. Detecting these **Scaling Regressions** requires a tiered testing strategy:
+
+1.  **Small-Scale Canaries**: Running the model on 8 and 64 GPUs to establish a scaling efficiency curve.
+2.  **Fleet Baseline Comparison**: Continuously comparing every production run's MFU against the "Gold Standard" baseline for that model architecture.
+3.  **Gray Failure Detection**: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10% slower due to thermal throttling can reduce the entire cluster's MFU by 10% in a synchronous data-parallel workload.
+
+::: {.callout-note title="Benchmark vs. Reality: The Hero Run Tax"}
+Industry benchmarks like **MLPerf** are often "Hero Runs"—highly tuned configurations where logging is disabled, safety checks are bypassed, and the hardware is freshly rebooted. 
+
+In production, your achieved MFU will typically sit **10–20% lower** than these hero numbers. This "Reality Tax" is consumed by essential operational overhead:
+*   **Observability**: Metrics collection and logging.
+*   **Reliability**: Checkpointing and health heartbeats.
+*   **Entropy**: Thermal throttling, memory fragmentation, and multi-tenant network noise.
+
+When planning capacity, engineers must budget for the Reality Tax. If a benchmark says you can train in 30 days, your production plan should assume 35–40 days.
+:::
+
+With the measurement hierarchy established—from node-level traces to fleet-wide MFU—we now turn to the tactical execution. The optimization playbook translates these global measurements into a surgical sequence of interventions.
+
+## The Optimization Playbook: A 70B LLM Case Study {#sec-performance-engineering-playbook}
+
+You are handed a raw, unoptimized 70-billion parameter PyTorch model and told it must serve 1,000 tokens per second in production by next week. Where do you start? You cannot simply throw every technique at the wall. The optimization playbook requires a systematic, prioritized attack: first unblocking the memory wall, then fusing operators, and finally applying algorithmic techniques like speculative decoding in a specific, compounding sequence.
+
+### The Diagnostic Sequence {#sec-performance-engineering-diagnostic-sequence}
+
+When approaching a new ML workload for optimization, follow this sequence:
+
+1. **Baseline Measurement**: Measure end-to-end throughput (tokens/second for LLMs, samples/second for training) and collect a Nsight Systems trace. Compute the **Model FLOPs Utilization (MFU)** as established in @sec-performance-engineering-measurement-scale. An MFU below 30% indicates substantial optimization opportunity; above 50% is good; above 60% is excellent for large models.
+
+2. **Roofline Classification**: For the dominant kernels, compute the arithmetic intensity and plot on the roofline. This immediately identifies whether the workload is compute-bound or memory-bound, which determines the entire optimization strategy.
+
+3. **Selecting the Primary Bottleneck**: The primary bottleneck falls into one of three categories, each with a different optimization path:
 
 For **memory-bound workloads** (the common case for inference):
 
@@ -2104,43 +2208,43 @@ This case study demonstrates how these disparate optimizations compound sequenti
 
 A team upgrades their inference cluster from A100s to H100s, expecting a massive 3x latency reduction based on the new spec sheet's teraFLOPS rating, only to find their generative model barely runs 15% faster. This leads us to one of the most pervasive traps in performance engineering: assuming that raw compute capacity dictates inference speed when the workload is entirely bound by memory bandwidth.
 
-**Fallacy:** *More FLOPS means faster inference.*
+Fallacy: *More FLOPS means faster inference.*
 
 The roofline model demonstrates that most inference operations are memory-bound, not compute-bound. A GPU with 2$\times$ the peak FLOPS but the same memory bandwidth will not generate tokens any faster for batch-1 LLM decode. The correct metric for memory-bound workloads is bandwidth, not FLOPS. This fallacy leads organizations to purchase the most expensive compute hardware when a mid-range GPU with equivalent HBM bandwidth would deliver identical inference throughput.
 
-**Fallacy:** *FP8 always halves training time compared to FP16.*
+Fallacy: *FP8 always halves training time compared to FP16.*
 
 FP8 doubles the peak TFLOPS and doubles the effective memory bandwidth, but these gains are realized only for operations that are bottlenecked by compute or bandwidth at FP16. Element-wise operations like activation functions are already limited by kernel launch overhead, not by precision. Communication-bound distributed training steps gain nothing from reduced arithmetic precision if the communication volume (gradient sizes) is not also reduced. The actual speedup depends on the fraction of execution time spent in precision-sensitive operations.
 
-**Pitfall:** *Optimizing the largest kernel while ignoring the long tail.*
+Pitfall: *Optimizing the largest kernel while ignoring the long tail.*
 
 The profiling case study above illustrates this pitfall. Engineers naturally focus on the single largest kernel, which is often the GEMM in a transformer layer. When the GEMM is already near-optimal, however, the remaining performance budget is distributed across dozens of smaller operations: normalization, activation, attention scoring, KV cache management, and kernel launch overhead. Collectively, these "small" operations can consume more than half of total execution time. Graph compilation and systematic fusion address this long tail more effectively than further GEMM optimization.
 
-**Pitfall:** *Applying speculative decoding without considering batch dynamics.*
+Pitfall: *Applying speculative decoding without considering batch dynamics.*
 
 Speculative decoding excels at batch size 1, where decode is deeply memory-bound and the verification step is essentially "free" (the GPU has ample spare compute). At large batch sizes, decode approaches the compute-bound regime, and the verification step adds meaningful compute cost. Furthermore, the variable number of accepted tokens per request complicates continuous batching schedulers. In high-throughput serving scenarios with large batches, the overhead of speculation may outweigh its latency benefits.
 
-**Pitfall:** *Treating MoE expert count as a free scaling knob.*
+Pitfall: *Treating MoE expert count as a free scaling knob.*
 
 Increasing the number of experts in an MoE model increases total parameters (capacity) without proportionally increasing per-token compute, which seems like a free lunch. Each additional expert, however, increases: (1) total memory requirements, requiring more GPUs; (2) AllToAll communication volume for expert routing; (3) load balancing difficulty, since the router must distribute tokens across more experts; and (4) training instability, as more experts compete for activation. Beyond approximately 64--256 experts, the system-level costs often outweigh the capacity benefits.
 
-**Fallacy:** *Graph compilers eliminate the need for manual kernel engineering.*
+Fallacy: *Graph compilers eliminate the need for manual kernel engineering.*
 
 Graph compilers have improved dramatically, but they remain limited by their cost models and fusion heuristics. FlashAttention required human insight to recognize that attention could be reformulated as a tiled algorithm with online softmax, an algorithmic insight beyond the scope of any current compiler's rewrite rules. Similarly, speculative decoding and MoE routing require algorithmic innovation that compilers cannot discover. Compilers automate known optimizations; human engineers discover new ones.
 
-**Pitfall:** *Quantizing everything to the lowest supported precision.*
+Pitfall: *Quantizing everything to the lowest supported precision.*
 
 Aggressive quantization (INT4 weights, INT4 KV cache, FP8 activations) can degrade model quality in ways that are difficult to detect with standard benchmarks but visible to users. Perplexity on a held-out dataset may change by less than 1%, but the model may produce subtly worse responses for edge cases, rare languages, or complex reasoning tasks. The correct approach is targeted quantization: apply the most aggressive precision to the least sensitive components (KV cache, intermediate activations) and preserve higher precision for the most sensitive (first and last layers, attention logits). Calibration on a representative dataset, followed by evaluation on diverse quality benchmarks, is essential before deploying any quantized model to production.
 
-**Pitfall:** *Measuring throughput without measuring quality.*
+Pitfall: *Measuring throughput without measuring quality.*
 
 A model serving system that generates 200 tokens/second is not twice as good as one generating 100 tokens/second if the first system achieves that throughput by using INT4 quantization that degrades answer quality by 15%. Performance metrics must always be reported alongside quality metrics. The correct optimization target is the Pareto frontier of throughput versus quality, not throughput alone.
 
-**Fallacy:** *A single profiling run is sufficient to characterize performance.*
+Fallacy: *A single profiling run is sufficient to characterize performance.*
 
 ML system performance is non-stationary. GPU thermal throttling reduces clock speeds (and therefore FLOPS) after sustained workloads, sometimes by 10--15%. Memory fragmentation accumulates over hours of serving, gradually reducing effective batch size. Network congestion varies with cluster-wide traffic patterns. A profiling run during a cold start may show different bottleneck patterns than one after hours of production serving. Reliable performance characterization requires profiling under realistic, sustained conditions, ideally sampling multiple times across a production run.
 
-**Pitfall:** *Optimizing for average case while ignoring tail latency.*
+Pitfall: *Optimizing for average case while ignoring tail latency.*
 
 A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to the throughput optimizations in this chapter: pre-allocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
 
@@ -2236,3 +2340,10 @@ Yet, optimizing an isolated forward pass is merely the precursor to deployment. 
 In **Inference at Scale** (@sec-inference-scale), we transition from the mechanics of local execution to the architecture of robust serving systems. The low-level optimizations developed here function as the foundational primitives for high-availability infrastructure, tackling systemic challenges like continuous batching, distributed KV-cache management, and dynamic request routing.
 
 :::
+
+```{python}
+#| echo: false
+#| label: chapter-end
+from mlsys.registry import end_chapter
+end_chapter("vol2:performance_engineering")
+```
