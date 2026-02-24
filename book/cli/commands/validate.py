@@ -101,7 +101,7 @@ LABEL_DEF_PATTERNS = {
 }
 LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
 
-EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-")
+EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-")
 
 
 class ValidateCommand:
@@ -626,7 +626,11 @@ class ValidateCommand:
             content = self._read_text(file)
             bib_content = self._read_text(bib_file)
             bib_keys = set(bib_key_pattern.findall(bib_content))
-            qmd_content_no_code = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+            # Strip YAML frontmatter (--- ... --- at file top) to avoid email false positives
+            qmd_content_no_code = re.sub(r"^---\n.*?\n---\n", "", content, flags=re.DOTALL)
+            # Strip HTML style/script blocks to avoid CSS @media false positives
+            qmd_content_no_code = re.sub(r"<style\b[^>]*>.*?</style>", "", qmd_content_no_code, flags=re.DOTALL)
+            qmd_content_no_code = re.sub(r"```.*?```", "", qmd_content_no_code, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"`[^`]+`", "", qmd_content_no_code)
             refs = set(CITATION_REF_PATTERN.findall(qmd_content_no_code))
             refs = {r.rstrip(".,;:") for r in refs if not r.startswith(EXCLUDED_CITATION_PREFIXES)}

@@ -37,7 +37,7 @@ Conventions used here follow the book-wide notation. We use $\alpha$ for per-mes
 #| label: appendix-comm-setup
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMMUNICATION FOUNDATIONS — MASTER COMPUTATION (P.I.C.O.)
+# │ COMMUNICATION FOUNDATIONS — MASTER COMPUTATION (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: PERSISTENT — All values used throughout the Communication Foundations
 # │          appendix: α-β model table, ring vs. tree AllReduce worked example,
@@ -68,11 +68,11 @@ from mlsys.formulas import (
     calc_pipeline_bubble,
 )
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 class CommFoundations:
     """Namespace for communication cost calculations."""
 
-    # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     # Interconnect Specs (Level 1)
     ib_ndr_alpha_us = IB_NDR_LATENCY_US
     ib_ndr_beta_gbs = INFINIBAND_NDR_BW_GBS
@@ -90,7 +90,7 @@ class CommFoundations:
     # Collective Params (Level 2)
     ring_n_gpus = 256
     ring_msg_bytes = BILLION # 1 GB
-    
+
     # Pipeline Params (Level 3)
     p_stages = 8
     m_microbatches = 16
@@ -100,7 +100,7 @@ class CommFoundations:
     compress_ratio = 64
     compress_overhead_ms = 2.0
 
-    # ┌── 2. CALCULATION (The Physics) ────────────────────────────────────────
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Level 4: Ratios & Efficiency
     ib_ndr_alpha_s = ib_ndr_alpha_us * 1e-6
     ib_ndr_beta_bs = ib_ndr_beta_gbs * 1e9
@@ -121,11 +121,11 @@ class CommFoundations:
     compressed_total_ms = compressed_comm_ms + compress_overhead_ms
     compress_speedup = ring_time_ms / compressed_total_ms
 
-    # ┌── 3. INVARIANTS (Guardrails) ──────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(round(crossover_kb_val) == 250, f"IB NDR crossover mismatch: {crossover_kb_val}")
-    check(ring_time_ms < tree_time_ms, "Ring should be faster than tree for 1GB message")
+    check(ring_time_ms < tree_time_ms, "Ring should be faster than tree for 1 GB message")
 
-    # ┌── 4. OUTPUTS (Formatting) ─────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # (Pre-computed formatted strings for appendix tables)
     ib_ndr_alpha_us_str = f"{int(ib_ndr_alpha_us)}"
     ib_ndr_beta_gbs_str = f"{int(ib_ndr_beta_gbs)}"
@@ -143,10 +143,10 @@ class CommFoundations:
     ring_time_ms_str = fmt(ring_time_ms, precision=1, commas=False)
     tree_time_ms_str = fmt(tree_time_ms, precision=1, commas=False)
     ring_msg_gb_str = f"{ring_msg_bytes/BILLION:.0f}"
-    
+
     bubble_std_pct = f"{bubble_std * 100:.1f}"
     bubble_interleaved_pct = f"{bubble_interleaved * 100:.1f}"
-    
+
     compress_ratio_str = f"{int(compress_ratio)}"
     compress_overhead_ms_str = fmt(compress_overhead_ms, precision=1, commas=False)
     uncompressed_ms_str = fmt(ring_time_ms, precision=1, commas=False)
@@ -268,13 +268,13 @@ Collective operations move data between all $N$ GPUs simultaneously. Each collec
 
 AllReduce is the workhorse of data-parallel training: every GPU starts with a local gradient tensor of size $M$ bytes and ends with the globally reduced (summed) result. The ring algorithm decomposes AllReduce into a ReduceScatter phase followed by an AllGather phase.
 
-**Ring AllReduce**:
+Ring AllReduce
 
 $$ T_{\text{ring}} = 2 \cdot \frac{N - 1}{N} \cdot \frac{M}{\beta} + 2(N - 1) \cdot \alpha $$ {#eq-ring-allreduce}
 
 The factor $2(N-1)/N$ in the bandwidth term approaches 2 as $N$ grows---each byte effectively traverses the ring twice (once for reduce-scatter, once for all-gather). The latency term grows linearly with $N$, which makes the ring algorithm expensive in latency for large GPU counts.
 
-**Tree AllReduce**:
+Tree AllReduce
 
 $$ T_{\text{tree}} = 2 \log_2 N \cdot \frac{M}{\beta} + 2 \log_2 N \cdot \alpha $$ {#eq-tree-allreduce}
 
@@ -304,7 +304,7 @@ $$T_{\text{tree}} \approx \mathbf{`{python} tree_time_ms_str` \text{ ms}}$$
 
 AllGather is the complement of ReduceScatter: each GPU starts with a $M/N$-sized shard and ends with the complete $M$-byte tensor. It is the core communication primitive in Fully Sharded Data Parallelism (FSDP) for reconstructing parameters before each forward pass, and in tensor parallelism for reassembling split activations.
 
-**Ring AllGather**:
+Ring AllGather
 
 $$ T_{\text{allgather}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-allgather}
 
@@ -314,7 +314,7 @@ AllGather is exactly half the cost of AllReduce (one ring pass instead of two) b
 
 ReduceScatter is the dual of AllGather: each GPU starts with a full $M$-byte tensor and ends with a $M/N$-sized shard that contains the globally reduced values for that shard. It is the gradient synchronization primitive in FSDP and ZeRO, replacing the full AllReduce with a cheaper operation when each GPU only needs its own parameter shard's gradient.
 
-**Ring ReduceScatter**:
+Ring ReduceScatter
 
 $$ T_{\text{reducescatter}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-reducescatter}
 
@@ -324,7 +324,7 @@ The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScat
 
 AllToAll is the most general collective: each GPU sends a distinct $M/N$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for Mixture-of-Experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
 
-**Ring AllToAll**:
+Ring AllToAll
 
 $$ T_{\text{alltoall}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-alltoall}
 
@@ -334,7 +334,7 @@ Although the formula matches AllGather and ReduceScatter in form, the communicat
 
 Broadcast sends a single $M$-byte tensor from one root GPU to all $N - 1$ others. It is used for distributing initial model weights, updated learning rates, and configuration changes during training.
 
-**Tree Broadcast**:
+Tree Broadcast
 
 $$ T_{\text{broadcast}} = \frac{M}{\beta} + \log_2 N \cdot \alpha $$ {#eq-broadcast}
 
@@ -412,14 +412,14 @@ This formula applies to both GPipe (where all forward passes complete before any
 
 The key insight: the bubble fraction depends on the *ratio* of stages to microbatches. Adding more microbatches (for a fixed number of stages) amortizes the pipeline fill and drain across more useful work.
 
-**Rule of thumb**: To keep bubble overhead below 20%, you need $M \geq 4(P - 1)$, which means $M \geq 4P$ for practical purposes.
+Rule of thumb To keep bubble overhead below 20%, you need $M \geq 4(P - 1)$, which means $M \geq 4P$ for practical purposes.
 
 @tbl-pipeline-bubble shows how bubble fraction varies with pipeline depth and microbatch count.
 
-| **Pipeline Stages ($P$)** | **$M$ = 8**                | **$M$ = 16**                | **$M$ = 32**                | **$M$ = 64**                |
-|:--------------------------|:---------------------------|:----------------------------|:----------------------------|:----------------------------|
-| **$P$ = 4**               | `{python} bubble_std_pct` % | `{python} bubble_std_pct` % | ---                         | ---                         |
-| **$P$ = 8**               | ---                        | `{python} bubble_std_pct` % | `{python} bubble_std_pct` % | `{python} bubble_std_pct` % |
+| **Pipeline Stages ($P$)** | **$M$ = 8**                | **$M$ = 16**               | **$M$ = 32**               | **$M$ = 64**               |
+|:--------------------------|:---------------------------|:---------------------------|:---------------------------|:---------------------------|
+| **$P$ = 4**               | `{python} bubble_std_pct`% | `{python} bubble_std_pct`% | ---                        | ---                        |
+| **$P$ = 8**               | ---                        | `{python} bubble_std_pct`% | `{python} bubble_std_pct`% | `{python} bubble_std_pct`% |
 
 : **Pipeline Bubble Fraction**: Percentage of GPU-time lost to pipeline bubbles for various stage counts and microbatch counts. Values below 20% (the typical target) require $M \geq 4P$. Dashes indicate configurations where the ratio is impractical. {#tbl-pipeline-bubble}
 
@@ -429,7 +429,7 @@ Interleaved scheduling (used in Megatron-LM) assigns $V$ **virtual stages** to e
 
 $$ b_{\text{interleaved}} = \frac{P - 1}{P - 1 + M \times V} $$ {#eq-interleaved-bubble}
 
-The denominator grows by a factor of $V$ compared to @eq-pipeline-bubble. For $P$ = 8, $M$ = 16, and $V$ = 4, the bubble fraction drops from `{python} bubble_std_pct` % to `{python} bubble_interleaved_pct` %---a dramatic improvement that comes at the cost of more frequent, smaller communication between stages.
+The denominator grows by a factor of $V$ compared to @eq-pipeline-bubble. For $P$ = 8, $M$ = 16, and $V$ = 4, the bubble fraction drops from `{python} bubble_std_pct`% to `{python} bubble_interleaved_pct`%---a dramatic improvement that comes at the cost of more frequent, smaller communication between stages.
 
 Interleaved scheduling highlights a recurring theme in distributed ML: communication granularity is a tunable knob. Smaller, more frequent transfers improve overlap and reduce idle time, but increase the aggregate latency overhead. The same trade-off appears in gradient compression, which is the final cost model in this appendix.
 
@@ -474,32 +474,32 @@ In the bandwidth-dominated regime ($M \gg M_{\text{cross}}$), the communication 
 
 | **Compression Ratio ($C$)** | **AllReduce = 10 ms (Max Codec Overhead)** | **AllReduce = 40 ms (Max Codec Overhead)** | **AllReduce = 100 ms (Max Codec Overhead)** |
 |:----------------------------|:-------------------------------------------|:-------------------------------------------|:--------------------------------------------|
-| **4$\times$**              | 7.5 ms                                     | 30 ms                                      | 75 ms                                       |
-| **16$\times$**             | 9.4 ms                                     | 37.5 ms                                    | 93.8 ms                                     |
-| **64$\times$**             | 9.8 ms                                     | 39.4 ms                                    | 98.4 ms                                     |
-| **256$\times$**            | 9.96 ms                                    | 39.8 ms                                    | 99.6 ms                                     |
+| **4$\times$**               | 7.5 ms                                     | 30 ms                                      | 75 ms                                       |
+| **16$\times$**              | 9.4 ms                                     | 37.5 ms                                    | 93.8 ms                                     |
+| **64$\times$**              | 9.8 ms                                     | 39.4 ms                                    | 98.4 ms                                     |
+| **256$\times$**             | 9.96 ms                                    | 39.8 ms                                    | 99.6 ms                                     |
 
 : **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as $T_{\text{comm}}(M) \times (1 - 1/C)$. At high compression ratios, nearly the entire uncompressed AllReduce time is available as codec budget. {#tbl-compression-breakeven}
 
 ## Fallacies and Pitfalls {#sec-comm-foundations-fallacies-pitfalls}
 
-**Fallacy:** *Doubling network bandwidth halves AllReduce time.*
+Fallacy: *Doubling network bandwidth halves AllReduce time.*
 
 For ring AllReduce, the bandwidth term is $2(N-1)/N \cdot M/\beta$, which does scale inversely with $\beta$. But the latency term $2(N-1) \cdot \alpha$ is independent of bandwidth. At 256 GPUs with small messages, the latency term can dominate, and doubling bandwidth yields negligible improvement. Always check which regime you are in before investing in faster interconnects.
 
-**Pitfall:** *Using the ring AllReduce formula for intra-node communication.*
+Pitfall: *Using the ring AllReduce formula for intra-node communication.*
 
 Within a node, GPUs communicate through NVLink or NVSwitch, which provides all-to-all connectivity---not a ring. The actual intra-node AllReduce uses a different algorithm (often a single-step reduce through the NVSwitch crossbar) with much lower latency than the ring formula predicts. The ring formula applies to inter-node communication where the ring topology matches the physical network.
 
-**Fallacy:** *Pipeline parallelism eliminates communication overhead.*
+Fallacy: *Pipeline parallelism eliminates communication overhead.*
 
 Pipeline parallelism replaces AllReduce with point-to-point activation transfers between adjacent stages, which are indeed cheaper. But it introduces bubble overhead that is mathematically unavoidable: with $P$ stages, at least $(P-1)/(P-1+M)$ of GPU-time is idle. For deep pipelines ($P \geq 8$), this overhead requires $M \geq 32$ microbatches to stay below 20%---a constraint that affects batch size, memory, and convergence.
 
-**Pitfall:** *Evaluating gradient compression by communication speedup alone.*
+Pitfall: *Evaluating gradient compression by communication speedup alone.*
 
 A compression scheme that achieves 100$\times$ communication speedup is worthless if it degrades model quality enough to require 2$\times$ more training iterations. The correct metric is *time-to-accuracy*, not time-per-iteration. Always validate compression on the target convergence benchmark, not just on a communication microbenchmark.
 
-**Fallacy:** *AllReduce, AllGather, and ReduceScatter have the same performance characteristics because they have the same ring complexity.*
+Fallacy: *AllReduce, AllGather, and ReduceScatter have the same performance characteristics because they have the same ring complexity.*
 
 While the bandwidth and latency formulas are identical for ring-based implementations, the operations have different memory access patterns and computation requirements. ReduceScatter performs a reduction (addition) on the received data, AllGather only copies, and AllToAll routes distinct chunks to distinct destinations. These differences affect how well each operation overlaps with computation and how sensitive it is to memory bandwidth contention on the GPU.
 
