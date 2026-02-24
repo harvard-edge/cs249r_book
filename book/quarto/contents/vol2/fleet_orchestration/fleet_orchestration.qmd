@@ -266,7 +266,7 @@ Periodic **defragmentation** migrates or preempts low-priority jobs to consolida
 
 A third strategy, **over-subscription**, allows more jobs to be admitted than strictly fit, relying on statistical multiplexing to avoid simultaneous peak usage across all resource dimensions. If each job's GPU utilization averages 70 percent (alternating between compute-intensive and data-loading phases), the cluster can support approximately 1.4$\times$ as many jobs as the strict GPU count would allow. Over-subscription works well when resource utilization is genuinely bursty and jobs' peak usage periods are uncorrelated, but can cause severe performance degradation (thrashing, memory pressure, network congestion) when multiple jobs peak simultaneously. The key to safe over-subscription is monitoring actual utilization in real time and throttling admission when contention is detected.
 
-::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="The Fragmentation Problem. The heatmap shows a snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Different colors represent distinct active jobs, while gray slots represent free GPUs. Although 19 GPUs (~30% of capacity) are available globally, they are fragmented across nodes. A new job requiring 8 contiguous GPUs (a full node) cannot be scheduled because no single row is completely empty, illustrating how bin-packing inefficiencies reduce effective cluster capacity." fig-alt="8-by-8 heatmap of cluster GPU allocation. Rows are nodes, columns are GPU slots. Colored cells show jobs; gray shows free. Status panel indicates 19 free GPUs but no contiguous block of 8."}
+::: {#fig-fragmentation-problem fig-env="figure" fig-pos="htb" fig-cap="**The Fragmentation Problem**. The heatmap shows a snapshot of an 8-node cluster (rows) with 8 GPUs each (columns). Different colors represent distinct active jobs, while gray slots represent free GPUs. Although 19 GPUs (~30% of capacity) are available globally, they are fragmented across nodes. A new job requiring 8 contiguous GPUs (a full node) cannot be scheduled because no single row is completely empty, illustrating how bin-packing inefficiencies reduce effective cluster capacity." fig-alt="8-by-8 heatmap of cluster GPU allocation. Rows are nodes, columns are GPU slots. Colored cells show jobs; gray shows free. Status panel indicates 19 free GPUs but no contiguous block of 8."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -357,6 +357,55 @@ fig = plt.gcf()
 :::
 
 ### Gang Scheduling {#sec-fleet-orchestration-gang-scheduling}
+
+::: {#fig-gang-scheduling-deadlock fig-env="figure" fig-pos="htb" fig-cap="**The Distributed Deadlock (Hold and Wait)**. In Independent Scheduling (top), Job A acquires half the cluster and waits for the rest, while Job B acquires the other half and waits for Job A to finish. Neither can proceed, and 100% of the cluster sits idle. Gang Scheduling (bottom) solves this by mandating **Atomic Allocation**: a job is either granted its entire $N$-GPU requirement simultaneously or it waits in the queue without holding any resources." fig-alt="Two-panel timeline. Top panel shows two jobs interleaved, both marked Deadlock. Bottom panel shows jobs scheduled sequentially, both marked Success."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \definecolor{JobAColor}{RGB}{0,99,149}    % BlueLine
+  \definecolor{JobBColor}{RGB}{204,85,0}  % OrangeLine
+
+  \tikzset{
+    bar/.style={draw=black!60, thick, minimum height=0.6cm, align=center},
+    deadlock/.style={fill=red!20, draw=red, thick, inner sep=2pt}
+  }
+
+  % Independent Scheduling
+  \begin{scope}
+    \node[anchor=west, crimson] at (0, 3.5) {\textbf{A. Independent Scheduling (Deadlock)}};
+    \draw (0, 0) -- (8, 0) node[right] {Time};
+    \draw (0, 0) -- (0, 2.5) node[above] {Cluster Nodes};
+    
+    % Job A holds some, waits for some
+    \fill[JobAColor!40, draw=black!60] (0, 1.25) rectangle (4, 2.2) node[midway] {Job A (Hold)};
+    \draw[JobAColor, dashed, ->] (4, 1.7) -- (6, 1.7) node[right] {Wait};
+    
+    % Job B holds the rest, waits for Job A's
+    \fill[JobBColor!40, draw=black!60] (1, 0.2) rectangle (5, 1.15) node[midway] {Job B (Hold)};
+    \draw[JobBColor, dashed, ->] (5, 0.7) -- (7, 0.7) node[right] {Wait};
+    
+    \node[deadlock] at (4.5, 1.2) {\textbf{DEADLOCK}};
+  \end{scope}
+
+  % Gang Scheduling
+  \begin{scope}[shift={(0,-5)}]
+    \node[anchor=west, crimson] at (0, 3.5) {\textbf{B. Gang Scheduling (Atomic)}};
+    \draw (0, 0) -- (8, 0) node[right] {Time};
+    \draw (0, 0) -- (0, 2.5) node[above] {Cluster Nodes};
+    
+    % Job A gets everything at once
+    \fill[JobAColor!60, draw=black!60] (0, 0.2) rectangle (3, 2.2) node[midway, white] {Job A (All)};
+    
+    % Job B waits entirely in queue
+    \draw[thick, gray, latex-] (3.2, 1.2) -- (4.2, 1.2) node[right, black] {Queue};
+    
+    % Job B starts after A finishes
+    \fill[JobBColor!60, draw=black!60] (4.5, 0.2) rectangle (7.5, 2.2) node[midway, white] {Job B (All)};
+    
+    \node[text=GreenLine] at (3.75, -0.5) {\textbf{SUCCESS}};
+  \end{scope}
+\end{tikzpicture}
+```
+:::
 
 Gang scheduling addresses the most distinctive aspect of ML workload scheduling: the requirement for atomic, all-or-nothing resource allocation. The term comes from the idea that all members of a "gang" (the workers in a distributed training job) must be present before any useful work can begin. Gang scheduling ensures that all $N$ workers for a distributed training job start simultaneously. Without this guarantee, a job requesting 1,024 GPUs might receive 768 immediately while waiting indefinitely for the remaining 256, wasting the already-allocated resources. Worse, if two such jobs each receive partial allocations, neither can proceed, creating a classic **hold-and-wait deadlock**[^fn-deadlock-scheduling].
 
@@ -733,7 +782,7 @@ The tensor parallel communication alone illustrates the impact. With NVLink at `
 
 :::
 
-::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="Topology Placement Impact: Reducing AllReduce latency by 4.8x through topology-aware scheduling (Rack/Rail optimization) compared to random placement for a 1 GB gradient sync on 64 GPUs." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8x speedup from Random to Topology-Optimal."}
+::: {#fig-topology-placement fig-env="figure" fig-pos="htb" fig-cap="**Topology Placement Impact**. Reducing AllReduce latency by 4.8x through topology-aware scheduling (Rack/Rail optimization) compared to random placement for a 1 GB gradient sync on 64 GPUs." fig-alt="Bar chart comparing AllReduce latency for Random, Rack-Aware, Rail-Optimized, and Topology-Optimal placement. 4.8x speedup from Random to Topology-Optimal."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -1443,7 +1492,7 @@ Even with sophisticated multi-tenancy and quota policies in place, the cluster c
 
 Imagine opening your cluster dashboard to find that average GPU utilization is stuck at 60%, yet developers are complaining about three-day queue times for small debugging jobs. You have hundreds of idle GPUs, but no jobs are starting. Bridging this gap between theoretical capacity and production reality requires methodical forensic analysis to untangle the interactions between hardware topology, scheduler policies, and user behavior.
 
-::: {#fig-utilization-paradox fig-env="figure" fig-pos="htb" fig-cap="The Utilization Paradox: As cluster utilization approaches saturation (100%), job wait times increase exponentially, not linearly. Operating above 80% utilization (the Danger Zone) causes unpredictable scheduling delays, especially for large jobs, illustrating why 100% utilization is an anti-pattern for interactive research clusters." fig-alt="Semi-log plot of job wait time versus cluster utilization. Three curves for small, mixed, and large jobs. Wait times explode near 100%. Danger Zone shaded above 80%."}
+::: {#fig-utilization-paradox fig-env="figure" fig-pos="htb" fig-cap="**The Utilization Paradox**. As cluster utilization approaches saturation (100%), job wait times increase exponentially, not linearly. Operating above 80% utilization (the Danger Zone) causes unpredictable scheduling delays, especially for large jobs, illustrating why 100% utilization is an anti-pattern for interactive research clusters." fig-alt="Semi-log plot of job wait time versus cluster utilization. Three curves for small, mixed, and large jobs. Wait times explode near 100%. Danger Zone shaded above 80%."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────

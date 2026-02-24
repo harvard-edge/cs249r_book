@@ -816,7 +816,7 @@ For ML training, where all-to-all communication is standard, full bisection band
 
 These definitions shape every topology choice that follows: fat-trees achieve non-blocking behavior through redundant switch tiers, rail-optimized networks exploit workload structure to approximate it at lower cost, and dragonflies trade bisection bandwidth for reduced cabling.
 
-::: {#fig-topology-bisection fig-env="figure" fig-pos="htb" fig-cap="Topology Bisection Bandwidth Comparison. Fat-Tree architectures provide full bisection bandwidth, while other topologies trade this off for cost or latency." fig-alt="Bar chart or comparison diagram showing bisection bandwidth across Fat-Tree, Torus, and other network topologies."}
+::: {#fig-topology-bisection fig-env="figure" fig-pos="htb" fig-cap="**Topology Bisection Bandwidth Comparison**. Fat-Tree architectures provide full bisection bandwidth, while other topologies trade this off for cost or latency." fig-alt="Bar chart or comparison diagram showing bisection bandwidth across Fat-Tree, Torus, and other network topologies."}
 ```{=latex}
 \begin{tikzpicture}
     \usefont{T1}{phv}{m}{n}
@@ -882,6 +882,57 @@ A fat-tree built from switches with **radix**[^fn-switch-radix-density] $k$ supp
 However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod (leaf-spine-leaf) and 4 for inter-pod (leaf-spine-core-spine-leaf). Each additional hop introduces serialization delay and switch processing time, adding microseconds to the $\alpha$ latency term that accumulates during the thousands of synchronization steps in a training run.
 
 ### Rail-Optimized Topology {#sec-network-fabrics-rail-optimized}
+
+::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**. In modern ML nodes (e.g., DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that **Tensor Parallelism**—which synchronizes between corresponding GPUs—never competes for bisection bandwidth with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, etc."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.5cm]
+  \definecolor{NodeColor}{RGB}{240,240,240}
+  \definecolor{GPUColor}{RGB}{200,220,255}
+  \definecolor{SwitchColor}{RGB}{0,99,149}
+
+  \tikzset{
+    node/.style={draw=black!60, fill=NodeColor, thick, rounded corners=2pt, minimum width=5cm, minimum height=1.5cm},
+    gpu/.style={draw=black!40, fill=GPUColor, thick, minimum width=0.8cm, minimum height=0.6cm, font=\tiny\bfseries},
+    switch/.style={circle, draw=black!60, fill=SwitchColor, text=white, inner sep=2pt, font=\tiny\bfseries}
+  }
+
+  % Nodes
+  \node[node] (N1) at (0, 0) {};
+  \node[anchor=north west, font=\tiny\bfseries] at (N1.north west) {Node 1};
+  \node[node] (N2) at (0, -3) {};
+  \node[anchor=north west, font=\tiny\bfseries] at (N2.north west) {Node 2};
+
+  % GPUs in Node 1
+  \node[gpu] (G1_0) at (-1.8, 0) {GPU 0};
+  \node[gpu] (G1_1) at (-0.6, 0) {GPU 1};
+  \node[gpu] (G1_2) at (0.6, 0) {GPU 2};
+  \node[gpu] (G1_3) at (1.8, 0) {GPU 3};
+
+  % GPUs in Node 2
+  \node[gpu] (G2_0) at (-1.8, -3) {GPU 0};
+  \node[gpu] (G2_1) at (-0.6, -3) {GPU 1};
+  \node[gpu] (G2_2) at (0.6, -3) {GPU 2};
+  \node[gpu] (G2_3) at (1.8, -3) {GPU 3};
+
+  % Rail Switches
+  \node[switch] (S0) at (-1.8, 2) {R0};
+  \node[switch] (S1) at (-0.6, 2) {R1};
+  \node[switch] (S2) at (0.6, 2) {R2};
+  \node[switch] (S3) at (1.8, 2) {R3};
+
+  % Cabling
+  \foreach \i in {0,1,2,3} {
+    \draw[thick, BlueLine] (G1_\i) -- (S\i);
+    \draw[thick, BlueLine] (G2_\i) -- (S\i);
+  }
+
+  % Annotation
+  \draw[latex-latex, thick, OrangeLine] (G1_0) -- (G1_1) node[midway, below, font=\tiny, text=black] {NVLink};
+  \node[right=0.2cm of S3, align=left, font=\tiny] {\textbf{Rail Switches}\\(InfiniBand)};
+
+\end{tikzpicture}
+```
+:::
 
 \index{rail-optimized topology}
 
@@ -1108,7 +1159,7 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 
 The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. This cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet.
 
-::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="PFC Pause Frame Propagation. Congestion at a tail switch (S4) triggers a backpressure cascade, freezing the entire communication path upstream." fig-alt="Diagram showing PFC pause frame propagation from congested switch S4 upstream through the network path."}
+::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**PFC Pause Frame Propagation**. Congestion at a tail switch (S4) triggers a backpressure cascade, freezing the entire communication path upstream." fig-alt="Diagram showing PFC pause frame propagation from congested switch S4 upstream through the network path."}
 ```{=latex}
 \begin{tikzpicture}
     \usefont{T1}{phv}{m}{n}
@@ -1211,7 +1262,7 @@ In a well-designed cluster, the network fabric acts not just as a pipe but as a 
 
 The bandwidth staircase shown in @fig-hierarchical-staircase dictates the parallelism strategy to mitigate this cliff. **Tensor Parallelism**, requiring massive bandwidth for frequent activation exchanges, is confined to the NVLink domain within a node. **Pipeline Parallelism**, involving point-to-point transfers of activations between pipeline stages, spans the InfiniBand links between nodes. **Data Parallelism**, tolerant of lower bandwidth through gradient accumulation and overlap, stretches across the full fabric.
 
-::: {#fig-hierarchical-staircase fig-env="figure" fig-pos="htb" fig-cap="The Hierarchical Bandwidth Staircase. Communication bandwidth drops by orders of magnitude as the distance from the chip increases, dictating parallelism strategies." fig-alt="Staircase or stepped diagram showing bandwidth decreasing from on-chip through NVLink, PCIe, and network levels."}
+::: {#fig-hierarchical-staircase fig-env="figure" fig-pos="htb" fig-cap="**The Hierarchical Bandwidth Staircase**. Communication bandwidth drops by orders of magnitude as the distance from the chip increases, dictating parallelism strategies." fig-alt="Staircase or stepped diagram showing bandwidth decreasing from on-chip through NVLink, PCIe, and network levels."}
 ```{=latex}
 \begin{tikzpicture}
     \usefont{T1}{phv}{m}{n}
