@@ -822,11 +822,9 @@ Binary formats like Protocol Buffers[^fn-protobuf-serialization] (Protobuf) or F
 
 #### REST vs gRPC {#sec-model-serving-rest-vs-grpc-c7b7}
 
-Two dominant paradigms define modern serving interfaces, each with distinct system characteristics. REST (Representational State Transfer)[^fn-rest-serving]\index{REST!HTTP/1.1 protocol} typically uses HTTP/1.1 and JSON. It is universally supported, human-readable, and stateless, making it the default choice for public-facing APIs. However, standard HTTP/1.1 requires a new TCP handshake for each request (unless keep-alive is carefully tuned), and JSON serialization adds significant latency for numerical data like tensors.
+Two dominant paradigms define modern serving interfaces, each with distinct system characteristics. REST (Representational State Transfer)\index{REST!HTTP/1.1 protocol} typically uses HTTP/1.1 and JSON. It is universally supported, human-readable, and stateless, making it the default choice for public-facing APIs. However, REST's statelessness forces re-sending context with every call; for LLM serving, where a conversation context can exceed 10 KB of token IDs, this per-request overhead compounds at high QPS. Standard HTTP/1.1 also requires a new TCP handshake for each request (unless keep-alive is carefully tuned), and JSON serialization adds significant latency for numerical data like tensors.
 
 In contrast, gRPC (gRPC Remote Procedure Call)\index{gRPC!inference protocol}[^fn-grpc-inference] uses HTTP/2 and Protobuf\index{Protocol Buffers!serialization}. HTTP/2 enables multiplexing multiple requests over a single persistent TCP connection, eliminating handshake latency and allowing efficient binary streaming. Protobuf provides strict type safety and efficient binary serialization, making it the standard for internal service-to-service communication where latency is critical.
-
-[^fn-rest-serving]: **REST (Representational State Transfer)**: REST's statelessness makes each request self-contained, which simplifies load balancing across model replicas but forces re-sending context (like session state or conversation history) with every call. For LLM serving, where a conversation context can exceed 10 KB of token IDs, this per-request overhead compounds: at 1,000 QPS, the system spends network bandwidth re-transmitting state that gRPC's persistent connections would amortize to near zero. \index{REST!serving overhead}
 
 [^fn-grpc-inference]: **gRPC (gRPC Remote Procedure Call)**: Evolved from Google's internal Stubby framework, gRPC was designed to minimize the overhead of the billions of inter-service calls made per second. It achieves this by pairing HTTP/2 for persistent connection multiplexing with Protobuf for efficient binary serialization, directly addressing the handshake and parsing latencies inherent to REST/JSON. This combination yields a ~10x reduction in serialization overhead, making it the standard for internal APIs where such costs are a significant fraction of the latency budget. \index{gRPC!inference protocol}
 
@@ -1253,9 +1251,7 @@ amdahl_speedup_str = AmdahlServingCalc.amdahl_speedup_str
 **Engineering Implication**: Profile before optimizing. If preprocessing dominates, GPU-accelerated pipelines (NVIDIA DALI) may outperform model quantization.
 :::
 
-Moving preprocessing to GPU[^fn-dali-preprocessing]\index{GPU Preprocessing!accelerated pipelines} can reduce total latency by 6$\times$ in some pipelines by eliminating CPU-GPU data transfers between stages [@nvidia_triton].
-
-[^fn-dali-preprocessing]: **NVIDIA DALI (Data Loading Library)**: DALI addresses the Amdahl's Law bottleneck that occurs when fast GPU inference (<1 ms) is gated by slow CPU-based preprocessing like JPEG decoding (3-5 ms). By executing the entire data pipeline on the GPU, it eliminates the CPU-to-GPU data transfer that otherwise dominates total latency. This approach yields a 2-6x end-to-end speedup by keeping the GPU fully utilized. \index{DALI!GPU preprocessing}
+Moving preprocessing to GPU\index{GPU Preprocessing!accelerated pipelines} can reduce total latency by 6$\times$ in some pipelines by eliminating CPU-GPU data transfers between stages [@nvidia_triton].
 
 Effective optimization targets the largest time consumers first.
 
@@ -1621,11 +1617,9 @@ littles_w_str = CapacityPlanning.littles_w_str
 littles_l_str = CapacityPlanning.littles_l_str
 ```
 
-Serving engineers need a tool that connects observable metrics to capacity requirements. The most celebrated result in queuing theory is Little's Law,\index{Little's Law!concurrency calculation}\index{Little's Law!L=λW formula}[^fn-littles-law-serving] [^fn-littles-law-intuition] which @eq-littles-law expresses as a simple relationship between three quantities in any stable system: Concretely, a server targeting `{python} serving_qps_str` QPS with a `{python} serving_slo_str` SLO requires `{python} serving_concurrency_slots_str` concurrent request slots, which sets the hard memory floor for activation storage on that node.
+Serving engineers need a tool that connects observable metrics to capacity requirements. The most celebrated result in queuing theory is Little's Law,\index{Little's Law!concurrency calculation}\index{Little's Law!L=λW formula}[^fn-littles-law-serving] which @eq-littles-law expresses as a simple relationship between three quantities in any stable system: Concretely, a server targeting `{python} serving_qps_str` QPS with a `{python} serving_slo_str` SLO requires `{python} serving_concurrency_slots_str` concurrent request slots, which sets the hard memory floor for activation storage on that node.
 
 [^fn-littles-law-serving]: **Little's Law**: John D.C. Little proved in 1961 that $L = \lambda W$ holds for *any* stable system regardless of arrival distribution, service distribution, or scheduling discipline. This universality is why it anchors ML capacity planning: the formula requires no assumptions about whether requests arrive in bursts, whether inference times vary, or whether the scheduler batches aggressively. The only requirement is stability ($\lambda < \mu$), and when that condition breaks, no amount of optimization prevents queue divergence. \index{Little's Law!capacity planning}
-
-[^fn-littles-law-intuition]: **Little's Law Intuition**: If a barista makes one drink per minute ($W=1$) but customers arrive every 30 seconds ($\lambda=2$), the queue grows without bound---more servers (baristas) are the only fix. For ML serving the mapping is direct: $W$ is inference latency, $\lambda$ is request rate, and $L$ is the in-flight request count that determines GPU memory requirements for concurrent activations. When $\lambda$ exceeds capacity, no batching or caching prevents queue explosion. \index{Little's Law!intuition}
 
 $$L = \lambda \cdot W$$ {#eq-littles-law}
 
@@ -1736,7 +1730,9 @@ Little's Law has immediate practical implications. If your inference service ave
 
 ### The Utilization-Latency Relationship {#sec-model-serving-utilizationlatency-relationship-a2f0}
 
-Little's Law describes average system behavior, but it does not reveal *how* latency changes as load approaches capacity. To answer the critical question of *how* much spare capacity a serving system needs, we turn to the M/M/1 queue model. For a system with Poisson arrivals\index{Poisson Arrivals!queuing model} and exponential service times, the average time in system follows:
+Little's Law describes average system behavior, but it does not reveal *how* latency changes as load approaches capacity. To answer the critical question of *how* much spare capacity a serving system needs, we turn to the M/M/1 queue model.[^fn-mm1-erlang-serving] For a system with Poisson arrivals\index{Poisson Arrivals!queuing model} and exponential service times, the average time in system follows:
+
+[^fn-mm1-erlang-serving]: **M/M/1 Queue**: Queuing theory originated with Agner Krarup Erlang's 1909 analysis of the Copenhagen Telephone Exchange, where call arrivals genuinely were memoryless (Poisson). The M/M/1 model's exponential service time assumption fit telephony well but overpredicts variance for ML inference, where fixed-architecture forward passes produce near-constant service times. This mismatch is *useful*: M/M/1 overestimates wait times by roughly 2$\times$ compared to the more realistic M/D/1, providing a built-in safety margin for capacity planning. \index{M/M/1 Queue!Erlang origin}
 
 $$W = \frac{1}{\mu - \lambda} = \frac{\text{service time}}{1 - \rho}$$ {#eq-mm1-wait}
 
@@ -2849,7 +2845,7 @@ This approach reduces average wait time during high traffic while maintaining ba
 
 The interplay between window size and batch limits creates a space of possible configurations, each representing a different balance between throughput and latency.
 
-The batching configuration space forms a Pareto frontier[^fn-pareto-frontier-serving]\index{Pareto Frontier!throughput-latency} where improving throughput requires accepting higher latency. @tbl-pareto-batching traces this frontier across five representative configurations:
+The batching configuration space forms a Pareto frontier\index{Pareto Frontier!throughput-latency} where improving throughput requires accepting higher latency. @tbl-pareto-batching traces this frontier across five representative configurations:
 
 | **Window (ms)** | **Max Batch** | **Avg Latency** | **p99 Latency** | **Throughput** | **Configuration**    |
 |:----------------|--------------:|----------------:|----------------:|---------------:|:---------------------|
@@ -2862,8 +2858,6 @@ The batching configuration space forms a Pareto frontier[^fn-pareto-frontier-ser
 : **Batching Pareto Frontier**: Each configuration represents a different point on the throughput-latency trade-off curve. Moving from 2ms to 50ms windows improves throughput by only 52% while increasing p99 latency by 5.4$\times$. Diminishing returns make aggressive batching costly for latency-sensitive applications. {#tbl-pareto-batching}
 
 #### Practical Configuration Guidelines {#sec-model-serving-practical-configuration-guidelines-9791}
-
-[^fn-pareto-frontier-serving]: **Pareto Frontier**: Represents the set of optimal configurations where improving one objective (throughput) necessarily degrades another (latency). The batching configurations in @tbl-pareto-batching trace this specific frontier, where any point below it is strictly suboptimal—for instance, offering lower throughput for the same latency budget. \index{Pareto Frontier!throughput-latency}
 
 The Pareto frontier in @tbl-pareto-batching illustrates why these guidelines matter: moving from a 2ms to a 50ms window improves throughput by only 52% while increasing p99 latency by 5.4$\times$. Principled batching configuration avoids this region of diminishing returns by working backward from the latency budget. Allocating 20 to 30 percent of the SLO to batching wait time leaves the remainder for inference and overhead, which bounds the maximum window at $T_{\text{max}} = 0.3 \times L_{\text{lat,SLO}}$. The traffic estimate that feeds this calculation should use the p95 arrival rate rather than the average, because batching windows tuned for average traffic produce oversized batches during spikes—precisely when SLO headroom matters most. GPU memory imposes a hard ceiling on batch size independent of the latency constraint, since activation memory scales linearly with the batch dimension. Finally, monitoring the actual batch size distribution in production reveals whether initial traffic assumptions hold; high variance signals that the window needs adaptive tuning rather than a fixed configuration.
 
@@ -2954,11 +2948,9 @@ The mechanism works as follows: when a sequence generates its end-of-sequence to
 
 This dynamic approach maintains high GPU utilization even when sequence lengths vary dramatically.
 
-Systems implementing continuous batching, such as vLLM[^fn-vllm-paging] and TensorRT-LLM[^fn-tensorrt-llm-serving], achieve 2--4$\times$ higher throughput than traditional static batching [@agrawal2024sarathi]. The improvement comes from two sources: eliminating wasted compute on completed sequences and reducing average wait time for new requests. For production language model serving where response lengths vary from single tokens to thousands, continuous batching has become essential for cost-effective deployment.
+Systems implementing continuous batching, such as vLLM[^fn-vllm-paging] and TensorRT-LLM, achieve 2--4$\times$ higher throughput than traditional static batching [@agrawal2024sarathi]. The improvement comes from two sources: eliminating wasted compute on completed sequences and reducing average wait time for new requests. For production language model serving where response lengths vary from single tokens to thousands, continuous batching has become essential for cost-effective deployment.
 
 [^fn-vllm-paging]: **vLLM (Virtual LLM)**: An open-source serving system that enables continuous batching via its PagedAttention algorithm. Inspired by OS virtual memory, this technique eliminates the severe memory fragmentation that constrains static batching. By avoiding the 40-50% memory waste common in prior systems, vLLM directly achieves the 2--4$\times$ throughput improvement. \index{vLLM!virtual memory analogy}
-
-[^fn-tensorrt-llm-serving]: **TensorRT-LLM**: Its continuous batching system uses a paged KV cache to immediately reclaim GPU memory from completed requests, eliminating the idle compute bubbles that plague static batching. This performance requires compiling the model into a highly-specialized "engine" for a single GPU architecture (e.g., Ampere or Hopper). The operational trade-off is a loss of portability, as a fleet with just 3 different GPU generations requires maintaining 3 separate build and deployment pipelines. \index{TensorRT-LLM!LLM serving}
 
 Memory management adds complexity to continuous batching. As sequences enter and exit the batch, the key-value cache that stores attention context must be dynamically allocated and freed. Consider what happens when sequences of varying lengths share GPU memory: a 100-token sequence completes and releases its cache, but a new 150-token sequence cannot use that space because it needs a larger contiguous block. Over time, small unusable gaps accumulate between allocated regions, eventually preventing new sequences from starting even when total free memory appears sufficient. This *memory fragmentation*\index{Memory Fragmentation!KV cache} can waste 40 to 50 percent of available memory in naive implementations, severely limiting the concurrent batch size that determines throughput.
 
@@ -2966,7 +2958,7 @@ Memory management adds complexity to continuous batching. As sequences enter and
 
 PagedAttention\index{Continuous Batching!iteration-level}\index{PagedAttention!memory fragmentation solution},[^fn-pagedattention-serving] introduced in vLLM, solves this fragmentation problem by applying operating system virtual memory concepts to GPU memory [@kwon2023vllm]. Instead of allocating one contiguous block per sequence, PagedAttention divides the KV cache into fixed-size *pages* (typically 16 tokens each). A sequence's cache consists of pointers to non-contiguous pages scattered across GPU memory. When a sequence completes, its pages return to a free list and can be reused by any new sequence, regardless of length. This approach achieves near-zero fragmentation: vLLM reports memory utilization above 95% compared to 50–60% for contiguous allocation schemes. The overhead is modest (one pointer lookup per page during attention computation), making PagedAttention the standard for production LLM serving.
 
-[^fn-pagedattention-serving]: **PagedAttention**: Introduced at SOSP 2023, this algorithm applies OS virtual memory concepts---paging and copy-on-write---to GPU memory management for LLMs. Before PagedAttention, existing systems wasted 60--80% of KV cache memory due to fragmentation and over-reservation. PagedAttention reduces waste to under 4%, enabling 2--4$\times$ higher throughput on the same hardware. The technique has become the de facto standard in production LLM serving, demonstrating that decades-old OS abstractions remain the most effective tools for managing scarce GPU memory. \index{PagedAttention!memory efficiency}
+[^fn-pagedattention-serving]: **PagedAttention**: The name directly references OS virtual memory paging, first implemented on the Atlas computer at Manchester (1962) to solve the same problem---programs needed more memory than physically available, and contiguous allocation wasted space. Introduced at SOSP 2023, PagedAttention applies this six-decade-old abstraction to GPU memory: before it, LLM serving systems wasted 60--80% of KV cache memory due to fragmentation and over-reservation. PagedAttention reduces waste to under 4%, enabling 2--4$\times$ higher throughput on the same hardware. \index{PagedAttention!memory efficiency}
 
 The batching and memory techniques covered here establish the foundation for LLM serving, but several advanced topics warrant additional study:
 
@@ -3206,9 +3198,7 @@ Generative models produce a stream of tokens rather than a single output tensor.
 
 :::
 
-These two metrics[^fn-ttft-tpot-llm] capture distinct user experience aspects.
-
-[^fn-ttft-tpot-llm]: **TTFT (Time To First Token) and TPOT (Time Per Output Token)**: TTFT captures the user's initial "wait time" (prompt processing), while TPOT captures the subsequent "reading speed" (token generation). These experiences are distinct because they are physically decoupled: TTFT is typically compute-bound, while TPOT is memory-bandwidth-bound. A system can thus have a fast TTFT but a slow TPOT (>100ms/token), creating a choppy experience that optimizing for initial response alone cannot fix. \index{TTFT!TPOT!LLM metrics}
+These two metrics capture distinct user experience aspects.
 
 ::: {.callout-lighthouse title="LLM Serving Latency Targets"}
 
@@ -3224,11 +3214,7 @@ A production-grade LLM service typically targets the following SLOs:
 
 Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy dramatically affects both output quality and computational cost.
 
-The simplest approach, greedy decoding\index{Greedy Decoding!LLM generation}, selects the highest-probability token at each step. It is fast but often produces repetitive, low-quality outputs because it cannot recover from early mistakes. Beam search[^fn-beam-search-serving]\index{Beam Search!decoding strategy}\index{Beam Search!candidate sequences} improves quality by maintaining multiple candidate sequences and selecting the highest-scoring complete sequence, though it multiplies computation by the beam width. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-k, and top-p parameters introduces randomness for diversity [@holtzman2020curious]. Temperature scales logits before softmax. Top-k limits sampling to the k highest-probability tokens. Top-p, also called nucleus sampling[^fn-nucleus-sampling-serving]\index{Nucleus Sampling!top-p}, limits sampling to tokens comprising probability mass p.
-
-[^fn-beam-search-serving]: **Beam Search**: It counteracts the risk of early greedy mistakes by expanding a fixed number of the most promising candidate sequences (the "beam") at each decoding step. For LLM serving, this quality gain has a direct memory cost, as each sequence in the beam must maintain its own independent KV cache. A beam width of 5 therefore requires 5x the KV cache memory of greedy decoding, making it a critical cost-quality trade-off. \index{Beam Search!memory cost}
-
-[^fn-nucleus-sampling-serving]: **Nucleus Sampling (Top-p)**: This method defines the sampling set by including the most probable tokens until their cumulative probability exceeds the threshold *p*. Unlike top-k's fixed count, this boundary adapts to the model's confidence, preventing sampling from the distribution's long tail when the model is certain but allowing more diversity when it is not. For most generative tasks, *p* is set to a high value like 0.92 to prune improbable tokens while retaining a high-quality nucleus. \index{Nucleus Sampling!adaptive diversity}
+The simplest approach, greedy decoding\index{Greedy Decoding!LLM generation}, selects the highest-probability token at each step. It is fast but often produces repetitive, low-quality outputs because it cannot recover from early mistakes. Beam search\index{Beam Search!decoding strategy}\index{Beam Search!candidate sequences} improves quality by maintaining multiple candidate sequences and selecting the highest-scoring complete sequence, though it multiplies computation by the beam width. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-k, and top-p parameters introduces randomness for diversity [@holtzman2020curious]. Temperature scales logits before softmax. Top-k limits sampling to the k highest-probability tokens. Top-p, also called nucleus sampling\index{Nucleus Sampling!top-p}, limits sampling to tokens comprising probability mass p.
 
 The choice presents latency tradeoffs [@meister2020beam]. Beam search with width 5 takes roughly 5$\times$ the compute of greedy decoding. Sampling adds minimal overhead but requires careful parameter tuning to balance quality and coherence.
 
@@ -3370,7 +3356,9 @@ TensorRT\index{Inference Engine!specialized}\index{TensorRT!GPU optimization}[^f
 
 [^fn-tensorrt-gpu-serving]: **TensorRT**: It abandons the portability of general-purpose frameworks by requiring a build phase that recompiles the model for a *specific* target GPU architecture (e.g., an H100). This hardware lock-in allows for aggressive, irreversible optimizations like layer fusion that are unsafe for a framework that must run on any hardware. The resulting non-portable engine can deliver 2--5$\times$ lower latency, directly reducing the number of GPUs required to meet a throughput target. \index{TensorRT!GPU optimization}
 
-Layer fusion\index{Layer Fusion!kernel optimization} combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15–60 μs saved per fusion) and reduces memory traffic by 2--3$\times$. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
+Layer fusion[^fn-layer-fusion-serving]\index{Layer Fusion!kernel optimization} combines multiple sequential operations into a single GPU kernel. Consider a common pattern: convolution → batch normalization → ReLU activation. Without fusion, this requires three kernel launches, three round-trips to GPU memory (write conv output, read for batchnorm, write batchnorm output, read for ReLU), and three sets of intermediate tensors. Fusion combines all three into one kernel that reads inputs once, computes the combined result in registers, and writes final outputs once. This eliminates kernel launch overhead (15–60 μs saved per fusion) and reduces memory traffic by 2--3$\times$. TensorRT automatically detects and fuses common patterns; a typical ResNet-50 reduces from ~50 kernels to ~15 after fusion.
+
+[^fn-layer-fusion-serving]: **Layer Fusion**: Analogous to loop fusion in compiler optimization, where adjacent loops over the same array are combined to reduce memory traffic. Kernel fusion applies the identical principle to GPU operations: sequential kernels that write and re-read intermediate tensors from HBM are merged into a single kernel that keeps data in registers. The savings compound---a typical ResNet-50 has ~35 fusible operation pairs, and each eliminated HBM round-trip saves 1--3 $\mu$s at `{python} h100_bw_tbs` TB/s bandwidth, converting memory-bound chains into compute-bound fused kernels. \index{Layer Fusion!compiler analogy}
 
 Kernel auto-tuning\index{Kernel Auto-Tuning!algorithm selection}\index{Algorithm Selection!convolution implementations} selects the fastest algorithm for each operation on the specific GPU. A single convolution can be implemented using dozens of algorithms (direct, FFT-based, Winograd, various tiling strategies), each optimal for different input sizes and GPU architectures. Auto-tuning benchmarks each candidate and caches the winner, trading compilation time for runtime performance.
 
@@ -3892,9 +3880,7 @@ The linear growth of the KV cache with sequence length forces a hard trade-off: 
 
 #### Workload Profile {#sec-model-serving-workload-profile-a380}
 
-*   **Model**: Llama-3-8B (quantized to 4-bit AWQ[^fn-awq-quantization]\index{AWQ!4-bit quantization}).
-
-[^fn-awq-quantization]: **AWQ (Activation-Aware Weight Quantization)**: AWQ enables this 4-bit quantization by protecting salient weights with per-channel scaling factors, allowing the rest to be aggressively compressed. For a model like Llama-3-8B, this reduces its memory footprint by nearly 4x, making deployment on smaller, more economical GPUs feasible. This efficiency is viable because the trade-off is a minimal performance drop, typically <0.5% accuracy degradation. \index{AWQ!serving efficiency}
+*   **Model**: Llama-3-8B (quantized to 4-bit AWQ\index{AWQ!4-bit quantization}; see @sec-model-compression for quantization techniques).
 
 *   **Hardware**: 1$\times$ NVIDIA H100 SXM5 GPU (`{python} h100_mem` GB HBM3, `{python} h100_bw_tbs` TB/s bandwidth).
 *   **Request Characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).

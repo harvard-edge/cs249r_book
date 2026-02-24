@@ -51,7 +51,7 @@ start_chapter("vol2:fault_tolerance")
 
 ::: {.callout-tip title="Learning Objectives"}
 
-- Calculate system-level **MTBF** from component failure rates and derive optimal checkpoint intervals using the **Young-Daly formula** to minimize wasted work
+- Calculate system-level **\text{MTBF}** from component failure rates and derive optimal checkpoint intervals using the **Young-Daly formula** to minimize wasted work
 - Design distributed **checkpoint and recovery** strategies that coordinate state across thousands of GPUs while managing multi-terabyte checkpoint sizes
 - Implement serving **redundancy**, **replication**, and **failover** mechanisms that maintain availability within millisecond latency requirements under partial failures
 - Apply **graceful degradation** strategies including **model fallback**, **feature fallback**, and **load shedding** to maintain partial service when full capability is unavailable
@@ -143,13 +143,13 @@ System reliability engineering provides the foundational framework for understan
 
 [^fn-poisson-failure]: **Poisson Process**: A statistical model for events occurring independently at a constant average rate. Reliability models assume hardware failures follow a Poisson distribution, leading to the exponential survival function $R(t) = e^{-\lambda t}$. This assumption simplifies fleet planning: the probability of at least one failure in a 10,000-node cluster is $1 - e^{-N \lambda t}$, making failure risk scale linearly with $N$ but exponentially with $t$. \index{Poisson Process!failure modeling}
 
-[^fn-failure-rate-fits]: **Failure Rate ($\lambda$)**: Expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A datacenter GPU with 50,000-hour MTBF has $\lambda = 20$ FITs, which seems negligible for one device but becomes dominant at fleet scale: a 10,000-GPU cluster accumulates 200,000 FITs, translating to an expected failure every 5 hours. \index{Failure Rate!FITs}
+[^fn-failure-rate-fits]: **Failure Rate ($\lambda$)**: Expressed in FITs (Failures In Time), where 1 FIT equals one failure per billion device-hours. A datacenter GPU with 50,000-hour \text{MTBF} has $\lambda = 20$ FITs, which seems negligible for one device but becomes dominant at fleet scale: a 10,000-GPU cluster accumulates 200,000 FITs, translating to an expected failure every 5 hours. \index{Failure Rate!FITs}
 
 $$ R_{single}(t) = e^{-\lambda t} $$ {#eq-single-component-reliability}
 
-The mean time between failures (MTBF) for this component equals $1/\lambda$. Modern GPUs in datacenter environments exhibit MTBF values ranging from 40,000 to 100,000 hours depending on operating conditions, cooling effectiveness, and manufacturing variation.[^fn-gpu-mtbf-field]
+The mean time between failures (\text{MTBF}) for this component equals $1/\lambda$. Modern GPUs in datacenter environments exhibit \text{MTBF} values ranging from 40,000 to 100,000 hours depending on operating conditions, cooling effectiveness, and manufacturing variation.[^fn-gpu-mtbf-field]
 
-[^fn-gpu-mtbf-field]: **GPU MTBF Variation**: NVIDIA specifies A100 MTBF at approximately 50,000 hours under controlled conditions, but fleet telemetry from Google (TPUs) and Meta (GPUs) consistently shows field failure rates 20--50% higher than manufacturer specifications. The gap arises from thermal stress, power fluctuations, and memory-intensive ML workloads that push components beyond the steady-state assumptions in reliability models. \index{MTBF!GPU field variation}
+[^fn-gpu-mtbf-field]: **GPU \text{MTBF} Variation**: NVIDIA specifies A100 \text{MTBF} at approximately 50,000 hours under controlled conditions, but fleet telemetry from Google (TPUs) and Meta (GPUs) consistently shows field failure rates 20--50% higher than manufacturer specifications. The gap arises from thermal stress, power fluctuations, and memory-intensive ML workloads that push components beyond the steady-state assumptions in reliability models. \index{\text{MTBF}!GPU field variation}
 
 When multiple independent components operate in a system where any single failure causes system failure, @eq-system-reliability-product formalizes how system reliability becomes the product of individual component reliabilities:
 
@@ -159,23 +159,23 @@ For $N$ identical components with individual failure rate $\lambda$, this simpli
 
 $$ R_{system}(t) = e^{-N\lambda t} $$ {#eq-system-reliability-n-components}
 
-The system failure rate becomes $N\lambda$, and @eq-system-mtbf expresses how the system MTBF scales inversely with component count. This inverse scaling reveals the counterintuitive reality of *the 9s of reliability* at cluster scale:
+The system failure rate becomes $N\lambda$, and @eq-system-mtbf expresses how the system \text{MTBF} scales inversely with component count. This inverse scaling reveals the counterintuitive reality of *the 9s of reliability* at cluster scale:
 
-$$ MTBF_{system} = \frac{1}{N\lambda} = \frac{MTBF_{component}}{N} $$ {#eq-system-mtbf}
+$$ \text{MTBF}_{system} = \frac{1}{N\lambda} = \frac{\text{MTBF}_{component}}{N} $$ {#eq-system-mtbf}
 
 @fig-reliability-gap visualizes the fundamental tension: as clusters grow, the expected time between failures shrinks below common training durations, making fault tolerance not optional but physically necessary.
 
-::: {#fig-reliability-gap fig-env="figure" fig-pos="htb" fig-cap="The Reliability Gap. As GPU count increases, cluster MTBF drops below common training durations. A 10,000-GPU cluster with server-grade components experiences a failure roughly every 10 hours, making a 3-month training run impossible without fault tolerance mechanisms." fig-alt="Semilog plot of cluster MTBF versus GPU count with reference lines for 1-day, 1-week, and 3-month training durations. Shaded region where MTBF falls below 3-month training."}
+::: {#fig-reliability-gap fig-env="figure" fig-pos="htb" fig-cap="The Reliability Gap. As GPU count increases, cluster \text{MTBF} drops below common training durations. A 10,000-GPU cluster with server-grade components experiences a failure roughly every 10 hours, making a 3-month training run impossible without fault tolerance mechanisms." fig-alt="Semilog plot of cluster \text{MTBF} versus GPU count with reference lines for 1-day, 1-week, and 3-month training durations. Shaded region where \text{MTBF} falls below 3-month training."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ RELIABILITY GAP (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-reliability-gap — cluster MTBF vs training duration
+# │ Context: @fig-reliability-gap — cluster \text{MTBF} vs training duration
 # │
-# │ Goal: Plot cluster MTBF = MTBF_component/N vs GPU count; show crossover
+# │ Goal: Plot cluster \text{MTBF} = \text{MTBF}_component/N vs GPU count; show crossover
 # │       with 1-day, 1-week, 3-month training reference lines.
-# │ Show: Semilogx; shaded region where MTBF < 3-month training.
+# │ Show: Semilogx; shaded region where \text{MTBF} < 3-month training.
 # │ How: cluster_mtbf = 100000/N; axhline references; viz.set_book_style().
 # │
 # │ Imports: numpy (np), matplotlib.pyplot (plt), mlsys.viz (viz)
@@ -189,8 +189,8 @@ plt.style.use('seaborn-v0_8-whitegrid')
 viz.set_book_style()
 COLORS = viz.COLORS
 
-# Parameters: per-GPU MTBF 100,000 hours (server-grade)
-# 10,000 GPUs -> cluster MTBF ≈ 10 hours
+# Parameters: per-GPU \text{MTBF} 100,000 hours (server-grade)
+# 10,000 GPUs -> cluster \text{MTBF} ≈ 10 hours
 mtbf_component = 100_000  # hours
 gpu_counts = np.array([8, 64, 512, 1000, 4000, 10000, 25000])
 cluster_mtbf = mtbf_component / gpu_counts
@@ -209,7 +209,7 @@ ax.axhline(train_3month, color=COLORS['OrangeLine'], linestyle='--', alpha=0.7, 
 
 ax.fill_between(gpu_counts, 0.1, cluster_mtbf, where=(cluster_mtbf < train_3month), alpha=0.2, color=COLORS['RedL'])
 ax.set_xlabel('Cluster Size (GPUs)')
-ax.set_ylabel('Cluster MTBF (hours)')
+ax.set_ylabel('Cluster \text{MTBF} (hours)')
 ax.set_ylim(0.5, 1e5)
 ax.set_xlim(5, 5e4)
 ax.legend(loc='upper right')
@@ -223,17 +223,17 @@ plt.show()
 *When* failure is inevitable, the key engineering decision is how often to save progress. Checkpointing too frequently wastes time on I/O; checkpointing too rarely wastes time re-computing work after a failure.
 
 ::: {#nte-young-daly .callout-principle icon=false title="The Young-Daly Checkpoint Law"}
-**The Invariant**: The optimal checkpoint frequency balances the cost of writing the checkpoint ($T_{write}$) against the expected cost of reworking lost progress due to failures ($\text{MTBF}$).
-$$ \tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}} $$
+**The Invariant**: The optimal checkpoint frequency balances the cost of writing the checkpoint ($T_{\text{write}}$) against the expected cost of reworking lost progress due to failures ($\text{\text{MTBF}}$).
+$$ \tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{\text{MTBF}}} $$
 
-**The Implication**: Checkpointing is not "free." As cluster size grows, MTBF drops, forcing more frequent checkpoints. This demands high-bandwidth storage (Burst Buffers) to prevent I/O from dominating training time.
+**The Implication**: Checkpointing is not "free." As cluster size grows, \text{MTBF} drops, forcing more frequent checkpoints. This demands high-bandwidth storage (Burst Buffers) to prevent I/O from dominating training time.
 :::
 
 The **Young-Daly formula**[^fn-young-daly-history] identifies the "sweet spot" that minimizes total wasted work.
 
-[^fn-young-daly-history]: **Young-Daly Formula**: J. W. Young derived the first-order optimal checkpoint interval in a 1974 *Communications of the ACM* paper; John Daly independently refined it in 2006 with tighter second-order bounds. The formula's square-root relationship ($\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}}$) means that halving MTBF only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth. \index{Young-Daly Formula!history}
+[^fn-young-daly-history]: **Young-Daly Formula**: J. W. Young derived the first-order optimal checkpoint interval in a 1974 *Communications of the ACM* paper; John Daly independently refined it in 2006 with tighter second-order bounds. The formula's square-root relationship ($\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{\text{MTBF}}}$) means that halving \text{MTBF} only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth. \index{Young-Daly Formula!history}
 
-::: {#fig-young-daly fig-env="figure" fig-pos="htb" fig-cap="**The Young-Daly Optimal Checkpoint**. Total wasted work is the sum of *checkpointing overhead* (which decreases with interval $\tau$) and *rework cost* (which increases with $\tau$). The minimum point defines the optimal interval $\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}}$. For a cluster with 5-hour MTBF and 15-minute write time, the optimal interval is ~1.2 hours." fig-alt="Plot of Overhead vs Checkpoint Interval. A red curve for Rework Cost increases linearly. A blue curve for Checkpoint Overhead decreases hyperbolically. Their sum (green curve) shows a clear minimum point labeled Optimal Interval."}
+::: {#fig-young-daly fig-env="figure" fig-pos="htb" fig-cap="**The Young-Daly Optimal Checkpoint**. Total wasted work is the sum of *checkpointing overhead* (which decreases with interval $\tau$) and *rework cost* (which increases with $\tau$). The minimum point defines the optimal interval $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{\text{MTBF}}}$. For a cluster with 5-hour \text{MTBF} and 15-minute write time, the optimal interval is ~1.2 hours." fig-alt="Plot of Overhead vs Checkpoint Interval. A red curve for Rework Cost increases linearly. A blue curve for Checkpoint Overhead decreases hyperbolically. Their sum (green curve) shows a clear minimum point labeled Optimal Interval."}
 ``` {python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -241,8 +241,8 @@ The **Young-Daly formula**[^fn-young-daly-history] identifies the "sweet spot" t
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @fig-young-daly — checkpoint overhead vs rework trade-off
 # │
-# │ Goal: Plot overhead = T_write/τ and rework = τ/(2*MTBF); show optimal
-# │       τ_opt = sqrt(2*T_write*MTBF) minimizing total waste.
+# │ Goal: Plot overhead = T_write/τ and rework = τ/(2*\text{MTBF}); show optimal
+# │       τ_opt = sqrt(2*T_write*\text{MTBF}) minimizing total waste.
 # │ Show: Three curves; minimum point annotation.
 # │ How: tau = linspace; over_ckpt + over_rework; viz.set_book_style().
 # │
@@ -269,8 +269,8 @@ tau_opt = np.sqrt(2 * t_write * mtbf)
 
 fig, ax = plt.subplots(figsize=(8, 5))
 
-ax.plot(tau, over_ckpt, label='Checkpoint Overhead ($T_{write}/\\tau$)', color=COLORS['BlueLine'], linestyle='--')
-ax.plot(tau, over_rework, label='Expected Rework ($\\tau/2\\text{MTBF}$)', color=COLORS['RedLine'], linestyle='--')
+ax.plot(tau, over_ckpt, label='Checkpoint Overhead ($T_{\text{write}}/\\tau$)', color=COLORS['BlueLine'], linestyle='--')
+ax.plot(tau, over_rework, label='Expected Rework ($\\tau/2\\text{\text{MTBF}}$)', color=COLORS['RedLine'], linestyle='--')
 ax.plot(tau, total_waste, label='Total Wasted Work', color=COLORS['GreenLine'], linewidth=2.5)
 
 # Optimal point
@@ -290,7 +290,7 @@ plt.show()
 ```
 :::
 
-The formula $\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}}$ reveals a critical scaling property: as clusters grow larger ($MTBF \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-storage) to keep $T_{write}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity.
+The formula $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{\text{MTBF}}}$ reveals a critical scaling property: as clusters grow larger ($\text{MTBF} \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-storage) to keep $T_{\text{write}}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity.
 
 ::: {.callout-notebook title="The 9s of Reliability"}
 **Problem**: You have a cluster of **10,000 GPUs**. Each GPU has **99.99%** availability (only 52 minutes of downtime per year). What is the probability that the **entire cluster** is up for **1 hour**?
@@ -307,20 +307,20 @@ The formula $\tau_{opt} = \sqrt{2 \cdot T_{write} \cdot \text{MTBF}}$ reveals a 
 This linear relationship between component count and failure rate has a profound implication: *scale transforms failure* from a rare event into a continuous condition.
 
 ::: {.callout-perspective title="Scale Transforms Failure"}
-A single GPU with MTBF of 50,000 hours (5.7 years) fails rarely enough that manual intervention suffices. A 10,000 GPU cluster with the same per-GPU reliability has system MTBF of 5 hours. Failures occur continuously, multiple times per day. Systems must be designed expecting failure, not hoping to avoid it.
+A single GPU with \text{MTBF} of 50,000 hours (5.7 years) fails rarely enough that manual intervention suffices. A 10,000 GPU cluster with the same per-GPU reliability has system \text{MTBF} of 5 hours. Failures occur continuously, multiple times per day. Systems must be designed expecting failure, not hoping to avoid it.
 :::
 
 ### Quantitative Reliability Analysis {#sec-fault-tolerance-reliability-quantitative-analysis}
 
 Building quantitative understanding of system reliability requires moving beyond qualitative descriptions to precise mathematical frameworks. Reliability engineering provides formal methods for calculating failure rates, predicting system availability, and designing fault tolerance strategies based on measurable metrics.
 
-#### MTBF and FIT Rate Calculations {#sec-fault-tolerance-reliability-mtbf-fit}
+#### \text{MTBF} and FIT Rate Calculations {#sec-fault-tolerance-reliability-mtbf-fit}
 
-Mean Time Between Failures (MTBF) quantifies the expected operational time between successive failures. Complementing MTBF, the Failures In Time (FIT) rate provides a normalized measure, defined as the number of failures per billion ($10^9$) device-hours of operation:
+Mean Time Between Failures (\text{MTBF}) quantifies the expected operational time between successive failures. Complementing \text{MTBF}, the Failures In Time (FIT) rate provides a normalized measure, defined as the number of failures per billion ($10^9$) device-hours of operation:
 
-$$\text{FIT} = \frac{10^9}{\text{MTBF}}$$
+$$\text{FIT} = \frac{10^9}{\text{\text{MTBF}}}$$
 
-A GPU with MTBF of 50,000 hours has a FIT rate of $10^9 / 50,000 = 20,000$ FIT.
+A GPU with \text{MTBF} of 50,000 hours has a FIT rate of $10^9 / 50,000 = 20,000$ FIT.
 
 #### System Reliability Composition {#sec-fault-tolerance-reliability-composition}
 
@@ -328,7 +328,7 @@ Complex ML systems comprise multiple components whose individual failure rates c
 
 For **series systems** (e.g., a node where all 8 GPUs must work), failure of any component causes system failure. The system reliability $R_{\text{sys}}$ is the product of individual component reliabilities:
 $$R_{\text{sys}} = \prod_{i=1}^{n} R_i$$
-The system MTBF for a series configuration is $\text{MTBF}_{\text{sys}} = 1 / \sum \lambda_i$. This reveals the scaling challenge: adding components reduces system MTBF linearly.
+The system \text{MTBF} for a series configuration is $\text{\text{MTBF}}_{\text{sys}} = 1 / \sum \lambda_i$. This reveals the scaling challenge: adding components reduces system \text{MTBF} linearly.
 
 For **parallel systems** providing redundancy (e.g., active-active model replicas), failure occurs only when all redundant components fail simultaneously:
 $$R_{\text{sys}} = 1 - \prod_{i=1}^{n} (1 - R_i)$$
@@ -336,20 +336,20 @@ $$R_{\text{sys}} = 1 - \prod_{i=1}^{n} (1 - R_i)$$
 #### Worked Example: GPU Cluster Reliability {#sec-fault-tolerance-reliability-worked-example-cluster}
 
 Consider training a **Archetype A (GPT-4 / Llama-3)** 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs.
-*   **GPU Logic**: 4,000 FIT per GPU$\times$ 1,024 = 4,096,000 FIT $\rightarrow$ **MTBF $\approx$ 244 hours**.
-*   **HBM2 Memory**: 250 FIT per Mb. Total Mb = $1,024 \times 80 \text{ GB} \times 8 \times 1,024 \approx 671 \text{M Mb}$. Total FIT $\approx$ 167B FIT $\rightarrow$ **MTBF $\approx$ 21 seconds**.
+*   **GPU Logic**: 4,000 FIT per GPU$\times$ 1,024 = 4,096,000 FIT $\rightarrow$ **\text{MTBF} $\approx$ 244 hours**.
+*   **HBM2 Memory**: 250 FIT per Mb. Total Mb = $1,024 \times 80 \text{ GB} \times 8 \times 1,024 \approx 671 \text{M Mb}$. Total FIT $\approx$ 167B FIT $\rightarrow$ **\text{MTBF} $\approx$ 21 seconds**.
 
-Without ECC memory protection, large-scale training is impossible as corruption would occur every 21 seconds. With ECC providing a 100$\times$ reduction in soft error rates, the memory MTBF improves to 36 minutes, and the combined system MTBF becomes approximately **35 minutes**. This quantitative analysis justifies checkpoint frequencies of 15-30 minutes for large-scale training.
+Without ECC memory protection, large-scale training is impossible as corruption would occur every 21 seconds. With ECC providing a 100$\times$ reduction in soft error rates, the memory \text{MTBF} improves to 36 minutes, and the combined system \text{MTBF} becomes approximately **35 minutes**. This quantitative analysis justifies checkpoint frequencies of 15--30 minutes for large-scale training.
 
-### Worked Example: Cluster MTBF Calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
+### Worked Example: Cluster \text{MTBF} Calculation {#sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255}
 
 Consider a training cluster designed for large language model development with the following specifications:
 
 - 10,000 NVIDIA H100 GPUs
-- Individual GPU MTBF: 50,000 hours
-- Each GPU connected to host via PCIe (MTBF: 200,000 hours)
-- Each node contains 8 GPUs with shared power supply (MTBF: 100,000 hours)
-- Network infrastructure per node (NIC, cables): MTBF 150,000 hours
+- Individual GPU \text{MTBF}: 50,000 hours
+- Each GPU connected to host via PCIe (\text{MTBF}: 200,000 hours)
+- Each node contains 8 GPUs with shared power supply (\text{MTBF}: 100,000 hours)
+- Network infrastructure per node (NIC, cables): \text{MTBF} 150,000 hours
 
 #### Step 1: Calculate Failure Rate per GPU Subsystem {.unnumbered}
 
@@ -367,17 +367,17 @@ $$ \lambda_{network/GPU} = \frac{1}{8} \times \frac{1}{150,000} = 0.083 \times 1
 
 $$ \lambda_{total/GPU} = (2.0 + 0.5 + 0.125 + 0.083) \times 10^{-5} = 2.708 \times 10^{-5} \text{ failures/hour} $$
 
-#### Step 3: Calculate Cluster Failure Rate and MTBF {.unnumbered}
+#### Step 3: Calculate Cluster Failure Rate and \text{MTBF} {.unnumbered}
 
 $$ \lambda_{cluster} = 10,000 \times 2.708 \times 10^{-5} = 0.2708 \text{ failures/hour} $$
 
-$$ MTBF_{cluster} = \frac{1}{0.2708} = 3.69 \text{ hours} $$
+$$ \text{MTBF}_{cluster} = \frac{1}{0.2708} = 3.69 \text{ hours} $$
 
 This result means the cluster experiences a failure approximately every 3.7 hours on average. Over a 24-hour period, the expected number of failures is 6.5. A training run lasting one week will experience approximately 45 failures. Any training system operating at this scale must treat failure as a continuous condition, not an exceptional event.
 
 @tbl-cluster-mtbf-scaling generalizes this analysis across cluster sizes, demonstrating the mathematical inevitability of frequent failures at scale.
 
-| **Cluster Size (GPUs)** | **Individual GPU MTBF** |     **Cluster MTBF** | **Expected Failures per Day** |
+| **Cluster Size (GPUs)** | **Individual GPU \text{MTBF}** |     **Cluster \text{MTBF}** | **Expected Failures per Day** |
 |:------------------------|------------------------:|---------------------:|------------------------------:|
 | 8                       |              50,000 hrs | 6,250 hrs (260 days) |                         0.004 |
 | 64                      |              50,000 hrs |    781 hrs (32 days) |                          0.03 |
@@ -387,7 +387,7 @@ This result means the cluster experiences a failure approximately every 3.7 hour
 | 10,000                  |              50,000 hrs |                5 hrs |                           4.8 |
 | 25,000                  |              50,000 hrs |                2 hrs |                          12.0 |
 
-: **Cluster MTBF Scaling**: System-level mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. A training cluster sized for modern LLM development (10,000+ GPUs) experiences multiple failures daily. {#tbl-cluster-mtbf-scaling}
+: **Cluster \text{MTBF} Scaling**: System-level mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. A training cluster sized for modern LLM development (10,000+ GPUs) experiences multiple failures daily. {#tbl-cluster-mtbf-scaling}
 
 The theoretical 1/N scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @fig-published-failure-rates overlays published empirical measurements from Meta's production clusters against the theoretical curve, confirming that the mathematics accurately predict real-world failure rates. The Kokolis et al. (2025) study of Meta's Research SuperCluster measured MTTF values from 8-GPU allocations through 16,384-GPU jobs, and Meta's Llama 3 training report independently documented 419 failures across 54 days on 16,384 H100 GPUs. Both datasets converge on the same conclusion: at 16,384 GPUs, the cluster experiences a failure every 2 to 3 hours. This empirical validation transforms the theoretical argument from an abstract scaling law into a measured engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
 
@@ -415,7 +415,7 @@ from mlsys.constants import GPU_MTTF_HOURS
 
 fig, ax, COLORS, plt = viz.setup_plot(figsize=(8, 5.5))
 
-# Theoretical curve: MTBF_cluster = GPU_MTTF / N
+# Theoretical curve: \text{MTBF}_cluster = GPU_MTTF / N
 n_theoretical = np.logspace(0.5, 5.3, 200)
 mtbf_theoretical = GPU_MTTF_HOURS / n_theoretical
 
@@ -457,7 +457,7 @@ for hrs, lbl in durations:
     ax.text(4, hrs * 1.15, lbl, fontsize=7, color=COLORS['GreenLine'], alpha=0.7)
 
 # Key annotation
-ax.annotate('At 16K GPUs:\none failure every\n~2-3 hours',
+ax.annotate('At 16K GPUs:\none failure every\n~2--3 hours',
             xy=(16384, 2.0), xytext=(2500, 0.15),
             fontsize=8, fontweight='bold', color='crimson',
             bbox=dict(facecolor=COLORS['RedL'], edgecolor='none', alpha=0.8, pad=3),
@@ -478,7 +478,7 @@ plt.show()
 
 ### Failure Taxonomy {#sec-fault-tolerance-reliability-reliability-failure-taxonomy-e78c}
 
-The MTBF calculations above tell us HOW OFTEN failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. But designing effective fault tolerance also requires understanding WHAT KIND of failures occur. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely. Not all failures are equivalent, and understanding failure characteristics guides the selection of appropriate recovery mechanisms. The taxonomy presented here classifies failures along two primary dimensions: temporal behavior (transient versus persistent) and failure manifestation (fail-stop versus Byzantine).
+The \text{MTBF} calculations above tell us HOW OFTEN failures occur, which is critical for setting checkpoint intervals and sizing recovery infrastructure. But designing effective fault tolerance also requires understanding WHAT KIND of failures occur. A network partition that resolves in seconds demands different handling than a permanent GPU failure. A silent memory corruption that produces incorrect gradients requires different detection mechanisms than a node crash that stops responding entirely. Not all failures are equivalent, and understanding failure characteristics guides the selection of appropriate recovery mechanisms. The taxonomy presented here classifies failures along two primary dimensions: temporal behavior (transient versus persistent) and failure manifestation (fail-stop versus Byzantine).
 
 #### Transient Failures {#sec-fault-tolerance-reliability-reliability-transient-failures-57b4}
 
@@ -508,11 +508,11 @@ Fail-stop failures cause components to cease operation entirely and detectably. 
 
 Fail-stop failures are the easiest class to handle because detection is straightforward: the component stops responding. Recovery involves replacing the failed component and restoring state from the most recent checkpoint. The primary challenge is minimizing detection time and recovery latency.
 
-Detection time $T_{detect}$ typically involves heartbeat mechanisms where each worker periodically signals liveness to a coordinator. If no heartbeat arrives within timeout period $T_{timeout}$, the coordinator declares failure. Setting $T_{timeout}$ requires balancing false positive rate against detection latency. False positives declare healthy workers failed due to transient delays, while slow detection wastes compute during the detection window.
+Detection time $T_{\text{detect}}$ typically involves heartbeat mechanisms where each worker periodically signals liveness to a coordinator. If no heartbeat arrives within timeout period $T_{\text{timeout}}$, the coordinator declares failure. Setting $T_{\text{timeout}}$ requires balancing false positive rate against detection latency. False positives declare healthy workers failed due to transient delays, while slow detection wastes compute during the detection window.
 
 For a heartbeat interval of $H$ seconds and expected network delay variance $\sigma_d$, @eq-timeout-calculation defines the timeout heuristic:
 
-$$ T_{timeout} = H + k\sigma_d $$ {#eq-timeout-calculation}
+$$ T_{\text{timeout}} = H + k\sigma_d $$ {#eq-timeout-calculation}
 
 where $k$ typically ranges from 3 to 5 to achieve low false positive rates while maintaining reasonable detection speed.
 
@@ -982,7 +982,7 @@ Failure costs include wasted compute, schedule delay, opportunity cost, and engi
 
 Prevention costs include storage, throughput overhead, recovery infrastructure, and complexity. Storage cost scales with model size and checkpoint frequency. Checkpoint writes consume memory bandwidth and may stall training. Recovery infrastructure requires spare capacity and automated recovery systems. Fault tolerant systems are harder to develop and debug.
 
-Optimal investment in fault tolerance balances these costs. For small-scale training on a few GPUs where failures are rare, minimal fault tolerance may be cost-optimal. Infrequent checkpoints and manual recovery suffice. For large-scale training on thousands of GPUs where failures occur multiple times daily, extensive fault tolerance provides positive return on investment. Frequent checkpoints, automatic recovery, and elastic training become essential. @fig-young-daly-storage visualizes how the trade-off between checkpoint overhead and recovery cost reaches an optimum that depends on both system MTBF and checkpoint write time.
+Optimal investment in fault tolerance balances these costs. For small-scale training on a few GPUs where failures are rare, minimal fault tolerance may be cost-optimal. Infrequent checkpoints and manual recovery suffice. For large-scale training on thousands of GPUs where failures occur multiple times daily, extensive fault tolerance provides positive return on investment. Frequent checkpoints, automatic recovery, and elastic training become essential. @fig-young-daly-storage visualizes how the trade-off between checkpoint overhead and recovery cost reaches an optimum that depends on both system \text{MTBF} and checkpoint write time.
 
 @eq-ft-total-cost presents a simplified economic model for expected cost per training run:
 
@@ -1001,7 +1001,7 @@ Three foundational principles guide every design decision in this domain.
 ::: {.callout-note title="Three Rules of Failure at Scale"}
 
 1. **At scale, failures are continuous, not exceptional.** A 10,000-GPU cluster experiences failures every few hours. Systems must be designed expecting failure as normal operation.
-2. **The optimal checkpoint interval is $\sqrt{2 \times T_{save} \times MTBF}$.** The Young-Daly formula provides quantitative guidance for checkpoint frequency. We derive this formula in @sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2.
+2. **The optimal checkpoint interval is $\sqrt{2 \times T_{\text{save}} \times \text{MTBF}}$.** The Young-Daly formula provides quantitative guidance for checkpoint frequency. We derive this formula in @sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2.
 3. **Training and serving have fundamentally different fault tolerance requirements.** Training tolerates minutes of recovery time; serving requires milliseconds. This difference demands entirely different approaches.
 
 :::
@@ -1087,9 +1087,9 @@ Transient faults encompass several distinct categories: Single Event Upsets (SEU
 
 #### Quantitative Fault Rates {#sec-ft-fault-analysis-performance-impact-fa37}
 
-Advanced semiconductor processes exhibit dramatically higher soft error rates. Modern 7 nm processes experience approximately 1000$\times$ higher soft error rates compared to 65 nm nodes due to reduced node capacitance and charge collection efficiency [@baumann2005soft], translating to base error rates of approximately 1 error per $10^{14}$ operations. GPUs[^fn-gpu-fault-rates-training] exhibit 10--1000$\times$ higher transient error rates than CPUs, driven by thousands of simpler cores operating at aggressive voltage/frequency points with minimal per-core error protection. These fault rates translate into MTBF[^fn-mtbf-checkpoint] values that differ substantially across deployment contexts: cloud AI accelerators (V100, A100) achieve 50,000--100,000 hours under controlled data center conditions, while edge AI processors achieve 20,000--40,000 hours. In distributed training, these values compound: a cluster of 1,000 accelerators with individual MTBF of 50,000 hours experiences an expected failure every 50 hours, necessitating robust checkpointing.
+Advanced semiconductor processes exhibit dramatically higher soft error rates. Modern 7 nm processes experience approximately 1000$\times$ higher soft error rates compared to 65 nm nodes due to reduced node capacitance and charge collection efficiency [@baumann2005soft], translating to base error rates of approximately 1 error per $10^{14}$ operations. GPUs[^fn-gpu-fault-rates-training] exhibit 10--1000$\times$ higher transient error rates than CPUs, driven by thousands of simpler cores operating at aggressive voltage/frequency points with minimal per-core error protection. These fault rates translate into \text{MTBF}[^fn-mtbf-checkpoint] values that differ substantially across deployment contexts: cloud AI accelerators (V100, A100) achieve 50,000--100,000 hours under controlled data center conditions, while edge AI processors achieve 20,000--40,000 hours. In distributed training, these values compound: a cluster of 1,000 accelerators with individual \text{MTBF} of 50,000 hours experiences an expected failure every 50 hours, necessitating robust checkpointing.
 
-[^fn-mtbf-checkpoint]: **MTBF (Mean Time Between Failures)**: Formalized by the U.S. military in MIL-HDBK-217 (1965), MTBF assumes exponential failure distributions during the useful-life period. For ML training, MTBF feeds directly into the Young-Daly formula: a cluster with 50,000-hour per-device MTBF and 1,000 devices has a system MTBF of 50 hours, demanding checkpoints every 1--2 hours to keep wasted compute below 1% of total training time. \index{MTBF!checkpoint frequency}
+[^fn-mtbf-checkpoint]: **\text{MTBF} (Mean Time Between Failures)**: Formalized by the U.S. military in MIL-HDBK-217 (1965), \text{MTBF} assumes exponential failure distributions during the useful-life period. For ML training, \text{MTBF} feeds directly into the Young-Daly formula: a cluster with 50,000-hour per-device \text{MTBF} and 1,000 devices has a system \text{MTBF} of 50 hours, demanding checkpoints every 1--2 hours to keep wasted compute below 1% of total training time. \index{\text{MTBF}!checkpoint frequency}
 
 [^fn-gpu-fault-rates-training]: **GPU Fault Rates**: GPUs exhibit 10--1,000$\times$ higher transient error rates than CPUs, driven by 5,000+ simpler cores (vs. 24--48 CPU cores) operating at aggressive voltage/frequency points with minimal per-core error protection. HBM2 memory in a V100 sustains 900 GB/s bandwidth with narrower ECC coverage than server DRAM, creating a larger silent corruption surface for the gradient and weight data that dominates ML workloads. \index{GPU!fault rate}
 
@@ -1114,7 +1114,7 @@ HBM exhibits 10$\times$ higher error rates than standard DRAM due to 3D stacking
 
 During training, transient faults in the memory storing model weights or gradients lead to incorrect updates that compromise convergence and accuracy [@he2023understanding; @wan2021analyzing]. During inference, a bit flip in the activation values of a neural network can alter the final classification or regression output [@mahmoud2020pytorchfi]. In safety-critical applications, these faults can result in incorrect decisions that compromise safety [@li2017understanding; @jha2019ml]. Resource-constrained environments amplify these vulnerabilities: Binarized Neural Networks (BNNs) [@courbariaux2016binarized], which represent weights in single-bit precision, suffer performance degradation from 98% to 70% test accuracy when random bit-flipping soft errors are inserted with 10% probability [@Aygun2021BSBNN]. In distributed training, **network partitions**[^fn-network-partition-training][^fn-ib-sm] affect 1--10% of nodes daily, and in synchronous training, even a single partitioned rank blocks the entire AllReduce collective.
 
-[^fn-ib-sm]: **InfiniBand Subnet Manager (SM)**: A centralized software entity that discovers all nodes and switches, assigns Local Identifiers (LIDs), and calculates routing tables. In a network partition, the SM's role is critical: it must re-discover the new topology and update routing within milliseconds. If the SM itself is partitioned, the fabric can enter a "zombie" state where nodes are physically connected but cannot route messages, a common cause of $T_{detect}$ delays in large training runs. \index{Subnet Manager!reliability}
+[^fn-ib-sm]: **InfiniBand Subnet Manager (SM)**: A centralized software entity that discovers all nodes and switches, assigns Local Identifiers (LIDs), and calculates routing tables. In a network partition, the SM's role is critical: it must re-discover the new topology and update routing within milliseconds. If the SM itself is partitioned, the fabric can enter a "zombie" state where nodes are physically connected but cannot route messages, a common cause of $T_{\text{detect}}$ delays in large training runs. \index{Subnet Manager!reliability}
 
 [^fn-network-partition-training]: **Network Partition**: From Lamport's 1978 formalization of distributed system failure modes. Large-scale training clusters report partition events affecting 1--10% of nodes daily; in synchronous training, even a single partitioned rank blocks the entire AllReduce collective, making partition tolerance a prerequisite for training jobs exceeding a few hours. \index{Network Partition!distributed training}
 
@@ -1204,7 +1204,7 @@ node[below,pos=0.91](ULDD4){SAO \textcolor{red}{SA1}}(DD4);
 ```
 :::
 
-For ML systems, permanent faults during training cause gradient calculation errors and parameter corruption that persist until hardware replacement, requiring more sophisticated recovery strategies than transient faults demand [@he2023understanding]. Permanent faults in storage can compromise entire training datasets or saved models [@zhang2018analyzing]. Mitigating permanent faults requires integrated fault-tolerant design combining hardware redundancy and error-correcting codes [@kim2015bamboo] with checkpoint and restart mechanisms[^fn-checkpoint-restart-training] [@egwutuoha2013survey]. The **Young-Daly formula**, derived in @sec-data-storage, balances checkpoint overhead against lost computation; the key insight is that increasing MTBF through hardware hardening yields diminishing returns due to the square-root relationship, so systems must balance investment in hardware reliability against investment in fast checkpointing infrastructure.
+For ML systems, permanent faults during training cause gradient calculation errors and parameter corruption that persist until hardware replacement, requiring more sophisticated recovery strategies than transient faults demand [@he2023understanding]. Permanent faults in storage can compromise entire training datasets or saved models [@zhang2018analyzing]. Mitigating permanent faults requires integrated fault-tolerant design combining hardware redundancy and error-correcting codes [@kim2015bamboo] with checkpoint and restart mechanisms[^fn-checkpoint-restart-training] [@egwutuoha2013survey]. The **Young-Daly formula**, derived in @sec-data-storage, balances checkpoint overhead against lost computation; the key insight is that increasing \text{MTBF} through hardware hardening yields diminishing returns due to the square-root relationship, so systems must balance investment in hardware reliability against investment in fast checkpointing infrastructure.
 
 [^fn-checkpoint-restart-training]: **Checkpoint-Restart**: Originated in 1960s mainframe batch processing, where restarting multi-hour jobs from scratch was prohibitively expensive. Modern distributed training checkpoints 100+ GB model states every 10--30 minutes; Google’s TPU pods achieve 99.9% training completion rates through coordinated checkpointing, reducing wasted computation from node failures to less than 1% of total training time. \index{Checkpoint-Restart!training completion}
 
@@ -2015,7 +2015,7 @@ To survive these inevitable hardware failures without catastrophic loss of compu
 
 ***Checkpointing***\index{Checkpointing!definition} is the periodic serialization of the complete training state (parameters, optimizer state, and data loader position) to persistent storage.
 
-1.  **Significance (Quantitative):** It minimizes the **Lost Work** after a system failure. Within the **Iron Law**, checkpointing creates an **I/O Overhead** that reduces the total training throughput ($\eta$), with the optimal interval ($T_{opt}$) governed by the **Young-Daly Formula** ($T_{opt} = \sqrt{2 \cdot T_{save} \cdot \text{MTBF}}$).
+1.  **Significance (Quantitative):** It minimizes the **Lost Work** after a system failure. Within the **Iron Law**, checkpointing creates an **I/O Overhead** that reduces the total training throughput ($\eta$), with the optimal interval ($T_{\text{opt}}$) governed by the **Young-Daly Formula** ($T_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot \text{\text{MTBF}}}$).
 2.  **Distinction (Durable):** Unlike **Incremental Backups**, Checkpointing must capture the **Exact Execution Context** (including random seeds and learning rate schedules) to ensure deterministic resumption of the optimization loop.
 3.  **Common Pitfall:** A frequent misconception is that Checkpointing is "just writing to disk." In reality, for large models, it is a **Storage System Stress Test**: the simultaneous write from thousands of GPUs can trigger a **Checkpoint Storm** that saturates the entire network fabric ($BW$).
 
@@ -2029,7 +2029,7 @@ If a training cluster loses power, how do we avoid losing the millions of dollar
 
 Checkpointing involves a critical trade-off: frequent checkpoints minimize lost work when failures occur but consume time and resources, while infrequent checkpoints minimize overhead but risk losing substantial work to failures.
 
-The Young-Daly formula introduced in @sec-fault-tolerance-young-daly provides the optimal checkpoint interval: $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$. The failure analysis in this chapter allows us to calculate the MTBF term this formula requires.
+The Young-Daly formula introduced in @sec-fault-tolerance-young-daly provides the optimal checkpoint interval: $T_{\text{opt}} = \sqrt{2 \times T_{\text{save}} \times \text{MTBF}}$. The failure analysis in this chapter allows us to calculate the \text{MTBF} term this formula requires.
 
 ::: {.callout-example title="Optimal Checkpoint Interval"}
 Applying the Young-Daly formula to a real-world scenario illustrates its practical value.
@@ -2043,10 +2043,10 @@ Applying the Young-Daly formula to a real-world scenario illustrates its practic
 
 **Calculation**:
 $$
-\tau_{opt} = \sqrt{2 \cdot C \cdot M}
+\tau_{\text{opt}} = \sqrt{2 \cdot C \cdot M}
 $$
 $$
-\tau_{opt} = \sqrt{2 \cdot (2 \text{ min}) \cdot (180 \text{ min})} = \sqrt{720} \approx \mathbf{26.8 \text{ minutes}}
+\tau_{\text{opt}} = \sqrt{2 \cdot (2 \text{ min}) \cdot (180 \text{ min})} = \sqrt{720} \approx \mathbf{26.8 \text{ minutes}}
 $$
 
 **Result**: You should checkpoint roughly every **27 minutes**.
@@ -2058,7 +2058,7 @@ $$
 
 @fig-checkpoint-tax illustrates the fundamental trade-off: checkpointing too frequently wastes time saving state, while checkpointing too rarely wastes computation when failures occur. The Young-Daly formula identifies the optimal balance point.
 
-::: {#fig-checkpoint-tax fig-env="figure" fig-pos="htb" fig-cap="The Checkpoint Tax. Checkpoint save overhead decreases with longer intervals, but wasted computation from failures increases. The Young-Daly optimal interval minimizes total overhead. For a 175B model with ~2.5-minute checkpoint writes on a cluster with 2-hour MTBF, the optimal interval is approximately 24 minutes." fig-alt="Three curves: checkpoint overhead decreasing with interval, rework cost increasing, and total wasted work with minimum at optimal interval around 24 minutes."}
+::: {#fig-checkpoint-tax fig-env="figure" fig-pos="htb" fig-cap="The Checkpoint Tax. Checkpoint save overhead decreases with longer intervals, but wasted computation from failures increases. The Young-Daly optimal interval minimizes total overhead. For a 175B model with ~2.5-minute checkpoint writes on a cluster with 2-hour \text{MTBF}, the optimal interval is approximately 24 minutes." fig-alt="Three curves: checkpoint overhead decreasing with interval, rework cost increasing, and total wasted work with minimum at optimal interval around 24 minutes."}
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -2067,9 +2067,9 @@ $$
 # │ Context: @fig-checkpoint-tax — Young-Daly applied to 175B model
 # │
 # │ Goal: Plot checkpoint overhead, rework cost, total waste vs interval τ;
-# │       show τ_opt ≈ 24 min for 2.5-min write, 2-hr MTBF.
+# │       show τ_opt ≈ 24 min for 2.5-min write, 2-hr \text{MTBF}.
 # │ Show: Three curves; optimal point annotation.
-# │ How: tau_opt = sqrt(2*T_write*MTBF); viz.set_book_style().
+# │ How: tau_opt = sqrt(2*T_write*\text{MTBF}); viz.set_book_style().
 # │
 # │ Imports: numpy (np), matplotlib.pyplot (plt), mlsys.viz (viz)
 # │ Exports: (figure only, no prose variables)
@@ -2082,8 +2082,8 @@ plt.style.use('seaborn-v0_8-whitegrid')
 viz.set_book_style()
 COLORS = viz.COLORS
 
-# Parameters: 175B model, ~2.5-min checkpoint write, 2-hour cluster MTBF
-# tau_opt = sqrt(2*T_write*MTBF) ≈ 24 min
+# Parameters: 175B model, ~2.5-min checkpoint write, 2-hour cluster \text{MTBF}
+# tau_opt = sqrt(2*T_write*\text{MTBF}) ≈ 24 min
 mtbf = 2.0  # hours
 t_write = 2.5 / 60.0  # hours (~2.5 min)
 
@@ -2095,8 +2095,8 @@ total_waste = over_ckpt + over_rework
 tau_opt = np.sqrt(2 * t_write * mtbf)
 
 fig, ax = plt.subplots(figsize=(8, 5))
-ax.plot(tau * 60, over_ckpt, label='Checkpoint Overhead ($T_{write}/\\tau$)', color=COLORS['BlueLine'], linestyle='--')
-ax.plot(tau * 60, over_rework, label='Expected Rework ($\\tau/2\\text{MTBF}$)', color=COLORS['RedLine'], linestyle='--')
+ax.plot(tau * 60, over_ckpt, label='Checkpoint Overhead ($T_{\text{write}}/\\tau$)', color=COLORS['BlueLine'], linestyle='--')
+ax.plot(tau * 60, over_rework, label='Expected Rework ($\\tau/2\\text{\text{MTBF}}$)', color=COLORS['RedLine'], linestyle='--')
 ax.plot(tau * 60, total_waste, label='Total Wasted Work', color=COLORS['GreenLine'], linewidth=2.5)
 
 ax.scatter([tau_opt * 60], [np.sqrt(2 * t_write / mtbf)], color='black', zorder=5)
@@ -2116,22 +2116,22 @@ plt.show()
 
 The U-shaped cost curve in @fig-young-daly-storage visualizes this trade-off: checkpoint overhead decreases as intervals lengthen, while rework cost from failures increases linearly. The optimal point minimizes their sum.
 
-For our 10,000 GPU cluster with calculated system MTBF of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} gpt3_ckpt_tb` TB checkpoint at 100 GB/s), @eq-young-daly-applied computes the optimal interval:
+For our 10,000 GPU cluster with calculated system \text{MTBF} of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} gpt3_ckpt_tb` TB checkpoint at 100 GB/s), @eq-young-daly-applied computes the optimal interval:
 
-$$ T_{opt} = \sqrt{2 \times 21s \times 3.69hr \times 3600s/hr} \approx 12.4 \text{ minutes} $$ {#eq-young-daly-applied}
+$$ T_{\text{opt}} = \sqrt{2 \times 21s \times 3.69hr \times 3600s/hr} \approx 12.4 \text{ minutes} $$ {#eq-young-daly-applied}
 
-This result demonstrates why failure analysis matters: without knowing the system MTBF, we cannot set checkpoint intervals rationally. With this interval, checkpoint overhead consumes approximately 2.8% of training time. However, practitioners should be aware of the *Young-Daly formula assumptions* that underpin this estimate.
+This result demonstrates why failure analysis matters: without knowing the system \text{MTBF}, we cannot set checkpoint intervals rationally. With this interval, checkpoint overhead consumes approximately 2.8% of training time. However, practitioners should be aware of the *Young-Daly formula assumptions* that underpin this estimate.
 
 ::: {.callout-warning title="Young-Daly Formula Assumptions"}
 The Young-Daly formula provides valuable intuition but rests on assumptions that may not hold in practice:
 
 1. **Exponentially distributed failures**: Assumes constant failure rate. Real systems exhibit "bathtub curve" behavior with higher rates during burn-in and wear-out phases.
-2. **Deterministic checkpoint time**: Assumes $T_{save}$ is constant. In practice, checkpoint time varies 2--3$\times$ due to storage contention, network congestion, and memory pressure.
+2. **Deterministic checkpoint time**: Assumes $T_{\text{save}}$ is constant. In practice, checkpoint time varies 2--3$\times$ due to storage contention, network congestion, and memory pressure.
 3. **Recovery time equals checkpoint time**: Assumes recovery reads same data written during checkpoint. Often recovery takes 3--5$\times$ longer due to job scheduling delays, topology reconstruction, and warmup.
 4. **Single failure mode**: Assumes one failure at a time. Correlated failures (power, cooling, shared switch) violate this assumption.
-5. **Infinite timeline**: Optimal for long training runs. Short runs (where total time is comparable to MTBF) require different analysis.
+5. **Infinite timeline**: Optimal for long training runs. Short runs (where total time is comparable to \text{MTBF}) require different analysis.
 
-When assumptions are violated, the optimal interval may shift significantly. As a rule of thumb, if restart overhead significantly exceeds checkpoint time, use $\sqrt{2 \times (T_{save} + T_{restart}) \times MTBF}$ instead.
+When assumptions are violated, the optimal interval may shift significantly. As a rule of thumb, if restart overhead significantly exceeds checkpoint time, use $\sqrt{2 \times (T_{\text{save}} + T_{\text{restart}}) \times \text{MTBF}}$ instead.
 :::
 
 @fig-checkpoint-recovery-timeline makes the temporal cost of failures concrete by showing the sequence of events during a training run: productive computation, periodic checkpoints, a failure event, and the recovery process with its associated wasted work.
@@ -2205,25 +2205,25 @@ When assumptions are violated, the optimal interval may shift significantly. As 
   % Annotations with braces
   % Checkpoint interval
   \draw[BlueLine, thick, decorate, decoration={brace, amplitude=4pt, mirror}]
-    (0, -0.7) -- (2.5, -0.7) node[midway, below=5pt, font=\tiny, text=BlueLine] {$\tau_{opt}$};
+    (0, -0.7) -- (2.5, -0.7) node[midway, below=5pt, font=\tiny, text=BlueLine] {$\tau_{\text{opt}}$};
   \draw[BlueLine, thick, decorate, decoration={brace, amplitude=4pt, mirror}]
-    (3.0, -0.7) -- (5.5, -0.7) node[midway, below=5pt, font=\tiny, text=BlueLine] {$\tau_{opt}$};
+    (3.0, -0.7) -- (5.5, -0.7) node[midway, below=5pt, font=\tiny, text=BlueLine] {$\tau_{\text{opt}}$};
 
   % Lost work brace
   \draw[RedLine, thick, decorate, decoration={brace, amplitude=4pt}]
     (6.0, \bary+\barh+0.1) -- (7.8, \bary+\barh+0.1)
-    node[midway, above=5pt, font=\tiny\bfseries, text=RedLine] {$\leq \tau_{opt}$};
+    node[midway, above=5pt, font=\tiny\bfseries, text=RedLine] {$\leq \tau_{\text{opt}}$};
 
   % Recovery brace
   \draw[OrangeLine, thick, decorate, decoration={brace, amplitude=4pt}]
     (7.8, \bary+\barh+0.1) -- (9.8, \bary+\barh+0.1)
-    node[midway, above=5pt, font=\tiny\bfseries, text=OrangeLine] {$T_{restart}$};
+    node[midway, above=5pt, font=\tiny\bfseries, text=OrangeLine] {$T_{\text{restart}}$};
 
   % Legend
   \fill[GreenLine!70] (0.0, -1.5) rectangle (0.4, -1.2);
   \node[font=\tiny, anchor=west] at (0.5, -1.35) {Productive training};
   \fill[BlueLine] (3.0, -1.5) rectangle (3.4, -1.2);
-  \node[font=\tiny, anchor=west] at (3.5, -1.35) {Checkpoint write ($T_{save}$)};
+  \node[font=\tiny, anchor=west] at (3.5, -1.35) {Checkpoint write ($T_{\text{save}}$)};
   \fill[OrangeLine!50] (6.5, -1.5) rectangle (6.9, -1.2);
   \node[font=\tiny, anchor=west] at (7.0, -1.35) {Recovery};
   \pattern[pattern=north east lines, pattern color=black!30]
@@ -2235,7 +2235,7 @@ When assumptions are violated, the optimal interval may shift significantly. As 
 ```
 :::
 
-The timeline in @fig-checkpoint-recovery-timeline reveals why $T_{restart}$ matters as much as $T_{save}$: the total failure cost is the sum of lost work (bounded by $\tau_{opt}$) and recovery time, which includes job scheduling, checkpoint loading, and pipeline warmup. Production systems where $T_{restart}$ exceeds $T_{save}$ by 3--5$\times$ should use the modified formula that accounts for both terms.
+The timeline in @fig-checkpoint-recovery-timeline reveals why $T_{\text{restart}}$ matters as much as $T_{\text{save}}$: the total failure cost is the sum of lost work (bounded by $\tau_{\text{opt}}$) and recovery time, which includes job scheduling, checkpoint loading, and pipeline warmup. Production systems where $T_{\text{restart}}$ exceeds $T_{\text{save}}$ by 3--5$\times$ should use the modified formula that accounts for both terms.
 
 #### Checkpoint Overhead Analysis {#sec-fault-tolerance-reliability-reliability-checkpoint-overhead-analysis-f5df}
 
@@ -2247,9 +2247,9 @@ Synchronous checkpointing pauses training while the checkpoint writes. Even with
 
 @eq-checkpoint-overhead quantifies the wasted time due to checkpointing:
 
-$$ O_{ckpt} = \frac{T_{save}}{T_{interval}} + \frac{T_{pause}}{T_{interval}} $$ {#eq-checkpoint-overhead}
+$$ O_{ckpt} = \frac{T_{\text{save}}}{T_{\text{interval}}} + \frac{T_{\text{pause}}}{T_{\text{interval}}} $$ {#eq-checkpoint-overhead}
 
-where $T_{pause}$ represents any training pause beyond the checkpoint write time. This includes memory allocation, coordination, and serialization.
+where $T_{\text{pause}}$ represents any training pause beyond the checkpoint write time. This includes memory allocation, coordination, and serialization.
 
 #### The "Stop-the-World" Cost
 
@@ -2263,7 +2263,7 @@ If checkpoints occur hourly, the system wastes **\$24,000 per day** simply waiti
 
 @tbl-checkpoint-overhead-by-model reveals how checkpoint characteristics vary dramatically by model architecture: larger models require longer write times but also benefit from correspondingly longer optimal intervals.
 
-| **Model Type**         | **Checkpoint Size** | **Write Time (100 GB/s)** | **Optimal Interval (5hr MTBF)** | **Overhead** |
+| **Model Type**         | **Checkpoint Size** | **Write Time (100 GB/s)** | **Optimal Interval (5hr \text{MTBF})** | **Overhead** |
 |:-----------------------|--------------------:|--------------------------:|--------------------------------:|-------------:|
 | **Archetype A (GPT-4 / Llama-3)** |              2.1 TB |                      21 s |                        14.5 min |         2.4% |
 | **GPT-3.5 (20B)**      |              240 GB |                     2.4 s |                         4.6 min |         0.9% |
@@ -2503,14 +2503,14 @@ A GPU silently hangs, dropping its utilization to zero while its peer GPUs wait 
 
 @eq-recovery-time decomposes recovery time into four primary components:
 
-$$ T_{recovery} = T_{detect} + T_{restart} + T_{load} + T_{warmup} $$ {#eq-recovery-time}
+$$ T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} $$ {#eq-recovery-time}
 
 where:
 
-- $T_{detect}$: Time between the actual hardware fault and the system classifying it as a failure
-- $T_{restart}$: Time for the job scheduler to allocate new resources and launch replacement processes
-- $T_{load}$: I/O time to read checkpoint state from distributed storage into GPU memory
-- $T_{warmup}$: Time for the system to refill the data pipeline, compile JIT kernels, and stabilize throughput
+- $T_{\text{detect}}$: Time between the actual hardware fault and the system classifying it as a failure
+- $T_{\text{restart}}$: Time for the job scheduler to allocate new resources and launch replacement processes
+- $T_{\text{load}}$: I/O time to read checkpoint state from distributed storage into GPU memory
+- $T_{\text{warmup}}$: Time for the system to refill the data pipeline, compile JIT kernels, and stabilize throughput
 
 Each component presents distinct optimization opportunities, and the dominant term varies by cluster configuration. Understanding this decomposition enables targeted investment in the bottleneck rather than uniform improvement across all components.
 
@@ -2518,9 +2518,9 @@ Each component presents distinct optimization opportunities, and the dominant te
 
 Detection is the first line of defense, governed by a fundamental trade-off between speed and false positive rate. A timeout that is too aggressive mistakes temporary network jitter for a node failure, triggering an unnecessary and expensive restart. A timeout that is too conservative allows the entire cluster to sit idle while a dead node holds up synchronization.
 
-**Heartbeat monitoring** is the standard mechanism: each worker periodically sends "I am alive" signals to a central coordinator or monitoring service. Missing heartbeats trigger failure classification. The heartbeat interval $H$ and timeout $T_{timeout}$ control the trade-off. In high-scale clusters, heartbeat arrival times often follow a heavy-tailed distribution due to network congestion, necessitating adaptive timeouts rather than static thresholds. Production systems typically use $T_{timeout} = H + k\sigma_d$ where $k$ ranges from 3 to 5 and $\sigma_d$ is the observed network delay variance.
+**Heartbeat monitoring** is the standard mechanism: each worker periodically sends "I am alive" signals to a central coordinator or monitoring service. Missing heartbeats trigger failure classification. The heartbeat interval $H$ and timeout $T_{\text{timeout}}$ control the trade-off. In high-scale clusters, heartbeat arrival times often follow a heavy-tailed distribution due to network congestion, necessitating adaptive timeouts rather than static thresholds. Production systems typically use $T_{\text{timeout}} = H + k\sigma_d$ where $k$ ranges from 3 to 5 and $\sigma_d$ is the observed network delay variance.
 
-**Collective communication timeouts** provide a second detection layer. During synchronous training, collective operations (AllReduce, Broadcast) are blocking: if a single rank fails silently—a frozen GPU driver, for instance—every other rank in the communicator hangs indefinitely waiting for data that will never arrive. NCCL[^fn-nccl-timeout-tradeoff] provides configurable timeout parameters for this purpose. In practice, the `NCCL_TIMEOUT` is often set conservatively (10–20 minutes) to avoid crashing jobs during legitimate periods of slow communication, which unfortunately extends $T_{detect}$.
+**Collective communication timeouts** provide a second detection layer. During synchronous training, collective operations (AllReduce, Broadcast) are blocking: if a single rank fails silently—a frozen GPU driver, for instance—every other rank in the communicator hangs indefinitely waiting for data that will never arrive. NCCL[^fn-nccl-timeout-tradeoff] provides configurable timeout parameters for this purpose. In practice, the `NCCL_TIMEOUT` is often set conservatively (10–20 minutes) to avoid crashing jobs during legitimate periods of slow communication, which unfortunately extends $T_{\text{detect}}$.
 
 [^fn-nccl-timeout-tradeoff]: **NCCL Timeout**: NVIDIA's collective communication library defaults to a 30-minute timeout (`NCCL_TIMEOUT`), which means a silently failed GPU can stall an entire training cluster for 30 minutes before detection. Reducing this to 5 minutes accelerates failure detection but risks false positives during legitimate long AllReduce operations on large models, forcing a trade-off between detection latency and training stability that has no universal optimum. \index{NCCL!timeout trade-off}
 
@@ -2569,16 +2569,16 @@ Once a failure is classified, the recovery procedure executes a rigid sequence t
 
 Consider our 175B parameter model training on 1,000 GPUs. The checkpoint size is approximately `{python} gpt3_ckpt_tb` TB (weights + Adam optimizer state). How much does a single failure event actually cost?
 
-**The Budget ($T_{recovery}$):**
+**The Budget ($T_{\text{recovery}}$):**
 
-1. **$T_{detect}$**: 60 seconds (conservative heartbeat timeout with verification retries)
-2. **$T_{restart}$**: 3 minutes (scheduler queue time + container launch + Python import overhead + NCCL initialization)
-3. **$T_{load}$**: 21 seconds (with sharded checkpointing, each of 1,000 workers reads only its `{python} gpt3_shard_gb` GB shard at 5 GB/s from local NVMe staging)
-4. **$T_{warmup}$**: 2 minutes (JIT kernel compilation, data pipeline buffer fill, TCP connection re-establishment)
+1. **$T_{\text{detect}}$**: 60 seconds (conservative heartbeat timeout with verification retries)
+2. **$T_{\text{restart}}$**: 3 minutes (scheduler queue time + container launch + Python import overhead + NCCL initialization)
+3. **$T_{\text{load}}$**: 21 seconds (with sharded checkpointing, each of 1,000 workers reads only its `{python} gpt3_shard_gb` GB shard at 5 GB/s from local NVMe staging)
+4. **$T_{\text{warmup}}$**: 2 minutes (JIT kernel compilation, data pipeline buffer fill, TCP connection re-establishment)
 
-**Total**: $T_{recovery} \approx 1 + 3 + 0.35 + 2 \approx 6.4$ minutes per failure event.
+**Total**: $T_{\text{recovery}} \approx 1 + 3 + 0.35 + 2 \approx 6.4$ minutes per failure event.
 
-**Impact at scale**: With a 1,000-GPU cluster MTBF of 50 hours (from @tbl-cluster-mtbf-scaling), we experience $\sim$0.48 failures per day, losing $\sim$3 minutes daily—a modest 0.2% overhead. But at 10,000 GPUs with MTBF of 5 hours, we experience $\sim$4.8 failures per day, losing $\sim$31 minutes daily—a 2.1% overhead equivalent to wasting 210 GPU-hours every day. This is why recovery time optimization matters more as clusters grow.
+**Impact at scale**: With a 1,000-GPU cluster \text{MTBF} of 50 hours (from @tbl-cluster-mtbf-scaling), we experience $\sim$0.48 failures per day, losing $\sim$3 minutes daily—a modest 0.2% overhead. But at 10,000 GPUs with \text{MTBF} of 5 hours, we experience $\sim$4.8 failures per day, losing $\sim$31 minutes daily—a 2.1% overhead equivalent to wasting 210 GPU-hours every day. This is why recovery time optimization matters more as clusters grow.
 :::
 
 #### Warm Restart vs. Cold Restart {#sec-fault-tolerance-reliability-warm-vs-cold-restart}
@@ -2587,7 +2587,7 @@ The standard recovery procedure described above is a **cold restart**: every pro
 
 A **warm restart** preserves the state of surviving workers. When a rank fails, surviving ranks detect the failure but do not exit. They enter a waiting state, preserving loaded model weights and optimizer states in GPU memory. The scheduler replaces only the failed node. The new node joins, loads its partition of the state from disk (or receives it via broadcast from a peer), and the communicator is rebuilt. Training resumes with minimal disruption.
 
-Warm restarts can reduce $T_{load}$ and $T_{warmup}$ to near-zero for 99.9% of the cluster, cutting total recovery time from minutes to seconds. For our 1,000-GPU example, a warm restart avoids reloading `{python} gpt3_ckpt_tb` TB from storage, saving the 50-second $T_{load}$ and 2-minute $T_{warmup}$ for all but the replacement node.
+Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9% of the cluster, cutting total recovery time from minutes to seconds. For our 1,000-GPU example, a warm restart avoids reloading `{python} gpt3_ckpt_tb` TB from storage, saving the 50-second $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
 
 The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself—a crash during communicator rebuild, for instance—must be handled by falling back to cold restart. Production systems implement warm restart as the fast path with cold restart as the safety net.
 
@@ -2621,7 +2621,7 @@ This automation reduces Mean Time To Recovery (MTTR) from the 30–60 minutes ty
 
 A **straggler** is a worker that remains functionally correct but performs significantly slower than its peers. In synchronous training, stragglers are performance poison: the speed of the entire cluster is determined by its slowest component, because AllReduce cannot complete until every rank has submitted its gradients.
 
-$$ T_{step} = \max(T_{rank_0}, T_{rank_1}, \dots, T_{rank_{N-1}}) + T_{comm} $$
+$$ T_{\text{step}} = \max(T_{rank_0}, T_{rank_1}, \dots, T_{rank_{N-1}}) + T_{\text{comm}} $$
 
 Stragglers arise from "gray failures" that do not trigger explicit errors: thermal throttling reduces clock speed, degrading interconnect cables increase communication latency, OS background processes (memory scrubbing, log rotation) consume CPU cycles, and data loading from a congested network filesystem introduces variable I/O delays. Unlike hard failures, stragglers do not trigger timeouts, allowing them to silently drag down global efficiency for hours.
 
@@ -2643,7 +2643,7 @@ Because AllReduce cannot complete until *every* rank has submitted its gradients
 
 A single failing device—0.1% of the hardware—has reduced the throughput of the entire cluster by **50%**. At \$3/GPU-hour, this straggler wastes \$1,500/hour in idle compute.
 
-**The lesson**: it is mathematically optimal to treat a severe straggler as a hard failure. Detecting and killing a slow node to force a restart onto healthy hardware yields higher long-term throughput than tolerating the degradation. The break-even point: if a straggler slows the cluster by more than $T_{recovery} / MTBF$ (the fraction of time spent recovering from failures), replacing it immediately is cheaper than waiting.
+**The lesson**: it is mathematically optimal to treat a severe straggler as a hard failure. Detecting and killing a slow node to force a restart onto healthy hardware yields higher long-term throughput than tolerating the degradation. The break-even point: if a straggler slows the cluster by more than $T_{\text{recovery}} / \text{MTBF}$ (the fraction of time spent recovering from failures), replacing it immediately is cheaper than waiting.
 :::
 
 However, simply killing a slow node and restarting the job implies we must wait for a replacement node to become available to maintain our original GPU count. To avoid this rigid dependency and keep the cluster productive even when operating below peak capacity, the training framework must adapt to changing hardware availability through elastic training.
@@ -3003,7 +3003,7 @@ When full redundancy fails—such as when an edge device loses connectivity, or 
 
 ***Graceful Degradation***\index{Graceful Degradation!definition} is the systematic reduction of model quality, latency, or coverage to maintain system **Availability** under conditions that exceed primary fault tolerance limits.
 
-1.  **Significance (Quantitative):** It allows the system to remain functional by trading **Model Accuracy** for lower resource requirements ($R_{peak}, BW$). For example, a system may fall back to a smaller model or use fewer features to maintain its **Inference SLO** ($L_{lat}$) during high load.
+1.  **Significance (Quantitative):** It allows the system to remain functional by trading **Model Accuracy** for lower resource requirements ($R_{\text{peak}}, BW$). For example, a system may fall back to a smaller model or use fewer features to maintain its **Inference SLO** ($L_{\text{lat}}$) during high load.
 2.  **Distinction (Durable):** Unlike **System Failure** (total loss of service), Graceful Degradation is a **Managed Transition** where the system continues to provide "best-effort" results through secondary mechanisms (e.g., cached predictions).
 3.  **Common Pitfall:** A frequent misconception is that degradation is "automatic." In reality, it is an **Architectural Choice**: it requires pre-computed fallback models and logic that can detect failure and switch execution paths without user intervention.
 
@@ -3369,11 +3369,11 @@ How did Meta keep a 992-node GPU cluster productive enough to successfully train
 
 ### Large-Scale LLM Training at Meta {#sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa}
 
-The training of the Open Pre-trained Transformer (OPT-175B) at Meta provides a definitive study in the physics of failure at the extreme scale of modern deep learning. Using a cluster of 992 NVIDIA A100 GPUs continuously for two months, the engineering team faced a statistical certainty: hardware components would fail, and they would fail often. Over the course of the training run, the team documented over 35 significant hardware failures, ranging from ECC memory errors and NVLink disconnects to complete power supply unit (PSU) failures. In a synchronous data-parallel regime, a single GPU failure halts the entire cluster, making the Mean Time Between Failures (MTBF) of the aggregate system a fraction of any individual component's reliability. For OPT-175B, the effective system-wide MTBF often dropped below 24 hours, necessitating a fault tolerance strategy that treated interruption as the norm rather than the exception.
+The training of the Open Pre-trained Transformer (OPT-175B) at Meta provides a definitive study in the physics of failure at the extreme scale of modern deep learning. Using a cluster of 992 NVIDIA A100 GPUs continuously for two months, the engineering team faced a statistical certainty: hardware components would fail, and they would fail often. Over the course of the training run, the team documented over 35 significant hardware failures, ranging from ECC memory errors and NVLink disconnects to complete power supply unit (PSU) failures. In a synchronous data-parallel regime, a single GPU failure halts the entire cluster, making the Mean Time Between Failures (\text{MTBF}) of the aggregate system a fraction of any individual component's reliability. For OPT-175B, the effective system-wide \text{MTBF} often dropped below 24 hours, necessitating a fault tolerance strategy that treated interruption as the norm rather than the exception.
 
 The primary detection mechanism relied on a heartbeat protocol with a strict 5-minute timeout. If a rank failed to report progress within this window, the orchestration layer assumed a hardware hang or silent data corruption and initiated a restart. However, detection was only half the battle; the critical engineering challenge was minimizing the "restart tax"---the time lost reloading the model and optimizer states from persistent storage. Early in the project, synchronous checkpointing to a remote distributed file system consumed nearly 12% of the total effective training time, a prohibitive overhead that extended the project timeline by weeks. To combat this, the team implemented asynchronous checkpointing, offloading the serialization of the 350GB model state to CPU memory first, then streaming it to disk in the background while computation for the next batch resumed immediately. This optimization reduced checkpoint overhead to less than 3%, reclaiming hundreds of GPU-hours.
 
-Recovery procedures also had to account for non-hardware failures, specifically "loss spikes" caused by numerical instabilities. Unlike a hardware crash where the last checkpoint is valid, a loss spike implies the model weight trajectory has become corrupted. The recovery strategy involved a "last good checkpoint" rollback mechanism: upon detecting a gradient explosion (via dynamic norm monitoring), the system would automatically revert to a checkpoint from 1-2 hours prior, skip the specific data batch that triggered the instability, and resume training with a slightly perturbed random seed. This dual-layer resilience---handling both physical silicon failures and mathematical divergence---allowed Meta to sustain a training throughput efficiency (MFU) of over 50% despite daily interruptions. The enduring lesson from OPT-175B is that at scale, the trade-off between checkpoint frequency and training throughput is the single most critical variable in determining the feasibility of a model; checkpointing too often wastes compute, while checkpointing too rarely risks losing days of progress to a single bit flip.
+Recovery procedures also had to account for non-hardware failures, specifically "loss spikes" caused by numerical instabilities. Unlike a hardware crash where the last checkpoint is valid, a loss spike implies the model weight trajectory has become corrupted. The recovery strategy involved a "last good checkpoint" rollback mechanism: upon detecting a gradient explosion (via dynamic norm monitoring), the system would automatically revert to a checkpoint from 1--2 hours prior, skip the specific data batch that triggered the instability, and resume training with a slightly perturbed random seed. This dual-layer resilience---handling both physical silicon failures and mathematical divergence---allowed Meta to sustain a training throughput efficiency (MFU) of over 50% despite daily interruptions. The enduring lesson from OPT-175B is that at scale, the trade-off between checkpoint frequency and training throughput is the single most critical variable in determining the feasibility of a model; checkpointing too often wastes compute, while checkpointing too rarely risks losing days of progress to a single bit flip.
 
 ### Google TPU Pod Resilience {#sec-fault-tolerance-reliability-reliability-google-tpu-pod-resilience}
 
@@ -3423,22 +3423,22 @@ Investing heavily in hardware redundancy while neglecting software robustness (i
 
 **Pitfall: Setting checkpoint interval by intuition.**
 
-Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." As @sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2 explains, the Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
+Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." As @sec-fault-tolerance-reliability-reliability-checkpoint-restart-fundamentals-0ac2 explains, the Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with \text{MTBF} of 4 hours and checkpoint time of 5 minutes:
 
-$$T_{opt} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \text{ minutes}$$
+$$T_{\text{opt}} = \sqrt{2 \times 5 \times 240} = \sqrt{2400} \approx 49 \text{ minutes}$$
 
 The intuitive "every hour" is close but suboptimal. More critically, if checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes 85 minutes, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
 
-**Fallacy: MTBF assumes independent failures.**
+**Fallacy: \text{MTBF} assumes independent failures.**
 
-The reliability equation $MTBF_{system} = MTBF_{component}/N$ assumes component failures are statistically independent. In production, failures correlate:
+The reliability equation $\text{MTBF}_{system} = \text{MTBF}_{component}/N$ assumes component failures are statistically independent. In production, failures correlate:
 
 - **Shared power domain**: UPS failure takes down entire rack
 - **Shared switch**: Top-of-rack switch failure partitions all connected GPUs
 - **Shared software**: Bug triggered by specific input fails all replicas simultaneously
 - **Thermal correlation**: Cooling failure causes clustered GPU throttling
 
-Correlated failures reduce effective MTBF below the independent-failure calculation, sometimes dramatically. A cluster with 1000 "independent" GPUs each with 10,000-hour MTBF should have system MTBF of 10 hours. If failures correlate with factor 10 (10 GPUs fail together on average), effective MTBF drops to 1 hour.
+Correlated failures reduce effective \text{MTBF} below the independent-failure calculation, sometimes dramatically. A cluster with 1000 "independent" GPUs each with 10,000-hour \text{MTBF} should have system \text{MTBF} of 10 hours. If failures correlate with factor 10 (10 GPUs fail together on average), effective \text{MTBF} drops to 1 hour.
 
 Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
 
@@ -3454,7 +3454,7 @@ While the Young-Daly formula accounts for checkpoint save time, practitioners of
 
 4. **Communication re-establishment**: NCCL ring topology reconstruction
 
-Total restart time can be 3--5$\times$ checkpoint save time. A 5-minute checkpoint save followed by 20-minute restart means effective failure cost is 25 minutes, not 5 minutes. The modified Young-Daly formula should use $T_{save} + T_{restart}$ for the overhead term, significantly increasing optimal checkpoint intervals.
+Total restart time can be 3--5$\times$ checkpoint save time. A 5-minute checkpoint save followed by 20-minute restart means effective failure cost is 25 minutes, not 5 minutes. The modified Young-Daly formula should use $T_{\text{save}} + T_{\text{restart}}$ for the overhead term, significantly increasing optimal checkpoint intervals.
 
 **Pitfall: Treating all failures as "restarts".**
 
@@ -3498,9 +3498,9 @@ Recognizing these fallacies—from underestimating silent data corruption to mis
 
 ## Summary {#sec-fault-tolerance-reliability-reliability-summary-48b0}
 
-Fault tolerance transforms the statistical certainty of hardware failure from a project-ending catastrophe into a manageable operational routine. The mathematics are unforgiving: individual component reliability compounds multiplicatively across thousands of devices, driving system-level MTBF from years down to hours. At frontier scale, failure is not an exceptional event to be debugged but a continuous background condition that systems must absorb without losing forward progress. The engineering challenge, therefore, is not to prevent failures but to build systems where recovery is automatic, fast, and invisible to the training or serving workload.
+Fault tolerance transforms the statistical certainty of hardware failure from a project-ending catastrophe into a manageable operational routine. The mathematics are unforgiving: individual component reliability compounds multiplicatively across thousands of devices, driving system-level \text{MTBF} from years down to hours. At frontier scale, failure is not an exceptional event to be debugged but a continuous background condition that systems must absorb without losing forward progress. The engineering challenge, therefore, is not to prevent failures but to build systems where recovery is automatic, fast, and invisible to the training or serving workload.
 
-Checkpointing provides the foundational mechanism for preserving training progress across failures. Synchronous checkpointing offers simplicity but imposes I/O overhead that scales with model size, while asynchronous approaches overlap checkpoint writes with computation at the cost of additional consistency complexity. The Young-Daly formula, $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$, gives engineers a principled way to balance checkpoint frequency against overhead, typically yielding intervals of 20 to 30 minutes for large clusters. Beyond basic checkpointing, elastic training breaks the rigid assumption that worker count must remain fixed: when nodes fail, the system redistributes data and model shards across the surviving workers, adjusts batch size and learning rate, and resumes training with reduced throughput rather than halting entirely.
+Checkpointing provides the foundational mechanism for preserving training progress across failures. Synchronous checkpointing offers simplicity but imposes I/O overhead that scales with model size, while asynchronous approaches overlap checkpoint writes with computation at the cost of additional consistency complexity. The Young-Daly formula, $T_{\text{opt}} = \sqrt{2 \times T_{\text{save}} \times \text{MTBF}}$, gives engineers a principled way to balance checkpoint frequency against overhead, typically yielding intervals of 20 to 30 minutes for large clusters. Beyond basic checkpointing, elastic training breaks the rigid assumption that worker count must remain fixed: when nodes fail, the system redistributes data and model shards across the surviving workers, adjusts batch size and learning rate, and resumes training with reduced throughput rather than halting entirely.
 
 Serving fault tolerance presents a fundamentally different challenge from training. Training tolerates minutes of recovery latency and benefits from SGD's mathematical tolerance of approximate restarts, while serving demands millisecond-level responsiveness and must preserve per-session state such as KV caches and conversation histories. Stateless serving achieves fault tolerance through straightforward replica redundancy and load balancing, but stateful serving for LLMs requires active state replication, session-affine routing, and graceful degradation hierarchies that fall back to lighter models when primary systems are unavailable. The case studies examined in this chapter, from Meta's OPT-175B training through over 35 hardware failures to Netflix's chaos engineering for ML serving, demonstrate that these principles are not theoretical but operational necessities at production scale.
 
@@ -3508,7 +3508,7 @@ Serving fault tolerance presents a fundamentally different challenge from traini
 
 * **Scale Guarantees Failure**: A 10,000-GPU cluster will encounter hardware failures every few hours; software must treat failure as a normal state.
 * **Checkpointing is the Baseline**: Synchronous checkpointing is simple but incurs high overhead; asynchronous approaches hide I/O latency at the cost of consistency complexity.
-* **The Young-Daly Formula Governs Checkpoint Intervals**: The optimal checkpoint interval $T_{opt} = \sqrt{2 \times T_{save} \times MTBF}$ balances the cost of saving state against the cost of lost work, typically yielding intervals of 20 to 30 minutes for large-scale training clusters.
+* **The Young-Daly Formula Governs Checkpoint Intervals**: The optimal checkpoint interval $T_{\text{opt}} = \sqrt{2 \times T_{\text{save}} \times \text{MTBF}}$ balances the cost of saving state against the cost of lost work, typically yielding intervals of 20 to 30 minutes for large-scale training clusters.
 * **Elasticity enables Persistence**: Designing training jobs to be "elastic" (reconfiguring around lost or added nodes as shown in @fig-elastic-flow) is superior to simple restart-from-scratch strategies.
 * **Stateful Serving is the Frontier**: For LLMs, the KV cache represents a massive serving state that must be replicated or migrated to prevent high-latency session restarts, with strategies illustrated in @fig-serving-redundancy.
 * **Training and Serving Require Different Strategies**: Training fault tolerance is checkpoint-centric and tolerates minutes of recovery, while serving fault tolerance is state-migration-centric and demands sub-second failover.

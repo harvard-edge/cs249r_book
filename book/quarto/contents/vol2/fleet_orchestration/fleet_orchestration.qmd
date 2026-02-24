@@ -23,7 +23,7 @@ from mlsys.constants import (
     NVLINK_A100_BW, NVLINK_H100_BW,
     INFINIBAND_HDR_BW, INFINIBAND_NDR_BW,
     GPT3_PARAMS,
-    GiB, GB, TB, second, Gbps, TFLOPs, param,
+    GB, TB, second, Gbps, TFLOPs, param,
     BILLION, BITS_PER_BYTE, SEC_PER_HOUR, SEC_PER_DAY
 )
 from mlsys.formatting import fmt, sci, check
@@ -84,11 +84,11 @@ A thousand GPUs sitting idle waiting for scheduling decisions cost the same as a
 # │       in scheduling comparison paragraph; $480K/day operating cost for
 # │       10,000-GPU cluster; 25% fragmentation from 6-GPU jobs on 8-GPU nodes.
 # │ How: Direct arithmetic on cluster_size, gpu_hour_cost_usd, utilization
-# │      fractions; pint .m_as() for hardware specs (GiB, GB/s, Gbps).
+# │      fractions; pint .m_as() for hardware specs (GB/s, Gbps).
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY,
 # │          NVLINK_A100_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW,
-# │          GiB, GB, second, Gbps, BITS_PER_BYTE)
+# │          GB, second, Gbps, BITS_PER_BYTE)
 # │ Exports: cluster_size_str, daily_cost_str, annual_cost_str,
 # │          daily_waste_str, annual_waste_str, equivalent_gpus_str,
 # │          spot_price_str, frag_pct_str, total_gpus_str,
@@ -99,8 +99,8 @@ A thousand GPUs sitting idle waiting for scheduling decisions cost the same as a
 class FleetOrchestrationSetup:
     """Cluster economics, fragmentation, and hardware specs for Fleet Orchestration chapter."""
     # ┌── 1. PARAMETERS (Inputs) ──────────────────────────────────────────────
-    a100_mem    = A100_MEM_CAPACITY.m_as(GiB)
-    h100_mem    = H100_MEM_CAPACITY.m_as(GiB)
+    a100_mem    = A100_MEM_CAPACITY.m_as(GB)
+    h100_mem    = H100_MEM_CAPACITY.m_as(GB)
     nvlink_a100 = NVLINK_A100_BW.m_as(GB / second)
     nvlink_h100 = NVLINK_H100_BW.m_as(GB / second)
     ib_ndr      = INFINIBAND_NDR_BW.m_as(Gbps)
@@ -450,9 +450,9 @@ The interaction between GPU allocation and node selection creates subtleties tha
 
 The **fair-share scheduling** mechanism prevents any single user or project from monopolizing resources over time. The core insight is that past usage should affect future priority: heavy users should yield to lighter users when the cluster is contended. The classic fair-share formula computes effective priority as:
 
-$$ P_{effective} = P_{base} \times \frac{F_{target}}{F_{actual} + \epsilon} $$ {#eq-fleet-orchestration-fair-share}
+$$ P_{\text{effective}} = P_{base} \times \frac{F_{\text{target}}}{F_{\text{actual}} + \epsilon} $$ {#eq-fleet-orchestration-fair-share}
 
-where $F_{target}$ represents the user's allocated share (determined by organizational policy), $F_{actual}$ their recent resource consumption (measured in GPU-hours over a configurable time window), and $\epsilon$ is a small constant preventing division by zero for new users. This formula naturally deprioritizes heavy users while allowing burst access when resources are idle. A researcher who has consumed twice their fair share sees their priority halved, pushing new submissions behind colleagues who have used less. Conversely, a researcher who has used no resources recently receives maximum priority, allowing rapid access when they return to active work.
+where $F_{\text{target}}$ represents the user's allocated share (determined by organizational policy), $F_{\text{actual}}$ their recent resource consumption (measured in GPU-hours over a configurable time window), and $\epsilon$ is a small constant preventing division by zero for new users. This formula naturally deprioritizes heavy users while allowing burst access when resources are idle. A researcher who has consumed twice their fair share sees their priority halved, pushing new submissions behind colleagues who have used less. Conversely, a researcher who has used no resources recently receives maximum priority, allowing rapid access when they return to active work.
 
 The time decay of usage history determines how quickly the system "forgives" past heavy usage. A half-life of one week means that a researcher's heavy usage from two weeks ago contributes only 25 percent to their current usage calculation. Short half-lives create rapid rebalancing but can lead to oscillatory behavior where users alternate between starving and gorging on resources. Long half-lives create stable priority ordering but may penalize researchers who completed a legitimate large project and now want resources for a smaller one. Most production clusters configure half-lives between 3 and 14 days, balancing responsiveness against stability.
 
@@ -706,7 +706,7 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
 
 Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **locality score** that penalizes allocations spanning multiple topology domains:
 
-$$ S_{locality} = \sum_{i < j} w(d(g_i, g_j)) $$ {#eq-fleet-orchestration-locality-score}
+$$ S_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j)) $$ {#eq-fleet-orchestration-locality-score}
 
 where $g_i$ and $g_j$ are GPUs assigned to the job, $d(g_i, g_j)$ is their topological distance (0 for same node, 1 for same rack, 2 for different racks), and $w(\cdot)$ is a weighting function that increases with distance. The scheduler minimizes this score when selecting an allocation from the set of feasible placements. The weighting function encodes the performance impact of each topology level: $w(0) = 0$ (same node, NVLink, no penalty), $w(1) = 1$ (same rack, one switch hop), $w(2) = 10$ (different racks, multiple switch hops). The tenfold weight difference between same-rack and cross-rack placements reflects the disproportionate performance impact of crossing spine switches.
 
@@ -1050,9 +1050,9 @@ Cloud providers offer **spot instances**[^fn-spot-instances-cloud] (AWS) or **pr
 
 The viability of spot instances for ML training depends on two factors that determine whether the discount translates into actual savings: the cost of each interruption (checkpoint overhead plus restart time plus lost work since the last checkpoint) and the frequency of interruption (which varies by instance type, region, time of day, and overall cloud demand). The **effective cost** of spot training is:
 
-$$ C_{effective} = C_{spot} \times \frac{T_{total}}{T_{productive}} $$ {#eq-fleet-orchestration-spot-cost}
+$$ C_{\text{effective}} = C_{\text{spot}} \times \frac{T_{\text{total}}}{T_{\text{productive}}} $$ {#eq-fleet-orchestration-spot-cost}
 
-where $T_{total}$ includes productive training time plus checkpoint overhead plus restart overhead after interruptions, and $T_{productive}$ is the time spent advancing training. If interruptions are rare (less than once per day) and checkpointing is efficient (less than 5 percent overhead), effective cost remains close to the spot price and the savings are nearly the full discount. If interruptions are frequent (every few hours) and restarts are expensive (large model, slow checkpoint loading, cold GPU cache), effective cost can approach or even exceed on-demand pricing, turning the apparent discount into a hidden premium.
+where $T_{\text{total}}$ includes productive training time plus checkpoint overhead plus restart overhead after interruptions, and $T_{\text{productive}}$ is the time spent advancing training. If interruptions are rare (less than once per day) and checkpointing is efficient (less than 5 percent overhead), effective cost remains close to the spot price and the savings are nearly the full discount. If interruptions are frequent (every few hours) and restarts are expensive (large model, slow checkpoint loading, cold GPU cache), effective cost can approach or even exceed on-demand pricing, turning the apparent discount into a hidden premium.
 
 The relationship between spot savings and fault tolerance infrastructure is circular in an important way. The fault tolerance mechanisms from @sec-fault-tolerance-reliability (frequent asynchronous checkpointing, fast checkpoint loading, elastic recovery) directly enable spot instance usage by minimizing the cost of each interruption. Elastic training allows jobs to continue with reduced worker count when some spot instances are reclaimed, avoiding full restart entirely. Organizations that invested in fault tolerance for reliability reasons discover that the same infrastructure unlocks significant cost savings through spot instance utilization, providing a return on their fault tolerance investment that goes far beyond avoiding lost work from hardware failures.
 
@@ -1120,11 +1120,11 @@ Technical optimization must be paired with financial accountability through **ML
 
 Optimizing for spot instance availability or scheduling density addresses only the visible tip of the infrastructure iceberg. The **Total Cost of Ownership (TCO)** for a machine learning fleet extends far beyond simple GPU-hours. In high-performance clusters, the compute silicon typically accounts for only 40 to 60 percent of the total system cost. The remainder is consumed by the supporting infrastructure required to keep that silicon fed and cool: high-bandwidth networking (InfiniBand switches, optics, and cabling), parallel file systems for checkpointing, and specialized power and cooling delivery. A single rack of H100 nodes can draw upwards of 40 kW -- ten times the density of a standard web server rack -- forcing facilities to deploy liquid cooling or rear-door heat exchangers that radically alter the facility's capital requirements.
 
-For an organization deciding between building a private cluster or renting cloud capacity, the decision hinges on the **amortization equation**. The TCO of an on-premise cluster over a typical three-year hardware lifecycle is the sum of Capital Expenditure ($C_{cap}$), Operational Expenditure ($C_{ops}$), and the often-overlooked Opportunity Cost ($C_{opp}$) of tying up capital in depreciating assets:
+For an organization deciding between building a private cluster or renting cloud capacity, the decision hinges on the **amortization equation**. The TCO of an on-premise cluster over a typical three-year hardware lifecycle is the sum of Capital Expenditure ($C_{\text{cap}}$), Operational Expenditure ($C_{\text{ops}}$), and the often-overlooked Opportunity Cost ($C_{\text{opp}}$) of tying up capital in depreciating assets:
 
-$$ \text{TCO}_{3\text{yr}} = C_{cap} + 3 \times C_{ops} + C_{opp} $$ {#eq-fleet-orchestration-tco}
+$$ \text{TCO}_{3\text{yr}} = C_{\text{cap}} + 3 \times C_{\text{ops}} + C_{\text{opp}} $$ {#eq-fleet-orchestration-tco}
 
-$C_{cap}$ is substantial: a cluster of 1,024 H100 GPUs requires approximately \$40M in servers and another \$10M in networking and storage fabric. $C_{ops}$ scales with utilization but includes a high fixed baseline for datacenter space, power availability guarantees, and the Site Reliability Engineering teams required to manage the complex software stack.
+$C_{\text{cap}}$ is substantial: a cluster of 1,024 H100 GPUs requires approximately \$40M in servers and another \$10M in networking and storage fabric. $C_{\text{ops}}$ scales with utilization but includes a high fixed baseline for datacenter space, power availability guarantees, and the Site Reliability Engineering teams required to manage the complex software stack.
 
 The break-even point between cloud and on-premise is strictly a function of utilization. Cloud pricing models charge a premium for elasticity -- the ability to scale to zero. Owning hardware eliminates the premium but introduces the risk of idle silicon. If a cluster runs at 80 percent utilization, the effective hourly cost of on-premise hardware drops to nearly half that of on-demand cloud instances, typically reaching break-even within 12 to 18 months. However, if utilization falters below 40 percent due to poor scheduling or fragmentation, the fixed amortization costs of owned hardware make it significantly more expensive than the cloud, where you only pay for what you use.
 
@@ -1293,7 +1293,7 @@ When multiple inference workloads share the same physical hardware, **noisy neig
 
 MIG provides hardware isolation that eliminates most interference channels, as discussed in @sec-fleet-orchestration-kubernetes. Each MIG instance has dedicated memory, cache, and compute resources, preventing cross-instance interference at the hardware level. However, MIG has limitations: it is available only on A100 and later GPUs, it requires pre-configured partition profiles that cannot change without draining all workloads from the GPU, and the fixed partition sizes may not match workload requirements (a workload that needs 15 GB of GPU memory wastes 5 GB on a 20 GB MIG instance or cannot fit on a 10 GB instance).
 
-Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA time-slicing** allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10-20ms) and offers no memory isolation. NVIDIA's **Multi-Process Service (MPS)**[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference but still sharing the same memory address space. The gold standard for multi-tenancy is **Multi-Instance GPU (MIG)**, which physically partitions the GPU's compute units and memory into isolated instances.
+Software approaches to isolation provide more flexibility at the cost of weaker guarantees. Efficiently sharing GPUs for inference requires navigating a hierarchy of isolation mechanisms, each trading performance for security. At the simplest level, **CUDA time-slicing** allows multiple processes to share a GPU by context-switching the compute resources. While flexible, this incurs high latency penalties (often 10--20 ms) and offers no memory isolation. NVIDIA's **Multi-Process Service (MPS)**[^fn-mps-gpu-sharing] improves this by allowing kernels from different processes to run concurrently on the same GPU, improving throughput for small batch inference but still sharing the same memory address space. The gold standard for multi-tenancy is **Multi-Instance GPU (MIG)**, which physically partitions the GPU's compute units and memory into isolated instances.
 
 GPU memory isolation prevents one model from consuming memory needed by another through explicit memory limits enforced by the container runtime. Without such limits, a memory leak, an unexpectedly large batch (triggered by a request with unusually long context), or a misbehaving custom kernel can consume all available GPU memory and crash colocated workloads. MPS improves utilization for small workloads by eliminating the context-switching overhead of time-slicing, but it adds latency overhead of approximately 5 to 10 microseconds per kernel launch and provides limited protection against memory bandwidth interference.
 
@@ -1373,7 +1373,7 @@ GPU quota allocation typically operates at the namespace or project level, defin
 
 Hierarchical quotas resolve this tension by enabling departmental limits with sub-team flexibility and cross-team borrowing. The effective quota for any team is bounded by both its own allocation and the remaining capacity within its parent organization:
 
-$$ Q_{effective} = \min\left(Q_{team},\ Q_{department} - \sum_{\text{other teams}} U_{allocated}\right) $$ {#eq-fleet-orchestration-quota}
+$$ Q_{\text{effective}} = \min\left(Q_{\text{team}},\ Q_{\text{department}} - \sum_{\text{other teams}} U_{\text{allocated}}\right) $$ {#eq-fleet-orchestration-quota}
 
 When aggregate demand exceeds capacity, each team receives resources proportional to its share allocation, ensuring that no team is systematically disadvantaged. Unused capacity borrows down the hierarchy: if Team A uses only 60 percent of its 500-GPU allocation, the remaining 200 GPUs become available to other teams within the same department. These borrowed resources carry lower preemption priority than owned resources: when Team A later submits jobs that need its full allocation, the scheduler reclaims borrowed capacity by preempting jobs running on those resources, returning capacity to its rightful owner.
 
@@ -1735,4 +1735,4 @@ In **Performance Engineering** (@sec-performance-engineering), we examine the te
 
 [^fn-taints-tolerations]: **Taints and Tolerations**: Kubernetes primitives for restricting pod placement. A **Taint** on a node repels all pods that do not explicitly **Tolerate** it. For ML fleets, this is the primary mechanism for isolating specialized hardware: by tainting A100 nodes, the orchestrator prevents general-purpose web services from "stealing" expensive GPU capacity, ensuring those nodes are reserved for training jobs that tolerate the taint. \index{Taints and Tolerations!GPU isolation}
 
-[^fn-placement-groups]: **Placement Group**: A cloud-native abstraction (AWS, GCP) that requests instances be placed within a single high-bandwidth, low-latency network domain. For the ML Fleet, placement groups are the **Topology Contract**: they guarantee the bisection bandwidth ($BW_{bisect}$) required for AllReduce, preventing the "topology lottery" where nodes are scattered across different datacenter racks. \index{Placement Group!topology}
+[^fn-placement-groups]: **Placement Group**: A cloud-native abstraction (AWS, GCP) that requests instances be placed within a single high-bandwidth, low-latency network domain. For the ML Fleet, placement groups are the **Topology Contract**: they guarantee the bisection bandwidth ($\text{BW}_{\text{bisect}}$) required for AllReduce, preventing the "topology lottery" where nodes are scattered across different datacenter racks. \index{Placement Group!topology}
