@@ -1153,6 +1153,58 @@ Continuous batching (also called iteration-level batching) decouples batch membe
 **Archetype A (GPT-4 / Llama-3)** (@sec-vol2-introduction-archetypes) relies on continuous batching to solve its primary efficiency paradox. The decode phase is memory-bandwidth bound, meaning the GPU compute cores are idle waiting for weights to load. Continuous batching saturates this bandwidth by processing unrelated requests together. Without this technique, serving Archetype A (GPT-4 / Llama-3) models would be economically unviable due to low GPU utilization.
 :::
 
+Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle.
+
+::: {#fig-continuous-batching-comparison fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**. In Static Batching (A), all requests in a batch must wait for the longest request to complete before the GPU can begin the next batch, leading to significant idle compute time (shaded gray). Continuous Batching (B) allows new requests to enter the batch as soon as any request finishes, keeping the GPU saturated and dramatically improving throughput." fig-alt="Two-panel timeline comparison. Left: Static batching shows requests of different lengths with large white space representing idle time. Right: Continuous batching shows requests filling the gaps as soon as one ends."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=0.8, yscale=0.7]
+  \definecolor{StaticColor}{RGB}{200,200,200}
+  \definecolor{ReqColor}{RGB}{0,99,149}    % BlueLine
+  \definecolor{WaitColor}{RGB}{240,240,240}
+
+  \tikzset{
+    req/.style={fill=ReqColor!60, draw=black!60, thick},
+    idle/.style={fill=black!5, draw=black!30, dashed}
+  }
+
+  % Panel A: Static Batching
+  \begin{scope}
+    \node[anchor=west, crimson] at (0, 4.5) {\textbf{A. Static Batching}};
+    % Batch 1
+    \draw[req] (0, 3) rectangle (2, 3.8) node[midway, white] {R1};
+    \draw[req] (0, 2) rectangle (5, 2.8) node[midway, white] {R2};
+    \draw[req] (0, 1) rectangle (3, 1.8) node[midway, white] {R3};
+    % Idle regions
+    \draw[idle] (2, 3) rectangle (5, 3.8);
+    \draw[idle] (3, 1) rectangle (5, 1.8);
+    % Vertical barrier
+    \draw[thick, red, dashed] (5, 0.5) -- (5, 4.2) node[above, font=\tiny] {Batch Barrier};
+    
+    % Batch 2 starts after barrier
+    \draw[req] (5.2, 3) rectangle (8, 3.8) node[midway, white] {R4};
+    \node at (2.5, -0.5) {Idle Compute};
+  \end{scope}
+
+  % Panel B: Continuous Batching
+  \begin{scope}[shift={(10,0)}]
+    \node[anchor=west, crimson] at (0, 4.5) {\textbf{B. Continuous Batching}};
+    % R1 ends at 2, R4 enters immediately
+    \draw[req] (0, 3) rectangle (2, 3.8) node[midway, white] {R1};
+    \draw[req, fill=OrangeLine!60] (2.1, 3) rectangle (5, 3.8) node[midway, white] {R4};
+    \draw[req, fill=OrangeLine!60] (5.1, 3) rectangle (8, 3.8) node[midway, white] {R5};
+    
+    \draw[req] (0, 2) rectangle (5, 2.8) node[midway, white] {R2};
+    \draw[req, fill=GreenLine!60] (5.1, 2) rectangle (9, 2.8) node[midway, white] {R6};
+    
+    \draw[req] (0, 1) rectangle (3, 1.8) node[midway, white] {R3};
+    \draw[req, fill=PurpleLine!60] (3.1, 1) rectangle (7, 1.8) node[midway, white] {R7};
+    
+    \node at (4.5, -0.5) {Continuous Utilization};
+  \end{scope}
+\end{tikzpicture}
+```
+:::
+
 ### Continuous Batching Throughput Analysis {#sec-inference-scale-continuous-batching-throughput-analysis-ecd2}
 
 Continuous batching's dynamic batch management maintains high GPU utilization regardless of sequence length variance. The throughput improvement depends on sequence length distribution. For a distribution with coefficient of variation $CV = \sigma / \mu$, the gain is approximately @eq-continuous-batching-gain:
