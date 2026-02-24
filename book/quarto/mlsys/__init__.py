@@ -7,4 +7,4 @@ from .deployment import Tiers
 
 # Export constants and registry for legacy support
 from .constants import ureg, Q_
-from .registry import start_chapter
+from .registry import start_chapter, end_chapter

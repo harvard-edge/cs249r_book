@@ -12,6 +12,11 @@ def start_chapter(chapter_id):
     TAPE.append({"type": "chapter_start", "chapter": chapter_id})
 
 
+def end_chapter(chapter_id):
+    """Close the tape for a chapter. Call from the last Python cell."""
+    TAPE.append({"type": "chapter_end", "chapter": chapter_id})
+
+
 def record(name, value, units=None, context=None):
     """Record a calculation step and return the value."""
     entry = {
