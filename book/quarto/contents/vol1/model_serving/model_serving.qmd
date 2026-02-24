@@ -1743,7 +1743,7 @@ This equation reveals why serving systems exhibit nonlinear behavior: small incr
 
 The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1\index{M/D/1 Queue!deterministic service} (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-kendall-notation-serving]
 
-[^fn-kendall-notation-serving]: **Kendall Notation**: In the A/S/c (Arrival/Service/servers) system, "M" signifies a Markovian (memoryless) process and "D" means deterministic. The text deliberately selects the less-accurate M/M/1 model because its predicted wait time is double that of the more realistic M/D/1 model, creating a conservative engineering bias that ensures capacity plans are more likely to meet SLOs. \index{Kendall Notation!queuing models}
+[^fn-kendall-notation-serving]: **Kendall Notation**: In the A/S/c (Arrival/Service/servers) system, "M" signifies a Markovian (memoryless) process and "D" means deterministic. The text selects M/M/1 rather than the more realistic M/D/1 because M/M/1's conservative bias is a *feature* for capacity planning: it overestimates wait times by roughly 2$\times$, building a 10--30% safety margin against variance surprises. The cost of over-provisioning by that margin is far lower than the cost of an SLA miss at the p99 tail when service time variance spikes unexpectedly. \index{Kendall Notation!queuing models}
 
 | **Utilization ($\rho$)** | **Latency Multiple** | **Example (5ms service)** |
 |:-------------------------|---------------------:|--------------------------:|
@@ -3227,7 +3227,15 @@ Generative inference requires managing the **KV Cache**[^fn-kv-cache-serving]\in
 
 [^fn-kv-cache-serving]: **KV Cache (Key-Value Cache)**: To avoid redundant work, the system caches the Key and Value vectors from previous tokens, which remain valid throughout generation. This design choice is the direct cause of the dynamic memory growth described; the cache's size grows linearly with every generated token, making memory management, not computation, the primary constraint. For a 70B model, this state can consume over 1.3 MB per token, meaning a batch of 32 requests at an 8,000-token context requires ~330 GB of memory—far exceeding the model weights themselves. \index{KV Cache!memory scaling}
 
-The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address these challenges. Advanced techniques including prefix caching and speculative decoding are covered in specialized coverage of large-scale systems.
+The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address these challenges.
+
+#### Prefix Caching and Memory Offloading {#sec-model-serving-prefix-caching-offloading}
+
+The memory pressure from KV caches can be further mitigated through architectural strategies that exploit request patterns. **Prefix Caching**\index{Prefix Caching!KV cache reuse} stores the KV cache of common instruction prefixes—such as a 2,000-token system prompt or a shared RAG context—allowing many independent requests to reuse the same pre-computed hidden states. This eliminates redundant prefill compute ($R_{peak}$) and reduces memory traffic ($BW$). For multi-turn conversations, this "caching of the past" allows the system to process only the *new* tokens in each turn.
+
+When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV Cache Offloading**\index{KV Cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. While retrieving offloaded context introduces a latency "tax" due to PCIe bandwidth limits (@sec-model-serving-model-swapping-host-memory-c54f), it prevents Out-of-Memory (OOM) failures and enables handling much larger context windows than the hardware could otherwise support.
+
+Advanced techniques including speculative decoding and distributed parallelism are covered in specialized treatments of large-scale systems.
 
 The computational intensity of managing KV caches across concurrent requests raises a broader question: *what* is the energy cost of each token generated? Unlike classification models where energy per inference is constant, LLM energy consumption scales with response length—every generated token requires reading the entire model from memory. Quantifying *the carbon cost of a chat* translates these hardware demands into energy and carbon metrics that make the environmental impact concrete.
 
@@ -3321,7 +3329,7 @@ As LLMs scale, energy efficiency becomes a first-class operational metric alongs
 - For comparison, charging a smartphone consumes ≈ `{python} cc_smartphone_str` Joules.
 - Boiling a cup of water consumes ≈ `{python} cc_boiling_str` Joules.
 
-**The Engineering Lever**: The primary way to reduce Joules/Token is to **increase hardware utilization**. If the GPU sits at `{python} cc_low_util_str`% utilization due to poor batching, the "Idle Power" is still ~`{python} cc_idle_power_str` W, causing the energy-per-token to skyrocket to **>`{python} cc_low_util_joules_str` Joules**. MLOps is not just about speed; it is about sustainability through efficiency.
+**The Engineering Lever**: The primary way to reduce Joules/Token is to **increase hardware utilization** and **eliminate redundant compute**. If the GPU sits at `{python} cc_low_util_str`% utilization due to poor batching, the "Idle Power" is still ~`{python} cc_idle_power_str` W, causing the energy-per-token to skyrocket to **>`{python} cc_low_util_joules_str` Joules**. Furthermore, architectural optimizations like **Prefix Caching** skip the energy-intensive prefill phase for shared context, directly reducing the energy footprint of RAG and chat applications. MLOps is not just about speed; it is about sustainability through efficiency.
 :::
 
 :::: {.callout-checkpoint title="LLM Serving Fundamentals" collapse="false"}
@@ -3331,6 +3339,7 @@ LLM serving introduces constraints absent from traditional model serving.
 - [ ] **Memory wall**: Can you explain why adding more compute cores yields zero latency improvement for token generation, and why only faster memory or smaller models help? (The Llama-3 case study in @sec-model-serving-production-case-study-serving-llama38b-0499 quantifies this relationship.)
 - [ ] **Continuous batching**: Can you explain why traditional static batching wastes compute when sequence lengths vary, and how iteration-level batching solves this?
 - [ ] **PagedAttention**: Can you explain the memory fragmentation problem in KV cache management and how borrowing virtual memory concepts from OS design achieves near-zero waste?
+- [ ] **Prefix Caching**: Can you explain how caching the KV states of common instruction prefixes reduces redundant computation and speeds up RAG or multi-turn applications?
 ::::
 
 ## Inference Runtime Selection {#sec-model-serving-inference-runtime-selection-5eef}
