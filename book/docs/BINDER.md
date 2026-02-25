@@ -107,6 +107,10 @@ Use Binder-native checks instead of direct script calls:
 - `./binder validate inline-python`
 - `./binder validate refs`
 - `./binder validate citations`
+- `./binder validate references` — validate .bib entries vs academic DBs (hallucinator; install: `pip install -e ".[reference-check]"` or `pip install -r book/tools/dependencies/requirements.txt`)
+  - `-f BIB` / `--file BIB` — .bib file(s) to check (can repeat)
+  - `-o FILE` / `--output FILE` — write report to FILE
+  - `--limit N` — check only first N refs (quick test)
 - `./binder validate duplicate-labels`
 - `./binder validate unreferenced-labels`
 - `./binder validate inline-refs`

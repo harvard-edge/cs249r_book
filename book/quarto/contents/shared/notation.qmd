@@ -1,0 +1,187 @@
+---
+number-sections: false
+---
+
+# Notation and Conventions {.unnumbered}
+
+These volumes span **Machine Learning** (computer science/statistics), **Systems** (computer architecture/hardware), and—in Volume II—**Distributed Systems** (networking/coordination). Each field developed its notation independently, and many symbols mean different things depending on which community you're reading. This collision creates real confusion when the disciplines merge. Volume I focuses on single-node ML systems; Volume II adds fleet-scale notation. This section establishes our notation to eliminate ambiguity in both.
+
+Consider a simple statement: *"Increasing $B$ improves throughput."* To an ML researcher, $B$ means batch size. To a hardware engineer, $B$ means bandwidth. Both interpretations are correct in their respective fields, but in ML Systems we need both concepts in the same equation. Similarly, *"Increasing $N$ improves throughput"* in Volume II could mean parameters or number of nodes—hence the need for a single, consistent convention.
+
+## The Iron Law of ML Systems {#sec-notation-conventions-iron-law-ml-systems-ce9d}
+
+The fundamental performance equation of these books (see the Introduction in each volume) is:
+
+$$T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta} + L_{\text{lat}}$$
+
+Each variable was chosen deliberately to avoid collision with standard ML terminology.
+
+| **Symbol**            | **Definition**  | **Unit** | **Why This Symbol?**                                                                                                                                                                         |
+|:----------------------|:----------------|:---------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **$T$**               | **Time**        | seconds  | Unambiguous. Wall-clock time for an operation.                                                                                                                                               |
+| **$D_{\text{vol}}$**  | **Data Volume** | bytes    | **Avoids collision with $D$ (Dataset Size)**. In scaling laws, $D$ means training tokens. Here we need bytes moved through memory. The subscript disambiguates.                              |
+| **$\text{BW}$**       | **Bandwidth**   | bytes/s  | **Avoids collision with $B$ (Batch Size)**. Physics uses $B$ for bandwidth, but every ML paper uses $B$ for batch size. We preserve the ML convention.                                       |
+| **$O$**               | **Operations**  | FLOPs    | Total floating-point operations. Clean in equations (vs. "$Ops$").                                                                                                                           |
+| **$R_{\text{peak}}$** | **Peak Rate**   | FLOP/s   | **Avoids collision with $P$ (Parameters)**. Roofline models use $P$ for peak performance, but ML universally uses $P$ for parameter count. We preserve the ML convention.                    |
+| **$\eta$**            | **Efficiency**  | —        | Hardware utilization ($0 \le \eta \le 1$). Overloaded with learning rate, but context always disambiguates (you never optimize learning rate and hardware utilization in the same equation). |
+| **$L_{\text{lat}}$**  | **Latency**     | seconds  | **Avoids collision with $\mathcal{L}$ (Loss)**. Fixed overhead time (kernel launch, network RTT). The subscript distinguishes from the loss function.                                        |
+
+### Why These Choices Matter {#sec-notation-conventions-choices-matter-0c16}
+
+Without careful notation, sentences become ambiguous:
+
+> *"Reducing $D$ improves performance."*
+
+Does this mean:
+
+- Reducing **dataset size** (fewer training samples)? → Faster training, but potentially worse accuracy.
+- Reducing **data volume moved** (smaller model, quantization)? → Faster inference, accuracy preserved.
+
+With our notation, we can write precisely:
+
+> *"Reducing $D_{vol}$ through INT8 quantization cuts memory traffic to one quarter while $D$ (training data) remains unchanged."*
+
+Our notation makes such ambiguity explicit: *"$\text{BW}$ limits throughput"* is unambiguous.
+
+## The Degradation Equation {#sec-notation-conventions-degradation-equation-ad12}
+
+The silent failure mode of ML systems is captured by the Degradation Equation (Volume I, Introduction):
+
+$$\text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot D(P_t \| P_0)$$
+
+| **Symbol**          | **Definition**             | **Unit / Type** | **Notes**                                                                                                   |
+|:--------------------|:---------------------------|:----------------|:------------------------------------------------------------------------------------------------------------|
+| $\text{Accuracy}_0$ | **Initial Accuracy**       | Scalar          | Model accuracy at deployment time.                                                                          |
+| $\lambda$           | **Sensitivity**            | Scalar          | Model sensitivity to distribution shift. Architecture-dependent. *(Not wavelength.)*                        |
+| $P_t$               | **Current Distribution**   | Distribution    | The data distribution at time $t$. *(Not parameters — use $P$ for parameter count.)*                        |
+| $P_0$               | **Training Distribution**  | Distribution    | The data distribution at training time.                                                                     |
+| $D(P_t \lVert P_0)$ | **Statistical Divergence** | Scalar $\ge 0$  | Measures how far $P_t$ has drifted from $P_0$. Common choices: KL divergence, total variation, Wasserstein. |
+| $\tau$              | **Drift Threshold**        | Scalar $> 0$    | Retraining is triggered when $D(P_t \lVert P_0) > \tau$.                                                    |
+
+## The Energy Corollary {#sec-notation-conventions-energy-corollary-a1da}
+
+The energy cost of ML workloads (see Iron Law in the Introduction) decomposes as:
+
+$$E_{\text{total}} \approx D_{\text{vol}} \times E_{\text{move}} + O \times E_{\text{compute}}$$
+
+| **Symbol**               | **Definition**            | **Unit**    | **Notes**                                                                                        |
+|:-------------------------|:--------------------------|:------------|:-------------------------------------------------------------------------------------------------|
+| **$E_{\text{move}}$**    | **Energy per Byte Moved** | joules/byte | Energy cost of data movement. Dominates total energy ($E_{\text{move}} \gg E_{\text{compute}}$). |
+| **$E_{\text{compute}}$** | **Energy per Operation**  | joules/FLOP | Energy cost of a single arithmetic operation.                                                    |
+
+## Distributed Systems Notation (Volume II) {#sec-notation-distributed}
+
+Fleet-scale ML in Volume II introduces a second layer of notation for coordination, communication, and reliability. The central equation there is the **Distributed Step Time Law**:
+
+$$T_{\text{step}}(N) = \frac{T_{\text{compute}}}{N} + T_{\text{comm}}(N) - T_{\text{overlap}}$$
+
+| **Symbol**               | **Definition**                 | **Unit** | **Notes**                                                               |
+|:-------------------------|:-------------------------------|:---------|:------------------------------------------------------------------------|
+| **$N$**                  | **Number of Devices**          | Integer  | Accelerator count in a distributed job. *(Not parameters — use $P$.)* |
+| **$T_{\text{step}}(N)$** | **Distributed Step Time**      | seconds  | Wall-clock time for one training step at scale $N$.                     |
+| **$T_{\text{compute}}$** | **Single-Device Compute Time** | seconds  | Forward + backward pass on one device.                                  |
+| **$T_{\text{comm}}(N)$** | **Communication Time**         | seconds  | Time for collective operations (AllReduce, AllGather). Grows with $N$.  |
+| **$T_{\text{overlap}}$** | **Overlapped Time**            | seconds  | Communication hidden behind computation. Reduces effective overhead.    |
+| **$T_{\text{sync}}$**    | **Synchronization Time**       | seconds  | Total non-overlapped synchronization cost per step.                     |
+
+### The \texorpdfstring{$\alpha$-$\beta$}{α-β} Communication Model {#sec-notation-alpha-beta}
+
+Network communication time decomposes into a fixed latency and a bandwidth-dependent transfer:
+
+$$T(n) = \alpha + \frac{n}{\beta}$$
+
+| **Symbol**   | **Definition**      | **Unit** | **Notes**                                                                             |
+|:-------------|:--------------------|:---------|:--------------------------------------------------------------------------------------|
+| **$\alpha$** | **Network Latency** | seconds  | Fixed per-message overhead. *(Not learning rate — context disambiguates.)*          |
+| **$\beta$**  | **Link Bandwidth**  | bytes/s  | Effective throughput per link.                                                        |
+| **$n$**      | **Message Size**    | bytes    | Size of the payload (e.g., gradient tensor).                                          |
+| **$n^*$**    | **Crossover Point** | bytes    | $n^* = \alpha \cdot \beta$. Below $n^*$: latency-bound. Above: bandwidth-bound.       |
+
+### Scaling Efficiency {#sec-notation-scaling}
+
+$$\eta_{\text{scaling}} = \frac{T_1}{N \times T_N} \leq 1$$
+
+| **Symbol**                  | **Definition**         | **Unit**      | **Notes**                                                                  |
+|:----------------------------|:-----------------------|:--------------|:---------------------------------------------------------------------------|
+| **$\eta_{\text{scaling}}$** | **Scaling Efficiency** | Dimensionless | Fraction of ideal linear speedup achieved. $1.0$ is the theoretical limit. |
+| **$T_1$**                   | **Single-Device Time** | seconds       | Baseline wall-clock time on one device.                                    |
+| **$T_N$**                   | **N-Device Time**      | seconds       | Wall-clock time on $N$ devices.                                            |
+
+### Fault Tolerance and Reliability {#sec-notation-reliability}
+
+System reliability degrades with scale. Single-component reliability follows an exponential distribution:
+
+$$R_{\text{system}}(t) = e^{-N\lambda t}$$
+
+The optimal checkpoint interval balances I/O cost against rework cost:
+
+$$\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$$
+
+| **Symbol**              | **Definition**                  | **Unit**    | **Notes**                                                                                                      |
+|:------------------------|:--------------------------------|:------------|:---------------------------------------------------------------------------------------------------------------|
+| **$R(t)$**              | **Reliability Function**        | Probability | Probability of no failure before time $t$.                                                                     |
+| **$\lambda$**           | **Failure Rate**                | FIT         | Failures per billion device-hours. *(Not sensitivity — context disambiguates.)*                              |
+| **$\text{MTBF}$**       | **Mean Time Between Failures**  | hours       | Average time between consecutive failures. $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}} / N$. |
+| **$\text{MTTR}$**       | **Mean Time To Repair**         | hours       | Average recovery time after a failure.                                                                         |
+| **$\tau_{\text{opt}}$** | **Optimal Checkpoint Interval** | seconds     | Young-Daly formula. Minimizes total wasted time.                                                               |
+| **$T_{\text{write}}$**  | **Checkpoint Write Time**       | seconds     | Time to persist model state to storage.                                                                        |
+
+### Parallelism Dimensions {#sec-notation-parallelism}
+
+Large-scale training partitions the workload across three orthogonal dimensions:
+
+$$N_{\text{total}} = d \times p \times t$$
+
+| **Symbol** | **Definition**           | **Unit** | **Notes**                                                                      |
+|:-----------|:-------------------------|:---------|:-------------------------------------------------------------------------------|
+| **$d$**    | **Data Parallelism**     | Integer  | Number of model replicas. *(Also hidden dimension — context disambiguates.)*   |
+| **$p$**    | **Pipeline Parallelism** | Integer  | Number of pipeline stages (model depth partitioning).                          |
+| **$t$**    | **Tensor Parallelism**   | Integer  | Degree of intra-layer partitioning (model width).                              |
+| **$M$**    | **Gradient Size**        | bytes    | Total size of gradient or model state to communicate.                          |
+
+## Deep Learning Notation {#sec-notation-conventions-deep-learning-notation-b40d}
+
+We follow standard deep learning conventions (@goodfellow2016deep) with explicit disambiguation for systems variables.
+
+| **Symbol**        | **Definition**       | **Dimensions / Type**                                                                                 |
+|:------------------|:---------------------|:------------------------------------------------------------------------------------------------------|
+| **$B$**           | **Batch Size**       | Integer. The number of samples processed in parallel. *(Never bandwidth.)*                            |
+| **$P$**           | **Parameters**       | Integer. The total count of trainable weights in a model. *(Never peak FLOP/s.)*                      |
+| **$D$**           | **Dataset Size**     | Integer. Number of training samples or tokens. *(Never data volume in bytes—use $D_{\text{vol}}$.)*   |
+| **$S$**           | **Sequence Length**  | Integer. Number of tokens or time steps.                                                              |
+| **$d$**           | **Hidden Dimension** | Integer. Size of the hidden state vector. *(Also data parallelism degree in Volume II—context disambiguates.)* |
+| **$\mathcal{L}$** | **Loss Function**    | Scalar. The objective function minimized during training.                                           |
+| **$\eta$**        | **Learning Rate**    | Scalar. Step size for the optimizer. *(Also efficiency—context distinguishes.)*                      |
+| **$\theta$**      | **Model Weights**    | Vector/Matrix. The set of all learnable parameters.                                                    |
+
+## Units and Precision {#sec-notation-conventions-units-precision-fdaf}
+
+*   **Physical Units**: These books use SI (metric) units throughout---meters, kilograms, seconds, watts, °C---consistent with standard engineering and scientific practice. Where source data was originally reported in imperial units, we convert to SI and note the original values parenthetically. A space always separates the number from the unit (e.g., 100 ms, 2 TB/s).
+*   **Data and memory**: We use **decimal SI prefixes only**: KB = $10^3$ bytes, MB = $10^6$, GB = $10^9$, TB = $10^{12}$. We do not use binary units (KiB, MiB, GiB) in prose; all capacities, throughputs, and model sizes are reported in decimal units (e.g., 80 GB, 2 TB/s, 102 MB).
+*   **Compute**: We use decimal prefixes for operations (e.g., GFLOPs, TFLOPs).
+    *   1 TFLOP = $10^{12}$ FLOPs
+*   **Network throughput** (Volume II): Reported in both bytes/s (GB/s, TB/s) and bits/s (Gbps) depending on convention. InfiniBand and Ethernet specifications use Gbps; application-level throughput uses GB/s. We note the convention on first use.
+*   **Precision**:
+    *   **FP32**: Single precision (4 bytes)
+    *   **FP16**: Half precision (2 bytes, standard range)
+    *   **BF16**: Brain float (2 bytes, wide dynamic range)
+    *   **FP8**: Quarter precision (1 byte, E4M3 or E5M2 format; Volume II)
+    *   **INT8**: 8-bit integer (1 byte)
+
+## Quick Reference: Resolving Collisions {#sec-notation-conventions-quick-reference-resolving-collisions-a9cf}
+
+When reading ML Systems literature (including these books), watch for these common collision points:
+
+| **Symbol** | **ML Meaning**   | **Systems / Distributed Meaning** | **Our Convention**                                                              |
+|:-----------|:-----------------|:----------------------------------|:--------------------------------------------------------------------------------|
+| $B$        | Batch Size       | Bandwidth                         | **Batch Size**. Use $\text{BW}$ for bandwidth.                                  |
+| $P$        | Parameters       | Peak FLOP/s                       | **Parameters**. Use $R_{\text{peak}}$ for peak rate.                            |
+| $D$        | Dataset Size     | Data Volume                       | **Dataset Size**. Use $D_{\text{vol}}$ for bytes moved.                         |
+| $N$        | —                | Number of Nodes / Devices         | **Device Count** in distributed context (Volume II).                              |
+| $L$        | Loss             | Latency                           | **Loss** ($\mathcal{L}$). Use $L_{\text{lat}}$ for latency.                     |
+| $\alpha$   | —                | Network Latency / Learning rate  | **Network latency** in $\alpha$-$\beta$ model. Context disambiguates.           |
+| $\lambda$  | Sensitivity      | Failure Rate                      | **Context-dependent**. Sensitivity in degradation; failure rate in reliability. |
+| $\eta$     | Learning Rate    | Efficiency                        | **Context-dependent**. Never both in the same equation.                          |
+| $d$        | Hidden Dimension | Data Parallelism Degree           | **Context-dependent**. Parallelism in 3D notation (Volume II); hidden dim in architectures. |
+
+The general principle: **ML conventions take precedence for single letters**; systems and distributed concepts get subscripts or multi-letter symbols. This reflects the primary audience (ML practitioners learning systems) and preserves compatibility with the vast ML literature.

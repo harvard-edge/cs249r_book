@@ -1,8 +1,10 @@
 """
 Native validation commands for MLSysBook Binder CLI.
 
-This module intentionally implements validation logic directly in Binder,
-without shelling out to legacy scripts under tools/scripts.
+Validation logic is implemented in Binder where possible (e.g. references,
+citations, labels, figures, rendering). Some checks still delegate to scripts
+under book/tools/scripts/ (tables, spelling, epub, sources, grid-tables,
+images). See book/cli/BINDER_NATIVE_AUDIT.md for the full list.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+from . import reference_check
 
 console = Console()
 
@@ -184,6 +188,12 @@ class ValidateCommand:
         "sources": [
             ("citations", "_run_sources"),
         ],
+        "references": [
+            ("hallucinator", "_run_check_references"),
+        ],
+        "content": [
+            ("tree", "_run_content_tree"),
+        ],
     }
 
     def __init__(self, config_manager, chapter_discovery):
@@ -201,7 +211,7 @@ class ValidateCommand:
             "subcommand",
             nargs="?",
             choices=all_group_names,
-            help="Check group to run (refs, labels, headers, footnotes, figures, rendering, all)",
+            help="Check group to run (refs, labels, headers, footnotes, figures, rendering, references, content, all)",
         )
         parser.add_argument("--scope", default=None, help="Narrow to a specific check within a group")
         parser.add_argument("--path", default=None, help="File or directory path to check")
@@ -219,6 +229,12 @@ class ValidateCommand:
         parser.add_argument("--equations", action="store_true", help="labels: filter to equations")
         parser.add_argument("--listings", action="store_true", help="labels: filter to listings")
         parser.add_argument("--all-types", action="store_true", help="labels: all label types")
+        parser.add_argument("-f", "--file", dest="refs_file", action="append", metavar="BIB", help="references: .bib file(s) to check")
+        parser.add_argument("-o", "--output", dest="refs_output", metavar="FILE", help="references: write report to FILE")
+        parser.add_argument("--limit", type=int, dest="refs_limit", metavar="N", help="references: check only first N refs (quick test)")
+        parser.add_argument("--skip-verified", dest="refs_skip_verified", action="store_true", help="references: skip refs already verified in cache")
+        parser.add_argument("--thorough", dest="refs_thorough", action="store_true", help="references: revalidate all refs (ignore cache)")
+        parser.add_argument("--refs-cache", dest="refs_cache", metavar="FILE", help="references: cache file (default: .references_verified.json in repo root)")
 
         try:
             ns = parser.parse_args(args)
@@ -292,6 +308,8 @@ class ValidateCommand:
                 results.append(method(root, check_patterns=ns.check_patterns))
             elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
                 results.append(method(root, self._selected_label_types(ns)))
+            elif method_name == "_run_check_references":
+                results.append(method(root, ns))
             else:
                 results.append(method(root))
         return results
@@ -316,6 +334,8 @@ class ValidateCommand:
             "spelling": "Prose and TikZ spell checking (requires aspell)",
             "epub": "EPUB file validation",
             "sources": "Source citation analysis and validation",
+            "references": "Bibliography vs academic DBs (hallucinator)",
+            "content": "Content tree (shared/, frontmatter/ required)",
         }
         for group_name, checks in self.GROUPS.items():
             scopes = ", ".join(s for s, _ in checks)
@@ -2683,6 +2703,68 @@ class ValidateCommand:
         return self._delegate_script(script, ["--quick", str(epub_files[0])], "epub")
 
     # ------------------------------------------------------------------
+    # Content tree: require shared/ and frontmatter/ (not only vol1/vol2)
+    # ------------------------------------------------------------------
+
+    # Required paths under contents/ so that scripts don't assume only vol1/vol2 exist.
+    CONTENT_TREE_REQUIRED: List[tuple] = [
+        ("shared", True),           # (path relative to contents, is_dir)
+        ("shared/notation.qmd", False),
+        ("frontmatter", True),
+    ]
+
+    def _run_content_tree(self, root: Path) -> ValidationRunResult:
+        """Ensure contents/ has shared/ and frontmatter/; fail if they are missing."""
+        t0 = time.time()
+        # Resolve to contents dir: root may be contents, or contents/vol1, or contents/vol2
+        if root.name in ("vol1", "vol2") and root.parent.name == "contents":
+            contents_dir = root.parent
+        else:
+            contents_dir = root
+        if not (contents_dir / "vol1").is_dir() or not (contents_dir / "vol2").is_dir():
+            # Not the book contents root; skip (e.g. user passed a chapter path)
+            return ValidationRunResult(
+                name="content-tree",
+                description="Content tree (shared/frontmatter required)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+        issues: List[ValidationIssue] = []
+        for rel, is_dir in self.CONTENT_TREE_REQUIRED:
+            path = contents_dir / rel
+            if is_dir:
+                if not path.is_dir():
+                    issues.append(
+                        ValidationIssue(
+                            file=str(path),
+                            line=0,
+                            code="content-tree",
+                            message=f"Required directory missing: contents/{rel} (shared content used by both volumes)",
+                            severity="error",
+                        )
+                    )
+            else:
+                if not path.is_file():
+                    issues.append(
+                        ValidationIssue(
+                            file=str(path),
+                            line=0,
+                            code="content-tree",
+                            message=f"Required file missing: contents/{rel}",
+                            severity="error",
+                        )
+                    )
+        elapsed = int((time.time() - t0) * 1000)
+        return ValidationRunResult(
+            name="content-tree",
+            description="Content tree (shared/frontmatter required)",
+            files_checked=len(self.CONTENT_TREE_REQUIRED),
+            issues=issues,
+            elapsed_ms=elapsed,
+        )
+
+    # ------------------------------------------------------------------
     # Source citation validation  (delegated to manage_sources.py)
     # ------------------------------------------------------------------
 
@@ -2725,6 +2807,52 @@ class ValidateCommand:
                     message=f"Script not found: {script}", severity="error",
                 )],
             )
+
+    def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
+        """Validate .bib references against academic DBs (native implementation)."""
+        repo_root = self.config_manager.book_dir.parent.parent
+        if getattr(ns, "refs_file", None):
+            bib_paths = [Path(f) if Path(f).is_absolute() else repo_root / f for f in ns.refs_file]
+        else:
+            bib_paths = [repo_root / p for p in reference_check.DEFAULT_BIB_REL_PATHS]
+        output_path = Path(ns.refs_output) if getattr(ns, "refs_output", None) else None
+        limit = getattr(ns, "refs_limit", None)
+        skip_verified = getattr(ns, "refs_skip_verified", False)
+        thorough = getattr(ns, "refs_thorough", False)
+        cache_path = getattr(ns, "refs_cache", None)
+        if cache_path is not None:
+            cache_path = Path(cache_path) if Path(cache_path).is_absolute() else repo_root / cache_path
+        else:
+            cache_path = repo_root / ".references_verified.json"
+
+        passed, elapsed_ms, issue_dicts, files_checked = reference_check.run(
+            bib_paths,
+            output_path=output_path,
+            limit=limit,
+            dedupe=True,
+            resilient=True,
+            console=console,
+            cache_path=cache_path,
+            skip_verified=skip_verified,
+            thorough=thorough,
+        )
+        issues = [
+            ValidationIssue(
+                file=d["file"],
+                line=d["line"],
+                code=d["code"],
+                message=d["message"],
+                severity=d.get("severity", "error"),
+            )
+            for d in issue_dicts
+        ]
+        return ValidationRunResult(
+            name="references",
+            description="Bibliography vs academic DBs (hallucinator)",
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=elapsed_ms,
+        )
 
     # ------------------------------------------------------------------
     # Shared helpers
