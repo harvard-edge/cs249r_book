@@ -35,7 +35,7 @@ USAGE:
     python3 download_external_images.py -d .
 
     # Process all files in specific directory
-    python3 download_external_images.py -d book/contents/core
+    python3 download_external_images.py -d book/contents/vol1
 
     # Process single file
     python3 download_external_images.py -f path/to/file.qmd
@@ -452,11 +452,11 @@ def main():
         epilog="""
 Examples:
   %(prog)s -d .                         # Process all files recursively from current directory
-  %(prog)s -d book/contents/core        # Process all files in specific directory
+  %(prog)s -d book/contents/vol1        # Process all files in specific directory
   %(prog)s -f chapter/file.qmd          # Process single file
   %(prog)s -d . --dry-run               # Preview what would be downloaded
   %(prog)s -d . --confirm               # Ask for confirmation before each download
-  %(prog)s --validate book/contents/core # Validate mode: fail if external images found (pre-commit)
+  %(prog)s --validate book/contents/vol1 # Validate mode: fail if external images found (pre-commit)
   %(prog)s --validate . --ignore-external # Validate mode: warn only (allow external images)
         """)
 

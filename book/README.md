@@ -3,11 +3,11 @@
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
 [![Build](https://img.shields.io/github/actions/workflow/status/harvard-edge/cs249r_book/book-validate-dev.yml?branch=dev&label=Build&logo=githubactions)](https://github.com/harvard-edge/cs249r_book/actions/workflows/book-validate-dev.yml)
-[![Website](https://img.shields.io/badge/Read-mlsysbook.ai-blue)](https://mlsysbook.ai)
-[![PDF](https://img.shields.io/badge/Download-PDF-red)](https://mlsysbook.ai/pdf)
-[![EPUB](https://img.shields.io/badge/Download-EPUB-green)](https://mlsysbook.ai/epub)
+[![Website](https://img.shields.io/badge/Read-mlsysbook.ai-blue)](https://mlsysbook.ai/book/)
+[![PDF](https://img.shields.io/badge/Download-PDF-red)](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)
+[![EPUB](https://img.shields.io/badge/Download-EPUB-green)](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub)
 
-**[Read Online](https://mlsysbook.ai)** | **[PDF](https://mlsysbook.ai/pdf)** | **[EPUB](https://mlsysbook.ai/epub)**
+**[Read Online](https://mlsysbook.ai/book/)** | **[Volume I](https://mlsysbook.ai/vol1/)** | **[Volume II](https://mlsysbook.ai/vol2/)** | **[PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)**
 
 ---
 
@@ -41,13 +41,30 @@ This directory contains the textbook source and build system for contributors.
 
 ### Book Structure
 
+This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
+
+| Volume | Theme | Focus |
+|--------|-------|-------|
+| **Volume I** | Build, Optimize, Deploy | Single-machine ML systems, foundational principles |
+| **Volume II** | Scale, Distribute, Govern | Distributed systems at production scale |
+
+#### Volume I: Build, Optimize, Deploy
+
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **Foundations** | ML and systems basics | Introduction, ML Primer, DL Primer, AI Acceleration |
-| **Workflow** | Production pipeline | Workflows, Data Engineering, Frameworks |
-| **Training** | Learning at scale | Training, Distributed Training, Efficient AI |
-| **Deployment** | Real-world systems | Inference, On-Device AI, Hardware Benchmarking, Ops |
-| **Advanced** | Frontier topics | Privacy, Security, Responsible AI, Sustainable AI, Genertic AI, Frontiers |
+| **Foundations** | Core concepts | Introduction, ML Systems, DL Primer, Architectures |
+| **Development** | Building blocks | Workflow, Data Engineering, Frameworks, Training |
+| **Optimization** | Making it fast | Efficient AI, Optimizations, HW Acceleration, Benchmarking |
+| **Deployment** | Making it work | Serving, MLOps, Responsible Engineering |
+
+#### Volume II: Scale, Distribute, Govern
+
+| Part | Focus | Chapters |
+|------|-------|----------|
+| **Foundations of Scale** | Infrastructure | Infrastructure, Storage, Communication |
+| **Distributed Systems** | Coordination | Distributed Training, Fault Tolerance, Inference, Edge Intelligence |
+| **Production Challenges** | Operations | On-device Learning, Privacy & Security, Robust AI, Ops at Scale |
+| **Responsible Deployment** | Trust | Responsible AI, Sustainable AI, AI for Good, Frontiers |
 
 ---
 
@@ -69,11 +86,11 @@ This directory contains the textbook source and build system for contributors.
 
 ```bash
 # Read online
-open https://mlsysbook.ai
+open https://mlsysbook.ai/book/
 
 # Download formats
-curl -O https://mlsysbook.ai/pdf
-curl -O https://mlsysbook.ai/epub
+curl -O https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf
+curl -O https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub
 ```
 
 ### For Contributors
@@ -91,12 +108,14 @@ cd book
 ./binder preview intro      # Preview chapter with live reload
 
 # Build all formats
-./binder pdf                # Build PDF
-./binder epub               # Build EPUB
+./binder build pdf          # Build PDF
+./binder build epub         # Build EPUB
 
 # Utilities
 ./binder help               # Show all commands
 ./binder list               # List chapters
+./binder validate all       # Run Binder-native validation checks
+./binder maintain repo-health # Run Binder-native repo diagnostics
 ```
 
 ---
@@ -107,12 +126,12 @@ cd book
 book/
 ├── quarto/              # Book source (Quarto markdown)
 │   ├── contents/        # Chapter content
-│   │   ├── core/        # Core chapters
-│   │   ├── labs/        # Hands-on labs
+│   │   ├── vol1/        # Volume I: Build, Optimize, Deploy
+│   │   ├── vol2/        # Volume II: Scale, Distribute, Govern
 │   │   ├── frontmatter/ # Preface, about, changelog
 │   │   └── backmatter/  # References, glossary
 │   ├── assets/          # Images, downloads
-│   └── _quarto.yml      # Quarto configuration
+│   └── config/          # Quarto configuration files
 ├── cli/                 # Binder CLI tool
 ├── docker/              # Development containers
 ├── docs/                # Documentation
@@ -126,9 +145,12 @@ book/
 
 | Audience | Resources |
 |----------|-----------|
-| **Readers** | [Online Book](https://mlsysbook.ai) ・ [PDF](https://mlsysbook.ai/pdf) ・ [EPUB](https://mlsysbook.ai/epub) |
+| **Readers** | [Online Book](https://mlsysbook.ai/book/) ・ [Volume I](https://mlsysbook.ai/vol1/) ・ [Volume II](https://mlsysbook.ai/vol2/) ・ [PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf) |
 | **Contributors** | [CONTRIBUTING.md](docs/CONTRIBUTING.md) ・ [BUILD.md](docs/BUILD.md) |
 | **Developers** | [DEVELOPMENT.md](docs/DEVELOPMENT.md) ・ [BINDER.md](docs/BINDER.md) |
+
+Binder is the public automation API for book build/validate/maintenance workflows.
+Use Binder subcommands in editor integrations and CI where possible.
 
 ---
 
@@ -152,7 +174,7 @@ We welcome contributions! See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for g
 | **[Main README](../README.md)** | Project overview and ecosystem |
 | **[TinyTorch](../tinytorch/)** | Build ML frameworks from scratch |
 | **[Hardware Kits](../kits/)** | Deploy to Arduino, Raspberry Pi, edge devices |
-| **[Website](https://mlsysbook.ai)** | Read the book online |
+| **[Website](https://mlsysbook.ai/book/)** | Read the book online |
 
 ---
 

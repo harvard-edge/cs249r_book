@@ -165,8 +165,14 @@ def print_invalid_files(invalid):
     table.add_column("Reason", style="red")
     table.add_column("Actual Format", style="yellow")
     table.add_column("Expected Format", style="red")
-    for fpath, reason, actual, expected in invalid:
-        table.add_row(fpath, reason, str(actual or "—"), str(expected or "—"))
+    
+    for item in invalid:
+        if isinstance(item, (list, tuple)) and len(item) == 4:
+            fpath, reason, actual, expected = item
+            table.add_row(fpath, reason, str(actual or "—"), str(expected or "—"))
+        else:
+            table.add_row(str(item), "Internal script error: invalid item format", "—", "—")
+            
     console.print(table)
 
 def main():
@@ -253,12 +259,12 @@ def main():
         sorted_formats = sorted(format_stats.items(), key=lambda x: x[1]['total'], reverse=True)
 
         for format_name, stats in sorted_formats:
-            total = stats['total']
-            valid = stats['valid']
-            invalid = stats['invalid']
+            fmt_total = stats['total']
+            fmt_valid = stats['valid']
+            fmt_invalid = stats['invalid']
 
-            status_color = "green" if invalid == 0 else "yellow" if invalid < total else "red"
-            console.print(f"   {format_name}: [cyan]{total}[/cyan] total ([{status_color}]{valid} valid, {invalid} invalid[/{status_color}])")
+            status_color = "green" if fmt_invalid == 0 else "yellow" if fmt_invalid < fmt_total else "red"
+            console.print(f"   {format_name}: [cyan]{fmt_total}[/cyan] total ([{status_color}]{fmt_valid} valid, {fmt_invalid} invalid[/{status_color}])")
 
     if invalid:
         console.print()

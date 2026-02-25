@@ -4,6 +4,7 @@ Build command implementation for MLSysBook CLI.
 Handles building chapters and full books in different formats (HTML, PDF, EPUB).
 """
 
+import platform
 import subprocess
 import signal
 import sys
@@ -18,15 +19,61 @@ console = Console()
 class BuildCommand:
     """Handles build operations for the MLSysBook."""
 
-    def __init__(self, config_manager, chapter_discovery):
+    def __init__(self, config_manager, chapter_discovery, verbose: bool = False, open_after: bool = False):
         """Initialize build command.
 
         Args:
             config_manager: ConfigManager instance
             chapter_discovery: ChapterDiscovery instance
+            verbose: If True, stream build output in real-time
+            open_after: If True, open build output after successful build
         """
         self.config_manager = config_manager
         self.chapter_discovery = chapter_discovery
+        self.verbose = verbose
+        self.open_after = open_after
+
+    def _open_output(self, output_dir: Path, format_type: str) -> None:
+        """Open the build output using the system's default application.
+
+        For PDF/EPUB: finds and opens the first matching file.
+        For HTML: opens index.html in the default browser.
+
+        Args:
+            output_dir: Path to the build output directory
+            format_type: Format type ('html', 'pdf', 'epub')
+        """
+        if not self.open_after:
+            return
+
+        target = None
+
+        if format_type == "pdf":
+            pdf_files = list(output_dir.glob("*.pdf"))
+            if pdf_files:
+                target = pdf_files[0]
+        elif format_type == "epub":
+            epub_files = list(output_dir.glob("*.epub"))
+            if epub_files:
+                target = epub_files[0]
+        elif format_type == "html":
+            index = output_dir / "index.html"
+            if index.exists():
+                target = index
+
+        if target is None:
+            console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
+            return
+
+        console.print(f"[cyan]🔗 Opening {target.name}...[/cyan]")
+
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.Popen(["open", str(target)])
+        elif system == "Linux":
+            subprocess.Popen(["xdg-open", str(target)])
+        elif system == "Windows":
+            subprocess.Popen(["start", "", str(target)], shell=True)
 
     def build_full(self, format_type: str = "html") -> bool:
         """Build full book in specified format.
@@ -101,6 +148,7 @@ class BuildCommand:
 
             if success:
                 console.print(f"[green]✅ {format_type.upper()} build completed: {output_dir}/[/green]")
+                self._open_output(output_dir, format_type)
             else:
                 console.print(f"[red]❌ {format_type.upper()} build failed[/red]")
 
@@ -120,6 +168,9 @@ class BuildCommand:
         Returns:
             True if build succeeded, False otherwise
         """
+        # Expand patterns like appendix* / re:^appendix_
+        chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names)
+
         console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type})[/dim]")
         console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
 
@@ -188,6 +239,7 @@ class BuildCommand:
 
             if success:
                 console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
+                self._open_output(output_dir, format_type)
             else:
                 console.print("[red]❌ Build failed[/red]")
 
@@ -203,6 +255,201 @@ class BuildCommand:
                     self._restore_config(config_file)
             except:
                 pass
+
+    def build_chapters_with_volume(self, chapter_names: List[str], format_type: str, volume: str) -> bool:
+        """Build specific chapters using volume-specific configuration.
+
+        Args:
+            chapter_names: List of chapter names to build
+            format_type: Format to build ('html', 'pdf', 'epub')
+            volume: Volume config to use ('vol1' or 'vol2')
+
+        Returns:
+            True if build succeeded, False otherwise
+        """
+        # Expand patterns like appendix* / re:^appendix_ within the requested volume
+        chapter_names = self.chapter_discovery.expand_chapter_patterns(chapter_names, volume=volume)
+
+        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        console.print(f"[green]🚀 Building {len(chapter_names)} chapters[/green] [dim]({format_type}, {volume_name} config)[/dim]")
+        console.print(f"[dim]📋 Chapters: {', '.join(chapter_names)}[/dim]")
+
+        try:
+            # Auto-prefix chapter names with volume to disambiguate
+            prefixed_chapters = []
+            for ch in chapter_names:
+                # Only prefix if not already prefixed
+                if not ch.startswith(f"{volume}/"):
+                    prefixed_chapters.append(f"{volume}/{ch}")
+                else:
+                    prefixed_chapters.append(ch)
+
+            # Validate chapters exist
+            chapter_files = self.chapter_discovery.validate_chapters(prefixed_chapters)
+
+            # Show files that will be built
+            console.print("[dim]📄 Files to be rendered:[/dim]")
+            console.print(f"[dim]  • index.qmd[/dim]")
+            for chapter_file in chapter_files:
+                rel_path = chapter_file.relative_to(self.config_manager.book_dir)
+                console.print(f"[dim]  • {rel_path}[/dim]")
+
+            # Setup volume-specific configuration
+            config_file = self.config_manager.get_config_file(format_type, volume)
+
+            if not config_file.exists():
+                console.print(f"[yellow]⚠️ Volume config not found: {config_file}[/yellow]")
+                console.print(f"[yellow]Falling back to default config...[/yellow]")
+                return self.build_chapters(chapter_names, format_type)
+
+            format_args = {
+                "html": "html",
+                "pdf": "titlepage-pdf",
+                "epub": "epub"
+            }
+
+            if format_type not in format_args:
+                raise ValueError(f"Unknown format type: {format_type}")
+
+            format_arg = format_args[format_type]
+
+            # Create volume-specific build directory
+            output_dir = self.config_manager.get_output_dir(format_type, volume)
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Setup volume-specific configuration symlink
+            config_name = self.config_manager.setup_symlink(format_type, volume)
+            console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
+
+            # Set up fast build mode for the target chapters
+            self._setup_fast_build_mode(config_file, chapter_files)
+
+            # Track if config has been restored to avoid double restoration
+            self._config_restored = False
+
+            # Setup signal handler to restore config on Ctrl+C
+            def signal_handler(signum, frame):
+                if not self._config_restored:
+                    console.print("\n[yellow]🛡️ Ctrl+C detected - restoring config...[/yellow]")
+                    self._restore_config(config_file)
+                    self._config_restored = True
+                    console.print("[green]✅ Config restored[/green]")
+                sys.exit(0)
+
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+            # Build with project.render configuration
+            console.print("[yellow]🔨 Building with fast build configuration...[/yellow]")
+
+            render_cmd = ["quarto", "render", f"--to={format_arg}"]
+            cmd_str = " ".join(render_cmd)
+            console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
+
+            # Execute build
+            success = self._run_command(
+                render_cmd,
+                cwd=self.config_manager.book_dir,
+                description=f"Building {len(chapter_names)} chapters ({format_type}, {volume_name})"
+            )
+
+            if success:
+                console.print(f"[green]✅ Build complete: {output_dir}/[/green]")
+                self._open_output(output_dir, format_type)
+            else:
+                console.print("[red]❌ Build failed[/red]")
+
+            return success
+
+        except Exception as e:
+            console.print(f"[red]❌ Build failed: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+            return False
+        finally:
+            # Restore configuration
+            try:
+                if not self._config_restored:
+                    console.print("[yellow]🛡️ Restoring config...[/yellow]")
+                    self._restore_config(config_file)
+                    console.print("[green]✅ Configuration restored successfully[/green]")
+            except:
+                pass
+
+    def build_volume(self, volume: str, format_type: str = "pdf") -> bool:
+        """Build a specific volume using its dedicated configuration.
+
+        This uses the volume-specific config files (e.g., _quarto-pdf-vol1.yml)
+        which are pre-configured with all the correct chapters and settings
+        for that volume.
+
+        Args:
+            volume: Volume to build ('vol1' or 'vol2')
+            format_type: Format to build ('html', 'pdf', 'epub')
+
+        Returns:
+            True if build succeeded, False otherwise
+        """
+        volume_name = "Volume I" if volume == "vol1" else "Volume II"
+        console.print(f"[magenta]📖 Building {volume_name} ({format_type.upper()})...[/magenta]")
+
+        # Check if volume-specific config exists
+        config_file = self.config_manager.get_config_file(format_type, volume)
+        if not config_file.exists():
+            console.print(f"[yellow]⚠️ Volume-specific config not found: {config_file}[/yellow]")
+            console.print(f"[yellow]Falling back to chapter-based build...[/yellow]")
+            # Fallback to old behavior
+            chapter_files = self.chapter_discovery.get_volume_chapters(volume)
+            if not chapter_files:
+                console.print(f"[red]No chapters found in {volume}[/red]")
+                return False
+            console.print(f"[dim]Found {len(chapter_files)} chapters in {volume}[/dim]")
+            return self.build_chapters(
+                [f"{volume}/{ch.stem}" for ch in chapter_files],
+                format_type
+            )
+
+        console.print(f"[dim]Using config: {config_file.name}[/dim]")
+
+        # Create build directory
+        output_dir = self.config_manager.get_output_dir(format_type, volume)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Setup config symlink to volume-specific config
+        config_name = self.config_manager.setup_symlink(format_type, volume)
+        console.print(f"[dim]🔗 Linked _quarto.yml → {config_name}[/dim]")
+
+        # Determine render target
+        render_targets = {
+            "html": "html",
+            "pdf": "titlepage-pdf",
+            "epub": "epub"
+        }
+
+        if format_type not in render_targets:
+            raise ValueError(f"Unknown format type: {format_type}")
+
+        render_to = render_targets[format_type]
+        render_cmd = ["quarto", "render", f"--to={render_to}"]
+
+        # Show the command being executed
+        cmd_str = " ".join(render_cmd)
+        console.print(f"[blue]💻 Command: {cmd_str}[/blue]")
+
+        # Execute build
+        success = self._run_command(
+            render_cmd,
+            cwd=self.config_manager.book_dir,
+            description=f"Building {volume_name} ({format_type.upper()})"
+        )
+
+        if success:
+            console.print(f"[green]✅ {volume_name} {format_type.upper()} build completed: {output_dir}/[/green]")
+            self._open_output(output_dir, format_type)
+        else:
+            console.print(f"[red]❌ {volume_name} {format_type.upper()} build failed[/red]")
+
+        return success
 
     def _build_both_formats(self) -> bool:
         """Build both HTML and PDF formats sequentially."""
@@ -237,31 +484,57 @@ class BuildCommand:
             True if command succeeded, False otherwise
         """
         try:
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=False
-            ) as progress:
-                task = progress.add_task(description, total=None)
-
-                result = subprocess.run(
+            if self.verbose:
+                # Verbose mode: stream output in real-time
+                console.print(f"[dim]▶ {description}[/dim]")
+                process = subprocess.Popen(
                     cmd,
                     cwd=cwd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
                     text=True,
-                    timeout=1800  # 30 minute timeout
+                    bufsize=1
                 )
 
-                progress.update(task, completed=True)
+                # Stream output line by line
+                for line in iter(process.stdout.readline, ''):
+                    if line:
+                        console.print(line.rstrip())
 
-            if result.returncode == 0:
-                return True
+                process.wait(timeout=1800)
+
+                if process.returncode == 0:
+                    return True
+                else:
+                    console.print(f"[red]Command failed with exit code {process.returncode}[/red]")
+                    return False
             else:
-                console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
-                if result.stderr:
-                    console.print(f"[red]Error: {result.stderr}[/red]")
-                return False
+                # Quiet mode: show spinner
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                    transient=False
+                ) as progress:
+                    task = progress.add_task(description, total=None)
+
+                    result = subprocess.run(
+                        cmd,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=1800  # 30 minute timeout
+                    )
+
+                    progress.update(task, completed=True)
+
+                if result.returncode == 0:
+                    return True
+                else:
+                    console.print(f"[red]Command failed with exit code {result.returncode}[/red]")
+                    if result.stderr:
+                        console.print(f"[red]Error: {result.stderr}[/red]")
+                    return False
 
         except subprocess.TimeoutExpired:
             console.print("[red]❌ Build timed out after 30 minutes[/red]")
@@ -307,7 +580,7 @@ class BuildCommand:
                         files_to_render.append(str(rel_path))
                     except ValueError:
                         # If relative path fails, try to construct it
-                        files_to_render.append(f"contents/core/{chapter_name}/{chapter_name}.qmd")
+                        files_to_render.append(f"contents/vol1/{chapter_name}/{chapter_name}.qmd")
 
             # Show files that will be built
             console.print("[dim]📄 Files to be rendered:[/dim]")
@@ -335,6 +608,7 @@ class BuildCommand:
             if success:
                 output_dir = self.config_manager.get_output_dir("html")
                 console.print(f"[green]✅ HTML-only build completed: {output_dir}/[/green]")
+                self._open_output(output_dir, "html")
             else:
                 console.print("[red]❌ HTML-only build failed[/red]")
 
@@ -420,11 +694,59 @@ class BuildCommand:
         except Exception as e:
             console.print(f"[yellow]⚠️ Error removing render section: {e}[/yellow]")
 
+    @staticmethod
+    def _reset_config_comments(content: str) -> str:
+        """Reset a config file by uncommenting all .qmd chapter lines.
+
+        This ensures a clean starting state regardless of whether a previous
+        build was interrupted and left the config in a partially-commented state.
+
+        Handles patterns like:
+            # - contents/vol1/chapter/chapter.qmd  →  - contents/vol1/chapter/chapter.qmd
+            #- contents/vol1/chapter/chapter.qmd   →  - contents/vol1/chapter/chapter.qmd
+
+        Also uncomments structural lines (part declarations, chapters: keys)
+        that may have been commented out by a previous fast build.
+
+        Args:
+            content: Raw config file content
+
+        Returns:
+            Content with all .qmd lines and their structural containers uncommented
+        """
+        lines = content.split('\n')
+        reset_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+
+            if stripped.startswith('#') and '.qmd' in line:
+                # Uncomment .qmd lines: preserve leading whitespace
+                indent = len(line) - len(line.lstrip())
+                # Strip the comment prefix from the stripped content
+                uncommented = stripped.lstrip('#').lstrip()
+                # Ensure it starts with '- ' (YAML list item)
+                if not uncommented.startswith('-'):
+                    uncommented = '- ' + uncommented
+                reset_lines.append(' ' * indent + uncommented)
+            elif stripped.startswith('#') and ('part:' in stripped or stripped.lstrip('#').strip().startswith('chapters:')):
+                # Uncomment structural lines (part declarations, chapters keys)
+                indent = len(line) - len(line.lstrip())
+                uncommented = stripped.lstrip('#').lstrip()
+                reset_lines.append(' ' * indent + uncommented)
+            else:
+                reset_lines.append(line)
+
+        return '\n'.join(reset_lines)
+
     def _setup_fast_build_mode(self, config_file: Path, chapter_files: List[Path]) -> None:
         """Setup fast build mode by modifying config for selective chapter builds.
 
         For HTML: Uses render field to specify which files to build
         For PDF/EPUB: Comments out chapters not being built
+
+        Always resets the config to a clean state first (all chapters uncommented)
+        to handle cases where a previous build was interrupted.
         """
         console.print("[dim]⚡ Setting up fast build mode...[/dim]")
 
@@ -441,19 +763,22 @@ class BuildCommand:
         with open(backup_file, 'w', encoding='utf-8') as f:
             f.write(original_content)
 
+        # Reset to clean state: uncomment all .qmd lines so we start fresh
+        clean_content = self._reset_config_comments(original_content)
+
         # Determine format and call appropriate setup function
         config_name = str(config_file).lower()
 
         if 'html' in config_name:
-            self._setup_html_fast_build(config_file, chapter_files, original_content)
+            self._setup_html_fast_build(config_file, chapter_files, clean_content)
         elif 'pdf' in config_name:
-            self._setup_pdf_fast_build(config_file, chapter_files, original_content)
+            self._setup_pdf_fast_build(config_file, chapter_files, clean_content)
         elif 'epub' in config_name:
-            self._setup_epub_fast_build(config_file, chapter_files, original_content)
+            self._setup_epub_fast_build(config_file, chapter_files, clean_content)
         else:
             # Fallback to PDF/EPUB approach for unknown formats
             console.print(f"[yellow]⚠️ Unknown config format, using PDF approach: {config_file}[/yellow]")
-            self._setup_pdf_fast_build(config_file, chapter_files, original_content)
+            self._setup_pdf_fast_build(config_file, chapter_files, clean_content)
 
     def _setup_html_fast_build(self, config_file: Path, chapter_files: List[Path], original_content: str) -> None:
         """Setup HTML fast build using render field."""
@@ -467,7 +792,7 @@ class BuildCommand:
             except ValueError:
                 # Try to construct the path
                 chapter_name = chapter_file.stem
-                files_to_render.append(f"contents/core/{chapter_name}/{chapter_name}.qmd")
+                files_to_render.append(f"contents/vol1/{chapter_name}/{chapter_name}.qmd")
 
         console.print(f"[dim]📋 Files to render: {len(files_to_render)} files[/dim]")
 
@@ -519,6 +844,11 @@ class BuildCommand:
 
         Note: render field doesn't work for PDF. We preserve the structure
         but comment out files not in the selected list.
+
+        Handles multiple path patterns:
+        - Regular chapters: contents/vol1/chapter_name/chapter_name.qmd
+        - Backmatter/appendix: contents/vol1/backmatter/appendix_name.qmd
+        - Glossary: contents/vol1/backmatter/glossary/glossary.qmd
         """
         # Get list of chapter names to keep
         keep_chapters = set(['index'])  # Always keep index.qmd
@@ -563,7 +893,11 @@ class BuildCommand:
                     # Check if this line has a chapter we want to include
                     if '.qmd' in next_line:
                         for chapter_name in keep_chapters:
-                            if f'{chapter_name}/{chapter_name}.qmd' in next_line or f'{chapter_name}.qmd' in next_line:
+                            # Check multiple path patterns for PDF backmatter/appendix support
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
                                 part_has_active_chapters = True
                                 break
                         # Also check always_include
@@ -597,10 +931,18 @@ class BuildCommand:
                                 should_include = True
                                 break
 
-                        # Check against selected chapters
+                        # Check against selected chapters using multiple path patterns
                         if not should_include:
                             for chapter_name in keep_chapters:
-                                if f'{chapter_name}/{chapter_name}.qmd' in part_line or f'{chapter_name}.qmd' in part_line:
+                                # Check multiple path patterns:
+                                # 1. Regular: chapter_name/chapter_name.qmd
+                                # 2. Direct: chapter_name.qmd (for backmatter files)
+                                # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                                # 4. Glossary: backmatter/glossary/glossary.qmd
+                                if (f'{chapter_name}/{chapter_name}.qmd' in part_line or
+                                    f'{chapter_name}.qmd' in part_line or
+                                    f'backmatter/{chapter_name}.qmd' in part_line or
+                                    f'glossary/{chapter_name}.qmd' in part_line):
                                     should_include = True
                                     break
 
@@ -647,10 +989,18 @@ class BuildCommand:
                         should_include = True
                         break
 
-                # Check against selected chapters
+                # Check against selected chapters using multiple path patterns
                 if not should_include:
                     for chapter_name in keep_chapters:
-                        if f'{chapter_name}/{chapter_name}.qmd' in line or f'{chapter_name}.qmd' in line:
+                        # Check multiple path patterns:
+                        # 1. Regular: chapter_name/chapter_name.qmd
+                        # 2. Direct: chapter_name.qmd (for backmatter files)
+                        # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                        # 4. Glossary: backmatter/glossary/glossary.qmd
+                        if (f'{chapter_name}/{chapter_name}.qmd' in line or
+                            f'{chapter_name}.qmd' in line or
+                            f'backmatter/{chapter_name}.qmd' in line or
+                            f'glossary/{chapter_name}.qmd' in line):
                             should_include = True
                             break
 
@@ -671,6 +1021,39 @@ class BuildCommand:
                         modified_lines.append(commented)
                     else:
                         modified_lines.append(line)
+            elif stripped == 'appendices:':
+                # Handle appendices section: look ahead to see if any appendix entries will be kept.
+                # If all entries are commented out, we must also comment out the 'appendices:' key
+                # itself, otherwise Quarto sees appendices: null and fails validation.
+                has_active_appendix = False
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    # Stop at blank lines or non-indented lines (end of appendices block)
+                    if not next_stripped or (next_line and not next_line[0].isspace() and not next_line.startswith('\t')):
+                        break
+                    if '.qmd' in next_line:
+                        for chapter_name in keep_chapters:
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
+                                has_active_appendix = True
+                                break
+                        for always_file in always_include:
+                            if always_file in next_line:
+                                has_active_appendix = True
+                                break
+                    if has_active_appendix:
+                        break
+                    j += 1
+
+                if has_active_appendix:
+                    modified_lines.append(line)
+                else:
+                    indent = len(line) - len(line.lstrip())
+                    modified_lines.append(' ' * indent + '# ' + line.lstrip())
             else:
                 # All other lines - copy as-is
                 modified_lines.append(line)
@@ -695,6 +1078,12 @@ class BuildCommand:
         - Must preserve part structure (parts cannot be commented out if they contain active chapters)
         - Must uncomment both part and chapters lines when building chapters in that part
         - Uses same commenting approach as PDF but with stricter part preservation
+
+        Handles multiple path patterns:
+        - Regular chapters: contents/vol1/chapter_name/chapter_name.qmd
+        - Backmatter/appendix: contents/vol1/backmatter/appendix_name.qmd
+        - Glossary: contents/vol1/backmatter/glossary/glossary.qmd
+        - Handles "Appendices" part wrapper for backmatter in EPUB
         """
         # Get list of chapter names to keep
         keep_chapters = set(['index'])  # Always keep index.qmd
@@ -739,7 +1128,11 @@ class BuildCommand:
                     # Check if this line has a chapter we want to include
                     if '.qmd' in next_line:
                         for chapter_name in keep_chapters:
-                            if f'{chapter_name}/{chapter_name}.qmd' in next_line or f'{chapter_name}.qmd' in next_line:
+                            # Check multiple path patterns for EPUB backmatter/appendix support
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
                                 part_has_active_chapters = True
                                 break
                         # Also check always_include
@@ -758,6 +1151,7 @@ class BuildCommand:
                     if part_has_active_chapters and ('part:' in part_line or part_stripped.startswith('chapters:')):
                         # EPUB CRITICAL: This part has active chapters, so ensure structural lines are uncommented
                         # Always ensure part and chapters lines are uncommented when part has active chapters
+                        # This handles "Appendices" part wrapper for backmatter chapters
                         if part_stripped.startswith('#'):
                             uncommented = part_line.replace('# ', '', 1).replace('#', '', 1)
                             modified_lines.append(uncommented)
@@ -773,10 +1167,18 @@ class BuildCommand:
                                 should_include = True
                                 break
 
-                        # Check against selected chapters
+                        # Check against selected chapters using multiple path patterns
                         if not should_include:
                             for chapter_name in keep_chapters:
-                                if f'{chapter_name}/{chapter_name}.qmd' in part_line or f'{chapter_name}.qmd' in part_line:
+                                # Check multiple path patterns:
+                                # 1. Regular: chapter_name/chapter_name.qmd
+                                # 2. Direct: chapter_name.qmd (for backmatter files)
+                                # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                                # 4. Glossary: backmatter/glossary/glossary.qmd
+                                if (f'{chapter_name}/{chapter_name}.qmd' in part_line or
+                                    f'{chapter_name}.qmd' in part_line or
+                                    f'backmatter/{chapter_name}.qmd' in part_line or
+                                    f'glossary/{chapter_name}.qmd' in part_line):
                                     should_include = True
                                     break
 
@@ -823,10 +1225,18 @@ class BuildCommand:
                         should_include = True
                         break
 
-                # Check against selected chapters
+                # Check against selected chapters using multiple path patterns
                 if not should_include:
                     for chapter_name in keep_chapters:
-                        if f'{chapter_name}/{chapter_name}.qmd' in line or f'{chapter_name}.qmd' in line:
+                        # Check multiple path patterns:
+                        # 1. Regular: chapter_name/chapter_name.qmd
+                        # 2. Direct: chapter_name.qmd (for backmatter files)
+                        # 3. Backmatter: backmatter/chapter_name.qmd (explicit)
+                        # 4. Glossary: backmatter/glossary/glossary.qmd
+                        if (f'{chapter_name}/{chapter_name}.qmd' in line or
+                            f'{chapter_name}.qmd' in line or
+                            f'backmatter/{chapter_name}.qmd' in line or
+                            f'glossary/{chapter_name}.qmd' in line):
                             should_include = True
                             break
 
@@ -847,6 +1257,38 @@ class BuildCommand:
                         modified_lines.append(commented)
                     else:
                         modified_lines.append(line)
+            elif stripped == 'appendices:':
+                # Handle appendices section: look ahead to see if any appendix entries will be kept.
+                # If all entries are commented out, we must also comment out the 'appendices:' key
+                # itself, otherwise Quarto sees appendices: null and fails validation.
+                has_active_appendix = False
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j]
+                    next_stripped = next_line.strip()
+                    if not next_stripped or (next_line and not next_line[0].isspace() and not next_line.startswith('\t')):
+                        break
+                    if '.qmd' in next_line:
+                        for chapter_name in keep_chapters:
+                            if (f'{chapter_name}/{chapter_name}.qmd' in next_line or
+                                f'{chapter_name}.qmd' in next_line or
+                                f'backmatter/{chapter_name}.qmd' in next_line or
+                                f'glossary/{chapter_name}.qmd' in next_line):
+                                has_active_appendix = True
+                                break
+                        for always_file in always_include:
+                            if always_file in next_line:
+                                has_active_appendix = True
+                                break
+                    if has_active_appendix:
+                        break
+                    j += 1
+
+                if has_active_appendix:
+                    modified_lines.append(line)
+                else:
+                    indent = len(line) - len(line.lstrip())
+                    modified_lines.append(' ' * indent + '# ' + line.lstrip())
             else:
                 # All other lines - copy as-is
                 modified_lines.append(line)
@@ -891,7 +1333,7 @@ class BuildCommand:
         for line in lines:
             stripped = line.strip()
 
-            # Check if this is a commented line with a .qmd file
+            # Check if this is a commented line with a .qmd file or a commented structural key
             if stripped.startswith('#') and '.qmd' in line:
                 # Uncomment the line while preserving indentation
                 # Handle both "# - " and "#- " patterns
@@ -903,6 +1345,11 @@ class BuildCommand:
                     # Just remove the first # and space
                     uncommented = line.replace('# ', '', 1).replace('#', '', 1)
 
+                modified_lines.append(uncommented)
+                uncommented_count += 1
+            elif stripped == '# appendices:':
+                # Uncomment the appendices key (may have been commented out by fast build)
+                uncommented = line.replace('# appendices:', 'appendices:', 1)
                 modified_lines.append(uncommented)
                 uncommented_count += 1
             else:
@@ -940,3 +1387,68 @@ class BuildCommand:
                 console.print(f"[red]❌ Error restoring config: {e}[/red]")
         else:
             console.print("[yellow]⚠️ No backup file found - config may already be restored[/yellow]")
+
+    def reset_build_config(self, format_type: str, volume: Optional[str] = None) -> bool:
+        """Reset build config by uncommenting all chapter entries.
+
+        For PDF/EPUB this restores commented chapter lists.
+        For HTML this also removes temporary `render:` sections used for fast builds.
+
+        Args:
+            format_type: Format to reset ('html', 'pdf', 'epub')
+            volume: Optional specific volume ('vol1' or 'vol2'). If omitted, reset both volumes.
+
+        Returns:
+            True if at least one config was reset successfully.
+        """
+        format_type = format_type.lower()
+        if format_type not in {"html", "pdf", "epub"}:
+            console.print(f"[red]❌ Unsupported format for reset: {format_type}[/red]")
+            return False
+
+        def _candidate_configs() -> List[Path]:
+            if volume:
+                return [self.config_manager.get_config_file(format_type, volume)]
+
+            # Reset all known volume configs for the selected format.
+            if format_type == "html":
+                return [self.config_manager.html_vol1_config, self.config_manager.html_vol2_config]
+            if format_type == "pdf":
+                return [self.config_manager.pdf_vol1_config, self.config_manager.pdf_vol2_config]
+            return [self.config_manager.epub_vol1_config, self.config_manager.epub_vol2_config]
+
+        targets = _candidate_configs()
+        reset_count = 0
+
+        for cfg in targets:
+            if not cfg.exists():
+                console.print(f"[yellow]⚠️ Skipping missing config: {cfg.name}[/yellow]")
+                continue
+
+            try:
+                original_content = cfg.read_text(encoding="utf-8")
+                reset_content = self._reset_config_comments(original_content)
+
+                if format_type == "html":
+                    # HTML fast builds can leave temporary render sections in place.
+                    cfg.write_text(reset_content, encoding="utf-8")
+                    self._remove_render_section(cfg)
+                else:
+                    cfg.write_text(reset_content, encoding="utf-8")
+
+                backup_file = cfg.with_suffix(".backup")
+                if backup_file.exists():
+                    backup_file.unlink()
+
+                reset_count += 1
+                console.print(f"[green]✓[/green] Reset config: {cfg.name}")
+            except Exception as e:
+                console.print(f"[red]❌ Failed to reset {cfg.name}: {e}[/red]")
+
+        if reset_count == 0:
+            console.print("[red]❌ No configs were reset.[/red]")
+            return False
+
+        scope = volume if volume else "all volumes"
+        console.print(f"[green]✅ Reset {format_type.upper()} build config for {scope}[/green]")
+        return True

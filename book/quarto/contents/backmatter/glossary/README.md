@@ -20,29 +20,36 @@ This directory contains the comprehensive glossary system for the ML Systems tex
 
 ### Data Flow {#sec-ml-systems-textbook-glossary-system-data-flow-b3a7}
 ```
-Individual Chapter Glossaries → Global Glossary → Published Glossary Page
-        (22 JSON files)           (1 JSON file)        (1 QMD file)
-            ↓                          ↓                     ↓
-      Source of Truth              Aggregated           User-Facing
-     (810 raw terms)            (611 unique terms)       (Web Page)
+Chapter Glossaries → Volume Glossaries → Published Glossary Pages
+   (vol1: 16 files)   (vol1_glossary.json)   (vol1/glossary.qmd)
+   (vol2:  7 files)   (vol2_glossary.json)   (vol2/glossary.qmd)
+         ↓                    ↓                     ↓
+     Source of           Aggregated             Volume-specific
+       truth             & deduplicated         user-facing pages
 ```
+
+Each volume has its own self-contained glossary with no cross-volume dependencies.
 
 ### File Structure {#sec-ml-systems-textbook-glossary-system-file-structure-a801}
 ```
 quarto/contents/
-├── core/                                    # Chapter directories
+├── vol1/                                    # Volume 1 chapters
 │   ├── introduction/
 │   │   └── introduction_glossary.json      # Chapter-specific terms
-│   ├── ml_systems/
-│   │   └── ml_systems_glossary.json        # Chapter-specific terms
-│   └── [... 20 more chapters ...]
+│   ├── [... more vol1 chapters ...]
+│   └── backmatter/glossary/
+│       ├── vol1_glossary.json              # Vol1 aggregated terms
+│       └── glossary.qmd                    # Vol1 glossary page
 │
-├── data/
-│   ├── global_glossary.json                # Aggregated & deduplicated terms
-│   └── global_glossary.backup.json         # Backup of previous version
+├── vol2/                                    # Volume 2 chapters
+│   ├── infrastructure/
+│   │   └── infrastructure_glossary.json
+│   ├── [... more vol2 chapters ...]
+│   └── backmatter/glossary/
+│       ├── vol2_glossary.json              # Vol2 aggregated terms
+│       └── glossary.qmd                    # Vol2 glossary page
 │
 └── backmatter/glossary/
-    ├── glossary.qmd                        # Published glossary page
     └── README.md                           # This documentation
 ```
 
@@ -259,7 +266,7 @@ quarto preview # Development server
 
 ### Consolidation Issues {#sec-ml-systems-textbook-glossary-system-consolidation-issues-d66b}
 1. Review similarity detection results: `smart_consolidation.py`
-2. Check consolidation logs in `quarto/contents/data/`
+2. Check consolidation logs in `quarto/contents/backmatter/glossary/`
 3. Manually edit problem terms in chapter files
 4. Re-run the full rebuild process
 

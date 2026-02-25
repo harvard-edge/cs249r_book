@@ -24,8 +24,8 @@ For most users, the easiest way is using our **Book Binder CLI**:
 
 # Build complete book
 ./binder build                          # Complete book (HTML)
-./binder pdf                            # Complete book (PDF)
-./binder epub                           # Complete book (EPUB)
+./binder build pdf                      # Complete book (PDF)
+./binder build epub                     # Complete book (EPUB)
 
 # Get help
 ./binder help
@@ -283,15 +283,15 @@ The **recommended way** to build the book is using the Book Binder CLI:
 #### Build Complete Book
 ```sh
 ./binder build                  # Complete website (HTML)
-./binder pdf                    # Complete book (PDF)
-./binder epub                   # Complete e-book (EPUB)
+./binder build pdf              # Complete book (PDF)
+./binder build epub             # Complete e-book (EPUB)
 ```
 
 #### Build Specific Chapter(s)
 ```sh
 ./binder build intro                    # Single chapter (HTML)
 ./binder build intro,ml_systems         # Multiple chapters (HTML)
-./binder pdf intro                      # Single chapter (PDF, selective build)
+./binder build pdf intro                # Single chapter (PDF, selective build)
 ```
 
 #### Preview Mode (Live Reload)
@@ -414,7 +414,7 @@ python binder doctor
 Or test building:
 ```powershell
 python binder build intro
-python binder pdf
+python binder build pdf
 ```
 
 ---
@@ -468,7 +468,7 @@ pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r req
 - Try rebuilding from scratch:
   ```sh
   ./binder clean
-  ./binder pdf
+  ./binder build pdf
   ```
 
 **Chapter not found?**
@@ -617,7 +617,7 @@ Once everything is set up, you'll be able to:
 ### Development Workflow
 - 🚀 **Preview changes locally** with live reload: `./binder preview intro`
 - 🔨 **Build individual chapters** for fast iteration: `./binder build intro`
-- 📚 **Build complete book** in multiple formats: `./binder build`, `./binder pdf`, `./binder epub`
+- 📚 **Build complete book** in multiple formats: `./binder build`, `./binder build pdf`, `./binder build epub`
 - 🔍 **Validate your setup** anytime: `./binder doctor`
 - 🧹 **Clean up artifacts**: `./binder clean`
 

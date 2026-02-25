@@ -6,7 +6,6 @@ Works on Windows, macOS, and Linux.
 """
 
 import sys
-import os
 import shutil
 import tempfile
 import zipfile
@@ -106,14 +105,29 @@ def repackage_epub(temp_dir, output_path):
                     epub_zip.write(item_path, item, compress_type=zipfile.ZIP_DEFLATED)
 
 
+def find_default_epub() -> Path | None:
+    """Find the most recently generated EPUB in common build locations."""
+    build_root = Path("_build")
+    if not build_root.exists():
+        return None
+
+    # Support legacy path (_build/epub) and per-volume outputs (_build/epub-vol*).
+    candidates = sorted(build_root.glob("**/*.epub"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0] if candidates else None
+
+
 def main():
     """Main entry point."""
     # Determine EPUB file path
     if len(sys.argv) > 1:
         epub_file = Path(sys.argv[1])
     else:
-        # Running as post-render hook - find the EPUB
-        epub_file = Path("_build/epub/Machine-Learning-Systems.epub")
+        # Running as post-render hook - auto-detect output location.
+        detected = find_default_epub()
+        if detected is None:
+            print("⚠️  EPUB file not found under _build/")
+            return 0
+        epub_file = detected
 
     if not epub_file.exists():
         print(f"⚠️  EPUB file not found: {epub_file}")

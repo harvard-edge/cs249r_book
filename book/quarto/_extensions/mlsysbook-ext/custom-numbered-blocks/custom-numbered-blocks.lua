@@ -475,7 +475,7 @@ local function Divs_getid(el)
    if id == nil or id =="" then
     -- try in next header
     el1 = el.content[1]
-    if el1.t=="Header" then
+    if el1 ~= nil and el1.t=="Header" then
     --    pout("--- looking at header with id "..el1.identifier)
     --    pout("--- still processing item with id ".. replaceifempty(id, "LEER"))
      -- pout("replacing id")
@@ -763,7 +763,7 @@ end -- function renderDiv
 -- TODO: make everything with walk. Looks so nice
 local function resolveref(data)
   return {
-   RawInline = function(el)
+    RawInline = function(el)
       local refid = el.text:match("\\ref{(.*)}")
       if refid then
         if data[refid] then
@@ -772,7 +772,25 @@ local function resolveref(data)
             href = data[refid].file .. '.html' .. href
           end
           return pandoc.Link(data[refid].refnum, href)
-      end  end
+        end
+      end
+    end,
+    -- Support for @id syntax (Quarto/Pandoc Cite elements)
+    Cite = function(el)
+      for _, citation in ipairs(el.citations) do
+        local refid = citation.id
+        if data[refid] then
+          local href = '#'..refid
+          if fbx.ishtmlbook then
+            href = data[refid].file .. '.html' .. href
+          end
+          -- Return link with reflabel + refnum (e.g., "Principle 1.1")
+          local linktext = data[refid].reflabel .. " " .. data[refid].refnum
+          return pandoc.Link(linktext, href)
+        end
+      end
+      -- Not our ref, return unchanged for bibliography processing
+      return nil
     end
   }
 end

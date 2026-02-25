@@ -233,12 +233,12 @@ class DoctorCommand:
                 "details": f"Large chapters: {', '.join([ch['name'] for ch in large_chapters[:3]])}"
             })
 
-        # Check for missing chapters (common ones)
+        # Check for missing chapters (common ones).
+        # Use discovered chapter names directly so duplicate names across volumes
+        # (e.g., vol1/introduction and vol2/introduction) are not treated as errors.
         expected_chapters = ["introduction", "ml_systems", "training", "ops"]
-        missing_chapters = []
-        for expected in expected_chapters:
-            if not self.chapter_discovery.find_chapter_file(expected):
-                missing_chapters.append(expected)
+        discovered_names = {ch["name"] for ch in chapters}
+        missing_chapters = [expected for expected in expected_chapters if expected not in discovered_names]
 
         if missing_chapters:
             self.checks.append({

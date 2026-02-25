@@ -50,8 +50,8 @@ The modular CLI has replaced the original binder and is available as `./binder` 
 # Build commands
 ./binder build                    # Build full book (HTML)
 ./binder build intro,ml_systems   # Build specific chapters (HTML)
-./binder pdf intro                # Build chapter as PDF
-./binder epub                     # Build full book as EPUB
+./binder build pdf intro          # Build chapter as PDF
+./binder build epub               # Build full book as EPUB
 
 # Preview commands
 ./binder preview                  # Start live dev server for full book

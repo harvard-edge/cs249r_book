@@ -46,45 +46,37 @@ import sys
 from pathlib import Path
 
 # Chapter mapping from section IDs to their absolute paths from build root
-# These are stored as absolute paths from the build root (e.g., contents/core/...)
+# These are stored as absolute paths from the build root (e.g., contents/vol1/...)
 # and will be converted to relative paths based on each file's location
 # Update this when adding new chapters to the book
 CHAPTER_MAPPING = {
     # Top-level chapters
-    "sec-introduction": "contents/core/introduction/introduction.html#sec-introduction",
-    "sec-ml-systems": "contents/core/ml_systems/ml_systems.html#sec-ml-systems",
-    "sec-dl-primer": "contents/core/dl_primer/dl_primer.html#sec-dl-primer",
-    "sec-dnn-architectures": "contents/core/dnn_architectures/dnn_architectures.html#sec-dnn-architectures",
-    "sec-ai-workflow": "contents/core/workflow/workflow.html#sec-ai-workflow",
-    "sec-data-engineering": "contents/core/data_engineering/data_engineering.html#sec-data-engineering",
-    "sec-ai-frameworks": "contents/core/frameworks/frameworks.html#sec-ai-frameworks",
-    "sec-ai-training": "contents/core/training/training.html#sec-ai-training",
-    "sec-efficient-ai": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai",
-    "sec-model-optimizations": "contents/core/optimizations/optimizations.html#sec-model-optimizations",
-    "sec-ai-acceleration": "contents/core/hw_acceleration/hw_acceleration.html#sec-ai-acceleration",
-    "sec-benchmarking-ai": "contents/core/benchmarking/benchmarking.html#sec-benchmarking-ai",
-    "sec-ml-operations": "contents/core/ops/ops.html#sec-ml-operations",
-    "sec-ondevice-learning": "contents/core/ondevice_learning/ondevice_learning.html#sec-ondevice-learning",
-    "sec-security-privacy": "contents/core/privacy_security/privacy_security.html#sec-security-privacy",
-    "sec-robust-ai": "contents/core/robust_ai/robust_ai.html#sec-robust-ai",
-    "sec-responsible-ai": "contents/core/responsible_ai/responsible_ai.html#sec-responsible-ai",
-    "sec-sustainable-ai": "contents/core/sustainable_ai/sustainable_ai.html#sec-sustainable-ai",
-    "sec-ai-good": "contents/core/ai_for_good/ai_for_good.html#sec-ai-good",
-    "sec-agi-systems": "contents/core/frontiers/frontiers.html#sec-agi-systems",
-    "sec-conclusion": "contents/core/conclusion/conclusion.html#sec-conclusion",
+    "sec-introduction": "contents/vol1/introduction/introduction.html#sec-introduction",
+    "sec-ml-system-architecture": "contents/vol1/ml_systems/ml_systems.html#sec-ml-system-architecture",
+    "sec-ai-development-workflow": "contents/vol1/ml_workflow/ml_workflow.html#sec-ai-development-workflow",
+    "sec-data-engineering-ml": "contents/vol1/data_engineering/data_engineering.html#sec-data-engineering-ml",
+    "sec-deep-learning-systems-foundations": "contents/vol1/nn_computation/nn_computation.html#sec-deep-learning-systems-foundations",
+    "sec-dnn-architectures": "contents/vol1/nn_architectures/nn_architectures.html#sec-dnn-architectures",
+    "sec-ai-frameworks": "contents/vol1/frameworks/frameworks.html#sec-ai-frameworks",
+    "sec-ai-training": "contents/vol1/training/training.html#sec-ai-training",
+    "sec-model-compression": "contents/vol1/optimizations/model_compression.html#sec-model-compression",
+    "sec-ai-acceleration": "contents/vol1/hw_acceleration/hw_acceleration.html#sec-ai-acceleration",
+    "sec-data-efficiency": "contents/vol1/data_efficiency/data_efficiency.html#sec-data-efficiency",
+    "sec-benchmarking-ai": "contents/vol1/benchmarking/benchmarking.html#sec-benchmarking-ai",
+    "sec-model-serving-systems": "contents/vol1/model_serving/model_serving.html#sec-model-serving-systems",
+    "sec-machine-learning-operations-mlops": "contents/vol1/ml_ops/ml_ops.html#sec-machine-learning-operations-mlops",
+    "sec-responsible-engineering": "contents/vol1/responsible_engr/responsible_engr.html#sec-responsible-engineering",
+    "sec-conclusion": "contents/vol1/conclusion/conclusion.html#sec-conclusion",
 
     # Subsections - AI Training chapter
-    "sec-ai-training-distributed-systems-8fe8": "contents/core/training/training.html#sec-ai-training-distributed-systems-8fe8",
-    "sec-ai-training-neural-network-computation-73f5": "contents/core/training/training.html#sec-ai-training-neural-network-computation-73f5",
-    "sec-ai-training-optimization-algorithms-506e": "contents/core/training/training.html#sec-ai-training-optimization-algorithms-506e",
+    "sec-ai-training-distributed-systems-8fe8": "contents/vol1/training/training.html#sec-ai-training-distributed-systems-8fe8",
+    "sec-ai-training-neural-network-computation-73f5": "contents/vol1/training/training.html#sec-ai-training-neural-network-computation-73f5",
+    "sec-ai-training-optimization-algorithms-506e": "contents/vol1/training/training.html#sec-ai-training-optimization-algorithms-506e",
 
-    # Subsections - Efficient AI chapter
-    "sec-efficient-ai-ai-scaling-laws-a043": "contents/core/efficient_ai/efficient_ai.html#sec-efficient-ai-ai-scaling-laws-a043",
-
-    # Subsections - Model Optimizations chapter
-    "sec-model-optimizations-neural-architecture-search-3915": "contents/core/optimizations/optimizations.html#sec-model-optimizations-neural-architecture-search-3915",
-    "sec-model-optimizations-numerical-precision-a93d": "contents/core/optimizations/optimizations.html#sec-model-optimizations-numerical-precision-a93d",
-    "sec-model-optimizations-pruning-3f36": "contents/core/optimizations/optimizations.html#sec-model-optimizations-pruning-3f36",
+    # Subsections - Model Compression chapter
+    "sec-model-compression-neural-architecture-search-3915": "contents/vol1/optimizations/model_compression.html#sec-model-compression-neural-architecture-search-3915",
+    "sec-model-compression-numerical-precision-a93d": "contents/vol1/optimizations/model_compression.html#sec-model-compression-numerical-precision-a93d",
+    "sec-model-compression-pruning-3f36": "contents/vol1/optimizations/model_compression.html#sec-model-compression-pruning-3f36",
 
     # Lab sections - Arduino Nicla Vision
     "sec-setup-overview-dcdd": "contents/labs/arduino/nicla_vision/setup/setup.html#sec-setup-overview-dcdd",
@@ -117,39 +109,31 @@ CHAPTER_MAPPING = {
 CHAPTER_TITLES = {
     # Top-level chapters
     "sec-introduction": "Chapter 1: Introduction",
-    "sec-ml-systems": "Chapter 2: ML Systems",
-    "sec-dl-primer": "Chapter 3: Deep Learning Primer",
-    "sec-dnn-architectures": "Chapter 4: DNN Architectures",
-    "sec-ai-workflow": "Chapter 5: AI Workflow",
-    "sec-data-engineering": "Chapter 6: Data Engineering",
-    "sec-ai-frameworks": "Chapter 7: AI Frameworks",
-    "sec-ai-training": "Chapter 8: AI Training",
-    "sec-efficient-ai": "Chapter 9: Efficient AI",
-    "sec-model-optimizations": "Chapter 10: Model Optimizations",
-    "sec-ai-acceleration": "Chapter 11: AI Acceleration",
-    "sec-benchmarking-ai": "Chapter 12: Benchmarking AI",
-    "sec-ml-operations": "Chapter 13: ML Operations",
-    "sec-ondevice-learning": "Chapter 14: On-Device Learning",
-    "sec-security-privacy": "Chapter 15: Security & Privacy",
-    "sec-robust-ai": "Chapter 16: Robust AI",
-    "sec-responsible-ai": "Chapter 17: Responsible AI",
-    "sec-sustainable-ai": "Chapter 18: Sustainable AI",
-    "sec-ai-good": "Chapter 19: AI for Good",
-    "sec-agi-systems": "Chapter 20: AGI Systems",
-    "sec-conclusion": "Chapter 21: Conclusion",
+    "sec-ml-system-architecture": "Chapter 2: ML Systems",
+    "sec-ai-development-workflow": "Chapter 3: ML Workflow",
+    "sec-data-engineering-ml": "Chapter 4: Data Engineering",
+    "sec-deep-learning-systems-foundations": "Chapter 5: Neural Computation",
+    "sec-dnn-architectures": "Chapter 6: Network Architectures",
+    "sec-ai-frameworks": "Chapter 7: ML Frameworks",
+    "sec-ai-training": "Chapter 8: Model Training",
+    "sec-model-compression": "Chapter 9: Model Compression",
+    "sec-ai-acceleration": "Chapter 10: Hardware Acceleration",
+    "sec-data-efficiency": "Chapter 11: Data Efficiency",
+    "sec-benchmarking-ai": "Chapter 12: Benchmarking",
+    "sec-model-serving-systems": "Chapter 13: Model Serving",
+    "sec-machine-learning-operations-mlops": "Chapter 14: ML Operations",
+    "sec-responsible-engineering": "Chapter 15: Responsible Engineering",
+    "sec-conclusion": "Chapter 16: Conclusion",
 
     # Subsections - AI Training chapter
     "sec-ai-training-distributed-systems-8fe8": "Distributed Systems",
     "sec-ai-training-neural-network-computation-73f5": "Neural Network Computation",
     "sec-ai-training-optimization-algorithms-506e": "Optimization Algorithms",
 
-    # Subsections - Efficient AI chapter
-    "sec-efficient-ai-ai-scaling-laws-a043": "AI Scaling Laws",
-
-    # Subsections - Model Optimizations chapter
-    "sec-model-optimizations-neural-architecture-search-3915": "Neural Architecture Search",
-    "sec-model-optimizations-numerical-precision-a93d": "Numerical Precision",
-    "sec-model-optimizations-pruning-3f36": "Pruning",
+    # Subsections - Model Compression chapter
+    "sec-model-compression-neural-architecture-search-3915": "Neural Architecture Search",
+    "sec-model-compression-numerical-precision-a93d": "Numerical Precision",
+    "sec-model-compression-pruning-3f36": "Pruning",
 
     # Lab sections - Arduino Nicla Vision
     "sec-setup-overview-dcdd": "Setup Nicla Vision",
@@ -224,7 +208,7 @@ def calculate_relative_path(from_file, to_path, build_dir, epub_mapping=None):
 
     Args:
         from_file: Path object of the source file
-        to_path: String path from build root (e.g., "contents/core/chapter/file.html#anchor")
+        to_path: String path from build root (e.g., "contents/vol1/chapter/file.html#anchor")
         build_dir: Path object of the build directory root
         epub_mapping: Optional dict mapping section IDs to EPUB chapter files
 
@@ -421,22 +405,31 @@ def main():
     if len(sys.argv) == 1:
         # MODE 1: Running as Quarto post-render hook
         # Detect if this is HTML or EPUB build
-        html_dir = Path("_build/html")
-        epub_dir = Path("_build/epub")
+        build_root = Path("_build")
+        html_candidates = sorted(
+            [p for p in build_root.glob("html*") if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        epub_candidates = sorted(
+            [p for p in build_root.glob("epub*") if p.is_dir()],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
 
         # Determine build type
         epub_mapping = None
-        if html_dir.exists() and (html_dir / "index.html").exists():
-            build_dir = html_dir
+        if html_candidates:
+            build_dir = html_candidates[0]
             file_pattern = "*.html"
             file_type = "HTML"
-        elif epub_dir.exists() and list(epub_dir.glob("*.xhtml")):
-            build_dir = epub_dir
+        elif epub_candidates and list(epub_candidates[0].glob("*.xhtml")):
+            build_dir = epub_candidates[0]
             file_pattern = "*.xhtml"
             file_type = "XHTML (EPUB)"
             # Build EPUB section mapping for dynamic chapter references
             print("📚 Building EPUB section mapping...")
-            epub_mapping = build_epub_section_mapping(epub_dir)
+            epub_mapping = build_epub_section_mapping(build_dir)
             print(f"   Found {len(epub_mapping)} section IDs across chapters")
         # Check for extracted EPUB structure (EPUB/ directory at current level)
         elif Path("EPUB").exists() and list(Path("EPUB").rglob("*.xhtml")):
