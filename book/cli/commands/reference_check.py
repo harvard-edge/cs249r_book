@@ -19,6 +19,7 @@ import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote_plus
 from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -205,6 +206,24 @@ def _save_cache(cache_path: Path, updates: Dict[str, dict]) -> None:
         json.dump(existing, f, indent=2)
 
 
+def parse_report_keys(report_path: Path) -> List[str]:
+    """
+    Parse a reference-check report and return citation keys from
+    "Not found" and "Author mismatch" sections (for re-validating only those).
+    """
+    keys: List[str] = []
+    pattern = re.compile(r"^\s+\[([^\]]+)\]\s")
+    try:
+        with open(report_path, encoding="utf-8") as f:
+            for line in f:
+                m = pattern.match(line)
+                if m:
+                    keys.append(m.group(1))
+    except OSError:
+        pass
+    return keys
+
+
 def run(
     bib_paths: List[Path],
     *,
@@ -216,6 +235,7 @@ def run(
     cache_path: Optional[Path] = None,
     skip_verified: bool = False,
     thorough: bool = False,
+    only_keys: Optional[List[str]] = None,
 ) -> Tuple[bool, int, List[dict], int]:
     """
     Load .bib files, validate refs against academic DBs, optionally write report.
@@ -223,6 +243,7 @@ def run(
     cache_path: if set, read/write verification cache (key -> {status, source, date}).
     skip_verified: only validate refs not already verified in cache (ignored if thorough).
     thorough: revalidate all refs and ignore cache for filtering.
+    only_keys: if set, validate only these citation keys (e.g. from a previous report).
 
     Returns:
         (passed, elapsed_ms, issues, ref_count)
@@ -261,6 +282,16 @@ def run(
 
     if dedupe:
         all_refs = _dedupe_refs(all_refs)
+
+    # Restrict to a subset of keys (e.g. from --only-from-report or --only-keys) before limit
+    if only_keys is not None:
+        allowed = set(only_keys)
+        all_refs = [(k, r) for k, r in all_refs if k in allowed]
+        if not all_refs and console:
+            console.print(f"[yellow]No .bib entries matched the {len(allowed)} key(s) to check.[/yellow]")
+        if not all_refs:
+            return True, int((time.time() - t0) * 1000), [], 0
+
     if limit is not None:
         all_refs = all_refs[:limit]
 
@@ -369,6 +400,20 @@ def run(
                 f.write("\nError (validator crash or timeout):\n")
                 for key, r in err_list:
                     f.write(f"  [{key}] {r.title}\n")
+        # Companion file: one search link per not_verified entry (search online to fix .bib)
+        not_verified = [(k, r) for k, r in zip(keys, results) if r.status in ("not_found", "author_mismatch", "error")]
+        if not_verified:
+            search_links_path = output_path.with_suffix(output_path.suffix + ".search-links.txt")
+            with open(search_links_path, "w", encoding="utf-8") as sl:
+                sl.write("# key\ttitle\tGoogle Scholar search URL (search online, then update .bib with DOI/arXiv or authors)\n")
+                for key, r in zip(keys, results):
+                    if r.status in ("not_found", "author_mismatch", "error"):
+                        title = (r.title or "").strip()
+                        q = quote_plus(title)
+                        url = f"https://scholar.google.com/scholar?q={q}"
+                        sl.write(f"{key}\t{title}\t{url}\n")
+            if console:
+                console.print(f"Search links written to {search_links_path} (open each URL to search online, then update .bib)")
         if console:
             console.print(f"\nReport written to {output_path}")
 

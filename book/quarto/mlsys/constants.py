@@ -412,7 +412,7 @@ DLRM_MODEL_SIZE_FP32 = 100 * GB  # Approximate total model size
 YOLOV8_NANO_FLOPs = 8.7e9 * flop  # 640x640
 
 # --- Storage (I/O Bandwidth) ---
-NVME_SEQUENTIAL_BW = 3.5 * GB / second    # NVMe SSD sequential read
+NVME_SEQUENTIAL_BW = 7.0 * GB / second    # NVMe SSD sequential read (Gen 4)
 SYSTEM_MEMORY_BW = 50 * GB / second        # DDR4/DDR5 typical
 
 # --- Case Studies ---
