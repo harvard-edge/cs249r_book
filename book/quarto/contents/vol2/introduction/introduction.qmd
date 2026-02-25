@@ -108,38 +108,46 @@ Between 2012 and 2024, the compute required to train a frontier model increased 
 # │ Imports: mlsys.formatting (fmt, check)
 # │ Exports: gpt4_gpus_str, gpt4_days_str, cluster_fail_day_str, mtbf_hours_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys import Models, Applications, Systems
+from mlsys.constants import GPU_MTTF_HOURS, hour, day
 from mlsys.formatting import fmt, check
 
 class Gpt4TrainingScenario:
     """Namespace for GPT-4 cluster reliability statistics."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    num_gpus = 25000
-    gpu_days = 90
-    fail_rate_annual = 0.08 # 8% failure rate
+    mission = Applications.Frontier
+    num_gpus = 25000 # Specific fleet size for this mission
+    gpu_days = 100   # Standard training window
+    
+    # Calculate MTBF from component MTTF (Physics Engine)
+    # MTBF_cluster = MTTF_gpu / N
+    node_mttf = GPU_MTTF_HOURS
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    cluster_failures_per_year = num_gpus * fail_rate_annual
-    cluster_failures_per_day = cluster_failures_per_year / 365
-    mtbf_hours = 24 / cluster_failures_per_day
-
+    cluster_mtbf_hours = node_mttf / num_gpus
+    cluster_failures_per_day = 24 / cluster_mtbf_hours
+    
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(mtbf_hours < 5, f"MTBF should be < 5 hours for 25k GPUs, got {mtbf_hours:.1f}")
+    check(cluster_mtbf_hours < 5, f"MTBF should be < 5 hours for 25k GPUs, got {cluster_mtbf_hours:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     gpt4_gpus_str = fmt(num_gpus, precision=0)
     gpt4_days_str = fmt(gpu_days, precision=0)
     cluster_fail_day_str = fmt(cluster_failures_per_day, precision=1)
-    mtbf_hours_str = fmt(mtbf_hours, precision=1)
+    mtbf_hours_str = fmt(cluster_mtbf_hours, precision=1)
+    hw_name = mission.hardware.name
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 gpt4_gpus_str = Gpt4TrainingScenario.gpt4_gpus_str
 gpt4_days_str = Gpt4TrainingScenario.gpt4_days_str
 cluster_fail_day_str = Gpt4TrainingScenario.cluster_fail_day_str
 mtbf_hours_str = Gpt4TrainingScenario.mtbf_hours_str
+hw_name = Gpt4TrainingScenario.hw_name
 ```
 
-Consider the training of GPT-4. It reportedly required approximately **`{python} gpt4_gpus_str` A100 GPUs** running for **`{python} gpt4_days_str` days** [@openai2023gpt4]. In a cluster of this size, the probability of failure ($P_{\text{fail}}$) becomes the dominant constraint. At the 8% annual GPU failure rate observed under intensive training workloads, this cluster experiences **`{python} cluster_fail_day_str` hardware failures per day**, or one failure every **`{python} mtbf_hours_str` hours**. In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for **Fault Tolerance**\index{Fault Tolerance} as a first-class citizen.
+Consider the training of GPT-4. It reportedly required approximately **`{python} gpt4_gpus_str` `{python} hw_name` GPUs** running for **`{python} gpt4_days_str` days** [@openai2023gpt4]. In a cluster of this size, the probability of failure ($P_{\text{fail}}$) becomes the dominant constraint.
+ At the 8% annual GPU failure rate observed under intensive training workloads, this cluster experiences **`{python} cluster_fail_day_str` hardware failures per day**, or one failure every **`{python} mtbf_hours_str` hours**. In this regime, the system is always in a state of partial failure. Traditional software recovery (manual restart) collapses; the system must be architected for **Fault Tolerance**\index{Fault Tolerance} as a first-class citizen.
 
 The history of machine learning is defined by scale. Each major capability leap has come not from algorithmic breakthroughs alone, but from the ability to apply computation at previously impossible scales. Compute requirements have evolved over the past decade in ways that make systems engineering central to AI advancement. Three qualitative changes emerge at production scale: communication dominance, routine failure, and governance requirements that accompany societal impact.
 
