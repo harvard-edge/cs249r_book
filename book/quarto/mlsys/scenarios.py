@@ -27,7 +27,7 @@ class Scenarios:
     FrontierTraining = ApplicationScenario(
         name="Frontier Model Training",
         system=Systems.Cloud, # H100 Cluster
-        model=Models.Language.GPT4,
+        model=Models.GPT4,
         mission_goal="Push the boundary of general intelligence.",
         critical_constraint="Total Cost of Ownership (TCO) and Convergence Stability.",
         accuracy_target=0.99
