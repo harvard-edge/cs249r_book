@@ -141,7 +141,7 @@ class NetworkFabricsContextScenario:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     ib_ndr_gbps_val = ib_ndr_raw.m_as(Gbps)
-    ib_ndr_gbs_val = (ib_ndr_raw / 8).m_as(GB/second)
+    ib_ndr_gbs_val = ib_ndr_raw.m_as(GB/second)
     nvlink_to_ib_ratio_val = nvlink_h100_raw.m_as(GB/second) / ib_ndr_gbs_val
 
     # Fat-tree hosts for radix k: (k^3)/4
@@ -151,7 +151,7 @@ class NetworkFabricsContextScenario:
     ib_ndr_gbps = f"{ib_ndr_gbps_val:.0f}"
     ib_hdr_gbps = f"{ib_hdr_raw.m_as(Gbps):.0f}"
     ib_ndr_gbs = f"{ib_ndr_gbs_val:.0f}"
-    ib_hdr_gbs = f"{(ib_hdr_raw / 8).m_as(GB/second):.0f}"
+    ib_hdr_gbs = f"{ib_hdr_raw.m_as(GB/second):.0f}"
     nvlink_h100_gbs = f"{nvlink_h100_raw.m_as(GB/second):.0f}"
     nvlink_a100_gbs = f"{nvlink_a100_raw.m_as(GB/second):.0f}"
     pcie5_gbs = f"{pcie5_raw.m_as(GB/second):.0f}"
@@ -188,8 +188,10 @@ nvlink_to_ib_ratio = NetworkFabricsContextScenario.nvlink_to_ib_ratio
 fat_tree_hosts = NetworkFabricsContextScenario.fat_tree_hosts
 alpha_ib_us = NetworkFabricsContextScenario.alpha_ib_us
 beta_ib_gbs = NetworkFabricsContextScenario.beta_ib_gbs
+```
 
-The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise. @sec-compute-infrastructure established that a single H100 delivers `{python} h100_tflops` TFLOPS of FP16 throughput with `{python} h100_mem_bw` TB/s of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} nvlink_h100_gbs` GB/s. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} nvlink_to_ib_ratio`$\times$, from `{python} nvlink_h100_gbs` GB/s (NVLink) to `{python} ib_ndr_gbs` GB/s (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. For our 175B model, moving 350 GB of gradients through `{python} ib_ndr_gbs` GB/s links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
+The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise.
+ @sec-compute-infrastructure established that a single H100 delivers `{python} h100_tflops` TFLOPS of FP16 throughput with `{python} h100_mem_bw` TB/s of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} nvlink_h100_gbs` GB/s. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} nvlink_to_ib_ratio`$\times$, from `{python} nvlink_h100_gbs` GB/s (NVLink) to `{python} ib_ndr_gbs` GB/s (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. For our 175B model, moving 350 GB of gradients through `{python} ib_ndr_gbs` GB/s links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
 
 @fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
 
@@ -621,13 +623,14 @@ The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 import numpy as np
-from mlsys.constants import INFINIBAND_NDR_BW, ETH_100G_BW
+from mlsys.constants import INFINIBAND_NDR_BW, NETWORK_100G_BW
 
 alpha_ib = 1.5e-6
 beta_ib = INFINIBAND_NDR_BW.m_as('byte/second')
 alpha_eth = 5.0e-6
-beta_eth = ETH_100G_BW.m_as('byte/second')
+beta_eth = NETWORK_100G_BW.m_as('byte/second')
 
 n = np.logspace(0, 10, 1000)
 t_ib = alpha_ib + n / beta_ib

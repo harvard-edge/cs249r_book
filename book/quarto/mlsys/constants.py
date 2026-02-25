@@ -70,6 +70,9 @@ MS = ureg.MS
 ms = ureg.ms          # pint built-in millisecond (alias for convenience)
 US = ureg.US
 NS = ureg.NS
+MILLISECOND = MS
+MICROSECOND = US
+NANOSECOND = NS
 
 # Common time conversions (unitless scalars)
 SECONDS_PER_MINUTE = 60
