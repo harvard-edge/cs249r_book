@@ -235,6 +235,8 @@ class ValidateCommand:
         parser.add_argument("--skip-verified", dest="refs_skip_verified", action="store_true", help="references: skip refs already verified in cache")
         parser.add_argument("--thorough", dest="refs_thorough", action="store_true", help="references: revalidate all refs (ignore cache)")
         parser.add_argument("--refs-cache", dest="refs_cache", metavar="FILE", help="references: cache file (default: .references_verified.json in repo root)")
+        parser.add_argument("--only-from-report", dest="refs_only_from_report", metavar="FILE", help="references: validate only keys that had issues in this report file")
+        parser.add_argument("--only-keys", dest="refs_only_keys_file", metavar="FILE", help="references: validate only keys listed in FILE (one key per line)")
 
         try:
             ns = parser.parse_args(args)
@@ -2825,6 +2827,24 @@ class ValidateCommand:
         else:
             cache_path = repo_root / ".references_verified.json"
 
+        only_keys: Optional[List[str]] = None
+        only_from_report = getattr(ns, "refs_only_from_report", None)
+        only_keys_file = getattr(ns, "refs_only_keys_file", None)
+        if only_from_report:
+            report_path = Path(only_from_report) if Path(only_from_report).is_absolute() else repo_root / only_from_report
+            if report_path.exists():
+                only_keys = reference_check.parse_report_keys(report_path)
+            else:
+                console.print(f"[red]Report not found: {report_path}[/red]")
+                return ValidationRunResult(name="references", description="Bibliography vs academic DBs (hallucinator)", files_checked=0, issues=[ValidationIssue(file=str(report_path), line=0, code="references", message=f"Report not found: {report_path}", severity="error")], elapsed_ms=0)
+        elif only_keys_file:
+            keys_path = Path(only_keys_file) if Path(only_keys_file).is_absolute() else repo_root / only_keys_file
+            if keys_path.exists():
+                only_keys = [line.strip() for line in keys_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            else:
+                console.print(f"[red]Keys file not found: {keys_path}[/red]")
+                return ValidationRunResult(name="references", description="Bibliography vs academic DBs (hallucinator)", files_checked=0, issues=[ValidationIssue(file=str(keys_path), line=0, code="references", message=f"Keys file not found: {keys_path}", severity="error")], elapsed_ms=0)
+
         passed, elapsed_ms, issue_dicts, files_checked = reference_check.run(
             bib_paths,
             output_path=output_path,
@@ -2835,6 +2855,7 @@ class ValidateCommand:
             cache_path=cache_path,
             skip_verified=skip_verified,
             thorough=thorough,
+            only_keys=only_keys,
         )
         issues = [
             ValidationIssue(

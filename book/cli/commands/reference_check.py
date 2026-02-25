@@ -278,7 +278,10 @@ def run(
         return True, int((time.time() - t0) * 1000), [], 0
 
     if console:
-        console.print(f"Validating {n} references against academic databases...")
+        if only_keys is not None:
+            console.print(f"Validating {n} references (only keys with issues from report/file)...")
+        else:
+            console.print(f"Validating {n} references against academic databases...")
         if skip_verified and not thorough and cache_path:
             console.print("(Skipping refs already marked verified in cache)\n")
         if os.environ.get("OPENALEX_KEY") or os.environ.get("S2_API_KEY"):
