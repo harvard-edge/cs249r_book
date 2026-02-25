@@ -87,6 +87,7 @@ class Tiny:
     """Always-on and Embedded models."""
     DS_CNN = ModelSpec("DS-CNN (KWS)", KWS_DSCNN_PARAMS, "CNN", inference_flops=KWS_DSCNN_FLOPs)
     AnomalyDetector = ModelSpec("Anomaly Detector", ANOMALY_MODEL_PARAMS, "MLP")
+    WakeVision = ModelSpec("Wake Vision (Doorbell)", 0.25e6 * ureg.param, "CNN", inference_flops=25e6 * ureg.flop)
 
 class Models:
     Language = Language
