@@ -141,8 +141,8 @@ H100_MEM_CAPACITY = 80 * GiB
 H100_TDP = 700 * watt                     # SXM variant
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
-B200_FLOPS_FP16_TENSOR = 4500 * TFLOPs / second
-B200_FLOPS_FP8_TENSOR = 9000 * TFLOPs / second
+B200_FLOPS_FP16_TENSOR = 2250 * TFLOPs / second  # Dense. Sparse is 4500.
+B200_FLOPS_FP8_TENSOR = 4500 * TFLOPs / second   # Dense. Sparse is 9000.
 B200_MEM_BW = 8 * TB / second             # HBM3e
 B200_MEM_CAPACITY = 192 * GiB
 B200_TDP = 1000 * watt
@@ -434,7 +434,7 @@ BATTERY_ENERGY_J = (BATTERY_CAPACITY_MAH * BATTERY_VOLTAGE_V).to(joule)
 ESP32_RAM = 520 * KiB
 ESP32_FLASH = 4 * MB
 ESP32_POWER_MIN = 0.05 * watt
-ESP32_POWER_MAX = 0.25 * watt
+ESP32_POWER_MAX = 1.2 * watt
 ESP32_PRICE = 10 * USD
 
 # Edge Hardware (NVIDIA DGX/Workstation)
