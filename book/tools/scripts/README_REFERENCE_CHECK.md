@@ -1,6 +1,6 @@
 # Reference check (hallucinator)
 
-Validates bibliography entries in the book’s `.bib` files against academic databases (CrossRef, arXiv, DBLP, Semantic Scholar, etc.) using [hallucinator](https://github.com/gianlucasb/hallucinator). **Native Binder CLI only** — implementation lives in `book/cli/commands/reference_check.py`.
+Validates bibliography entries in the book’s `.bib` files against academic databases (CrossRef, arXiv, DBLP, Semantic Scholar, etc.) using [hallucinator](https://github.com/gianlucasb/hallucinator). **Native Binder CLI only** — implementation lives in `book/cli/commands/reference_check.py`. Use **`./book/binder validate references`** (not a standalone script).
 
 ## Run
 
@@ -47,6 +47,32 @@ Optional env: `OPENALEX_KEY`, `S2_API_KEY`.
 - **Error** — Validator crashed or timed out for that ref (resilient mode skips and continues).
 
 Exit code: `0` if all verified; `1` if any not found, mismatch, or error.
+
+## Using the report (do not auto-correct)
+
+**We do not auto-correct or rewrite `.bib` from this check.** Reasons:
+
+- **Not found** — Many valid sources are not in academic DBs: vendor docs, standards (IEEE, ISO), blog posts, manuals, reports. Auto-“fixing” would delete or overwrite them.
+- **Author mismatch** — Often formatting (e.g. “Smith, J.” vs “J. Smith”) or multi-author ordering; DB metadata can be wrong.
+- **Risk** — Applying DB metadata blindly can introduce wrong DOIs, wrong authors, or duplicate entries.
+
+**Use the report as a manual review list:**
+
+1. **Not found (186 in your run)**  
+   - If the work has a DOI or arXiv ID, add it to the entry and re-run; many will then verify.  
+   - If it’s a report, standard, or doc, leave as-is and optionally add a `note` that it’s not in academic DBs.
+
+2. **Author mismatch (23 in your run)**  
+   - Open the entry in the report and in your `.bib`; compare authors.  
+   - Fix only if the `.bib` is clearly wrong (typo, wrong person); ignore harmless formatting differences.
+
+3. **Getting keys for batch review**  
+   From the report file you can pull citation keys, e.g.:
+   ```bash
+   # Keys that were not found (for grepping .bib or scripting)
+   grep -E '^\s+\[[^]]+\]' report.txt | sed 's/.*\[\([^]]*\)\].*/\1/'
+   ```
+   Or use the “Not verified” block printed at the end of `binder validate references` (same keys + status + title).
 
 ## Pre-commit
 

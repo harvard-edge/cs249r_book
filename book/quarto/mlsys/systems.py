@@ -30,7 +30,7 @@ class SystemArchetype:
 class Archetypes:
     # --- CLOUD LAYER ---
     Cloud_H100 = SystemArchetype(
-        name="Cloud (H100 Node)",
+        name="H100 Training Cluster",
         hardware=Hardware.H100,
         tier=Tiers.Cloud,
         network_bw=400 * ureg.Gbps, # NDR InfiniBand
@@ -38,7 +38,7 @@ class Archetypes:
     )
     
     Cloud_A100 = SystemArchetype(
-        name="Cloud (A100 Node)",
+        name="A100 Training Cluster",
         hardware=Hardware.A100,
         tier=Tiers.Cloud,
         network_bw=200 * ureg.Gbps, # HDR InfiniBand
@@ -46,7 +46,7 @@ class Archetypes:
     )
 
     Cloud_V100 = SystemArchetype(
-        name="Cloud (V100 Node)",
+        name="V100 Legacy Cluster",
         hardware=Hardware.V100,
         tier=Tiers.Cloud,
         network_bw=100 * ureg.Gbps, # EDR InfiniBand
@@ -55,7 +55,7 @@ class Archetypes:
 
     # --- EDGE LAYER ---
     Edge_Server = SystemArchetype(
-        name="Edge Server",
+        name="Edge Data Center",
         hardware=Hardware.Edge.GenericServer,
         tier=Tiers.Edge,
         network_bw=10 * ureg.Gbps,
@@ -63,7 +63,7 @@ class Archetypes:
     )
     
     Edge_Robotics = SystemArchetype(
-        name="Edge (Jetson Orin)",
+        name="Industrial Robotics Hub",
         hardware=Hardware.Edge.JetsonOrinNX,
         tier=Tiers.Edge,
         network_bw=1 * ureg.Gbps,
@@ -72,7 +72,7 @@ class Archetypes:
 
     # --- MOBILE LAYER ---
     Mobile_Phone = SystemArchetype(
-        name="Mobile (Smartphone)",
+        name="Modern Flagship Phone",
         hardware=Hardware.Edge.Generic_Phone,
         tier=Tiers.Mobile,
         network_bw=100 * ureg.Mbps,
@@ -81,15 +81,15 @@ class Archetypes:
 
     # --- TINYML LAYER ---
     TinyML_MCU = SystemArchetype(
-        name="TinyML (ESP32)",
+        name="Sub-Watt Sensor Node",
         hardware=Hardware.Tiny.ESP32,
         tier=Tiers.Tiny,
         network_bw=1 * ureg.Mbps,
-        power_budget=0.5 * ureg.watt
+        power_budget=1.2 * ureg.watt
     )
     
     TinyML_M7 = SystemArchetype(
-        name="TinyML (Cortex-M7)",
+        name="Ultra-Low-Power MCU",
         hardware=Hardware.Tiny.Generic_MCU,
         tier=Tiers.Tiny,
         network_bw=1 * ureg.Mbps,
