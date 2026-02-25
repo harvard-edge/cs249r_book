@@ -103,7 +103,7 @@ from mlsys.formatting import fmt, sci, check
 
 ## Why Distribution Is Necessary {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
 
-Part I built the physical fleet: @sec-compute-infrastructure established the accelerator hierarchy, @sec-network-fabrics wired nodes into a high-bandwidth fabric, and @sec-data-storage completed the infrastructure with storage pipelines that keep the fleet fed. With the physical foundation in place, we now confront the algorithmic question that defines Part II: how do we split a single training job across this hardware?
+Part I built the physical fleet: @sec-compute-infrastructure established the accelerator hierarchy, @sec-network-fabrics wired nodes into a high-bandwidth fabric, and @sec-data-storage completed the infrastructure with storage pipelines that keep the fleet fed. With the physical foundation in place, the algorithmic challenge that defines Part II is splitting a single training job across this hardware.
 
 If you could purchase a single GPU with 100 terabytes of memory and an exaflop of compute, distributed training would not exist. Because the laws of physics prevent this, we are forced to shatter our models across thousands of independent chips. In the **Fleet Stack** framework (@sec-vol2-introduction), Distributed Training represents the **Distribution Layer** — the logic that partitions the mathematical workload across the physical fleet.
 
@@ -558,7 +558,7 @@ These coordination requirements shape the four main approaches to distributed tr
 
 ## Data Parallelism {#sec-distributed-training-systems-systems-data-parallelism-6132}
 
-What is the simplest way to use eight GPUs to process a massive dataset? You give each GPU a complete, identical copy of the model, but only assign it one-eighth of the data. Data parallelism represents the most straightforward distributed approach and the natural starting point for understanding how distributed training works in practice.
+The simplest approach gives each GPU a complete, identical copy of the model and assigns it one-eighth of the data. Data parallelism represents the most straightforward distributed approach and the natural starting point for understanding how distributed training works in practice.
 
 ::: {.callout-definition title="Data Parallelism"}
 
@@ -1001,7 +1001,7 @@ class Scaling8GPU:
     # For large N, ~2 * Params * 2 = 4 * Params.
     sync_size_gb = (params_b * BILLION * 4) / BILLION
     comm_8gpu_ms_val = (sync_size_gb / nvlink_bw) * 1000
-    
+
     total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
     speedup_8gpu_val = single_gpu_step_s / (total_8gpu_ms_val / 1000)
     efficiency_8gpu_val = speedup_8gpu_val / gpus_per_node * 100
@@ -1084,13 +1084,13 @@ class Scaling32GPU:
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     sync_size_gb = (params_b * BILLION * 4) / BILLION
     inter_node_ms_val = (sync_size_gb / ib_bw) * 1000
-    
+
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
-    
+
     compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
     comm_pct_val = comm_32gpu_ms_val / total_32gpu_ms_val * 100
-    
+
     speedup_32gpu_val = single_gpu_step_s / (total_32gpu_ms_val / 1000)
     efficiency_32gpu_val = speedup_32gpu_val / 32 * 100
     training_32gpu_hours_val = training_hours_1gpu / speedup_32gpu_val
@@ -1147,7 +1147,6 @@ comm_32gpu_ms = Scaling32GPU.comm_32gpu_ms_str
 Communication dominates and becomes the bottleneck.
 
 Better Approach: 8 GPUs with Gradient Accumulation
-
 
 ```{python}
 #| label: grad-accum-calc
@@ -1214,7 +1213,6 @@ compute_8gpu_ms = GradAccumScenario.compute_8gpu_ms
 - Savings: USD `{python} ga_savings_str` (`{python} ga_savings_pct_str`% reduction) with only 1 hour longer training
 
 Key Insights
-
 
 1. NVLink enables efficient scaling within single nodes (97% efficiency)
 2. Inter-node communication kills efficiency (drops to 13%)
@@ -1472,7 +1470,7 @@ These efficiency metrics directly influence the choice of parallelism strategy. 
 
 ### Convergence Guarantees for Distributed Optimization {#sec-distributed-training-systems-systems-convergence-guarantees-distributed-optimization-350e}
 
-Hardware efficiency metrics govern throughput, but convergence theory determines whether distributed training reaches the same solution quality as single-device training. Three questions arise: how does parallelism affect optimization convergence, when does adding workers help versus hurt, and how must learning rates be tuned for large-batch training?
+Hardware efficiency metrics govern throughput, but convergence theory determines whether distributed training reaches the same solution quality as single-device training. Parallelism affects optimization convergence in three ways: convergence rate changes with batch size, adding workers yields diminishing returns beyond the critical batch size, and learning rates must scale with batch size.
 
 ### Convergence Rate for Synchronous Data Parallel SGD {#sec-distributed-training-systems-systems-convergence-rate-synchronous-data-parallel-sgd-2ed5}
 
@@ -1786,7 +1784,7 @@ The choice among these methods depends on the specific bottleneck. When network 
 
 ## Model Parallelism {#sec-distributed-training-systems-systems-model-parallelism-7437}
 
-What do you do when your model is so massive that even a single layer's weights exceed the memory capacity of your largest GPU? Data parallelism entirely collapses under these constraints. The memory optimization techniques examined in the previous section extend data parallelism's reach, but eventually, we must partition the model itself.
+When a model is so massive that even a single layer's weights exceed the memory capacity of a GPU, data parallelism entirely collapses. The memory optimization techniques examined in the previous section extend data parallelism's reach, but eventually, we must partition the model itself.
 
 Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A `{python} gpt3_params_b`B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations. For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} gpt3_params_b`B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
@@ -2349,7 +2347,7 @@ This three-precision approach (FP32 master weights, FP8 GEMMs, FP16 accumulation
 
 ## Hybrid Parallelism {#sec-distributed-training-systems-systems-hybrid-parallelism-12a0}
 
-How do you train a frontier model when data parallelism runs out of memory and model parallelism runs out of network bandwidth? You must orchestrate them simultaneously across three dimensions. The preceding sections revealed a fundamental tension: data parallelism scales throughput but demands massive memory, while model parallelism enables large models but starves the compute.
+Training a frontier model when data parallelism runs out of memory and model parallelism runs out of network bandwidth requires orchestrating both strategies simultaneously across three dimensions. The preceding sections revealed a fundamental tension: data parallelism scales throughput but demands massive memory, while model parallelism enables large models but starves the compute.
 
 Hybrid parallelism resolves this tension by applying both strategies orthogonally: model parallelism splits the architecture to fit available memory, while data parallelism scales throughput across multiple model replicas. Training a `{python} gpt3_params_b` billion parameter language model on a dataset of 300 billion tokens demonstrates this approach in practice. The neural network layers distribute across multiple GPUs through model parallelism, while data parallelism enables different GPU groups to process separate batches. This dual strategy addresses both memory constraints from model size and computational demands from dataset scale simultaneously, and it is precisely this combination that defines *Archetype A* training at frontier scale.
 
@@ -2558,14 +2556,14 @@ Total static memory: $35 + 4.4 = 39.4$ GB per GPU — identical to PPO's static 
 
 PPO's two-phase design (generate then train) introduces a fundamental throughput penalty. If generation consumes 60% of the step time (typical for autoregressive decoding of long sequences), the training hardware achieves only 40% utilization during an RLHF step. DPO, operating as a standard training loop, achieves the same 40--55% MFU as pre-training.
 
-| **Metric**                     | **PPO (70B policy)**     | **DPO (70B policy)**     |
-|:-------------------------------|:-------------------------|:-------------------------|
-| **Models required**            | 4 (policy, ref, reward, value) | 2 (policy, reference)   |
-| **Total parameter memory**     | $\sim$2,406 GB           | $\sim$1,260 GB           |
-| **Minimum GPUs (memory)**      | 64--128                  | 32--64                   |
-| **Generation phase**           | Yes (sequential, BW-bound) | None                    |
-| **Effective training MFU**     | 15--25%                  | 40--55%                  |
-| **Data pipeline**              | Online generation        | Static preference pairs  |
+| **Metric**                 | **PPO (70B policy)**           | **DPO (70B policy)**    |
+|:---------------------------|:-------------------------------|:------------------------|
+| **Models required**        | 4 (policy, ref, reward, value) | 2 (policy, reference)   |
+| **Total parameter memory** | $\sim$2,406 GB                 | $\sim$1,260 GB          |
+| **Minimum GPUs (memory)**  | 64--128                        | 32--64                  |
+| **Generation phase**       | Yes (sequential, BW-bound)     | None                    |
+| **Effective training MFU** | 15--25%                        | 40--55%                 |
+| **Data pipeline**          | Online generation              | Static preference pairs |
 
 **Systems Conclusion**: DPO halves the GPU requirement and doubles the effective compute utilization compared to PPO by eliminating two models and the autoregressive generation phase. The choice between them is not a modeling preference but an infrastructure constraint: organizations with limited GPU budgets adopt DPO because the alternative physically does not fit on their cluster.
 :::
@@ -2580,7 +2578,7 @@ Production RLHF systems mitigate this through a combination of sequence packing 
 
 ## Parallelism Strategy Comparison {#sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a}
 
-If a colleague asks whether to implement pipeline or tensor parallelism for a new 50-billion parameter model, how do you systematically weigh the architectural and hardware trade-offs? @tbl-parallelism-compare contrasts data, model, pipeline, and hybrid parallelism across six critical dimensions.
+To systematically weigh the architectural and hardware trade-offs for a new 50-billion parameter model, practitioners must compare data, model, pipeline, and hybrid parallelism across six critical dimensions. @tbl-parallelism-compare presents this comparison.
 
 | **Aspect**                        | **Data Parallelism**                                             | **Model Parallelism**                                                      | **Pipeline Parallelism**                                                   | **Hybrid Parallelism**                                            |
 |:----------------------------------|:-----------------------------------------------------------------|:---------------------------------------------------------------------------|:---------------------------------------------------------------------------|:------------------------------------------------------------------|
@@ -2692,7 +2690,7 @@ These primitives compose into the communication patterns that define each parall
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}
 
-Why do so many engineering teams scale their cluster capacity by 4x, only to find that their training iterations are actually taking longer to complete? Distributed training involves counterintuitive behavior that leads to common misconceptions, capturing errors that waste compute resources and delay research.
+Many engineering teams who scale cluster capacity by 4x find that their training iterations take longer to complete, reflecting a fundamental misunderstanding of distributed training physics. The following misconceptions capture errors that waste compute resources and delay research.
 
 Fallacy: ***Linear speedup is achievable with sufficient engineering effort.***
 
@@ -2819,7 +2817,7 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
   \definecolor{DataColor}{RGB}{0,99,149}    % BlueLine
   \definecolor{TensorColor}{RGB}{204,85,0}  % OrangeLine
   \definecolor{PipeColor}{RGB}{0,143,69}    % GreenLine
-  
+
   \tikzset{
     face/.style={fill=white, opacity=0.8, draw=black!60, thick},
     label/.style={font=\bfseries, align=center}
@@ -2840,7 +2838,7 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
                 \draw[face, fill=DataColor!10] (0,0,0) -- (1,0,0) -- (1,1,0) -- (0,1,0) -- cycle;
                 \draw[face, fill=TensorColor!10] (1,0,0) -- (1,0,1) -- (1,1,1) -- (1,1,0) -- cycle;
                 \draw[face, fill=PipeColor!10] (0,1,0) -- (1,1,0) -- (1,1,1) -- (0,1,1) -- cycle;
-                
+
                 \node at (0.5, 0.5, 0.5) {\tiny GPU};
               \end{scope}
             }
