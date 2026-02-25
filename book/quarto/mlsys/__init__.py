@@ -4,6 +4,7 @@
 from .hardware import Hardware
 from .models import Models
 from .deployment import Tiers
+from .systems import Systems, Archetypes
 
 # Export constants and registry for legacy support
 from .constants import ureg, Q_

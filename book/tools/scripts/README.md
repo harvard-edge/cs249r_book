@@ -39,6 +39,7 @@ scripts/
 - `content/manage_section_ids.py` - Manage `@sec-` cross-reference IDs
 
 ### Validation
+- `check_references_hallucinator.py` - Validate .bib entries against academic DBs ([hallucinator](https://github.com/gianlucasb/hallucinator)); requires `pip install hallucinator bibtexparser`
 - `content/check_duplicate_labels.py` - Find duplicate labels
 - `content/check_fig_references.py` - Validate figure references
 - `content/check_unreferenced_labels.py` - Find unused labels
