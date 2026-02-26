@@ -145,36 +145,49 @@ The systematic optimization methodology established for single-machine training 
 ::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead." fig-alt="3D coordinate system with three axes: Data Parallelism (replica count d), Pipeline Parallelism (depth p), and Tensor Parallelism (width t). Dashed cube marks a configuration point with Total Accelerators equals d times p times t."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, z={(0.6,0.5)}, x={(1,0)}, y={(0,1)}, scale=1.3]
+  \tikzset{
+    axis/.style={->, ultra thick},
+    cube/.style={thick, gray!50, dashed},
+    volume/.style={gray!10, opacity=0.5},
+    label/.style={font=\bfseries, align=center},
+    constraint/.style={align=center, font=\footnotesize},
+    point/.style={circle, fill=black, inner sep=1.5pt},
+    textBlue/.style={text=BlueLine},
+    textRed/.style={text=RedLine},
+    textGreen/.style={text=GreenLine}
+  }
+
   % Origin
   \coordinate (O) at (0,0,0);
 
   % Axes Arrows
-  \draw[->, ultra thick, BlueLine] (O) -- (4.5,0,0) node[anchor=north east, align=center, font=\bfseries] {Data Parallelism\\(Replica Count $d$)};
-  \draw[->, ultra thick, RedLine] (O) -- (0,3.5,0) node[anchor=east, align=right, font=\bfseries] {Pipeline Parallelism\\(Depth/Stages $p$)};
-  \draw[->, ultra thick, GreenLine] (O) -- (0,0,3.5) node[anchor=south west, align=left, font=\bfseries] {Tensor Parallelism\\(Layer Width $t$)};
+  \node[axis, BlueLine, label={[anchor=north east]Data Parallelism\\(Replica Count $d$)}] (xaxis) at (4.5,0,0) {};
+  \node[axis, RedLine, label={[anchor=east]Pipeline Parallelism\\(Depth/Stages $p$)}] (yaxis) at (0,3.5,0) {};
+  \node[axis, GreenLine, label={[anchor=south west]Tensor Parallelism\\(Layer Width $t$)}] (zaxis) at (0,0,3.5) {};
 
   % The "Cube" of a specific training configuration
-  % Let's show a config of (d=2, p=2, t=2)
-  \draw[thick, gray!50, dashed] (2,0,0) -- (2,2,0) -- (0,2,0);
-  \draw[thick, gray!50, dashed] (2,0,0) -- (2,0,2) -- (0,0,2);
-  \draw[thick, gray!50, dashed] (0,2,0) -- (0,2,2) -- (0,0,2);
-  \draw[thick, gray!50, dashed] (2,2,0) -- (2,2,2) -- (0,2,2); % Front corner
-  \draw[thick, gray!50, dashed] (2,0,2) -- (2,2,2);
-  \draw[thick, gray!50, dashed] (0,2,2) -- (2,2,2);
+  \begin{scope}[shift={(O)}]
+    \draw[cube] (2,0,0) -- (2,2,0) -- (0,2,0);
+    \draw[cube] (2,0,0) -- (2,0,2) -- (0,0,2);
+    \draw[cube] (0,2,0) -- (0,2,2) -- (0,0,2);
+    \draw[cube] (2,2,0) -- (2,2,2) -- (0,2,2);
+    \draw[cube] (2,0,2) -- (2,2,2);
+    \draw[cube] (0,2,2) -- (2,2,2);
 
-  % Highlight the volume
-  \fill[gray!10, opacity=0.5] (O) -- (2,0,0) -- (2,0,2) -- (0,0,2) -- cycle; % Bottom
-  \fill[gray!10, opacity=0.5] (O) -- (0,2,0) -- (0,2,2) -- (0,0,2) -- cycle; % Side
-  \fill[gray!10, opacity=0.5] (O) -- (2,0,0) -- (2,2,0) -- (0,2,0) -- cycle; % Back
+    % Highlight the volume
+    \fill[volume] (O) -- (2,0,0) -- (2,0,2) -- (0,0,2) -- cycle; % Bottom
+    \fill[volume] (O) -- (0,2,0) -- (0,2,2) -- (0,0,2) -- cycle; % Side
+    \fill[volume] (O) -- (2,0,0) -- (2,2,0) -- (0,2,0) -- cycle; % Back
+  \end{scope}
 
   % Label the point
-  \fill[black] (2,2,2) circle (1.5pt) node[anchor=west, xshift=2mm, font=\bfseries] {Training Config $(d, p, t)$};
+  \node[point, label={[anchor=west, xshift=2mm]Training Config $(d, p, t)$}] at (2,2,2) {};
   \node[anchor=north west, gray, font=\footnotesize] at (2,2,2) {Total Accelerators = $d \times p \times t$};
 
   % Contextual Constraints
-  \node[align=center, font=\footnotesize, text=BlueLine] at (2.5, -0.5, 0) {constraint: Global Batch Size};
-  \node[align=center, font=\footnotesize, text=RedLine] at (-0.5, 2.5, 0) {constraint: Latency/Bubbles};
-  \node[align=center, font=\footnotesize, text=GreenLine] at (-0.5, 0, 2.5) {constraint: Memory/NVLink};
+  \node[constraint, textBlue] at (2.5, -0.5, 0) {constraint: Global Batch Size};
+  \node[constraint, textRed] at (-0.5, 2.5, 0) {constraint: Latency/Bubbles};
+  \node[constraint, textGreen] at (-0.5, 0, 2.5) {constraint: Memory/NVLink};
 
 \end{tikzpicture}
 ```
@@ -229,50 +242,32 @@ If you attempt **Tensor Parallelism** across server racks connected by standard 
   % Root decision
   \node[decision=BlueLine] (d1) {Model fits in\\single GPU\\memory?};
 
-  % Scope for YES branch
-  \begin{scope}[shift={(-4.5,-2.2)}]
-    \node[leaf=GreenLine] (dp) at (0,0) {\textbf{Data Parallelism}\\Scale batch size};
-    \node[hw, below=of dp, yshift=-2pt] {InfiniBand sufficient};
-  \end{scope}
-
+  % YES branch
+  \node[leaf=GreenLine, below left=of d1, shift={(-1.5,-0.5)}] (dp) {\textbf{Data Parallelism}\\Scale batch size};
+  \node[hw, below=of dp, yshift=-2pt] {InfiniBand sufficient};
   \draw[arrow] (d1) -- node[yes, left, pos=0.3] {Yes} (dp);
 
-  % Scope for NO branch -> second decision
-  \begin{scope}[shift={(3.5,-2.2)}]
-    \node[decision=OrangeLine] (d2) {Model fits in\\single node\\(8 GPUs)?};
-  \end{scope}
-
+  % NO branch -> second decision
+  \node[decision=OrangeLine, below right=of d1, shift={(1.5,-0.5)}] (d2) {Model fits in\\single node\\(8 GPUs)?};
   \draw[arrow] (d1) -- node[no, right, pos=0.3] {No} (d2);
 
-  % Scope for YES from d2: Tensor Parallel
-  \begin{scope}[shift={(1,-2.6)}]
-    \node[leaf=BlueLine, below=of d2] (tp) {\textbf{Tensor Parallelism}\\Split layers across GPUs};
-    \node[hw, below=of tp, yshift=-2pt] {Requires NVLink};
-  \end{scope}
-
+  % YES from d2: Tensor Parallel
+  \node[leaf=BlueLine, below=of d2, shift={(0,-0.5)}] (tp) {\textbf{Tensor Parallelism}\\Split layers across GPUs};
+  \node[hw, below=of tp, yshift=-2pt] {Requires NVLink};
   \draw[arrow] (d2) -- node[yes, left, pos=0.3] {Yes} (tp);
 
-  % Scope for NO from d2 -> third decision
-  \begin{scope}[shift={(3.5,-2.6)}]
-    \node[decision=RedLine, below=of d2] (d3) {Sequential\\dependencies\\dominate?};
-  \end{scope}
-
+  % NO from d2 -> third decision
+  \node[decision=RedLine, below=of d2, shift={(2,-0.5)}] (d3) {Sequential\\dependencies\\dominate?};
   \draw[arrow] (d2) -- node[no, right, pos=0.3] {No} (d3);
 
-  % Scope for YES from d3: Pipeline Parallel
-  \begin{scope}[shift={(0.5,-2.4)}]
-    \node[leaf=OrangeLine, below=of d3] (pp) {\textbf{Pipeline Parallelism}\\Stage layers across nodes};
-    \node[hw, below=of pp, yshift=-2pt] {Low BW (Ethernet OK)};
-  \end{scope}
-
+  % YES from d3: Pipeline Parallel
+  \node[leaf=OrangeLine, below=of d3, shift={(0,-0.5)}] (pp) {\textbf{Pipeline Parallelism}\\Stage layers across nodes};
+  \node[hw, below=of pp, yshift=-2pt] {Low BW (Ethernet OK)};
   \draw[arrow] (d3) -- node[yes, left, pos=0.3] {Yes} (pp);
 
-  % Scope for NO from d3: 3D Hybrid
-  \begin{scope}[shift={(3,-2.4)}]
-    \node[leaf=VioletLine, below=of d3] (hybrid) {\textbf{3D Hybrid}\\TP + PP + DP};
-    \node[hw, below=of hybrid, yshift=-2pt] {NVLink + IB + Ethernet};
-  \end{scope}
-
+  % NO from d3: 3D Hybrid
+  \node[leaf=VioletLine, below=of d3, shift={(2,-0.5)}] (hybrid) {\textbf{3D Hybrid}\\TP + PP + DP};
+  \node[hw, below=of hybrid, yshift=-2pt] {NVLink + IB + Ethernet};
   \draw[arrow] (d3) -- node[no, right, pos=0.3] {No} (hybrid);
 
 \end{tikzpicture}
@@ -329,7 +324,6 @@ The distributed training process itself involves splitting the dataset into non-
 
 ::: {#fig-distributed-training fig-env="figure" fig-pos="htb" fig-cap="**Data Parallel Training Flow**. Distributed training partitions datasets across GPUs, computes gradients concurrently on each device's data subset, then aggregates gradients through AllReduce to update shared model parameters. Each GPU maintains an identical model copy and processes its portion of the batch independently, with synchronization occurring only during gradient aggregation. This approach achieves near-linear speedup when communication overhead remains below 30--40% of training time." fig-alt="Two parallel GPU workflows showing data parallel training. Each GPU processes a data chunk through forward pass, error computation, loss function, backward pass, then gradients merge at Calculate Global Gradients for parameter updates."}
 ```{.tikz}
-latex
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{
     mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white, minimum width=20mm, minimum height=9mm, line width=1pt},
@@ -626,18 +620,18 @@ The process of data parallelism can be broken into a series of distinct steps, e
 \node[Box, right=of B3] (B4) {GPU 4\\Forward \& Backward Pass};
 
 % Batch Nodes
-\node[Box2, above=1.06cm of B1] (GB1) {Batch 1};
-\node[Box2, above=1.06cm of B2] (GB2) {Batch 2};
-\node[Box2, above=1.06cm of B3] (GB3) {Batch 3};
-\node[Box2, above=1.06cm of B4] (GB4) {Batch 4};
+\node[Box2, above=of B1] (GB1) {Batch 1};
+\node[Box2, above=of B2] (GB2) {Batch 2};
+\node[Box2, above=of B3] (GB3) {Batch 3};
+\node[Box2, above=of B4] (GB4) {Batch 4};
 
 % Input Data Node
-\node[Box2, above=1.8cm of $(GB2)!0.5!(GB3)$, fill=RedL, draw=RedLine] (GGB1) {Input Data};
+\node[Box2, above=of $(GB2)!0.5!(GB3)$, fill=RedL, draw=RedLine] (GGB1) {Input Data};
 
 % Gradient Nodes
 \node[GradientBox, below=of $(B2)!0.5!(B3)$] (DB1) {Gradients GPU N};
-\node[GradientBox, below=1.05cm of DB1] (DB2) {Gradient Aggregation};
-\node[GradientBox, below=1.05cm of DB2] (DB3) {Model Update};
+\node[GradientBox, below=of DB1] (DB2) {Gradient Aggregation};
+\node[GradientBox, below=of DB2] (DB3) {Model Update};
 
 % Draw Arrows
 \draw[Line, -latex] (GGB1) -- ++(270:1.4cm) -| (GB2);
@@ -659,6 +653,7 @@ The process of data parallelism can be broken into a series of distinct steps, e
 \draw[Line, -latex] (DB2) -- node[Text, pos=0.45]{Aggregate Gradients and Update Parameters} (DB3);
 
 \draw[Line, -latex] (GGB1.east) -- ++(0:6.8cm) |- node[Text, pos=0.8]{Next Mini-Batch} (DB3.east);
+
 \end{tikzpicture}
 ```
 :::
@@ -1257,7 +1252,7 @@ ZeRO addresses this redundancy through progressive sharding:
   }
 
   % DDP (Replicated)
-  \node[label=DDP, below] (ddp) at (0,2.7) {};
+  \node[label=DDP] (ddp) {};
   \node[bar, fill=ParamColor, anchor=north] (ddp-p) at (ddp.south) {P};
   \node[bar, fill=GradColor, anchor=north] (ddp-g) at (ddp-p.south) {G};
   \node[bar, fill=OptColor, anchor=north, minimum height=2cm] (ddp-os) at (ddp-g.south) {OS};
@@ -1606,6 +1601,7 @@ The scaling law regime exhibits three distinct behaviors:
   BlueLine/.style={blue, ultra thick},
   RedLine/.style={red, dashed, thick},
   Annotation/.style={font=\footnotesize},
+  every node/.style={anchor=center},
   ]
 
   \begin{axis}[
@@ -1637,9 +1633,9 @@ The scaling law regime exhibits three distinct behaviors:
   \addplot[RedLine] coordinates {(12000, 0.1) (12000, 2)};
 
   % Annotations
-  \node[Annotation, anchor=south] at (axis cs:1000, 1.1) {Linear Scaling};
-  \node[Annotation, anchor=south] at (axis cs:100000, 1.8) {Diminishing Returns};
-  \node[Annotation, anchor=west, RedLine] at (axis cs:14000, 0.15) {$B*$};
+  \node[Annotation, anchor=south] (linear) at (axis cs:1000, 1.1) {Linear Scaling};
+  \node[Annotation, anchor=south] (diminishing) at (axis cs:100000, 1.8) {Diminishing Returns};
+  \node[Annotation, anchor=west, RedLine] (critical) at (axis cs:14000, 0.15) {$B*$};
 
   \end{axis}
 \end{tikzpicture}
@@ -1728,7 +1724,9 @@ The fundamental trade-off in distributed training is between communication effic
     grid/.style={grid=major},
     line/.style={solid, line width=1.0pt},
     pareto/.style={black, dashed, thick},
-    labelText/.style={font=\footnotesize}
+    labelText/.style={font=\footnotesize},
+    nodeStyle/.style={anchor=west, font=\footnotesize},
+    pointStyle/.style={only marks, mark=*, mark size=4pt},
   }
 
   % Define colors consistently
@@ -1756,22 +1754,11 @@ The fundamental trade-off in distributed training is between communication effic
   \addplot[pareto, domain=15:95, samples=50] {100 - 0.8*(x-15) - 0.005*(x-15)^2};
 
   % Methods as points
-  \begin{scope}[every node/.style={label}]
-    \addplot[point, BlueL] coordinates {(20, 98)};
-    \node[anchor=west, BlueL] at (axis cs:22, 98) {BSP};
-
-    \addplot[point, OrangeL] coordinates {(50, 85)};
-    \node[anchor=west, OrangeL] at (axis cs:52, 85) {SSP ($s$=4)};
-
-    \addplot[point, RedL] coordinates {(90, 65)};
-    \node[anchor=west, RedL] at (axis cs:82, 60) {ASP};
-
-    \addplot[point, GreenL] coordinates {(60, 92)};
-    \node[anchor=south, GreenL] at (axis cs:60, 94) {Gradient Compression};
-
-    \addplot[point, PurpleL] coordinates {(75, 78)};
-    \node[anchor=north, PurpleL] at (axis cs:75, 76) {Local SGD};
-  \end{scope}
+  \node[pointStyle, BlueL, label=right:BSP] at (axis cs:20, 98) {};
+  \node[pointStyle, OrangeL, label=right:SSP ($s$=4)] at (axis cs:50, 85) {};
+  \node[pointStyle, RedL, label=left:ASP] at (axis cs:90, 65) {};
+  \node[pointStyle, GreenL, label=above:Gradient Compression] at (axis cs:60, 92) {};
+  \node[pointStyle, PurpleL, label=below:Local SGD] at (axis cs:75, 78) {};
 
   % Annotation
   \node[labelText, anchor=north east] at (axis cs:95, 20) {Pareto Frontier};
@@ -1894,17 +1881,17 @@ Model parallelism divides neural networks across multiple computing devices, wit
   \node[Box, right=of B4] (B5) {Predictions};
 
   \begin{scope}[every node/.style={Text}]
-    \draw[Connector] (B1) -- node[pos=0.25] {Forward Pass} ++(0,12mm) -| (B2.120);
-    \draw[ReverseConnector] (B1) -- node[pos=0.25] {Gradient Updates} ++(0,-12mm) -| (B2.240);
+    \draw[Connector] (B1) -- ++(0,12mm) node[pos=0.25] {Forward Pass} -| (B2.120);
+    \draw[ReverseConnector] (B1) -- ++(0,-12mm) node[pos=0.25] {Gradient Updates} -| (B2.240);
 
-    \draw[Connector] (B2) -- node[pos=0.25] {Intermediate Data} ++(0,12mm) -| (B3.120);
-    \draw[ReverseConnector] (B2) -- node[pos=0.25] {Gradient Updates} ++(0,-12mm) -| (B3.240);
+    \draw[Connector] (B2) -- ++(0,12mm) node[pos=0.25] {Intermediate Data} -| (B3.120);
+    \draw[ReverseConnector] (B2) -- ++(0,-12mm) node[pos=0.25] {Gradient Updates} -| (B3.240);
 
-    \draw[Connector] (B3) -- node[pos=0.25] {Intermediate Data} ++(0,12mm) -| (B4.120);
-    \draw[ReverseConnector] (B3) -- node[pos=0.25] {Gradient Updates} ++(0,-12mm) -| (B4.240);
+    \draw[Connector] (B3) -- ++(0,12mm) node[pos=0.25] {Intermediate Data} -| (B4.120);
+    \draw[ReverseConnector] (B3) -- ++(0,-12mm) node[pos=0.25] {Gradient Updates} -| (B4.240);
 
-    \draw[Connector] (B4) -- node[pos=0.25] {Output} ++(0,12mm) -| (B5.120);
-    \draw[ReverseConnector] (B4) -- node[pos=0.25] {Backward Pass} ++(0,-12mm) -| (B5.240);
+    \draw[Connector] (B4) -- ++(0,12mm) node[pos=0.25] {Output} -| (B5.120);
+    \draw[ReverseConnector] (B4) -- ++(0,-12mm) node[pos=0.25] {Backward Pass} -| (B5.240);
   \end{scope}
 \end{tikzpicture}
 ```
@@ -2014,57 +2001,75 @@ Each device, as represented by the rows in the drawing, processes its assigned m
     fill2/.style={fill=OrangeL},
     fill3/.style={fill=GreenL},
     update/.style={fill=Yellow!50},
-    node distance=0cm,
+    node distance=0.2cm and 0.5cm,
     on grid
 ]
 
 % Forward Pass Layers
-\node[fill0, anchor=south west] (F0_0) {$F_{0,0}$};
-\foreach \x in {1, 2, 3} {
-    \node[fill0, right=of F0_\the\numexpr\x-1\relax] (F0_\x) {$F_{0,\x}$};
-}
+\begin{scope}[start chain=going right, node distance=0.5cm]
+    \node[fill0, on chain] (F0_0) {$F_{0,0}$};
+    \foreach \x in {1, 2, 3} {
+        \node[fill0, on chain] (F0_\x) {$F_{0,\x}$};
+    }
+\end{scope}
 
-\node[fill1, above=of F0_0] (F1_0) {$F_{1,0}$};
-\foreach \x in {1, 2, 3} {
-    \node[fill1, right=of F1_\the\numexpr\x-1\relax] (F1_\x) {$F_{1,\x}$};
-}
+\begin{scope}[start chain=going right, node distance=0.5cm, above=of F0_0]
+    \node[fill1, on chain] (F1_0) {$F_{1,0}$};
+    \foreach \x in {1, 2, 3} {
+        \node[fill1, on chain] (F1_\x) {$F_{1,\x}$};
+    }
+\end{scope}
 
-\node[fill2, above=of F1_0] (F2_0) {$F_{2,0}$};
-\foreach \x in {1, 2, 3} {
-    \node[fill2, right=of F2_\the\numexpr\x-1\relax] (F2_\x) {$F_{2,\x}$};
-}
+\begin{scope}[start chain=going right, node distance=0.5cm, above=of F1_0]
+    \node[fill2, on chain] (F2_0) {$F_{2,0}$};
+    \foreach \x in {1, 2, 3} {
+        \node[fill2, on chain] (F2_\x) {$F_{2,\x}$};
+    }
+\end{scope}
 
-\node[fill3, above=of F2_0] (F3_0) {$F_{3,0}$};
-\foreach \x in {1, 2, 3} {
-    \node[fill3, right=of F3_\the\numexpr\x-1\relax] (F3_\x) {$F_{3,\x}$};
-}
+\begin{scope}[start chain=going right, node distance=0.5cm, above=of F2_0]
+    \node[fill3, on chain] (F3_0) {$F_{3,0}$};
+    \foreach \x in {1, 2, 3} {
+        \node[fill3, on chain] (F3_\x) {$F_{3,\x}$};
+    }
+\end{scope}
 
 % Backward Pass Layers
-\node[fill3, right=of F3_3] (B3_3) {$B_{3,3}$};
-\foreach \x in {2, 1, 0} {
-    \node[fill3, right=of B3_\the\numexpr\x+1\relax] (B3_\x) {$B_{3,\x}$};
-}
+\begin{scope}[start chain=going left, node distance=0.5cm, right=of F3_3]
+    \node[fill3, on chain] (B3_3) {$B_{3,3}$};
+    \foreach \x in {2, 1, 0} {
+        \node[fill3, on chain] (B3_\x) {$B_{3,\x}$};
+    }
+\end{scope}
 
-\node[fill2, below=of B3_2] (B2_3) {$B_{2,3}$};
-\foreach \x in {2, 1, 0} {
-    \node[fill2, right=of B2_\the\numexpr\x+1\relax] (B2_\x) {$B_{2,\x}$};
-}
+\begin{scope}[start chain=going left, node distance=0.5cm, below=of B3_2]
+    \node[fill2, on chain] (B2_3) {$B_{2,3}$};
+    \foreach \x in {2, 1, 0} {
+        \node[fill2, on chain] (B2_\x) {$B_{2,\x}$};
+    }
+\end{scope}
 
-\node[fill1, below=of B2_2] (B1_3) {$B_{1,3}$};
-\foreach \x in {2, 1, 0} {
-    \node[fill1, right=of B1_\the\numexpr\x+1\relax] (B1_\x) {$B_{1,\x}$};
-}
+\begin{scope}[start chain=going left, node distance=0.5cm, below=of B2_2]
+    \node[fill1, on chain] (B1_3) {$B_{1,3}$};
+    \foreach \x in {2, 1, 0} {
+        \node[fill1, on chain] (B1_\x) {$B_{1,\x}$};
+    }
+\end{scope}
 
-\node[fill0, below=of B1_2] (B0_3) {$B_{0,3}$};
-\foreach \x in {2, 1, 0} {
-    \node[fill0, right=of B0_\the\numexpr\x+1\relax] (B0_\x) {$B_{0,\x}$};
-}
+\begin{scope}[start chain=going left, node distance=0.5cm, below=of B1_2]
+    \node[fill0, on chain] (B0_3) {$B_{0,3}$};
+    \foreach \x in {2, 1, 0} {
+        \node[fill0, on chain] (B0_\x) {$B_{0,\x}$};
+    }
+\end{scope}
 
 % Update Nodes
-\node[update, right=of B0_0] (U0_0) {Update};
-\node[update, above=of U0_0] (U0_1) {Update};
-\node[update, above=of U0_1] (U0_2) {Update};
-\node[update, above=of U0_2] (U0_3) {Update};
+\begin{scope}[start chain=going up, node distance=0.2cm, right=of B0_0]
+    \node[update, on chain] (U0_0) {Update};
+    \foreach \x in {1, 2, 3} {
+        \node[update, on chain] (U0_\x) {Update};
+    }
+\end{scope}
 
 \end{tikzpicture}
 ```
@@ -2591,7 +2596,6 @@ To systematically weigh the architectural and hardware trade-offs for a new 50-b
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model and dataset fit on single device. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
 ```{.tikz}
-latex
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{
   Line/.style={line width=1.0pt,black!50,text=black},
@@ -2609,17 +2613,18 @@ latex
   endbox/.style={Box,fill=BlueL, draw=BlueLine, node distance=15mm}
 }
 
-\node[Box](B1){Hybrid\\ Parallelism};
+\node[startbox](G5B3){Start};
+\node[decision,below=of G5B3](G4B3){Does\\ the model fit in a\\ single device?};
+\node[decision,below=of G4B3](G3B3){Does\\ the dataset fit in a\\ single device?};
+\node[decision,below=of G3B3](G2B3){Are\\ both constraints\\ significant?};
+\node[Box1,below=of G2B3](G1B3){Is scaling the model\\ or data more critical?};
+\node[decision,right=of G1B3](G1B4){Is\\ the dataset\\ very large?};
+
+\node[Box,below=of G1B3](B1){Hybrid\\ Parallelism};
 \node[Box,right=of B1](B2){Model\\ Parallelism};
 \node[Box,right=of B2](B3){Data\\ Parallelism};
 \node[Box,right=of B3,fill=RedL, draw=RedLine](B4){Single Device Optimization};
 
-\node[decision,above=of B4](G1B4){Is\\ the dataset\\ very large?};
-\node[Box1,above=of $(B2.north)!0.5!(B3.north)$](G1B3){Is scaling the model\\ or data more critical?};
-\node[decision,above=of G1B3](G2B3){Are\\ both constraints\\ significant?};
-\node[decision,above=of G2B3](G3B3){Does\\ the dataset fit in a\\ single device?};
-\node[decision,above=of G3B3](G4B3){Does\\ the model fit in a\\ single device?};
-\node[startbox,above=of G4B3](G5B3){Start};
 \node[endbox,below=of B2](DB2){End};
 
 \begin{scope}[on background layer]
@@ -2799,15 +2804,17 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
 ```{.tikz}
 \begin{tikzpicture}[scale=1.5, font=\small\usefont{T1}{phv}{m}{n}, line join=round]
   % Define colors
-  \definecolor{DataColor}{RGB}{0,99,149}
-  \definecolor{TensorColor}{RGB}{204,85,0}
-  \definecolor{PipeColor}{RGB}{0,143,69}
+  \definecolor{BlueL}{RGB}{0,99,149}
+  \definecolor{OrangeL}{RGB}{204,85,0}
+  \definecolor{GreenL}{RGB}{0,143,69}
 
   % Set node styles
   \tikzset{
     face/.style={fill=white, opacity=0.8, draw=black!60, thick},
     label/.style={font=\bfseries, align=center},
-    gpu/.style={face, minimum width=1cm, minimum height=1cm, fill=#1!10}
+    gpu/.style={face, minimum width=1cm, minimum height=1cm, fill=#1!10},
+    brace/.style={decorate, decoration={brace, amplitude=5pt}, thick},
+    brace_mirror/.style={decorate, decoration={brace, mirror, amplitude=10pt}, thick}
   }
 
   % Initial position of the 3D block
@@ -2823,23 +2830,21 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
 
             % Shards (Tensor Parallel)
             \foreach \t in {0, 1} {
-              \node[gpu=DataColor] (data\d\p\t) [on chain] {};
-              \node[gpu=TensorColor] (tensor\d\p\t) [right=0 of data\d\p\t, on chain] {};
-              \node[gpu=PipeColor] (pipe\d\p\t) [above=0 of data\d\p\t, on chain] {};
-
-              \node at (data\d\p\t.center) {\tiny GPU};
+              \node[gpu=BlueL] (data\d\p\t) [on chain] {\tiny GPU};
+              \node[gpu=OrangeL] (tensor\d\p\t) [right=of data\d\p\t, on chain] {};
+              \node[gpu=GreenL] (pipe\d\p\t) [above=of data\d\p\t, on chain] {};
             }
           \end{scope}
         }
 
         % Bracket for Pipeline
-        \draw[decorate, decoration={brace, amplitude=5pt}, thick, PipeColor]
+        \draw[brace, GreenL]
           ([yshift=-0.1cm]data\d00.south west) --
           ([yshift=0.1cm]data\d10.north west)
           node[midway, left=8pt, label] {$p$ stages};
 
         % Bracket for Tensor
-        \draw[decorate, decoration={brace, amplitude=5pt}, thick, TensorColor]
+        \draw[brace, OrangeL]
           ([xshift=-0.1cm]data\d00.south west) --
           ([xshift=0.1cm]tensor\d00.south)
           node[midway, below=8pt, label] {$t$ shards};
@@ -2848,7 +2853,7 @@ Ultimately, the choice of parallelism is a **loop transformation** applied by th
     }
 
     % Bracket for Data
-    \draw[decorate, decoration={brace, mirror, amplitude=10pt}, thick, DataColor]
+    \draw[brace_mirror, BlueL]
       ([xshift=-0.1cm]data000.south west) --
       ([xshift=0.1cm]tensor100.south east)
       node[midway, below=12pt, label] {$d$ replicas};
