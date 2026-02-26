@@ -77,22 +77,22 @@ class NumbersToKnow:
     # (All inputs drawn from mlsys.constants via wildcard import above)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Physics Constants (Eternal)
+    # Step 1: Physics Constants (Eternal)
     speed_of_light_km_ms = int(SPEED_OF_LIGHT_FIBER_KM_S.m_as(ureg.kilometer / second) / 1000)
 
-    # Energy Ratios (Stable across process nodes)
+    # Step 2: Energy Ratios (Stable across process nodes)
     dram_vs_compute = int(ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule))
     fp32_vs_int8 = int(ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule))
     fp32_vs_fp16 = round(ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule) / ENERGY_FLOP_FP16_PJ.m_as(ureg.picojoule), 1)
     l1_vs_reg = int(ENERGY_SRAM_L1_PJ.m_as(ureg.picojoule) / ENERGY_REG_PJ.m_as(ureg.picojoule))
 
-    # Memory Hierarchy Ratios (Stable)
+    # Step 3: Memory Hierarchy Ratios (Stable)
     hbm_vs_l1 = int(LATENCY_HBM3.m_as(NS) / LATENCY_L1_REGISTER.m_as(NS))
     ssd_vs_l1 = int(LATENCY_NVME_SSD.m_as(NS) / LATENCY_L1_REGISTER.m_as(NS))
     network_vs_local = int(LATENCY_INFINIBAND.m_as(NS) / LATENCY_HBM3.m_as(NS))
     gpu_bw_vs_pcie = int(H100_MEM_BW.m_as(GB / second) / PCIE_GEN5_BW.m_as(GB / second))
 
-    # Current Hardware Reference (circa 2024)
+    # Step 4: Current Hardware Reference (circa 2024)
     lat_l1_ns = int(LATENCY_L1_REGISTER.m_as(NS))
     lat_l2_ns = int(LATENCY_L2_CACHE.m_as(NS))
     lat_hbm_ns = int(LATENCY_HBM3.m_as(NS))
@@ -201,10 +201,10 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 | Relationship                   |                                       Ratio | Why It Persists                   |
 |:-------------------------------|--------------------------------------------:|:----------------------------------|
-| GPU memory (HBM) vs. L1 cache  |        ~`{python} hbm_vs_l1`$\times$ slower | On-chip vs. off-chip              |
+| Accelerator memory (HBM) vs. L1 cache  |        ~`{python} hbm_vs_l1`$\times$ slower | On-chip vs. off-chip              |
 | SSD vs. L1 cache               |        ~`{python} ssd_vs_l1`$\times$ slower | Electrical vs. mechanical/flash   |
 | Network vs. local memory       | ~`{python} network_vs_local`$\times$ slower | Speed of light + switching        |
-| GPU memory BW vs. CPU↔GPU link |   ~`{python} gpu_bw_vs_pcie`$\times$ faster | Architectural investment priority |
+| Accelerator memory BW vs. CPU↔Accelerator link |   ~`{python} gpu_bw_vs_pcie`$\times$ faster | Architectural investment priority |
 
 : **The Latency Hierarchy.** Each level costs roughly 10--100$\times$ more than the one above it. {#tbl-memory-ratios-ref}
 
@@ -223,7 +223,7 @@ These relationships are governed by physics or arithmetic—they will still be t
 
 : **Scaling Rules.** These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2B), FP32 master weights (4B), and Adam optimizer states (8B for momentum + variance). {#tbl-scaling-rules-ref}
 
-[^fn-training-memory]: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-GPU memory by sharding optimizer states across GPUs, but the total memory across all GPUs remains ~16$\times$ parameters.
+[^fn-training-memory]: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
 
 ### Latency Budgets: The Non-Negotiables { .unnumbered}
 
@@ -284,7 +284,7 @@ These numbers reflect the current generation. Use them for back-of-envelope calc
 : **Arithmetic Intensity Thresholds (c. 2024).** Most inference workloads are <10 ops/byte—firmly memory-bound. {#tbl-ridge-current-ref}
 
 ::: {.callout-perspective title="A Note on Terminology: GPUs and Accelerators"}
-Throughout this book, we often use "GPU" when discussing hardware acceleration. However, the principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply equally to **TPUs**, **NPUs**, **custom ASICs**, and other specialized AI accelerators. We use "GPU" as convenient shorthand given its prevalence in the ML ecosystem, but readers should understand these concepts as **accelerator-general** unless we explicitly discuss vendor-specific features (e.g., CUDA, NVLink).
+Throughout this book, we often use "accelerator" when discussing hardware acceleration. However, the principles—roofline analysis, memory hierarchies, numerical precision, and performance modeling—apply equally to **GPUs**, **TPUs**, **NPUs**, **custom ASICs**, and other specialized AI accelerators. We use "accelerator" as the universal term, but readers should understand these concepts apply to GPUs unless we explicitly discuss vendor-specific features (e.g., CUDA, NVLink).
 :::
 
 Knowing the numbers is only the first step. The real power comes from having compact models that tell you *which* number matters for *your* specific bottleneck. The next section provides exactly these diagnostic tools—starting with the Roofline Model, which translates raw hardware specs into actionable performance ceilings.
@@ -620,7 +620,7 @@ No matter how many accelerators you buy, you cannot make this fixed workload run
 
 **Weak scaling** answers the question: *If I add more processors, how much larger of a problem can I solve in the same amount of time?*
 
-This is the reality of Large Language Models. We do not use 1,000 GPUs to train GPT-4 on a laptop-sized dataset in milliseconds; we use them to train on a dataset 1,000$\times$ larger in reasonable time.
+This is the reality of Large Language Models. We do not use 1,000 accelerators to train GPT-4 on a laptop-sized dataset in milliseconds; we use them to train on a dataset 1,000$\times$ larger in reasonable time.
 
 Gustafson's Law [@gustafson1988reevaluating] models this "scaled speedup":[^fn-gustafson]
 
@@ -768,7 +768,7 @@ class TrainingTimeRef:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     total_flops = 6 * p_params_value * d_tokens_value
-    # x_flops_value is in TFLOPS (1e12)
+    # Step 1: x_flops_value is in TFLOPS (1e12)
     throughput = n_gpus_value * (x_flops_value) * u_mfu_value
 
     t_seconds_value = total_flops / throughput
@@ -830,9 +830,9 @@ The computed result: **`{python} T_seconds_str` seconds** (≈ `{python} T_minut
 
 1. A new accelerator doubles compute throughput but keeps memory bandwidth the same. For a workload that is **memory-bound** on the current hardware, how much speedup do you expect? What about a **compute-bound** workload?
 
-2. Your training pipeline has 10% serial overhead. Using Amdahl's Law, what is the maximum possible speedup regardless of how many GPUs you add? Using Gustafson's Law with 256 GPUs, what is the scaled speedup?
+2. Your training pipeline has 10% serial overhead. Using Amdahl's Law, what is the maximum possible speedup regardless of how many accelerators you add? Using Gustafson's Law with 256 accelerators, what is the scaled speedup?
 
-3. An inference service must handle 500 queries per second (QPS) at 100 ms latency. Using Little's Law, how many concurrent requests must the system support? If each request needs 2 GB of KV cache memory, what is the minimum GPU memory required?
+3. An inference service must handle 500 queries per second (QPS) at 100 ms latency. Using Little's Law, how many concurrent requests must the system support? If each request needs 2 GB of KV cache memory, what is the minimum accelerator memory required?
 
 :::
 
@@ -1235,7 +1235,7 @@ With the full toolkit assembled—reference numbers, performance models, archite
 
 Even experienced engineers fall into traps when reasoning about hardware performance. The following misconceptions violate the physical and architectural principles covered in this appendix.
 
-::: {.callout-warning title="Fallacy: Doubling GPUs halves training time."}
+::: {.callout-warning title="Fallacy: Doubling accelerators halves training time."}
 This assumes perfect strong scaling (Amdahl's Law). In practice, communication overhead (all-reduce) grows with $N$, and batch size constraints may limit parallelism. At large scale, you often hit diminishing returns unless you also scale the problem size (weak scaling).
 :::
 

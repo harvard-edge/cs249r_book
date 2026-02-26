@@ -287,7 +287,7 @@ class MemoryWallSpecs:
     bw_tbs = gpu.memory_bw.m_as(TB/second)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Arithmetic Intensity "Ridge Point" (Ops / Byte)
+    # Step 1: Arithmetic Intensity "Ridge Point" (Ops / Byte)
     ridge_point = gpu.ridge_point().m_as(flop/byte)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -601,7 +601,7 @@ class DispatchTax:
     large_kernel_us = 100.0   # e.g. MatMul 1024x1024
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Dispatch Tax = Overhead / (Overhead + Execution)
+    # Step 1: Dispatch Tax = Overhead / (Overhead + Execution)
     small_tax_pct = (python_overhead_us / (python_overhead_us + small_kernel_us)) * 100
     large_tax_pct = (python_overhead_us / (python_overhead_us + large_kernel_us)) * 100
 
@@ -1418,14 +1418,14 @@ class DispatchTax:
     large_dispatch_us = 50.0
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Small Model
+    # Step 1: Small Model
     small_sw_total = small_ops_count * small_dispatch_us
     small_total_time = small_sw_total + small_hw_us
     small_overhead_ratio = small_sw_total / small_hw_us
     small_overhead_pct = (small_sw_total / small_total_time) * 100
     small_speedup_limit = small_total_time / small_hw_us
 
-    # Large Model
+    # Step 2: Large Model
     large_overhead_ratio = large_dispatch_us / large_hw_us
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -2405,7 +2405,7 @@ class AdminTax:
     grads_gb = weights_gb
     opt_gb = (params_count * BYTES_ADAM_STATE).m_as(GB)
 
-    # Activation approximation: Batch * Layers * Width^2 * FP16
+    # Step 1: Activation approximation: Batch * Layers * Width^2 * FP16
     act_bytes = batch_size * layers * (width ** 2) * BYTES_FP16
     act_gb = act_bytes.m_as(GB)
 
@@ -2888,16 +2888,16 @@ class DataloaderThroughput:
     batch_size = 64
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Throughput requirement
+    # Step 1: Throughput requirement
     throughput_bytes_sec = img_per_sec * img_res * img_res * img_channels * byte
     dataloader_mbs = throughput_bytes_sec.m_as(MB)
 
-    # Batch transfer
+    # Step 2: Batch transfer
     batch_bytes = batch_size * img_res * img_res * img_channels * BYTES_FP32
     batch_mb = batch_bytes.m_as(MB)
     batch_transfer_ms = (batch_bytes / PCIE_GEN4_BW).m_as(second) * MS_PER_SEC
 
-    # PCIe Ref
+    # Step 3: PCIe Ref
     pcie4_gbs = PCIE_GEN4_BW.m_as(GB/second)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -3755,7 +3755,9 @@ As ML models move from cloud servers to edge devices, the efficiency gaps measur
 \index{ONNX!hub-and-spoke interoperability}
 The Open Neural Network Exchange (ONNX)\index{ONNX!cross-framework portability}[^fn-onnx-portability] format addresses this fragmentation by enabling model portability across frameworks: train in PyTorch, deploy via TensorFlow Lite or ONNX Runtime. This standardization eliminates manual conversion when moving between development and production environments. @fig-onnx captures this hub-and-spoke interoperability model---notice how ONNX sits at the center, accepting models from any training framework on the left and dispatching them to specialized runtimes on the right. Detailed deployment optimization (quantization, pruning, hardware-specific compilation) appears in @sec-model-compression and @sec-model-serving.
 
-![**Framework Interoperability**: ONNX enables model portability across frameworks, allowing training in one framework and deployment in another.](images/jpeg/onnx_new.jpg){#fig-onnx fig-pos="htb" width="70%" fig-alt="Hub diagram with ONNX logo at center. Left side: PyTorch, TensorFlow, Keras with arrows pointing inward. Right side: TF Lite, ONNX Runtime with arrows outward."}
+:::: {#fig-onnx fig-env="figure" fig-pos="htb" fig-cap="**Framework Interoperability**: ONNX enables model portability across frameworks, allowing training in one framework and deployment in another." fig-alt="Hub diagram with ONNX logo at center. Left side: PyTorch, TensorFlow, Keras with arrows pointing inward. Right side: TF Lite, ONNX Runtime with arrows outward."}
+![](images/jpeg/onnx_new.jpg){width="70%"}
+::::
 
 ONNX reduces the cost of framework fragmentation, but it does not eliminate the initial selection decision. With the deployment landscape mapped and interoperability options understood, we can now address the practical question: given a specific project's requirements, the question becomes how an engineer should select a framework.
 
@@ -3982,23 +3984,23 @@ class TrainingStepCalc:
     _output = train_output
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # MatMul 1: [32, 784] @ [784, 256]
+    # Step 1: MatMul 1: [32, 784] @ [784, 256]
     mm1_flops = 2 * _batch * _input * _hidden                                  # ~12.8M FLOPs
     mm1_mem_bytes = (_batch * _input + _input * _hidden + _batch * _hidden) * 4  # FP32
 
-    # ReLU: [32, 256]
+    # Step 2: ReLU: [32, 256]
     relu_flops = _batch * _hidden                                               # ~8K FLOPs
     relu_mem_bytes = (_batch * _hidden) * 2 * 4                                # read + write
 
-    # MatMul 2: [32, 256] @ [256, 10]
+    # Step 3: MatMul 2: [32, 256] @ [256, 10]
     mm2_flops = 2 * _batch * _hidden * _output                                 # ~164K FLOPs
     mm2_mem_bytes = (_batch * _hidden + _hidden * _output + _batch * _output) * 4
 
-    # Cross Entropy: [32, 10]
+    # Step 4: Cross Entropy: [32, 10]
     ce_flops = _batch * _output * 3                                             # ~1K FLOPs (exp + sum + div)
     ce_mem_bytes = (_batch * _output) * 2 * 4
 
-    # Backward pass (2x forward FLOPs)
+    # Step 5: Backward pass (2x forward FLOPs)
     bwd_flops = 2 * (mm1_flops + relu_flops + mm2_flops + ce_flops)
     bwd_mem_str = "~3.2 MB"                                                     # approximation
     bwd_ai_str = "~8.0"                                                         # approximation
