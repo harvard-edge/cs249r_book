@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { VolumeId } from '../types';
 import { getRepoRoot } from '../utils/workspace';
 import { discoverChapters } from '../utils/chapters';
@@ -82,9 +81,9 @@ async function runTestAllChapters(
 }
 
 /**
- * Debug All Chapters (Sequential) — runs `./binder debug pdf --vol1` in a
- * visible terminal.  This builds each chapter one-by-one inside the current
- * repo (no worktrees), reports pass/fail, and binary-searches any failures.
+ * Debug All Chapters (Sequential) — runs `./book/binder debug pdf --vol1` in a
+ * visible terminal from repo root.  This builds each chapter one-by-one inside
+ * the current repo (no worktrees), reports pass/fail, and binary-searches any failures.
  */
 async function runDebugAllChapters(
   root: string,
@@ -102,9 +101,8 @@ async function runDebugAllChapters(
 
   await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, selection.id);
 
-  const bookDir = path.join(root, 'book');
-  const cmd = `./binder debug pdf --${selection.id} -v`;
-  runInVisibleTerminal(cmd, bookDir, `Debug All Chapters (${selection.id})`);
+  const cmd = `./book/binder debug pdf --${selection.id} -v`;
+  runInVisibleTerminal(cmd, root, `Debug All Chapters (${selection.id})`);
 }
 
 export function registerDebugCommands(context: vscode.ExtensionContext): void {
