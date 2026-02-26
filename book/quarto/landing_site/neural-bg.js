@@ -1,91 +1,120 @@
-/**
- * Subtle animated neural-network background for MLSysBook landing.
- * Light grid of nodes + edges with a gentle opacity wave. No D3 dependency.
- */
-(function () {
+document.addEventListener('DOMContentLoaded', function(){
   var container = document.getElementById('mls-neural-bg');
   if (!container) return;
-
   var canvas = document.createElement('canvas');
   var ctx = canvas.getContext('2d');
   container.appendChild(canvas);
-
-  var cols = 12, rows = 8;
-  var nodes = [];
-  var edges = [];
+  
+  var pixels = [];
   var time = 0;
-
-  function initNodes() {
-    nodes = [];
-    for (var i = 0; i < rows; i++) {
-      for (var j = 0; j < cols; j++) {
-        nodes.push({
-          x: (j + 0.5) / cols,
-          y: (i + 0.5) / rows,
-          phase: (i * cols + j) * 0.7
-        });
+  
+  var lightColors = [
+    '#A51C30', '#4285F4', '#FBBC05', '#34A853', '#8E24AA', 
+    '#E0E0E0', '#BDBDBD', '#9E9E9E',
+    '#F1F3F4', '#E8F0FE', '#FCE8E6', '#FEF7E0', '#E6F4EA', '#F3E8FD'
+  ];
+  
+  var darkColors = [
+    '#ff4d6d', '#00e5ff', '#b388ff', '#00e676', '#ffea00',
+    '#333333', '#444444', '#555555',
+    '#1a1a1a', '#111111', '#222222', '#151515', '#0a0a0a', '#1c1c1c'
+  ];
+  
+  var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+  
+  // Observe theme changes
+  var observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+      if (mutation.attributeName === 'data-bs-theme') {
+        isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        // Re-initialize pixels to pick up new colors immediately
+        initPixels(canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
       }
-    }
-    edges = [];
-    for (var i = 0; i < nodes.length; i++) {
-      var r = Math.floor(i / cols), c = i % cols;
-      if (c < cols - 1) edges.push([i, i + 1]);
-      if (r < rows - 1) edges.push([i, i + cols]);
-    }
-  }
+    });
+  });
+  observer.observe(document.documentElement, { attributes: true });
 
+  var pixelSize = 10;
+  var spacing = 4;
+  var cols = 0, rows = 0;
+  
   function resize() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
-    canvas.style.width = window.innerWidth + 'px';
-    canvas.style.height = window.innerHeight + 'px';
+    var w = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+    var h = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+    
+    if (w === 0) w = 1000;
+    if (h === 0) h = 800;
+
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.scale(dpr, dpr);
-    draw();
+    initPixels(w, h);
+  }
+
+  function initPixels(w, h) {
+    pixels = [];
+    cols = Math.ceil(w / (pixelSize + spacing));
+    rows = Math.ceil(h / (pixelSize + spacing));
+    
+    var colors = isDark ? darkColors : lightColors;
+    
+    for (var i = 0; i < rows; i++) {
+      for (var j = 0; j < cols; j++) {
+        if (Math.random() > 0.25) {
+          pixels.push({
+            c: j,
+            r: i,
+            color: colors[Math.floor(Math.random() * colors.length)],
+            phase: Math.random() * Math.PI * 2,
+            speed: 0.04 + Math.random() * 0.06
+          });
+        }
+      }
+    }
   }
 
   function draw() {
-    var w = window.innerWidth, h = window.innerHeight;
+    var w = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
+    var h = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
     ctx.clearRect(0, 0, w, h);
-
-    time += 0.012;
-    var baseOpacity = 0.08;
-    var waveAmplitude = 0.06;
-
-    // Edges (lines)
-    ctx.strokeStyle = 'rgba(165, 28, 48, 0.4)';
-    edges.forEach(function (e) {
-      var a = nodes[e[0]], b = nodes[e[1]];
-      var phase = (a.phase + b.phase) * 0.5;
-      var opacity = baseOpacity + waveAmplitude * Math.sin(time + phase);
-      ctx.globalAlpha = Math.max(0.02, opacity);
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.moveTo(a.x * w, a.y * h);
-      ctx.lineTo(b.x * w, b.y * h);
-      ctx.stroke();
+    time += 1.5;
+    
+    pixels.forEach(function(p) {
+      var alpha = 0.1 + 0.3 * Math.sin(time * p.speed + p.phase);
+      if (alpha < 0) alpha = 0;
+      
+      // In dark mode, we might want slightly higher alpha for the neon colors to pop
+      if (isDark) {
+        alpha = alpha * 1.5;
+        if (alpha > 1) alpha = 1;
+      }
+      
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = p.color;
+      var px = p.c * (pixelSize + spacing);
+      var py = p.r * (pixelSize + spacing);
+      ctx.fillRect(px, py, pixelSize, pixelSize);
     });
-
-    // Nodes (small circles)
-    ctx.fillStyle = 'rgb(165, 28, 48)';
-    nodes.forEach(function (n) {
-      var opacity = baseOpacity + waveAmplitude * Math.sin(time + n.phase);
-      ctx.globalAlpha = Math.max(0.02, opacity);
-      ctx.beginPath();
-      ctx.arc(n.x * w, n.y * h, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-    });
-
     ctx.globalAlpha = 1;
   }
-
-  function tick() {
-    draw();
-    requestAnimationFrame(tick);
+  
+  var lastTime = 0;
+  function tick(timestamp) { 
+    requestAnimationFrame(tick); 
+    if (timestamp - lastTime < 33) return;
+    lastTime = timestamp;
+    draw(); 
   }
-
-  initNodes();
   resize();
-  tick();
-  window.addEventListener('resize', resize);
-})();
+  requestAnimationFrame(tick);
+  
+  var resizeTimeout;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(resize, 200);
+  });
+});
