@@ -38,6 +38,9 @@ document.addEventListener('DOMContentLoaded', function(){
   var spacing = 4;
   var cols = 0, rows = 0;
   
+  var lastW = window.innerWidth;
+  var lastH = window.innerHeight;
+  
   function resize() {
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
     var w = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
@@ -46,13 +49,22 @@ document.addEventListener('DOMContentLoaded', function(){
     if (w === 0) w = 1000;
     if (h === 0) h = 800;
 
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.scale(dpr, dpr);
-    initPixels(w, h);
+    // Only resize canvas if width changes significantly (ignore height changes from scrollbars/navbars)
+    if (Math.abs(w - lastW) > 50 || pixels.length === 0) {
+      // Make canvas slightly larger than screen to account for mobile address bar hiding
+      var canvasH = h + 200; 
+      
+      canvas.width = w * dpr;
+      canvas.height = canvasH * dpr;
+      canvas.style.width = w + 'px';
+      canvas.style.height = canvasH + 'px';
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+      
+      lastW = w;
+      lastH = h;
+      initPixels(w, canvasH);
+    }
   }
 
   function initPixels(w, h) {
@@ -78,8 +90,9 @@ document.addEventListener('DOMContentLoaded', function(){
   }
 
   function draw() {
-    var w = window.innerWidth || document.documentElement.clientWidth || document.body.clientWidth;
-    var h = window.innerHeight || document.documentElement.clientHeight || document.body.clientHeight;
+    // Use the canvas dimensions for clearing, not the window dimensions
+    var w = canvas.width / Math.min(window.devicePixelRatio || 1, 2);
+    var h = canvas.height / Math.min(window.devicePixelRatio || 1, 2);
     ctx.clearRect(0, 0, w, h);
     time += 1.5;
     
@@ -115,6 +128,11 @@ document.addEventListener('DOMContentLoaded', function(){
   var resizeTimeout;
   window.addEventListener('resize', function() {
     clearTimeout(resizeTimeout);
-    resizeTimeout = setTimeout(resize, 200);
+    resizeTimeout = setTimeout(function() {
+      // Only trigger resize if width actually changed (ignores mobile scrollbar hide/show)
+      if (window.innerWidth !== lastW) {
+        resize();
+      }
+    }, 200);
   });
 });
