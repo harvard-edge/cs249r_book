@@ -5,6 +5,7 @@ from .hardware import Hardware
 from .models import Models
 from .deployment import Tiers
 from .systems import Systems, Archetypes
+from .engine import Engine
 from .scenarios import Scenarios, Applications
 
 # Export constants and registry for legacy support

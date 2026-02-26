@@ -5,9 +5,10 @@ Pre-render guardrail for inline Python in QMD files.
 
 Checks:
 1. Every `{python} var_name` resolves to a defined variable
-2. No inline Python inside LaTeX math mode (causes decimal stripping)
-3. No inline Python adjacent to LaTeX symbols like $\\times$
-4. No grid tables with inline Python (use pipe tables instead)
+2. Every `{python} var_name` appears AFTER its definition (Locality)
+3. No inline Python inside LaTeX math mode (causes decimal stripping)
+4. No inline Python adjacent to LaTeX symbols like $\\times$
+5. No grid tables with inline Python (use pipe tables instead)
 
 Usage:
     python3 book/quarto/mlsys/validate_inline_refs.py [--verbose] [--check-patterns]
@@ -36,8 +37,11 @@ INLINE_REF = re.compile(r'`\{python\}\s+(\w+)`')
 CELL_START = re.compile(r'^```\{python\}')
 CELL_END = re.compile(r'^```\s*$')
 
-# Pattern for variable assignments in compute cells
-ASSIGNMENT = re.compile(r'^(\w+)\s*=')
+# Pattern for variable assignments in compute cells (handles tuple unpacking)
+ASSIGNMENT = re.compile(r'^([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\s*=')
+
+# Pattern for Exports: in header block
+EXPORTS_SECTION = re.compile(r'#\s*.\s*[Ee]xports?:\s*(.*)')
 
 # Problematic patterns that cause rendering issues
 # Pattern 1: Inline Python directly inside LaTeX math: $`{python}`$ or $..`{python}`$
@@ -60,40 +64,11 @@ INLINE_FSTRING = re.compile(r'`\{python\}\s*f"[^`]+`')
 # Pattern 5: Inline function calls (should be pre-computed as _str)
 INLINE_FUNC_CALL = re.compile(r'`\{python\}\s*\w+\([^`]+\)`')
 
-# Pattern 6: Inline Python in YAML cell options (fig-cap, tbl-cap, etc.)
-# These NEVER render - Quarto passes YAML options as literal strings
+# Pattern 6: Inline Python in YAML chunk options (fig-cap, tbl-cap, fig-alt, lst-cap)
+# These NEVER render — Quarto uses the option value as a literal string (verified by
+# rendering _test_inline_captions.qmd: body and ": Caption {#tbl-...}" run inline Python;
+# #| fig-alt and #| fig-cap do not).
 YAML_OPTION_INLINE = re.compile(r'^#\|\s*(fig-cap|tbl-cap|lst-cap|fig-alt):\s*.*`\{python\}')
-
-# Pattern 7: Inline Python in Quarto caption syntax (: Caption {#tbl-...} or {#fig-...})
-# These also NEVER render - the caption line is parsed as metadata
-CAPTION_SYNTAX_INLINE = re.compile(r'^:\s+.*`\{python\}.*\{#(tbl|fig|lst)-')
-
-
-def extract_compute_vars(lines):
-    """Extract all variable names assigned in ```{python} compute cells."""
-    variables = set()
-    in_cell = False
-    for line in lines:
-        if CELL_START.match(line):
-            in_cell = True
-            continue
-        if in_cell and CELL_END.match(line):
-            in_cell = False
-            continue
-        if in_cell:
-            m = ASSIGNMENT.match(line.strip())
-            if m:
-                variables.add(m.group(1))
-    return variables
-
-
-def extract_inline_refs(lines):
-    """Extract all inline `{python} var` references with line numbers."""
-    refs = []
-    for i, line in enumerate(lines, 1):
-        for m in INLINE_REF.finditer(line):
-            refs.append((i, m.group(1)))
-    return refs
 
 
 def check_rendering_patterns(qmd_path, verbose=False):
@@ -152,19 +127,12 @@ def check_rendering_patterns(qmd_path, verbose=False):
             if verbose:
                 print(f"  ⚠ {qmd_path.name}:{i} — Inline function call")
 
-        # Check for inline Python in YAML cell options (NEVER renders!)
+        # Check for inline Python in YAML chunk options (fig-cap, fig-alt, tbl-cap, lst-cap) — NEVER renders
         if YAML_OPTION_INLINE.search(line):
             warnings.append((filepath, i, "YAML_OPTION",
-                "Inline Python in YAML option (fig-cap/tbl-cap) - NEVER renders! Use hardcoded value or plt.suptitle()"))
+                "Inline Python in #| fig-alt/fig-cap/tbl-cap/lst-cap - NEVER renders! Use hardcoded value or set caption in code."))
             if verbose:
                 print(f"  ✗ {qmd_path.name}:{i} — Python in YAML option (will appear literally)")
-
-        # Check for inline Python in Quarto caption syntax (: Caption {#tbl-...})
-        if CAPTION_SYNTAX_INLINE.search(line):
-            warnings.append((filepath, i, "CAPTION_SYNTAX",
-                "Inline Python in caption (: ... {#tbl/fig-}) - NEVER renders! Use hardcoded value."))
-            if verbose:
-                print(f"  ✗ {qmd_path.name}:{i} — Python in caption syntax (will appear literally)")
 
     return warnings
 
@@ -174,17 +142,68 @@ def validate_file(qmd_path, verbose=False, check_patterns=False):
     text = qmd_path.read_text(encoding="utf-8")
     lines = text.splitlines()
 
-    inline_refs = extract_inline_refs(lines)
-    if not inline_refs:
-        return [], []  # No inline refs, nothing to validate
-
-    compute_vars = extract_compute_vars(lines)
     errors = []
-    for lineno, var in inline_refs:
-        if var not in compute_vars:
-            errors.append((str(qmd_path.relative_to(BOOK_ROOT)), lineno, var))
-            if verbose:
-                print(f"  ✗ {qmd_path.name}:{lineno} — `{{python}} {var}` not defined")
+    defined_vars = set()
+    in_cell = False
+    in_exports = False
+
+    for i, line in enumerate(lines, 1):
+        # 1. Track variable definitions in cells
+        if CELL_START.match(line):
+            in_cell = True
+            continue
+        if in_cell and CELL_END.match(line):
+            in_cell = False
+            in_exports = False
+            continue
+        
+        if in_cell:
+            # Check for assignments: var = ... or var1, var2 = ...
+            m = ASSIGNMENT.match(line.strip())
+            if m:
+                vars_part = m.group(1)
+                for v in re.split(r'[,\s]+', vars_part):
+                    if v.strip():
+                        defined_vars.add(v.strip())
+            
+            # Check for Exports: in header
+            m = EXPORTS_SECTION.match(line.strip())
+            if m:
+                in_exports = True
+                vars_raw = m.group(1)
+                # Remove unit parentheticals like (MB, GB)
+                vars_raw = re.sub(r'\(.*?\)', '', vars_raw)
+                for v in re.split(r'[,\s]+', vars_raw):
+                    v = v.strip().rstrip(',')
+                    if v:
+                        defined_vars.add(v)
+            elif in_exports:
+                # Continuation of exports
+                m = re.match(r'#\s*.\s*(.*)', line.strip())
+                if m:
+                    content = m.group(1).strip()
+                    # If content starts with a section like 'Goal:', stop
+                    if re.match(r'^[A-Z][a-z]+:', content):
+                        in_exports = False
+                    elif content == "" or "──" in content:
+                        in_exports = False
+                    else:
+                        vars_raw = re.sub(r'\(.*?\)', '', content)
+                        for v in re.split(r'[,\s]+', vars_raw):
+                            v = v.strip().rstrip(',')
+                            if v:
+                                defined_vars.add(v)
+                else:
+                    in_exports = False
+            continue # Don't check for refs inside compute cells
+
+        # 2. Check inline references for Locality
+        for m in INLINE_REF.finditer(line):
+            var = m.group(1)
+            if var not in defined_vars:
+                errors.append((str(qmd_path.relative_to(BOOK_ROOT)), i, var))
+                if verbose:
+                    print(f"  ✗ {qmd_path.name}:{i} — `{{python}} {var}` used before definition (Locality Violation)")
 
     warnings = []
     if check_patterns:
@@ -198,8 +217,17 @@ def main():
 
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     check_patterns = "--check-patterns" in sys.argv or "-p" in sys.argv
-
-    qmd_files = sorted(CONTENTS.rglob("*.qmd"))
+    
+    # Check for path argument
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if args:
+        target_path = Path(args[0]).resolve()
+        if target_path.is_file():
+            qmd_files = [target_path]
+        else:
+            qmd_files = sorted(target_path.rglob("*.qmd"))
+    else:
+        qmd_files = sorted(CONTENTS.rglob("*.qmd"))
     total_files = 0
     total_refs = 0
     all_errors = []
@@ -230,7 +258,7 @@ def main():
         print(f"\n{'─'*60}")
         print("ERRORS (will break render):")
         for filepath, lineno, var in all_errors:
-            print(f"  {filepath}:{lineno} — `{{python}} {var}` undefined")
+            print(f"  {filepath}:{lineno} — `{{python}} {var}` undefined/locality violation")
         exit_code = 1
 
     if all_warnings:
