@@ -72,32 +72,78 @@ A thousand GPUs sitting idle waiting for scheduling decisions cost the same as a
 ```{python}
 #| label: fleet-orchestration-setup
 #| echo: false
+```{python}
+#| label: fleet-setup
+#| echo: false
+#| output: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ FLEET ORCHESTRATION: CHAPTER-WIDE CONSTANTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide setup for Fleet Orchestration (@sec-fleet-orchestration).
+# │ Context: @sec-fleet-orchestration-introduction
 # │
-# │ Goal: Compute cluster GPU utilization under Kubernetes gang scheduling vs
-# │       Slurm backfill to show the ~15–20% utilization gap from scheduling
-# │       overhead, plus cluster economics and fragmentation numbers.
-# │ Show: "~65% utilization" (Kubernetes) vs "~80%" (Slurm backfill) — inline
-# │       in scheduling comparison paragraph; $480K/day operating cost for
-# │       10,000-GPU cluster; 25% fragmentation from 6-GPU jobs on 8-GPU nodes.
-# │ How: Direct arithmetic on cluster_size, gpu_hour_cost_usd, utilization
-# │      fractions; pint .m_as() for hardware specs (GB/s, Gbps).
+# │ Goal: Establish cluster economics, scale, and hardware baselines.
+# │ Show: 10,000-GPU cluster; ~$480k/day operating cost; fragmentation metrics.
+# │ How: GPU_Count * hourly_rate * 24; pint .m_as() for hardware specs.
 # │
-# │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY,
-# │          NVLINK_A100_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW,
-# │          GB, second, Gbps, BITS_PER_BYTE)
-# │ Exports: cluster_size_str, daily_cost_str, annual_cost_str,
-# │          daily_waste_str, annual_waste_str, equivalent_gpus_str,
-# │          spot_price_str, frag_pct_str, total_gpus_str,
-# │          nvlink_a100_str, nvlink_h100_str, ib_ndr_str, ib_ndr_gbs_str,
-# │          a100_mem_str, h100_mem_str
+# │ Imports: mlsys.constants, mlsys.formatting
+# │ Exports: cluster_size_str, daily_cost_str, total_gpus_str, ...
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys import Hardware
+from mlsys.constants import (
+    NVLINK_H100_BW, NVLINK_A100_BW, INFINIBAND_NDR_BW,
+    GB, second, Gbps, TRILLION, MILLION, BITS_PER_BYTE
+)
+from mlsys.formatting import fmt, check
 
-## The Scheduling Problem {#sec-fleet-orchestration-introduction}```
+# ┌── LEGO ───────────────────────────────────────────────
+class FleetSetup:
+    """
+    Central namespace for Fleet Orchestration constants.
+    """
+    # 1. Scale and Economics
+    cluster_size = 10000
+    hourly_rate = 2.0 # USD/GPU-hour
+    daily_cost = cluster_size * hourly_rate * 24
+    annual_cost = daily_cost * 365
 
+    # 2. Fragmentation Scenario (64 nodes * 8 GPUs)
+    n_nodes = 64
+    gpus_per_node = 8
+    total_gpus = n_nodes * gpus_per_node
+    job_request = 6
+    wasted_per_node = gpus_per_node - job_request
+    frag_pct = (wasted_per_node / gpus_per_node) * 100
+
+    # 3. Hardware Interconnects
+    nvlink_h100_val = NVLINK_H100_BW.m_as(GB/second)
+    nvlink_a100_val = NVLINK_A100_BW.m_as(GB/second)
+    ib_ndr_gbps_val = INFINIBAND_NDR_BW.m_as('Gbps')
+    ib_ndr_gbs_val = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
+
+    # OUTPUTS
+    cluster_size_str = fmt(cluster_size, precision=0)
+    daily_cost_str = f"${daily_cost/1000:.0f}K"
+    annual_cost_str = f"${annual_cost/1e6:.0f}M"
+    total_gpus_str = fmt(total_gpus, precision=0)
+    frag_pct_str = fmt(frag_pct, precision=0)
+    nvlink_h100_str = fmt(nvlink_h100_val, precision=0)
+    nvlink_a100_str = fmt(nvlink_a100_val, precision=0)
+    ib_ndr_str = fmt(ib_ndr_gbps_val, precision=0)
+    ib_ndr_gbs_str = fmt(ib_ndr_gbs_val, precision=0)
+    spot_price_str = "$0.50"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+cluster_size_str = FleetSetup.cluster_size_str
+daily_cost_str = FleetSetup.daily_cost_str
+annual_cost_str = FleetSetup.annual_cost_str
+total_gpus_str = FleetSetup.total_gpus_str
+frag_pct_str = FleetSetup.frag_pct_str
+nvlink_h100_str = FleetSetup.nvlink_h100_str
+nvlink_a100_str = FleetSetup.nvlink_a100_str
+ib_ndr_str = FleetSetup.ib_ndr_str
+ib_ndr_gbs_str = FleetSetup.ib_ndr_gbs_str
+spot_price_str = FleetSetup.spot_price_str
+```
 ## The Scheduling Problem {#sec-fleet-orchestration-introduction}
 
 The preceding chapters established how to distribute computation (@sec-distributed-training-systems), synchronize it efficiently (@sec-collective-communication), and recover when hardware fails (@sec-fault-tolerance-reliability). Fault tolerance keeps individual jobs alive; orchestration decides which jobs run, where they run, and how resources are shared among competing demands.
@@ -360,48 +406,74 @@ fig = plt.gcf()
 
 ::: {#fig-gang-scheduling-deadlock fig-env="figure" fig-pos="htb" fig-cap="**The Distributed Deadlock (Hold and Wait)**. In Independent Scheduling (top), Job A acquires half the cluster and waits for the rest, while Job B acquires the other half and waits for Job A to finish. Neither can proceed, and 100% of the cluster sits idle. Gang Scheduling (bottom) solves this by mandating **Atomic Allocation**: a job is either granted its entire $N$-GPU requirement simultaneously or it waits in the queue without holding any resources." fig-alt="Two-panel timeline. Top panel shows two jobs interleaved, both marked Deadlock. Bottom panel shows jobs scheduled sequentially, both marked Success."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \definecolor{JobAColor}{RGB}{0,99,149}    % BlueLine
-  \definecolor{JobBColor}{RGB}{204,85,0}  % OrangeLine
-
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=latex]
   \tikzset{
-    bar/.style={draw=black!60, thick, minimum height=0.6cm, align=center},
-    deadlock/.style={fill=red!20, draw=red, thick, inner sep=2pt}
+    JobBox/.style={
+      draw=black!60, line width=0.75pt,
+      minimum height=0.95cm, align=center,
+      inner sep=2pt, anchor=south west
+    },
+    WaitArrow/.style={
+      ->, dashed, line width=1.0pt
+    },
+    AxisLine/.style={
+      ->, line width=1.0pt, black!70
+    },
+    DeadlockLabel/.style={
+      fill=RedL, draw=RedLine, line width=0.75pt,
+      inner sep=4pt, font=\bfseries, rounded corners=2pt
+    },
+    SuccessLabel/.style={
+      fill=GreenL, draw=GreenLine, line width=0.75pt,
+      inner sep=4pt, font=\bfseries, rounded corners=2pt
+    }
   }
 
-  % Independent Scheduling
-  \begin{scope}
-    \node[anchor=west, crimson] at (0, 3.5) {\textbf{A. Independent Scheduling (Deadlock)}};
-    \draw (0, 0) -- (8, 0) node[right] {Time};
-    \draw (0, 0) -- (0, 2.5) node[above] {Cluster Nodes};
+  % ---------------------------------------------------------
+  % A. Independent Scheduling
+  % ---------------------------------------------------------
+  \begin{scope}[local bounding box=scopeA]
+    % Axes
+    \node (originA) at (0,0) {};
+    \draw[AxisLine] (originA.center) -- ++(8, 0) node[right, text=black] {Time};
+    \draw[AxisLine] (originA.center) -- ++(0, 2.5) node[above, text=black] {Cluster Nodes};
 
-    % Job A holds some, waits for some
-    \fill[JobAColor!40, draw=black!60] (0, 1.25) rectangle (4, 2.2) node[midway] {Job A (Hold)};
-    \draw[JobAColor, dashed, ->] (4, 1.7) -- (6, 1.7) node[right] {Wait};
+    \node[anchor=south west, text=RedLine, font=\bfseries] (titleA) at (0, 2.8) {A. Independent Scheduling (Deadlock)};
 
-    % Job B holds the rest, waits for Job A's
-    \fill[JobBColor!40, draw=black!60] (1, 0.2) rectangle (5, 1.15) node[midway] {Job B (Hold)};
-    \draw[JobBColor, dashed, ->] (5, 0.7) -- (7, 0.7) node[right] {Wait};
+    % Job B (bottom)
+    \node[JobBox, fill=OrangeL, minimum width=4cm] (jobB) at (1, 0.2) {Job B (Hold)};
+    \draw[WaitArrow, OrangeLine] (jobB.east) -- ++(2,0) node[right, text=black] {Wait};
 
-    \node[deadlock] at (4.5, 1.2) {\textbf{DEADLOCK}};
+    % Job A (top)
+    \node[JobBox, fill=BlueL, minimum width=4cm] (jobA) at (0, 1.25) {Job A (Hold)};
+    \draw[WaitArrow, BlueLine] (jobA.east) -- ++(2,0) node[right, text=black] {Wait};
+
+    % Deadlock Label
+    \node[DeadlockLabel, right=0.5cm of jobA.south east, anchor=west] {DEADLOCK};
   \end{scope}
 
-  % Gang Scheduling
-  \begin{scope}[shift={(0,-5)}]
-    \node[anchor=west, crimson] at (0, 3.5) {\textbf{B. Gang Scheduling (Atomic)}};
-    \draw (0, 0) -- (8, 0) node[right] {Time};
-    \draw (0, 0) -- (0, 2.5) node[above] {Cluster Nodes};
+  % ---------------------------------------------------------
+  % B. Gang Scheduling
+  % ---------------------------------------------------------
+  \begin{scope}[shift={(0,-4.5)}, local bounding box=scopeB]
+    % Axes
+    \node (originB) at (0,0) {};
+    \draw[AxisLine] (originB.center) -- ++(8, 0) node[right, text=black] {Time};
+    \draw[AxisLine] (originB.center) -- ++(0, 2.5) node[above, text=black] {Cluster Nodes};
 
-    % Job A gets everything at once
-    \fill[JobAColor!60, draw=black!60] (0, 0.2) rectangle (3, 2.2) node[midway, white] {Job A (All)};
+    \node[anchor=south west, text=GreenLine, font=\bfseries] (titleB) at (0, 2.8) {B. Gang Scheduling (Atomic)};
 
-    % Job B waits entirely in queue
-    \draw[thick, gray, latex-] (3.2, 1.2) -- (4.2, 1.2) node[right, black] {Queue};
+    % Job A
+    \node[JobBox, fill=BlueL, minimum width=3cm, minimum height=2cm] (jobA_gang) at (0, 0.2) {Job A (All)};
 
-    % Job B starts after A finishes
-    \fill[JobBColor!60, draw=black!60] (4.5, 0.2) rectangle (7.5, 2.2) node[midway, white] {Job B (All)};
+    % Job B
+    \node[JobBox, fill=OrangeL, minimum width=3cm, minimum height=2cm, right=1.5cm of jobA_gang.south east, anchor=south west] (jobB_gang) {Job B (All)};
 
-    \node[text=GreenLine] at (3.75, -0.5) {\textbf{SUCCESS}};
+    % Queue Arrow
+    \draw[WaitArrow, black!50, <-, solid] (jobA_gang.east) -- (jobB_gang.west) node[midway, above, text=black] {Queue};
+
+    % Success Label
+    \node[SuccessLabel, below=0.5cm of jobB_gang.south, anchor=north] {SUCCESS};
   \end{scope}
 \end{tikzpicture}
 ```
@@ -655,84 +727,80 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
 
 ::: {#fig-topology-placement-paths fig-env="figure" fig-pos="htb" fig-cap="**Topology-Aware vs. Scattered Placement**. An 8-GPU tensor parallel group placed within a single node (left, green paths) communicates exclusively via NVLink at 900 GB/s. The same group scattered across two nodes (right, red paths) must route half its traffic through InfiniBand at 50 GB/s, an 18$\\times$ bandwidth reduction that compounds at every transformer layer." fig-alt="Two side-by-side diagrams. Left shows 8 GPUs in one node connected by green NVLink paths through a central NVSwitch. Right shows 8 GPUs split across two nodes with red InfiniBand paths crossing between them."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{BrownLine}{HTML}{78492A}
-  \definecolor{BrownL}{HTML}{E3D3C8}
-
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape, >=latex]
   \tikzset{
-    gpu/.style={draw=black!60, fill=BlueL, thick, rounded corners=2pt,
-                minimum width=0.6cm, minimum height=0.5cm, font=\tiny\bfseries},
-    switch/.style={draw=black!60, fill=BrownL, thick, rounded corners=2pt,
-                   minimum width=1.6cm, minimum height=0.4cm, font=\tiny\bfseries},
-    nodebox/.style={draw=black!30, fill=black!3, rounded corners=6pt,
-                    minimum width=4.5cm, minimum height=2.5cm},
-    nvpath/.style={draw=GreenLine, line width=1.5pt},
-    ibpath/.style={draw=RedLine, line width=1.5pt, dashed}
+    gpu/.style={draw=black!60, fill=BlueL, line width=0.75pt, rounded corners=2pt,
+                minimum width=0.6cm, minimum height=0.5cm, font=\tiny\bfseries, align=center},
+    switch/.style={draw=black!60, fill=BrownL, line width=0.75pt, rounded corners=2pt,
+                   minimum width=1.6cm, minimum height=0.4cm, font=\tiny\bfseries, align=center},
+    nodebox/.style={draw=black!30, fill=black!3, rounded corners=6pt, line width=0.75pt,
+                    minimum width=4.5cm, minimum height=2.5cm, anchor=south west},
+    nvpath/.style={draw=GreenLine, line width=1.2pt},
+    ibpath/.style={draw=RedLine, line width=1.2pt, dashed},
+    Title/.style={font=\small\bfseries, anchor=south}
   }
 
   % === LEFT: Optimal Placement ===
-  \node[font=\small\bfseries, text=GreenLine] at (2.25, 3.5) {Optimal (Single Node)};
+  \begin{scope}[local bounding box=leftScope]
+    \node[Title, text=GreenLine] (titleLeft) at (2.25, 3.2) {Optimal (Single Node)};
 
-  % Node box
-  \node[nodebox] (opt_node) at (2.25, 1.2) {};
-  \node[font=\tiny, anchor=south] at (2.25, -0.2) {Node 0};
+    % Node box
+    \node[nodebox] (opt_node) at (0, 0) {};
+    \node[font=\tiny, anchor=south] (node0_lbl) at (2.25, 0.1) {Node 0};
 
-  % NVSwitch
-  \node[switch, fill=GreenL] (nvsw) at (2.25, 1.8) {NVSwitch};
+    % NVSwitch
+    \node[switch, fill=GreenL] (nvsw) at (2.25, 1.8) {NVSwitch};
 
-  % GPUs (2 rows of 4)
-  \foreach \i in {0,...,3} {
-    \pgfmathsetmacro{\xpos}{0.6 + \i * 1.1}
-    \node[gpu, fill=GreenL] (og\i) at (\xpos, 0.5) {G\i};
-    \draw[nvpath] (og\i) -- (nvsw);
-  }
-  \foreach \i in {4,...,7} {
-    \pgfmathsetmacro{\xpos}{0.6 + (\i-4) * 1.1}
-    \pgfmathtruncatemacro{\idx}{\i}
-    \node[gpu, fill=GreenL] (og\idx) at (\xpos, -0.3) {G\idx};
-    \draw[nvpath] (og\idx) -- (nvsw);
-  }
+    % GPUs (2 rows of 4)
+    \foreach \i in {0,...,3} {
+      \pgfmathsetmacro{\xpos}{0.6 + \i * 1.1}
+      \node[gpu, fill=GreenL] (og\i) at (\xpos, 0.5) {G\i};
+      \draw[nvpath] (og\i) -- (nvsw);
+    }
+    \foreach \i in {4,...,7} {
+      \pgfmathsetmacro{\xpos}{0.6 + (\i-4) * 1.1}
+      \pgfmathtruncatemacro{\idx}{\i}
+      \node[gpu, fill=GreenL] (og\idx) at (\xpos, 1.1) {G\idx};
+      \draw[nvpath] (og\idx) -- (nvsw);
+    }
 
-  % Bandwidth label
-  \node[font=\scriptsize\bfseries, text=GreenLine] at (2.25, -1.0) {900 GB/s (NVLink)};
+    % Bandwidth label
+    \node[font=\scriptsize\bfseries, text=GreenLine, below=0.2cm of opt_node.south] {900 GB/s (NVLink)};
+  \end{scope}
 
   % === RIGHT: Scattered Placement ===
-  \node[font=\small\bfseries, text=RedLine] at (9.25, 3.5) {Scattered (Two Nodes)};
+  \begin{scope}[shift={(6,0)}, local bounding box=rightScope]
+    \node[Title, text=RedLine] (titleRight) at (2.25, 3.2) {Scattered (Two Nodes)};
 
-  % Node A
-  \node[nodebox, minimum width=3.2cm, minimum height=2.0cm] (sn_a) at (7.5, 1.4) {};
-  \node[font=\tiny, anchor=south] at (7.5, 0.1) {Node 0};
-  \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_a) at (7.5, 1.8) {NVSw};
-  \foreach \i in {0,...,3} {
-    \pgfmathsetmacro{\xpos}{6.3 + \i * 0.8}
-    \node[gpu, fill=GreenL] (sg\i) at (\xpos, 0.7) {G\i};
-    \draw[nvpath] (sg\i) -- (nvsw_a);
-  }
+    % Node A
+    \node[nodebox, minimum width=4.5cm, minimum height=1.2cm] (sn_a) at (0, 1.3) {};
+    \node[font=\tiny, anchor=south] at (2.25, 1.4) {Node 0};
+    \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_a) at (2.25, 2.1) {NVSw};
 
-  % Node B
-  \node[nodebox, minimum width=3.2cm, minimum height=2.0cm] (sn_b) at (11.0, 1.4) {};
-  \node[font=\tiny, anchor=south] at (11.0, 0.1) {Node 1};
-  \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_b) at (11.0, 1.8) {NVSw};
-  \foreach \i in {4,...,7} {
-    \pgfmathsetmacro{\xpos}{9.8 + (\i-4) * 0.8}
-    \pgfmathtruncatemacro{\idx}{\i}
-    \node[gpu, fill=RedL] (sg\idx) at (\xpos, 0.7) {G\idx};
-    \draw[nvpath] (sg\idx) -- (nvsw_b);
-  }
+    \foreach \i in {0,...,3} {
+      \pgfmathsetmacro{\xpos}{0.6 + \i * 1.1}
+      \node[gpu, fill=GreenL] (sg\i) at (\xpos, 1.7) {G\i};
+      \draw[nvpath] (sg\i) -- (nvsw_a);
+    }
 
-  % InfiniBand link between nodes
-  \draw[ibpath] (nvsw_a.east) -- node[above, font=\tiny\bfseries, text=RedLine] {IB 50 GB/s} (nvsw_b.west);
+    % Node B
+    \node[nodebox, minimum width=4.5cm, minimum height=1.2cm] (sn_b) at (0, -0.2) {};
+    \node[font=\tiny, anchor=south] at (2.25, -0.1) {Node 1};
+    \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_b) at (2.25, 0.6) {NVSw};
 
-  % Bandwidth label
-  \node[font=\scriptsize\bfseries, text=RedLine] at (9.25, -1.0) {50 GB/s cross-node (18$\times$ slower)};
+    \foreach \i in {4,...,7} {
+      \pgfmathsetmacro{\xpos}{0.6 + (\i-4) * 1.1}
+      \pgfmathtruncatemacro{\idx}{\i}
+      \node[gpu, fill=RedL] (sg\idx) at (\xpos, 0.2) {G\idx};
+      \draw[nvpath] (sg\idx) -- (nvsw_b);
+    }
 
+    % Inter-node connection
+    \draw[ibpath] (nvsw_a) -- (nvsw_b) node[midway, right, font=\scriptsize\bfseries, text=RedLine] {50 GB/s (IB)};
+
+    % Bandwidth label
+    \node[font=\scriptsize\bfseries, text=RedLine, below=0.2cm of sn_b.south] {50 GB/s cross-node (18$\times$ slower)};
+  \end{scope}
 \end{tikzpicture}
 ```
 :::

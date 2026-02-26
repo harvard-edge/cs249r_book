@@ -115,15 +115,15 @@ class StorageHierarchyAnalysis:
     h100_bw = H100_MEM_BW
     h100_flops_fp16 = H100_FLOPS_FP16_TENSOR
     h100_cap = H100_MEM_CAPACITY
-    nvme_bw_raw = NVME_SEQUENTIAL_BW 
-    pfs_node_bw = (4.0 * GB / second) 
-    s3_bw = (1.0 * GB / second) 
+    nvme_bw_raw = NVME_SEQUENTIAL_BW
+    pfs_node_bw = (4.0 * GB / second)
+    s3_bw = (1.0 * GB / second)
 
     gpt3_params = GPT3_PARAMS.m_as('param')
     t_step_ms = 200
 
     n_gpus_image = 256
-    img_size = 150 * THOUSAND 
+    img_size = 150 * THOUSAND
     batch_img_gpu = 256
     util_target = 0.80
 
@@ -138,7 +138,7 @@ class StorageHierarchyAnalysis:
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     t_step_s = t_step_ms / 1000
-    req_bw_imagenet_val = (n_gpus_image * util_target * (batch_img_gpu * img_size)) / t_step_s 
+    req_bw_imagenet_val = (n_gpus_image * util_target * (batch_img_gpu * img_size)) / t_step_s
     req_bw_imagenet_gbs = req_bw_imagenet_val / BILLION
 
     t_comp_val = 200
@@ -151,7 +151,7 @@ class StorageHierarchyAnalysis:
 
     n_nodes = 256
     node_shard_gb = ckpt_total_gb_val / n_nodes
-    ckpt_nvme_s_val = node_shard_gb / (4 * nvme_bw_raw.m_as(GB/second)) 
+    ckpt_nvme_s_val = node_shard_gb / (4 * nvme_bw_raw.m_as(GB/second))
     ckpt_pfs_s_val = node_shard_gb / pfs_node_bw.m_as(GB/second)
     ckpt_weights_gb = (gpt3_params * 2) / BILLION
     ckpt_optimizer_gb = (gpt3_params * 8) / BILLION
@@ -165,7 +165,7 @@ class StorageHierarchyAnalysis:
     prob_tail_all = (1.0 - p_tail_fail) ** n_tail_servers
 
     images_per_sec = 1000
-    raw_bw_val = (images_per_sec * img_size) / MILLION 
+    raw_bw_val = (images_per_sec * img_size) / MILLION
     hdd_iops = 100
     hdd_slowdown_val = images_per_sec / hdd_iops
 
@@ -466,6 +466,14 @@ Understanding *how* data is accessed across storage tiers is essential for choos
 ::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Access Pattern Throughput Comparison**. High-performance storage delivers dramatically different throughput depending on access patterns. Sequential reads (blue) saturate bandwidth quickly as request size increases. Random reads (red), typical of databases or poorly shuffled datasets, suffer from seek latency and protocol overhead." fig-alt="Line graph comparing sequential vs random read throughput across I/O request sizes."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \tikzset{
+    Box/.style={draw=black!60, line width=0.75pt, rounded corners=1pt, align=center},
+    Line/.style={->, line width=1.0pt},
+    WallText/.style={anchor=west, text=RedLine},
+    WallLine/.style={->, line width=1.0pt, color=RedLine},
+    SeqPlot/.style={color=BlueLine, line width=1.0pt, mark=square},
+    RandPlot/.style={color=RedLine, line width=1.0pt, mark=triangle}
+  }
   \begin{axis}[
     width=10cm, height=6cm,
     xlabel={I/O Request Size},
@@ -479,16 +487,16 @@ Understanding *how* data is accessed across storage tiers is essential for choos
     legend pos=north west,
     legend style={draw=none, fill=none}
   ]
-    \addplot[color=BlueLine, ultra thick, mark=square] coordinates {
+    \addplot[SeqPlot] coordinates {
       (4, 2) (16, 6) (64, 10) (256, 10.5) (1024, 10.8)
     };
     \addlegendentry{Sequential Read (ML Training)}
-    \addplot[color=RedLine, ultra thick, mark=triangle] coordinates {
+    \addplot[RandPlot] coordinates {
       (4, 0.2) (16, 0.5) (64, 1.2) (256, 2.8) (1024, 4.5)
     };
     \addlegendentry{Random Read (Database)}
-    \node[anchor=west] at (axis cs: 64, 6) {The "I/O Wall"};
-    \draw[->, thick] (axis cs: 64, 5.8) -- (axis cs: 64, 1.5);
+    \node[WallText] at (axis cs: 64, 6) {The "I/O Wall"};
+    \draw[WallLine] (axis cs: 64, 5.8) -- (axis cs: 64, 1.5);
   \end{axis}
 \end{tikzpicture}
 ```
@@ -525,34 +533,43 @@ Storage performance decreases and capacity increases as data moves further from 
 ::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**. A pyramid visualization extending the classic memory hierarchy from GPU HBM down to Object Storage. The bandwidth gap between levels drives the need for sophisticated caching and prefetching." fig-alt="Five-tier pyramid: GPU HBM, Host DRAM, Local NVMe, Parallel File System, Object Storage from top to base."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+  \tikzset{
+    Box/.style={draw=black!60, line width=0.75pt, rounded corners=1pt, align=center},
+    Line/.style={->, line width=1.0pt},
+    HBM/.style={fill=BlueL, draw=BlueLine, line width=0.75pt},
+    DRAM/.style={fill=GreenL, draw=GreenLine, line width=0.75pt},
+    NVMe/.style={fill=OrangeL, draw=OrangeLine, line width=0.75pt},
+    DFS/.style={fill=RedL, draw=RedLine, line width=0.75pt},
+    Object/.style={fill=VioletL2, draw=VioletLine, line width=0.75pt}
+  }
   % Pyramid Layers
   \coordinate (T) at (0, 5);
   \coordinate (BL) at (-4, 0);
   \coordinate (BR) at (4, 0);
 
   % HBM
-  \filldraw[fill=BlueL, draw=BlueLine] (0,5) -- (-0.8,4) -- (0.8,4) -- cycle;
+  \filldraw[HBM] (0,5) -- (-0.8,4) -- (0.8,4) -- cycle;
   \node at (0, 4.3) {\textbf{GPU HBM}};
 
   % DRAM
-  \filldraw[fill=GreenL, draw=GreenLine] (-0.8,4) -- (-1.6,3) -- (1.6,3) -- (0.8,4) -- cycle;
+  \filldraw[DRAM] (-0.8,4) -- (-1.6,3) -- (1.6,3) -- (0.8,4) -- cycle;
   \node at (0, 3.5) {Host DRAM};
 
   % NVMe
-  \filldraw[fill=OrangeL, draw=OrangeLine] (-1.6,3) -- (-2.4,2) -- (2.4,2) -- (1.6,3) -- cycle;
+  \filldraw[NVMe] (-1.6,3) -- (-2.4,2) -- (2.4,2) -- (1.6,3) -- cycle;
   \node at (0, 2.5) {Local NVMe SSD};
 
   % DFS
-  \filldraw[fill=RedL, draw=RedLine] (2.4,2) -- (3.2,1) -- (-3.2,1) -- (-2.4,2) -- cycle;
+  \filldraw[DFS] (2.4,2) -- (3.2,1) -- (-3.2,1) -- (-2.4,2) -- cycle;
   \node at (0, 1.5) {Parallel File System};
 
   % Object
-  \filldraw[fill=VioletL, draw=VioletLine] (-3.2,1) -- (-4,0) -- (4,0) -- (3.2,1) -- cycle;
+  \filldraw[Object] (-3.2,1) -- (-4,0) -- (4,0) -- (3.2,1) -- cycle;
   \node at (0, 0.5) {Object Storage};
 
   % Annotations
-  \draw[->, ultra thick] (-4.5, 0.5) -- (-4.5, 4.5) node[midway, left, rotate=90] {Bandwidth};
-  \draw[->, ultra thick] (4.5, 4.5) -- (4.5, 0.5) node[midway, right, rotate=90] {Capacity};
+  \draw[Line] (-4.5, 0.5) -- (-4.5, 4.5) node[midway, left, rotate=90] {Bandwidth};
+  \draw[Line] (4.5, 4.5) -- (4.5, 0.5) node[midway, right, rotate=90] {Capacity};
 \end{tikzpicture}
 ```
 :::
@@ -978,19 +995,35 @@ The primary weapon against data stalls is **pipelining**: the CPU prepares batch
 
 ::: {#fig-data-pipeline-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Pipelined Data Loading**. The CPU prepares Batch $N+1$ while the GPU processes Batch $N$. Pipelining hides storage latency, but only if the prefetch buffer is deep enough to absorb variance." fig-alt="Pipelining diagram showing CPU loading batches while GPU trains on previous batches."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \draw[fill=BlueL, draw=BlueLine] (0,1) rectangle (2,1.6) node[midway] {Load N};
-  \draw[fill=GreenL, draw=GreenLine] (2.2,0) rectangle (4.2,0.6) node[midway] {Train N};
-  \draw[fill=BlueL, draw=BlueLine] (2.2,1) rectangle (4.2,1.6) node[midway] {Load N+1};
-  \draw[fill=GreenL, draw=GreenLine] (4.4,0) rectangle (6.4,0.6) node[midway] {Train N+1};
-  \draw[fill=BlueL, draw=BlueLine] (4.4,1) rectangle (6.4,1.6) node[midway] {Load N+2};
-  \draw[fill=GreenL, draw=GreenLine] (6.6,0) rectangle (8.6,0.6) node[midway] {Train N+2};
-  \draw[->, dashed, thick] (2,1.3) -- (2.2,0.3);
-  \draw[->, dashed, thick] (4.2,1.3) -- (4.4,0.3);
-  \draw[->, dashed, thick] (6.4,1.3) -- (6.6,0.3);
-  \node at (-1, 1.3) {CPU};
-  \node at (-1, 0.3) {GPU};
-  \node[anchor=west, font=\footnotesize] at (0, -0.5) {Time $\longrightarrow$};
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
+  \usetikzlibrary{positioning}
+  \tikzset{
+    Box/.style={draw, line width=0.75pt, minimum width=2cm, minimum height=0.6cm, align=center},
+    LoadBox/.style={Box, fill=BlueL, draw=BlueLine},
+    TrainBox/.style={Box, fill=GreenL, draw=GreenLine},
+    Line/.style={->, line width=1.0pt, dashed, color=RedLine}
+  }
+
+  % Load nodes (CPU)
+  \node[LoadBox] (loadN) {Load N};
+  \node[LoadBox, right=0.2cm of loadN] (loadN1) {Load N+1};
+  \node[LoadBox, right=0.2cm of loadN1] (loadN2) {Load N+2};
+
+  % Train nodes (GPU)
+  \node[TrainBox, below=0.4cm of loadN1] (trainN) {Train N};
+  \node[TrainBox, right=0.2cm of trainN] (trainN1) {Train N+1};
+  \node[TrainBox, right=0.2cm of trainN1] (trainN2) {Train N+2};
+
+  % Connections
+  \draw[Line] (loadN.south east) -- (trainN.north west);
+  \draw[Line] (loadN1.south east) -- (trainN1.north west);
+  \draw[Line] (loadN2.south east) -- (trainN2.north west);
+
+  % Labels
+  \node[left=0.5cm of loadN] (cpu) {CPU};
+  \node at (cpu |- trainN) {GPU};
+
+  \node[anchor=west, font=\footnotesize] at ([yshift=-0.5cm]loadN.south west |- trainN.south) {Time $\longrightarrow$};
 \end{tikzpicture}
 ```
 :::
@@ -1100,29 +1133,42 @@ The latency reduction from GDS matters most when the training pipeline is alread
 
 ::: {#fig-gds-path fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. GPU Direct Storage Path**. The traditional path (top) requires two copies and CPU involvement. The GDS path (bottom) uses DMA to transfer data directly from NVMe to GPU memory, eliminating the CPU as a bottleneck." fig-alt="Diagram comparing traditional three-hop storage path with GDS direct DMA path from NVMe to GPU."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n},
-    box/.style={draw, rounded corners, minimum width=2.2cm, minimum height=0.8cm, align=center},
-    arrow/.style={->, thick}]
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
+  \usetikzlibrary{positioning}
+  \tikzset{
+    box/.style={draw=black!60, line width=0.75pt, rounded corners, minimum width=2.2cm, minimum height=0.8cm, align=center},
+    nvme/.style={box, fill=OrangeL, draw=OrangeLine},
+    dram/.style={box, fill=GreenL, draw=GreenLine},
+    cpu/.style={box, fill=RedL, draw=RedLine},
+    gpu/.style={box, fill=BlueL, draw=BlueLine},
+    arrow/.style={->, line width=1.0pt},
+    gdsarrow/.style={->, line width=1.0pt, color=BlueLine},
+    label/.style={font=\small\bfseries},
+    ann/.style={font=\scriptsize, color=RedLine},
+    gdsann/.style={font=\scriptsize, color=BlueLine}
+  }
 
   % Traditional path
-  \node[font=\small\bfseries] at (-1.5, 2.5) {Traditional};
-  \node[box, fill=OrangeL] (nvme1) at (0, 2.5) {NVMe};
-  \node[box, fill=GreenL] (dram1) at (3.5, 2.5) {Host\\DRAM};
-  \node[box, fill=RedL] (cpu1) at (7, 2.5) {CPU\\Copy};
-  \node[box, fill=BlueL] (gpu1) at (10.5, 2.5) {GPU\\HBM};
+  \node[label] (tradLabel) {Traditional};
+  \node[nvme, right=0.5cm of tradLabel] (nvme1) {NVMe};
+  \node[dram, right=1.3cm of nvme1] (dram1) {Host\\DRAM};
+  \node[cpu, right=1.3cm of dram1] (cpu1) {CPU\\Copy};
+  \node[gpu, right=1.3cm of cpu1] (gpu1) {GPU\\HBM};
+
   \draw[arrow] (nvme1) -- node[above, font=\scriptsize] {DMA} (dram1);
   \draw[arrow] (dram1) -- node[above, font=\scriptsize] {memcpy} (cpu1);
   \draw[arrow] (cpu1) -- node[above, font=\scriptsize] {PCIe} (gpu1);
 
   % GDS path
-  \node[font=\small\bfseries] at (-1.5, 0.5) {GDS};
-  \node[box, fill=OrangeL] (nvme2) at (0, 0.5) {NVMe};
-  \node[box, fill=BlueL] (gpu2) at (10.5, 0.5) {GPU\\HBM};
-  \draw[arrow, ultra thick, color=BlueLine] (nvme2) -- node[above, font=\scriptsize] {Direct DMA (PCIe peer-to-peer)} (gpu2);
+  \node[label, below=1.2cm of tradLabel] (gdsLabel) {GDS};
+  \node[nvme] (nvme2) at (gdsLabel -| nvme1) {NVMe};
+  \node[gpu] (gpu2) at (gdsLabel -| gpu1) {GPU\\HBM};
+
+  \draw[gdsarrow] (nvme2) -- node[above, font=\scriptsize] {Direct DMA (PCIe peer-to-peer)} (gpu2);
 
   % Latency annotations
-  \node[font=\scriptsize, color=RedLine] at (5.25, 1.8) {$\sim$\,120\,\textmu s total};
-  \node[font=\scriptsize, color=BlueLine] at (5.25, -0.2) {$\sim$\,30\,\textmu s total};
+  \path (nvme1) -- node[below=0.6cm, ann] {$\sim$\,120\,\textmu s total} (gpu1);
+  \path (nvme2) -- node[below=0.2cm, gdsann] {$\sim$\,30\,\textmu s total} (gpu2);
 \end{tikzpicture}
 ```
 :::

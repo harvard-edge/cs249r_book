@@ -81,252 +81,150 @@ Machine learning systems have a physical reality that transcends code. While the
 ```{python}
 #| label: infra-setup
 #| echo: false
+#| output: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ INFRASTRUCTURE SPECIFICATIONS AND HIERARCHY (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-compute-infrastructure — chapter-wide hardware specs and TCO
+# │ Context: @sec-compute-introduction — chapter-wide hardware specs and math.
 # │
-# │ Goal: Establish accelerator specs (H100/A100/B200/V100/TPU), bandwidth
-# │       hierarchy (HBM→NVLink→PCIe→InfiniBand), and build-vs-buy TCO for a
-# │       1-node cluster to support all quantitative claims in the chapter.
-# │ Show: H100 ~1979 TFLOPs, ~3.35 TB/s HBM, ridge ~591 FLOP/byte; 8-GPU node
-# │       ~640 GB HBM; cloud ~$280k/yr vs on-prem ~$166k/yr at 80% utilization.
-# │ How: Pull from mlsys.constants; ridge via (flops/bw).to(flop/byte).m_as(flop/byte);
-# │       TCO from CLOUD_ELECTRICITY_PER_KWH + amortized CapEx vs cloud hourly rate.
+# │ Goal: Establish foundational parameters for accelerators and interconnects.
+# │ Show: Baseline performance metrics for H100, GPT-3, and communication.
+# │ How: Reference mlsys.Hardware and mlsys.Models registry.
 # │
-# │ Imports: mlsys.constants (system.memory_bw, system.peak_flops,
-# │           system.ram, H100_TDP, A100_FLOPS_FP16_TENSOR, A100_MEM_BW,
-# │           A100_TDP, B200_FLOPS_FP16_TENSOR, B200_MEM_BW, B200_TDP,
-# │           V100_FLOPS_FP16_TENSOR, V100_MEM_BW, V100_TDP,
-# │           NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW, SYSTEM_MEMORY_BW,
-# │           CLOUD_ELECTRICITY_PER_KWH, Models.GPT3.parameters, TPUV3_FLOPS_BF16,
-# │           TPUV4_FLOPS_BF16, TPUV5P_FLOPS_BF16, WSE3_CORES, WSE3_MEM_CAPACITY)
-# │ Exports: h100_tflops, h100_bw, h100_ridge, ddr_bw_str, nvlink_bw_str,
-# │          pcie_bw_str, ib_bw_str, ib_bw_gbs, node_hbm_cap, rack_power_str,
-# │          h100_ef, a100_ef, b200_ef, v100_ef, annual_elec_cost_str,
-# │          onprem_node_annual_str, cloud_node_annual_str, gpt3_params_b,
-# │          t_mem_str, t_comp_str, dominance_str, util_pct_str
+# │ Imports: mlsys.Hardware, mlsys.Models, mlsys.constants, mlsys.formatting
+# │ Exports: h100_tflops, h100_bw, gpt3_params_b, frontier_params_b,
+# │          nvlink_bw_str, ib_bw_gbs, ib_bw_str, t_mem_str, t_comp_str, ...
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys import Hardware, Models, Tiers
+from mlsys.constants import (
+    TFLOPs, second, GB, TB, byte, flop, BYTES_FP16,
+    NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW
+)
+from mlsys.formatting import fmt, check, md_math
 
 # ┌── LEGO ───────────────────────────────────────────────
-class TokenLatency:
+class InfraSetup:
     """
-    Scenario: The Physics of Token Latency (Memory Wall).
-    Calculates time for loading weights vs performing compute.
-    Matches Archetype A (Frontier LLM) profile.
+    Central namespace for Compute Infrastructure constants.
     """
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    p_params = Models.Llama2_70B.parameters
-    weight_bytes = BYTES_FP16
-    hbm_bw = system.memory_bw
-    peak_tflops = system.peak_flops
+    # Hardware
+    h_h100 = Hardware.H100
+    h_a100 = Hardware.A100
 
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    weight_vol = p_params * weight_bytes
-    ops_per_token = 2 * p_params
+    # Models
+    m_gpt3 = Models.GPT3
+    m_llama70b = Models.Llama2_70B
+    m_frontier = Models.Llama3_405B # Representative Frontier model
 
-    t_mem_ms_val = (weight_vol / hbm_bw).to('millisecond').magnitude
-    t_comp_ms_val = (ops_per_token / peak_tflops).to('millisecond').magnitude
+    # 1. Compute and Memory (H100)
+    h100_tflops_val = h_h100.peak_flops.m_as(TFLOPs/second)
+    h100_bw_val = h_h100.memory_bw.m_as(TB/second)
+    h100_ridge_val = (h_h100.peak_flops / h_h100.memory_bw).to(flop/byte).magnitude
 
-    mem_dominance_val = (t_mem_ms_val / (t_mem_ms_val + t_comp_ms_val)) * 100
+    # 2. Parameters
+    gpt3_params_b_val = m_gpt3.parameters.m_as('billion')
+    frontier_params_b_val = m_frontier.parameters.m_as('billion')
 
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(mem_dominance_val > 90, f"Decode should be memory-dominant (>90%), got {mem_dominance_val:.1f}%")
+    # 3. Interconnects
+    nvlink_bw_val = NVLINK_H100_BW.m_as(GB/second)
+    ib_bw_gbps_val = INFINIBAND_NDR_BW.m_as('Gbps')
+    ib_bw_gbs_val = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    t_mem_str = f"{t_mem_ms_val:.1f}"
-    t_comp_str = f"{t_comp_ms_val:.2f}"
-    dominance_str = f"{mem_dominance_val:.1f}"
+    # 4. Token Latency (Llama-2-70B)
+    weight_vol = m_llama70b.parameters * BYTES_FP16
+    t_mem_ms = (weight_vol / h_h100.memory_bw).to('millisecond').magnitude
+    t_comp_ms = (2 * m_llama70b.parameters / h_h100.peak_flops).to('millisecond').magnitude
+    dominance = (t_mem_ms / (t_mem_ms + t_comp_ms)) * 100
+
+    # OUTPUTS
+    h100_tflops = f"{h100_tflops_val:.0f}"
+    h100_bw = f"{h100_bw_val:.2f}"
+    h100_ridge = f"{h100_ridge_val:.0f}"
+    gpt3_params_b = f"{gpt3_params_b_val:.0f}"
+    frontier_params_b = f"{frontier_params_b_val:.0f}"
+    nvlink_bw_str = f"{nvlink_bw_val:.0f}"
+    ib_bw_gbs = f"{ib_bw_gbs_val:.0f}"
+    ib_bw_str = f"{ib_bw_gbps_val:.0f}"
+    ddr_bw_str = "100" # Approximate for DRAM
+    t_mem_str = f"{t_mem_ms:.1f}"
+    t_comp_str = f"{t_comp_ms:.2f}"
+    dominance_str = f"{dominance:.1f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-t_mem_str = TokenLatency.t_mem_str
-t_comp_str = TokenLatency.t_comp_str
-dominance_str = TokenLatency.dominance_str
+h100_tflops = InfraSetup.h100_tflops
+h100_bw = InfraSetup.h100_bw
+h100_ridge = InfraSetup.h100_ridge
+gpt3_params_b = InfraSetup.gpt3_params_b
+frontier_params_b = InfraSetup.frontier_params_b
+nvlink_bw_str = InfraSetup.nvlink_bw_str
+ib_bw_gbs = InfraSetup.ib_bw_gbs
+ib_bw_str = InfraSetup.ib_bw_str
+ddr_bw_str = InfraSetup.ddr_bw_str
+t_mem_str = InfraSetup.t_mem_str
+t_comp_str = InfraSetup.t_comp_str
+dominance_str = InfraSetup.dominance_str
 
-# Math built in Python (vol1 pattern: no {python} inside $...$ or $$...$$)
-flops_per_token_math = md_math(f"6 \\times {gpt3_params_b} \\times 10^9")
-t_comp_math = md_math(f"T_{{\\text{{comp}}}} \\approx \\mathbf{{{t_comp_str} \\text{{ ms}}}}")
-t_mem_math = md_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem_str} \\text{{ ms}}}}")
-inf_flops_math = md_math(f"2 \\times {gpt3_params_b} \\times 10^9 = 350 \\times 10^9")
-inf_throughput_math = md_math(f"{h100_bw} \\times 10^{{12}} \\times 1.0 = 3.35")
-train_intensity_math = md_math(f"2048 \\times 1.0 = 2{{,}}048")
-t_intra_math = md_math(f"T_{{\\text{{intra}}}} = 1\\text{{ GB}} / {nvlink_bw_str}\\text{{ GB/s}} \\approx \\mathbf{{1.1 \\text{{ ms}}}}")
-t_inter_math = md_math(f"T_{{\\text{{inter}}}} = 1\\text{{ GB}} / {ib_bw_gbs}\\text{{ GB/s}} \\approx \\mathbf{{20 \\text{{ ms}}}}")
-pod_flops_math = md_math(f"6 \\times {gpt3_params_b} \\times 10^9 \\times 300 \\times 10^9 \\approx 3.15 \\times 10^{{23}}")
-total_flops_math = md_math(f"6 \\times {gpt3_params_b} \\times 10^9 \\times 300 \\times 10^9 = 3.15 \\times 10^{{23}}")
-cluster_throughput_math = md_math(f"8{{,}}192 \\times {h100_tflops} \\times 10^{{12}} \\times 0.45 \\approx 7.3")
-compute_per_step_math = md_math(f"C = 6 \\times {gpt3_params_b} \\times 10^9 \\times 2 \\times 10^6 = 2.1 \\times 10^{{18}}")
-t_compute_math = md_math(f"T_{{\\text{{compute}}}} = 2.1 \\times 10^{{18}} / (1024 \\times {h100_tflops} \\times 10^{{12}} \\times 0.5) \\approx 2.1")
-t_comm_math = md_math(f"T_{{\\text{{comm}}}} \\approx 0.5 \\times 350 / {ib_bw_gbs} \\approx 3.5")
-comm_time_formula_math = md_math(f"2 \\times (N-1)/N \\times 350 \\text{{ GB}} / ({ib_bw_gbs} \\text{{ GB/s}})")
-comm_approx_math = md_math(f"2 \\times 350 / {ib_bw_gbs} \\approx 14")
-n_params_math = md_math(f"N = {gpt3_params_b} \\times 10^9")
+# Math Blocks for Intro
+flops_per_token_math = md_math(f"6 	imes {gpt3_params_b} 	imes 10^9")
+t_comp_math = md_math(f"T_{{	ext{{comp}}}} \approx \mathbf{{{t_comp_str} 	ext{{ ms}}}}")
+t_mem_math = md_math(f"T_{{	ext{{mem}}}} \approx \mathbf{{{t_mem_str} 	ext{{ ms}}}}")
+inf_flops_math = md_math(f"2 	imes {gpt3_params_b} 	imes 10^9")
+inf_throughput_math = md_math(f"{h100_bw} 	imes 10^{{12}}")
+train_intensity_math = md_math(f"2048 	imes 1.0")
+t_intra_math = md_math(f"T_{{	ext{{intra}}}} = 1	ext{{ GB}} / {nvlink_bw_str}	ext{{ GB/s}} \approx \mathbf{{1.1 	ext{{ ms}}}}")
+t_inter_math = md_math(f"T_{{	ext{{inter}}}} = 1	ext{{ GB}} / {ib_bw_gbs}	ext{{ GB/s}} \approx \mathbf{{20 	ext{{ ms}}}}")
+pod_flops_math = md_math(f"6 	imes {gpt3_params_b} 	imes 10^{{23}}")
+total_flops_math = md_math(f"6 	imes {gpt3_params_b} 	imes 10^{{23}}")
+n_params_math = md_math(f"N = {gpt3_params_b} 	imes 10^9")
+compute_per_step_math = md_math(f"C = 6 	imes {gpt3_params_b} 	imes 10^{{18}}")
+t_compute_math = md_math(f"T_{{	ext{{compute}}}} \approx 2.1")
+t_comm_math = md_math(f"T_{{	ext{{comm}}}} \approx 3.5")
+cluster_throughput_math = md_math(f"8{{,}}192 \times {h100_tflops} \times 10^{{12}} \times 0.45")
+comm_time_formula_math = md_math(f"2 	imes (N-1)/N 	imes 350 / {ib_bw_gbs}")
+comm_approx_math = md_math(f"2 	imes 350 / {ib_bw_gbs}")
 ```
-
-## The Physics of Scale {#sec-compute-introduction}
-
-In the Introduction to this volume (@sec-vol2-introduction), we defined the Machine Learning Fleet not merely as a collection of servers, but as a holistic warehouse-scale computer. This chapter explores the physical foundation of that machine: the **Compute Infrastructure**. While algorithms define *how* a model learns, infrastructure determines *if* it can learn at all. The transition from academic prototypes to frontier systems is fundamentally a transition from software constraints to physical ones -- where the limitations of silicon, electricity, and heat become the primary obstacles to progress.
-
-```{python}
-#| label: gpt3-scale-scenario
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-3 INFRASTRUCTURE SCALE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-compute-introduction
-# │
-# │ Goal: Provide GPT-3 scale statistics for infrastructure discussion.
-# │ Show: ~175B parameters.
-# │ How: pulling Models.GPT3.parameters from mlsys.constants.
-# │
-# │ Imports: mlsys.constants (Models.GPT3.parameters, param, BILLION)
-# │ Exports: gpt3_params_b
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import Models.GPT3.parameters, param, BILLION
-
-class FrontierScaleScenario:
-    """GPT-3 scale reference for infrastructure."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    params = Models.GPT3.parameters.m_as(param)
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    params_b = params / BILLION
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    gpt3_params_b = f"{params_b:.0f}"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-frontier_params_b = FrontierScaleScenario.frontier_params_b_str
-```
-
-To understand the magnitude of this challenge, consider our running example: a `{python} frontier_params_b`B-parameter language model. In standard half-precision (FP16), the model's weights alone occupy 350 GB of memory. A single NVIDIA H100 accelerator -- the current standard for high-performance training -- provides 80 GB of High Bandwidth Memory. The model is more than 4$\times$ larger than the hardware intended to run it. When we account for the optimizer states and gradients required for training, the memory footprint exceeds 2 TB. This single arithmetic reality drives every architectural decision in this chapter: because the model cannot fit on a single chip, we are forced to build a distributed system.
-
-Building this system requires us to expand outward from the silicon die in a series of concentric physical layers, each designed to overcome a specific fundamental constraint:
-
-1.  **The Accelerator**: At the center, we confront the **Memory Wall**. Specialized silicon (GPUs, TPUs) maximizes arithmetic throughput, but is constantly starved for data. The engineering response is High Bandwidth Memory (HBM) and extreme on-chip caching.
-2.  **The Node**: To solve the capacity deficit, we aggregate multiple accelerators into a single chassis. Here we face the bandwidth limits of standard interfaces like PCIe. The response is high-speed proprietary interconnects (NVLink, Infinity Fabric) that bind distinct chips into a unified memory space.
-3.  **The Rack**: Concentrating this much compute density triggers the **Power Wall**. A single rack of ML servers consumes as much power as a residential neighborhood. The response shifts from electrical engineering to thermodynamics, necessitating liquid cooling and advanced power delivery networks.
-4.  **The Pod**: Finally, to train in weeks rather than decades, we scale to thousands of accelerators. Here we hit the **Communication Wall**, where network latency threatens to idle the entire cluster. The response is the creation of a "supercomputer-in-a-warehouse" topology.
-
-::: {.callout-note title="Connection: The Fleet Stack"}
-
-In the Fleet Stack model introduced in @sec-vol2-introduction, **Compute Infrastructure** serves as the foundation layer -- the physical silicon and power systems upon which everything else is built. It provides the raw execution capability that **Network Fabrics** (@sec-network-fabrics) wire together and **Data Storage** (@sec-data-storage) feeds. Without understanding the physics of this compute layer, the constraints that shape every subsequent chapter -- from the necessity of distributed training algorithms to the complexity of fleet orchestration -- remain invisible.
-
-:::
-
-Even for machine learning engineers who will never crimp an Ethernet cable or debug a liquid cooling loop, the physical reality of the datacenter defines the *constraints* of their software. The decision to shard our `{python} frontier_params_b`B model is not merely algorithmic but a direct response to the bandwidth hierarchy: tensor parallelism exploits ultra-fast intra-node NVLink, while pipeline parallelism mitigates the latency of slower inter-node links. The optimal batch size is determined by the Roofline Model, ensuring arithmetic intensity prevents the accelerator from stalling on memory fetches. The necessity of quantization is a concession to the Memory Wall. At scale, the frequency of checkpointing is a function of the Mean Time Between Failures (MTBF) of a 1,000-GPU pod. Every software optimization in distributed training is ultimately an attempt to navigate these physical boundaries, transforming system configuration from ad hoc heuristics into principled engineering grounded in the physics of latency, bandwidth, and failure rates.
-
-We begin our exploration at the center of this hierarchy, where the struggle to bridge the gap between CPU capability and AI demand first began: the accelerator.
-
-## How ML Workloads Invert Compute Assumptions {#sec-compute-workload-inversion}
-
-A computer architect from the era of general-purpose supercomputing would find the design of a modern ML cluster both familiar and deeply strange. While both systems are built for high-performance parallel processing, the underlying assumptions about the workload are fundamentally different. Traditional High-Performance Computing (HPC) for scientific simulation often requires high-precision floating-point arithmetic (FP64), deals with irregular data access patterns (e.g., sparse matrix solvers, graph traversals), and balances computation with significant I/O for loading initial conditions and saving simulation state.
-
-ML workloads, particularly for training large neural networks, systematically invert these assumptions. This inversion is not a minor difference in emphasis; it is a profound shift in the computational paradigm that has driven the design of every successful ML accelerator, from GPUs to TPUs to custom ASICs.
-
-| **Workload Pattern**    | **Traditional HPC Assumption**    | **ML Reality**                              |
-|:------------------------|:----------------------------------|:--------------------------------------------|
-| **Numerical Precision** | FP64 for accuracy                 | FP16/BF16/FP8 tolerated, even preferred     |
-| **Instruction Mix**     | Diverse, complex instruction set  | Dominated by one operation: matrix multiply |
-| **Control Flow**        | Branch-heavy, data-dependent      | Uniform, predictable (data-parallel)        |
-| **Data Reuse**          | Varies; often limited by locality | Extreme (weights reused for every sample)   |
-| **Fault Tolerance**     | Must be perfect or restart        | Checkpoint/resume is part of the workflow   |
-
-: **ML Workloads Invert Traditional Compute Assumptions**: Where HPC prioritizes precision and generality, ML training sacrifices both for massive throughput on a narrow set of operations. {#tbl-compute-assumptions}
-
-The precision inversion is the most economically significant. Traditional scientific computing demands 64-bit precision (FP64) to accurately simulate physical phenomena where small errors can compound over time. ML training, by contrast, has demonstrated substantial tolerance for lower precision. The stochastic nature of the training process means that the "noise" introduced by 16-bit (FP16/BF16) or even 8-bit (FP8) arithmetic is often absorbed by the optimization algorithm. This tolerance is the single most important economic and architectural feature of ML compute. It allows architects to build hardware (like Tensor Cores) that performs four FP16 operations or eight FP8 operations in the same silicon area and power budget as a single FP32 operation, yielding a 4--8$\times$ improvement in throughput for free.
-
-The instruction mix tells a similar story. General-purpose CPUs and HPC systems are designed to execute a vast and complex instruction set, from integer arithmetic to floating-point division to complex conditional branching. Profiling a large neural network training run reveals a starkly different picture: over 90% of the computation is spent on a single operation—the matrix-multiply-accumulate (GEMM). This extreme regularity allows for radical hardware specialization. Instead of building flexible, general-purpose ALUs, architects can dedicate silicon to hyper-optimized matrix engines (Tensor Cores, Systolic Arrays), achieving 100--1000$\times$ the throughput of a CPU for that specific operation.
-
-The control flow inversion completes the picture. Traditional parallel programs often involve complex, data-dependent control flow, where different processing elements take different paths through the code. ML training, particularly data-parallel training, is the opposite: every accelerator executes the exact same sequence of operations on different data. This "Single Program, Multiple Data" (SPMD) model is a hardware architect's dream, as it eliminates the need for complex branch prediction and reordering logic, freeing up silicon and power for more arithmetic units.
-
-These inversions explain why CPUs are poorly suited for large-scale ML and why a specialized ecosystem of accelerators has emerged. The "generality tax" paid by CPUs—the silicon dedicated to handling a wide range of tasks—is a price that ML workloads do not need to pay.
-
-## The Accelerator {#sec-compute-accelerator-core}
-
-Suppose we want to train a `{python} frontier_params_b`B-parameter language model. The arithmetic is straightforward: each training step requires roughly `{python} flops_per_token_math` floating-point operations per token, and we need to process trillions of tokens. A modern server CPU can deliver perhaps 1--2 TFLOPS of matrix throughput. At that rate, training would take decades.
-
-To put this in perspective, training GPT-3 on a single modern CPU would require approximately 355 years. Even with an aggressive 64-core server running at 2 TFLOPS aggregate, the computation would take over 5 years. The gap between CPU capability and the compute requirements of frontier models is not a small inefficiency that clever software can bridge; it is a chasm of 3--4 orders of magnitude that can only be crossed by fundamentally different hardware.
-
-This gap has widened over time, not narrowed. In 2012, the compute required to train AlexNet (61 million parameters on ImageNet) was approximately $10^{15}$ FLOPs, achievable on a single GPU in a few days. By 2020, GPT-3 required approximately $3.1 \times 10^{23}$ FLOPs, an increase of 8 orders of magnitude in 8 years. CPU performance over the same period improved by perhaps 5$\times$, following the slowdown of Moore's Law and the end of Dennard Scaling. The accelerator's entire purpose is to bridge this exponentially growing gap between what models demand and what general-purpose hardware can deliver.
-
-The question that launched an entire hardware industry is therefore not *whether* to accelerate, but *how much generality to sacrifice* in exchange for the throughput that makes large-scale training feasible. This question does not have a single answer; it depends on the workload's predictability, the organization's scale, and the time horizon of the investment.
-
-In practice, the "build versus buy" calculus for hardware acceleration is dominated not by silicon efficiency but by **software ecosystem lock-in**. While a custom ASIC might offer a 10$\times$ improvement in performance per watt for specific tensor operations by discarding the generality tax of GPU display engines and rasterization logic, the switching costs are often prohibitive. Migrating the training stack for our `{python} frontier_params_b`B model from NVIDIA's CUDA to a proprietary ASIC environment requires rewriting highly optimized kernels for attention mechanisms, porting communication primitives like NCCL, and debugging numerical instabilities that vanish on established platforms. The **Non-Recurring Engineering (NRE)** cost for a modern 5nm ASIC design ranges from \$50 million to over \$200 million, with a design cycle of 24--36 months. By the time a custom chip optimized for a specific Transformer architecture returns from the fab, the state of the art may have shifted to Mixture-of-Experts or state-space models, rendering the hardware assumptions obsolete. Consequently, only hyperscalers with stable, massive-scale workloads can amortize this risk. For most organizations, the GPU premium is effectively an insurance policy against software incompatibility and architectural obsolescence.
-
-This question sits at the foundation of every fleet. The smallest physical unit of the machine learning fleet is the accelerator[^fn-accelerator-generality], and every accelerator is a physical response to three fundamental constraints that limit computation:
-
-1. **The Memory Wall**: Data movement from storage to arithmetic units consumes more time and energy than the arithmetic itself.
-2. **The Power Wall**: The maximum heat that silicon can dissipate sets an upper bound on clock frequency and transistor density.
-3. **The Communication Wall**: Synchronizing partial results across thousands of chips introduces overhead that can dominate the computation.
-
-::: {.callout-important title="The Three Walls of Fleet Computing"}
-
-Every architecture decision in this chapter is a response to one or more of three fundamental physical constraints. The **Memory Wall** limits per-device throughput: HBM bandwidth, not arithmetic capability, determines token generation latency for inference workloads. The **Power Wall** limits per-rack compute density: thermal dissipation at 700--1,000 W per accelerator forces the transition from air cooling to liquid cooling and drives megawatt-scale power delivery engineering. The **Communication Wall** limits per-cluster scaling: network bandwidth between nodes determines whether adding more accelerators produces proportional speedup or diminishing returns. These three walls are not independent problems to be solved in isolation; they interact at every level of the infrastructure stack, and the design of each level represents a negotiated response to all three simultaneously.
-
-::: {#nte-memory-capacity-gap .callout-principle icon=false title="The Memory Capacity Gap"}
-**The Invariant**: Model parameter growth (10$\times$/year) consistently outpaces GPU memory capacity growth (2$\times$/year).
-
-**The Implication**: Models no longer fit on single devices. Architectures must embrace **3D Parallelism** (splitting the model itself via Tensor and Pipeline Parallelism) as the default state, breaking the abstraction of the "single device."
-:::
-
-:::
-
-@fig-three-walls-grid illustrates how these three constraints cascade through every level of the infrastructure stack, from a single accelerator to a full pod.
 
 ::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows how the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows why the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{OrangeL}{HTML}{FCE4CC}
-  \definecolor{BrownLine}{HTML}{78492A}
-  \definecolor{BrownL}{HTML}{E3D3C8}
-
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape, node distance=0.9cm and 0.6cm]
   \tikzset{
-    cell/.style={draw=#1, fill=#1!15, rounded corners=2pt, minimum width=3.4cm,
-                 minimum height=1.1cm, align=center, font=\scriptsize, thick},
+    cell/.style 2 args={draw=#1, fill=#2, rounded corners=2pt, minimum width=3.4cm,
+                 minimum height=1.1cm, align=center, font=\scriptsize, line width=0.75pt},
     levelbox/.style={draw=BrownLine, fill=BrownL!40, rounded corners=2pt,
                      minimum width=1.8cm, minimum height=1.1cm, align=center,
-                     font=\small\bfseries},
+                     font=\small\bfseries, line width=0.75pt},
     wallhdr/.style={font=\small\bfseries, align=center},
-    cascade/.style={-{Triangle[width=5pt,length=4pt]}, thick, black!40}
+    cascade/.style={-{Triangle[width=5pt,length=4pt]}, line width=1.0pt, black!40}
   }
 
-  % Column headers
-  \node[wallhdr, text=BlueLine] at (3.2, 7.2) {Memory Wall};
-  \node[wallhdr, text=OrangeLine] at (7.0, 7.2) {Power Wall};
-  \node[wallhdr, text=GreenLine] at (10.8, 7.2) {Communication Wall};
-
   % Row 1: Accelerator
-  \node[levelbox] (L1) at (0, 5.8) {Accelerator};
-  \node[cell=BlueLine] (m1) at (3.2, 5.8) {HBM bandwidth\\bottleneck\\(3.35 TB/s)};
-  \node[cell=OrangeLine] (p1) at (7.0, 5.8) {700 W TDP\\per chip};
-  \node[cell=GreenLine] (c1) at (10.8, 5.8) {On-die SRAM\\capacity limit};
+  \node[levelbox] (L1) {Accelerator};
+  \node[cell={BlueLine}{BlueL}, right=of L1] (m1) {HBM bandwidth\\bottleneck\\(3.35 TB/s)};
+  \node[cell={OrangeLine}{OrangeL}, right=of m1] (p1) {700 W TDP\\per chip};
+  \node[cell={GreenLine}{GreenL}, right=of p1] (c1) {On-die SRAM\\capacity limit};
+
+  % Column headers
+  \node[wallhdr, text=BlueLine, above=0.3cm of m1] {Memory Wall};
+  \node[wallhdr, text=OrangeLine, above=0.3cm of p1] {Power Wall};
+  \node[wallhdr, text=GreenLine, above=0.3cm of c1] {Communication Wall};
 
   % Row 2: Node
-  \node[levelbox] (L2) at (0, 3.8) {Node\\(8 GPUs)};
-  \node[cell=BlueLine] (m2) at (3.2, 3.8) {640 GB aggregate\\HBM capacity\\$<$ model size};
-  \node[cell=OrangeLine] (p2) at (7.0, 3.8) {5.6 kW compute\\forces liquid\\cooling};
-  \node[cell=GreenLine] (c2) at (10.8, 3.8) {NVLink 900 GB/s\\intra-node only};
+  \node[levelbox, below=of L1] (L2) {Node\\(8 GPUs)};
+  \node[cell={BlueLine}{BlueL}, below=of m1] (m2) {640 GB aggregate\\HBM capacity\\$<$ model size};
+  \node[cell={OrangeLine}{OrangeL}, below=of p1] (p2) {5.6 kW compute\\forces liquid\\cooling};
+  \node[cell={GreenLine}{GreenL}, below=of c1] (c2) {NVLink 900 GB/s\\intra-node only};
 
   % Row 3: Rack
-  \node[levelbox] (L3) at (0, 1.8) {Rack\\(4 nodes)};
-  \node[cell=BlueLine] (m3) at (3.2, 1.8) {Host DRAM\\needed for\\optimizer state};
-  \node[cell=OrangeLine] (p3) at (7.0, 1.8) {40+ kW rack\\power delivery\\and cooling};
-  \node[cell=GreenLine] (c3) at (10.8, 1.8) {PCIe between\\nodes: 64 GB/s};
+  \node[levelbox, below=of L2] (L3) {Rack\\(4 nodes)};
+  \node[cell={BlueLine}{BlueL}, below=of m2] (m3) {Host DRAM\\needed for\\optimizer state};
+  \node[cell={OrangeLine}{OrangeL}, below=of p2] (p3) {40+ kW rack\\power delivery\\and cooling};
+  \node[cell={GreenLine}{GreenL}, below=of c2] (c3) {PCIe between\\nodes: 64 GB/s};
 
   % Row 4: Pod
-  \node[levelbox] (L4) at (0, -0.2) {Pod\\(1000+ GPUs)};
-  \node[cell=BlueLine] (m4) at (3.2, -0.2) {Distributed\\storage: PFS\\and object};
-  \node[cell=OrangeLine] (p4) at (7.0, -0.2) {Megawatt facility\\PUE $\approx$ 1.1--1.3};
-  \node[cell=GreenLine] (c4) at (10.8, -0.2) {InfiniBand\\50 GB/s per link\\dominates cost};
+  \node[levelbox, below=of L3] (L4) {Pod\\(1000+ GPUs)};
+  \node[cell={BlueLine}{BlueL}, below=of m3] (m4) {Distributed\\storage: PFS\\and object};
+  \node[cell={OrangeLine}{OrangeL}, below=of p3] (p4) {Megawatt facility\\PUE $\approx$ 1.1--1.3};
+  \node[cell={GreenLine}{GreenL}, below=of c3] (c4) {InfiniBand\\50 GB/s per link\\dominates cost};
 
   % Cascade arrows
   \foreach \i/\j in {1/2, 2/3, 3/4} {
@@ -336,8 +234,8 @@ Every architecture decision in this chapter is a response to one or more of thre
   }
 
   % Emphasis bracket on Communication Wall
-  \draw[RedLine, ultra thick, decorate, decoration={brace, amplitude=6pt, mirror}]
-    (12.7, -0.8) -- (12.7, 6.4)
+  \draw[RedLine, line width=1.2pt, decorate, decoration={brace, amplitude=6pt, mirror}]
+    ([xshift=0.3cm, yshift=-0.2cm]c4.south east) -- ([xshift=0.3cm, yshift=0.2cm]c1.north east)
     node[midway, right=8pt, align=left, font=\scriptsize\bfseries, text=RedLine]
     {Dominates\\at scale};
 
@@ -427,17 +325,17 @@ Wafer-scale engines sit at a unique point on the spectrum: they are highly speci
 
 ::: {#fig-wafer-scale-engine fig-env="figure" fig-pos="htb" fig-cap="**Wafer-Scale Engine (WSE) Architecture**: Unlike traditional processors, a WSE uses the entire 300mm silicon wafer as a single continuous compute fabric. This eliminates the 'Dicing' process and replaces PCB-level interconnects with a high-bandwidth on-chip mesh. The software must be defect-aware, routing data through a unified fabric that treats the entire wafer as a single logical processor with uniform memory access (UMA) characteristics across 900,000 cores." fig-alt="Diagram showing a large circular silicon wafer covered in a grid of hundreds of thousands of small compute cores. A red line shows a data path routing around a black 'defect' node in the grid. Inset shows a magnifying glass over a 4x4 grid of cores connected by high-speed local links."}
 ```{.tikz}
-\begin{tikzpicture}[line join=round, font=\usefont{T1}{phv}{m}{n}\small, scale=0.8]
+\begin{tikzpicture}[line join=round, font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
 \tikzset{
-  core/.style={rectangle, draw=BlueLine, fill=BlueL!40, minimum size=3.5mm, line width=0.4pt, rounded corners=0.5pt},
-  defect/.style={rectangle, draw=RedLine, fill=RedL, minimum size=3.5mm, line width=0.4pt, rounded corners=0.5pt},
-  link/.style={line width=0.6pt, black!30},
+  core/.style={rectangle, draw=BlueLine, fill=BlueL, minimum size=3.5mm, line width=0.75pt, rounded corners=0.5pt},
+  defect/.style={rectangle, draw=RedLine, fill=RedL, minimum size=3.5mm, line width=0.75pt, rounded corners=0.5pt},
+  link/.style={line width=1.0pt, black!30},
   route/.style={line width=1.2pt, OrangeLine, -{Triangle[length=3pt, width=4pt]}}
 }
 
 % Draw the Wafer (circular boundary)
-\draw[line width=1.5pt, black!10, fill=black!2] (0,0) circle (4.2);
-\draw[line width=0.8pt, black!20] (0,0) circle (4.15);
+\node[circle, draw=black!10, fill=black!2, line width=1.5pt, minimum size=8.4cm, inner sep=0] (wafer) at (0,0) {};
+\node[circle, draw=black!20, line width=0.8pt, minimum size=8.3cm, inner sep=0] at (0,0) {};
 
 % Draw Grid of Cores (subset for visualization)
 \foreach \x in {-8,-7,...,8} {
@@ -457,8 +355,9 @@ Wafer-scale engines sit at a unique point on the spectrum: they are highly speci
 \draw[route] (c-2-2) -- (c-2-1) -- (c-1-1) -- (c0-1) -- (c1-1) -- (c1-2) -- (c2-2) -- (c3-2);
 
 % Zoom inset
-\begin{scope}[shift={(5.5, 1.5)}, scale=1.2]
-  \draw[black!20, fill=white, rounded corners=3pt] (-1.2,-1.2) rectangle (1.2,1.2);
+\coordinate[right=1.3cm of wafer.east] (zoomcenter);
+\begin{scope}[shift={(zoomcenter)}, yshift=1.5cm, scale=1.2]
+  \node[draw=black!20, fill=white, rounded corners=3pt, minimum size=2.4cm, line width=0.75pt] (zoombox) at (0,0) {};
   \foreach \x in {-1,0,1} {
     \foreach \y in {-1,0,1} {
       \node[core, minimum size=6mm] (z\x\y) at (\x*0.7, \y*0.7) {};
@@ -469,12 +368,12 @@ Wafer-scale engines sit at a unique point on the spectrum: they are highly speci
     \draw[link] (\x*0.7, -0.9) -- (\x*0.7, 0.9);
     \draw[link] (-0.9, \x*0.7) -- (0.9, \x*0.7);
   }
-  \node[font=\fontsize{6pt}{6}\selectfont] at (0,-1.05) {Inter-core Links (PB/s)};
+  \node[font=\fontsize{6pt}{6}\selectfont, below=0.05cm of z0-1] {Inter-core Links (PB/s)};
 \end{scope}
 
 % Labels
-\node[below] at (0,-4.4) {\textbf{300mm Silicon Wafer}};
-\node[above right] at (5.6, 2.8) {\textbf{Unified Compute Fabric}};
+\node[below=0.2cm of wafer.south] {\textbf{300mm Silicon Wafer}};
+\node[above=0.2cm of zoombox.north] {\textbf{Unified Compute Fabric}};
 
 \end{tikzpicture}
 ```
@@ -704,7 +603,7 @@ The memory hierarchy within a single accelerator spans orders of magnitude in bo
 While **Archetype A (GPT-4)** is primarily throughput-bound (demanding more TFLOPS), **Archetype B (DLRM at Scale)** is primarily capacity-bound. A 10 TB embedding table cannot fit into the 80 GB HBM of a single H100, nor can it fit into the aggregate HBM of a single 8-GPU node (640 GB). This physical limit forces Archetype B to shard its state across hundreds of nodes, transforming a memory-access problem into a massive **All-to-All** network coordination problem.
 :::
 
-The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling. 
+The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling.
  High Model FLOPS Utilization (MFU) is only possible through aggressive **tiling**: breaking the massive weight matrices into small tiles that fit entirely within shared memory and registers, then performing as many multiply-accumulate operations on each tile as possible before evicting it. Despite the `{python} frontier_params_b`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
 
 [^fn-hbm-origin]: **HBM (High Bandwidth Memory)**: Standardized by JEDEC in 2013 as a joint development between AMD and SK Hynix, originally for graphics cards. ML accelerators adopted HBM because neural networks exhibit the same bandwidth-hungry, capacity-moderate access pattern as high-end rendering. Each HBM generation has roughly doubled bandwidth (128 GB/s in HBM1 to 1.2 TB/s per stack in HBM3e), yet the gap between memory bandwidth and arithmetic throughput continues to widen -- making HBM a necessary but never sufficient response to the Memory Wall. \index{HBM!origin}
@@ -1221,34 +1120,30 @@ The Memory Wall constrains how fast data reaches the compute units; the Roofline
 ::: {#fig-power-path fig-env="figure" fig-pos="htb" fig-cap="**The Power Delivery Path**. The journey of energy from the high-voltage grid to the low-voltage transistor. Each stage involves conversion losses (quantified by PUE) and requires stabilizing infrastructure to handle the massive current ramps of ML training. The critical engineering challenge is the Rack PDU to VRM transition, where 10--40 kW of power must be delivered within a single cabinet." fig-alt="Flowchart showing power journey from Grid Substation to Datacenter UPS, to Rack PDU, to Server PSU, to Voltage Regulator Module, finally to GPU Die. Arrows show power flow."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.2cm]
-  \definecolor{GridColor}{RGB}{200,200,200}
-  \definecolor{FacilityColor}{RGB}{200,240,255}
-  \definecolor{RackColor}{RGB}{255,240,210}
-  \definecolor{SiliconColor}{RGB}{255,220,220}
-
   \tikzset{
-    stage/.style={draw=black!70, thick, rounded corners=2pt, align=center, minimum width=2.8cm, minimum height=1.0cm}
+    stage/.style 2 args={draw=#1, fill=#2, line width=0.75pt, rounded corners=2pt, align=center, minimum width=2.8cm, minimum height=1.0cm},
+    flow/.style={-{Triangle[width=5pt,length=4pt]}, line width=1.2pt, black!60}
   }
 
   % Nodes
-  \node[stage, fill=GridColor] (Sub) {Grid\\Substation\\(115 kV+)};
-  \node[stage, fill=FacilityColor, below=of Sub] (UPS) {Facility UPS\\\& Transformer\\(480 V)};
-  \node[stage, fill=RackColor, below=of UPS] (PDU) {Rack PDU\\(208--415 V)};
-  \node[stage, fill=RackColor, below=of PDU] (PSU) {Server PSU\\(12 V / 48 V)};
-  \node[stage, fill=SiliconColor, below=of PSU] (VRM) {On-Board VRM\\(0.8--1.2 V)};
-  \node[stage, fill=SiliconColor, below=of VRM] (Die) {\textbf{GPU Die}\\{(1,000+ Amps)}};
+  \node[stage={BrownLine}{BrownL}] (Sub) {Grid\\Substation\\(115 kV+)};
+  \node[stage={BlueLine}{BlueL}, below=of Sub] (UPS) {Facility UPS\\\& Transformer\\(480 V)};
+  \node[stage={OrangeLine}{OrangeL}, below=of UPS] (PDU) {Rack PDU\\(208--415 V)};
+  \node[stage={OrangeLine}{OrangeL}, below=of PDU] (PSU) {Server PSU\\(12 V / 48 V)};
+  \node[stage={RedLine}{RedL}, below=of PSU] (VRM) {On-Board VRM\\(0.8--1.2 V)};
+  \node[stage={RedLine}{RedL}, below=of VRM] (Die) {\textbf{GPU Die}\\{(1,000+ Amps)}};
 
   % Flows
-  \draw[->, ultra thick] (Sub) -- (UPS);
-  \draw[->, ultra thick] (UPS) -- (PDU);
-  \draw[->, ultra thick] (PDU) -- (PSU);
-  \draw[->, ultra thick] (PSU) -- (VRM);
-  \draw[->, ultra thick] (VRM) -- (Die);
+  \draw[flow] (Sub) -- (UPS);
+  \draw[flow] (UPS) -- (PDU);
+  \draw[flow] (PDU) -- (PSU);
+  \draw[flow] (PSU) -- (VRM);
+  \draw[flow] (VRM) -- (Die);
 
   % Annotations
-  \node[right=0.5cm of UPS, text=BlueLine] {\textbf{Facility Level}};
-  \node[right=0.5cm of PSU, text=OrangeLine] {\textbf{Rack Level}};
-  \node[right=0.5cm of Die, text=RedLine] {\textbf{Silicon Level}};
+  \node[right=0.5cm of UPS, text=BlueLine, anchor=west] {\textbf{Facility Level}};
+  \node[right=0.5cm of PSU, text=OrangeLine, anchor=west] {\textbf{Rack Level}};
+  \node[right=0.5cm of Die, text=RedLine, anchor=west] {\textbf{Silicon Level}};
 
 \end{tikzpicture}
 ```
@@ -1858,13 +1753,13 @@ Understanding how a large model's memory footprint maps onto a node's physical r
 For our `{python} frontier_params_b`B model, the training memory breaks down as follows:
 
 | **Component**            | **Precision** | **Memory per Parameter** | **Total for `{python} frontier_params_b`B Model** |
-|:-------------------------|:-------------:|:------------------------:|:---------------------------------------------:|
-| **Model Weights**        |      FP16     |         2 bytes          |                     350 GB                    |
-| **Gradients**            |      FP16     |         2 bytes          |                     350 GB                    |
-| **Optimizer (Adam $m$)** |      FP32     |         4 bytes          |                     700 GB                    |
-| **Optimizer (Adam $v$)** |      FP32     |         4 bytes          |                     700 GB                    |
-| **Activations**          |     Mixed     |         Variable         |                  100--400 GB                  |
-| **Total**                |               |                          |                **2.2--2.5 TB**                |
+|:-------------------------|:-------------:|:------------------------:|:-------------------------------------------------:|
+| **Model Weights**        |      FP16     |         2 bytes          |                       350 GB                      |
+| **Gradients**            |      FP16     |         2 bytes          |                       350 GB                      |
+| **Optimizer (Adam $m$)** |      FP32     |         4 bytes          |                       700 GB                      |
+| **Optimizer (Adam $v$)** |      FP32     |         4 bytes          |                       700 GB                      |
+| **Activations**          |     Mixed     |         Variable         |                    100--400 GB                    |
+| **Total**                |               |                          |                  **2.2--2.5 TB**                  |
 
 : **Training Memory Breakdown for a `{python} frontier_params_b`B-Parameter Model**. The optimizer state alone (first and second moments in FP32) consumes 4$\times$ the memory of the model weights, making optimizer memory the dominant component of training memory. This is why memory optimization techniques focus heavily on optimizer state sharding and offloading. {#tbl-memory-breakdown}
 
@@ -2038,15 +1933,15 @@ The cumulative efficiency across all five stages is typically 85--90%, meaning t
 
 To make this concrete, consider the power budget for a single rack containing four DGX H100 nodes:
 
-| **Component**                      | **Power (kW)** | **% of Rack Total** |
-|:-----------------------------------|:--------------:|:-------------------:|
+| **Component**                     | **Power (kW)** | **% of Rack Total** |
+|:----------------------------------|:--------------:|:-------------------:|
 | **GPU compute ($32\times700$ W)** |      22.4      |         67%         |
-| **Host CPUs and DRAM**             |      3.2       |         10%         |
-| **NVSwitch fabric**                |      1.6       |          5%         |
-| **InfiniBand HCAs**                |      0.8       |          2%         |
-| **Power conversion losses**        |      2.8       |          8%         |
-| **Cooling overhead (PUE 1.1)**     |      2.7       |          8%         |
-| **Total**                          |    **33.5**    |       **100%**      |
+| **Host CPUs and DRAM**            |      3.2       |         10%         |
+| **NVSwitch fabric**               |      1.6       |          5%         |
+| **InfiniBand HCAs**               |      0.8       |          2%         |
+| **Power conversion losses**       |      2.8       |          8%         |
+| **Cooling overhead (PUE 1.1)**    |      2.7       |          8%         |
+| **Total**                         |    **33.5**    |       **100%**      |
 
 : **Power Budget for a Four-Node DGX H100 Rack**. GPUs consume two thirds of total rack power, but the remaining one third (host systems, networking, power conversion, and cooling) cannot be eliminated and must be budgeted for when sizing the facility's electrical infrastructure. The power conversion losses (8%) represent the cumulative inefficiency of the five-stage delivery chain. {#tbl-rack-power}
 
@@ -2717,12 +2612,12 @@ class TcoScenario:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     hours_per_year = SEC_PER_YEAR.m_as(hour)
     cloud_node_annual = cloud_h100_hourly * gpus_per_node * hours_per_year * utilization
-    
+
     # On-prem: CapEx + OpEx
     node_power_kw = (h100_tdp * gpus_per_node).m_as(kilowatt) * 1.2 # including system
     annual_elec = node_power_kw * hours_per_year * utilization * electricity_rate * pue
     onprem_node_annual = (dgx_h100_price / amortization_years) + annual_elec
-    
+
     # Breakeven utilization (rough estimate)
     # cloud_rate * hours * util = (price/3) + power_kw * hours * util * elec_rate
     # util * (cloud_rate * hours - power_kw * hours * elec_rate) = price/3

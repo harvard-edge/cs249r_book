@@ -62,7 +62,7 @@ class FleetFoundations:
 
     # Level 3: Cluster
     cluster_sizes = [CLUSTER_SMALL_GPUS, CLUSTER_MEDIUM_GPUS, CLUSTER_LARGE_GPUS, CLUSTER_MEGA_GPUS]
-    
+
     # Efficiency & Budgets
     mfu_range = (MFU_TRAINING_LOW, MFU_TRAINING_HIGH)
     oh_pipeline = OVERHEAD_PIPELINE_BUBBLE
@@ -71,10 +71,10 @@ class FleetFoundations:
     oh_maintenance = OVERHEAD_MAINTENANCE
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Level 4: Ratios & Rework
+    # Step 1: Level 4: Ratios & Rework
     nvlink_h100_bw_val = int(nvlink_h100_qty.m_as(GB / second))
     nvlink_to_ib = int(nvlink_h100_bw_val / ib_ndr_bw)
-    
+
     node_mtbf_h = calc_mtbf_node(
         node_mtbf_params["gpu_mttf"], 8,
         node_mtbf_params["nic_mttf"], 8,
@@ -86,7 +86,7 @@ class FleetFoundations:
     mtbf_8192_min = mtbf_8192_h.m_as(ureg.minute)
     mtbf_100k_min = mtbf_100k_h.m_as(ureg.minute)
 
-    # Effective FLOPS (1024-GPU cluster)
+    # Step 2: Effective FLOPS (1024-GPU cluster)
     _peak_1024_qty = 1024 * h100_qty
     goodput_ratio = 1.0 - (oh_pipeline + oh_checkpoint + oh_failure + oh_maintenance)
     _eff_flops_1024_qty = calc_effective_flops(
@@ -106,7 +106,7 @@ class FleetFoundations:
     # (Attributes kept for downstream cell access)
     peak_1024 = _peak_1024_qty.m_as(TFLOPs / second)
     eff_flops_1024 = _eff_flops_1024_qty.m_as(TFLOPs / second)
-    
+
     # Pre-computed formatted strings
     mfu_low = int(MFU_TRAINING_LOW * 100)
     mfu_high = int(MFU_TRAINING_HIGH * 100)
@@ -225,15 +225,15 @@ _pue_typ = fmt(FF.pue_typical, precision=2, commas=False)
 _h100_tdp = fmt(FF.h100_tdp, precision=0, commas=False)
 ```
 
-| **Category**      | **Number**                                                                 | **Use** |
-|:------------------|:---------------------------------------------------------------------------|:--------|
-| **Communication** | NVLink ~`{python} _nvlink_ib`× IB NDR                                      | Parallelism boundary (in-node vs cross-node) |
-| **Communication** | IB NDR ~`{python} _ib_ndr_gbs` GB/s, ~`{python} _ib_ndr_us` μs one-way     | Inter-node bandwidth and latency |
-| **Computation**   | MFU `{python} _mfu_lo`--`{python} _mfu_hi`%, η ~`{python} _eff_1024`% @ 1K, ~`{python} _eff_8192`% @ 8K | Effective FLOPS and scaling sanity checks |
-| **Coordination**  | MTBF 8K: ~`{python} _mtbf_8k_min` min; 100K: ~`{python} _mtbf_100k_min` min | Failure expectation and checkpoint cadence |
-| **Coordination**  | 175B checkpoint ~`{python} _ckpt_175` GB (16 B/param)                      | Recovery and storage sizing |
-| **Coordination**  | Goodput ~`{python} _goodput`% after overheads                              | Wall-clock utilization |
-| **Power & sustainability** | AI rack ~`{python} _rack_ai` kW; air limit ~`{python} _air_limit` kW      | Cooling feasibility (liquid required above air limit) |
+| **Category**               | **Number**                                                                                                            | **Use**                                                             |
+|:---------------------------|:----------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------|
+| **Communication**          | NVLink ~`{python} _nvlink_ib`× IB NDR                                                                                 | Parallelism boundary (in-node vs cross-node)                        |
+| **Communication**          | IB NDR ~`{python} _ib_ndr_gbs` GB/s, ~`{python} _ib_ndr_us` μs one-way                                                | Inter-node bandwidth and latency                                    |
+| **Computation**            | MFU `{python} _mfu_lo`--`{python} _mfu_hi`%, η ~`{python} _eff_1024`% @ 1K, ~`{python} _eff_8192`% @ 8K               | Effective FLOPS and scaling sanity checks                           |
+| **Coordination**           | MTBF 8K: ~`{python} _mtbf_8k_min` min; 100K: ~`{python} _mtbf_100k_min` min                                           | Failure expectation and checkpoint cadence                          |
+| **Coordination**           | 175B checkpoint ~`{python} _ckpt_175` GB (16 B/param)                                                                 | Recovery and storage sizing                                         |
+| **Coordination**           | Goodput ~`{python} _goodput`% after overheads                                                                         | Wall-clock utilization                                              |
+| **Power & sustainability** | AI rack ~`{python} _rack_ai` kW; air limit ~`{python} _air_limit` kW                                                  | Cooling feasibility (liquid required above air limit)               |
 | **Power & sustainability** | PUE liquid ~`{python} _pue_liq`, typical ~`{python} _pue_typ`; H100 `{python} _h100_tdp` W → 10K GPUs ≈ 7 MW IT × PUE | Facility load and carbon (see @sec-fleet-foundations-thermal-power) |
 
 : **Numbers every fleet engineer should know (quick reference)**: One-page summary of the fleet-scale reference numbers in this section. See the detailed Communication, Computation, and Coordination tables below for full context. {#tbl-fleet-numbers-quick-ref}
@@ -445,16 +445,16 @@ At fleet scale, four categories of overhead consume wall-clock time that is not 
 
 Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **rack power density**, **PUE**, and the **air-cooling limit**---they determine where you can build and what your facility load will be.
 
-| **Quantity**                    | **Typical value**                    | **Use** |
-|:--------------------------------|:-------------------------------------|:--------|
-| **Traditional rack**            | `{python} FF.rack_trad` kW           | Baseline for non-AI datacenters |
-| **AI rack (current gen)**      | `{python} FF.rack_ai` kW              | Liquid cooling required |
-| **AI rack (high-density)**     | `{python} FF.rack_ai_high` kW         | Direct-to-chip liquid |
-| **Air cooling limit**          | ~`{python} FF.air_limit` kW per rack  | Physics ceiling; above this, liquid is mandatory |
-| **PUE (liquid-cooled AI)**     | ~`{python} fmt(FF.pue_liquid, precision=2, commas=False)` | Best case: facility load ≈ IT load |
-| **PUE (best air-cooled)**      | ~`{python} fmt(FF.pue_air, precision=2, commas=False)`    | Hyperscale best practice |
-| **PUE (industry average)**     | ~`{python} fmt(FF.pue_typical, precision=2, commas=False)` | Sanity check for cost/carbon |
-| **H100 TDP**                   | `{python} FF.h100_tdp` W per GPU      | IT load: 10K GPUs × 700 W = 7 MW |
+| **Quantity**               | **Typical value**                                          | **Use**                                          |
+|:---------------------------|:-----------------------------------------------------------|:-------------------------------------------------|
+| **Traditional rack**       | `{python} FF.rack_trad` kW                                 | Baseline for non-AI datacenters                  |
+| **AI rack (current gen)**  | `{python} FF.rack_ai` kW                                   | Liquid cooling required                          |
+| **AI rack (high-density)** | `{python} FF.rack_ai_high` kW                              | Direct-to-chip liquid                            |
+| **Air cooling limit**      | ~`{python} FF.air_limit` kW per rack                       | Physics ceiling; above this, liquid is mandatory |
+| **PUE (liquid-cooled AI)** | ~`{python} fmt(FF.pue_liquid, precision=2, commas=False)`  | Best case: facility load ≈ IT load               |
+| **PUE (best air-cooled)**  | ~`{python} fmt(FF.pue_air, precision=2, commas=False)`     | Hyperscale best practice                         |
+| **PUE (industry average)** | ~`{python} fmt(FF.pue_typical, precision=2, commas=False)` | Sanity check for cost/carbon                     |
+| **H100 TDP**               | `{python} FF.h100_tdp` W per GPU                           | IT load: 10K GPUs × 700 W = 7 MW                 |
 
 Rule of thumb: **IT load (MW) = (number of GPUs × TDP per GPU) / 10⁶**; **facility load = IT load × PUE**. A 10,000-GPU H100 cluster at 700 W each is 7 MW IT; at PUE 1.4 that is 9.8 MW facility draw. For carbon and cost, see @sec-fleet-foundations-thermal-power and @sec-sustainable-ai.
 
