@@ -1,5 +1,5 @@
 import { SUPABASE_URL, NETLIFY_URL, getBasePath } from './config.js';
-import { forceLogin, getSession } from './state.js?v=2';
+import { forceLogin, getSession, clearSession } from './state.js';
 import { initCandle } from './candle.js';
 
 export async function geocodeAndSetCoordinates(location) {
@@ -124,9 +124,7 @@ export function setupProfileDeleteEvents() {
             }
 
             alert("Your account has been deleted.");
-            localStorage.removeItem("tinytorch_token");
-            localStorage.removeItem("tinytorch_refresh_token");
-            localStorage.removeItem("tinytorch_user");
+            await clearSession();
             window.location.href = getBasePath() + '/index.html';
         } catch (error) {
             console.error("Delete account error:", error);

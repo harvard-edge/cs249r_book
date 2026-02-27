@@ -1,7 +1,7 @@
 import { injectStyles } from './modules/styles.js';
-import { renderLayout, updateNavState } from './modules/ui.js?v=3';
-import { getSession } from './modules/state.js?v=2';
-import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession, signInWithSocial, supabase } from './modules/auth.js?v=3';
+import { renderLayout, updateNavState } from './modules/ui.js';
+import { getSession } from './modules/state.js';
+import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession, signInWithSocial, supabase } from './modules/auth.js';
 import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates, checkAndAutoUpdateLocation, setupProfileDeleteEvents } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
 import { getBasePath } from './modules/config.js';
@@ -35,38 +35,24 @@ import { getBasePath } from './modules/config.js';
     // Initialize profile events
     setupProfileDeleteEvents();
 
-    // 2.6 Check for Supabase Session & Verify
-    const checkProfile = async (session) => {
-        if (!session || window.location.pathname.includes('profile_setup')) return;
-        
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('display_name, institution, location')
-            .eq('id', session.user.id)
-            .single();
-
-        const hasName = profile && profile.display_name;
-        const hasInst = profile && profile.institution && (Array.isArray(profile.institution) ? profile.institution.length > 0 : !!profile.institution);
-        const hasLoc = profile && profile.location;
-
-        if (!hasName || !hasInst || !hasLoc) {
-            window.location.href = getBasePath() + '/profile_setup.html';
-        }
-    };
-
     supabase.auth.getSession().then(({ data: { session } }) => {
         if (session) {
              localStorage.setItem("tinytorch_token", session.access_token);
              if (session.refresh_token) localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
              if (session.user) localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
              
-             // Clean URL hash if present (Supabase puts tokens there)
-             if (window.location.hash && window.location.hash.includes('access_token')) {
-                 window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+             // Clean URL of tokens/code (Supabase puts tokens in hash or code in query)
+             if ((window.location.hash && window.location.hash.includes('access_token')) || 
+                 (window.location.search && window.location.search.includes('code='))) {
+                 // Remove sensitive parameters while preserving non-sensitive ones
+                 const url = new URL(window.location);
+                 url.hash = '';
+                 url.searchParams.delete('code');
+                 url.searchParams.delete('type');
+                 window.history.replaceState({}, document.title, url.toString());
              }
              
              updateNavState();
-             checkProfile(session);
         }
         // 3. Verify Session (Async)
         verifySession();
@@ -82,7 +68,6 @@ import { getBasePath } from './modules/config.js';
             if (session.refresh_token) localStorage.setItem("tinytorch_refresh_token", session.refresh_token);
             if (session.user) localStorage.setItem("tinytorch_user", JSON.stringify(session.user));
             updateNavState();
-            checkProfile(session);
         } else if (event === 'SIGNED_OUT') {
             localStorage.removeItem("tinytorch_token");
             updateNavState();
@@ -171,10 +156,13 @@ import { getBasePath } from './modules/config.js';
     const action = params.get('action');
 
     if (action === 'login') {
-        localStorage.removeItem("tinytorch_token");
-        localStorage.removeItem("tinytorch_refresh_token");
-        localStorage.removeItem("tinytorch_user");
-        updateNavState();
+        const { isLoggedIn } = getSession();
+        if (!isLoggedIn) {
+            localStorage.removeItem("tinytorch_token");
+            localStorage.removeItem("tinytorch_refresh_token");
+            localStorage.removeItem("tinytorch_user");
+            updateNavState();
+        }
         openModal('login');
     } else if (action === 'profile') {
         const { isLoggedIn } = getSession();

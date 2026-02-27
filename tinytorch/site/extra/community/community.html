@@ -289,15 +289,18 @@
 
     <div class="legend-row">
       <span class="legend-dot"></span>
-      <span id="member-count">0 Members</span>
+      <span id="member-count">0 Members on Map</span>
+    </div>
+    <div class="legend-row">
+      <span class="legend-dot" style="background-color: #2ecc71; border-color: #27ae60;"></span>
+      <span id="no-location-count">0 without Location (Lost at Sea)</span>
     </div>
     <div class="legend-row">
       <span class="legend-dot-institution"></span>
       <span id="institution-count">0 Institutions</span>
     </div>
-    <div class="legend-row">
-      <span class="legend-dot" style="background-color: #2ecc71; border-color: #27ae60;"></span>
-      <span>Members with Unknown Location</span>
+    <div class="legend-row" style="margin-top: 5px; border-top: 1px dashed #eee; padding-top: 8px; font-style: italic; color: #888;">
+      Note: Members without a location set in their profile are placed at the Sea Station.
     </div>
   </div>
 
@@ -307,7 +310,6 @@
   <svg id="globe-svg"></svg>
 
   <script type="module">
-    import { initCloud, updateCloudUsers, animateCloud } from './modules/cloud.js';
     import './app.js'; // Keep existing app logic
 
     const width = window.innerWidth;
@@ -317,7 +319,8 @@
     const config = {
       speed: 0.3,
       verticalTilt: -20,
-      scale: Math.min(width, height) / 2.5
+      scale: Math.min(width, height) / 2.5,
+      lostStationCoords: [-135, -35] // Point in the Pacific
     };
 
     // Major cities for rough location mapping
@@ -345,7 +348,9 @@
       {lat: 22.5726, lng: 88.3639, name: "Kolkata"}
     ];
 
+    let totalMemberCount = 0;
     let locations = [];
+    let lostUsers = [];
     let institutions = [];
     const API_URL = "https://zrvmjrxhokwwmjacyhpq.supabase.co/functions/v1/search-profiles";
 
@@ -372,10 +377,8 @@
     const graticuleGroup = svg.append('g');
     const mapGroup = svg.append('g');
     const institutionGroup = svg.append('g');
+    const lostStationGroup = svg.append('g');
     const markerGroup = svg.append('g');
-
-    // Initialize Cloud Module
-    initCloud(svg, width, height, tooltip);
 
     // 1. Globe Background
     globeGroup.append("path")
@@ -393,9 +396,9 @@
     // 3. Load World Data
     d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
       .then(worldData => {
-        mapGroup.selectAll(".country")
-          .data(topojson.feature(worldData, worldData.objects.countries).features)
-          .enter().append("path")
+        // Optimized: Render countries as a single path
+        mapGroup.append("path")
+          .datum(topojson.feature(worldData, worldData.objects.countries))
           .attr("class", "country")
           .attr("d", path);
 
@@ -403,119 +406,77 @@
         fetchProfiles();
       });
 
-    // ... (Geocoding helpers omitted for brevity, logic preserved) ...
-    // Re-implementing simplified helpers for completeness
-    const geocodeCache = {};
-    let lastGeocodingTime = 0;
-    const GEOCODING_DELAY = 1100;
-
-    function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
-
-    async function getCoords(locationStr) {
-        if (!locationStr || locationStr === "unknown") return getRoughCoords("unknown");
-        if (geocodeCache[locationStr]) return geocodeCache[locationStr];
-
-        try {
-            const now = Date.now();
-            if (now - lastGeocodingTime < GEOCODING_DELAY) await sleep(GEOCODING_DELAY - (now - lastGeocodingTime));
-            lastGeocodingTime = Date.now();
-
-            const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(locationStr)}&format=json&limit=1`;
-            const response = await fetch(url, { headers: { 'User-Agent': 'TinyTorch Globe' } });
-            const data = await response.json();
-
-            if (data && data.length > 0) {
-                const coords = { latitude: parseFloat(data[0].lat), longitude: parseFloat(data[0].lon) };
-                geocodeCache[locationStr] = coords;
-                return coords;
-            }
-        } catch (e) {}
-        return getRoughCoords(locationStr);
-    }
-
-    function getRoughCoords(str) {
-        if (!str) str = "unknown";
-        let hash = 0;
-        for (let i = 0; i < str.length; i++) { hash = str.charCodeAt(i) + ((hash << 5) - hash); }
-        const index = Math.abs(hash) % CITIES.length;
-        const city = CITIES[index];
-        return {
-            latitude: city.lat + (Math.random() - 0.5) * 5,
-            longitude: city.lng + (Math.random() - 0.5) * 5
-        };
-    }
-
     // API Fetch Logic
     async function fetchProfiles(query = "") {
         try {
             const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ query: query, page: 0, limit: 20 })
+                body: JSON.stringify({ query: query, page: 0, limit: 1000 }) 
             });
 
             if (!response.ok) throw new Error("API Error");
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
-                if (query) locations = [];
+                totalMemberCount = data.length;
+                let mapUsers = [];
+                let tempLostUsers = [];
 
-                locations = data.map(p => {
-                    const roughCoords = (p.latitude && p.longitude)
-                        ? { latitude: p.latitude, longitude: p.longitude }
-                        : getRoughCoords(p.location || p.institution || p.username);
+                data.forEach(p => {
+                    const lat = parseFloat(p.latitude);
+                    const lng = parseFloat(p.longitude);
+                    const isLostLabel = p.location === "Lost at Sea 🌊";
+                    const hasNoLocation = !p.location || p.location === "unknown";
+                    const hasNoCoords = isNaN(lat) || isNaN(lng) || (Math.abs(lat) < 0.001 && Math.abs(lng) < 0.001);
 
                     const displayName = (p.display_name && p.display_name.trim()) ? p.display_name.trim() : (p.username ? p.username.split('@')[0].trim() : 'Anonymous');
-
-                    return {
-                        latitude: roughCoords.latitude,
-                        longitude: roughCoords.longitude,
+                    
+                    const userObj = {
                         user: p.username,
                         displayName: displayName,
                         completed: "Member",
                         institution: Array.isArray(p.institution) ? p.institution.join(", ") : (p.institution || "Independent"),
                         location: p.location || null
                     };
+
+                    if (isLostLabel || (hasNoLocation && hasNoCoords)) {
+                        tempLostUsers.push(userObj);
+                    } else if (!hasNoCoords) {
+                         mapUsers.push({
+                             ...userObj, 
+                             latitude: lat + (Math.random() - 0.5) * 0.2, 
+                             longitude: lng + (Math.random() - 0.5) * 0.2
+                         });
+                    } else {
+                        tempLostUsers.push(userObj);
+                    }
                 });
+
+                locations = mapUsers;
+                lostUsers = tempLostUsers;
 
                 renderMarkers();
                 renderInstitutions();
-
-                data.forEach(async (p, index) => {
-                    const locationString = p.location || p.institution;
-                    if (locationString && !(p.latitude && p.longitude)) {
-                        const coords = await getCoords(locationString);
-                        if (locations[index]) {
-                            locations[index].latitude = coords.latitude;
-                            locations[index].longitude = coords.longitude;
-                            updateMarkerPositions();
-                            updateInstitutionPositions();
-                        }
-                    }
-                });
+                renderLostStation();
             } else {
-               if (query) locations = [];
+               if (query) { locations = []; lostUsers = []; totalMemberCount = 0; }
             }
         } catch (e) {
             locations = [];
+            lostUsers = [];
+            totalMemberCount = 0;
         }
         renderMarkers();
         renderInstitutions();
+        renderLostStation();
         if (query) updateSearchDropdown(query);
     }
 
     // Render Markers
     function renderMarkers() {
-      // Split Users
-      const globeUsers = locations.filter(d => d.location !== "Lost at Sea 🌊");
-      const cloudUsers = locations.filter(d => d.location === "Lost at Sea 🌊");
-
-      // Update Cloud
-      updateCloudUsers(cloudUsers);
-
-      // Render Globe Markers
       const markers = markerGroup.selectAll('circle.marker')
-        .data(globeUsers, d => d.user);
+        .data(locations, d => d.user);
 
       markers.exit().remove();
 
@@ -533,10 +494,39 @@
             d3.select(this).attr("r", 4);
             tooltip.style("opacity", 0);
         })
+        .style('opacity', 0)
         .transition().duration(300).style('opacity', 1);
 
-      document.getElementById('member-count').textContent = `${locations.length + 10} Members`;
+      document.getElementById('member-count').textContent = `${locations.length} Members on Map`;
+      document.getElementById('no-location-count').textContent = `${lostUsers.length} without Location (Lost at Sea)`;
       updateMarkerPositions();
+    }
+
+    function renderLostStation() {
+        const station = lostStationGroup.selectAll('g.lost-station')
+            .data(lostUsers.length > 0 ? [{count: lostUsers.length}] : []);
+
+        station.exit().remove();
+
+        const enter = station.enter()
+            .append('g')
+            .attr('class', 'lost-station')
+            .style('cursor', 'pointer')
+            .on("mouseover", function(event, d) {
+                isHovering = true;
+                tooltip.html(`<h3>🌊 Sea Station</h3><div class="info-row"><span class="highlight">${d.count}</span> Members drifting here...</div><div class="info-row" style="font-size:10px; color:#888;">(Update location in profile to be found)</div>`);
+                tooltip.style("left", (event.pageX + 15) + "px").style("top", (event.pageY - 15) + "px").style("opacity", 1);
+            })
+            .on("mouseout", function() {
+                isHovering = false;
+                tooltip.style("opacity", 0);
+            });
+
+        // Buoy/Station Visual
+        enter.append('circle').attr('r', 12).attr('fill', 'rgba(46, 204, 113, 0.2)').attr('stroke', '#2ecc71').attr('stroke-width', 1).attr('stroke-dasharray', '2,2');
+        enter.append('circle').attr('r', 4).attr('fill', '#2ecc71').attr('stroke', '#fff').attr('stroke-width', 1);
+        
+        updateLostStationPosition();
     }
 
     function showTooltip(event, d) {
@@ -601,9 +591,12 @@
     function updateMarkerPositions() {
       const markers = markerGroup.selectAll('circle.marker');
       if (markers.empty()) return;
+      
+      const invCenter = projection.invert(center);
+      
       markers.each(function(d) {
         const coordinate = [d.longitude, d.latitude];
-        const gdistance = d3.geoDistance(coordinate, projection.invert(center));
+        const gdistance = d3.geoDistance(coordinate, invCenter);
         if (gdistance < 1.57) {
           const pos = projection(coordinate);
           d3.select(this).attr('cx', pos[0]).attr('cy', pos[1]).style('display', 'block');
@@ -613,12 +606,31 @@
       });
     }
 
+    function updateLostStationPosition() {
+        const station = lostStationGroup.selectAll('g.lost-station');
+        if (station.empty()) return;
+
+        const invCenter = projection.invert(center);
+        const coordinate = config.lostStationCoords;
+        const gdistance = d3.geoDistance(coordinate, invCenter);
+        
+        if (gdistance < 1.57) {
+            const pos = projection(coordinate);
+            station.attr('transform', `translate(${pos[0]},${pos[1]})`).style('display', 'block');
+        } else {
+            station.style('display', 'none');
+        }
+    }
+
     function updateInstitutionPositions() {
         const instMarkers = institutionGroup.selectAll('g.institution-marker');
         if (instMarkers.empty()) return;
+        
+        const invCenter = projection.invert(center);
+
         instMarkers.each(function(d) {
             const coordinate = [d.longitude, d.latitude];
-            const gdistance = d3.geoDistance(coordinate, projection.invert(center));
+            const gdistance = d3.geoDistance(coordinate, invCenter);
             if (gdistance < 1.57) {
                 const pos = projection(coordinate);
                 d3.select(this).attr('transform', `translate(${pos[0]},${pos[1]})`).style('display', 'block');
@@ -631,7 +643,6 @@
     // Animation
     function startAnimation() {
       d3.timer(function () {
-        animateCloud(); // Always animate cloud
         if (!isDragging && !isPaused && !isHovering) {
           currentRotation[0] += config.speed;
           projection.rotate(currentRotation);
@@ -641,14 +652,14 @@
     }
 
     function redraw() {
-        graticuleGroup.selectAll("path").attr("d", path);
-        mapGroup.selectAll("path").attr("d", path);
-        globeGroup.selectAll("path").attr("d", path);
+        graticuleGroup.select("path").attr("d", path);
+        mapGroup.select("path").attr("d", path);
         updateMarkerPositions();
         updateInstitutionPositions();
+        updateLostStationPosition();
     }
 
-    // Input Handling (Drag, Resize, Search - Simplified for restore)
+    // Input Handling
     const drag = d3.drag()
       .on("start", () => { isDragging = true; })
       .on("drag", (event) => {
@@ -662,7 +673,6 @@
 
     document.getElementById('rotation-toggle').addEventListener('click', () => { isPaused = !isPaused; });
 
-    // ... (Search logic would go here, kept largely as is in previous logic) ...
     const searchInput = document.getElementById('user-search');
     const searchDropdown = document.getElementById('search-dropdown');
     let debounceTimer;
@@ -702,19 +712,10 @@
        svg.attr('width', w).attr('height', h);
        projection.translate([w/2, h/2]).scale(Math.min(w, h) / 2.5);
        center[0] = w/2; center[1] = h/2;
-       redraw();
-    });
-
-  </script>
-
-    // Handle Window Resize
-    window.addEventListener('resize', () => {
-       const w = window.innerWidth;
-       const h = window.innerHeight;
-       svg.attr('width', w).attr('height', h);
-       projection.translate([w/2, h/2]).scale(Math.min(w, h) / 2.5);
-       center[0] = w/2;
-       center[1] = h/2;
+       
+       // Update static globe background
+       globeGroup.select("path").attr("d", path);
+       
        redraw();
     });
 
