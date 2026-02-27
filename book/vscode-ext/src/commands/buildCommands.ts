@@ -5,6 +5,7 @@ import { discoverChapters } from '../utils/chapters';
 import { getRepoRoot, parseQmdFile } from '../utils/workspace';
 import { runInVisibleTerminal } from '../utils/terminal';
 import { getQuartoResetAllFormatsCommand, withQuartoResetPrefix } from '../utils/quartoConfigReset';
+import { showBuildManifest } from '../utils/buildManifest';
 
 /** Map volume → PDF filename (derived from book title in Quarto config). */
 const PDF_FILENAMES: Record<VolumeId, string> = {
@@ -100,6 +101,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
         const buildCmd = `./book/binder build ${fmtLower} --${vol} -v`;
         const label = `Build Volume ${fmt.toUpperCase()} (${vol})`;
         const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
+        showBuildManifest({ repoRoot: root, vol, format: fmtLower, mode: 'sequential', command: fullCmd });
         if (fmtLower === 'pdf') {
           runPdfBuildAndOpen(fullCmd, root, vol, label);
         } else {
@@ -125,6 +127,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
       const buildCmd = `./book/binder build ${fmtLower} --${vol} -v`;
       const label = `Build Full Volume ${fmtLower.toUpperCase()} (${vol})`;
       const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
+      showBuildManifest({ repoRoot: root, vol, format: fmtLower, mode: 'sequential', command: fullCmd });
       if (fmtLower === 'pdf') {
         runPdfBuildAndOpen(fullCmd, root, vol, label);
       } else {
@@ -170,6 +173,7 @@ export function registerBuildCommands(context: vscode.ExtensionContext): void {
       const buildCmd = `./book/binder build ${fmtLower} ${chapterList} --${vol} -v`;
       const label = `Build Chapters ${fmtLower.toUpperCase()} (${vol}): ${chapters.length} chapter(s)`;
       const fullCmd = withQuartoResetPrefix(fmtLower, vol, buildCmd);
+      showBuildManifest({ repoRoot: root, vol, format: fmtLower, mode: 'sequential', command: fullCmd });
       if (fmtLower === 'pdf') {
         runPdfBuildAndOpen(fullCmd, root, vol, label);
       } else {

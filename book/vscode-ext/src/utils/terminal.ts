@@ -164,6 +164,11 @@ function getLastFailure(): LastFailureState | undefined {
   return context.workspaceState.get<LastFailureState>(STATE_LAST_FAILURE_KEY);
 }
 
+/** Exposed so build manifest can append to the same channel without creating a duplicate. */
+export function getBuildChannel(): vscode.OutputChannel {
+  return getOutputChannel();
+}
+
 export function initializeRunManager(context: vscode.ExtensionContext): void {
   extensionContext = context;
   const savedRuns = context.workspaceState.get<CommandRunRecord[]>(STATE_COMMAND_HISTORY_KEY, []);

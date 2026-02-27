@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { ChapterInfo, ChapterOrderSource, VolumeId, VolumeInfo } from '../types';
+import { BuildFormat, ChapterInfo, ChapterOrderSource, VolumeId, VolumeInfo } from '../types';
 
 function toDisplayName(dirName: string): string {
   return dirName
@@ -116,6 +116,27 @@ function pathToChapterInfo(
     volume: vol,
     dirPath,
     displayName: toDisplayName(name),
+  };
+}
+
+/**
+ * Returns all buildable paths for a given format by reading the YML config,
+ * stripping comment markers so every entry — whether currently commented out
+ * or active — is included in the correct book order.
+ * The YML is the single source of truth: add a chapter there (even commented)
+ * and it will appear in the manifest and be built after `binder reset`.
+ */
+export function getBuildEntriesForFormat(
+  repoRoot: string,
+  vol: VolumeId,
+  format: BuildFormat,
+): { configFile: string; relPaths: string[] } {
+  const source = format as ChapterOrderSource;
+  const entries = readBuildablePathsFromConfig(repoRoot, vol, source);
+  const configFile = path.join('book', 'quarto', 'config', `_quarto-${format}-${vol}.yml`);
+  return {
+    configFile,
+    relPaths: entries.map(e => e.relPath),
   };
 }
 

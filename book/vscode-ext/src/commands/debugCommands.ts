@@ -3,6 +3,7 @@ import { VolumeId } from '../types';
 import { getRepoRoot } from '../utils/workspace';
 import { discoverChapters } from '../utils/chapters';
 import { runInVisibleTerminal } from '../utils/terminal';
+import { showBuildManifest } from '../utils/buildManifest';
 import {
   cancelActiveDebugSession,
   getDebugSessionById,
@@ -67,6 +68,17 @@ async function runTestAllChapters(
   await context.workspaceState.update(STATE_LAST_PARALLEL_FORMAT, format);
 
   const allChapters = volume.chapters.map(ch => ch.name);
+
+  const parallelCmd = `./book/binder ${format} reset --${volumeId} && [parallel: ${workers} workers × ./book/binder build ${format} <chapter> --${volumeId} -v]`;
+  showBuildManifest({
+    repoRoot,
+    vol: volumeId,
+    format,
+    mode: 'parallel',
+    command: parallelCmd,
+    workers,
+  });
+
   vscode.window.showInformationMessage(
     `Testing ${allChapters.length} chapters (${format.toUpperCase()}, ${workers} workers)...`
   );
@@ -102,6 +114,13 @@ async function runDebugAllChapters(
   await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, selection.id);
 
   const cmd = `./book/binder debug pdf --${selection.id} -v`;
+  showBuildManifest({
+    repoRoot: root,
+    vol: selection.id,
+    format: 'pdf',
+    mode: 'sequential',
+    command: cmd,
+  });
   runInVisibleTerminal(cmd, root, `Debug All Chapters (${selection.id})`);
 }
 
