@@ -95,8 +95,67 @@ Performance Engineering is the **Optimization Layer** of the Fleet Stack. While 
 # │          a100_hbm_bw_str, a100_hbm_bw_gbs_str, a100_fp16_str, a100_ridge_fp16_str,
 # │          b200_fp8_str, b200_hbm_bw_str, b200_mem_str, energy_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_FLOPS_FP8_TENSOR, H100_MEM_CAPACITY, H100_TDP,
+    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY,
+    B200_FLOPS_FP8_TENSOR, B200_MEM_BW, B200_MEM_CAPACITY,
+    ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
+    TB, GB, second, TFLOPs, watt, flop, byte
+)
+from mlsys.formatting import fmt
 
-## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}```
+class PerfEngSetup:
+    """Chapter-wide H100/A100/B200 specs and ridge points."""
+    h100_bw = H100_MEM_BW
+    h100_fp16 = H100_FLOPS_FP16_TENSOR
+    h100_fp8 = H100_FLOPS_FP8_TENSOR
+    h100_mem = H100_MEM_CAPACITY
+    h100_tdp = H100_TDP
+    a100_bw = A100_MEM_BW
+    a100_fp16 = A100_FLOPS_FP16_TENSOR
+    a100_mem = A100_MEM_CAPACITY
+    b200_bw = B200_MEM_BW
+    b200_fp8 = B200_FLOPS_FP8_TENSOR
+    b200_mem = B200_MEM_CAPACITY
+    h100_ridge_fp16 = (h100_fp16 / h100_bw).m_as(flop/byte)
+    h100_ridge_fp8 = (h100_fp8 / h100_bw).m_as(flop/byte)
+    a100_ridge_fp16 = (a100_fp16 / a100_bw).m_as(flop/byte)
+    energy_ratio = (ENERGY_DRAM_ACCESS_PJ / ENERGY_SRAM_L1_PJ).magnitude
+
+    h100_hbm_bw_str = f"{h100_bw.m_as(TB/second):.2f}"
+    h100_hbm_bw_gbs_str = f"{h100_bw.m_as(GB/second):.0f}"
+    h100_fp16_str = f"{h100_fp16.m_as(TFLOPs/second):.0f}"
+    h100_fp8_str = f"{h100_fp8.m_as(TFLOPs/second):.0f}"
+    h100_mem_str = f"{h100_mem.m_as(GB):.0f}"
+    h100_tdp_str = f"{h100_tdp.m_as(watt):.0f}"
+    h100_ridge_fp16_str = f"{h100_ridge_fp16:.0f}"
+    h100_ridge_fp8_str = f"{h100_ridge_fp8:.0f}"
+    a100_hbm_bw_str = f"{a100_bw.m_as(TB/second):.2f}"
+    a100_hbm_bw_gbs_str = f"{a100_bw.m_as(GB/second):.0f}"
+    a100_fp16_str = f"{a100_fp16.m_as(TFLOPs/second):.0f}"
+    a100_ridge_fp16_str = f"{a100_ridge_fp16:.0f}"
+    b200_fp8_str = f"{b200_fp8.m_as(TFLOPs/second):.0f}"
+    b200_hbm_bw_str = f"{b200_bw.m_as(TB/second):.2f}"
+    b200_mem_str = f"{b200_mem.m_as(GB):.0f}"
+    energy_ratio_str = f"{energy_ratio:.0f}"
+
+h100_hbm_bw_str = PerfEngSetup.h100_hbm_bw_str
+h100_hbm_bw_gbs_str = PerfEngSetup.h100_hbm_bw_gbs_str
+h100_fp16_str = PerfEngSetup.h100_fp16_str
+h100_fp8_str = PerfEngSetup.h100_fp8_str
+h100_mem_str = PerfEngSetup.h100_mem_str
+h100_tdp_str = PerfEngSetup.h100_tdp_str
+h100_ridge_fp16_str = PerfEngSetup.h100_ridge_fp16_str
+h100_ridge_fp8_str = PerfEngSetup.h100_ridge_fp8_str
+a100_hbm_bw_str = PerfEngSetup.a100_hbm_bw_str
+a100_hbm_bw_gbs_str = PerfEngSetup.a100_hbm_bw_gbs_str
+a100_fp16_str = PerfEngSetup.a100_fp16_str
+a100_ridge_fp16_str = PerfEngSetup.a100_ridge_fp16_str
+b200_fp8_str = PerfEngSetup.b200_fp8_str
+b200_hbm_bw_str = PerfEngSetup.b200_hbm_bw_str
+b200_mem_str = PerfEngSetup.b200_mem_str
+energy_ratio_str = PerfEngSetup.energy_ratio_str
+```
 
 ## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}
 
@@ -640,33 +699,8 @@ Different ML operations have vastly different arithmetic intensities. Understand
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
-```{python}
-#| label: workload-intensity-refactor
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ WORKLOAD INTENSITY ANALYSIS (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-performance-engineering-workload-placement — classify ML ops
-# │
-# │ Goal: Compute arithmetic intensity (FLOP/byte) for a 4096×4096 FP16 GEMM,
-# │       a GELU element-wise op, and LLM decode at batch=1 on a 4096-dim model
-# │       to show why inference is predominantly memory-bound.
-# │ Show: ~1365 FLOP/byte (GEMM, compute-bound), ~1.25 (GELU, memory-bound),
-# │       ~1 (LLM decode batch=1, deeply memory-bound) — inline and in table.
-# │ How: FLOP count / byte count; GEMM uses 2*M*N*K / (M*K + K*N + M*N)*bytes;
-# │       element-wise uses ~5 FLOPs per element / (load + store) bytes.
-# │
-# │ Imports: mlsys.constants (H100_MEM_BW, H100_FLOPS_FP16_TENSOR, ...)
-# │ Exports: gemm_intensity_str, elem_intensity_str, decode_intensity_str,
-# │          h100_ridge_str, prefill_intensity_str, decode_t_ms_str,
-# │          decode_util_pct_str, decode_tokens_sec_str,
-# │          gemm_flops_str, gemm_data_mb_str,
-# │          gelu_flops_per_val, decode_step_param_b_str,
-# │          decode_step_weight_gb_str, decode_step_flops_str,
-# │          decode_step_bytes_str
-# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
-    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, BYTES_PER_FP16,
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, BYTES_FP16,
     BILLION, MILLION, TRILLION, THOUSAND,
     GB, TB, second, byte, flop, MICROSECOND
 )
@@ -680,7 +714,7 @@ class WorkloadIntensityCalc:
     # Level 1: Hardware
     h100_flops = H100_FLOPS_FP16_TENSOR
     h100_bw = H100_MEM_BW
-    bytes_per_elem = BYTES_PER_FP16
+    bytes_per_elem = BYTES_FP16
 
     # Level 2: Workload
     # GEMM: C = A*B where A is MxK, B is KxN
@@ -1005,13 +1039,13 @@ Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$
 # │ Show: ~65x reduction in HBM traffic by avoiding NxN materialization.
 # │ How: Naive = 2*N^2 * h; Flash = 4*N*d * h. (bytes)
 # │
-# │ Imports: mlsys.constants (BYTES_PER_FP16, MILLION, BILLION)
+# │ Imports: mlsys.constants (BYTES_FP16, MILLION, BILLION)
 # │ Exports: naive_mb_str, flash_mb_str, savings_str,
 # │          head_n_str, head_d_str, head_bytes_str,
 # │          naive_head_traffic_mb_str, flash_head_traffic_mb_str,
 # │          flash_savings_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import BYTES_PER_FP16, MILLION, BILLION
+from mlsys.constants import BYTES_FP16, MILLION, BILLION
 from mlsys.formatting import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1022,7 +1056,7 @@ class FlashAttentionSavings:
     seq_len = 8192
     head_dim = 128
     num_heads = 32
-    bytes_per_elem = BYTES_PER_FP16
+    bytes_per_elem = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Naive attention HBM traffic per head:
@@ -1306,6 +1340,7 @@ class KVCacheAnalysis:
     batch_ratio_str = f"{int(batch_ratio)}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+kv_fp16_gb = KVCacheAnalysis.kv_fp16_gb_val
 kv_fp16_gb_str = KVCacheAnalysis.kv_fp16_gb_str
 max_batch_fp16_str = KVCacheAnalysis.max_batch_fp16_str
 max_batch_int8_str = KVCacheAnalysis.max_batch_int8_str
