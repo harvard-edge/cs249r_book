@@ -1,5 +1,5 @@
 import { SUPABASE_URL, NETLIFY_URL, getBasePath } from './config.js';
-import { forceLogin } from './state.js?v=2';
+import { forceLogin, getSession } from './state.js?v=2';
 import { initCandle } from './candle.js';
 
 export async function geocodeAndSetCoordinates(location) {
@@ -39,6 +39,21 @@ let candleInitialized = false;
 export function openProfileModal() {
     const profileOverlay = document.getElementById('profileOverlay');
     profileOverlay.classList.add('active');
+
+    // Reset delete section
+    const deleteBtn = document.getElementById('profileDeleteBtn');
+    const deleteConfirmSection = document.getElementById('deleteConfirmSection');
+    const deleteConfirmInput = document.getElementById('profileDeleteConfirmInput');
+    const deleteFinalBtn = document.getElementById('profileDeleteFinalBtn');
+    if (deleteBtn) deleteBtn.classList.remove('hidden');
+    if (deleteConfirmSection) deleteConfirmSection.classList.add('hidden');
+    if (deleteConfirmInput) deleteConfirmInput.value = '';
+    if (deleteFinalBtn) {
+        deleteFinalBtn.disabled = true;
+        deleteFinalBtn.style.opacity = '0.5';
+        deleteFinalBtn.style.cursor = 'not-allowed';
+    }
+
     fetchUserProfile();
 
     if (!candleInitialized) {
@@ -47,6 +62,79 @@ export function openProfileModal() {
             candleInitialized = true;
         }, 100);
     }
+}
+
+export function setupProfileDeleteEvents() {
+    const deleteBtn = document.getElementById('profileDeleteBtn');
+    const deleteConfirmSection = document.getElementById('deleteConfirmSection');
+    const deleteConfirmName = document.getElementById('deleteConfirmName');
+    const deleteConfirmInput = document.getElementById('profileDeleteConfirmInput');
+    const deleteFinalBtn = document.getElementById('profileDeleteFinalBtn');
+    const profileDisplayNameInput = document.getElementById('profileDisplayName');
+
+    if (!deleteBtn) return;
+
+    deleteBtn.addEventListener('click', () => {
+        let displayName = profileDisplayNameInput.value.trim();
+        if (!displayName) {
+            const { email } = getSession();
+            displayName = email || 'DELETE';
+        }
+        deleteConfirmName.textContent = displayName;
+        deleteConfirmSection.classList.remove('hidden');
+        deleteBtn.classList.add('hidden');
+    });
+
+    deleteConfirmInput.addEventListener('input', () => {
+        const displayName = deleteConfirmName.textContent.trim();
+        if (deleteConfirmInput.value.trim() === displayName) {
+            deleteFinalBtn.disabled = false;
+            deleteFinalBtn.style.opacity = '1';
+            deleteFinalBtn.style.cursor = 'pointer';
+        } else {
+            deleteFinalBtn.disabled = true;
+            deleteFinalBtn.style.opacity = '0.5';
+            deleteFinalBtn.style.cursor = 'not-allowed';
+        }
+    });
+
+    deleteFinalBtn.addEventListener('click', async () => {
+        const confirmResult = confirm("Are you absolutely sure? This will delete all your data and access.");
+        if (!confirmResult) return;
+
+        deleteFinalBtn.disabled = true;
+        deleteFinalBtn.textContent = 'Deleting...';
+
+        const token = localStorage.getItem("tinytorch_token");
+        try {
+            const response = await fetch(`${SUPABASE_URL}/delete-account`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            if (!response.ok) {
+                let errData = {};
+                try {
+                    errData = await response.json();
+                } catch(e) {}
+                throw new Error(errData.error || 'Failed to delete account');
+            }
+
+            alert("Your account has been deleted.");
+            localStorage.removeItem("tinytorch_token");
+            localStorage.removeItem("tinytorch_refresh_token");
+            localStorage.removeItem("tinytorch_user");
+            window.location.href = getBasePath() + '/index.html';
+        } catch (error) {
+            console.error("Delete account error:", error);
+            alert("Error deleting account: " + error.message);
+            deleteFinalBtn.disabled = false;
+            deleteFinalBtn.textContent = 'Permanently Delete My Account';
+        }
+    });
 }
 
 export function closeProfileModal() {
