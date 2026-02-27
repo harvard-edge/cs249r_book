@@ -31,7 +31,7 @@ This appendix collects the reference numbers and compact models for fleet-scale 
 
 import math
 from mlsys.constants import *
-from mlsys.formatting import fmt, check, md, md_math, sci_latex
+from mlsys.formatting import fmt, fmt_percent, check, md, md_math, sci_latex
 from mlsys.formulas import (
     calc_mtbf_cluster, calc_mtbf_node,
     calc_failure_probability, calc_effective_flops,
@@ -62,6 +62,10 @@ class FleetFoundations:
 
     # Level 3: Cluster
     cluster_sizes = [CLUSTER_SMALL_GPUS, CLUSTER_MEDIUM_GPUS, CLUSTER_LARGE_GPUS, CLUSTER_MEGA_GPUS]
+    cl_small = CLUSTER_SMALL_GPUS
+    cl_medium = CLUSTER_MEDIUM_GPUS
+    cl_large = CLUSTER_LARGE_GPUS
+    cl_mega = CLUSTER_MEGA_GPUS  # for prose: "At FF.cl_mega GPUs"
 
     # Efficiency & Budgets
     mfu_range = (MFU_TRAINING_LOW, MFU_TRAINING_HIGH)
@@ -69,6 +73,12 @@ class FleetFoundations:
     oh_checkpoint = OVERHEAD_CHECKPOINT
     oh_failure = OVERHEAD_FAILURE_RECOVERY
     oh_maintenance = OVERHEAD_MAINTENANCE
+
+    # Scaling efficiency percentages (for prose: ~FF.eff_1024%)
+    eff_32 = int(SCALING_EFF_32GPU * 100)
+    eff_256 = int(SCALING_EFF_256GPU * 100)
+    eff_1024 = int(SCALING_EFF_1024GPU * 100)
+    eff_8192 = int(SCALING_EFF_8192GPU * 100)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Step 1: Level 4: Ratios & Rework
@@ -81,10 +91,18 @@ class FleetFoundations:
         node_mtbf_params["psu_mttf"], 4
     )
 
+    mtbf_256_h = calc_mtbf_cluster(GPU_MTTF_HOURS, 256)
+    mtbf_2048_h = calc_mtbf_cluster(GPU_MTTF_HOURS, 2048)
     mtbf_8192_h = calc_mtbf_cluster(GPU_MTTF_HOURS, 8192)
     mtbf_100k_h = calc_mtbf_cluster(GPU_MTTF_HOURS, CLUSTER_MEGA_GPUS)
+    mtbf_256_min = mtbf_256_h.m_as(ureg.minute)
+    mtbf_2048_min = mtbf_2048_h.m_as(ureg.minute)
     mtbf_8192_min = mtbf_8192_h.m_as(ureg.minute)
     mtbf_100k_min = mtbf_100k_h.m_as(ureg.minute)
+    pfail_256_24h = calc_failure_probability(mtbf_256_h, 24 * ureg.hour)
+    pfail_2048_24h = calc_failure_probability(mtbf_2048_h, 24 * ureg.hour)
+    pfail_8192_24h = calc_failure_probability(mtbf_8192_h, 24 * ureg.hour)
+    pfail_100k_24h = calc_failure_probability(mtbf_100k_h, 24 * ureg.hour)
 
     # Step 2: Effective FLOPS (1024-GPU cluster)
     _peak_1024_qty = 1024 * h100_qty
@@ -95,7 +113,8 @@ class FleetFoundations:
         SCALING_EFF_1024GPU,
         goodput_ratio
     )
-    eff_fraction = _eff_flops_1024_qty / _peak_1024_qty
+    # Store as plain float so prose/formatters never see a Quantity (avoids display bugs)
+    eff_fraction = float((_eff_flops_1024_qty / _peak_1024_qty).m_as(''))
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(nvlink_to_ib > 10, "NVLink must be >10x IB for hierarchy to hold")
@@ -114,6 +133,49 @@ class FleetFoundations:
     oh_checkpoint_pct = int(oh_checkpoint * 100)
     oh_failure_pct = int(oh_failure * 100)
     oh_maintenance_pct = int(oh_maintenance * 100)
+
+    # Interconnect scalars (for tables/prose)
+    nvlink_h100_bw = int(nvlink_h100_qty.m_as(GB / second))
+    pcie5_bw = int(pcie5_qty.m_as(GB / second))
+    ib_hdr_bw = INFINIBAND_HDR_BW_GBS
+    ib_xdr_bw = INFINIBAND_XDR_BW_GBS
+    roce_bw = ROCE_100G_BW_GBS
+    eth_400g_bw = ETHERNET_400G_BW_GBS
+    tpuv5_ici = int(TPUV5P_ICI_BW.m_as(GB / second))
+    ib_hdr_lat = IB_HDR_LATENCY_US
+    roce_lat = ROCE_LATENCY_US
+    tcp_lat = TCP_LATENCY_US
+    ib_to_tcp_lat = int(TCP_LATENCY_US / IB_NDR_LATENCY_US)
+
+    # Checkpoint sizes (GB or TB for display)
+    ckpt_7b_gb = calc_checkpoint_size(7e9, 16).m_as(GB)
+    ckpt_70b_gb = calc_checkpoint_size(70e9, 16).m_as(GB)
+    ckpt_175b_gb = calc_checkpoint_size(175e9, 16).m_as(GB)
+    ckpt_1t_tb = calc_checkpoint_size(1e12, 16).m_as(TB)
+
+    # Rack & PUE
+    rack_trad = RACK_POWER_TRADITIONAL_KW
+    rack_ai = RACK_POWER_AI_TYPICAL_KW
+    rack_ai_high = RACK_POWER_AI_HIGH_KW
+    air_limit = AIR_COOLING_LIMIT_KW
+    pue_liquid = PUE_LIQUID_COOLED
+    pue_air = PUE_BEST_AIR
+    pue_typical = PUE_TYPICAL
+    pue_legacy = PUE_LEGACY
+    rack_ratio = rack_ai / rack_trad
+
+    # Accelerator table (scalars for fmt)
+    h100_flops = int(H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
+    h100_bw_tbs = fmt(H100_MEM_BW.m_as(TB / second), precision=2, commas=False)
+    h100_cap = int(H100_MEM_CAPACITY.m_as(GiB))
+    h100_tdp = int(H100_TDP.m_as(watt))
+    b200_flops = int(B200_FLOPS_FP16_TENSOR.m_as(TFLOPs / second))
+    b200_bw_tbs = fmt(B200_MEM_BW.m_as(TB / second), precision=2, commas=False)
+    b200_cap = int(B200_MEM_CAPACITY.m_as(GiB))
+    b200_tdp = int(B200_TDP.m_as(watt))
+    tpuv5_flops = int(TPUV5P_FLOPS_BF16.m_as(TFLOPs / second))
+    tpuv5_bw_tbs = fmt(TPUV5P_MEM_BW.m_as(TB / second), precision=2, commas=False)
+    tpuv5_cap = int(TPUV5P_MEM_CAPACITY.m_as(GiB))
 
 # ── EXPORTS (Bridge to Text) ────────────────────────────────────────────────
 FF = FleetFoundations
@@ -198,7 +260,7 @@ If you memorize nothing else from this section, memorize these:
 
 2. **MTBF scales as $1/N$**: A cluster's mean time between failures is the single-component MTBF divided by the number of components. At `{python} fmt(FF.cl_mega, precision=0)` GPUs, expect a failure every `{python} fmt(FF.mtbf_100k_min, precision=0)` minutes.
 
-3. **~`{python} fmt(FF.eff_fraction * 100, precision=0)`% effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a 1,024-GPU cluster delivers roughly `{python} fmt(FF.eff_fraction * 100, precision=0)`% of its peak FLOPS as useful training work.
+3. **~`{python} fmt_percent(FF.eff_fraction)`% effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a 1,024-GPU cluster delivers roughly `{python} fmt_percent(FF.eff_fraction)`% of its peak FLOPS as useful training work.
 :::
 
 Quick reference --- @tbl-fleet-numbers-quick-ref condenses the numbers below into one place. Use it for back-of-envelope checks; use the detailed tables in each subsection when designing or debugging.
@@ -708,7 +770,8 @@ The key insight for fleet-scale ML is that weak scaling is not just a mathematic
 
 peak_str = fmt(FF.peak_1024, precision=0)
 eff_str = fmt(FF.eff_flops_1024, precision=0)
-eff_pct_str = fmt(FF.eff_fraction * 100, precision=0, commas=False)
+# Effective % of peak (0.50 × 0.50 × 0.77 ≈ 19.25%); use fmt_percent to avoid display bugs
+eff_pct_str = fmt_percent(FF.eff_fraction, precision=1)
 goodput_pct_str = fmt(FF.goodput_ratio * 100, precision=0, commas=False)
 mfu_pct_str = fmt(MFU_TRAINING_HIGH * 100, precision=0, commas=False)
 scaling_pct_str = fmt(SCALING_EFF_1024GPU * 100, precision=0, commas=False)

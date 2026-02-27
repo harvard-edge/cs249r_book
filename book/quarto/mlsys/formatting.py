@@ -58,6 +58,21 @@ def fmt(quantity, unit=None, precision=1, commas=True, allow_zero=False):
     return result
 
 
+def fmt_percent(ratio, precision=1, commas=False):
+    """
+    Format a ratio (0.0 to 1.0) as a percentage string for display.
+    Use this for compound fractions (e.g. effective utilization) to avoid
+    display bugs from Quantity or wrong scaling.
+    Accepts Pint Quantity (uses magnitude) or plain float.
+    """
+    if isinstance(ratio, ureg.Quantity):
+        # Crucial: convert to dimensionless first so units like flop/TFLOP cancel out!
+        ratio = float(ratio.m_as(''))
+    else:
+        ratio = float(ratio)
+    return fmt(ratio * 100, precision=precision, commas=commas)
+
+
 def sci(val, precision=2):
     """
     Formats a number or Pint Quantity into scientific notation using Unicode.
@@ -92,6 +107,11 @@ def display_percent(ratio, precision=0):
     """
     ratio: 0.0 to 1.0
     """
+    if isinstance(ratio, ureg.Quantity):
+        ratio = float(ratio.m_as(''))
+    else:
+        ratio = float(ratio)
+        
     pct = ratio * 100
     return {
         "value": ratio,
