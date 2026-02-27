@@ -132,15 +132,15 @@ export function renderLayout() {
         <div class="profile-overlay" id="profileOverlay">
             <div class="profile-modal" style="max-width: 850px; width: 95%;">
                 <button class="profile-close" id="profileClose">&times;</button>
-                <div style="display: flex; gap: 30px; align-items: stretch;">
-                    <div style="flex: 1;">
-                        <h2 class="profile-title">Your Profile</h2>
+                <div style="display: flex; gap: 40px; align-items: flex-start; position: relative;">
+                    <div style="flex: 1; min-width: 0;">
+                        <h2 class="profile-title" style="text-align: left; margin-bottom: 25px;">Your Profile</h2>
                         <form id="profileForm">
                             <div class="profile-form-group">
                                 <label for="profileDisplayName" class="profile-label">Display Name:</label>
                                 <input type="text" class="profile-input" id="profileDisplayName" placeholder="Display Name">
                             </div>
-
+                            <!-- ... rest of the form ... -->
                             <div class="profile-form-group">
                                 <label for="profileFullName" class="profile-label">Full Name:</label>
                                 <input type="text" class="profile-input" id="profileFullName" placeholder="Your Full Name">
@@ -180,12 +180,26 @@ export function renderLayout() {
 
                             <button type="submit" class="profile-submit" id="profileSubmit">Update Profile</button>
                             <button type="button" class="profile-logout-btn" id="profileLogoutBtn">Logout</button>
+
+                            <div class="profile-danger-zone" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #fee2e2;">
+                                <h3 style="color: #d32f2f; font-size: 1rem; margin-bottom: 10px;">Danger Zone</h3>
+                                <p style="font-size: 0.85rem; color: #666; margin-bottom: 15px;">Deleting your account is permanent and cannot be undone.</p>
+                                <button type="button" class="profile-delete-btn" id="profileDeleteBtn">Delete Account</button>
+                                
+                                <div id="deleteConfirmSection" class="hidden" style="margin-top: 15px; padding: 15px; background: #fff5f5; border-radius: 10px; border: 1px solid #fecaca;">
+                                    <p style="font-size: 0.85rem; color: #b91c1c; margin-bottom: 10px;">Type your display name <strong id="deleteConfirmName"></strong> to confirm:</p>
+                                    <input type="text" class="profile-input" id="profileDeleteConfirmInput" placeholder="Enter display name">
+                                    <button type="button" class="profile-delete-btn" id="profileDeleteFinalBtn" style="margin-top: 10px; opacity: 0.5; cursor: not-allowed;" disabled>Permanently Delete My Account</button>
+                                </div>
+                            </div>
                         </form>
                     </div>
                     
                     <!-- Flame Side -->
-                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-width: 180px; border-left: 1px solid #f0f0f0; background: rgba(252, 252, 252, 0.5);">
-                         <canvas id="profileCandleCanvas" width="16" height="24" style="width: 150px; height: auto; image-rendering: pixelated; filter: drop-shadow(4px 4px 0px rgba(0,0,0,0.05));"></canvas>
+                    <div style="flex: 0 0 220px; min-height: 450px; border-left: 1px solid #f0f0f0; background: rgba(252, 252, 252, 0.5); border-radius: 0 16px 16px 0; align-self: stretch; position: relative;">
+                        <div style="position: sticky; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px;">
+                             <canvas id="profileCandleCanvas" width="16" height="24" style="width: 140px; height: auto; image-rendering: pixelated; filter: drop-shadow(0 10px 20px rgba(255,102,0,0.2));"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>

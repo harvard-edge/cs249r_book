@@ -2,7 +2,7 @@ import { injectStyles } from './modules/styles.js';
 import { renderLayout, updateNavState } from './modules/ui.js?v=3';
 import { getSession } from './modules/state.js?v=2';
 import { openModal, closeModal, handleToggle, handleAuth, handleLogout, setMode, verifySession, signInWithSocial, supabase } from './modules/auth.js?v=3';
-import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates, checkAndAutoUpdateLocation } from './modules/profile.js';
+import { openProfileModal, closeProfileModal, handleProfileUpdate, geocodeAndSetCoordinates, checkAndAutoUpdateLocation, setupProfileDeleteEvents } from './modules/profile.js';
 import { setupCameraEvents } from './modules/camera.js';
 import { getBasePath } from './modules/config.js';
 
@@ -31,6 +31,9 @@ import { getBasePath } from './modules/config.js';
             closeModal();
         });
     }
+
+    // Initialize profile events
+    setupProfileDeleteEvents();
 
     // 2.6 Check for Supabase Session & Verify
     const checkProfile = async (session) => {
