@@ -1,7 +1,16 @@
 // --- CANDLE ANIMATION MODULE ---
+const activeLoops = new Set();
+
 export function initCandle(canvasId) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
+    
+    // Prevent multiple loops on the same canvas
+    if (activeLoops.has(canvasId)) {
+        console.log(`Candle loop already running for ${canvasId}, skipping init.`);
+        return;
+    }
+    activeLoops.add(canvasId);
     
     const ctx = canvas.getContext("2d");
 

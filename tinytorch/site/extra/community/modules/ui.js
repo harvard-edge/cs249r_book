@@ -1,5 +1,5 @@
 import { getBasePath, NETLIFY_URL } from './config.js';
-import { getSession } from './state.js?v=2';
+import { getSession } from './state.js';
 
 export function updateNavState() {
     const { isLoggedIn, email: userEmail } = getSession();
