@@ -65,7 +65,8 @@ A single GPU can perform trillions of operations per second, but distributed tra
 # │          nvlink_a100_gbs, pcie5_gbs, h100_tflops, h100_tdp, h100_mem,
 # │          h100_mem_bw, a100_tflops, b200_tflops, b200_mem_bw,
 # │          ib_ndr_latency_us, nvlink_to_ib_ratio, fat_tree_hosts,
-# │          alpha_ib_us, beta_ib_gbs
+# │          alpha_ib_us, beta_ib_gbs,
+# │          FECLatency.ns_low, FECLatency.ns_high
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     INFINIBAND_NDR_BW, INFINIBAND_HDR_BW,
@@ -78,9 +79,10 @@ from mlsys.constants import (
 )
 from mlsys.formatting import fmt, sci, check, md, md_math
 
-# Static FEC latency references
-fec_latency_ns_low = 100
-fec_latency_ns_high = 200
+class FECLatency:
+    """FEC processing latency bounds per hop (nanoseconds)."""
+    ns_low  = 100
+    ns_high = 200
 ```
 
 ## The Synchronization Backbone {#sec-network-fabrics-introduction}
@@ -359,7 +361,7 @@ Before analyzing protocols and topologies, we must understand the physical mediu
 
 To achieve `{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps, we cannot simply toggle a voltage on and off faster. Signal attenuation in copper and chromatic dispersion in fiber impose a hard ceiling on the **symbol rate** (the number of signal transitions per second). Modern links overcome this by using PAM4 to pack more information into each transition.
 
-However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of three compared to NRZ, making the link highly susceptible to noise. Consequently, modern high-speed links operate near the physical limits of reliable detection and require **Forward Error Correction (FEC)** at the physical layer, typically Reed-Solomon RS(544,514) codes. This FEC processing adds significant latency—typically `{python} fec_latency_ns_low` to `{python} fec_latency_ns_high` ns per hop—to every packet. For our 175B model training, which generates 350 GB of gradient traffic per step across 1,000 GPUs, this latency floor is non-negotiable. A packet crossing three switch hops in a fat-tree incurs nearly 1 $\mu$s of irreducible latency just from FEC decoding and encoding at each port. This "physics tax" sets a hard floor on the $\alpha$ term of our performance models, limiting the speed of latency-sensitive collectives like AllReduce regardless of software optimizations.
+However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of three compared to NRZ, making the link highly susceptible to noise. Consequently, modern high-speed links operate near the physical limits of reliable detection and require **Forward Error Correction (FEC)** at the physical layer, typically Reed-Solomon RS(544,514) codes. This FEC processing adds significant latency—typically `{python} FECLatency.ns_low` to `{python} FECLatency.ns_high` ns per hop—to every packet. For our 175B model training, which generates 350 GB of gradient traffic per step across 1,000 GPUs, this latency floor is non-negotiable. A packet crossing three switch hops in a fat-tree incurs nearly 1 $\mu$s of irreducible latency just from FEC decoding and encoding at each port. This "physics tax" sets a hard floor on the $\alpha$ term of our performance models, limiting the speed of latency-sensitive collectives like AllReduce regardless of software optimizations.
 
 ### Reach and Medium: Copper versus Optics {#sec-network-fabrics-copper-optics}
 
@@ -495,11 +497,11 @@ Consider a 2,048-GPU training cluster that will run both large language model tr
 
 ::: {.callout-definition title="α-β Model (Hockney Model)"}
 
-***α-β Model (Hockney Model)***\index{Alpha-Beta Model!definition} is a linear cost model for network communication where the time to transfer a message of $n$ bytes is $T(n) = \alpha + n/\beta$.
+***α-β Model (Hockney Model)***\index{Alpha-Beta Model!definition} is a linear cost model for network communication where the time to transfer a message of $n$ bytes is $T(n) = \alpha + n/\beta$, with the crossover point $n^* = \alpha \cdot \beta$ separating the latency-bound from the bandwidth-bound regime.
 
-1.  **Significance (Quantitative):** It maps directly to the **Iron Law**, where **α** (alpha) represents the fixed **Startup Latency ($L_{\text{lat}}$)** and **β** (beta) represents the **Network Bandwidth ($\text{BW}$)**. It separates the **Latency-Bound Regime** (small messages) from the **Bandwidth-Bound Regime** (large messages).
-2.  **Distinction (Durable):** Unlike **Idealized Throughput Models**, the α-β model captures the **Fixed Penalty** of communication, explaining why many small messages are 100$\times$ more expensive than one large message of the same total size.
-3.  **Common Pitfall:** A frequent misconception is that $\alpha$ is just "network delay." In reality, $\alpha$ includes **Software Overhead** (kernel context switches, stack traversal, and library synchronization) that can often exceed the physical wire delay.
+1.  **Significance (Quantitative):** Topology choice directly shifts $\alpha$ and $\beta$. An InfiniBand HDR link has $\alpha \approx 1\,\mu\text{s}$ and $\beta \approx 25\,\text{GB/s}$, yielding $n^* \approx 25\,\text{KB}$: messages smaller than 25 KB are latency-bound and benefit from topology designs that minimize hop count; messages larger than 25 KB are bandwidth-bound and benefit from fat-tree bisection bandwidth. In a ring topology, the worst-case path traverses $\lfloor N/2 \rfloor$ hops, so effective startup latency scales as $\alpha_{\text{ring}} \approx \lfloor N/2 \rfloor \cdot \alpha_{\text{hop}}$: for a 64-node ring, $\alpha_{\text{ring}} \approx 32\,\mu\text{s}$ versus $\alpha \approx 1\,\mu\text{s}$ in a fat-tree — a $32\times$ penalty that dominates All-Reduce time even for large gradient tensors.
+2.  **Distinction (Durable):** Unlike **Idealized Throughput Models** (which treat bandwidth as the sole cost), the α-β model captures the **Fixed Startup Penalty**, exposing why topology matters: a fat-tree provides many equal-cost short paths (minimizing $\alpha$), while a ring forces long paths (amplifying $\alpha$ with cluster size).
+3.  **Common Pitfall:** A frequent misconception is that $\alpha$ is just "network delay." In reality, $\alpha$ includes **Software Overhead** (kernel context switches, RDMA stack traversal, and library synchronization) that can exceed the physical wire delay by 2–5$\times$, making switch hop count only one component of the effective startup latency.
 
 :::
 
@@ -658,7 +660,9 @@ plt.show()
 # │ How: Calculate T_compute vs T_ring_allreduce using Alpha-Beta parameters.
 # │
 # │ Imports: mlsys.constants
-# │ Exports: t_comp_ms, t_comm_1b_ms, t_comm_70b_ms, comm_frac_1b
+# │ Exports: AllReduceBottleneck.alpha_math, AllReduceBottleneck.beta_math,
+# │          AllReduceBottleneck.t_comp_display_math, AllReduceBottleneck.t_ring_1b_math,
+# │          AllReduceBottleneck.comm_frac_display_math, AllReduceBottleneck.t_ring_70b_display_math
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -707,38 +711,38 @@ class AllReduceBottleneck:
     t_comm_70b_ms = f"{t_comm_large_s * 1000:.0f}"
     comm_frac_1b_pct = f"{comm_frac_small * 100:.1f}"
 
-# Math built in Python (vol1 pattern: no {python} inside math)
-alpha_math = md_math(f"\\alpha = {AllReduceBottleneck.alpha_s * 1e6:.1f} \\;\\mu\\text{{s}}")
-beta_math = md_math(f"\\beta = {AllReduceBottleneck.beta_gbs:.0f} \\;\\text{{GB/s}}")
-t_comp_display_math = md(f"$$ T_{{\\text{{compute}}}} = {AllReduceBottleneck.t_comp_ms} \\text{{ ms}} $$")
-t_ring_1b_math = md_math(f"T_{{\\text{{ring}}}} \\approx {AllReduceBottleneck.t_comm_1b_ms} \\text{{ ms}}")
-comm_frac_display_math = md(f"$$ \\text{{Comm. fraction}} = {AllReduceBottleneck.comm_frac_1b_pct} \\% $$")
-t_ring_70b_display_math = md(f"$$ T_{{\\text{{ring}}}} \\approx {AllReduceBottleneck.t_comm_70b_ms} \\text{{ ms}} $$")
+    # Math strings (vol1 pattern: no {python} inside math)
+    alpha_math           = md_math(f"\\alpha = {alpha_s * 1e6:.1f} \\;\\mu\\text{{s}}")
+    beta_math            = md_math(f"\\beta = {beta_gbs:.0f} \\;\\text{{GB/s}}")
+    t_comp_display_math  = md(f"$$ T_{{\\text{{compute}}}} = {t_comp_ms} \\text{{ ms}} $$")
+    t_ring_1b_math       = md_math(f"T_{{\\text{{ring}}}} \\approx {t_comm_1b_ms} \\text{{ ms}}")
+    comm_frac_display_math = md(f"$$ \\text{{Comm. fraction}} = {comm_frac_1b_pct} \\% $$")
+    t_ring_70b_display_math = md(f"$$ T_{{\\text{{ring}}}} \\approx {t_comm_70b_ms} \\text{{ ms}} $$")
 ```
 
-**Setup**: A cluster of 1,024 H100 GPUs training a model with 1 billion parameters (4 GB of FP32 gradients). Each GPU computes at `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS. The network uses NDR InfiniBand (`{python} alpha_math` and `{python} beta_math` per link).
+**Setup**: A cluster of 1,024 H100 GPUs training a model with 1 billion parameters (4 GB of FP32 gradients). Each GPU computes at `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
 
 **Step 1: Compute time per iteration.**
 
 Assume each GPU processes a microbatch requiring $2 \times 10^{18}$ FLOPs (a rough estimate for a forward plus backward pass on a large batch). At `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS with 50% utilization:
 
-`{python} t_comp_display_math`
+`{python} AllReduceBottleneck.t_comp_display_math`
 
 **Step 2: Communication time (Ring AllReduce).**
 
 With $p = 1{,}024$ and $m = 4 \times 10^9$ bytes:
 
-- Total Communication: `{python} t_ring_1b_math`
+- Total Communication: `{python} AllReduceBottleneck.t_ring_1b_math`
 
 **Step 3: Communication fraction.**
 
-`{python} comm_frac_display_math`
+`{python} AllReduceBottleneck.comm_frac_display_math`
 
 With overlap between communication and computation (possible because the backward pass produces gradients layer by layer), the effective overhead can be reduced further. The network is not the bottleneck for this configuration.
 
 **When does it become the bottleneck?** If we scale to 70 billion parameters (280 GB of gradients) and the per-GPU computation stays similar (through batch size scaling), the bandwidth term alone becomes:
 
-`{python} t_ring_70b_display_math`
+`{python} AllReduceBottleneck.t_ring_70b_display_math`
 
 Now communication dominates computation by nearly 3$\times$. Our 175B model, at 2.5$\times$ this scale, would be even more severely bottlenecked by pure data parallelism. This is precisely why models beyond a few billion parameters require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
 

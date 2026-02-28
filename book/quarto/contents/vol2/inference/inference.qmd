@@ -974,9 +974,9 @@ Analysis
 
 1. **Batch sizes 1-4 are unstable**: Utilization exceeds 100%, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
 
-2. **Batch size 8 achieves stability**: At 67.5% utilization, the system is stable but queuing delays contribute significantly to latency.
+2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct`% utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms).
 
-3. **Batch size 32 minimizes total latency**: Despite longer service time (66 ms vs 54 ms), the dramatic reduction in queue wait time (8.9 ms vs 42.3 ms) yields lower total latency.
+3. **Batch size 32 minimizes total latency**: Despite longer service time (`{python} GPT3ServingResults.b32_service_ms` ms vs `{python} GPT3ServingResults.b8_service_ms` ms), the dramatic reduction in queue wait time (`{python} GPT3ServingResults.b32_wait_ms` ms vs `{python} GPT3ServingResults.b8_wait_ms` ms) yields lower total latency.
 
 4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
 
@@ -987,12 +987,24 @@ We can confirm these results by *applying Little's Law to verify* internal consi
 #| echo: false
 from mlsys.formatting import check
 
+class GPT3ServingResults:
+    # Batch 8 results
+    b8_service_ms = 54.0
+    b8_util_pct = 67.5
+    b8_wait_ms = 42.3
+    
+    # Batch 32 results
+    b32_service_ms = 66.0
+    b32_util_pct = 20.6
+    b32_wait_ms = 8.9
+    b32_total_ms = 91.5
+
 class LittlesLawVerify:
     # ┌── 1. LOAD ──────────────────────────────────────────
     arrival_rate = 100
     batch_size = 32
-    expected_total_ms = 91.5
-    utilization = 0.206
+    expected_total_ms = GPT3ServingResults.b32_total_ms
+    utilization = GPT3ServingResults.b32_util_pct / 100
     # ┌── 2. EXECUTE ───────────────────────────────────────
     L = arrival_rate * (expected_total_ms / 1000)
     in_service = batch_size * utilization
@@ -1001,6 +1013,9 @@ class LittlesLawVerify:
     check(8 < L < 12, f"L should be ~9, got {L:.2f}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     expected_total_str = f"{expected_total_ms}"
+    l_str = f"{L:.2f}"
+    in_service_str = f"{in_service:.1f}"
+    in_queue_str = f"{in_queue:.2f}"
 ```
 
 ::: {.callout-notebook title="Applying Little's Law to Verify"}
@@ -1008,12 +1023,12 @@ class LittlesLawVerify:
 
 At B=32 with $\lambda = 100$ req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_str` ms:
 
-$$L = 100 \times 0.0915 = 9.15 \text{ requests in system}$$
+$$L = 100 \times `{python} expected_total_ms / 1000` = `{python} LittlesLawVerify.l_str` \text{ requests in system}$$
 
-With batch size 32 and utilization 20.6%:
+With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b32_util_pct` %:
 
-- Expected requests in service: $32 \times 0.206 = 6.6$
-- Expected requests in queue: $9.15 - 6.6 = 2.55$
+- Expected requests in service: `{python} LittlesLawVerify.batch_size` $\times$ `{python} LittlesLawVerify.utilization` = `{python} LittlesLawVerify.in_service_str`
+- Expected requests in queue: `{python} LittlesLawVerify.l_str` - `{python} LittlesLawVerify.in_service_str` = `{python} LittlesLawVerify.in_queue_str`
 
 This matches our queue wait calculation: approximately 2-3 requests waiting on average.
 :::

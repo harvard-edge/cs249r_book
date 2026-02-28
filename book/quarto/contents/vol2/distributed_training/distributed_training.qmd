@@ -927,10 +927,9 @@ This example demonstrates how data parallelism scales in practice, including eff
 
 **Single GPU Baseline**
 
-- Batch size: 16 (with gradient checkpointing, fits in 32 GB)
-- Time per step: 1.8 seconds
-- Training throughput: ~9 samples/second
-- Time to 50K steps: **25 hours**
+- Batch size: `{python} Scaling8GPU.batch_per_gpu_val` (with gradient checkpointing, fits in 32 GB)
+- Time per step: `{python} Scaling8GPU.single_gpu_step_s` seconds
+- Time to 50K steps: **`{python} Scaling8GPU.training_hours_1gpu` hours**
 
 ```{python}
 #| label: scaling-8gpu-calc
@@ -960,7 +959,8 @@ class Scaling8GPU:
     """Scenario: 8-GPU scaling within a single node."""
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     single_gpu_step_s = 1.8
-    compute_8gpu_ms = 180
+    batch_per_gpu_val = 16
+    compute_8gpu_ms = 1800  # Matched to 1.8s baseline
     params_b = 1.5 # GPT-2
     nvlink_bw = NVLINK_H100_BW.m_as(GB/second)
     gpus_per_node = GPUS_PER_HOST
@@ -972,13 +972,14 @@ class Scaling8GPU:
     comm_8gpu_ms_val = (sync_size_gb / nvlink_bw) * 1000
 
     total_8gpu_ms_val = compute_8gpu_ms + comm_8gpu_ms_val
-    speedup_8gpu_val = single_gpu_step_s / (total_8gpu_ms_val / 1000)
+    # Speedup = (N * b / T_N) / (b / T_1) = N * (T_1 / T_N)
+    speedup_8gpu_val = gpus_per_node * (single_gpu_step_s / (total_8gpu_ms_val / 1000))
     efficiency_8gpu_val = speedup_8gpu_val / gpus_per_node * 100
     training_hours_1gpu = 25
-    training_hours_8gpu_val = training_hours_1gpu / speedup_8gpu_val
+    training_hours_8gpu_val = training_hours_1gpu / (speedup_8gpu_val / gpus_per_node)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(efficiency_8gpu_val > 90, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
+    check(efficiency_8gpu_val > 95, f"Intra-node efficiency ({efficiency_8gpu_val:.1f}%) should be high")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     total_8gpu_str = f"{total_8gpu_ms_val:.0f}"
@@ -1006,10 +1007,10 @@ Performance results:
 - Communication: `{python} Scaling8GPU.comm_8gpu_ms_str`ms per step
 
 - Total: `{python} Scaling8GPU.total_8gpu_str`ms per step
-- Speedup: `{python} Scaling8GPU.single_gpu_step_s_str`s ÷ `{python} Scaling8GPU.total_8gpu_s_str`s = `{python} Scaling8GPU.speedup_8gpu_str`$\times$
-- Parallel efficiency: `{python} Scaling8GPU.speedup_8gpu_str` ÷ 8 = `{python} Scaling8GPU.efficiency_8gpu_str`%
+- Speedup (throughput): `{python} Scaling8GPU.speedup_8gpu_str`$\times$
+- Parallel efficiency: `{python} Scaling8GPU.efficiency_8gpu_str`%
 
-Training time: 25 hours ÷ `{python} Scaling8GPU.speedup_8gpu_str` = **`{python} Scaling8GPU.training_8gpu_str` hours**
+Training time: 25 hours ÷ (`{python} Scaling8GPU.speedup_8gpu_str` / 8) = **`{python} Scaling8GPU.training_8gpu_str` hours**
 
 ```{python}
 #| label: scaling-32gpu-calc
@@ -1017,7 +1018,7 @@ Training time: 25 hours ÷ `{python} Scaling8GPU.speedup_8gpu_str` = **`{python}
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ 32-GPU SCALING ANALYSIS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Inter-node scaling using InfiniBand.
+# │ Context: Inter-node scaling using Commodity Network.
 # │
 # │ Goal: Show how inter-node communication collapses scaling efficiency.
 # │ Show: ~30% efficiency when communication overhead dominates.
@@ -1031,18 +1032,18 @@ from mlsys.constants import INFINIBAND_HDR_BW, GB, second, BILLION
 
 # ┌── LEGO ───────────────────────────────────────────────
 class Scaling32GPU:
-    """Scenario: 32-GPU scaling across 4 nodes."""
+    """Scenario: 32-GPU scaling across 4 nodes on 10GbE network."""
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     single_gpu_step_s = 1.8
-    compute_32gpu_ms = 180
+    compute_32gpu_ms = 1800
     params_b = 1.5 # GPT-2
-    ib_bw = INFINIBAND_HDR_BW.m_as(GB/second)
+    net_bw = 1.25 # 10 Gbps = 1.25 GB/s (Commodity network)
     intra_node_ms = Scaling8GPU.comm_8gpu_ms_val
     training_hours_1gpu = 25
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     sync_size_gb = (params_b * BILLION * 4) / BILLION
-    inter_node_ms_val = (sync_size_gb / ib_bw) * 1000
+    inter_node_ms_val = (sync_size_gb / net_bw) * 1000
 
     comm_32gpu_ms_val = inter_node_ms_val + intra_node_ms
     total_32gpu_ms_val = compute_32gpu_ms + comm_32gpu_ms_val
@@ -1050,9 +1051,9 @@ class Scaling32GPU:
     compute_pct_val = compute_32gpu_ms / total_32gpu_ms_val * 100
     comm_pct_val = comm_32gpu_ms_val / total_32gpu_ms_val * 100
 
-    speedup_32gpu_val = single_gpu_step_s / (total_32gpu_ms_val / 1000)
+    speedup_32gpu_val = 32 * (single_gpu_step_s / (total_32gpu_ms_val / 1000))
     efficiency_32gpu_val = speedup_32gpu_val / 32 * 100
-    training_32gpu_hours_val = training_hours_1gpu / speedup_32gpu_val
+    training_32gpu_hours_val = training_hours_1gpu / (speedup_32gpu_val / 32)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(comm_pct_val > 50, f"Communication should dominate ({comm_pct_val:.1f}%) 32-GPU scenario")
@@ -1066,26 +1067,26 @@ class Scaling32GPU:
     efficiency_32gpu_str = f"{efficiency_32gpu_val:.0f}"
     training_32gpu_str = f"{training_32gpu_hours_val:.1f}"
     inter_node_ms_str = f"{inter_node_ms_val:.0f}"
-    ib_hdr_gbs = f"{ib_bw:.0f}"
+    ib_hdr_gbs = f"{net_bw:.2f}"
     compute_32gpu_ms_str = f"{compute_32gpu_ms}"
-    comm_32gpu_ms_str = f"{comm_32gpu_ms_val}"
+    comm_32gpu_ms_str = f"{comm_32gpu_ms_val:.0f}"
 ```
 
-**32 GPUs: 4 Nodes with InfiniBand**
+**32 GPUs: 4 Nodes with Commodity Network**
 
 Configuration:
 
 - Per-GPU batch: 16, global batch: 512
 - Intra-node communication: `{python} Scaling8GPU.comm_8gpu_ms_str`ms (NVLink)
-- Inter-node communication: `{python} Scaling8GPU.gpt2_sync_size_gb_str`GB @ `{python} Scaling32GPU.ib_hdr_gbs` GB/s (InfiniBand HDR) $\approx$ `{python} Scaling32GPU.inter_node_ms_str`ms
+- Inter-node communication: `{python} Scaling8GPU.gpt2_sync_size_gb_str`GB @ `{python} Scaling32GPU.ib_hdr_gbs` GB/s (10GbE) $\approx$ `{python} Scaling32GPU.inter_node_ms_str`ms
 
 Performance results:
 
 - Computation: `{python} Scaling32GPU.compute_32gpu_ms_str`ms (`{python} Scaling32GPU.compute_pct_str`% of time)
 - Communication: `{python} Scaling32GPU.comm_32gpu_ms_str`ms (`{python} Scaling32GPU.comm_pct_str`% of time)
 - Total: `{python} Scaling32GPU.total_32gpu_str`ms per step
-- Speedup: `{python} Scaling8GPU.single_gpu_step_s_str`s ÷ `{python} Scaling32GPU.total_32gpu_s_str`s = `{python} Scaling32GPU.speedup_32gpu_str`$\times$ faster → `{python} Scaling32GPU.training_32gpu_str` hours
-- Parallel efficiency: `{python} Scaling32GPU.speedup_32gpu_str` ÷ 32 = `{python} Scaling32GPU.efficiency_32gpu_str`%
+- Speedup (throughput): `{python} Scaling32GPU.speedup_32gpu_str`$\times$ faster → `{python} Scaling32GPU.training_32gpu_str` hours
+- Parallel efficiency: `{python} Scaling32GPU.efficiency_32gpu_str`%
 
 Communication dominates and becomes the bottleneck.
 

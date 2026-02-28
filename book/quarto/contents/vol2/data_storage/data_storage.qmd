@@ -90,9 +90,9 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 # │
 # │ Imports: mlsys.constants (H100_MEM_BW, NVME_SEQUENTIAL_BW, GPT3_PARAMS,
 # │          BYTES_FP16, BYTES_FP32, GB, TB, second, byte, BILLION)
-# │ Exports: bw_ratio_str, ckpt_fleet_total_pb
-# │          (plus StorageHierarchyAnalysis.h100_bw_tbs, .nvme_bw_str,
-# │           .ckpt_total_gb_str, .gpt3_params_b used in prose)
+# │ Exports: StorageHierarchyAnalysis.h100_bw_tbs, StorageHierarchyAnalysis.nvme_bw_str,
+# │          StorageHierarchyAnalysis.ckpt_total_gb_str, StorageHierarchyAnalysis.gpt3_params_b,
+# │          StorageHierarchyAnalysis.bw_ratio_str, StorageHierarchyAnalysis.ckpt_fleet_total_pb
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     H100_MEM_BW, NVME_SEQUENTIAL_BW, GPT3_PARAMS,
@@ -116,14 +116,12 @@ class StorageHierarchyAnalysis:
     check(ckpt_total_gb_val > 1000, "175B checkpoint must be > 1 TB")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
-    h100_bw_tbs      = f"{h100_bw.m_as(TB / second):.2f}"
-    nvme_bw_str      = f"{nvme_bw_raw.m_as(GB / second):.1f}"
-    gpt3_params_b    = f"{gpt3_params / BILLION:.0f}"
+    h100_bw_tbs       = f"{h100_bw.m_as(TB / second):.2f}"
+    nvme_bw_str       = f"{nvme_bw_raw.m_as(GB / second):.1f}"
+    gpt3_params_b     = f"{gpt3_params / BILLION:.0f}"
     ckpt_total_gb_str = f"{ckpt_total_gb_val:,.0f}"
-
-# Module-level exports
-bw_ratio_str       = f"{StorageHierarchyAnalysis.bw_ratio_val:,.0f}"
-ckpt_fleet_total_pb = f"{StorageHierarchyAnalysis.ckpt_fleet_total_pb_val:,.1f}"
+    bw_ratio_str      = f"{bw_ratio_val:,.0f}"
+    ckpt_fleet_total_pb = f"{ckpt_fleet_total_pb_val:,.1f}"
 ```
 
 ## The Fuel Line {#sec-storage-fuel-line}
@@ -138,11 +136,11 @@ In the Fleet Stack model introduced in @sec-vol2-introduction, **Data Storage** 
 
 Consider the running example that will thread through this chapter. A 175-billion parameter language model trains on 1.5 trillion tokens of text, roughly 3 TB in compressed form. Each training epoch reads every token once, in a shuffled order determined by the random seed. There is no "hot" subset of data that dominates access; every byte is consumed exactly once per pass. Meanwhile, each accelerator processes its local batch in roughly 200 ms, then waits for the next. If storage cannot deliver data within that 200 ms window, the accelerator sits idle, and the organization pays for silicon that produces heat instead of gradients.
 
-This problem is deceptive because storage technology has improved enormously. NVMe drives achieve `{python} StorageHierarchyAnalysis.nvme_bw_str` GB/s of sequential throughput, a figure that would have seemed extraordinary a decade ago. But the accelerators improved faster. An H100 GPU consumes data from its HBM at `{python} StorageHierarchyAnalysis.h100_bw_tbs` TB/s, roughly `{python} bw_ratio_str`$\times$ faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
+This problem is deceptive because storage technology has improved enormously. NVMe drives achieve `{python} StorageHierarchyAnalysis.nvme_bw_str` GB/s of sequential throughput, a figure that would have seemed extraordinary a decade ago. But the accelerators improved faster. An H100 GPU consumes data from its HBM at `{python} StorageHierarchyAnalysis.h100_bw_tbs` TB/s, roughly `{python} StorageHierarchyAnalysis.bw_ratio_str`$\times$ faster than a single NVMe drive can feed it. The gap between storage delivery and accelerator consumption is the central tension of this chapter, and it cannot be solved by any single technology. Instead, it requires a hierarchy of storage tiers, each carefully matched to a specific phase of the ML lifecycle, connected by pipelines that hide latency through prefetching and pipelining.
 
 The storage problem is fundamentally one of physics meeting economics. Physics dictates that data closer to the accelerator (in both physical distance and interconnect hops) can be delivered faster but in smaller quantities. Economics dictates that cheaper storage can hold more data but at greater distance. The engineering art is constructing a pipeline that bridges these constraints, keeping the expensive top tier full by drawing from cheaper lower tiers fast enough that the accelerator never perceives the delay. This chapter shows how to reason quantitatively about each tier in the hierarchy, how to size the pipeline that connects them, and how to make the economic tradeoffs that determine which data lives where.
 
-Training our 175B model requires roughly 15 TB of training data (including preprocessed variants), stored across the hierarchy. The model generates 350 GB weight-only checkpoints (`{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB with optimizer state) every 30 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver 3 TB of training data per epoch, absorb `{python} ckpt_fleet_total_pb` PB of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
+Training our 175B model requires roughly 15 TB of training data (including preprocessed variants), stored across the hierarchy. The model generates 350 GB weight-only checkpoints (`{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB with optimizer state) every 30 minutes. Over a 30-day training run on 256 nodes, the storage system must deliver 3 TB of training data per epoch, absorb `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint writes, and stage model weights for evaluation runs. These numbers thread through every section of this chapter, grounding abstract principles in concrete engineering constraints.
 
 The chapter proceeds through three layers of increasing distance from the accelerator. We begin with how ML workloads differ from traditional storage workloads, then trace the six-tier storage hierarchy from HBM to cold archive, examining the physics and economics at each level. We then turn to the data pipeline equation that governs required bandwidth, the GPU Direct Storage technology that eliminates CPU bottlenecks, and the economics that determine which tier houses which data. We conclude with common fallacies that trap even experienced engineers.
 
@@ -870,8 +868,9 @@ For our running example, the 1.5 trillion token dataset is stored as 1,000 shard
 # │
 # │ Imports: mlsys.constants (BILLION, THOUSAND)
 # │          mlsys.formatting (fmt, check, md)
-# │ Exports: PipelineCalcs.req_bw_imagenet_str, .data_stall_pct_str,
-# │          .t_comp_stall_str, .t_io_stall_str, stall_pct_display_math
+# │ Exports: PipelineCalcs.req_bw_imagenet_str, PipelineCalcs.data_stall_pct_str,
+# │          PipelineCalcs.t_comp_stall_str, PipelineCalcs.t_io_stall_str,
+# │          PipelineCalcs.stall_pct_display_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import BILLION, THOUSAND
 from mlsys.formatting import check, md
@@ -905,11 +904,11 @@ class PipelineCalcs:
     t_comp_stall_str    = f"{t_comp_val}"
     t_io_stall_str      = f"{t_io_val}"
 
-stall_pct_display_math = md(
-    f"$$\\text{{Stall \\%}} = \\frac{{{PipelineCalcs.t_io_val} - {PipelineCalcs.t_comp_val}}}"
-    f"{{{PipelineCalcs.t_io_val}}} = "
-    f"\\mathbf{{{PipelineCalcs.data_stall_pct_str}\\%}}$$"
-)
+    stall_pct_display_math = md(
+        f"$$\\text{{Stall \\%}} = \\frac{{{t_io_val} - {t_comp_val}}}"
+        f"{{{t_io_val}}} = "
+        f"\\mathbf{{{data_stall_pct_str}\\%}}$$"
+    )
 ```
 
 ## The Data Pipeline Equation {#sec-storage-pipeline-equation}
@@ -942,7 +941,7 @@ $$\text{Stall \%} = \frac{250}{450} = 55.6\%$$
 **With pipelining** (I/O overlapped with compute):
 
 $$T_{\text{step}} = \max(200, 250) = 250 \text{ ms}$$
-`{python} stall_pct_display_math`
+`{python} PipelineCalcs.stall_pct_display_math`
 
 **The Systems Conclusion**: Even with pipelining, the accelerator is idle `{python} PipelineCalcs.data_stall_pct_str`% of the time. To eliminate the stall entirely, storage throughput must be reduced below 200 ms, either by using faster storage, deeper prefetch buffers, or more parallel I/O streams.
 :::
@@ -1283,7 +1282,7 @@ At the end of the training job, the final model checkpoint is promoted from the 
 
 The total number of data copies in this lifecycle is instructive. Each training sample traverses: object storage $\to$ NVMe (staging), NVMe $\to$ host DRAM (read), host DRAM $\to$ GPU HBM (transfer). Each checkpoint traverses: GPU HBM $\to$ NVMe (local save), NVMe $\to$ parallel file system (async copy), parallel file system $\to$ object storage (long-term retention). Every copy consumes bandwidth and contributes latency. The engineering goal is to minimize copies on the critical path (the training loop) and tolerate additional copies on non-critical paths (staging and archival).
 
-The volume of data moved during a 30-day training run reveals a counterintuitive reality. A single staging copy of the 3 TB dataset from object storage to local NVMe accounts for a modest transfer. But the checkpointing process generates a vastly larger data stream. With a roughly `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB checkpoint created every 10 minutes across 256 nodes for 30 days, the system produces approximately 4,320 checkpoints, totaling over `{python} ckpt_fleet_total_pb` petabytes of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the 3 TB training dataset might be read a handful of times (once per epoch), the `{python} ckpt_fleet_total_pb` PB of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) has a larger impact on overall storage design than training data pipeline optimization for frontier-scale models.
+The volume of data moved during a 30-day training run reveals a counterintuitive reality. A single staging copy of the 3 TB dataset from object storage to local NVMe accounts for a modest transfer. But the checkpointing process generates a vastly larger data stream. With a roughly `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB checkpoint created every 10 minutes across 256 nodes for 30 days, the system produces approximately 4,320 checkpoints, totaling over `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` petabytes of state that must traverse the storage hierarchy. Checkpoint data movement dwarfs training data movement for large models: while the 3 TB training dataset might be read a handful of times (once per epoch), the `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data is generated anew, making checkpoint I/O the dominant storage workload. This insight explains why checkpoint staging strategy (write locally, replicate asynchronously) has a larger impact on overall storage design than training data pipeline optimization for frontier-scale models.
 
 With the physical data path established, we turn to the economic dimension of storage design.
 
@@ -1465,7 +1464,7 @@ The **tiered staging** strategy minimizes $T_{save}$ by writing in two phases. I
 
 In the second phase, a background process asynchronously copies the local checkpoint to the parallel file system for durability. This copy can overlap with the next training iteration, so it does not block the pipeline. The risk is that if the node fails before the async copy completes, the local checkpoint is lost. The mitigation is to replicate checkpoints to at least two peer nodes' NVMe drives before declaring the save complete, providing durability even if one node fails.
 
-The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every 10 minutes over a 30-day training run generates roughly 4,320 checkpoints, each `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB, for a total of approximately `{python} ckpt_fleet_total_pb` PB of checkpoint data. Retaining all of them is neither necessary nor economical. A common retention policy keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} ckpt_fleet_total_pb` PB to roughly 3 TB (three live checkpoints) while preserving 43 historical snapshots in object storage for post-training analysis.
+The total storage consumed by checkpoints over the life of a training run is substantial. A 175B parameter model checkpointed every 10 minutes over a 30-day training run generates roughly 4,320 checkpoints, each `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB, for a total of approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data. Retaining all of them is neither necessary nor economical. A common retention policy keeps the three most recent checkpoints on the parallel file system for fast recovery, copies every 100th checkpoint to object storage for long-term auditability, and deletes the rest. This policy reduces the parallel file system checkpoint footprint from `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB to roughly 3 TB (three live checkpoints) while preserving 43 historical snapshots in object storage for post-training analysis.
 
 Incremental checkpointing offers a further optimization for reducing $T_{save}$. Rather than saving the entire model state every checkpoint, an incremental checkpoint saves only the parameters that changed since the last full checkpoint. For models where a large fraction of parameters are frozen (such as fine-tuning scenarios where only the last few layers are updated), incremental checkpoints can be orders of magnitude smaller than full checkpoints. The tradeoff is recovery complexity: restoring from an incremental checkpoint requires applying a chain of incremental updates to a base checkpoint, which extends recovery time. Most production systems use a hybrid approach, saving incremental checkpoints frequently and full checkpoints periodically (every 10th to 100th increment).
 
@@ -1505,7 +1504,7 @@ Storage design errors are among the most expensive mistakes in ML infrastructure
 
 **Fallacy:** *NVMe is fast enough to feed GPUs directly without pipelining.*
 
-A single NVMe drive delivers `{python} StorageHierarchyAnalysis.nvme_bw_str` GB/s, while an H100 consumes `{python} StorageHierarchyAnalysis.h100_bw_tbs` TB/s from HBM. The gap is roughly `{python} bw_ratio_str`$\times$. Even four drives in RAID-0 only close this gap to 250$\times$. Without pipelining and prefetching to hide the latency of loading from NVMe to host DRAM to HBM, every batch transfer introduces a stall equal to the transfer time. NVMe speed is necessary but nowhere near sufficient; the entire pipeline architecture (multi-worker loading, prefetch buffers, async transfers) exists precisely because no single storage device can match accelerator bandwidth. The confusion arises because NVMe bandwidth is quoted in absolute terms (GB/s), which sounds impressive, but the relevant metric is the *ratio* of storage bandwidth to accelerator consumption rate, and this ratio is unfavorable by three orders of magnitude.
+A single NVMe drive delivers `{python} StorageHierarchyAnalysis.nvme_bw_str` GB/s, while an H100 consumes `{python} StorageHierarchyAnalysis.h100_bw_tbs` TB/s from HBM. The gap is roughly `{python} StorageHierarchyAnalysis.bw_ratio_str`$\times$. Even four drives in RAID-0 only close this gap to 250$\times$. Without pipelining and prefetching to hide the latency of loading from NVMe to host DRAM to HBM, every batch transfer introduces a stall equal to the transfer time. NVMe speed is necessary but nowhere near sufficient; the entire pipeline architecture (multi-worker loading, prefetch buffers, async transfers) exists precisely because no single storage device can match accelerator bandwidth. The confusion arises because NVMe bandwidth is quoted in absolute terms (GB/s), which sounds impressive, but the relevant metric is the *ratio* of storage bandwidth to accelerator consumption rate, and this ratio is unfavorable by three orders of magnitude.
 
 **Fallacy:** *Object storage latency does not matter because we prefetch everything.*
 
@@ -1550,10 +1549,10 @@ The complete storage picture for our running example -- a 30-day training run of
 | Model weights (FP16)                       |     350 GB | GPU HBM (distributed)                                      |
 | Optimizer state (FP32)                     |   1,400 GB | GPU HBM (ZeRO-partitioned)                                 |
 | Single checkpoint (full)                   |   1,050 GB | NVMe $\to$ PFS $\to$ Object Storage                        |
-| All checkpoints (30 days, 10-min interval) |     `{python} ckpt_fleet_total_pb` PB | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
+| All checkpoints (30 days, 10-min interval) |     `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
 | Archive (retained checkpoints + dataset)   |     ~50 TB | Glacier                                                    |
 
-**Total data moved through the hierarchy**: approximately `{python} ckpt_fleet_total_pb` PB of checkpoint data plus 3 TB$\times$ epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over 1,000.
+**Total data moved through the hierarchy**: approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data plus 3 TB$\times$ epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over 1,000.
 :::
 
 ## Summary {#sec-storage-summary}

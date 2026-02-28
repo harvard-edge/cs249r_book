@@ -96,7 +96,7 @@ Machine learning systems have a physical reality that transcends code. While the
 # │ Exports: InfraSetup.frontier_params_b, InfraSetup.gpt3_params_b,
 # │          InfraSetup.h100_tflops, InfraSetup.h100_bw, InfraSetup.h100_ridge,
 # │          InfraSetup.ddr_bw_str, InfraSetup.dominance_str,
-# │          InfraSetup.ib_bw_str, t_comp_math, t_mem_math
+# │          InfraSetup.ib_bw_str, InfraSetup.t_comp_math, InfraSetup.t_mem_math
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Hardware, Models, Tiers
 from mlsys.constants import (
@@ -144,9 +144,9 @@ class InfraSetup:
     ddr_bw_str = "100"  # Approximate for DRAM
     dominance_str = f"{dominance:.1f}"
 
-# Token latency math blocks (used in @nb-token-latency, line ~712)
-t_comp_math = md_math(f"T_{{\\text{{comp}}}} \\approx \\mathbf{{{InfraSetup.t_comp_ms:.2f} \\text{{ ms}}}}")
-t_mem_math = md_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{InfraSetup.t_mem_ms:.1f} \\text{{ ms}}}}")
+    # Token latency math blocks (used in @nb-token-latency)
+    t_comp_math = md_math(f"T_{{\\text{{comp}}}} \\approx \\mathbf{{{t_comp_ms:.2f} \\text{{ ms}}}}")
+    t_mem_math = md_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem_ms:.1f} \\text{{ ms}}}}")
 ```
 
 ::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows how the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows why the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
@@ -688,9 +688,9 @@ The distinction between memory *capacity* (how many gigabytes the HBM can store)
 **Scenario**: Generating one token for Llama-3 70B (140 GB weights in FP16) on an NVIDIA H100.
 
 1. **Compute Time**: Each token requires $2 \times 70\text{B} = 1.4 \times 10^{11}$ floating-point operations. At `{python} H100PerformanceScenario.h100_tflops` TFLOPS peak throughput, the arithmetic takes:
-   `{python} t_comp_math`
+   `{python} InfraSetup.t_comp_math`
 2. **Memory Time**: Loading 140 GB of weights from HBM at 3.35 TB/s takes:
-   `{python} t_mem_math`
+   `{python} InfraSetup.t_mem_math`
 
 **Conclusion**: The processor spends **`{python} InfraSetup.dominance_str`%** of its time waiting for data from memory. The arithmetic units are idle for almost the entire token generation. Even a hypothetical processor with *infinite* compute throughput would generate tokens only negligibly faster, because the memory transfer time dominates completely. This is why HBM bandwidth improvements deliver nearly linear speedups for inference workloads.
 
@@ -976,18 +976,23 @@ class RooflineScenario:
 # │ How: Build md_math strings from InfraSetup values.
 # │
 # │ Imports: mlsys.formatting (md_math)
-# │ Exports: inf_flops_math, inf_throughput_math, train_intensity_math
+# │ Exports: RooflineInferenceMath.inf_flops_math, RooflineInferenceMath.inf_throughput_math,
+# │          RooflineInferenceMath.train_intensity_math
 # └─────────────────────────────────────────────────────────────────────────────
-inf_flops_math = md_math(f"2 \\times {InfraSetup.gpt3_params_b} \\times 10^9")
-inf_throughput_math = md_math(f"{InfraSetup.h100_bw} \\times 10^{{12}}")
-train_intensity_math = md_math(f"2048 \\times 1.0")
+
+class RooflineInferenceMath:
+    """Formatted math strings for the roofline inference vs training intensity example."""
+
+    inf_flops_math = md_math(f"2 \\times {InfraSetup.gpt3_params_b} \\times 10^9")
+    inf_throughput_math = md_math(f"{InfraSetup.h100_bw} \\times 10^{{12}}")
+    train_intensity_math = md_math(f"2048 \\times 1.0")
 ```
 
 Consider our `{python} InfraSetup.frontier_params_b`B model on an H100 with `{python} RooflineScenario.h100_tflops` TFLOPS peak compute and `{python} RooflineScenario.h100_bw` TB/s memory bandwidth. The ridge point is `{python} RooflineScenario.h100_ridge` FLOP/byte.
 
-**Inference (Decode, Batch Size 1)**: Each token loads 350 GB of FP16 weights and performs `{python} inf_flops_math` FLOPs. Arithmetic intensity: $I = 350 \times 10^9 / 350 \times 10^9 = 1.0$ FLOP/byte. Since $1.0 \ll$ `{python} RooflineScenario.h100_ridge` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} inf_throughput_math` TFLOPS, which is less than 0.2% of the H100's peak `{python} RooflineScenario.h100_tflops` TFLOPS. No amount of additional compute will help; only more memory bandwidth improves throughput.
+**Inference (Decode, Batch Size 1)**: Each token loads 350 GB of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I = 350 \times 10^9 / 350 \times 10^9 = 1.0$ FLOP/byte. Since $1.0 \ll$ `{python} RooflineScenario.h100_ridge` (the ridge point), the workload is deeply memory-bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOPS, which is less than 0.2% of the H100's peak `{python} RooflineScenario.h100_tflops` TFLOPS. No amount of additional compute will help; only more memory bandwidth improves throughput.
 
-**Training (Forward Pass, Batch Size 2048)**: The same weight tensor is multiplied by a batch of 2048 activation vectors simultaneously, turning matrix-vector operations into matrix-matrix operations. The FLOPs increase by 2048$\times$ while the weight loading remains constant: $I =$ `{python} train_intensity_math` FLOP/byte. Since $2{,}048 \gg$ `{python} RooflineScenario.h100_ridge`, the workload is compute-bound. The achievable throughput is now limited by the peak compute ceiling of `{python} RooflineScenario.h100_tflops` TFLOPS, and the memory bandwidth is irrelevant. Adding more TFLOPS (through a newer GPU generation) directly improves performance.
+**Training (Forward Pass, Batch Size 2048)**: The same weight tensor is multiplied by a batch of 2048 activation vectors simultaneously, turning matrix-vector operations into matrix-matrix operations. The FLOPs increase by 2048$\times$ while the weight loading remains constant: $I =$ `{python} RooflineInferenceMath.train_intensity_math` FLOP/byte. Since $2{,}048 \gg$ `{python} RooflineScenario.h100_ridge`, the workload is compute-bound. The achievable throughput is now limited by the peak compute ceiling of `{python} RooflineScenario.h100_tflops` TFLOPS, and the memory bandwidth is irrelevant. Adding more TFLOPS (through a newer GPU generation) directly improves performance.
 
 This contrast explains why organizations sometimes use different hardware for training and inference: training benefits from peak FLOPS, while inference benefits from memory bandwidth per dollar.
 
@@ -1804,13 +1809,17 @@ This example illustrates why memory planning for frontier models is a careful en
 # │
 # │ Imports: mlsys.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second),
 # │          mlsys.formatting (md_math)
-# │ Exports: t_intra_math, t_inter_math
+# │ Exports: InterconnectCommMath.t_intra_math, InterconnectCommMath.t_inter_math
 # └─────────────────────────────────────────────────────────────────────────────
-_nvlink_bw_val = NVLINK_H100_BW.m_as(GB/second)
-_ib_bw_gbs_val = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
 
-t_intra_math = md_math(f"T_{{\\text{{intra}}}} = 1\\text{{ GB}} / {_nvlink_bw_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{1.1 \\text{{ ms}}}}")
-t_inter_math = md_math(f"T_{{\\text{{inter}}}} = 1\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{20 \\text{{ ms}}}}")
+class InterconnectCommMath:
+    """Formatted math strings for NVLink vs InfiniBand gradient sync latency."""
+
+    _nvlink_bw_val = NVLINK_H100_BW.m_as(GB/second)
+    _ib_bw_gbs_val = (INFINIBAND_NDR_BW / 8).m_as(GB/second)
+
+    t_intra_math = md_math(f"T_{{\\text{{intra}}}} = 1\\text{{ GB}} / {_nvlink_bw_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{1.1 \\text{{ ms}}}}")
+    t_inter_math = md_math(f"T_{{\\text{{inter}}}} = 1\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{20 \\text{{ ms}}}}")
 ```
 
 ::: {#nb-comm-overhead .callout-notebook title="The Cost of Crossing the Cliff"}
@@ -1818,9 +1827,9 @@ t_inter_math = md_math(f"T_{{\\text{{inter}}}} = 1\\text{{ GB}} / {_ib_bw_gbs_va
 **Scenario**: Synchronizing a 1 GB gradient buffer during a training step.
 
 1. **Intra-Node (NVLink)**: Bandwidth = `{python} BandwidthHierarchyScenario.nvlink_bw_str` GB/s.
-   `{python} t_intra_math`
+   `{python} InterconnectCommMath.t_intra_math`
 2. **Inter-Node (InfiniBand NDR)**: Bandwidth = `{python} BandwidthHierarchyScenario.ib_bw_gbs` GB/s.
-   `{python} t_inter_math`
+   `{python} InterconnectCommMath.t_inter_math`
 
 **Conclusion**: Crossing the node boundary increases communication time by approximately 18$\times$. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50%. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
 
@@ -2132,16 +2141,20 @@ The physical layout of the datacenter hall reflects these density constraints. T
 # │ How: Build md_math strings from InfraSetup values.
 # │
 # │ Imports: mlsys.formatting (md_math)
-# │ Exports: pod_flops_math, total_flops_math, n_params_math,
-# │          cluster_throughput_math
+# │ Exports: PodTrainingMath.pod_flops_math, PodTrainingMath.total_flops_math,
+# │          PodTrainingMath.n_params_math, PodTrainingMath.cluster_throughput_math
 # └─────────────────────────────────────────────────────────────────────────────
-pod_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{23}}")
-total_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{23}}")
-n_params_math = md_math(f"N = {InfraSetup.gpt3_params_b} \\times 10^9")
-cluster_throughput_math = md_math(f"8{{,}}192 \\times {InfraSetup.h100_tflops} \\times 10^{{12}} \\times 0.45")
+
+class PodTrainingMath:
+    """Formatted math strings for 175B training time derivation."""
+
+    pod_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{23}}")
+    total_flops_math = md_math(f"6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{23}}")
+    n_params_math = md_math(f"N = {InfraSetup.gpt3_params_b} \\times 10^9")
+    cluster_throughput_math = md_math(f"8{{,}}192 \\times {InfraSetup.h100_tflops} \\times 10^{{12}} \\times 0.45")
 ```
 
-Training a `{python} InfraSetup.frontier_params_b`B model on this cluster requires `{python} pod_flops_math` total floating-point operations (assuming 300 billion training tokens). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} cluster_throughput_math` EFLOPS, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
+Training a `{python} InfraSetup.frontier_params_b`B model on this cluster requires `{python} PodTrainingMath.pod_flops_math` total floating-point operations (assuming 300 billion training tokens). At 45 percent MFU -- a strong but achievable figure for well-tuned large-model training -- the cluster sustains `{python} PodTrainingMath.cluster_throughput_math` EFLOPS, yielding a physics-limit training time of approximately 12 hours. This is the absolute floor: every GPU computing useful FLOPs at 45 percent of peak, with zero communication overhead, zero pipeline bubbles, and zero downtime.
 
 In practice, communication overhead, pipeline bubbles, checkpoint I/O, hardware failures, and maintenance windows compound to extend the actual wall-clock time to 2--4 weeks. The gap between the 12-hour physics limit and the practical 2--4 week schedule is a factor of 15--25$\times$ (as the callout below quantifies step by step), illustrating the central theme of this section: at pod scale, the infrastructure's imperfections dominate over the raw capability of the silicon. Recovering this lost factor is the central challenge of distributed systems engineering, and the solutions span hardware (better networks), software (overlapped communication), and operations (proactive maintenance to minimize downtime).
 
@@ -2216,14 +2229,14 @@ class TrainingTime175B:
 
 We can derive the training time for our `{python} InfraSetup.frontier_params_b`B model from first principles.
 
-1. **Total FLOPs**: Using the approximation $6 \times N \times P$, where `{python} n_params_math` and $P = 300 \times 10^9$ tokens:
-   `{python} total_flops_math` FLOPs
+1. **Total FLOPs**: Using the approximation $6 \times N \times P$, where `{python} PodTrainingMath.n_params_math` and $P = 300 \times 10^9$ tokens:
+   `{python} PodTrainingMath.total_flops_math` FLOPs
 
 2. **Cluster Throughput**: 8,192 H100 GPUs at `{python} NodeCapacityScenario.h100_tflops` TFLOPS peak, operating at 45% MFU:
-   `{python} cluster_throughput_math` EFLOPS sustained
+   `{python} PodTrainingMath.cluster_throughput_math` EFLOPS sustained
 
 3. **Idealized Training Time** (the "physics limit"):
-   `{python} total_flops_math` / `{python} cluster_throughput_math` $\times 10^{18}$ $\approx$ **`{python} TrainingTime175B.t_physics_hr_str` hours**
+   `{python} PodTrainingMath.total_flops_math` / `{python} PodTrainingMath.cluster_throughput_math` $\times 10^{18}$ $\approx$ **`{python} TrainingTime175B.t_physics_hr_str` hours**
 
 4. **Real-World Multipliers**:
    - Communication overhead (scaling efficiency $\approx 0.85$): $\div 0.85 \rightarrow$ **`{python} TrainingTime175B.t_comm_hr_str` hours**
@@ -2358,19 +2371,24 @@ where $T_N$ is the training time on $N$ nodes. An efficiency of 1.0 means perfec
 # │ How: Build md_math strings from InfraSetup and BandwidthHierarchyScenario.
 # │
 # │ Imports: mlsys.formatting (md_math)
-# │ Exports: comm_time_formula_math, comm_approx_math, compute_per_step_math,
-# │          t_compute_math, t_comm_math
+# │ Exports: CommScalingMath.comm_time_formula_math, CommScalingMath.comm_approx_math,
+# │          CommScalingMath.compute_per_step_math, CommScalingMath.t_compute_math,
+# │          CommScalingMath.t_comm_math
 # └─────────────────────────────────────────────────────────────────────────────
-_ib_gbs = BandwidthHierarchyScenario.ib_bw_gbs
 
-comm_time_formula_math = md_math(f"2 \\times (N-1)/N \\times 350 / {_ib_gbs}")
-comm_approx_math = md_math(f"2 \\times 350 / {_ib_gbs}")
-compute_per_step_math = md_math(f"C = 6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{18}}")
-t_compute_math = md_math(f"T_{{\\text{{compute}}}} \\approx 2.1")
-t_comm_math = md_math(f"T_{{\\text{{comm}}}} \\approx 3.5")
+class CommScalingMath:
+    """Formatted math strings for scaling efficiency and communication overhead analysis."""
+
+    _ib_gbs = BandwidthHierarchyScenario.ib_bw_gbs
+
+    comm_time_formula_math = md_math(f"2 \\times (N-1)/N \\times 350 / {_ib_gbs}")
+    comm_approx_math = md_math(f"2 \\times 350 / {_ib_gbs}")
+    compute_per_step_math = md_math(f"C = 6 \\times {InfraSetup.gpt3_params_b} \\times 10^{{18}}")
+    t_compute_math = md_math(f"T_{{\\text{{compute}}}} \\approx 2.1")
+    t_comm_math = md_math(f"T_{{\\text{{comm}}}} \\approx 3.5")
 ```
 
-For data-parallel training of our `{python} InfraSetup.frontier_params_b`B model, the communication cost per step is dominated by the AllReduce of 350 GB of gradients. Using ring-AllReduce over InfiniBand at `{python} BandwidthHierarchyScenario.ib_bw_gbs` GB/s effective bandwidth, the communication time is approximately `{python} comm_time_formula_math`, which for large $N$ approaches `{python} comm_approx_math` seconds. If the compute time per step is 20 seconds, the total step time is 34 seconds, yielding a scaling efficiency of $20/34 \approx 0.59$. In practice, communication can be overlapped with the backward pass (sending gradients for early layers while computing gradients for later layers), which recovers much of this loss, achieving 70--90% scaling efficiency for well-optimized training systems.
+For data-parallel training of our `{python} InfraSetup.frontier_params_b`B model, the communication cost per step is dominated by the AllReduce of 350 GB of gradients. Using ring-AllReduce over InfiniBand at `{python} BandwidthHierarchyScenario.ib_bw_gbs` GB/s effective bandwidth, the communication time is approximately `{python} CommScalingMath.comm_time_formula_math`, which for large $N$ approaches `{python} CommScalingMath.comm_approx_math` seconds. If the compute time per step is 20 seconds, the total step time is 34 seconds, yielding a scaling efficiency of $20/34 \approx 0.59$. In practice, communication can be overlapped with the backward pass (sending gradients for early layers while computing gradients for later layers), which recovers much of this loss, achieving 70--90% scaling efficiency for well-optimized training systems.
 
 The scaling efficiency depends critically on the ratio of computation to communication. This ratio is determined by three factors:
 
@@ -2389,13 +2407,13 @@ However, even for large models, scaling does not continue indefinitely. There ex
 **Setup**: Training a `{python} InfraSetup.frontier_params_b`B model on a DGX H100 cluster with `{python} InfraSetup.ib_bw_str` Gbps InfiniBand per GPU.
 
 - **Compute per step** (assuming batch size 2M tokens, 6 FLOPs per parameter per token):
-  `{python} compute_per_step_math` FLOPs
+  `{python} CommScalingMath.compute_per_step_math` FLOPs
 
 - **Per-GPU compute time** on 1,024 GPUs, each at `{python} NodeCapacityScenario.h100_tflops` TFLOPS (50% utilization):
-  `{python} t_compute_math` seconds
+  `{python} CommScalingMath.t_compute_math` seconds
 
 - **AllReduce time** for 350 GB of gradients using ring-AllReduce with overlap:
-  `{python} t_comm_math` seconds (with 50% overlap)
+  `{python} CommScalingMath.t_comm_math` seconds (with 50% overlap)
 
 - **Scaling efficiency**: $\eta = T_{\text{compute}} / (T_{\text{compute}} + T_{\text{comm}}) = 2.1 / 5.6 \approx 0.375$
 
@@ -2649,21 +2667,16 @@ class TcoScenario:
     check(onprem_node_annual < cloud_node_annual, "On-prem should be cheaper at 80% util")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cloud_cost_display = fmt(cloud_node_annual, precision=0)
-    annual_elec_display = fmt(annual_elec, precision=0)
-    onprem_display = fmt(onprem_node_annual, precision=0)
+    cloud_cost_display = f"${fmt(cloud_node_annual, precision=0)}"
+    annual_elec_display = f"${fmt(annual_elec, precision=0)}"
+    onprem_display = f"${fmt(onprem_node_annual, precision=0)}"
     util_pct_str = f"{utilization*100:.0f}"
     breakeven_util = f"{breakeven:.0f}"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-cloud_cost_display = f"${TcoScenario.cloud_cost_display}"
-annual_elec_display = f"${TcoScenario.annual_elec_display}"
-onprem_display = f"${TcoScenario.onprem_display}"
 ```
 
-Cloud providers charge by the GPU-hour. At approximately \$4.00 per H100-hour, a single 8-GPU node running at `{python} TcoScenario.util_pct_str`% utilization costs `{python} cloud_cost_display` per year. An on-premises DGX H100 node costs approximately \$350,000 to purchase. Amortized over three years and combined with electricity costs of `{python} annual_elec_display` per node per year, the total annual on-premises cost is approximately `{python} onprem_display` per node. On-premises infrastructure becomes favorable when sustained utilization exceeds roughly `{python} TcoScenario.breakeven_util`%.
+Cloud providers charge by the GPU-hour. At approximately \$4.00 per H100-hour, a single 8-GPU node running at `{python} TcoScenario.util_pct_str`% utilization costs `{python} TcoScenario.cloud_cost_display` per year. An on-premises DGX H100 node costs approximately \$350,000 to purchase. Amortized over three years and combined with electricity costs of `{python} TcoScenario.annual_elec_display` per node per year, the total annual on-premises cost is approximately `{python} TcoScenario.onprem_display` per node. On-premises infrastructure becomes favorable when sustained utilization exceeds roughly `{python} TcoScenario.breakeven_util`%.
 
-Several factors complicate this simple comparison. Cloud pricing is highly dynamic, with multiple pricing tiers that can significantly shift the economics. Reserved instances (1--3 year commitments) reduce the effective hourly rate by 40--60%, narrowing the gap between cloud and on-premises costs. For a 3-year commitment, the effective cloud cost for our 8-GPU node drops from `{python} cloud_cost_display` to approximately \$100,000--140,000 per year, which approaches the on-premises cost.
+Several factors complicate this simple comparison. Cloud pricing is highly dynamic, with multiple pricing tiers that can significantly shift the economics. Reserved instances (1--3 year commitments) reduce the effective hourly rate by 40--60%, narrowing the gap between cloud and on-premises costs. For a 3-year commitment, the effective cloud cost for our 8-GPU node drops from `{python} TcoScenario.cloud_cost_display` to approximately \$100,000--140,000 per year, which approaches the on-premises cost.
 
 Spot or preemptible instances offer even deeper discounts of 60--80%, but they can be interrupted at any time when the cloud provider needs the capacity for higher-paying customers. This makes them suitable for fault-tolerant workloads (where frequent checkpointing allows the job to resume after interruption) but risky for long-running training jobs where interruption costs hours of lost computation and checkpoint restoration time.
 
