@@ -339,7 +339,7 @@ class ChapterDiscovery:
 
         for chapter_name in chapter_names:
             try:
-                chapter_file = self.find_chapter_file(chapter_name)
+                chapter_file = self.find_chapter_file(chapter_name, allow_fuzzy=True)
             except AmbiguousChapterError as e:
                 console.print(f"[red]Ambiguous chapter: '{e.chapter_name}' exists in multiple volumes[/red]")
                 console.print("[yellow]Please specify the volume:[/yellow]")

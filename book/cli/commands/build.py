@@ -37,15 +37,20 @@ class BuildCommand:
         """Open the build output using the system's default application.
 
         Uses shared rule: PDF = any .pdf, EPUB = any .epub, HTML = index.html.
+        Always prints a clickable "Output created:" line for Cursor/VSCode terminals.
         """
-        if not self.open_after:
-            return
-
         from cli.core.config import get_output_file
         target = get_output_file(output_dir, format_type)
 
         if target is None:
-            console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
+            if self.open_after:
+                console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
+            return
+
+        # Print absolute path — Cursor/VSCode terminals auto-linkify file paths
+        console.print(f"Output created: {target.resolve()}")
+
+        if not self.open_after:
             return
 
         console.print(f"[cyan]🔗 Opening {target.name}...[/cyan]")
@@ -261,6 +266,8 @@ class BuildCommand:
             # Auto-prefix chapter names with volume to disambiguate
             prefixed_chapters = []
             for ch in chapter_names:
+                # Normalize: strip .qmd extension so find_chapter_file gets a stem
+                ch = ch.removesuffix(".qmd")
                 # Only prefix if not already prefixed
                 if not ch.startswith(f"{volume}/"):
                     prefixed_chapters.append(f"{volume}/{ch}")

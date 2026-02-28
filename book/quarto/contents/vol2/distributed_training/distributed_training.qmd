@@ -1282,9 +1282,7 @@ When doubling the number of GPUs yields only 1.5× speedup, the missing 25% of c
 
 Communication overhead represents the primary bottleneck in distributed training systems. AllReduce operations consume 10--40% of total training time in data parallel systems, and this overhead grows with cluster size. BERT-Large on 128 GPUs experiences communication overhead reaching 35% of total runtime, while GPT-3 scale models experience 55% overhead on 1,024 GPUs.
 
-::: {.callout-definition title="AllReduce Communication Complexity"}
-AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth ($\beta$). Ring AllReduce achieves bandwidth-optimal communication with $(N-1)/N$ utilization, while tree-based approaches offer lower latency at $O(\log N)$ steps. The choice depends on message size: tree wins for latency-dominated small messages, ring wins for bandwidth-dominated large gradients. Modern implementations like NCCL use hierarchical algorithms that combine tree latency within nodes and ring bandwidth between nodes. @sec-collective-communication provides detailed algorithm analysis including complexity formulas, hierarchical variants, and topology-aware optimizations for production-scale collective operations.
-:::
+AllReduce complexity depends on two components: latency ($\alpha$) and bandwidth ($\beta$). Ring AllReduce achieves bandwidth-optimal communication with $(N-1)/N$ utilization, while tree-based approaches offer lower latency at $O(\log N)$ steps. The choice depends on message size: tree algorithms win for latency-dominated small messages, ring algorithms win for bandwidth-dominated large gradients. Modern implementations like NCCL use hierarchical algorithms that combine tree latency within nodes and ring bandwidth between nodes. @sec-collective-communication provides detailed algorithm analysis, including complexity formulas, hierarchical variants, and topology-aware optimizations for production-scale collective operations.
 
 Interconnect selection determines whether large-scale deployments remain compute-bound or collapse into communication-bound regimes.
 
@@ -1516,7 +1514,7 @@ A fundamental question in distributed training is: when does adding more workers
 
 ::: {.callout-definition title="Critical Batch Size"}
 
-***Critical Batch Size ($B*$)***\index{Critical Batch Size!definition} is the batch size at which the **Gradient Noise Scale** equals the **Gradient Signal Scale**.
+***Critical Batch Size***\index{Critical Batch Size!definition} ($B^*$) is the batch size at which the **Gradient Noise Scale** equals the **Gradient Signal Scale**.
 
 1.  **Significance (Quantitative):** It marks the transition point for **Parallel Scaling Efficiency**. Below $B*$, increasing the batch size linearly improves the convergence per step. Above $B*$, larger batches yield diminishing returns, requiring proportionally more samples ($D_{\text{vol}}$) to reach the same loss.
 2.  **Distinction (Durable):** Unlike the **Memory-Limited Batch Size** (determined by $BW$ and capacity), the Critical Batch Size is an **Algorithmic Property** of the model and dataset.
@@ -2159,14 +2157,14 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 
 This distinction is critical for hardware planning: tensor parallelism demands NVLink-class bandwidth, while pipeline parallelism tolerates InfiniBand between stages.
 
-::: {.callout-definition title="Tensor vs. Pipeline Parallelism"}
-Modern literature distinguishes two forms of model parallelism:
+::: {.callout-perspective title="Tensor vs. Pipeline Parallelism: A Design Choice"}
+Both strategies split the model, but they split at different granularities and impose different network requirements:
 
-**Tensor Parallelism** (intra-layer): Splits individual operations (matrix multiplies, attention heads) across devices. Requires high-bandwidth interconnects (NVLink) due to fine-grained communication within each layer.
+**Tensor Parallelism** (intra-layer) splits individual operations (matrix multiplies, attention heads) across devices. Every forward pass requires a synchronization within each layer, so inter-GPU bandwidth must be NVLink-class (~900 GB/s) to avoid stalling on communication.
 
-**Pipeline Parallelism** (inter-layer): Assigns complete layers to different devices. Requires only point-to-point communication between pipeline stages, tolerating lower bandwidth interconnects.
+**Pipeline Parallelism** (inter-layer) assigns complete layers to different devices, communicating only at stage boundaries. These boundary activations are much smaller than gradient tensors, so InfiniBand-class bandwidth (~25–50 GB/s) is sufficient between nodes.
 
-The Megatron-LM framework popularized this distinction, using tensor parallelism within nodes (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand).
+Megatron-LM [@shoeybi2019megatron] popularized the resulting hybrid: tensor parallelism within each node (8 GPUs on NVLink) and pipeline parallelism across nodes (InfiniBand). The individual definitions for each strategy appear in @sec-distributed-training-tensor-parallelism and @sec-distributed-training-pipeline-parallelism.
 :::
 
 Megatron-style tensor parallelism[^fn-megatron] [@shoeybi2019megatron] partitions matrix multiplications in two ways. Examine @fig-tensor-parallel-split: column-parallel splitting divides weight matrices along columns for QKV projections, allowing independent computation across GPUs, while row-parallel splitting divides along rows for output layers, requiring AllReduce to combine partial sums at the end of each block.

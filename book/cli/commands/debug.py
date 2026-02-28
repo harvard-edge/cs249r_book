@@ -146,6 +146,48 @@ def _safe_artifact_stem(stem: str) -> str:
     return cleaned or "artifact"
 
 
+def _print_step_result(success: bool, duration: float, warnings: List[str]) -> None:
+    """Print PASS/WARN status and any Quarto warnings for a build step."""
+    if warnings:
+        console.print(f"[yellow]WARN[/yellow] ({duration:.1f}s)")
+        for w in warnings:
+            console.print(f"         [yellow]⚠ {w}[/yellow]")
+    else:
+        console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+
+
+# Quarto warning patterns to surface even when the build succeeds.
+# Each entry is (pattern, human_label).
+_QUARTO_WARN_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"Duplicate note reference '([^']+)'", re.IGNORECASE),
+        "Duplicate footnote reference",
+    ),
+    (
+        re.compile(r"The following string was found in the document: :::", re.IGNORECASE),
+        "Unclosed/stray fenced div (:::)",
+    ),
+]
+
+
+def _extract_quarto_warnings(output: str) -> List[str]:
+    """Scan build output for known Quarto warning patterns.
+
+    Returns a deduplicated list of human-readable warning strings.
+    """
+    found: List[str] = []
+    seen: set = set()
+    for pattern, label in _QUARTO_WARN_PATTERNS:
+        for m in pattern.finditer(output):
+            # Include the captured group (e.g., fn ID) if present
+            detail = m.group(1) if m.lastindex else ""
+            msg = f"{label}: {detail}" if detail else label
+            if msg not in seen:
+                seen.add(msg)
+                found.append(msg)
+    return found
+
+
 def _build_and_check(
     book_dir: Path,
     chapter_name: str,
@@ -155,11 +197,11 @@ def _build_and_check(
     verbose: bool = False,
     artifact_dir: Optional[Path] = None,
     artifact_stem: Optional[str] = None,
-) -> Tuple[bool, float, str]:
+) -> Tuple[bool, float, str, List[str]]:
     """Run a single chapter build and check if output was created.
 
     Returns:
-        (success, duration_seconds, error_snippet)
+        (success, duration_seconds, error_snippet, quarto_warnings)
     """
     cmd = [
         "./binder",
@@ -173,7 +215,7 @@ def _build_and_check(
     output_dir = _get_output_dir(book_dir, format_type, volume)
     if not output_dir:
         log_file.write_text("Unknown format type\n")
-        return False, 0.0, "Unknown format type"
+        return False, 0.0, "Unknown format type", []
 
     # Delete previous output to ensure clean test (same rule: any .pdf, any .epub, index.html)
     from cli.core.config import get_output_file
@@ -206,6 +248,8 @@ def _build_and_check(
 
         # Success = output file present (any .pdf, any .epub, or index.html)
         resolved = get_output_file(output_dir, format_type)
+        combined = result.stdout + result.stderr
+        quarto_warnings = _extract_quarto_warnings(combined)
 
         if resolved is not None and resolved.exists():
             if artifact_dir is not None:
@@ -220,20 +264,19 @@ def _build_and_check(
                     console.print(
                         f"[yellow]⚠️ Failed to save debug artifact for {chapter_name}: {exc}[/yellow]"
                     )
-            return True, duration, ""
+            return True, duration, "", quarto_warnings
         else:
-            combined = result.stdout + result.stderr
             error_lines = combined.strip().split("\n")[-20:]
-            return False, duration, "\n".join(error_lines)
+            return False, duration, "\n".join(error_lines), quarto_warnings
 
     except subprocess.TimeoutExpired:
         duration = time.time() - start
         log_file.write_text(f"TIMEOUT after {duration:.0f}s\nCommand: {' '.join(cmd)}")
-        return False, duration, "TIMEOUT: Build exceeded 10 minutes"
+        return False, duration, "TIMEOUT: Build exceeded 10 minutes", []
     except Exception as e:
         duration = time.time() - start
         log_file.write_text(f"EXCEPTION: {e}\nCommand: {' '.join(cmd)}")
-        return False, duration, f"EXCEPTION: {e}"
+        return False, duration, f"EXCEPTION: {e}", []
 
 
 class DebugCommand:
@@ -352,7 +395,7 @@ class DebugCommand:
             chapter_log_dir.mkdir(parents=True, exist_ok=True)
             log_file = chapter_log_dir / f"{chapter_name}.log"
 
-            success, duration, error = _build_and_check(
+            success, duration, error, warnings = _build_and_check(
                 self.book_dir,
                 chapter_name,
                 volume,
@@ -364,11 +407,19 @@ class DebugCommand:
             )
 
             if success:
-                console.print(f" [green]PASS[/green] ({duration:.1f}s)")
+                if warnings:
+                    console.print(f" [yellow]WARN[/yellow] ({duration:.1f}s)")
+                    for w in warnings:
+                        console.print(f"         [yellow]⚠ {w}[/yellow]")
+                else:
+                    console.print(f" [green]PASS[/green] ({duration:.1f}s)")
                 passed += 1
             else:
                 console.print(f" [red]FAIL[/red] ({duration:.1f}s)")
                 failures.append((chapter_name, error))
+                if warnings:
+                    for w in warnings:
+                        console.print(f"         [yellow]⚠ {w}[/yellow]")
                 if self.verbose and error:
                     for line in error.strip().split("\n")[-3:]:
                         console.print(f"         [dim]{line}[/dim]")
@@ -510,7 +561,7 @@ class DebugCommand:
         content = self._assemble_content(chapter, -1)
         qmd_path.write_text(content, encoding="utf-8")
         log_file = log_dir / "binary_preamble.log"
-        success, duration, _ = _build_and_check(
+        success, duration, _, warnings = _build_and_check(
             self.book_dir,
             chapter_name,
             volume,
@@ -523,14 +574,14 @@ class DebugCommand:
         if not success:
             console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
             return -1
-        console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+        _print_step_result(success, duration, warnings)
 
         # Step 2: Test full chapter (confirm it actually fails)
         console.print(f"  [dim][full][/dim] All {num_sections} sections", end="  ")
         content = self._assemble_content(chapter, num_sections - 1)
         qmd_path.write_text(content, encoding="utf-8")
         log_file = log_dir / "binary_full.log"
-        success, duration, _ = _build_and_check(
+        success, duration, _, warnings = _build_and_check(
             self.book_dir,
             chapter_name,
             volume,
@@ -541,9 +592,11 @@ class DebugCommand:
             artifact_stem="full",
         )
         if success:
-            console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+            _print_step_result(success, duration, warnings)
             return None
         console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
+        for w in warnings:
+            console.print(f"         [yellow]⚠ {w}[/yellow]")
 
         # Step 3: Binary search
         lo, hi = 0, num_sections - 1
@@ -560,7 +613,7 @@ class DebugCommand:
             content = self._assemble_content(chapter, mid)
             qmd_path.write_text(content, encoding="utf-8")
             log_file = log_dir / f"binary_step_{build_count:02d}_upto_{mid}.log"
-            success, duration, _ = _build_and_check(
+            success, duration, _, warnings = _build_and_check(
                 self.book_dir,
                 chapter_name,
                 volume,
@@ -572,10 +625,12 @@ class DebugCommand:
             )
 
             if success:
-                console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+                _print_step_result(success, duration, warnings)
                 lo = mid + 1
             else:
                 console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
+                for w in warnings:
+                    console.print(f"         [yellow]⚠ {w}[/yellow]")
                 hi = mid
 
         console.print(f"\n[dim]Isolated in {build_count} builds (binary search).[/dim]")

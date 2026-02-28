@@ -339,7 +339,8 @@ GPT2_HIDDEN_DIM = 1600
 GPT3_PARAMS = 175e9 * param
 GPT3_TRAINING_OPS = 3.14e23 * flop
 GPT3_TRAINING_TOKENS = 300e9 * count
-GPT3_TRAINING_DAYS_REF = 25 # Days on 1024 A100s
+GPT3_TRAINING_DAYS_REF = 25 * day # Days on 1024 A100s
+GPT3_TRAINING_ENERGY_MWH = 1287 # MWh, estimated per Patterson et al. (2021)
 
 # GPT-4 (Reference) - Note: Unofficial public estimates
 GPT4_EST_PARAMS = 1.76e12 * param
