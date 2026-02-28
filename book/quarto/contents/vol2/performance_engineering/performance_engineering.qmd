@@ -856,6 +856,46 @@ Disaggregated serving addresses this mismatch by running prefill and decode on s
 
 The performance characteristics of each phase determine which optimization techniques apply. FlashAttention provides the largest speedup during prefill, where the quadratic attention computation dominates. KV cache quantization and speculative decoding apply exclusively to the decode phase. Precision engineering (FP8/INT4 weights) benefits both phases, but through different mechanisms: prefill benefits from doubled compute throughput (FP8 Tensor Cores), while decode benefits from doubled effective bandwidth (half the bytes per weight read).
 
+```{python}
+#| label: roofline-diagnostic
+#| echo: false
+from mlsys.formatting import fmt, check
+
+class RooflineDiagnostic:
+    """Roofline analysis for 70B LLM decode on 8× H100."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    params_per_gpu_B = 17.5    # 70B model, TP across GPUs → 17.5B per shard
+    bytes_fp16 = 2
+    h100_bw_tbs = 3.35         # H100 HBM3 bandwidth (TB/s)
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    flops_B = 2 * params_per_gpu_B                         # 35 (×10^9 FLOP)
+    weight_gb = params_per_gpu_B * bytes_fp16              # 35 GB
+    arith_intensity = flops_B / weight_gb                   # 1.0 FLOP/byte
+    decode_time_ms = weight_gb / (h100_bw_tbs * 1000) * 1000
+    tokens_per_sec = 1000.0 / decode_time_ms
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(arith_intensity - 1.0) < 0.01, f"AI should be 1.0, got {arith_intensity}")
+    check(9 < decode_time_ms < 12, f"Decode time should be ~10.4ms, got {decode_time_ms:.1f}")
+    check(90 < tokens_per_sec < 100, f"Token rate should be ~96, got {tokens_per_sec:.0f}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    flops_B_str = f"{flops_B:.0f}"
+    weight_gb_str = f"{weight_gb:.0f}"
+    ai_str = f"{arith_intensity:.1f}"
+    decode_ms_str = f"{decode_time_ms:.1f}"
+    tps_str = f"{int(tokens_per_sec)}"
+
+# ┌── EXPORTS ─────────────────────────────────────────────────
+rd_flops = RooflineDiagnostic.flops_B_str
+rd_weight = RooflineDiagnostic.weight_gb_str
+rd_ai = RooflineDiagnostic.ai_str
+rd_decode = RooflineDiagnostic.decode_ms_str
+rd_tps = RooflineDiagnostic.tps_str
+```
+
 ::: {.callout-notebook title="The Roofline Diagnostic"}
 
 **Problem**: You are deploying a 70B parameter LLM on 8$\times$ H100 GPUs with tensor parallelism. At batch size 1, each GPU holds approximately 17.5B parameters in FP16 (35 GB of weights). Each decode step reads all weights to produce one token. What is the achieved arithmetic intensity, and what is the theoretical maximum token generation rate?
@@ -863,10 +903,10 @@ The performance characteristics of each phase determine which optimization techn
 **The Math**:
 
 *Step 1: Arithmetic Intensity.*
-Each decode step per GPU: FLOPs $= 2 \times 17.5 \times 10^9 = 35 \times 10^9$ FLOP. Bytes loaded $= 17.5 \times 10^9 \times 2 = 35 \times 10^9$ bytes $= 35$ GB.
+Each decode step per GPU: FLOPs $= 2 \times 17.5 \times 10^9 =$ `{python} rd_flops` $\times 10^9$ FLOP. Bytes loaded $= 17.5 \times 10^9 \times 2 =$ `{python} rd_weight` $\times 10^9$ bytes $=$ `{python} rd_weight` GB.
 
 $$
-I = \frac{35 \times 10^9 \text{ FLOP}}{35 \times 10^9 \text{ bytes}} = 1.0 \text{ FLOP/byte}
+I = \frac{`{python} rd_flops` \times 10^9 \text{ FLOP}}{`{python} rd_weight` \times 10^9 \text{ bytes}} = `{python} rd_ai` \text{ FLOP/byte}
 $$
 
 This is far below the H100 ridge point of ~295 FLOP/byte. The operation is deeply memory-bound.
@@ -875,10 +915,10 @@ This is far below the H100 ridge point of ~295 FLOP/byte. The operation is deepl
 Since the operation is memory-bound, performance is limited by bandwidth, not compute:
 
 $$
-t_{\text{decode}} = \frac{35 \text{ GB}}{3.35 \text{ TB/s}} \approx 10.4 \text{ ms per token}
+t_{\text{decode}} = \frac{`{python} rd_weight` \text{ GB}}{3.35 \text{ TB/s}} \approx `{python} rd_decode` \text{ ms per token}
 $$
 
-This yields approximately 96 tokens/second per GPU, or about 96 tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this to 40--70 tokens/second.
+This yields approximately `{python} rd_tps` tokens/second per GPU, or about `{python} rd_tps` tokens/second for the model (since tensor parallelism does not multiply throughput for memory-bound decode). In practice, overheads from KV cache reads and NVLink synchronization reduce this to 40--70 tokens/second.
 
 **Takeaway**: At batch size 1, fewer than 0.4% of the H100's FP16 FLOPS are in use. The only ways to improve are: (a) increase batch size to amortize weight reads, (b) reduce weight bytes via quantization, or (c) use speculative decoding to generate multiple tokens per weight read.
 
@@ -1338,6 +1378,9 @@ class KVCacheAnalysis:
     max_batch_fp16_str = f"{max_batch_fp16_val}"
     max_batch_int8_str = f"{max_batch_int8_val}"
     batch_ratio_str = f"{int(batch_ratio)}"
+    avail_fp16_gb_str = f"{int(avail_fp16_gb)}"
+    weight_int4_gb_str = f"{weight_int4_shard_gb}"
+    avail_int8_gb_str = f"{avail_int8_gb:.2f}"
 
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 kv_fp16_gb = KVCacheAnalysis.kv_fp16_gb_val
@@ -1345,6 +1388,9 @@ kv_fp16_gb_str = KVCacheAnalysis.kv_fp16_gb_str
 max_batch_fp16_str = KVCacheAnalysis.max_batch_fp16_str
 max_batch_int8_str = KVCacheAnalysis.max_batch_int8_str
 batch_ratio_str = KVCacheAnalysis.batch_ratio_str
+avail_fp16_gb_str = KVCacheAnalysis.avail_fp16_gb_str
+weight_int4_gb_str = KVCacheAnalysis.weight_int4_gb_str
+avail_int8_gb_str = KVCacheAnalysis.avail_int8_gb_str
 ```
 
 ::: {.callout-notebook title="The Precision Dividend"}
@@ -1354,16 +1400,16 @@ batch_ratio_str = KVCacheAnalysis.batch_ratio_str
 **Before optimization** (all FP16):
 
 - Weights: 35 GB/GPU
-- Available for KV cache: $80 - 35 = 45$ GB/GPU
+- Available for KV cache: $80 - 35 =$ `{python} avail_fp16_gb_str` GB/GPU
 - KV cache per request: `{python} kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{kv_fp16_gb / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor 45 /$ `{python} f"{kv_fp16_gb / 4:.1f}"` $\rfloor \approx$ `{python} max_batch_fp16_str` requests
+- Maximum batch size: $\lfloor$ `{python} avail_fp16_gb_str` $/$ `{python} f"{kv_fp16_gb / 4:.1f}"` $\rfloor \approx$ `{python} max_batch_fp16_str` requests
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
-- Weights: 35 GB$\times$ (4/16) = 8.75 GB/GPU (INT4)
-- Available for KV cache: $80 - 8.75 = 71.25$ GB/GPU
+- Weights: 35 GB $\times$ (4/16) = `{python} weight_int4_gb_str` GB/GPU (INT4)
+- Available for KV cache: $80 -$ `{python} weight_int4_gb_str` $=$ `{python} avail_int8_gb_str` GB/GPU
 - KV cache per request (INT8): `{python} f"{kv_fp16_gb / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor 71.25 /$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` $\rfloor \approx$ `{python} max_batch_int8_str` requests
+- Maximum batch size: $\lfloor$ `{python} avail_int8_gb_str` $/$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` $\rfloor \approx$ `{python} max_batch_int8_str` requests
 
 **Takeaway**: Precision engineering does not just make individual operations faster; it fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound. This single optimization can increase throughput by `{python} batch_ratio_str`$\times$ or more.
 
@@ -1518,6 +1564,58 @@ The real power of Triton emerges when fusing multiple operations. A Triton kerne
 
 Triton's adoption has accelerated rapidly since its integration into PyTorch's TorchInductor backend. When `torch.compile` identifies a fusion opportunity that requires a custom kernel, TorchInductor automatically generates Triton code for the fused operation. This means that many of the fusion benefits described in this section are available to users through a single `torch.compile` call, without writing any Triton code directly. For advanced use cases where the compiler's heuristics are insufficient, hand-written Triton kernels provide a middle ground between the accessibility of PyTorch and the performance of hand-tuned CUDA.
 
+```{python}
+#| label: compilation-dividend
+#| echo: false
+from mlsys.formatting import fmt, check
+
+class CompilationDividend:
+    """torch.compile speedup analysis for 13B model."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    base_tps = 120             # baseline tokens/second (eager mode)
+    elementwise_frac = 0.35    # fraction of time in element-wise kernels
+    launch_frac = 0.15         # fraction of time in launch overhead
+    gemm_frac = 0.50           # fraction of time in GEMM
+    fusion_reduction = 0.70    # element-wise time reduction from fusion
+    launch_reduction = 0.80    # launch overhead reduction from compilation
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    time_per_token_ms = 1000.0 / base_tps
+    _tpt = round(time_per_token_ms, 2)     # 8.33 — rounded for step-by-step display
+    gemm_ms = _tpt * gemm_frac
+    elem_ms = _tpt * elementwise_frac * (1 - fusion_reduction)
+    launch_ms = _tpt * launch_frac * (1 - launch_reduction)
+    new_time_ms = gemm_ms + elem_ms + launch_ms
+    new_tps = 1000.0 / new_time_ms
+    speedup = new_tps / base_tps
+    gemm_share_post = gemm_ms / new_time_ms * 100
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(new_tps > base_tps, "Compilation should improve throughput")
+    check(1.5 < speedup < 1.7, f"Speedup should be ~1.58, got {speedup:.2f}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    tpt_str = f"{_tpt:.2f}"
+    gemm_ms_str = f"{gemm_ms:.2f}"
+    elem_ms_str = f"{elem_ms:.2f}"
+    launch_ms_str = f"{launch_ms:.2f}"
+    new_time_str = f"{new_time_ms:.2f}"
+    new_tps_str = f"{round(new_tps)}"
+    speedup_str = f"{speedup:.2f}"
+    gemm_share_str = f"{round(gemm_share_post)}"
+
+# ┌── EXPORTS ─────────────────────────────────────────────────
+cd_tpt = CompilationDividend.tpt_str
+cd_gemm = CompilationDividend.gemm_ms_str
+cd_elem = CompilationDividend.elem_ms_str
+cd_launch = CompilationDividend.launch_ms_str
+cd_new_t = CompilationDividend.new_time_str
+cd_new_tps = CompilationDividend.new_tps_str
+cd_speedup = CompilationDividend.speedup_str
+cd_gemm_share = CompilationDividend.gemm_share_str
+```
+
 ::: {.callout-notebook title="The Compilation Dividend"}
 
 **Problem**: You deploy a 13B parameter model for inference. Without compilation, the PyTorch eager mode processes 120 tokens/second on a single H100. The Nsight Systems trace reveals that 35% of step time is spent in element-wise kernels (LayerNorm, GELU, residual additions) and 15% is kernel launch overhead. You apply `torch.compile` with the `max-autotune` backend. Estimate the new throughput.
@@ -1528,15 +1626,15 @@ Triton's adoption has accelerated rapidly since its integration into PyTorch's T
 Element-wise kernels (35%) and launch overhead (15%) total 50% of execution time. torch.compile fuses element-wise operations (reducing their time by approximately 70% due to eliminated HBM round-trips) and reduces kernel launches (eliminating most launch overhead).
 
 *Step 2: Estimate post-compilation time.*
-Original time per token: $1/120 = 8.33$ ms.
+Original time per token: $1/120 =$ `{python} cd_tpt` ms.
 
-- GEMM time (unchanged): $8.33 \times 0.50 = 4.17$ ms
-- Element-wise time (70% reduction): $8.33 \times 0.35 \times 0.30 = 0.87$ ms
-- Launch overhead (80% reduction): $8.33 \times 0.15 \times 0.20 = 0.25$ ms
+- GEMM time (unchanged): `{python} cd_tpt` $\times 0.50 =$ `{python} cd_gemm` ms
+- Element-wise time (70% reduction): `{python} cd_tpt` $\times 0.35 \times 0.30 =$ `{python} cd_elem` ms
+- Launch overhead (80% reduction): `{python} cd_tpt` $\times 0.15 \times 0.20 =$ `{python} cd_launch` ms
 
-New time per token: $4.17 + 0.87 + 0.25 = 5.29$ ms, yielding approximately 189 tokens/second.
+New time per token: `{python} cd_gemm` $+$ `{python} cd_elem` $+$ `{python} cd_launch` $=$ `{python} cd_new_t` ms, yielding approximately `{python} cd_new_tps` tokens/second.
 
-**Takeaway**: torch.compile delivers a 1.58$\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (79% of step time), indicating that further improvement requires either precision reduction or batching.
+**Takeaway**: torch.compile delivers a `{python} cd_speedup`$\times$ speedup by fusing element-wise operations and reducing launch overhead, without touching the GEMM kernels. The remaining bottleneck is now the GEMM itself (`{python} cd_gemm_share`% of step time), indicating that further improvement requires either precision reduction or batching.
 
 :::
 

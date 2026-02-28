@@ -30,15 +30,127 @@ The tables below are organized into thematic groups --- cluster configurations, 
 
 Because fleet-scale parameters evolve as infrastructure matures, these tables also serve as a change log: updating a single value in `mlsys/constants.py` propagates the change to every calculation in every chapter automatically. The following worked example demonstrates how to combine these constants for a quick fleet-scale estimate.
 
+```{python}
+#| label: fleet-napkin-math
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FLEET NAPKIN MATH EXAMPLES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout "Napkin Math with These Constants"
+# │
+# │ Goal:    Compute three fleet-scale estimates using book constants.
+# │ Show:    Failure rate, AllReduce time, carbon footprint.
+# │ How:     Scalar arithmetic from mlsys.constants.
+# │
+# │ Imports: mlsys.constants (...), mlsys.formatting (fmt, check)
+# │ Exports: fleet_n_small_str, fleet_mttf_str, fleet_fail_hr_str,
+# │          fleet_fail_day_str, fleet_n_large_str, fleet_fail_large_str,
+# │          fleet_model_str, fleet_model_params_str, fleet_bf16_str,
+# │          fleet_grad_gb_str, fleet_ib_bw_str, fleet_allreduce_str,
+# │          fleet_n_carbon_str, fleet_tdp_str, fleet_pue_str,
+# │          fleet_facility_mw_str, fleet_carbon_q_str, fleet_co2_q_str,
+# │          fleet_carbon_p_str, fleet_co2_p_str, fleet_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    GPU_MTTF_HOURS, H100_TDP, PUE_BEST_AIR,
+    CARBON_QUEBEC_GCO2_KWH, CARBON_POLAND_GCO2_KWH,
+    INFINIBAND_NDR_BW_GBS, watt,
+)
+from mlsys.formatting import fmt, check
+
+class FleetNapkin:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus_small = 8_192
+    n_gpus_large = 100_000
+    mttf_h = GPU_MTTF_HOURS
+    model_params_b = 70
+    bf16_bytes = 2
+    ib_bw_gbs = INFINIBAND_NDR_BW_GBS
+    n_gpus_carbon = 10_000
+    tdp_w = H100_TDP.m_as(watt)
+    pue = PUE_BEST_AIR
+    carbon_quebec = CARBON_QUEBEC_GCO2_KWH
+    carbon_poland = CARBON_POLAND_GCO2_KWH
+    hours_per_month = 720
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Failure rate
+    fail_per_hour = n_gpus_small / mttf_h
+    fail_per_day = fail_per_hour * 24
+    fail_large_per_day = (n_gpus_large / mttf_h) * 24
+
+    # AllReduce time
+    grad_gb = model_params_b * 1e9 * bf16_bytes / 1e9
+    allreduce_s = 2 * grad_gb / ib_bw_gbs
+
+    # Carbon footprint
+    facility_mw = n_gpus_carbon * tdp_w * pue / 1e6
+    co2_quebec_tonnes = facility_mw * 1e3 * hours_per_month * carbon_quebec / 1e6
+    co2_poland_tonnes = facility_mw * 1e3 * hours_per_month * carbon_poland / 1e6
+    carbon_ratio = co2_poland_tonnes / co2_quebec_tonnes
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(fail_per_day > 1, "Should see multiple failures per day")
+    check(allreduce_s > 1, "AllReduce should take multiple seconds")
+    check(carbon_ratio > 30, "Poland/Quebec ratio should be large")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    n_small_str = f"{n_gpus_small:,}"
+    mttf_str = f"{mttf_h:,}"
+    fail_hr_str = f"{fail_per_hour:.2f}"
+    fail_day_str = f"~{fail_per_day:.0f}"
+    n_large_str = f"{n_gpus_large:,}"
+    fail_large_str = f"~{fail_large_per_day:.0f}"
+
+    model_str = f"{model_params_b}B"
+    bf16_str = f"{bf16_bytes}"
+    grad_gb_str = f"{grad_gb:.0f}"
+    ib_bw_str = f"{ib_bw_gbs}"
+    allreduce_str = f"{allreduce_s:.1f}"
+
+    n_carbon_str = f"{n_gpus_carbon:,}"
+    tdp_str = f"{tdp_w:.0f}"
+    pue_str = f"{pue}"
+    facility_mw_str = f"{facility_mw:.2f}"
+    carbon_q_str = f"{carbon_quebec}"
+    co2_q_str = f"{co2_quebec_tonnes:.0f}"
+    carbon_p_str = f"{carbon_poland}"
+    co2_p_str = f"{co2_poland_tonnes:,.0f}"
+    ratio_str = f"{carbon_ratio:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────
+fleet_n_small_str = FleetNapkin.n_small_str
+fleet_mttf_str = FleetNapkin.mttf_str
+fleet_fail_hr_str = FleetNapkin.fail_hr_str
+fleet_fail_day_str = FleetNapkin.fail_day_str
+fleet_n_large_str = FleetNapkin.n_large_str
+fleet_fail_large_str = FleetNapkin.fail_large_str
+fleet_model_str = FleetNapkin.model_str
+fleet_model_params_str = f"{FleetNapkin.model_params_b}"
+fleet_bf16_str = FleetNapkin.bf16_str
+fleet_grad_gb_str = FleetNapkin.grad_gb_str
+fleet_ib_bw_str = FleetNapkin.ib_bw_str
+fleet_allreduce_str = FleetNapkin.allreduce_str
+fleet_n_carbon_str = FleetNapkin.n_carbon_str
+fleet_tdp_str = FleetNapkin.tdp_str
+fleet_pue_str = FleetNapkin.pue_str
+fleet_facility_mw_str = FleetNapkin.facility_mw_str
+fleet_carbon_q_str = FleetNapkin.carbon_q_str
+fleet_co2_q_str = FleetNapkin.co2_q_str
+fleet_carbon_p_str = FleetNapkin.carbon_p_str
+fleet_co2_p_str = FleetNapkin.co2_p_str
+fleet_ratio_str = FleetNapkin.ratio_str
+```
+
 ::: {.callout-notebook title="Napkin Math with These Constants"}
 
 The constants in this appendix are designed for quick distributed systems calculations. Three examples illustrate the pattern.
 
-**How many failures per day should you expect?** A cluster of 8,192 GPUs with each GPU having an MTTF of 50,000 hours experiences GPU failures at a rate of 8,192 / 50,000 $\approx$ 0.16 failures per hour, or roughly 4 GPU failures per day. This estimate does not include NIC, PSU, or cable failures, which collectively double the rate. At 100,000 GPUs, expect approximately 48 GPU failures per day --- failure becomes a continuous background process, not an exceptional event.
+**How many failures per day should you expect?** A cluster of `{python} fleet_n_small_str` GPUs with each GPU having an MTTF of `{python} fleet_mttf_str` hours experiences GPU failures at a rate of `{python} fleet_n_small_str` / `{python} fleet_mttf_str` $\approx$ `{python} fleet_fail_hr_str` failures per hour, or roughly `{python} fleet_fail_day_str` GPU failures per day. This estimate does not include NIC, PSU, or cable failures, which collectively double the rate. At `{python} fleet_n_large_str` GPUs, expect approximately `{python} fleet_fail_large_str` GPU failures per day --- failure becomes a continuous background process, not an exceptional event.
 
-**How long does an AllReduce of a 70B model take?** With BF16 parameters, the gradient payload is $70 \times 10^9 \times 2$ bytes = 140 GB. Over InfiniBand NDR (50 GB/s effective per port), the ring AllReduce time is approximately $2 \times$ 140 GB / 50 GB/s $\approx$ 5.6 seconds --- a significant fraction of a training step, which is why pipeline and tensor parallelism exist to shrink the gradient volume each rank must communicate.
+**How long does an AllReduce of a `{python} fleet_model_str` model take?** With BF16 parameters, the gradient payload is $`{python} fleet_model_params_str` \times 10^9 \times `{python} fleet_bf16_str`$ bytes = `{python} fleet_grad_gb_str` GB. Over InfiniBand NDR (`{python} fleet_ib_bw_str` GB/s effective per port), the ring AllReduce time is approximately $2 \times$ `{python} fleet_grad_gb_str` GB / `{python} fleet_ib_bw_str` GB/s $\approx$ `{python} fleet_allreduce_str` seconds --- a significant fraction of a training step, which is why pipeline and tensor parallelism exist to shrink the gradient volume each rank must communicate.
 
-**What is the carbon footprint of a 10,000 GPU training run?** Each H100 draws 700 W at TDP. With PUE of 1.12 (best-in-class air cooled), total facility power is $10,000\times700$ W$\times$ 1.12 = 7.84 MW. Running in Quebec (20 gCO$_2$/kWh): 7.84 MW$\times$ 720 h/month$\times$ 20 g/kWh = 113 tonnes CO$_2$ per month. The same run in Poland (820 gCO$_2$/kWh) emits 4,628 tonnes --- a 41$\times$ difference driven entirely by grid carbon intensity.
+**What is the carbon footprint of a `{python} fleet_n_carbon_str` GPU training run?** Each H100 draws `{python} fleet_tdp_str` W at TDP. With PUE of `{python} fleet_pue_str` (best-in-class air cooled), total facility power is $`{python} fleet_n_carbon_str`\times`{python} fleet_tdp_str`$ W$\times$ `{python} fleet_pue_str` = `{python} fleet_facility_mw_str` MW. Running in Quebec (`{python} fleet_carbon_q_str` gCO$_2$/kWh): `{python} fleet_facility_mw_str` MW$\times$ 720 h/month$\times$ `{python} fleet_carbon_q_str` g/kWh = `{python} fleet_co2_q_str` tonnes CO$_2$ per month. The same run in Poland (`{python} fleet_carbon_p_str` gCO$_2$/kWh) emits `{python} fleet_co2_p_str` tonnes --- a `{python} fleet_ratio_str`$\times$ difference driven entirely by grid carbon intensity.
 
 :::
 

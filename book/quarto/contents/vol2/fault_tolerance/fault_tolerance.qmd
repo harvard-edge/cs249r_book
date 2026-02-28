@@ -292,16 +292,55 @@ plt.show()
 
 The formula $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{\text{MTBF}}}$ reveals a critical scaling property: as clusters grow larger ($\text{MTBF} \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-storage) to keep $T_{\text{write}}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity.
 
+```{python}
+#| label: lego-nines-reliability
+#| echo: false
+from mlsys.formatting import fmt, check
+
+class NinesReliability:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 10_000
+    availability_pct = 99.99
+    hours_per_year = HOURS_PER_YEAR
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    downtime_min_year = (1 - availability_pct / 100) * hours_per_year * 60
+    hourly_survival = 1 - (1 / hours_per_year)
+    cluster_prob = hourly_survival ** n_gpus
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(0 < cluster_prob < 1, "Probability must be in (0,1)")
+    check(cluster_prob < 0.5, "Cluster survival must be low at scale")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    n_gpus_str = fmt(n_gpus, precision=0)
+    availability_str = f"{availability_pct}"
+    downtime_min_str = f"{int(downtime_min_year)}"
+    hours_str = fmt(hours_per_year, precision=0)
+    survival_str = f"{hourly_survival:.5f}"
+    cluster_prob_str = f"{cluster_prob:.2f}"
+    cluster_pct_str = f"{int(round(cluster_prob * 100))}"
+
+# ┌── EXPORTS (Bridge to Text) ───────────────────────────────
+nines_n_gpus = NinesReliability.n_gpus_str
+nines_availability = NinesReliability.availability_str
+nines_downtime_min = NinesReliability.downtime_min_str
+nines_hours = NinesReliability.hours_str
+nines_survival = NinesReliability.survival_str
+nines_cluster_prob = NinesReliability.cluster_prob_str
+nines_cluster_pct = NinesReliability.cluster_pct_str
+```
+
 ::: {.callout-notebook title="The 9s of Reliability"}
-**Problem**: You have a cluster of **10,000 GPUs**. Each GPU has **99.99%** availability (only 52 minutes of downtime per year). What is the probability that the **entire cluster** is up for **1 hour**?
+**Problem**: You have a cluster of **`{python} nines_n_gpus` GPUs**. Each GPU has **`{python} nines_availability`%** availability (only `{python} nines_downtime_min` minutes of downtime per year). What is the probability that the **entire cluster** is up for **1 hour**?
 
 **The Math**:
 
-1.  **Single GPU Success Probability ($P_{1h}$)**: A GPU failing once per year (8760 hours) has hourly survival prob $\approx 1 - (1/8760) = 0.99988$.
-2.  **Cluster Success Probability ($P_{cluster}$)**: $P_{cluster} = (P_{1h})^{10,000}$.
-3.  **Calculation**: $0.99988^{10000} \approx \mathbf{0.30}$.
+1.  **Single GPU Success Probability ($P_{1h}$)**: A GPU failing once per year (`{python} nines_hours` hours) has hourly survival probability $P_{1h} \approx 1 - 1/N_{\text{hours}}$ = `{python} nines_survival`.
+2.  **Cluster Success Probability ($P_{cluster}$)**: $P_{cluster} = (P_{1h})^{N}$.
+3.  **Calculation**: $(P_{1h})^{N}$ $\approx$ **`{python} nines_cluster_prob`**.
 
-**The Systems Conclusion**: Even with 99.99% reliable hardware, a 10k GPU cluster has only a **30% chance** of surviving a single hour without a failure. Relying on hardware reliability is mathematically impossible at scale. Hardware reliability alone is insufficient; software must handle failures automatically.
+**The Systems Conclusion**: Even with `{python} nines_availability`% reliable hardware, a `{python} nines_n_gpus`-GPU cluster has only a **`{python} nines_cluster_pct`% chance** of surviving a single hour without a failure. Hardware reliability alone is insufficient; software must handle failures automatically.
 :::
 
 This linear relationship between component count and failure rate has a profound implication: *scale transforms failure* from a rare event into a continuous condition.
@@ -2385,6 +2424,34 @@ Automatic recovery systems perform these steps without human intervention. Moder
 
 Recovery validation is the final and often overlooked step. After loading a checkpoint, validation confirms successful recovery by verifying model parameters match expected shapes and dtypes, running a few training steps and checking that the loss is consistent with pre-failure values, and confirming gradient computations produce expected statistics. If the loss diverges immediately after recovery, the checkpoint itself may be corrupted, requiring fallback to an earlier snapshot.
 
+```{python}
+#| label: lego-recovery-budget
+#| echo: false
+from mlsys.formatting import fmt, check
+
+class RecoveryBudget:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_detect_s = 60
+    t_restart_min = 3
+    t_load_s = 21
+    t_warmup_min = 2
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_detect_min = t_detect_s / 60
+    t_load_min = t_load_s / 60
+    t_total_min = t_detect_min + t_restart_min + t_load_min + t_warmup_min
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(t_total_min > 0, "Recovery time must be positive")
+    check(t_total_min < 30, "Recovery time should be under 30 min")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    t_total_str = f"{t_total_min:.1f}"
+
+# ┌── EXPORTS (Bridge to Text) ───────────────────────────────
+recovery_total_min = RecoveryBudget.t_total_str
+```
+
 ::: {.callout-notebook title="The Recovery Time Budget"}
 
 Consider our 175B parameter model training on 1,000 GPUs. The checkpoint size is approximately `{python} gpt3_ckpt_tb` TB (weights + Adam optimizer state). How much does a single failure event actually cost?
@@ -2396,7 +2463,7 @@ Consider our 175B parameter model training on 1,000 GPUs. The checkpoint size is
 3. **$T_{\text{load}}$**: 21 seconds (with sharded checkpointing, each of 1,000 workers reads only its `{python} gpt3_shard_gb` GB shard at 5 GB/s from local NVMe staging)
 4. **$T_{\text{warmup}}$**: 2 minutes (JIT kernel compilation, data pipeline buffer fill, TCP connection re-establishment)
 
-**Total**: $T_{\text{recovery}} \approx 1 + 3 + 0.35 + 2 \approx 6.4$ minutes per failure event.
+**Total**: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}}$ $\approx$ **`{python} recovery_total_min`** minutes per failure event.
 
 **Impact at scale**: With a 1,000-GPU cluster \text{MTBF} of 50 hours (from @tbl-cluster-mtbf-scaling), we experience $\sim$0.48 failures per day, losing $\sim$3 minutes daily—a modest 0.2% overhead. But at 10,000 GPUs with \text{MTBF} of 5 hours, we experience $\sim$4.8 failures per day, losing $\sim$31 minutes daily—a 2.1% overhead equivalent to wasting 210 GPU-hours every day. This is why recovery time optimization matters more as clusters grow.
 :::
@@ -2449,19 +2516,58 @@ The challenge is distinguishing stragglers from failures. Stragglers should trig
 
 Straggler mitigation strategies span a spectrum of aggressiveness. **Backup workers** replicate work assigned to slow workers and use the first result, trading compute for latency. **Bounded staleness** allows training to proceed with stale gradients from slow workers, accepting a small convergence penalty. **Dynamic load balancing** redistributes data shards away from slow workers, reducing their per-step workload. **Proactive replacement** uses GPU telemetry trends (rising temperature, increasing ECC error counts) to detect degrading workers and replace them before they become stragglers.
 
+```{python}
+#| label: lego-straggler-tax
+#| echo: false
+from mlsys.formatting import fmt, check
+
+class StragglerTax:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 1000
+    normal_step_s = 1.0
+    throttle_factor = 0.50       # straggler runs at 50% speed
+    gpu_cost_per_hour = 3        # $/GPU-hour
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    straggler_step_s = normal_step_s / throttle_factor
+    healthy_gpus = n_gpus - 1
+    effective_speed = 1 / straggler_step_s
+    straggler_frac_pct = 1 / n_gpus * 100
+    throughput_loss_pct = (1 - normal_step_s / straggler_step_s) * 100
+    wasted_cost_per_hour = (n_gpus * gpu_cost_per_hour
+                            * (1 - normal_step_s / straggler_step_s))
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(straggler_step_s > normal_step_s, "Straggler must be slower")
+    check(throughput_loss_pct > 0, "Must show throughput loss")
+    check(wasted_cost_per_hour > 0, "Must show wasted cost")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    n_gpus_str = fmt(n_gpus, precision=0)
+    normal_step_str = f"{normal_step_s:.1f}"
+    throttle_pct_str = f"{int(throttle_factor * 100)}"
+    straggler_step_str = f"{straggler_step_s:.1f}"
+    healthy_gpus_str = fmt(healthy_gpus, precision=0)
+    effective_speed_str = f"{effective_speed:.1f}"
+    straggler_frac_str = f"{straggler_frac_pct:.1f}"
+    throughput_loss_str = f"{int(throughput_loss_pct)}"
+    gpu_cost_str = f"{int(gpu_cost_per_hour)}"
+    wasted_cost_str = fmt(wasted_cost_per_hour, precision=0)
+```
+
 ::: {.callout-notebook title="The Straggler Tax"}
 
-Consider our 1,000-GPU cluster where a normal training iteration takes **1.0 second**. A single GPU enters a thermally throttled state, clocking down to 50% speed, and now takes **2.0 seconds** to complete its computation.
+Consider our `{python} StragglerTax.n_gpus_str`-GPU cluster where a normal training iteration takes **`{python} StragglerTax.normal_step_str` second**. A single GPU enters a thermally throttled state, clocking down to `{python} StragglerTax.throttle_pct_str`% speed, and now takes **`{python} StragglerTax.straggler_step_str` seconds** to complete its computation.
 
-Because AllReduce cannot complete until *every* rank has submitted its gradients, the other 999 healthy GPUs sit idle waiting for the straggler.
+Because AllReduce cannot complete until *every* rank has submitted its gradients, the other `{python} StragglerTax.healthy_gpus_str` healthy GPUs sit idle waiting for the straggler.
 
 **Impact:**
 
-- **Normal step time**: 1.0 second
-- **Straggler step time**: 2.0 seconds
-- **Effective cluster speed**: 1 step / 2.0s = 0.5 steps/sec
+- **Normal step time**: `{python} StragglerTax.normal_step_str` second
+- **Straggler step time**: `{python} StragglerTax.straggler_step_str` seconds
+- **Effective cluster speed**: 1 step / `{python} StragglerTax.straggler_step_str`s = `{python} StragglerTax.effective_speed_str` steps/sec
 
-A single failing device—0.1% of the hardware—has reduced the throughput of the entire cluster by **50%**. At \$3/GPU-hour, this straggler wastes \$1,500/hour in idle compute.
+A single failing device—`{python} StragglerTax.straggler_frac_str`% of the hardware—has reduced the throughput of the entire cluster by **`{python} StragglerTax.throughput_loss_str`%**. At \$`{python} StragglerTax.gpu_cost_str`/GPU-hour, this straggler wastes \$`{python} StragglerTax.wasted_cost_str`/hour in idle compute.
 
 **The lesson**: it is mathematically optimal to treat a severe straggler as a hard failure. Detecting and killing a slow node to force a restart onto healthy hardware yields higher long-term throughput than tolerating the degradation. The break-even point: if a straggler slows the cluster by more than $T_{\text{recovery}} / \text{MTBF}$ (the fraction of time spent recovering from failures), replacing it immediately is cheaper than waiting.
 :::

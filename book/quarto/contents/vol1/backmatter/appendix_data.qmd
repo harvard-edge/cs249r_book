@@ -35,106 +35,75 @@ Conventions used here follow the book-wide notation (for example, we reserve \(B
 - **When accuracy drifts silently**: Use @sec-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
 
 ```{python}
-#| label: appendix-data-setup
+#| label: data-gravity-transfer
 #| echo: false
-
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA GRAVITY TRANSFER TIMES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-data-gravity — why we ship compute to data
+# │
+# │ Goal:    Compute transfer times for 1 TB / 100 TB / 1 PB at three bandwidths.
+# │ Show:    Human-readable durations (Minutes, Hours, Days, Months).
+# │ How:     T = Volume / Bandwidth, formatted via helper.
+# │
+# │ Imports: mlsys.constants (TB, PB, Gbps, byte, BITS_PER_BYTE, time constants)
+# │ Exports: t_1tb_1g … t_1pb_100g (9 formatted time strings)
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     TB, PB, Gbps, byte,
     BITS_PER_BYTE, SECONDS_PER_MINUTE, SEC_PER_HOUR, SEC_PER_DAY,
-    KIB_TO_BYTES, MILLION, DAYS_PER_MONTH
+    DAYS_PER_MONTH
 )
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsys.formatting import check
 
-# ┌── LEGO ───────────────────────────────────────────────
-# Scenarios: Data Gravity, Serialization, Data Algebra, Long Tails
+class DataGravity:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    tb_bytes = (1 * TB).m_as(byte)
+    pb_bytes = (1 * PB).m_as(byte)
+    bw_1g = (1 * Gbps).m_as('bit/second')
+    bw_10g = (10 * Gbps).m_as('bit/second')
+    bw_100g = (100 * Gbps).m_as('bit/second')
 
-# --- Inputs (Data Gravity) ---
-tb_value = (1 * TB).m_as(byte)
-pb_value = (1 * PB).m_as(byte)
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    @staticmethod
+    def _xfer(vol_bytes, bw_bps):
+        return vol_bytes / (bw_bps / BITS_PER_BYTE)
 
-bw_1g_value = (1 * Gbps).m_as('bit/second')
-bw_10g_value = (10 * Gbps).m_as('bit/second')
-bw_100g_value = (100 * Gbps).m_as('bit/second')
+    @staticmethod
+    def _fmt_time(s):
+        if s < SECONDS_PER_MINUTE:    return f"{s:.0f} Seconds"
+        if s < SEC_PER_HOUR:          return f"{s / SECONDS_PER_MINUTE:.0f} Minutes"
+        if s < SEC_PER_DAY:           return f"{s / SEC_PER_HOUR:.1f} Hours"
+        if s < SEC_PER_DAY * DAYS_PER_MONTH: return f"{s / SEC_PER_DAY:.0f} Days"
+        return f"{s / (SEC_PER_DAY * DAYS_PER_MONTH):.0f} Months"
 
-# --- Inputs (Serialization) ---
-csv_speed_mb = 100
-parquet_speed_mb = 1000
-csv_cycles = 100
-parquet_cycles = 10
-proto_speed_mb = 300
-proto_cycles = 200
+    _x = _xfer.__func__
+    _f = _fmt_time.__func__
 
-# --- Inputs (Algebra of Data) ---
-row_size_kb = 1
-int_size_bytes = 4
-join_table_tb = 1
-join_network_tb = 2 * join_table_tb
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(_x(tb_bytes, bw_1g) > 0, "Transfer time must be positive")
 
-# --- Inputs (Long Tail) ---
-n_users = MILLION
-p99_ratio = 0.01
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    t_1tb_1g_str    = _f(_x(tb_bytes, bw_1g))
+    t_1tb_10g_str   = _f(_x(tb_bytes, bw_10g))
+    t_1tb_100g_str  = _f(_x(tb_bytes, bw_100g))
+    t_100tb_1g_str  = _f(_x(100 * tb_bytes, bw_1g))
+    t_100tb_10g_str = _f(_x(100 * tb_bytes, bw_10g))
+    t_100tb_100g_str= _f(_x(100 * tb_bytes, bw_100g))
+    t_1pb_1g_str    = _f(_x(pb_bytes, bw_1g))
+    t_1pb_10g_str   = _f(_x(pb_bytes, bw_10g))
+    t_1pb_100g_str  = _f(_x(pb_bytes, bw_100g))
 
-# --- Calculations (Shared Logic) ---
-waste_pct = (1 - (int_size_bytes / (row_size_kb * KIB_TO_BYTES))) * 100
-n_unhappy = n_users * p99_ratio
-
-def transfer_time(volume_bytes, bandwidth_bps):
-    """Calculate transfer time in seconds."""
-    return volume_bytes / (bandwidth_bps / BITS_PER_BYTE)
-
-def format_time(seconds):
-    """Format seconds into human-readable string."""
-    if seconds < SECONDS_PER_MINUTE:
-        return f"{seconds:.0f} Seconds"
-    elif seconds < SEC_PER_HOUR:
-        return f"{seconds / SECONDS_PER_MINUTE:.0f} Minutes"
-    elif seconds < SEC_PER_DAY:
-        return f"{seconds / SEC_PER_HOUR:.1f} Hours"
-    elif seconds < SEC_PER_DAY * DAYS_PER_MONTH:
-        return f"{seconds / SEC_PER_DAY:.0f} Days"
-    else:
-        return f"{seconds / (SEC_PER_DAY * DAYS_PER_MONTH):.0f} Months"
-
-t_1tb_1g_value = transfer_time(tb_value, bw_1g_value)
-t_1tb_10g_value = transfer_time(tb_value, bw_10g_value)
-t_1tb_100g_value = transfer_time(tb_value, bw_100g_value)
-t_100tb_1g_value = transfer_time(100 * tb_value, bw_1g_value)
-t_100tb_10g_value = transfer_time(100 * tb_value, bw_10g_value)
-t_100tb_100g_value = transfer_time(100 * tb_value, bw_100g_value)
-t_1pb_1g_value = transfer_time(pb_value, bw_1g_value)
-t_1pb_100g_value = transfer_time(pb_value, bw_100g_value)
-t_1pb_10g_value = transfer_time(pb_value, bw_10g_value)
-
-# =============================================================================
-# OUTPUT
-# =============================================================================
-t_1tb_1g = format_time(t_1tb_1g_value)
-t_1tb_10g = format_time(t_1tb_10g_value)
-t_1tb_100g = format_time(t_1tb_100g_value)
-t_100tb_1g = format_time(t_100tb_1g_value)
-t_100tb_10g = format_time(t_100tb_10g_value)
-t_100tb_100g = format_time(t_100tb_100g_value)
-t_1pb_1g = format_time(t_1pb_1g_value)
-t_1pb_10g = format_time(t_1pb_10g_value)
-t_1pb_100g = format_time(t_1pb_100g_value)
-
-# Formatted strings for text
-csv_speed_str = f"~{csv_speed_mb}"
-parquet_speed_str = f"> {parquet_speed_mb:,}"
-csv_cycles_str = f"~{csv_cycles}"
-parquet_cycles_str = f"~{parquet_cycles}"
-proto_speed_str = f"~{proto_speed_mb}"
-proto_cycles_str = f"~{proto_cycles}"
-
-waste_pct_str = f"{waste_pct:.1f}"
-join_table_tb_str = f"{join_table_tb}"
-join_network_tb_str = f"~{join_network_tb}"
-
-n_users_str = "1M"
-n_unhappy_str = f"{n_unhappy:,.0f}"
-
-psi_threshold = 0.2
-logit_val = 100
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+t_1tb_1g    = DataGravity.t_1tb_1g_str
+t_1tb_10g   = DataGravity.t_1tb_10g_str
+t_1tb_100g  = DataGravity.t_1tb_100g_str
+t_100tb_1g  = DataGravity.t_100tb_1g_str
+t_100tb_10g = DataGravity.t_100tb_10g_str
+t_100tb_100g= DataGravity.t_100tb_100g_str
+t_1pb_1g    = DataGravity.t_1pb_1g_str
+t_1pb_10g   = DataGravity.t_1pb_10g_str
+t_1pb_100g  = DataGravity.t_1pb_100g_str
 ```
 
 This appendix covers the principles of data engineering and statistical monitoring that keep ML systems healthy. From storage formats that determine I/O throughput to drift metrics that detect silent failures, these foundations connect directly to the data pipelines in @sec-data-engineering and the operational monitoring in @sec-ml-operations.
@@ -160,6 +129,54 @@ The transfer time for moving a dataset is simply $T = \text{Data Volume} / \text
 : **The Cost of Inertia.** Why we "ship compute to data" rather than "ship data to compute." If you have 1 PB, the network is often not a viable option. {#tbl-data-gravity}
 
 ### The Cost of Serialization {#sec-data-foundations-cost-serialization-b921}
+
+```{python}
+#| label: serialization-cost
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SERIALIZATION FORMAT PERFORMANCE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-serialization-cost — CPU decode overhead by format
+# │
+# │ Goal:    Show throughput and CPU cost for CSV, Protobuf, and Parquet.
+# │ Show:    MB/s and cycles-per-value for each format.
+# │ How:     Directly from representative benchmarks.
+# │
+# │ Imports: (none — values are empirical benchmarks)
+# │ Exports: csv_speed_str, parquet_speed_str, csv_cycles_str,
+# │          parquet_cycles_str, proto_speed_str, proto_cycles_str
+# └─────────────────────────────────────────────────────────────────────────────
+class SerializationCost:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    csv_speed_mb = 100
+    parquet_speed_mb = 1000
+    csv_cycles = 100
+    parquet_cycles = 10
+    proto_speed_mb = 300
+    proto_cycles = 200
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    speedup = parquet_speed_mb / csv_speed_mb
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    # (no derived values requiring guards)
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    csv_speed_str = f"~{csv_speed_mb}"
+    parquet_speed_str = f"> {parquet_speed_mb:,}"
+    csv_cycles_str = f"~{csv_cycles}"
+    parquet_cycles_str = f"~{parquet_cycles}"
+    proto_speed_str = f"~{proto_speed_mb}"
+    proto_cycles_str = f"~{proto_cycles}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+csv_speed_str = SerializationCost.csv_speed_str
+parquet_speed_str = SerializationCost.parquet_speed_str
+csv_cycles_str = SerializationCost.csv_cycles_str
+parquet_cycles_str = SerializationCost.parquet_cycles_str
+proto_speed_str = SerializationCost.proto_speed_str
+proto_cycles_str = SerializationCost.proto_cycles_str
+```
 
 Even after data arrives at the machine, we face one final hurdle: the serialization tax.[^fn-serialization] As @tbl-serialization-cost shows, many engineers meticulously optimize their accelerator kernels while ignoring the CPU overhead of decoding data. Parsing text-based formats like JSON or CSV is extremely CPU-intensive, often leaving the accelerator idling while the CPU struggles to convert strings into floating-point numbers.
 
@@ -288,6 +305,53 @@ The choice of file format determines whether your system is I/O bound or compute
 
 :::
 
+```{python}
+#| label: data-algebra
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA ALGEBRA COST EXAMPLES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-foundations-algebra-data-9792 — projection waste, join cost
+# │
+# │ Goal:    Quantify the I/O waste of row-format projection and join cost.
+# │ Show:    Waste percentage and network traffic for joins.
+# │ How:     Scalar arithmetic from row/column sizes.
+# │
+# │ Imports: mlsys.constants (KIB_TO_BYTES)
+# │ Exports: row_size_kb, int_size_bytes, waste_pct_str,
+# │          join_table_tb_str, join_network_tb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import KIB_TO_BYTES
+from mlsys.formatting import fmt, check
+
+class DataAlgebra:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    row_size_kb = 1
+    int_size_bytes = 4
+    join_table_tb = 1
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    waste_pct = (1 - (int_size_bytes / (row_size_kb * KIB_TO_BYTES))) * 100
+    join_network_tb = 2 * join_table_tb
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(waste_pct > 99, "Row-format waste should be >99%")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    row_size_kb_str = f"{row_size_kb}"
+    int_size_bytes_str = f"{int_size_bytes}"
+    waste_pct_str = f"{waste_pct:.1f}"
+    join_table_tb_str = f"{join_table_tb}"
+    join_network_tb_str = f"~{join_network_tb}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+row_size_kb = DataAlgebra.row_size_kb_str
+int_size_bytes = DataAlgebra.int_size_bytes_str
+waste_pct_str = DataAlgebra.waste_pct_str
+join_table_tb_str = DataAlgebra.join_table_tb_str
+join_network_tb_str = DataAlgebra.join_network_tb_str
+```
+
 ### The Algebra of Data {#sec-data-foundations-algebra-data-9792}
 
 Feature engineering is built on three SQL primitives. Understanding their computational cost prevents pipeline bottlenecks.
@@ -314,6 +378,44 @@ Once data is flowing through our pipelines, we need mathematical tools to ensure
 Your monitoring dashboard says average latency is fine, but users are complaining. Why? Because systems live in the "long tail." Statistics gives us the tools to measure uncertainty, detect drift, and handle numerical stability—three capabilities that separate robust production systems from fragile ones.
 :::
 
+```{python}
+#| label: long-tail-stats
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LONG-TAIL SCALE IMPACT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-foundations-distributions-long-tail-901f — P99 at scale
+# │
+# │ Goal:    Show how many users hit the P99 tail at production scale.
+# │ Show:    1% of 1M users = 10,000 unhappy people.
+# │ How:     Scalar multiplication.
+# │
+# │ Imports: mlsys.constants (MILLION)
+# │ Exports: n_users_str, n_unhappy_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import MILLION
+from mlsys.formatting import check
+
+class LongTailScale:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    n_users = MILLION
+    p99_ratio = 0.01
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    n_unhappy = n_users * p99_ratio
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(n_unhappy > 0, "Must have some unhappy users at scale")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    n_users_str = "1M"
+    n_unhappy_str = f"{n_unhappy:,.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+n_users_str = LongTailScale.n_users_str
+n_unhappy_str = LongTailScale.n_unhappy_str
+```
+
 ### Distributions and the Long Tail {#sec-data-foundations-distributions-long-tail-901f}
 
 In systems, the mean is often misleading. Latency distributions are almost always long-tailed (log-normal or power law). A "P99" (99th percentile) latency of 500 ms means 1% of your users experience extreme slowness, which at scale (`{python} n_users_str` users) is `{python} n_unhappy_str` unhappy people.
@@ -321,32 +423,43 @@ In systems, the mean is often misleading. Latency distributions are almost alway
 ```{python}
 #| label: tail-latency-probability
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TAIL-LATENCY SESSION PROBABILITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "The Median Experience"
+# │
+# │ Goal:    Compute probability of at least one P99 spike in a user session.
+# │ Show:    Formatted probability and inline equation.
+# │ How:     Binomial complement: P(slow) = 1 - (1 - p99)^N.
+# │
+# │ Imports: mlsys.formatting (fmt_percent, fmt, md_math)
+# │ Exports: p_slow_eq, p_slow_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt, md_math
 
-# =============================================================================
-# PURPOSE
-# =============================================================================
-# Purpose: Compute probability of at least one slow request
-# Used in: Callout "The Median Experience"
+class TailLatency:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    p_fast = 0.99
+    n_requests = 100
 
-# =============================================================================
-# INPUT
-# =============================================================================
-p_fast_value = 0.99
-n_requests_value = 100
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    p_all_fast = p_fast ** n_requests
+    p_slow = 1 - p_all_fast
 
-# =============================================================================
-# PROCESS
-# =============================================================================
-p_all_fast_value = p_fast_value ** n_requests_value
-p_slow_value = 1 - p_all_fast_value
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    # (probability must be in [0, 1])
 
-# =============================================================================
-# OUTPUT
-# =============================================================================
-p_all_fast_str = fmt(p_all_fast_value, precision=3, commas=False)
-p_slow_pct_str = fmt_percent(p_slow_value, precision=1, commas=False)
-p_slow_eq = md_math(f"P(\\text{{Slow}}) = 1 - ({p_fast_value})^{{{n_requests_value}}} \\approx 1 - {p_all_fast_value:.3f} = {p_slow_pct_str}\\%")
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    p_all_fast_str = fmt(p_all_fast, precision=3, commas=False)
+    p_slow_pct_str = fmt_percent(p_slow, precision=1, commas=False)
+    p_slow_eq = md_math(
+        f"P(\\text{{Slow}}) = 1 - ({p_fast})^{{{n_requests}}} "
+        f"\\approx 1 - {p_all_fast:.3f} = {p_slow_pct_str}\\%"
+    )
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+p_slow_eq = TailLatency.p_slow_eq
+p_slow_pct_str = TailLatency.p_slow_pct_str
 ```
 
 ::: {.callout-notebook title="The Median Experience"}
@@ -356,6 +469,36 @@ If a user session involves $N=100$ requests (common for a web page load or chat 
 Computed: P(Slow) = `{python} p_slow_pct_str`%.
 For a heavy user ($N$ is large), the "tail" latency becomes their *median* experience. This is why Google and Amazon optimize for P99.9 or P99.99.
 :::
+
+```{python}
+#| label: drift-thresholds
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DRIFT AND LOGIT THRESHOLDS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-data-foundations-measuring-drift-divergence-a6dd (PSI threshold),
+# │          @sec-data-foundations-logits-numerical-stability-13e2 (logit overflow)
+# │
+# │ Goal:    Define PSI retraining threshold and example logit value.
+# │ Show:    PSI > 0.2 triggers alert; logit = 100 for overflow demo.
+# │ How:     Industry-standard thresholds.
+# │
+# │ Imports: (none)
+# │ Exports: psi_threshold, logit_val
+# └─────────────────────────────────────────────────────────────────────────────
+class DriftThresholds:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    psi_threshold = 0.2
+    logit_val = 100
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    psi_threshold_str = f"{psi_threshold}"
+    logit_val_str = f"{logit_val}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+psi_threshold = DriftThresholds.psi_threshold_str
+logit_val = DriftThresholds.logit_val_str
+```
 
 ### Measuring Drift (Divergence) {#sec-data-foundations-measuring-drift-divergence-a6dd}
 
@@ -367,25 +510,145 @@ KL divergence[^fn-kl] measures how much information is lost if we approximate $P
 
 $$ D_{KL}(P || Q) = \sum P(x) \log \frac{P(x)}{Q(x)} $$
 
+```{python}
+#| label: kl-divergence-drift
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ KL DIVERGENCE DRIFT DETECTION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Worked Example: KL Divergence for Drift Detection",
+# │          @sec-data-foundations-measuring-drift-divergence-a6dd narrative.
+# │
+# │ Goal:    Compute KL(P||Q), KL(Q||P), and PSI for a worked drift example.
+# │ Show:    Step-by-step formulas, intermediate terms, and final values.
+# │ How:     Elementwise log-ratios, weighted sums, PSI symmetrization.
+# │
+# │ Imports: math (log), mlsys.formatting (fmt, check, md_math)
+# │ Exports: kl_scenario_str, kl_P_vec_str, kl_Q_vec_str,
+# │          kl_pq_formula, kl_pq_calc, kl_qp_formula, kl_qp_calc,
+# │          kl_psi_eq, kl_psi_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsys.formatting import fmt, check, md_math
+
+class KLDrift:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    P = [0.60, 0.30, 0.10]
+    Q = [0.45, 0.40, 0.15]
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    lr = [math.log(p / q) for p, q in zip(P, Q)]
+
+    kl_pq_t = [p * l for p, l in zip(P, lr)]
+    kl_pq = sum(kl_pq_t)
+
+    kl_qp_t = [q * (-l) for q, l in zip(Q, lr)]
+    kl_qp = sum(kl_qp_t)
+
+    diffs = [p - q for p, q in zip(P, Q)]
+    psi_t = [d * l for d, l in zip(diffs, lr)]
+    psi = sum(psi_t)
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(kl_pq > 0, "KL(P||Q) must be positive")
+    check(kl_qp > 0, "KL(Q||P) must be positive")
+    check(psi > 0, "PSI must be positive")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    P_pct = [f"{int(p * 100)}" for p in P]
+    Q_pct = [f"{int(q * 100)}" for q in Q]
+
+    def _f2(v): return f"{v:.2f}"
+    def _f3(v): return f"{v:.3f}"
+
+    P_str = [_f2(p) for p in P]
+    Q_str = [_f2(q) for q in Q]
+    lr_str = [_f3(l) for l in lr]
+
+    kl_pq_t_str = [_f3(t) for t in kl_pq_t]
+    kl_pq_str = _f3(kl_pq)
+
+    kl_qp_t_str = [_f3(t) for t in kl_qp_t]
+    kl_qp_str = _f3(kl_qp)
+
+    diff_str = [_f2(d) for d in diffs]
+    psi_t_str = [_f3(t) for t in psi_t]
+    psi_str = _f3(psi)
+
+    # Full equation strings (md_math for inline rendering)
+    scenario_str = (
+        f"{P_pct[0]}% of reviews were positive, {P_pct[1]}% negative, "
+        f"and {P_pct[2]}% neutral. After deployment, the serving distribution "
+        f"shifts to {Q_pct[0]}% positive, {Q_pct[1]}% negative, "
+        f"and {Q_pct[2]}% neutral"
+    )
+    P_vec_str = f"[{P_str[0]}, {P_str[1]}, {P_str[2]}]"
+    Q_vec_str = f"[{Q_str[0]}, {Q_str[1]}, {Q_str[2]}]"
+
+    kl_pq_formula = md_math(
+        f"D_{{KL}}(P || Q) = {P_str[0]} \\log\\frac{{{P_str[0]}}}{{{Q_str[0]}}} "
+        f"+ {P_str[1]} \\log\\frac{{{P_str[1]}}}{{{Q_str[1]}}} "
+        f"+ {P_str[2]} \\log\\frac{{{P_str[2]}}}{{{Q_str[2]}}}"
+    )
+    kl_pq_calc = md_math(
+        f"= {P_str[0]} \\times {lr_str[0]} "
+        f"+ {P_str[1]} \\times ({lr_str[1]}) "
+        f"+ {P_str[2]} \\times ({lr_str[2]}) "
+        f"= {kl_pq_t_str[0]} + ({kl_pq_t_str[1]}) + ({kl_pq_t_str[2]}) "
+        f"= {kl_pq_str}"
+    )
+    kl_qp_formula = md_math(
+        f"D_{{KL}}(Q || P) = {Q_str[0]} \\log\\frac{{{Q_str[0]}}}{{{P_str[0]}}} "
+        f"+ {Q_str[1]} \\log\\frac{{{Q_str[1]}}}{{{P_str[1]}}} "
+        f"+ {Q_str[2]} \\log\\frac{{{Q_str[2]}}}{{{P_str[2]}}}"
+    )
+    kl_qp_calc = md_math(
+        f"= {Q_str[0]} \\times ({_f3(-lr[0])}) "
+        f"+ {Q_str[1]} \\times {lr_str[0]} "
+        f"+ {Q_str[2]} \\times {_f3(abs(lr[2]))} "
+        f"= {kl_qp_t_str[0]} + {kl_qp_t_str[1]} + {kl_qp_t_str[2]} "
+        f"= {kl_qp_str}"
+    )
+    psi_eq = md_math(
+        f"\\text{{PSI}} = \\sum (P_i - Q_i) \\log\\frac{{P_i}}{{Q_i}} "
+        f"= ({diff_str[0]})({lr_str[0]}) "
+        f"+ ({diff_str[1]})({lr_str[1]}) "
+        f"+ ({diff_str[2]})({lr_str[2]}) "
+        f"= {psi_t_str[0]} + {psi_t_str[1]} + {psi_t_str[2]} "
+        f"= {psi_str}"
+    )
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────
+kl_scenario_str = KLDrift.scenario_str
+kl_P_vec_str = KLDrift.P_vec_str
+kl_Q_vec_str = KLDrift.Q_vec_str
+kl_pq_formula = KLDrift.kl_pq_formula
+kl_pq_calc = KLDrift.kl_pq_calc
+kl_qp_formula = KLDrift.kl_qp_formula
+kl_qp_calc = KLDrift.kl_qp_calc
+kl_psi_eq = KLDrift.psi_eq
+kl_psi_str = KLDrift.psi_str
+```
+
 ::: {.callout-notebook title="Worked Example: KL Divergence for Drift Detection"}
 
-**Scenario**: A sentiment classifier was trained on data where 60% of reviews were positive, 30% negative, and 10% neutral. After deployment, the serving distribution shifts to 45% positive, 40% negative, and 15% neutral.
+**Scenario**: A sentiment classifier was trained on data where `{python} kl_scenario_str`.
 
-Training distribution $P$: [0.60, 0.30, 0.10]. Serving distribution $Q$: [0.45, 0.40, 0.15].
+Training distribution $P$: `{python} kl_P_vec_str`. Serving distribution $Q$: `{python} kl_Q_vec_str`.
 
-$D_{KL}(P || Q) = 0.60 \log\frac{0.60}{0.45} + 0.30 \log\frac{0.30}{0.40} + 0.10 \log\frac{0.10}{0.15}$
+`{python} kl_pq_formula`
 
-$= 0.60 \times 0.288 + 0.30 \times (-0.288) + 0.10 \times (-0.405) = 0.173 - 0.086 - 0.041 = 0.046$ nats
+`{python} kl_pq_calc` nats
 
-$D_{KL}(Q || P) = 0.45 \log\frac{0.45}{0.60} + 0.40 \log\frac{0.40}{0.30} + 0.15 \log\frac{0.15}{0.10}$
+`{python} kl_qp_formula`
 
-$= 0.45 \times (-0.288) + 0.40 \times 0.288 + 0.15 \times 0.405 = -0.130 + 0.115 + 0.061 = 0.047$ nats
+`{python} kl_qp_calc` nats
 
 Notice the asymmetry: $D_{KL}(P||Q) \neq D_{KL}(Q||P)$. The Population Stability Index (PSI) symmetrizes this:
 
-$\text{PSI} = \sum (P_i - Q_i) \log\frac{P_i}{Q_i} = (0.15)(0.288) + (-0.10)(-0.288) + (-0.05)(-0.405) = 0.043 + 0.029 + 0.020 = 0.092$
+`{python} kl_psi_eq`
 
-Since PSI = 0.092 < 0.2, this drift is noticeable but does not yet trigger a retraining alert. However, monitoring should increase in frequency.
+Since PSI = `{python} kl_psi_str` < `{python} psi_threshold`, this drift is noticeable but does not yet trigger a retraining alert. However, monitoring should increase in frequency.
 
 :::
 
@@ -421,25 +684,122 @@ The problem is that if $z_i$ is large (e.g., `{python} logit_val`), the exponent
 
 The following example shows why this trick matters in practice, even for modest logit values:
 
+```{python}
+#| label: logsumexp-example
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOG-SUM-EXP NUMERICAL STABILITY
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Worked Example: Log-Sum-Exp in Action",
+# │          @sec-data-foundations-logits-numerical-stability-13e2 narrative.
+# │
+# │ Goal:    Demonstrate naive vs stable softmax via the Log-Sum-Exp trick.
+# │ Show:    Naive overflow risk, shifted exponentials, stable softmax values.
+# │ How:     Subtract max logit before exponentiation; compare to naive path.
+# │
+# │ Imports: math (exp, log, log10, floor), mlsys.formatting (fmt, check, md_math)
+# │ Exports: lse_z_str, lse_z0..2, lse_naive0..2_str, lse_a_str,
+# │          lse_shifted_str, lse_shifted0..2, lse_sexp0..2_str,
+# │          lse_sum_str, lse_result_str, lse_sm0..2_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsys.formatting import fmt, check, md_math
+
+class LogSumExp:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    z = [100, 101, 102]
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Naive exponentials
+    naive_exp = [math.exp(zi) for zi in z]
+
+    # Stable version: shift by max
+    a = max(z)
+    shifted = [zi - a for zi in z]
+    stable_exp = [math.exp(s) for s in shifted]
+    stable_sum = sum(stable_exp)
+    lse = a + math.log(stable_sum)
+
+    # Softmax from stable exponentials
+    softmax = [e / stable_sum for e in stable_exp]
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(abs(sum(softmax) - 1.0) < 1e-10, "Softmax must sum to 1")
+    check(all(0 <= s <= 1 for s in softmax), "Softmax values must be in [0,1]")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    z_str = f"[{z[0]}, {z[1]}, {z[2]}]"
+    a_str = f"{a}"
+
+    # Naive exponentials in scientific notation
+    def _sci(v):
+        exp = int(math.floor(math.log10(v)))
+        mantissa = v / 10**exp
+        return f"{mantissa:.1f} \\times 10^{{{exp}}}"
+
+    naive0_str = _sci(naive_exp[0])
+    naive1_str = _sci(naive_exp[1])
+    naive2_str = _sci(naive_exp[2])
+
+    # Shifted logits
+    shifted_str = f"[{shifted[0]}, {shifted[1]}, {shifted[2]}]"
+
+    # Stable exponentials
+    sexp0_str = f"{stable_exp[0]:.3f}"
+    sexp1_str = f"{stable_exp[1]:.3f}"
+    sexp2_str = f"{stable_exp[2]:.1f}"
+
+    sum_str = f"{stable_sum:.3f}"
+    lse_str = f"{lse:.3f}"
+    log_sum_str = f"{math.log(stable_sum):.3f}"
+
+    # Softmax values
+    sm0_str = f"{softmax[0]:.3f}"
+    sm1_str = f"{softmax[1]:.3f}"
+    sm2_str = f"{softmax[2]:.3f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────
+lse_z_str = LogSumExp.z_str
+lse_z0 = LogSumExp.z[0]
+lse_z1 = LogSumExp.z[1]
+lse_z2 = LogSumExp.z[2]
+lse_naive0_str = LogSumExp.naive0_str
+lse_naive1_str = LogSumExp.naive1_str
+lse_naive2_str = LogSumExp.naive2_str
+lse_a_str = LogSumExp.a_str
+lse_shifted_str = LogSumExp.shifted_str
+lse_shifted0 = LogSumExp.shifted[0]
+lse_shifted1 = LogSumExp.shifted[1]
+lse_shifted2 = LogSumExp.shifted[2]
+lse_sexp0_str = LogSumExp.sexp0_str
+lse_sexp1_str = LogSumExp.sexp1_str
+lse_sexp2_str = LogSumExp.sexp2_str
+lse_sum_str = LogSumExp.sum_str
+lse_result_str = LogSumExp.lse_str
+lse_sm0_str = LogSumExp.sm0_str
+lse_sm1_str = LogSumExp.sm1_str
+lse_sm2_str = LogSumExp.sm2_str
+```
+
 ::: {.callout-notebook title="Worked Example: Log-Sum-Exp in Action"}
 
-**The setup**: A 3-class classifier outputs logits $z = [100, 101, 102]$.
+**The setup**: A 3-class classifier outputs logits $z = `{python} lse_z_str`$.
 
 **Without the trick (naive softmax)**:
 
-$e^{100} \approx 2.7 \times 10^{43}$, $e^{101} \approx 7.2 \times 10^{43}$, $e^{102} \approx 1.9 \times 10^{44}$
+$e^{`{python} lse_z0`} \approx `{python} lse_naive0_str`$, $e^{`{python} lse_z1`} \approx `{python} lse_naive1_str`$, $e^{`{python} lse_z2`} \approx `{python} lse_naive2_str`$
 
 These numbers are representable in FP64 but overflow FP32 (max $\approx 3.4 \times 10^{38}$). With FP16 (max $\approx 65{,}504$), even $e^{12}$ overflows. In practice, logits of magnitude 100 are not unusual in deep networks, and FP16/BF16 is the standard training precision—so naive softmax fails routinely.
 
-**With the trick**: Subtract $a = \max(z) = 102$:
+**With the trick**: Subtract $a = \max(z) = `{python} lse_a_str`$:
 
-$z - a = [-2, -1, 0]$
+$z - a = `{python} lse_shifted_str`$
 
-$e^{-2} \approx 0.135$, $e^{-1} \approx 0.368$, $e^{0} = 1.0$
+$e^{`{python} lse_shifted0`} \approx `{python} lse_sexp0_str`$, $e^{`{python} lse_shifted1`} \approx `{python} lse_sexp1_str`$, $e^{`{python} lse_shifted2`} = `{python} lse_sexp2_str`$
 
-Sum = 1.503. LogSumExp = $102 + \log(1.503) = 102.407$.
+Sum = `{python} lse_sum_str`. LogSumExp = $`{python} lse_a_str` + \log(`{python} lse_sum_str`) = `{python} lse_result_str`$.
 
-Softmax: $[0.135/1.503,\; 0.368/1.503,\; 1.0/1.503] = [0.090,\; 0.245,\; 0.665]$
+Softmax: $[`{python} lse_sexp0_str`/`{python} lse_sum_str`,\; `{python} lse_sexp1_str`/`{python} lse_sum_str`,\; `{python} lse_sexp2_str`/`{python} lse_sum_str`] = [`{python} lse_sm0_str`,\; `{python} lse_sm1_str`,\; `{python} lse_sm2_str`]$
 
 All intermediate values are in $[0, 1]$—no overflow risk, even in FP16.
 

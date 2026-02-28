@@ -332,13 +332,37 @@ The **critical message size** $n = \alpha \cdot \beta$ marks the crossover point
 
 The following example illustrates how to apply the critical message size formula to determine which optimization strategy matters most for a given workload:
 
+```{python}
+#| label: critical-msg-size-calc
+#| echo: false
+from mlsys.formatting import check
+
+class CriticalMsgSize:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    alpha_us = 2
+    beta_gbs = 50
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    n_star_bytes = alpha_us * 1e-6 * beta_gbs * 1e9
+    n_star_kb = int(n_star_bytes / 1e3)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(n_star_kb == 100, f"n* = {n_star_kb} KB, expected 100")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_str = f"{alpha_us}"
+    beta_str = f"{beta_gbs}"
+    n_star_kb_str = f"{n_star_kb}"
+
+cms_alpha_str = CriticalMsgSize.alpha_str
+cms_beta_str = CriticalMsgSize.beta_str
+cms_n_star_str = CriticalMsgSize.n_star_kb_str
+```
+
 ::: {.callout-notebook title="The Critical Message Size"}
-**Problem**: Your cluster uses InfiniBand NDR 400G with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
+**Problem**: Your cluster uses InfiniBand NDR 400G with $\alpha = `{python} cms_alpha_str`\ \mu s$ and $\beta = `{python} cms_beta_str`\ \text{GB/s}$. At what message size does optimizing for bandwidth start to matter more than optimizing for latency?
 
 **The Math**:
-$$n = \alpha \cdot \beta = 2 \times 10^{-6}\ \text{s} \times 50 \times 10^9\ \text{B/s} = 100\ \text{KB}$$
+$$n = \alpha \cdot \beta = 2 \times 10^{-6}\ \text{s} \times 50 \times 10^9\ \text{B/s} = `{python} cms_n_star_str`\ \text{KB}$$
 
-**The Systems Insight**: Messages under 100 KB (like MoE tokens, pipeline activations) are **latency-bound**—buy lower-latency switches, reduce software overhead. Messages over 100 KB (like LLM gradients) are **bandwidth-bound**—buy more bandwidth, compress the data. Applying the wrong optimization wastes money without improving performance.
+**The Systems Insight**: Messages under `{python} cms_n_star_str` KB (like MoE tokens, pipeline activations) are **latency-bound**—buy lower-latency switches, reduce software overhead. Messages over `{python} cms_n_star_str` KB (like LLM gradients) are **bandwidth-bound**—buy more bandwidth, compress the data. Applying the wrong optimization wastes money without improving performance.
 :::
 
 This reveals two distinct operating regimes:
@@ -348,20 +372,65 @@ This reveals two distinct operating regimes:
 
 The following comparison shows how the bottleneck shifts between these regimes:
 
+```{python}
+#| label: latency-vs-bw-calc
+#| echo: false
+from mlsys.formatting import check
+
+class LatencyVsBw:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    alpha_us = 2
+    beta_gbs = 50
+    msg_a_bytes = 1e6     # 1 MB
+    msg_b_bytes = 1e9     # 1 GB
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    bw_a_us = msg_a_bytes / (beta_gbs * 1e9) * 1e6
+    total_a_us = bw_a_us + alpha_us
+    lat_pct_a = alpha_us / total_a_us * 100
+    bw_b_us = msg_b_bytes / (beta_gbs * 1e9) * 1e6
+    bw_b_ms = bw_b_us / 1000
+    total_b_us = bw_b_us + alpha_us
+    lat_pct_b = alpha_us / total_b_us * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(bw_a_us == 20, f"Case A bw = {bw_a_us} μs, expected 20")
+    check(total_a_us == 22, f"Case A total = {total_a_us} μs, expected 22")
+    check(bw_b_us == 20000, f"Case B bw = {bw_b_us} μs, expected 20000")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_str = f"{alpha_us}"
+    beta_str = f"{beta_gbs}"
+    bw_a_us_str = f"{bw_a_us:.0f}"
+    total_a_us_str = f"{total_a_us:.0f}"
+    lat_pct_a_str = f"{lat_pct_a:.0f}"
+    bw_b_us_str = f"{bw_b_us:,.0f}"
+    bw_b_ms_str = f"{bw_b_ms:.0f}"
+    total_b_us_str = f"{total_b_us:,.0f}"
+    lat_pct_b_str = f"{lat_pct_b:.2f}"
+
+lbw_alpha_str = LatencyVsBw.alpha_str
+lbw_beta_str = LatencyVsBw.beta_str
+lbw_bw_a_str = LatencyVsBw.bw_a_us_str
+lbw_total_a_str = LatencyVsBw.total_a_us_str
+lbw_lat_pct_a_str = LatencyVsBw.lat_pct_a_str
+lbw_bw_b_str = LatencyVsBw.bw_b_us_str
+lbw_bw_b_ms_str = LatencyVsBw.bw_b_ms_str
+lbw_total_b_str = LatencyVsBw.total_b_us_str
+lbw_lat_pct_b_str = LatencyVsBw.lat_pct_b_str
+```
+
 ::: {.callout-notebook title="Latency vs. Bandwidth Dominance"}
-**Problem**: You are synchronizing a 1 MB buffer versus a 1 GB buffer on InfiniBand NDR with $\alpha = 2\ \mu s$ and $\beta = 50\ \text{GB/s}$. How does the bottleneck shift?
+**Problem**: You are synchronizing a 1 MB buffer versus a 1 GB buffer on InfiniBand NDR with $\alpha = `{python} lbw_alpha_str`\ \mu s$ and $\beta = `{python} lbw_beta_str`\ \text{GB/s}$. How does the bottleneck shift?
 
 **Case A: 1 MB Message**
 
-*   Bandwidth Time: $10^6 / (50 \times 10^{9}) = 20\ \mu s$.
+*   Bandwidth Time: $10^6 / (50 \times 10^{9})$ = `{python} lbw_bw_a_str` $\mu\text{s}$.
 *   Latency Time: $2\ \mu s$.
-*   **Total: 22 μs**. Latency is 9% of total—still meaningful!
+*   **Total: `{python} lbw_total_a_str` μs**. Latency is `{python} lbw_lat_pct_a_str`% of total—still meaningful!
 
 **Case B: 1 GB Message**
 
-*   Bandwidth Time: $10^9 / (50 \times 10^{9}) = 20{,}000\ \mu s = 20\ \text{ms}$.
+*   Bandwidth Time: $10^9 / (50 \times 10^{9})$ = `{python} lbw_bw_b_str` $\mu\text{s}$ = `{python} lbw_bw_b_ms_str` ms.
 *   Latency Time: $2\ \mu s$.
-*   **Total: 20,002 μs**. Latency is 0.01%—completely negligible.
+*   **Total: `{python} lbw_total_b_str` μs**. Latency is `{python} lbw_lat_pct_b_str`%—completely negligible.
 
 **The Systems Conclusion**: For Data Parallelism (large gradients), we optimize for $\beta$—compress gradients, add NICs. For Pipeline/Expert Parallelism (small activations), we fight for every microsecond of $\alpha$—kernel bypass, topology optimization. The α-β model identifies *which constraint to optimize*.
 :::
@@ -377,18 +446,46 @@ The α-β model assumes the processor is idle during communication. For **pipeli
 
 The key insight of LogP is distinguishing **network latency** (L, which can be hidden) from **processor overhead** (o, which cannot). A system can overlap communication with computation only if the compute kernel runs longer than the overhead. The following example demonstrates this distinction in practice:
 
+```{python}
+#| label: logp-overlap-calc
+#| echo: false
+from mlsys.formatting import check
+
+class LogPOverlap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    L_us = 100
+    o_us = 50
+    compute_us = 500
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    two_o_us = 2 * o_us
+    effective_us = max(compute_us, L_us + two_o_us)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(two_o_us == 100, f"2o = {two_o_us}, expected 100")
+    check(effective_us == 500, f"Effective = {effective_us}, expected 500")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    L_str = f"{L_us}"
+    two_o_str = f"{two_o_us}"
+    compute_str = f"{compute_us}"
+    effective_str = f"{effective_us}"
+
+logp_L_str = LogPOverlap.L_str
+logp_two_o_str = LogPOverlap.two_o_str
+logp_compute_str = LogPOverlap.compute_str
+logp_effective_str = LogPOverlap.effective_str
+```
+
 ::: {.callout-notebook title="Can You Hide the Communication?"}
-**Problem**: You want to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes 500 μs. The AllReduce has network latency $L = 100\ \mu s$ but processor overhead $o = 50\ \mu s$ to initiate and $o = 50\ \mu s$ to receive. Can you hide the communication?
+**Problem**: You want to overlap gradient AllReduce with the next layer's backward pass. The backward pass takes `{python} logp_compute_str` μs. The AllReduce has network latency $L = 100\ \mu s$ but processor overhead $o = 50\ \mu s$ to initiate and $o = 50\ \mu s$ to receive. Can you hide the communication?
 
 **The Math**:
 
-1.  **Overlappable portion**: Network latency $L = 100\ \mu s$ (data in flight while GPU computes).
-2.  **Non-overlappable portion**: $2o = 100\ \mu s$ (GPU busy initiating/receiving).
-3.  **Compute available**: $500\ \mu s$.
-4.  **Hidden**: All 100 μs of $L$ can overlap with compute.
-5.  **Exposed**: The 100 μs of $o$ cannot overlap.
+1.  **Overlappable portion**: Network latency $L$ = `{python} logp_L_str` $\mu\text{s}$ (data in flight while GPU computes).
+2.  **Non-overlappable portion**: $2o$ = `{python} logp_two_o_str` $\mu\text{s}$ (GPU busy initiating/receiving).
+3.  **Compute available**: `{python} logp_compute_str` $\mu\text{s}$.
+4.  **Hidden**: All `{python} logp_L_str` μs of $L$ can overlap with compute.
+5.  **Exposed**: The `{python} logp_two_o_str` μs of $o$ cannot overlap.
 
-**Effective time**: $\max(500, 100 + 100) = 500\ \mu s$ (communication hidden!).
+**Effective time**: $\max(`{python} logp_compute_str`, `{python} logp_L_str` + `{python} logp_two_o_str`)$ = `{python} logp_effective_str` $\mu\text{s}$ (communication hidden!).
 
 **The Systems Insight**: α-β tells you the total communication time. LogP tells you **how much of it you can hide**. When designing pipelined training, optimize for low $o$ (kernel bypass, GPUDirect) rather than high $\beta$ alone.
 :::
@@ -583,23 +680,87 @@ This is why **Expert Parallelism (MoE)** and large-scale **Recommendation System
 
 To make the AllToAll pattern concrete, consider a Mixture of Experts model with 64 experts distributed across 8 GPUs (8 experts per GPU). During each forward pass, a gating network assigns each input token to one or more experts. The tokens assigned to experts on remote GPUs must be physically moved to those GPUs before computation can proceed, and the results must be moved back afterward.
 
+```{python}
+#| label: moe-alltoall-calc
+#| echo: false
+from mlsys.formatting import check
+
+class MoeAllToAll:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    total_tokens = 4096
+    n_gpus = 8
+    hidden_dim = 2048
+    bytes_per_elem = 2            # BF16
+    n_experts = 64
+    alpha_us = 3                  # IB NDR latency
+    beta_gbs = 50                 # IB NDR bandwidth
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    tokens_per_gpu = total_tokens // n_gpus
+    experts_per_gpu = n_experts // n_gpus
+    bytes_per_token = hidden_dim * bytes_per_elem
+    kb_per_token = bytes_per_token / 1000
+    tokens_per_expert = total_tokens // n_experts
+    tokens_per_transfer = tokens_per_gpu // n_gpus
+    remote_gpus = n_gpus - 1
+    data_per_transfer_kb = tokens_per_transfer * kb_per_token
+    total_sent_kb = remote_gpus * data_per_transfer_kb
+    total_sent_mb = total_sent_kb / 1000
+    bw_time_us = data_per_transfer_kb * 1e3 / (beta_gbs * 1e9) * 1e6
+    bw_time_us_approx = round(bw_time_us)
+    per_transfer_us = alpha_us + bw_time_us_approx
+    serialized_us = remote_gpus * per_transfer_us
+    parallel_us = per_transfer_us
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
+    check(kb_per_token == 4, f"KB/token = {kb_per_token}")
+    check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
+    check(data_per_transfer_kb == 256, f"data/transfer = {data_per_transfer_kb} KB")
+    check(per_transfer_us == 8, f"T/transfer = {per_transfer_us} μs")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_str = f"{alpha_us}"
+    beta_str = f"{beta_gbs}"
+    tokens_per_gpu_str = f"{tokens_per_gpu}"
+    tokens_per_transfer_str = f"{tokens_per_transfer}"
+    kb_per_token_str = f"{kb_per_token:.0f}"
+    tokens_per_expert_str = f"{tokens_per_expert}"
+    data_per_transfer_kb_str = f"{data_per_transfer_kb:.0f}"
+    total_sent_mb_str = f"{total_sent_mb:.2f}"
+    bw_time_approx_str = f"{bw_time_us_approx}"
+    per_transfer_us_str = f"{per_transfer_us}"
+    serialized_us_str = f"{serialized_us}"
+    parallel_us_str = f"{parallel_us}"
+
+moe_alpha_str = MoeAllToAll.alpha_str
+moe_beta_str = MoeAllToAll.beta_str
+moe_tpg_str = MoeAllToAll.tokens_per_gpu_str
+moe_tpt_str = MoeAllToAll.tokens_per_transfer_str
+moe_kbpt_str = MoeAllToAll.kb_per_token_str
+moe_tpe_str = MoeAllToAll.tokens_per_expert_str
+moe_dpxfer_str = MoeAllToAll.data_per_transfer_kb_str
+moe_sent_str = MoeAllToAll.total_sent_mb_str
+moe_bw_str = MoeAllToAll.bw_time_approx_str
+moe_xfer_str = MoeAllToAll.per_transfer_us_str
+moe_serial_str = MoeAllToAll.serialized_us_str
+moe_par_str = MoeAllToAll.parallel_us_str
+```
+
 ::: {.callout-notebook title="AllToAll for MoE Token Routing" collapse="false"}
 
-**Problem**: A MoE model processes a batch of 4096 tokens across 8 GPUs (512 tokens per GPU). Each token is a 2048-dimensional hidden state in BF16 (4 KB per token). The gating network assigns each token to exactly 1 of 64 experts (8 experts per GPU). Assuming uniform routing (each expert receives $4096/64 = 64$ tokens), how much data does each GPU send and receive?
+**Problem**: A MoE model processes a batch of 4096 tokens across 8 GPUs (`{python} moe_tpg_str` tokens per GPU). Each token is a 2048-dimensional hidden state in BF16 (`{python} moe_kbpt_str` KB per token). The gating network assigns each token to exactly 1 of 64 experts (8 experts per GPU). Assuming uniform routing (each expert receives $4096/64$ = `{python} moe_tpe_str` tokens), how much data does each GPU send and receive?
 
 **The Math**:
 
-Each GPU holds 512 tokens that need to reach 64 different experts across 8 GPUs. With uniform routing, each GPU sends $512/8 = 64$ tokens to each of the other 7 GPUs (keeping 64 tokens local).
+Each GPU holds `{python} moe_tpg_str` tokens that need to reach 64 different experts across 8 GPUs. With uniform routing, each GPU sends $512/8$ = `{python} moe_tpt_str` tokens to each of the other 7 GPUs (keeping `{python} moe_tpt_str` tokens local).
 
-*   Data per GPU-to-GPU transfer: $64\ \text{tokens} \times 4\ \text{KB/token} = 256\ \text{KB}$
-*   Total data sent per GPU: $7 \times 256\ \text{KB} = 1.79\ \text{MB}$
-*   Total data received per GPU: $1.79\ \text{MB}$ (symmetric)
+*   Data per GPU-to-GPU transfer: `{python} moe_tpt_str` tokens $\times$ `{python} moe_kbpt_str` KB/token = `{python} moe_dpxfer_str` KB
+*   Total data sent per GPU: 7 $\times$ `{python} moe_dpxfer_str` KB = `{python} moe_sent_str` MB
+*   Total data received per GPU: `{python} moe_sent_str` MB (symmetric)
 
-**Latency Analysis (InfiniBand NDR, $\alpha = 3\ \mu\text{s}$, $\beta = 50\ \text{GB/s}$)**:
+**Latency Analysis (InfiniBand NDR, $\alpha = `{python} moe_alpha_str`\ \mu\text{s}$, $\beta = `{python} moe_beta_str`\ \text{GB/s}$)**:
 
-Each of the 7 transfers is a 256 KB message. From the alpha-beta model: $T = 3\ \mu\text{s} + 256\ \text{KB} / 50\ \text{GB/s} = 3 + 5 = 8\ \mu\text{s}$ per transfer.
+Each of the 7 transfers is a `{python} moe_dpxfer_str` KB message. From the alpha-beta model: $T$ = 3 + `{python} moe_bw_str` = `{python} moe_xfer_str` $\mu\text{s}$ per transfer.
 
-If serialized: $7 \times 8\ \mu\text{s} = 56\ \mu\text{s}$. If all 7 transfers run in parallel (full-duplex, non-blocking): $\approx 8\ \mu\text{s}$.
+If serialized: 7 $\times$ `{python} moe_xfer_str` $\mu\text{s}$ = `{python} moe_serial_str` $\mu\text{s}$. If all 7 transfers run in parallel (full-duplex, non-blocking): $\approx$ `{python} moe_par_str` $\mu\text{s}$.
 
 **The Systems Insight**: The per-message sizes in MoE are small (hundreds of KB), placing them firmly in the latency-bound regime. This is why MoE scaling is constrained by alpha (latency), not beta (bandwidth), and why MoE systems benefit from low-latency switches and RDMA rather than raw bandwidth upgrades. The AllToAll also runs *twice per layer* (once for token dispatch, once for result collection), doubling the latency tax.
 
@@ -710,6 +871,32 @@ The data flow during Step 1 proceeds as follows:
 
 To make the ring algorithm concrete, consider a step-by-step trace with 4 GPUs reducing a vector of 4 elements by summation. Each GPU $i$ starts with a local gradient vector $g_i = [a_i, b_i, c_i, d_i]$. The vector is split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
 
+```{python}
+#| label: ring-trace-calc
+#| echo: false
+from mlsys.formatting import check
+
+class RingTrace:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    N = 4
+    M = 4
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    total_steps = 2 * (N - 1)
+    elem_per_step = M // N
+    total_per_gpu = total_steps * elem_per_step
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(total_steps == 6, f"steps = {total_steps}, expected 6")
+    check(elem_per_step == 1, f"elem/step = {elem_per_step}, expected 1")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    steps_str = f"{total_steps}"
+    elem_str = f"{elem_per_step}"
+    total_str = f"{total_per_gpu}"
+
+rt_steps_str = RingTrace.steps_str
+rt_elem_str = RingTrace.elem_str
+rt_total_str = RingTrace.total_str
+```
+
 ::: {.callout-notebook title="Ring AllReduce: Step-by-Step Trace (4 GPUs)" collapse="false"}
 
 **Setup**: 4 GPUs in a ring ($0 \to 1 \to 2 \to 3 \to 0$). Each GPU holds a vector of 4 values. We use concrete numbers for clarity:
@@ -745,7 +932,7 @@ Each GPU sends its fully reduced chunk around the ring so all GPUs receive all r
 | 5        | Continue forwarding                             | Each GPU now has 3 of 4 final chunks |
 | 6        | Final forwarding                                | All GPUs hold $[10, 26, 18, 34]$     |
 
-**Total data movement per GPU**: In each of the $2(N-1) = 6$ steps, each GPU sends exactly $M/N = 1$ element. Total per GPU: $6 \times 1 = 6$ elements sent, $6$ received.
+**Total data movement per GPU**: In each of the $2(N-1)$ = `{python} rt_steps_str` steps, each GPU sends exactly $M/N$ = `{python} rt_elem_str` element. Total per GPU: `{python} rt_steps_str` $\times$ `{python} rt_elem_str` = `{python} rt_total_str` elements sent, `{python} rt_total_str` received.
 
 :::
 
@@ -927,31 +1114,80 @@ Gradients smaller than 25 MB use Tree; larger use Ring. In practice, NCCL's algo
 
 Nevertheless, the crossover formula remains the essential mental model for understanding *why* libraries make the choices they do. When a library selects an unexpected algorithm, the crossover analysis provides the reasoning framework to evaluate whether the choice is correct or whether manual override is warranted. The following worked example applies this framework to a concrete scenario:
 
+```{python}
+#| label: ring-vs-tree-calc
+#| echo: false
+from mlsys.formatting import check
+import math
+
+class RingVsTree:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    M_mb = 1
+    N = 64
+    alpha_us = 10
+    beta_gbs = 10
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    log2N = int(math.log2(N))
+    ring_lat_us = 2 * (N - 1) * alpha_us
+    tree_lat_us = 2 * log2N * alpha_us
+    ring_bw_us = 2 * (N - 1) / N * M_mb / beta_gbs * 1e3
+    tree_bw_us = 2 * log2N * M_mb / beta_gbs * 1e3
+    ring_total_us = ring_lat_us + ring_bw_us
+    tree_total_us = tree_lat_us + tree_bw_us
+    crossover_mb = N * alpha_us * 1e-6 * beta_gbs * 1e9 / 1e6
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(ring_lat_us == 1260, f"Ring lat = {ring_lat_us}")
+    check(tree_lat_us == 120, f"Tree lat = {tree_lat_us}")
+    check(abs(ring_bw_us - 200) < 1, f"Ring bw = {ring_bw_us}")
+    check(abs(tree_bw_us - 1200) < 1, f"Tree bw = {tree_bw_us}")
+    check(abs(crossover_mb - 6.4) < 0.01, f"Crossover = {crossover_mb}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    alpha_str = f"{alpha_us}"
+    beta_str = f"{beta_gbs}"
+    ring_lat_str = f"{ring_lat_us:,}"
+    tree_lat_str = f"{tree_lat_us}"
+    ring_bw_str = f"{ring_bw_us:.0f}"
+    tree_bw_str = f"{tree_bw_us:,.0f}"
+    ring_total_str = f"{ring_total_us:,.0f}"
+    tree_total_str = f"{tree_total_us:,.0f}"
+    crossover_str = f"{crossover_mb}"
+
+rvt_alpha_str = RingVsTree.alpha_str
+rvt_beta_str = RingVsTree.beta_str
+rvt_ring_lat_str = RingVsTree.ring_lat_str
+rvt_tree_lat_str = RingVsTree.tree_lat_str
+rvt_ring_bw_str = RingVsTree.ring_bw_str
+rvt_tree_bw_str = RingVsTree.tree_bw_str
+rvt_ring_total_str = RingVsTree.ring_total_str
+rvt_tree_total_str = RingVsTree.tree_total_str
+rvt_crossover_str = RingVsTree.crossover_str
+```
+
 ::: {.callout-notebook title="The Ring vs. Tree Crossover"}
-**Problem**: You are synchronizing a **1 MB** buffer across **64 GPUs**. The network has latency $\alpha = 10 \mu s$ and bandwidth $\beta = 10 \text{ GB/s}$. Should you use Ring or Tree?
+**Problem**: You are synchronizing a **1 MB** buffer across **64 GPUs**. The network has latency $\alpha = `{python} rvt_alpha_str`\ \mu s$ and bandwidth $\beta = `{python} rvt_beta_str`\ \text{GB/s}$. Should you use Ring or Tree?
 
 **The Math**:
 
 *Latency Terms:*
 
-1.  **Ring Latency**: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu s = \mathbf{1{,}260\ \mu s}$.
-2.  **Tree Latency**: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu s = \mathbf{120\ \mu s}$.
+1.  **Ring Latency**: $2(N-1)\alpha = 2 \times 63 \times 10\ \mu s$ = $\mathbf{`{python} rvt_ring_lat_str`\ \mu s}$.
+2.  **Tree Latency**: $2(\log_2 N)\alpha = 2 \times 6 \times 10\ \mu s$ = $\mathbf{`{python} rvt_tree_lat_str`\ \mu s}$.
 
 *Bandwidth Terms (note the difference!):*
 
-3.  **Ring Bandwidth**: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}} = \mathbf{200\ \mu s}$ (optimal—each byte sent once).
-4.  **Tree Bandwidth**: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}} = \mathbf{1{,}200\ \mu s}$ (each level sends full message).
+3.  **Ring Bandwidth**: $2\frac{N-1}{N}\frac{M}{\beta} \approx 2 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = $\mathbf{`{python} rvt_ring_bw_str`\ \mu s}$ (optimal—each byte sent once).
+4.  **Tree Bandwidth**: $2\log_2 N \cdot \frac{M}{\beta} = 12 \times \frac{1\text{ MB}}{10\text{ GB/s}}$ = $\mathbf{`{python} rvt_tree_bw_str`\ \mu s}$ (each level sends full message).
 
 **Total Time**:
 
 | **Algorithm** | **Latency** | **Bandwidth** |    **Total** |
 |:--------------|------------:|--------------:|-------------:|
-| **Ring**      |    1,260 μs |        200 μs | **1,460 μs** |
-| **Tree**      |      120 μs |      1,200 μs | **1,320 μs** |
+| **Ring**      |    `{python} rvt_ring_lat_str` μs |        `{python} rvt_ring_bw_str` μs | **`{python} rvt_ring_total_str` μs** |
+| **Tree**      |      `{python} rvt_tree_lat_str` μs |      `{python} rvt_tree_bw_str` μs | **`{python} rvt_tree_total_str` μs** |
 
 **Tree wins**, but only by 10%. For this 1 MB message, we are near the crossover point.
 
-**The Systems Insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The crossover formula predicts: $M_{\text{crossover}} = N \cdot \alpha \cdot \beta = 64 \times 10\ \mu s \times 10\ \text{GB/s} = 6.4\ \text{MB}$. At 1 MB, we are below crossover—Tree wins. At 10 MB, Ring would dominate.
+**The Systems Insight**: Ring's latency penalty (10$\times$ worse than Tree) nearly balances Tree's bandwidth penalty (6$\times$ worse than Ring). The crossover formula predicts: $M_{\text{crossover}} = N \cdot \alpha \cdot \beta = 64 \times 10\ \mu s \times 10\ \text{GB/s}$ = `{python} rvt_crossover_str` MB. At 1 MB, we are below crossover—Tree wins. At 10 MB, Ring would dominate.
 :::
 
 The crossover analysis demonstrates that algorithm selection is not a static choice but depends on the specific combination of message size, cluster scale, and network parameters. In practice, communication libraries like NCCL maintain internal lookup tables that map (message size, GPU count) pairs to the optimal algorithm, selecting Ring, Tree, or hybrid approaches automatically. Understanding the underlying crossover math allows engineers to predict when the library's defaults may be suboptimal and to override them when necessary.
@@ -1113,17 +1349,17 @@ speedup_str       = HierarchicalAllreduceCalc.speedup_str
 - Each GPU sends ~2 GB total (the bandwidth-optimal Ring AllReduce formula).
 - The ring crosses node boundaries multiple times.
 - **Effective bandwidth**: Limited by the slowest link = 50 GB/s (InfiniBand).
-- **Time**: $\approx 2 \times 1\ \text{GB} / 50\ \text{GB/s} = 40\ \text{ms}$ (bandwidth term dominates).
+- **Time**: $\approx 2 \times 1\ \text{GB} / 50\ \text{GB/s}$ = `{python} flat_time_ms_str` ms (bandwidth term dominates).
 
 **Hierarchical AllReduce (3-step decomposition)**:
 
 1. **Intra-Node ReduceScatter**: Each GPU sends `{python} intra_data_mb_str` MB at 900 GB/s → ~`{python} intra_rs_ms_str` ms
-2. **Inter-Node AllReduce**: Each GPU sends $1\ \text{GB}/8 = 125\ \text{MB}$ at 50 GB/s → ~`{python} inter_time_ms_str` ms
+2. **Inter-Node AllReduce**: Each GPU sends $1\ \text{GB}/8$ = `{python} inter_data_mb_str` MB at 50 GB/s → ~`{python} inter_time_ms_str` ms
 
    *(Only 1/8 of the data crosses InfiniBand!)*
 
 3. **Intra-Node AllGather**: Each GPU receives `{python} intra_data_mb_str` MB at 900 GB/s → ~`{python} intra_ag_ms_str` ms
-- **Total Time**: $\approx 1 + 5 + 1 = 7\ \text{ms}$
+- **Total Time**: $\approx$ `{python} intra_rs_ms_str` + `{python} inter_time_ms_str` + `{python} intra_ag_ms_str` = `{python} hier_total_ms_str` ms
 
 **The Systems Insight**: Hierarchical AllReduce achieves a **`{python} speedup_str`$\times$ speedup** by reducing inter-node traffic from 1 GB to `{python} inter_data_mb_str` MB per GPU. With 8 GPUs per node, we effectively get 8$\times$ the apparent inter-node bandwidth. This is why NVIDIA's NCCL and similar libraries default to hierarchical algorithms on multi-node clusters.
 :::
@@ -1444,6 +1680,43 @@ The long-run average of transmitted gradients equals the long-run average of tru
 
 This property—that compression error telescopes across time—is why error feedback transforms a biased, non-convergent method into an unbiased, convergent one. Theoretical analysis shows that with error feedback, compressed SGD converges at the same asymptotic rate as uncompressed SGD, with only constant-factor slowdowns [@stich2018sparsified; @karimireddy2019error]. The following step-by-step trace illustrates how error feedback preserves gradient information that naive compression would lose:
 
+```{python}
+#| label: error-feedback-calc
+#| echo: false
+from mlsys.formatting import check
+
+class ErrorFeedbackTrace:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    gradients = [0.4, 0.3, 0.2, 0.4, 0.3]
+    # ┌── 2. EXECUTE (unrolled 5-step trace) ───────────────
+    e0 = 0.0
+    v1_in = gradients[0] + e0;   v1 = round(v1_in);   e1 = v1_in - v1
+    v2_in = gradients[1] + e1;   v2 = round(v2_in);   e2 = v2_in - v2
+    v3_in = gradients[2] + e2;   v3 = round(v3_in);   e3 = v3_in - v3
+    v4_in = gradients[3] + e3;   v4 = round(v4_in);   e4 = v4_in - v4
+    v5_in = gradients[4] + e4;   v5 = round(v5_in);   e5 = v5_in - v5
+    cum_transmitted = int(v1 + v2 + v3 + v4 + v5)
+    final_error = round(e5, 4)
+    true_cumulative = sum(gradients)
+    naive_transmitted = 0
+    conservation = cum_transmitted + final_error
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(cum_transmitted == 2, f"Cum transmitted = {cum_transmitted}, expected 2")
+    check(abs(final_error - (-0.4)) < 1e-9, f"Final error = {final_error}, expected -0.4")
+    check(abs(true_cumulative - 1.6) < 1e-9, f"True cum = {true_cumulative}, expected 1.6")
+    check(abs(conservation - true_cumulative) < 1e-9, "Conservation violated")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    cum_str = f"{cum_transmitted}"
+    error_str = f"{final_error}"
+    true_str = f"{true_cumulative}"
+    naive_str = f"{naive_transmitted}"
+
+ef_cum_str = ErrorFeedbackTrace.cum_str
+ef_error_str = ErrorFeedbackTrace.error_str
+ef_true_str = ErrorFeedbackTrace.true_str
+ef_naive_str = ErrorFeedbackTrace.naive_str
+```
+
 ::: {.callout-notebook title="Error Feedback Mechanism" collapse="false"}
 **Scenario**: We have a single parameter receiving small gradients over 5 training steps. We use aggressive compression that only transmits values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.).
 
@@ -1457,7 +1730,7 @@ This property—that compression error telescopes across time—is why error fee
 | 4        |                     0.4 |                     0 |                          0 |                 1.3 |
 | 5        |                     0.3 |                     0 |                      **0** |             **1.6** |
 
-**Result**: After 5 steps, the system has transmitted **0** but the true cumulative gradient is **1.6**. The parameter never updates—**100% of gradient information is lost**.
+**Result**: After 5 steps, the system has transmitted **`{python} ef_naive_str`** but the true cumulative gradient is **`{python} ef_true_str`**. The parameter never updates—**100% of gradient information is lost**.
 
 **With Error Feedback**:
 
@@ -1469,7 +1742,7 @@ This property—that compression error telescopes across time—is why error fee
 | 4        |       0.4 |      −0.1 |             0.3 |         0 |                               0.3 |                  1 |
 | 5        |       0.3 |       0.3 |             0.6 |         1 |                              −0.4 |              **2** |
 
-**Result**: After 5 steps, the system has transmitted **2** with a remaining error of **−0.4**. The true cumulative is **1.6**, so transmitted + error = $2 + (-0.4) = 1.6$ ✓
+**Result**: After 5 steps, the system has transmitted **`{python} ef_cum_str`** with a remaining error of **`{python} ef_error_str`**. The true cumulative is **`{python} ef_true_str`**, so transmitted + error = $`{python} ef_cum_str` + (`{python} ef_error_str`)$ = `{python} ef_true_str` ✓
 
 **Key Observations**:
 
@@ -1739,14 +2012,45 @@ $T_{\text{pipelined}} = T_{\text{backward}} + T_{first\_layer\_comm} + (N_{layer
 
 The combination of hierarchical AllReduce (reducing the volume of data to communicate), rail-optimized routing (maximizing the throughput of each communication operation), and layer-by-layer overlap (hiding the remaining communication behind computation) forms the complete communication optimization stack for production distributed training. Each technique addresses a different term in the performance equation: hierarchical algorithms reduce $M$, topology-aware routing maximizes effective $\beta$, and overlap amortizes $\alpha$ by running communication concurrently with computation. When all three are applied together, the communication overhead for a well-configured system falls to 5--15% of total step time, down from the 50--80% that a naive flat, synchronous approach would impose.
 
+```{python}
+#| label: napkin-overlap-calc
+#| echo: false
+from mlsys.formatting import check
+
+class NapkinOverlap:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    params_b = 70
+    bytes_per_param = 2       # FP16
+    nvlink_bw_gbs = 900
+    compute_s = 2.1
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    gradient_gb = params_b * bytes_per_param
+    comm_s = 2 * gradient_gb / nvlink_bw_gbs
+    overlap_pct = comm_s / compute_s * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(gradient_gb == 140, f"gradient = {gradient_gb} GB")
+    check(abs(comm_s - 0.311) < 0.01, f"comm = {comm_s:.3f} s")
+    check(abs(overlap_pct - 15) < 1, f"overlap = {overlap_pct:.0f}%")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    gradient_gb_str = f"{gradient_gb}"
+    comm_s_str = f"{comm_s:.2f}"
+    compute_s_str = f"{compute_s}"
+    overlap_pct_str = f"{overlap_pct:.0f}"
+
+nap_grad_str = NapkinOverlap.gradient_gb_str
+nap_comm_str = NapkinOverlap.comm_s_str
+nap_compute_str = NapkinOverlap.compute_s_str
+nap_pct_str = NapkinOverlap.overlap_pct_str
+```
+
 ::: {.callout-notebook}
 ## Napkin Math: The Overlap Budget
 The following analysis determines whether the communication cost of a 70B parameter model on 8 GPUs can be hidden behind computation. The physics determines the answer.
-1.  **Gradient Size:** 70B params$\times$ 2 bytes (FP16) = 140 GB.
-2.  **Communication Time:** Using Ring AllReduce on NVLink (900 GB/s), time is $\approx \frac{2 \cdot 140\text{GB}}{900\text{GB/s}} = 0.31\text{s}$.
-3.  **Compute Time:** A typical forward/backward pass for a block of this size takes $\approx 2.1\text{s}$.
-4.  **Overlap Ratio:** $\frac{0.31\text{s}}{2.1\text{s}} \approx 15\%$.
-Since communication takes only 15% of the compute time, it fits comfortably within the backward pass "overlap budget," meaning the network cost effectively disappears.
+1.  **Gradient Size:** 70B params $\times$ 2 bytes (FP16) = `{python} nap_grad_str` GB.
+2.  **Communication Time:** Using Ring AllReduce on NVLink (900 GB/s), time is $\approx \frac{2 \cdot `{python} nap_grad_str`\text{GB}}{900\text{GB/s}}$ = `{python} nap_comm_str` s.
+3.  **Compute Time:** A typical forward/backward pass for a block of this size takes $\approx$ `{python} nap_compute_str` s.
+4.  **Overlap Ratio:** `{python} nap_comm_str` s / `{python} nap_compute_str` s $\approx$ `{python} nap_pct_str`%.
+Since communication takes only `{python} nap_pct_str`% of the compute time, it fits comfortably within the backward pass "overlap budget," meaning the network cost effectively disappears.
 :::
 
 ## Fallacies and Pitfalls {#sec-communication-collective-operations-collective-operations-fallacies-pitfalls-9cd0}

@@ -9,9 +9,11 @@ Checks:
 3. No inline Python inside LaTeX math mode (causes decimal stripping)
 4. No inline Python adjacent to LaTeX symbols like $\\times$
 5. No grid tables with inline Python (use pipe tables instead)
+6. (--check-lego) callout-notebook blocks without a preceding LEGO cell
+7. (--check-lego) Hardcoded derived results in display math inside callout-notebooks
 
 Usage:
-    python3 book/quarto/mlsys/validate_inline_refs.py [--verbose] [--check-patterns]
+    python3 book/quarto/mlsys/validate_inline_refs.py [--verbose] [--check-patterns] [--check-lego]
 
 Exit codes:
     0 = all checks pass
@@ -24,7 +26,7 @@ from pathlib import Path
 
 DEPRECATION_MSG = (
     "DEPRECATION: use Binder instead of direct script invocation:\n"
-    "  ./book/binder validate inline-refs [--path <file-or-dir>] [--check-patterns]"
+    "  ./book/binder validate inline-refs [--path <file-or-dir>] [--check-patterns] [--check-lego]"
 )
 
 BOOK_ROOT = Path(__file__).resolve().parent.parent  # book/quarto/
@@ -69,6 +71,206 @@ INLINE_FUNC_CALL = re.compile(r'`\{python\}\s*\w+\([^`]+\)`')
 # rendering _test_inline_captions.qmd: body and ": Caption {#tbl-...}" run inline Python;
 # #| fig-alt and #| fig-cap do not).
 YAML_OPTION_INLINE = re.compile(r'^#\|\s*(fig-cap|tbl-cap|lst-cap|fig-alt):\s*.*`\{python\}')
+
+
+# ---------------------------------------------------------------------------
+# LEGO compliance patterns (--check-lego)
+# ---------------------------------------------------------------------------
+
+CALLOUT_NOTEBOOK_START = re.compile(r'^:{2,}\s*\{\.callout-notebook')
+CALLOUT_DIV_END = re.compile(r'^:{3,}\s*$')
+
+# Hardcoded numeric result after = or \approx in LaTeX math.
+# Matches patterns like: = 0.046, = 31.25, \approx 12.4, = 14,400
+# Also handles: = \mathbf{6.9}, = \$398,131, = **0.30**
+HARDCODED_RESULT_RE = re.compile(
+    r'(?:=\s*|\\approx\s*)'
+    r'(?:\\mathbf\{|\\textbf\{|\*\*)?'
+    r'-?\d[\d,]*\.?\d*'
+)
+
+# A line with `{python}` reference — used to check if a callout uses computed values
+HAS_PYTHON_REF = re.compile(r'`\{python\}\s+\w+`')
+
+# Suppression comment
+LEGO_OK = re.compile(r'<!--\s*lego-ok\s*-->')
+
+# Display math delimiters
+DISPLAY_MATH_LINE = re.compile(r'^\$\$')
+
+# Lines that contain numeric content worth flagging (digits with decimals or arithmetic)
+HAS_NUMERIC_CONTENT = re.compile(r'\d+\.\d+|\\times|\\frac|\\approx')
+
+
+def check_lego_compliance(qmd_path, verbose=False):
+    """Check LEGO principle compliance in callout-notebook blocks.
+
+    Returns list of (filepath, lineno, check_type, message) tuples.
+    """
+    text = qmd_path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    warnings = []
+    filepath = str(qmd_path.relative_to(BOOK_ROOT))
+
+    # Pre-scan: record lines that are Python cell starts or ends
+    python_cell_end_lines = set()
+    in_cell = False
+    cell_start_line = 0
+    for i, line in enumerate(lines):
+        if CELL_START.match(line):
+            in_cell = True
+            cell_start_line = i
+        elif in_cell and CELL_END.match(line):
+            in_cell = False
+            python_cell_end_lines.add(i)  # 0-based
+
+    # Main scan: find callout-notebook blocks
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Check for lego-ok suppression on this line or the next
+        if LEGO_OK.search(line):
+            i += 1
+            continue
+
+        if CALLOUT_NOTEBOOK_START.match(line):
+            callout_start = i  # 0-based
+            callout_title = line.strip()
+
+            # Check suppression on the callout start line itself
+            if LEGO_OK.search(line):
+                # Skip to end of callout
+                i += 1
+                depth = 1
+                while i < len(lines) and depth > 0:
+                    if re.match(r'^:{3,}\s*\{', lines[i]):
+                        depth += 1
+                    elif CALLOUT_DIV_END.match(lines[i]):
+                        depth -= 1
+                    i += 1
+                continue
+
+            # --- Check 1: MISSING_LEGO_CELL ---
+            # Look backwards up to 15 lines for a Python cell end (```)
+            has_preceding_cell = False
+            lookback = min(callout_start, 15)
+            for j in range(callout_start - 1, callout_start - lookback - 1, -1):
+                if j < 0:
+                    break
+                if j in python_cell_end_lines:
+                    has_preceding_cell = True
+                    break
+                # Stop looking if we hit another callout or heading
+                if re.match(r'^#{1,4}\s', lines[j]) or CALLOUT_NOTEBOOK_START.match(lines[j]):
+                    break
+
+            # --- Collect callout body ---
+            callout_body_lines = []
+            i += 1
+            depth = 1
+            while i < len(lines) and depth > 0:
+                if LEGO_OK.search(lines[i]):
+                    # Suppression inside callout: skip rest
+                    while i < len(lines) and depth > 0:
+                        if re.match(r'^:{3,}\s*\{', lines[i]):
+                            depth += 1
+                        elif CALLOUT_DIV_END.match(lines[i]):
+                            depth -= 1
+                        i += 1
+                    break
+                if re.match(r'^:{3,}\s*\{', lines[i]):
+                    depth += 1
+                elif CALLOUT_DIV_END.match(lines[i]):
+                    depth -= 1
+                    if depth == 0:
+                        i += 1
+                        break
+                callout_body_lines.append((i, lines[i]))
+                i += 1
+
+            # Check if callout has numeric content (display math, decimals, etc.)
+            has_numerics = False
+            has_python_refs = False
+            for _, bline in callout_body_lines:
+                if HAS_NUMERIC_CONTENT.search(bline):
+                    has_numerics = True
+                if HAS_PYTHON_REF.search(bline):
+                    has_python_refs = True
+
+            if not has_preceding_cell and has_numerics and not has_python_refs:
+                warnings.append((filepath, callout_start + 1, "MISSING_LEGO_CELL",
+                    f"callout-notebook has no preceding Python LEGO cell"))
+                if verbose:
+                    print(f"  ⚠ {qmd_path.name}:{callout_start + 1} — "
+                          f"callout-notebook missing LEGO cell")
+
+            # --- Check 2: HARDCODED_RESULT ---
+            in_display_math = False
+            display_math_start = 0
+            display_math_buf = []
+
+            for line_idx, bline in callout_body_lines:
+                # Per-line suppression
+                if LEGO_OK.search(bline):
+                    continue
+
+                # Track display math blocks ($$...$$)
+                if DISPLAY_MATH_LINE.match(bline.strip()):
+                    if not in_display_math:
+                        in_display_math = True
+                        display_math_start = line_idx
+                        display_math_buf = [bline]
+                    else:
+                        # End of display math
+                        display_math_buf.append(bline)
+                        math_text = ' '.join(display_math_buf)
+                        if (HARDCODED_RESULT_RE.search(math_text)
+                                and not HAS_PYTHON_REF.search(math_text)):
+                            warnings.append((filepath, display_math_start + 1,
+                                "HARDCODED_RESULT",
+                                "display math has hardcoded numeric result (no {python} ref)"))
+                            if verbose:
+                                snippet = math_text[:80].replace('\n', ' ')
+                                print(f"  ⚠ {qmd_path.name}:{display_math_start + 1} — "
+                                      f"hardcoded result: {snippet}…")
+                        in_display_math = False
+                        display_math_buf = []
+                    continue
+
+                if in_display_math:
+                    display_math_buf.append(bline)
+                    continue
+
+                # Single-line display math: $$ ... $$
+                stripped = bline.strip()
+                if stripped.startswith('$$') and stripped.endswith('$$') and len(stripped) > 4:
+                    if (HARDCODED_RESULT_RE.search(stripped)
+                            and not HAS_PYTHON_REF.search(stripped)):
+                        warnings.append((filepath, line_idx + 1, "HARDCODED_RESULT",
+                            "display math has hardcoded numeric result (no {python} ref)"))
+                        if verbose:
+                            print(f"  ⚠ {qmd_path.name}:{line_idx + 1} — hardcoded result")
+                    continue
+
+                # Inline math with results: $...= NUMBER...$
+                # Only flag if line has = or \approx followed by a number, no {python}
+                if ('$' in bline and not HAS_PYTHON_REF.search(bline)
+                        and HARDCODED_RESULT_RE.search(bline)):
+                    # Confirm it's inside $...$ math, not prose
+                    dollar_count = bline.count('$') - bline.count('\\$')
+                    if dollar_count >= 2:
+                        warnings.append((filepath, line_idx + 1, "HARDCODED_RESULT",
+                            "inline math has hardcoded numeric result (no {python} ref)"))
+                        if verbose:
+                            print(f"  ⚠ {qmd_path.name}:{line_idx + 1} — "
+                                  f"hardcoded inline result")
+
+            continue  # already advanced i in the callout body loop
+
+        i += 1
+
+    return warnings
 
 
 def check_rendering_patterns(qmd_path, verbose=False):
@@ -137,7 +339,7 @@ def check_rendering_patterns(qmd_path, verbose=False):
     return warnings
 
 
-def validate_file(qmd_path, verbose=False, check_patterns=False):
+def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=False):
     """Validate one QMD file. Returns (errors, warnings)."""
     text = qmd_path.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -208,6 +410,8 @@ def validate_file(qmd_path, verbose=False, check_patterns=False):
     warnings = []
     if check_patterns:
         warnings = check_rendering_patterns(qmd_path, verbose)
+    if check_lego:
+        warnings.extend(check_lego_compliance(qmd_path, verbose))
     
     return errors, warnings
 
@@ -217,6 +421,7 @@ def main():
 
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     check_patterns = "--check-patterns" in sys.argv or "-p" in sys.argv
+    check_lego = "--check-lego" in sys.argv or "-l" in sys.argv
     
     # Check for path argument
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
@@ -234,7 +439,10 @@ def main():
     all_warnings = []
 
     for qmd in qmd_files:
-        errors, warnings = validate_file(qmd, verbose=verbose, check_patterns=check_patterns)
+        errors, warnings = validate_file(
+            qmd, verbose=verbose,
+            check_patterns=check_patterns, check_lego=check_lego,
+        )
         text = qmd.read_text(encoding="utf-8")
         refs = INLINE_REF.findall(text)
         if refs:
@@ -249,7 +457,7 @@ def main():
     print(f"Files with inline refs:  {total_files}")
     print(f"Total inline references: {total_refs}")
     print(f"Unresolved references:   {len(all_errors)}")
-    if check_patterns:
+    if check_patterns or check_lego:
         print(f"Rendering warnings:      {len(all_warnings)}")
 
     exit_code = 0
@@ -271,10 +479,8 @@ def main():
         
         for wtype, items in sorted(by_type.items()):
             print(f"\n  [{wtype}] ({len(items)} issues)")
-            for filepath, lineno, msg in items[:5]:  # Show first 5
+            for filepath, lineno, msg in items:
                 print(f"    {filepath}:{lineno} — {msg}")
-            if len(items) > 5:
-                print(f"    ... and {len(items) - 5} more")
         exit_code = 1
 
     if exit_code == 0:

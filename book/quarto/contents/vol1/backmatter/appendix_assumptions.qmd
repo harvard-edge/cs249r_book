@@ -28,15 +28,105 @@ The tables below are organized into thematic groups — accelerator specificatio
 
 Because hardware generations change faster than textbooks, these tables also serve as a change log of sorts: updating a single value in `mlsys/constants.py` propagates the change to every calculation in every chapter automatically. The following worked examples demonstrate how to combine these constants for quick back-of-the-envelope estimates.
 
+```{python}
+#| label: napkin-math-examples
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NAPKIN MATH EXAMPLES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout "Napkin Math with These Constants"
+# │
+# │ Goal:    Compute three quick estimates using book constants.
+# │ Show:    Ridge point, training memory, energy cost.
+# │ How:     Scalar arithmetic from mlsys.constants.
+# │
+# │ Imports: mlsys.constants (...), mlsys.formatting (fmt, check)
+# │ Exports: napkin_h100_tflops_str, napkin_h100_bw_str, napkin_ridge_str,
+# │          napkin_gemm_n_str, napkin_gemm_intensity_str, napkin_model_b_str,
+# │          napkin_model_b_digit_str, napkin_bytes_per_param_str,
+# │          napkin_train_mem_gb_str, napkin_accel_mem_str, napkin_a100_tdp_str,
+# │          napkin_gpt3_ops_str, napkin_gpt3_days_str, napkin_elec_rate_str,
+# │          napkin_a100_kw_str, napkin_elec_cost_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    H100_FLOPS_FP16_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY,
+    A100_TDP, GPT3_TRAINING_OPS, GPT3_TRAINING_DAYS_REF,
+    CLOUD_ELECTRICITY_PER_KWH,
+    TFLOPs, second, TB, GB, watt,
+)
+from mlsys.formatting import fmt, check
+
+class NapkinMath:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    h100_tflops = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+    h100_bw_tbs = H100_MEM_BW.m_as(TB / second)
+    h100_mem_gb = H100_MEM_CAPACITY.m_as(GB)
+    a100_tdp_w = A100_TDP.m_as(watt)
+    gpt3_ops = GPT3_TRAINING_OPS.magnitude
+    gpt3_days = GPT3_TRAINING_DAYS_REF.magnitude
+    elec_per_kwh = CLOUD_ELECTRICITY_PER_KWH.magnitude
+
+    gemm_n = 4096
+    model_params_b = 7
+    bytes_per_param = 16  # BF16 weights + gradients + FP32 optimizer
+    hours_per_day = 24
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    ridge = h100_tflops / h100_bw_tbs
+    gemm_intensity = gemm_n / 3
+    train_mem_gb = model_params_b * 1e9 * bytes_per_param / 1e9
+    a100_tdp_kw = a100_tdp_w / 1000
+    elec_cost = gpt3_days * hours_per_day * a100_tdp_kw * elec_per_kwh
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(ridge > 200, f"Ridge point {ridge} too low")
+    check(train_mem_gb > h100_mem_gb, "7B model state should exceed single GPU")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    h100_tflops_str = fmt(h100_tflops, precision=0, commas=False)
+    h100_bw_str = f"{h100_bw_tbs:.2f}"
+    ridge_str = fmt(ridge, precision=0, commas=False)
+    gemm_n_str = f"{gemm_n:,}"
+    gemm_intensity_str = fmt(gemm_intensity, precision=0, commas=True)
+    model_b_str = f"{model_params_b}B"
+    bytes_per_param_str = f"{bytes_per_param}"
+    train_mem_gb_str = fmt(train_mem_gb, precision=0, commas=False)
+    accel_mem_str = fmt(h100_mem_gb, precision=0, commas=False)
+    a100_tdp_str = fmt(a100_tdp_w, precision=0, commas=False)
+    gpt3_ops_str = f"{gpt3_ops:.2e}"
+    gpt3_days_str = f"~{gpt3_days:,.0f}"
+    elec_rate_str = f"{elec_per_kwh:.2f}"
+    a100_kw_str = f"{a100_tdp_kw:.1f}"
+    elec_cost_str = f"~\\${elec_cost:,.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────
+napkin_h100_tflops_str = NapkinMath.h100_tflops_str
+napkin_h100_bw_str = NapkinMath.h100_bw_str
+napkin_ridge_str = NapkinMath.ridge_str
+napkin_gemm_n_str = NapkinMath.gemm_n_str
+napkin_gemm_intensity_str = NapkinMath.gemm_intensity_str
+napkin_model_b_str = NapkinMath.model_b_str
+napkin_model_b_digit_str = f"{NapkinMath.model_params_b}"
+napkin_bytes_per_param_str = NapkinMath.bytes_per_param_str
+napkin_train_mem_gb_str = NapkinMath.train_mem_gb_str
+napkin_accel_mem_str = NapkinMath.accel_mem_str
+napkin_a100_tdp_str = NapkinMath.a100_tdp_str
+napkin_gpt3_ops_str = NapkinMath.gpt3_ops_str
+napkin_gpt3_days_str = NapkinMath.gpt3_days_str
+napkin_elec_rate_str = NapkinMath.elec_rate_str
+napkin_a100_kw_str = NapkinMath.a100_kw_str
+napkin_elec_cost_str = NapkinMath.elec_cost_str
+```
+
 ::: {.callout-notebook title="Napkin Math with These Constants"}
 
 The constants in this appendix are not just for auditing—they are designed for quick calculations. Three examples illustrate the pattern.
 
-**Is this workload compute-bound or memory-bound?** Divide peak FLOPS by memory bandwidth to get the *ridge point* (@sec-machine-foundations-roofline-model-2529). For an H100: 990 TFLOPS / 3.35 TB/s $\approx$ 296 FLOP/byte. Any operation with arithmetic intensity above 296 FLOP/byte is compute-bound; below it, memory-bound. A large GEMM with $n=4096$ has intensity $n/3 \approx 1365$ FLOP/byte (compute-bound). A single-token autoregressive decode has intensity $\approx 1$ FLOP/byte (deeply memory-bound).
+**Is this workload compute-bound or memory-bound?** Divide peak FLOPS by memory bandwidth to get the *ridge point* (@sec-machine-foundations-roofline-model-2529). For an H100: `{python} napkin_h100_tflops_str` TFLOPS / `{python} napkin_h100_bw_str` TB/s $\approx$ `{python} napkin_ridge_str` FLOP/byte. Any operation with arithmetic intensity above `{python} napkin_ridge_str` FLOP/byte is compute-bound; below it, memory-bound. A large GEMM with $n=`{python} napkin_gemm_n_str`$ has intensity $n/3 \approx `{python} napkin_gemm_intensity_str`$ FLOP/byte (compute-bound). A single-token autoregressive decode has intensity $\approx 1$ FLOP/byte (deeply memory-bound).
 
-**How much memory does training a 7B model require?** Mixed-precision Adam stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = 16 bytes per parameter. For 7B parameters: $7 \times 10^9 \times 16$ bytes = 112 GB. An A100 or H100 has 80 GB of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.
+**How much memory does training a `{python} napkin_model_b_str` model require?** Mixed-precision Adam stores 2 bytes (BF16 weights) + 2 bytes (gradients) + 12 bytes (FP32 master weights + momentum + variance) = `{python} napkin_bytes_per_param_str` bytes per parameter. For `{python} napkin_model_b_str` parameters: $`{python} napkin_model_b_digit_str` \times 10^9 \times `{python} napkin_bytes_per_param_str`$ bytes = `{python} napkin_train_mem_gb_str` GB. An A100 or H100 has `{python} napkin_accel_mem_str` GB of HBM, so the model state alone exceeds a single accelerator—before accounting for activations.
 
-**How much energy does one GPT-3 training run cost?** An A100 draws 400 W at TDP. GPT-3 training used roughly $3.14 \times 10^{23}$ FLOPS across ~3,640 accelerator-days. At \$0.10/kWh: 3,640 accelerator-days$\times$ 24 h/day$\times$ 0.4 kW$\times$ \$0.10/kWh $\approx$ \$3,500 in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization.
+**How much energy does one GPT-3 training run cost?** An A100 draws `{python} napkin_a100_tdp_str` W at TDP. GPT-3 training used roughly $`{python} napkin_gpt3_ops_str`$ FLOPS across `{python} napkin_gpt3_days_str` accelerator-days. At \$`{python} napkin_elec_rate_str`/kWh: `{python} napkin_gpt3_days_str` accelerator-days$\times$ 24 h/day$\times$ `{python} napkin_a100_kw_str` kW$\times$ \$`{python} napkin_elec_rate_str`/kWh $\approx$ `{python} napkin_elec_cost_str` in electricity alone—a small fraction of the total cost, which is dominated by accelerator amortization.
 
 :::
 

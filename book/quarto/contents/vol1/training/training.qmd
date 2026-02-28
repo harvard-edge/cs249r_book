@@ -767,6 +767,11 @@ class GPT2Compute:
     total_peta_str = fmt(flops_training_total / QUADRILLION, precision=0, commas=False)
     v100_time_str = fmt(v100_time_s, precision=0, commas=False)
 
+    # Formula structure constants
+    mac_factor = 2
+    n_projections = 3
+    ffn_coeff = 2 * 2 * 4  # 2 MAC × 2 linear layers × 4 expansion
+
     # Context exports
     batch_str = f"{batch}"
     seq_len_str = f"{seq_len}"
@@ -775,44 +780,63 @@ class GPT2Compute:
     head_dim_str = f"{head_dim}"
     n_layers_gpt2_str = f"{layers}"
     training_steps_str = f"{steps:,}"
+    mac_factor_str = f"{mac_factor}"
+    n_projections_str = f"{n_projections}"
+    ffn_coeff_str = f"{ffn_coeff}"
 
-# Note: Use GPT2Compute.qkv_billion_str directly.
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+gpt2_mac_str = GPT2Compute.mac_factor_str
+gpt2_n_proj_str = GPT2Compute.n_projections_str
+gpt2_ffn_coeff_str = GPT2Compute.ffn_coeff_str
+gpt2_batch_str = GPT2Compute.batch_str
+gpt2_seq_str = GPT2Compute.seq_len_str
+gpt2_hidden_str = GPT2Compute.hidden_str
+gpt2_n_heads_str = GPT2Compute.n_heads_str
+gpt2_head_dim_str = GPT2Compute.head_dim_str
+gpt2_qkv_billion_str = GPT2Compute.qkv_billion_str
+gpt2_attn_billion_str = GPT2Compute.attn_billion_str
+gpt2_total_layer_str = GPT2Compute.total_layer_str
+gpt2_per_step_t_str = GPT2Compute.per_step_t_str
+gpt2_total_peta_str = GPT2Compute.total_peta_str
+gpt2_v100_time_str = GPT2Compute.v100_time_str
+gpt2_n_layers_str = GPT2Compute.n_layers_gpt2_str
+gpt2_training_steps_str = GPT2Compute.training_steps_str
 ```
 
 The scale of these computations becomes concrete in the *GPT-2 attention layer computation* below, which traces through a single layer.
 
 ::: {.callout-notebook title="GPT-2 Attention Layer Computation"}
 
-Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size=`{python} GPT2Compute.batch_str`, sequence_length=`{python} GPT2Compute.seq_len_str`, hidden_dim=`{python} GPT2Compute.hidden_str`:
+Each GPT-2 layer performs attention computations that exemplify dense matrix multiplication demands. For a single attention head with batch_size=`{python} gpt2_batch_str`, sequence_length=`{python} gpt2_seq_str`, hidden_dim=`{python} gpt2_hidden_str`:
 
 **Query, Key, Value Projections** (the three linear transformations that create attention inputs—3 separate matrix multiplications):
 $$
-\text{FLOPs} = 2 \times 3 \times (\text{batch} \times \text{seq} \times \text{hidden} \times \text{hidden})
+\text{FLOPs} = `{python} gpt2_mac_str` \times `{python} gpt2_n_proj_str` \times (\text{batch} \times \text{seq} \times \text{hidden} \times \text{hidden})
 $$
 $$
-= 2 \times 3 \times (`{python} GPT2Compute.batch_str` \times `{python} GPT2Compute.seq_len_str` \times `{python} GPT2Compute.hidden_str` \times `{python} GPT2Compute.hidden_str`) \approx `{python} GPT2Compute.qkv_billion_str` \text{ billion FLOPs}
+= `{python} gpt2_mac_str` \times `{python} gpt2_n_proj_str` \times (`{python} gpt2_batch_str` \times `{python} gpt2_seq_str` \times `{python} gpt2_hidden_str` \times `{python} gpt2_hidden_str`) \approx `{python} gpt2_qkv_billion_str` \text{ billion FLOPs}
 $$
 
 **Attention Score Computation** (Q$\times$ K^T):
 $$
-\text{FLOPs} = 2 \times \text{batch} \times \text{heads} \times \text{seq} \times \text{seq} \times \text{hidden/heads}
+\text{FLOPs} = `{python} gpt2_mac_str` \times \text{batch} \times \text{heads} \times \text{seq} \times \text{seq} \times \text{hidden/heads}
 $$
 $$
-= 2 \times `{python} GPT2Compute.batch_str` \times `{python} GPT2Compute.n_heads_str` \times `{python} GPT2Compute.seq_len_str` \times `{python} GPT2Compute.seq_len_str` \times `{python} GPT2Compute.head_dim_str` = `{python} GPT2Compute.attn_billion_str` \text{ billion FLOPs}
+= `{python} gpt2_mac_str` \times `{python} gpt2_batch_str` \times `{python} gpt2_n_heads_str` \times `{python} gpt2_seq_str` \times `{python} gpt2_seq_str` \times `{python} gpt2_head_dim_str` = `{python} gpt2_attn_billion_str` \text{ billion FLOPs}
 $$
 
 **Feed-Forward Network** (Two linear transformations with expansion factor 4):
 $$
-\text{FLOPs} \approx 16 \times \text{batch} \times \text{seq} \times \text{hidden}^2
+\text{FLOPs} \approx `{python} gpt2_ffn_coeff_str` \times \text{batch} \times \text{seq} \times \text{hidden}^2
 $$
 
 **Computation Scale**
 
-- Total for one Transformer layer (Attention + FFN): ~`{python} GPT2Compute.total_layer_str` B FLOPs forward pass
-- With `{python} GPT2Compute.n_layers_gpt2_str` layers in GPT-2: ~`{python} GPT2Compute.per_step_t_str` trillion FLOPs per training step
-- At `{python} GPT2Compute.training_steps_str` training steps: ~`{python} GPT2Compute.total_peta_str` petaFLOPS total training computation
+- Total for one Transformer layer (Attention + FFN): ~`{python} gpt2_total_layer_str` B FLOPs forward pass
+- With `{python} gpt2_n_layers_str` layers in GPT-2: ~`{python} gpt2_per_step_t_str` trillion FLOPs per training step
+- At `{python} gpt2_training_steps_str` training steps: ~`{python} gpt2_total_peta_str` petaFLOPS total training computation
 
-**System Implication:** A V100 GPU (`{python} TrainingHardware.v100_tflops_fp16_str` TFLOPS peak FP16 with Tensor Cores, `{python} TrainingHardware.v100_tflops_fp32_str` TFLOPS FP32 without) would require `{python} GPT2Compute.v100_time_str` seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220 ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
+**System Implication:** A V100 GPU (`{python} TrainingHardware.v100_tflops_fp16_str` TFLOPS peak FP16 with Tensor Cores, `{python} TrainingHardware.v100_tflops_fp32_str` TFLOPS FP32 without) would require `{python} gpt2_v100_time_str` seconds just for the attention computations per step at 100% utilization (theoretical peak; practical throughput would be lower). Actual training steps take 180 to 220 ms, requiring 8 to 32 GPUs to achieve this throughput depending on utilization and interconnect efficiency.
 
 :::
 
@@ -909,6 +933,27 @@ In practice, ReLU is the default choice for large-scale networks due to its effi
 
 Our GPT-2 Lighthouse Model illustrates these trade-offs through its choice of the *GPT-2 GELU activation function*.
 
+```{python}
+#| label: gpt2-gelu-bridge
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 GELU ACTIVATION — BRIDGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: GELU Activation Function callout
+# │ Goal:    Bridge class-level values to module-level exports
+# │ Exports: gelu_cost_min_str, gelu_cost_max_str, gelu_layers_str,
+# │          gelu_overhead_min_str, gelu_overhead_max_str, gelu_approx_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+gelu_cost_min_str = TrainingScenarios.gelu_cost_factor_min_str
+gelu_cost_max_str = TrainingScenarios.gelu_cost_factor_max_str
+gelu_layers_str = TrainingModels.gpt2_layers_str
+gelu_overhead_min_str = TrainingScenarios.gelu_overhead_pct_min_str
+gelu_overhead_max_str = TrainingScenarios.gelu_overhead_pct_max_str
+gelu_approx_str = TrainingScenarios.gelu_approx_cost_factor_str
+```
+
 ::: {.callout-notebook title="GPT-2 GELU Activation Function"}
 
 \index{GELU!Gaussian Error Linear Unit}
@@ -927,12 +972,12 @@ where $\Phi(x)$ is the cumulative distribution function of the standard normal d
 
 **System Performance Tradeoff**
 
-- Computational cost: ~`{python} TrainingScenarios.gelu_cost_factor_min_str` to `{python} TrainingScenarios.gelu_cost_factor_max_str`$\times$ more expensive than ReLU (requires erf function evaluation)
+- Computational cost: ~`{python} gelu_cost_min_str` to `{python} gelu_cost_max_str`$\times$ more expensive than ReLU (requires erf function evaluation)
 - Memory: Same as ReLU (element-wise operation)
-- Training time impact: For GPT-2's `{python} TrainingModels.gpt2_layers_str` layers, GELU adds ~`{python} TrainingScenarios.gelu_overhead_pct_min_str` to `{python} TrainingScenarios.gelu_overhead_pct_max_str`% to total forward pass time
+- Training time impact: For GPT-2's `{python} gelu_layers_str` layers, GELU adds ~`{python} gelu_overhead_min_str` to `{python} gelu_overhead_max_str`% to total forward pass time
 - Justified by results: The improved model quality (lower perplexity) offsets the computational overhead
 
-Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately `{python} TrainingScenarios.gelu_approx_cost_factor_str`$\times$ ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
+Frameworks implement fast approximation of GELU using optimized formulas (@lst-gelu-approx). This approximation reduces computational cost to approximately `{python} gelu_approx_str`$\times$ ReLU while maintaining GELU's benefits, demonstrating *how* production systems balance mathematical properties with implementation efficiency.
 
 :::
 
@@ -1551,26 +1596,57 @@ Both $\mathbf{z}^{(l)}$ and $\mathbf{a}^{(l)}$ must be cached for the backward p
 
 We can see this in detail by examining the *GPT-2 activation memory breakdown*.
 
+```{python}
+#| label: gpt2-activation-memory-bridge
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 ACTIVATION MEMORY — BRIDGE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Activation Memory Breakdown callout
+# │ Goal:    Bridge class-level values to module-level exports
+# │ Exports: act_batch_str, act_seq_str, act_hidden_str, act_n_layers_str,
+# │          act_ffn_dim_str, act_attn_mb_str, act_ffn_mb_str, act_per_layer_str,
+# │          act_total_gb_str, act_params_gb_str, act_grad_gb_str, act_opt_gb_str,
+# │          act_peak_gb_str, act_v100_mem_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+act_batch_str = GPT2ActivationMemory.batch_size_str
+act_seq_str = GPT2ActivationMemory.seq_len_str
+act_hidden_str = GPT2ActivationMemory.hidden_dim_str
+act_n_layers_str = GPT2ActivationMemory.n_layers_str
+act_ffn_dim_str = GPT2ActivationMemory.ffn_dim_str
+act_attn_mb_str = GPT2ActivationMemory.attn_act_str
+act_ffn_mb_str = GPT2ActivationMemory.ffn_act_str
+act_per_layer_str = GPT2ActivationMemory.per_layer_str
+act_total_gb_str = GPT2ActivationMemory.total_act_str
+act_params_gb_str = GPT2ActivationMemory.params_gb_str
+act_grad_gb_str = GPT2ActivationMemory.grad_gb_str
+act_opt_gb_str = GPT2ActivationMemory.opt_gb_str
+act_peak_gb_str = GPT2ActivationMemory.peak_gb_str
+act_v100_mem_str = TrainingHardware.v100_mem_str
+```
+
 ::: {.callout-notebook title="GPT-2 Activation Memory Breakdown"}
 
-For GPT-2 with batch_size=`{python} GPT2ActivationMemory.batch_size_str`, seq_len=`{python} GPT2Compute.seq_len_str`, hidden_dim=`{python} GPT2ActivationMemory.hidden_dim_str`, `{python} GPT2ActivationMemory.n_layers_str` layers:
+For GPT-2 with batch_size=`{python} act_batch_str`, seq_len=`{python} act_seq_str`, hidden_dim=`{python} act_hidden_str`, `{python} act_n_layers_str` layers:
 
 **Per-Layer Activation Memory.**
 
-- Attention activations: `batch$\times$ seq$\times$ hidden$\times$ 4` (Q, K, V, output) = `{python} GPT2ActivationMemory.batch_size_str`$\times$ `{python} GPT2Compute.seq_len_str`$\times$ `{python} GPT2ActivationMemory.hidden_dim_str`$\times$ $4\times2$ bytes (FP16) = `{python} GPT2ActivationMemory.attn_act_str` MB
-- FFN activations: `batch$\times$ seq$\times$ (hidden$\times$ 4)` (intermediate expansion) = `{python} GPT2ActivationMemory.batch_size_str`$\times$ `{python} GPT2Compute.seq_len_str`$\times$ `{python} GPT2ActivationMemory.ffn_dim_str`$\times$ 2 bytes = `{python} GPT2ActivationMemory.ffn_act_str` MB
+- Attention activations: `batch$\times$ seq$\times$ hidden$\times$ 4` (Q, K, V, output) = `{python} act_batch_str`$\times$ `{python} act_seq_str`$\times$ `{python} act_hidden_str`$\times$ $4\times2$ bytes (FP16) = `{python} act_attn_mb_str` MB
+- FFN activations: `batch$\times$ seq$\times$ (hidden$\times$ 4)` (intermediate expansion) = `{python} act_batch_str`$\times$ `{python} act_seq_str`$\times$ `{python} act_ffn_dim_str`$\times$ 2 bytes = `{python} act_ffn_mb_str` MB
 - Layer norm states: Minimal (~10 MB per layer)
-- Total per layer: ~`{python} GPT2ActivationMemory.per_layer_str` MB
+- Total per layer: ~`{python} act_per_layer_str` MB
 
 **Full Model Activation Memory.**
 
-- `{python} GPT2ActivationMemory.n_layers_str` layers$\times$ ~`{python} GPT2ActivationMemory.per_layer_str` MB = **`{python} GPT2ActivationMemory.total_act_str` GB** just for activations
-- Parameters (FP16): `{python} GPT2ActivationMemory.params_gb_str` GB
-- Gradients: `{python} GPT2ActivationMemory.grad_gb_str` GB
-- Optimizer state (Adam, FP32): `{python} GPT2ActivationMemory.opt_gb_str` GB
-- Peak memory during training: **~`{python} GPT2ActivationMemory.peak_gb_str` GB**
+- `{python} act_n_layers_str` layers$\times$ ~`{python} act_per_layer_str` MB = **`{python} act_total_gb_str` GB** just for activations
+- Parameters (FP16): `{python} act_params_gb_str` GB
+- Gradients: `{python} act_grad_gb_str` GB
+- Optimizer state (Adam, FP32): `{python} act_opt_gb_str` GB
+- Peak memory during training: **~`{python} act_peak_gb_str` GB**
 
-This exceeds a single V100's `{python} TrainingHardware.v100_mem_str` GB capacity.
+This exceeds a single V100's `{python} act_v100_mem_str` GB capacity.
 
 **System Solutions Applied.**
 
@@ -2388,26 +2464,40 @@ class VRAMRequirements:
     vram_hidden_str = fmt(hidden, precision=0, commas=False)
     vram_layers_str = fmt(layers, precision=0, commas=False)
     vram_activations_gb_str = fmt(activations_gb, precision=0, commas=False)
+    vram_batch_str = f"{batch}"
 
-# Note: Use VRAMRequirements.vram_params_b_str directly.
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+vram_params_b_str = VRAMRequirements.vram_params_b_str
+vram_gpu_capacity_str = VRAMRequirements.vram_gpu_capacity_str
+vram_fp16_bytes_str = VRAMRequirements.vram_fp16_bytes_str
+vram_adam_bytes_str = VRAMRequirements.vram_adam_bytes_str
+vram_weights_gb_str = VRAMRequirements.vram_weights_gb_str
+vram_gradients_gb_str = VRAMRequirements.vram_gradients_gb_str
+vram_optimizer_gb_str = VRAMRequirements.vram_optimizer_gb_str
+vram_subtotal_gb_str = VRAMRequirements.vram_subtotal_gb_str
+vram_seq_str = VRAMRequirements.vram_seq_str
+vram_hidden_str = VRAMRequirements.vram_hidden_str
+vram_layers_str = VRAMRequirements.vram_layers_str
+vram_activations_gb_str = VRAMRequirements.vram_activations_gb_str
+vram_batch_str = VRAMRequirements.vram_batch_str
 ```
 
 ::: {.callout-notebook title="Estimating VRAM Requirements"}
 
-**Problem**: Will your `{python} VRAMRequirements.vram_params_b_str` B parameter model fit on a `{python} VRAMRequirements.vram_gpu_capacity_str` GB GPU for training?
+**Problem**: Will your `{python} vram_params_b_str` B parameter model fit on a `{python} vram_gpu_capacity_str` GB GPU for training?
 
-**Given**: `{python} VRAMRequirements.vram_params_b_str` B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, `{python} VRAMRequirements.vram_gpu_capacity_str` GB GPU memory.
+**Given**: `{python} vram_params_b_str` B parameters, mixed-precision training (FP16 weights/gradients, FP32 optimizer), Adam optimizer, `{python} vram_gpu_capacity_str` GB GPU memory.
 
 **The Math**:
 
-1.  **Weights (FP16)**: `{python} VRAMRequirements.vram_params_b_str` B$\times$ `{python} VRAMRequirements.vram_fp16_bytes_str` bytes = **`{python} VRAMRequirements.vram_weights_gb_str` GB**.
-2.  **Gradients (FP16)**: Same size as weights = **`{python} VRAMRequirements.vram_gradients_gb_str` GB**.
-3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. `{python} VRAMRequirements.vram_params_b_str` B$\times$ `{python} VRAMRequirements.vram_adam_bytes_str` bytes = **`{python} VRAMRequirements.vram_optimizer_gb_str` GB**.
-4.  **Subtotal (before activations)**: `{python} VRAMRequirements.vram_weights_gb_str` + `{python} VRAMRequirements.vram_gradients_gb_str` + `{python} VRAMRequirements.vram_optimizer_gb_str` = **`{python} VRAMRequirements.vram_subtotal_gb_str` GB**. Already exceeds `{python} VRAMRequirements.vram_gpu_capacity_str` GB.
-5.  **Activations**: Scale with batch size. Formula: Batch$\times$ SeqLen$\times$ Hidden$\times$ Layers$\times$ Bytes. Example: Batch=1, Seq=`{python} VRAMRequirements.vram_seq_str`, Hidden=`{python} VRAMRequirements.vram_hidden_str`, `{python} VRAMRequirements.vram_layers_str` Layers ≈ **`{python} VRAMRequirements.vram_activations_gb_str` GB** additional.
+1.  **Weights (FP16)**: `{python} vram_params_b_str` B$\times$ `{python} vram_fp16_bytes_str` bytes = **`{python} vram_weights_gb_str` GB**.
+2.  **Gradients (FP16)**: Same size as weights = **`{python} vram_gradients_gb_str` GB**.
+3.  **Optimizer (Adam, FP32)**: Stores momentum & variance. `{python} vram_params_b_str` B$\times$ `{python} vram_adam_bytes_str` bytes = **`{python} vram_optimizer_gb_str` GB**.
+4.  **Subtotal (before activations)**: `{python} vram_weights_gb_str` + `{python} vram_gradients_gb_str` + `{python} vram_optimizer_gb_str` = **`{python} vram_subtotal_gb_str` GB**. Already exceeds `{python} vram_gpu_capacity_str` GB.
+5.  **Activations**: Scale with batch size. Formula: Batch$\times$ SeqLen$\times$ Hidden$\times$ Layers$\times$ Bytes. Example: Batch=`{python} vram_batch_str`, Seq=`{python} vram_seq_str`, Hidden=`{python} vram_hidden_str`, `{python} vram_layers_str` Layers ≈ **`{python} vram_activations_gb_str` GB** additional.
 
 \index{Parameter Sharding!memory constraint solution}
-**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is 4--6$\times$ larger than model weights. Training a `{python} VRAMRequirements.vram_params_b_str` B model on a single `{python} VRAMRequirements.vram_gpu_capacity_str` GB GPU requires quantization (4-bit) or parameter sharding (FSDP/ZeRO).
+**The Systems Conclusion**: The "administrative tax" (gradients + optimizer states) is 4--6$\times$ larger than model weights. Training a `{python} vram_params_b_str` B model on a single `{python} vram_gpu_capacity_str` GB GPU requires quantization (4-bit) or parameter sharding (FSDP/ZeRO).
 :::
 
 The total memory scales linearly with batch size (as established in @eq-activation-memory-per-batch), which means the practical complexity lies not in the scaling law itself but in how these costs interact across layers.
@@ -4228,6 +4318,9 @@ class GradientAccumulation:
     # ┌── 4. OUTPUTS ───────────────────────────────────────────────────────────
     gpus_naive_str = f"{gpus_naive}"
     batch_per_gpu_str = f"{batch_per_gpu}"
+    micro_batch_str = f"{micro_batch}"
+    effective_batch_str = f"{effective_batch}"
+    gpus_accum_str = f"{gpus_accum}"
     naive_hourly_str = f"{naive_hourly}"
     accum_hourly_str = f"{accum_hourly}"
     savings_hourly_str = f"{savings_hourly}"
@@ -4240,6 +4333,9 @@ class GradientAccumulation:
 # Export for prose
 gpus_naive_str = GradientAccumulation.gpus_naive_str
 batch_per_gpu_str = GradientAccumulation.batch_per_gpu_str
+micro_batch_str = GradientAccumulation.micro_batch_str
+effective_batch_str = GradientAccumulation.effective_batch_str
+gpus_accum_str = GradientAccumulation.gpus_accum_str
 naive_hourly_str = GradientAccumulation.naive_hourly_str
 accum_hourly_str = GradientAccumulation.accum_hourly_str
 savings_hourly_str = GradientAccumulation.savings_hourly_str
@@ -4277,15 +4373,15 @@ Configuration:
 
 Without Accumulation (naive approach):
 
-- 32 GPUs$\times$ batch_size=16 = 512 effective batch
-- Gradient sync: 32 GPUs → high communication overhead
-- Cost: USD 16/hour$\times$ 32 GPUs = USD `{python} naive_hourly_str`/hour
+- `{python} gpus_naive_str` GPUs$\times$ batch_size=`{python} micro_batch_str` = `{python} effective_batch_str` effective batch
+- Gradient sync: `{python} gpus_naive_str` GPUs → high communication overhead
+- Cost: USD 16/hour$\times$ `{python} gpus_naive_str` GPUs = USD `{python} naive_hourly_str`/hour
 
 With Accumulation (actual GPT-2 approach):
 
-- 8 GPUs$\times$ ($16\times4$ accumulation) = 512 effective batch
-- Gradient sync: Only every 4 steps, only 8 GPUs
-- Cost: USD 16/hour$\times$ 8 GPUs = USD `{python} accum_hourly_str`/hour
+- `{python} gpus_accum_str` GPUs$\times$ (`{python} micro_batch_str`$\times$`{python} accum_steps_str` accumulation) = `{python} effective_batch_str` effective batch
+- Gradient sync: Only every `{python} accum_steps_str` steps, only `{python} gpus_accum_str` GPUs
+- Cost: USD 16/hour$\times$ `{python} gpus_accum_str` GPUs = USD `{python} accum_hourly_str`/hour
 - Savings: USD `{python} savings_hourly_str`/hour = `{python} savings_pct_str`% cost reduction
 
 **Tradeoff Analysis**
@@ -4302,8 +4398,9 @@ With Accumulation (actual GPT-2 approach):
 - Difference: 0.5% (within noise margin)
 
 **Why This Works:** Gradient accumulation is mathematically equivalent to larger batches because gradients are additive:
+
 $$
-\nabla \mathcal{L}_{\text{batch}} = \frac{1}{N}\sum_{i=1}^N \nabla \mathcal{L}(x_i) = \frac{1}{4}\sum_{j=1}^4 \left[\frac{1}{16}\sum_{k=1}^{16} \nabla \mathcal{L}(x_{jk})\right]
+\nabla \mathcal{L}_{\text{batch}} = \frac{1}{N}\sum_{i=1}^N \nabla \mathcal{L}(x_i) = \frac{1}{`{python} accum_steps_str`}\sum_{j=1}^{`{python} accum_steps_str`} \left[\frac{1}{`{python} micro_batch_str`}\sum_{k=1}^{`{python} micro_batch_str`} \nabla \mathcal{L}(x_{jk})\right]
 $$
 
 **Key Insight:** For memory-bound models like GPT-2, gradient accumulation + moderate GPU count is more cost-effective than scaling to many GPUs with small batches.
@@ -4901,7 +4998,7 @@ Model parallelism's challenge is *idle time*. While Device 1 computes layers 1--
 \index{NVLink!GPU interconnect}\index{NVLink!gradient synchronization}
 Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink[^fn-nvlink-training] (up to `{python} TrainingHardware.nvlink_h100_str` GB/s on modern systems), making gradient synchronization and activation transfers fast. Data parallelism transfers gradients, which are proportional to model size. Model parallelism transfers activations, proportional to batch size times hidden dimension, at every partition boundary. The 10--50$\times$ bandwidth advantage of NVLink over PCIe makes both strategies practical within a node. This intra-node parallelism forms the building block for larger distributed systems. To understand *when* to choose each strategy, the following analysis compares *data vs. model parallelism* quantitatively.
 
-::: {.callout-notebook title="Data vs. Model Parallelism"}
+::: {.callout-notebook title="Data vs. Model Parallelism"} <!-- lego-ok -->
 
 **The Physics of Splitting**: How do you split a model that is too big or too slow?
 

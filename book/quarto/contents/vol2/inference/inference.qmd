@@ -202,13 +202,35 @@ Minimizing this tax requires co-locating communicating components, using high-ba
 
 The serving tax quantified above consumes a fraction of the latency budget per request. The true economic impact of inference, however, emerges when we consider cost over a model's entire operational lifetime. A critical insight for infrastructure planning is that serving cost typically dominates training cost over a model's operational lifetime. This reversal from the training-centric view of model development has profound implications for where optimization effort should focus. Training is a one-time capital expenditure (CapEx); serving is a continuous operational expenditure (OpEx) that scales with user growth. To make this cost dominance concrete, consider a worked example that reveals the *serving cost multiplier* in practice.
 
+```{python}
+#| label: serving-cost-multiplier-simple
+#| echo: false
+from mlsys.formatting import check
+
+class ServingCostSimple:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    dau = 1_000_000
+    reqs_per_day = 50
+    days_per_year = 365
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    annual_reqs = dau * reqs_per_day * days_per_year
+    annual_reqs_b = round(annual_reqs / 1e9)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(annual_reqs > 10e9, "Should be >10B annual requests")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    annual_reqs_b_str = f"{annual_reqs_b}"
+
+# ┌── EXPORTS ─────────────────────────────────────────────────
+annual_reqs_b_str = ServingCostSimple.annual_reqs_b_str
+```
+
 ::: {.callout-notebook title="The Serving Cost Multiplier"}
 **Problem**: You spent **\$2 Million** training a 70B parameter model. You serve it to 1 million daily active users (DAU), each making 50 requests/day. Is training or serving the dominant cost over 1 year?
 
 **The Math**:
 
 1.  **Training Cost**: \$2,000,000 (One-time).
-2.  **Inference Volume**: $1M \text{ users} \times 50 \text{ reqs} \times 365 \text{ days} \approx 18 \text{ Billion requests/year}$.
+2.  **Inference Volume**: $1M \text{ users} \times 50 \text{ reqs} \times 365 \text{ days}$ $\approx$ `{python} annual_reqs_b_str` Billion requests/year.
 3.  **Cost per Request**: Assume a 70B model on H100 costs $\approx \$0.001$ per request (input + output).
 4.  **Annual Serving Cost**: $18 \times 10^9 \times \$0.001 = \mathbf{\$18{,}000{,}000}$.
 
@@ -761,6 +783,38 @@ The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$.
 
 : **Batching Strategy by Model Type**. Each model type has characteristic batching behavior determined by its computational bottleneck. {#tbl-batching-by-model}
 
+```{python}
+#| label: littles-law-example
+#| echo: false
+from mlsys.formatting import check
+
+class LittlesLawExample:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    target_throughput = 1000
+    latency_slo_s = 0.1
+    batch_size = 8
+    replica_latency_s = 0.08
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    required_concurrency = int(target_throughput * latency_slo_s)
+    replica_throughput = int(batch_size / replica_latency_s)
+    replicas_needed = int(target_throughput / replica_throughput)
+    total_concurrency = replicas_needed * batch_size
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(required_concurrency == 100, "L should be 100")
+    check(replicas_needed == 10, "Should need 10 replicas")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    required_concurrency_str = f"{required_concurrency}"
+    replica_throughput_str = f"{replica_throughput}"
+    replicas_needed_str = f"{replicas_needed}"
+    total_concurrency_str = f"{total_concurrency}"
+
+# ┌── EXPORTS ─────────────────────────────────────────────────
+required_concurrency_str = LittlesLawExample.required_concurrency_str
+replica_throughput_str = LittlesLawExample.replica_throughput_str
+replicas_needed_str = LittlesLawExample.replicas_needed_str
+total_concurrency_str = LittlesLawExample.total_concurrency_str
+```
+
 ::: {.callout-notebook title="Little's Law for Inference" collapse="true"}
 **Concept**: In any stable queuing system, the average number of requests in the system ($L$) equals the arrival rate ($\lambda$) multiplied by the average time a request spends in the system ($W$).
 
@@ -771,19 +825,18 @@ $$ L = \lambda \times W $$
 - **Target Throughput ($\lambda$)**: 1,000 requests/sec
 - **Latency SLO ($W$)**: 100 ms (0.1 s)
 
-**Required Concurrency ($L$)**:
-$$ L = 1000 \times 0.1 = \mathbf{100 \text{ concurrent requests}} $$
+**Required Concurrency ($L$)**: $L = 1000 \times 0.1 =$ **`{python} required_concurrency_str`** concurrent requests
 
 **Capacity Planning**:
 If a single GPU replica handles batch size 8 with 80 ms latency:
 
-1. Replica Throughput = $8 / 0.08 = 100 \text{ req/s}$
-2. Replicas Needed = $1000 / 100 = 10 \text{ replicas}$
+1. Replica Throughput $= 8 / 0.08 =$ `{python} replica_throughput_str` req/s
+2. Replicas Needed $= 1000 /$ `{python} replica_throughput_str` $=$ `{python} replicas_needed_str` replicas
 
 **Verification**:
-Total system concurrency = $10 \text{ replicas} \times 8 \text{ batch} = 80$.
-Wait! We needed 100.
-*Correction*: We must account for queue depth. With 10 replicas active processing 80 reqs, 20 reqs are in queues.
+Total system concurrency $=$ `{python} replicas_needed_str` replicas $\times$ 8 batch $=$ `{python} total_concurrency_str`.
+Wait! We needed `{python} required_concurrency_str`.
+*Correction*: We must account for queue depth. With `{python} replicas_needed_str` replicas active processing `{python} total_concurrency_str` reqs, 20 reqs are in queues.
 Queue wait time added to latency must not violate SLO.
 :::
 
@@ -964,10 +1017,34 @@ Analysis
 
 We can confirm these results by *applying Little's Law to verify* internal consistency.
 
+```{python}
+#| label: littles-law-verify
+#| echo: false
+from mlsys.formatting import check
+
+class LittlesLawVerify:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    arrival_rate = 100
+    batch_size = 32
+    expected_total_ms = 91.5
+    utilization = 0.206
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    L = arrival_rate * (expected_total_ms / 1000)
+    in_service = batch_size * utilization
+    in_queue = L - in_service
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(8 < L < 12, f"L should be ~9, got {L:.2f}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    expected_total_str = f"{expected_total_ms}"
+
+# ┌── EXPORTS ─────────────────────────────────────────────────
+expected_total_str = LittlesLawVerify.expected_total_str
+```
+
 ::: {.callout-notebook title="Applying Little's Law to Verify" collapse="true"}
 **Verification using Little's Law**: $L = \lambda \cdot W$
 
-At B=32 with $\lambda = 100$ req/s and $E[T] = 91.5$ ms:
+At B=32 with $\lambda = 100$ req/s and $E[T] =$ `{python} expected_total_str` ms:
 
 $$L = 100 \times 0.0915 = 9.15 \text{ requests in system}$$
 
@@ -2525,6 +2602,36 @@ $$
 
 This is dramatically more manageable than the `{python} kv_fp16_gb_str` GB required by MHA. Combining GQA with INT8 KV cache quantization yields sub-gigabyte per-request cache sizes, enabling batch sizes of 50 or more on a single GPU. GQA has become the dominant architectural choice for inference-optimized LLMs (Llama 3, Mistral, Gemma) because its quality impact is typically less than 1% on standard benchmarks while enabling an order-of-magnitude increase in serving throughput.
 
+```{python}
+#| label: precision-dividend
+#| echo: false
+from mlsys.formatting import check
+
+class PrecisionDividend:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    h100_mem_gb = 80
+    fp16_weight_per_gpu = 35
+    int4_bits = 4
+    fp16_bits = 16
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    avail_kv_fp16 = h100_mem_gb - fp16_weight_per_gpu
+    int4_weight_per_gpu = fp16_weight_per_gpu * (int4_bits / fp16_bits)
+    avail_kv_int4 = h100_mem_gb - int4_weight_per_gpu
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(avail_kv_fp16 == 45, f"Expected 45, got {avail_kv_fp16}")
+    check(abs(int4_weight_per_gpu - 8.75) < 0.01, f"Expected 8.75, got {int4_weight_per_gpu}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    avail_kv_fp16_str = f"{avail_kv_fp16:.0f}"
+    int4_weight_per_gpu_str = f"{int4_weight_per_gpu}"
+    avail_kv_int4_str = f"{avail_kv_int4}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+avail_kv_fp16_str = PrecisionDividend.avail_kv_fp16_str
+int4_weight_per_gpu_str = PrecisionDividend.int4_weight_per_gpu_str
+avail_kv_int4_str = PrecisionDividend.avail_kv_int4_str
+fp16_weight_per_gpu = PrecisionDividend.fp16_weight_per_gpu
+```
+
 ::: {.callout-notebook title="The Precision Dividend"}
 
 **Problem**: You serve a 70B model on 4$\times$ H100 GPUs. Weights in FP16 consume 140 GB (35 GB/GPU). KV cache at FP16 consumes `{python} kv_fp16_gb_str` GB per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
@@ -2532,16 +2639,16 @@ This is dramatically more manageable than the `{python} kv_fp16_gb_str` GB requi
 **Before optimization** (all FP16):
 
 - Weights: 35 GB/GPU
-- Available for KV cache: $80 - 35 = 45$ GB/GPU
+- Available for KV cache: $80 -$ `{python} fp16_weight_per_gpu` $=$ `{python} avail_kv_fp16_str` GB/GPU
 - KV cache per request: `{python} kv_fp16_gb_str` GB $\div$ 4 GPUs $\approx$ `{python} f"{kv_fp16_gb / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor 45 / {kv_fp16_gb / 4:.1f} \rfloor$ $\approx$ `{python} f"{int(45 / (kv_fp16_gb / 4))}"` requests
+- Maximum batch size: $\lfloor$ `{python} avail_kv_fp16_str` $/$ `{python} f"{kv_fp16_gb / 4:.1f}"` $\rfloor$ $\approx$ `{python} f"{int(45 / (kv_fp16_gb / 4))}"` requests
 
 **After optimization** (INT4 weights, INT8 KV cache):
 
-- Weights: 35 GB$\times$ (4/16) = 8.75 GB/GPU (INT4)
-- Available for KV cache: $80 - 8.75 = 71.25$ GB/GPU
+- Weights: `{python} fp16_weight_per_gpu` GB $\times$ (4/16) $=$ `{python} int4_weight_per_gpu_str` GB/GPU (INT4)
+- Available for KV cache: $80 -$ `{python} int4_weight_per_gpu_str` $=$ `{python} avail_kv_int4_str` GB/GPU
 - KV cache per request (INT8): `{python} f"{kv_fp16_gb / 2:.1f}"` GB $\div$ 4 $\approx$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` GB/GPU
-- Maximum batch size: $\lfloor 71.25 / {kv_fp16_gb / 2 / 4:.1f} \rfloor$ $\approx$ `{python} f"{int(71.25 / (kv_fp16_gb / 2 / 4))}"` requests
+- Maximum batch size: $\lfloor$ `{python} avail_kv_int4_str` $/$ `{python} f"{kv_fp16_gb / 2 / 4:.1f}"` $\rfloor$ $\approx$ `{python} f"{int(float(PrecisionDividend.avail_kv_int4) / (kv_fp16_gb / 2 / 4))}"` requests
 
 **Takeaway**: Precision engineering fundamentally changes serving economics by enabling larger batch sizes. Larger batches amortize the fixed cost of weight loading, shifting operations from memory-bound toward compute-bound.
 
@@ -3295,6 +3402,40 @@ The performance advantages are striking. During autoregressive decode at batch s
 
 The trade-off is memory capacity: all experts must reside in memory even though only a fraction are active at any time. DeepSeek-V3's full model in FP16 requires approximately `{python} moe_mem_str` GB, necessitating distribution across many GPUs.
 
+```{python}
+#| label: moe-capacity-planning
+#| echo: false
+from mlsys.constants import H100_MEM_BW, GB, TB, second
+from mlsys.formatting import check
+
+class MoECapacityPlan:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    moe_active_params_b = 37
+    bytes_fp8 = 1
+    n_gpus = 16
+    alltoall_overhead_ms = 0.3
+    h100_bw_gbs = H100_MEM_BW.m_as(GB / second)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    active_mem_gb = moe_active_params_b * bytes_fp8
+    read_per_gpu_gb = active_mem_gb / n_gpus
+    t_read_ms = (read_per_gpu_gb / h100_bw_gbs) * 1000
+    total_decode_ms = t_read_ms + alltoall_overhead_ms
+    tokens_per_sec = round(1000 / total_decode_ms, -2)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(0.5 < total_decode_ms < 2.0, f"Expected ~1ms, got {total_decode_ms:.2f}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    read_per_gpu_str = f"{read_per_gpu_gb:.1f}"
+    t_read_ms_str = f"{t_read_ms:.2f}"
+    total_decode_ms_str = f"{total_decode_ms:.1f}"
+    tokens_per_sec_str = f"{tokens_per_sec:,.0f}"
+
+# ┌── EXPORTS ─────────────────────────────────────────────────
+moe_read_per_gpu_str = MoECapacityPlan.read_per_gpu_str
+moe_t_read_ms_str = MoECapacityPlan.t_read_ms_str
+moe_total_decode_ms_str = MoECapacityPlan.total_decode_ms_str
+moe_tokens_per_sec_str = MoECapacityPlan.tokens_per_sec_str
+```
+
 ::: {.callout-notebook title="MoE Capacity Planning"}
 
 **Problem**: You are deploying DeepSeek-V3 (671B total parameters, 37B active per token) for a chatbot application. The model uses FP8 weights (1 byte per parameter). Your cluster has 8-GPU nodes, each with 8$\times$ H100 (80 GB HBM per GPU, 640 GB per node). How many nodes do you need, and what is the per-token decode latency?
@@ -3302,8 +3443,8 @@ The trade-off is memory capacity: all experts must reside in memory even though 
 **The Math**:
 
 1.  **Memory**: Total weight memory = $671 \text{ GB}$. A single node (640 GB) is insufficient. Two nodes provide 1,280 GB, leaving enough room for KV caches.
-2.  **Latency**: Each decode step reads 37B active parameters (37 GB). Distributed across 16 GPUs, each reads $\sim$2.3 GB. At `{python} h100_mem_bw_tbs` TB/s HBM bandwidth, $t_{read} \approx 0.69 \text{ ms}$. AllToAll routing adds $\sim$0.3 ms.
-3.  **Floor**: Estimated decode latency $\approx 1.0 \text{ ms/token}$, or 1,000 tokens/second at batch size 1.
+2.  **Latency**: Each decode step reads 37B active parameters (37 GB). Distributed across 16 GPUs, each reads $\sim$`{python} moe_read_per_gpu_str` GB. At `{python} h100_mem_bw_tbs` TB/s HBM bandwidth, $t_{read} \approx$ `{python} moe_t_read_ms_str` ms. AllToAll routing adds $\sim$0.3 ms.
+3.  **Floor**: Estimated decode latency $\approx$ `{python} moe_total_decode_ms_str` ms/token, or `{python} moe_tokens_per_sec_str` tokens/second at batch size 1.
 
 **Takeaway**: MoE allows a 671B model to achieve the latency of a 37B dense model but requires 2$\times$ more hardware for memory capacity.
 

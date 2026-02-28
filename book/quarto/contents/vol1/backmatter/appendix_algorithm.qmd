@@ -344,24 +344,125 @@ For a standard Adam optimizer in Mixed Precision:
 
 To see how these components interact in practice, consider a concrete model.
 
+```{python}
+#| label: gpt2-training-memory
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-2 XL TRAINING MEMORY BREAKDOWN
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Callout "Worked Example: GPT-2 (1.5B) Training Memory",
+# │          @sec-algorithm-foundations-true-cost-training-memory-e54e
+# │
+# │ Goal:    Compute memory breakdown (weights, gradients, optimizer, activations).
+# │ Show:    Per-component GB and total for two batch sizes.
+# │ How:     Scalar arithmetic from pint constants.
+# │
+# │ Imports: mlsys.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
+# │                           BYTES_FP16, BYTES_FP32, GB, byte, ureg, param)
+# │          mlsys.formatting (fmt, check)
+# │ Exports: gpt2_P_str, gpt2_layers_str, gpt2_d_str, gpt2_bf16_str,
+# │          gpt2_weights_gb_str, gpt2_grads_gb_str, gpt2_optim_bytes_str,
+# │          gpt2_optim_gb_str, gpt2_model_state_gb_str, gpt2_accel_gb_str,
+# │          gpt2_remaining_gb_str, gpt2_batch_small_str, gpt2_seq_len_str,
+# │          gpt2_act_small_gb_str, gpt2_total_small_gb_str,
+# │          gpt2_batch_large_str, gpt2_act_large_gb_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
+    BYTES_FP16, BYTES_FP32, GB, byte, ureg, param
+)
+from mlsys.formatting import fmt, check
+
+class GPT2TrainingMem:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    P = GPT2_PARAMS.m_as(param)
+    layers = GPT2_LAYERS
+    d = GPT2_HIDDEN_DIM
+    bf16 = int(BYTES_FP16.m_as(ureg.byte))
+    fp32 = int(BYTES_FP32.m_as(ureg.byte))
+    accel_gb = 80
+    batch_small = 8
+    batch_large = 32
+    seq_len = 1024
+    optimizer_bytes_per_param = 12  # FP32 master + momentum + variance
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    weights_gb = P * bf16 / 1e9
+    grads_gb = P * bf16 / 1e9
+    optim_gb = P * optimizer_bytes_per_param / 1e9
+    model_state_gb = weights_gb + grads_gb + optim_gb
+    remaining_gb = accel_gb - model_state_gb
+
+    # Per-layer activation: 2 * B * S * d * bytes_bf16 (approximate)
+    act_small_bytes = layers * 2 * batch_small * seq_len * d * bf16
+    act_small_gb = act_small_bytes / 1e9
+    total_small_gb = model_state_gb + act_small_gb
+
+    act_large_bytes = layers * 2 * batch_large * seq_len * d * bf16
+    act_large_gb = act_large_bytes / 1e9
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(model_state_gb < accel_gb, "Model state must fit on accelerator")
+    check(total_small_gb < accel_gb, "Small batch must fit on 80 GB")
+    check(act_large_gb > remaining_gb, "Large batch should exceed remaining capacity")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    P_str = f"{P:.1e}"
+    layers_str = f"{layers}"
+    d_str = f"{d}"
+    bf16_str = f"{bf16}"
+    weights_gb_str = f"{weights_gb:.1f}"
+    grads_gb_str = f"{grads_gb:.1f}"
+    optim_bytes_str = f"{optimizer_bytes_per_param}"
+    optim_gb_str = f"{optim_gb:.1f}"
+    model_state_gb_str = f"{model_state_gb:.0f}"
+    accel_gb_str = f"{accel_gb}"
+    remaining_gb_str = f"{remaining_gb:.0f}"
+    batch_small_str = f"{batch_small}"
+    seq_len_str = f"{seq_len}"
+    act_small_gb_str = f"{act_small_gb:.0f}"
+    total_small_gb_str = f"~{total_small_gb:.0f}"
+    batch_large_str = f"{batch_large}"
+    act_large_gb_str = f"~{act_large_gb:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+gpt2_P_str = GPT2TrainingMem.P_str
+gpt2_layers_str = GPT2TrainingMem.layers_str
+gpt2_d_str = GPT2TrainingMem.d_str
+gpt2_bf16_str = GPT2TrainingMem.bf16_str
+gpt2_weights_gb_str = GPT2TrainingMem.weights_gb_str
+gpt2_grads_gb_str = GPT2TrainingMem.grads_gb_str
+gpt2_optim_bytes_str = GPT2TrainingMem.optim_bytes_str
+gpt2_optim_gb_str = GPT2TrainingMem.optim_gb_str
+gpt2_model_state_gb_str = GPT2TrainingMem.model_state_gb_str
+gpt2_accel_gb_str = GPT2TrainingMem.accel_gb_str
+gpt2_remaining_gb_str = GPT2TrainingMem.remaining_gb_str
+gpt2_batch_small_str = GPT2TrainingMem.batch_small_str
+gpt2_seq_len_str = GPT2TrainingMem.seq_len_str
+gpt2_act_small_gb_str = GPT2TrainingMem.act_small_gb_str
+gpt2_total_small_gb_str = GPT2TrainingMem.total_small_gb_str
+gpt2_batch_large_str = GPT2TrainingMem.batch_large_str
+gpt2_act_large_gb_str = GPT2TrainingMem.act_large_gb_str
+```
+
 ::: {.callout-notebook title="Worked Example: GPT-2 (1.5B) Training Memory"}
 
-**The model**: GPT-2 XL has $P = 1.5 \times 10^9$ parameters, 48 layers, hidden dimension $d = 1600$.
+**The model**: GPT-2 XL has $P = `{python} gpt2_P_str`$ parameters, `{python} gpt2_layers_str` layers, hidden dimension $d = `{python} gpt2_d_str`$.
 
 **Model state (fixed per step)**:
 
-- Weights (BF16): $1.5 \times 10^9 \times 2$ bytes = 3.0 GB
-- Gradients (BF16): $1.5 \times 10^9 \times 2$ bytes = 3.0 GB
-- Optimizer (FP32 master + momentum + variance): $1.5 \times 10^9 \times 12$ bytes = 18.0 GB
-- **Total model state: 24 GB** — fits on an A100/H100 (80 GB), but leaves only 56 GB for activations.
+- Weights (BF16): $`{python} gpt2_P_str` \times `{python} gpt2_bf16_str`$ bytes = `{python} gpt2_weights_gb_str` GB
+- Gradients (BF16): $`{python} gpt2_P_str` \times `{python} gpt2_bf16_str`$ bytes = `{python} gpt2_grads_gb_str` GB
+- Optimizer (FP32 master + momentum + variance): $`{python} gpt2_P_str` \times `{python} gpt2_optim_bytes_str`$ bytes = `{python} gpt2_optim_gb_str` GB
+- **Total model state: `{python} gpt2_model_state_gb_str` GB** — fits on an A100/H100 (`{python} gpt2_accel_gb_str` GB), but leaves only `{python} gpt2_remaining_gb_str` GB for activations.
 
 **Activations (scale with batch)**:
 
-Per-layer activation memory for a transformer is approximately $2 \times B \times S \times d$ bytes (in BF16), where $B$ is batch size and $S$ is sequence length. With 48 layers, batch size 8, and sequence length 1024:
+Per-layer activation memory for a transformer is approximately $2 \times B \times S \times d$ bytes (in BF16), where $B$ is batch size and $S$ is sequence length. With `{python} gpt2_layers_str` layers, batch size `{python} gpt2_batch_small_str`, and sequence length `{python} gpt2_seq_len_str`:
 
-$48 \times 2 \times 8 \times 1024 \times 1600 \times 2$ bytes $\approx$ 24 GB
+$`{python} gpt2_layers_str` \times 2 \times `{python} gpt2_batch_small_str` \times `{python} gpt2_seq_len_str` \times `{python} gpt2_d_str` \times `{python} gpt2_bf16_str`$ bytes $\approx$ `{python} gpt2_act_small_gb_str` GB
 
-**Total: ~48 GB** — fits on one 80 GB accelerator. However, increase the batch to 32 and activations grow to ~96 GB, exceeding the remaining capacity. This is the threshold where gradient checkpointing (trading ~33% more compute for $O(\sqrt{L})$ activation memory) becomes necessary.
+**Total: `{python} gpt2_total_small_gb_str` GB** — fits on one `{python} gpt2_accel_gb_str` GB accelerator. However, increase the batch to `{python} gpt2_batch_large_str` and activations grow to `{python} gpt2_act_large_gb_str` GB, exceeding the remaining capacity. This is the threshold where gradient checkpointing (trading ~33% more compute for $O(\sqrt{L})$ activation memory) becomes necessary.
 
 :::
 

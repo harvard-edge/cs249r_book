@@ -75,19 +75,13 @@ Distributed training appears simple: split the work across machines and combine 
 # │ Context: @sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96
 # │          and ZeRO/FSDP analysis paragraphs throughout the chapter.
 # │
-# │ Goal: Establish GPU memory limits (A100_MEM_CAPACITY, H100_MEM_CAPACITY)
-# │       and intra-node interconnect bandwidth (NVLINK_A100_BW, NVLINK_H100_BW)
-# │       for large-scale distributed clusters, and compute GPT-3/GPT-4 scale
-# │       (GPT3_PARAMS, GPT4_EST_PARAMS) to anchor why distribution is necessary.
-# │ Show: "80" GB A100 memory and "600" GB/s NVLink H100 bandwidth — inline
-# │       in the memory exhaustion and interconnect hierarchy paragraphs.
-# │ How: Convert Mparam → billions via /THOUSAND; Tparam direct .m_as().
+# │ Goal:    Format GPU memory limits and NVLink bandwidths used throughout.
+# │ Show:    "80" GB A100 memory and "600" GB/s NVLink H100 bandwidth.
+# │ How:     Unit conversion via pint .m_as().
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY,
-# │           NVLINK_A100_BW, NVLINK_H100_BW, GPT3_PARAMS, GPT4_EST_PARAMS,
-# │           GB, second, Mparam, Tparam, THOUSAND)
-# │ Exports: a100_mem, h100_mem, nvlink_a100, nvlink_h100,
-# │          gpt3_params_b, gpt4_est_params_t
+# │           NVLINK_A100_BW, NVLINK_H100_BW, GB, second)
+# │ Exports: a100_mem, h100_mem, nvlink_a100, nvlink_h100
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     A100_MEM_CAPACITY, H100_MEM_CAPACITY,
@@ -98,13 +92,31 @@ from mlsys.constants import (
 )
 from mlsys.formatting import fmt_percent, fmt, sci, check
 
-# ┌── LEGO ───────────────────────────────────────────────
-## Why Distribution Is Necessary {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
+class DistTrainConstants:
+    # ┌── 1. LOAD (Constants) ──────────────────────────────
+    a100_mem_gb = A100_MEM_CAPACITY.m_as(GB)
+    h100_mem_gb = H100_MEM_CAPACITY.m_as(GB)
+    nvlink_a100_gbs = NVLINK_A100_BW.m_as(GB / second)
+    nvlink_h100_gbs = NVLINK_H100_BW.m_as(GB / second)
 
-a100_mem = f"{A100_MEM_CAPACITY.m_as(GB):.0f}"
-h100_mem = f"{H100_MEM_CAPACITY.m_as(GB):.0f}"
-nvlink_a100 = f"{NVLINK_A100_BW.m_as(GB/second):.0f}"
-nvlink_h100 = f"{NVLINK_H100_BW.m_as(GB/second):.0f}"
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────
+    # (direct unit conversions only)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────
+    check(a100_mem_gb > 0, "A100 memory must be positive")
+    check(nvlink_h100_gbs > nvlink_a100_gbs, "H100 NVLink faster than A100")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────
+    a100_mem_str = f"{a100_mem_gb:.0f}"
+    h100_mem_str = f"{h100_mem_gb:.0f}"
+    nvlink_a100_str = f"{nvlink_a100_gbs:.0f}"
+    nvlink_h100_str = f"{nvlink_h100_gbs:.0f}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────
+a100_mem = DistTrainConstants.a100_mem_str
+h100_mem = DistTrainConstants.h100_mem_str
+nvlink_a100 = DistTrainConstants.nvlink_a100_str
+nvlink_h100 = DistTrainConstants.nvlink_h100_str
 ```
 
 ## Why Distribution Is Necessary {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
@@ -222,6 +234,7 @@ If you attempt **Tensor Parallelism** across server racks connected by standard 
 ::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. Starting from the model's memory requirements, the tree guides practitioners through the constraint satisfaction process that determines which parallelism strategies are physically feasible. The critical branching points are model memory versus single-GPU capacity and communication bandwidth versus parallelism demands. Leaf nodes are annotated with the dominant hardware constraint." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+  \usetikzlibrary{positioning}
   \definecolor{BlueLine}{HTML}{006395}
   \definecolor{BlueL}{HTML}{D1E6F3}
   \definecolor{GreenLine}{HTML}{008F45}
@@ -1652,37 +1665,124 @@ Given a 7B parameter model distributed across a cluster of 64 A100 GPUs (80 GB H
 
 To illustrate these concepts concretely, consider *scaling from 8 to 64 workers* when training a transformer language model with baseline batch size $b = 32$ per worker.
 
+```{python}
+#| label: scaling-8-to-64-workers
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SCALING 8→64 WORKERS ANALYSIS (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-distributed-training-systems-systems-worked-example-convergence-comparison-8-versus-64-workers-57ce
+# │
+# │ Goal: Quantify batch sizes, speedups, and LR scaling for 8 vs 64 workers.
+# │ Show: Effective batch sizes, expected iterations, wall-clock speedups.
+# │ How: Speedup = base_iters / (actual_iters × (1 + comm_overhead)).
+# │
+# │ Imports: math, mlsys.formatting (check)
+# │ Exports: batch_8_str, batch_64_str, exp_iter_8_str, exp_iter_64_str,
+# │          speedup_8_str, speedup_64_str, speedup_ssp_str, lr_ssp_str,
+# │          base_iters_k_str, base_batch_str, n_workers_8_str,
+# │          n_workers_64_str, ssp_staleness_str, critical_batch_str
+# └─────────────────────────────────────────────────────────────────────────────
+import math
+from mlsys.formatting import check
+
+class ScalingWorkers:
+    """Convergence comparison: 8 vs 64 workers, BSP vs SSP."""
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    n8 = 8
+    n64 = 64
+    b = 32
+    base_iters = 100_000
+    actual_8bsp = 12_800
+    comm_8bsp = 0.15
+    actual_64bsp = 1_720
+    comm_64bsp = 0.45
+    staleness = 4
+    actual_ssp = 2_100
+    comm_ssp = 0.25
+    critical_batch_size = 4_000
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    batch_8 = n8 * b
+    batch_64 = n64 * b
+    exp_iter_8 = base_iters / n8
+    exp_iter_64 = base_iters / n64
+    speedup_8 = base_iters / (actual_8bsp * (1 + comm_8bsp))
+    speedup_64 = base_iters / (actual_64bsp * (1 + comm_64bsp))
+    speedup_ssp = base_iters / (actual_ssp * (1 + comm_ssp))
+    lr_factor_ssp = 1 / math.sqrt(1 + staleness)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(batch_8 == 256, f"8-worker batch ({batch_8})")
+    check(batch_64 == 2048, f"64-worker batch ({batch_64})")
+    check(abs(speedup_8 - 6.8) < 0.1, f"8-worker speedup ({speedup_8:.2f})")
+    check(abs(speedup_64 - 40.1) < 0.2, f"64-worker speedup ({speedup_64:.2f})")
+    check(abs(speedup_ssp - 38.1) < 0.1, f"SSP speedup ({speedup_ssp:.2f})")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    batch_8_str = f"{batch_8:,}"
+    batch_64_str = f"{batch_64:,}"
+    exp_iter_8_str = f"{exp_iter_8/1000:.1f}K"
+    exp_iter_64_str = f"{exp_iter_64/1000:.2f}K"
+    speedup_8_str = f"{speedup_8:.1f}"
+    speedup_64_str = f"{speedup_64:.1f}"
+    speedup_ssp_str = f"{speedup_ssp:.1f}"
+    lr_ssp_str = f"{lr_factor_ssp:.2f}"
+    base_iters_k_str = f"{base_iters // 1000}K"
+    base_batch_str = str(b)
+    n_workers_8_str = str(n8)
+    n_workers_64_str = str(n64)
+    ssp_staleness_str = str(staleness)
+    critical_batch_str = f"{critical_batch_size:,}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+batch_8_str = ScalingWorkers.batch_8_str
+batch_64_str = ScalingWorkers.batch_64_str
+exp_iter_8_str = ScalingWorkers.exp_iter_8_str
+exp_iter_64_str = ScalingWorkers.exp_iter_64_str
+speedup_8_str = ScalingWorkers.speedup_8_str
+speedup_64_str = ScalingWorkers.speedup_64_str
+speedup_ssp_str = ScalingWorkers.speedup_ssp_str
+lr_ssp_str = ScalingWorkers.lr_ssp_str
+base_iters_k_str = ScalingWorkers.base_iters_k_str
+base_batch_str = ScalingWorkers.base_batch_str
+n_workers_8_str = ScalingWorkers.n_workers_8_str
+n_workers_64_str = ScalingWorkers.n_workers_64_str
+ssp_staleness_str = ScalingWorkers.ssp_staleness_str
+critical_batch_str = ScalingWorkers.critical_batch_str
+```
+
 ::: {.callout-notebook title="Scaling from 8 to 64 Workers" collapse="false"}
 
-**Setup**: Transformer model with 1.3B parameters, target perplexity 15.0, baseline training: 100K iterations on single GPU with $b = 32$.
+**Setup**: Transformer model with 1.3B parameters, target perplexity 15.0, baseline training: `{python} base_iters_k_str` iterations on single GPU with $b =$ `{python} base_batch_str`.
 
 **8 Workers (BSP)**
 
-- Effective batch size: $B = 8 \times 32 = 256$
-- Learning rate: $\eta = 8 \times \eta_{\text{base}}$ (linear scaling with warmup)
-- Expected iterations: $100K / 8 = 12.5K$ iterations
+- Effective batch size: $B = 8 \times 32 =$ `{python} batch_8_str`
+- Learning rate: $\eta =$ `{python} n_workers_8_str` $\times \eta_{\text{base}}$ (linear scaling with warmup)
+- Expected iterations: $100K / 8 =$ `{python} exp_iter_8_str` iterations
 - Convergence: Reaches target perplexity in 12.8K iterations (97% efficiency)
 - Communication overhead: 15% (NVLink intra-node)
-- Wall-clock speedup: $100K \times 1.0 / (12.8K \times 1.15) = 6.8\times$
+- Wall-clock speedup: $100K \times 1.0 / (12.8K \times 1.15) =$ `{python} speedup_8_str`$\times$
 
 **64 Workers (BSP)**
 
-- Effective batch size: $B = 64 \times 32 = 2,048$
-- Learning rate: $\eta = 64 \times \eta_{\text{base}}$ (if $B < B*$) or $\eta = \sqrt{64} \times \eta_{\text{base}}$ (if $B > B*$)
-- Assuming $B* \approx 4,000$ (below critical): Linear scaling applies
-- Expected iterations: $100K / 64 = 1.56K$ iterations
+- Effective batch size: $B = 64 \times 32 =$ `{python} batch_64_str`
+- Learning rate ($N =$ `{python} n_workers_64_str` workers): $\eta = N \times \eta_{\text{base}}$ (if $B < B^*$) or $\eta = \sqrt{N} \times \eta_{\text{base}}$ (if $B > B^*$)
+- Assuming $B^* \approx$ `{python} critical_batch_str` (below critical): Linear scaling applies
+- Expected iterations: $100K / 64 =$ `{python} exp_iter_64_str` iterations
 - Convergence: Reaches target perplexity in 1.72K iterations (91% efficiency)
 - Communication overhead: 45% (InfiniBand inter-node, 8 nodes)
-- Wall-clock speedup: $100K \times 1.0 / (1.72K \times 1.45) = 40.1\times$
+- Wall-clock speedup: $100K \times 1.0 / (1.72K \times 1.45) =$ `{python} speedup_64_str`$\times$
 
-**64 Workers (SSP, $s = 4$)**
+**`{python} n_workers_64_str` Workers (SSP, $s =$ `{python} ssp_staleness_str`)**
 
-- Same effective batch size: $B = 2,048$
-- Learning rate: $\eta' = \eta_{\text{BSP}} / \sqrt{1 + 4} \approx 0.45 \times \eta_{\text{BSP}}$
+- Same effective batch size: $B =$ `{python} batch_64_str`
+- Learning rate: $\eta' = \eta_{\text{BSP}} / \sqrt{1 + 4} \approx$ `{python} lr_ssp_str` $\times \eta_{\text{BSP}}$
 - Expected iterations: Higher due to staleness penalty
 - Convergence: Reaches target perplexity in 2.1K iterations (74% efficiency)
 - Communication overhead: 25% (reduced synchronization)
-- Wall-clock speedup: $100K \times 1.0 / (2.1K \times 1.25) = 38.1\times$
+- Wall-clock speedup: $100K \times 1.0 / (2.1K \times 1.25) =$ `{python} speedup_ssp_str`$\times$
 
 **Analysis**
 
@@ -1791,7 +1891,7 @@ Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and param
 # │ How: pulling A100_MEM_CAPACITY from mlsys.constants.
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, GB)
-# │ Exports: a100_mem
+# │ Exports: a100_mem, mwa_per_gpu_str, mwa_activation_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import A100_MEM_CAPACITY, GB
 
@@ -1804,8 +1904,39 @@ class A100CapacityContext:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     a100_mem = f"{mem.m_as(GB):.0f}"
 
+class MemoryWallAnalysis:
+    """ZeRO-3 memory wall analysis for 175B model on A100s."""
+
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    params_b = 175
+    bytes_fp16 = 2
+    bytes_adam = 12
+    n_gpus = 64
+    activation_approx_gb = 50
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    param_gb = params_b * bytes_fp16
+    optim_gb = params_b * bytes_adam
+    total_static_gb = param_gb + optim_gb
+    per_gpu_static = total_static_gb / n_gpus
+    total_per_gpu = int(per_gpu_static) + activation_approx_gb
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(param_gb == 350, f"param storage ({param_gb})")
+    check(optim_gb == 2100, f"optim storage ({optim_gb})")
+    check(total_static_gb == 2450, f"total static ({total_static_gb})")
+    check(int(per_gpu_static) == 38, f"per-GPU static ({per_gpu_static:.1f})")
+    check(total_per_gpu == 88, f"total per GPU ({total_per_gpu})")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    per_gpu_str = f"{int(per_gpu_static)}"
+    activation_str = f"{activation_approx_gb}"
+    total_per_gpu_str = f"{total_per_gpu}"
+
 # ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
 a100_mem = A100CapacityContext.a100_mem
+mwa_per_gpu_str = MemoryWallAnalysis.per_gpu_str
+mwa_activation_str = MemoryWallAnalysis.activation_str
 ```
 
 ::: {.callout-notebook title="The Memory Wall of Scale"}
@@ -1816,8 +1947,8 @@ a100_mem = A100CapacityContext.a100_mem
 1.  **Parameter Storage**: `{python} frontier_params_b`B params$\times$ 2 bytes (FP16) = **350 GB**.
 2.  **Optimizer State**: `{python} frontier_params_b`B params$\times$ 12 bytes (Adam FP32) = **2,100 GB**.
 3.  **Total Static Memory**: 2,450 GB.
-4.  **ZeRO-3 Sharding**: With 64 GPUs, per-GPU static memory = $2,450 / 64 \approx \mathbf{38 \text{ GB}}$.
-5.  **Activation Memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx \mathbf{50 \text{ GB}}$ of activations per GPU.
+4.  **ZeRO-3 Sharding**: With 64 GPUs, per-GPU static memory = $2{,}450 / 64 \approx$ **`{python} mwa_per_gpu_str` GB**.
+5.  **Activation Memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx$ **`{python} mwa_activation_str` GB** of activations per GPU.
 
 **The Systems Conclusion**: 38 GB (Static) + 50 GB (Dynamic) = **88 GB**. This exceeds the `{python} a100_mem` GB capacity of the A100. Even with full ZeRO-3 sharding, **pure Data Parallelism fails**. You *must* use **Tensor Parallelism** to split the layers themselves.
 :::
@@ -2391,12 +2522,52 @@ The transition to the **Blackwell** architecture (2024) introduces two architect
 
 For a 1-trillion parameter model, Blackwell enables a configuration of $t=16$ (spanning two 8-GPU nodes via NVLink Switch) and $p=32$, reducing the total number of pipeline stages and associated bubble overhead. The 10 TB/s die-to-die interconnect within the B200 package further collapses the distinction between intra-chip and intra-package communication, allowing the two dies to function as a single high-bandwidth tensor parallel unit. These advancements shift the bottleneck from intra-node communication to the inter-pod optical fabric, making **Rail-Optimized** topologies (@sec-network-fabrics-rail-optimized) and **All-to-All** optimization even more critical for the next generation of the Machine Learning Fleet.
 
+```{python}
+#| label: three-d-parallelism-config
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ 3D PARALLELISM CONFIGURATION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-distributed-training-systems-systems-hybrid-parallelism-configuration-design
+# │
+# │ Goal: Compute total GPU count for Hopper 3D parallelism; format Blackwell BW.
+# │ Show: TP×PP×DP = 8×16×128 = 16,384 GPUs; NVLink 5 bandwidth.
+# │ How: Direct multiplication of parallelism dimensions.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: total_gpus_h100_str, nvlink5_bw_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class ThreeDParallelism:
+    """3D parallelism configuration for GPT-175B."""
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    tp_h100 = 8
+    pp_h100 = 16
+    dp_h100 = 128
+    nvlink5_bw_tbs = 1.8              # NVLink 5.0 bidirectional TB/s (B200)
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    total_gpus_h100 = tp_h100 * pp_h100 * dp_h100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(total_gpus_h100 == 16384, f"H100 total GPUs ({total_gpus_h100})")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    total_gpus_h100_str = f"{total_gpus_h100:,}"
+    nvlink5_bw_str = f"{nvlink5_bw_tbs} TB/s"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+total_gpus_h100_str = ThreeDParallelism.total_gpus_h100_str
+nvlink5_bw_str = ThreeDParallelism.nvlink5_bw_str
+```
+
 ::: {.callout-notebook title="Configuring 3D Parallelism for GPT-175B"}
 **Scenario A: Hopper Cluster (H100)**
-Designing the training topology for GPT-3 (175B parameters) requires balancing memory, bandwidth, and compute across three dimensions. A standard configuration uses **Tensor Parallelism (TP=8)** to shard layers within a single node, exploiting the 900 GB/s NVLink bandwidth. **Pipeline Parallelism (PP=16)** then splits the model depth across 16 nodes, tolerant of the slower inter-node bandwidth (InfiniBand) due to bubble overhead. Finally, **Data Parallelism (DP=128)** replicates this entire 16-node pipeline 128 times to scale throughput. The total hardware requirement is massive: $8 \text{ GPUs} \times 16 \text{ Stages} \times 128 \text{ Replicas} = 16,384 \text{ GPUs}$.
+Designing the training topology for GPT-3 (175B parameters) requires balancing memory, bandwidth, and compute across three dimensions. A standard configuration uses **Tensor Parallelism (TP=8)** to shard layers within a single node, exploiting the 900 GB/s NVLink bandwidth. **Pipeline Parallelism (PP=16)** then splits the model depth across 16 nodes, tolerant of the slower inter-node bandwidth (InfiniBand) due to bubble overhead. Finally, **Data Parallelism (DP=128)** replicates this entire 16-node pipeline 128 times to scale throughput. The total hardware requirement is massive: $8 \text{ GPUs} \times 16 \text{ Stages} \times 128 \text{ Replicas} =$ `{python} total_gpus_h100_str` **GPUs**.
 
 **Scenario B: Blackwell Cluster (B200)**
-With the Blackwell architecture, we can exploit the 1.8 TB/s NVLink 5 and FP4 precision. For a 175B model, we can increase **Tensor Parallelism to TP=16** (across two nodes) while maintaining the same low latency. This reduces the required **Pipeline Parallelism to PP=8**, cutting the pipeline bubble fraction by half ($P=8$ vs $P=16$). The resulting fleet is not only faster due to higher TFLOPS but also more efficient due to reduced coordination overhead ($T_{coord}$).
+With the Blackwell architecture, we can exploit the `{python} nvlink5_bw_str` NVLink 5 and FP4 precision. For a 175B model, we can increase **Tensor Parallelism to TP=16** (across two nodes) while maintaining the same low latency. This reduces the required **Pipeline Parallelism to PP=8**, cutting the pipeline bubble fraction by half ($P=8$ vs $P=16$). The resulting fleet is not only faster due to higher TFLOPS but also more efficient due to reduced coordination overhead ($T_{coord}$).
 :::
 
 The MFU values cited above raise a natural question: how did the field arrive at 50% utilization, and what trajectory brought it there? @fig-mfu-progression traces the evolution of Model FLOPs Utilization across published training systems from 2020 to 2024. The progression from GPT-3's 21% MFU to PaLM's 46% MFU reflects not improvements in raw hardware speed but advances in the parallelism strategies, communication overlap techniques, and scheduling optimizations discussed throughout this chapter. The plateau near 40-46% reveals that the theoretical ceiling imposed by communication overhead, pipeline bubbles, and memory management remains formidable even with the most advanced hybrid parallelism techniques available. Notably, Meta's Llama 3 training at 16,384 H100 GPUs achieved slightly lower MFU (41%) than the same model at 8,192 GPUs (43%), confirming that the Scaling Tax described in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f is not merely theoretical but measurable in production.
@@ -2531,21 +2702,105 @@ The trade-off is capability. DPO operates on a static preference dataset, meanin
 
 To make the infrastructure trade-off concrete, consider aligning a 70B policy model on a cluster of 256 H100 GPUs (`{python} h100_mem` GB HBM each).
 
+```{python}
+#| label: rlhf-budget-ppo-vs-dpo
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RLHF INFRASTRUCTURE BUDGET (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-distributed-training-rlhf-quantitative
+# │
+# │ Goal: Quantify per-GPU memory for PPO vs DPO with 70B policy model.
+# │ Show: Static memory, KV cache, and remaining budget per GPU.
+# │ How: Distribute total model memory across TP×PP GPU mesh.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: policy_mem_str, ref_mem_str, rlhf_n_gpus_str,
+# │          policy_per_gpu_str, ref_per_gpu_str, ref_per_gpu_sep_str,
+# │          reward_mem_str, value_mem_str, static_per_gpu_str,
+# │          rlhf_remaining_str, kv_per_gpu_str, rlhf_remaining_kv_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class RLHFBudget:
+    """PPO vs DPO resource requirements for 70B alignment."""
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    policy_b = 70
+    ref_b = 70
+    reward_b = 13
+    value_b = 13
+    bytes_train = 16
+    bytes_infer = 2
+    tp = 8
+    pp = 4
+    h100_mem = 80
+    kv_total_gb = 172
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    policy_mem = policy_b * bytes_train
+    ref_mem = ref_b * bytes_infer
+    n_gpus = tp * pp
+    policy_per_gpu = policy_mem / n_gpus
+    ref_per_gpu = ref_mem / n_gpus
+    ref_per_gpu_sep = ref_mem / tp
+    reward_mem = reward_b * bytes_infer
+    value_mem = value_b * bytes_train
+    static_per_gpu = policy_per_gpu + ref_per_gpu
+    remaining = h100_mem - static_per_gpu
+    kv_per_gpu = kv_total_gb / n_gpus
+    remaining_after_kv = remaining - kv_per_gpu
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(policy_mem == 1120, f"policy memory ({policy_mem})")
+    check(n_gpus == 32, f"GPU count ({n_gpus})")
+    check(policy_per_gpu == 35.0, f"policy per GPU ({policy_per_gpu})")
+    check(value_mem == 208, f"value mem ({value_mem})")
+    check(abs(static_per_gpu - 39.4) < 0.1, f"static/GPU ({static_per_gpu:.1f})")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
+    policy_mem_str = f"{policy_mem:,}"
+    ref_mem_str = f"{ref_mem}"
+    n_gpus_str = f"{n_gpus}"
+    policy_per_gpu_str = f"{policy_per_gpu:.0f}"
+    ref_per_gpu_str = f"{ref_per_gpu:.1f}"
+    ref_per_gpu_sep_str = f"{ref_per_gpu_sep:.1f}"
+    reward_mem_str = f"{reward_mem}"
+    value_mem_str = f"{value_mem}"
+    static_per_gpu_str = f"{static_per_gpu:.1f}"
+    remaining_str = f"{int(remaining)}"
+    kv_per_gpu_str = f"{kv_per_gpu:.1f}"
+    remaining_kv_str = f"{int(remaining_after_kv)}"
+
+# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
+policy_mem_str = RLHFBudget.policy_mem_str
+ref_mem_str = RLHFBudget.ref_mem_str
+rlhf_n_gpus_str = RLHFBudget.n_gpus_str
+policy_per_gpu_str = RLHFBudget.policy_per_gpu_str
+ref_per_gpu_str = RLHFBudget.ref_per_gpu_str
+ref_per_gpu_sep_str = RLHFBudget.ref_per_gpu_sep_str
+reward_mem_str = RLHFBudget.reward_mem_str
+value_mem_str = RLHFBudget.value_mem_str
+static_per_gpu_str = RLHFBudget.static_per_gpu_str
+rlhf_remaining_str = RLHFBudget.remaining_str
+kv_per_gpu_str = RLHFBudget.kv_per_gpu_str
+rlhf_remaining_kv_str = RLHFBudget.remaining_kv_str
+```
+
 ::: {.callout-notebook title="RLHF Infrastructure Budget: PPO versus DPO"}
 
 **Scenario**: Aligning a 70B parameter policy model. Reference model: 70B (frozen). Reward model (PPO only): 13B (frozen). Value model (PPO only): 13B (training).
 
 **PPO Memory Budget (per-GPU, with TP=8, PP=4, DP=8 for policy)**
 
-The policy model under 3D parallelism with TP=8 and PP=4 distributes its 1,120 GB training state across 32 GPUs, yielding 35 GB per GPU. The reference model, requiring only 140 GB for inference, can be sharded across a separate pool of 8 GPUs at 17.5 GB each, or co-located with the policy GPUs at an additional 4.4 GB per GPU (140 / 32). The 13B reward model adds 26 GB shared across its pool. The 13B value model in training mode adds approximately 208 GB (13B $\times$ 16 bytes/param) across its pool.
+The policy model under 3D parallelism with TP=8 and PP=4 distributes its `{python} policy_mem_str` GB training state across `{python} rlhf_n_gpus_str` GPUs, yielding `{python} policy_per_gpu_str` GB per GPU. The reference model, requiring only `{python} ref_mem_str` GB for inference, can be sharded across a separate pool of 8 GPUs at `{python} ref_per_gpu_sep_str` GB each, or co-located with the policy GPUs at an additional `{python} ref_per_gpu_str` GB per GPU (`{python} ref_mem_str` / `{python} rlhf_n_gpus_str`). The 13B reward model adds `{python} reward_mem_str` GB shared across its pool. The 13B value model in training mode adds approximately `{python} value_mem_str` GB (13B $\times$ 16 bytes/param) across its pool.
 
-Total static memory (co-located policy + reference on 32 GPUs): $35 + 4.4 \approx 39.4$ GB per GPU, leaving $\sim$40 GB for activations and KV cache. With generation-phase KV caches for 256 sequences of 1,024 tokens, each policy GPU must reserve an additional $172 / 32 \approx 5.4$ GB for its KV cache shard. The remaining $\sim$35 GB constrains the micro-batch size during the training phase.
+Total static memory (co-located policy + reference on `{python} rlhf_n_gpus_str` GPUs): $`{python} policy_per_gpu_str` + `{python} ref_per_gpu_str` \approx$ `{python} static_per_gpu_str` GB per GPU, leaving $\sim$`{python} rlhf_remaining_str` GB for activations and KV cache. With generation-phase KV caches for 256 sequences of 1,024 tokens, each policy GPU must reserve an additional $172 / `{python} rlhf_n_gpus_str` \approx$ `{python} kv_per_gpu_str` GB for its KV cache shard. The remaining $\sim$`{python} rlhf_remaining_kv_str` GB constrains the micro-batch size during the training phase.
 
 **DPO Memory Budget (same parallelism configuration)**
 
-The policy model uses the same 35 GB per GPU. The reference model adds 4.4 GB per GPU (co-located). No reward model, no value model, no KV cache for generation.
+The policy model uses the same `{python} policy_per_gpu_str` GB per GPU. The reference model adds `{python} ref_per_gpu_str` GB per GPU (co-located). No reward model, no value model, no KV cache for generation.
 
-Total static memory: $35 + 4.4 = 39.4$ GB per GPU — identical to PPO's static footprint, but without the generation-phase KV cache burden. The full $\sim$40 GB remaining is available for training activations, permitting 2$\times$ larger micro-batch sizes or eliminating the need for activation checkpointing that PPO requires.
+Total static memory: $`{python} policy_per_gpu_str` + `{python} ref_per_gpu_str` =$ `{python} static_per_gpu_str` GB per GPU — identical to PPO's static footprint, but without the generation-phase KV cache burden. The full $\sim$`{python} rlhf_remaining_str` GB remaining is available for training activations, permitting 2$\times$ larger micro-batch sizes or eliminating the need for activation checkpointing that PPO requires.
 
 **Throughput Comparison**
 

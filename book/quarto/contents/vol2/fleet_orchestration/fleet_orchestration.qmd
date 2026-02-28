@@ -276,6 +276,42 @@ Optimizing all four simultaneously is impossible; every scheduling policy repres
 
 Consider our 175B model training on 64 GPUs. From a throughput perspective, this is an ideal job: it runs for weeks with high arithmetic intensity and zero scheduling overhead once started. From a latency perspective, it is a boulder in the stream. To schedule it, the system might need to drain 64 GPUs of all other work, forcing hundreds of smaller jobs to wait. Once running, it occupies those resources immovably. If the scheduler prioritizes the 175B model (throughput), the P99 latency for small jobs explodes. If it prioritizes small jobs (latency) by allowing them to preempt or fragmentation-fill the cluster, the 175B model may never assemble the contiguous block it needs to start. This zero-sum game forces organizations to make explicit policy choices -- often encoded in Quality of Service classes -- about which objective wins when they collide.
 
+```{python}
+#| label: lego-queuing-theory
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ QUEUING THEORY (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-notebook "The Queuing Theory of GPU Clusters"
+# │
+# │ Goal: Compute Pollaczek-Khinchine waiting-time multipliers for uniform
+# │       vs heavy-tailed ML workloads.
+# │ How: W_q_mult = rho/(1-rho) * (1+Cs^2)/2
+# │
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: wq_uniform_str, wq_ml_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+
+class QueuingTheory:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    rho = 0.8
+    cs_uniform = 1
+    cs_ml = 3
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    wq_uniform = rho / (1 - rho) * (1 + cs_uniform**2) / 2
+    wq_ml = rho / (1 - rho) * (1 + cs_ml**2) / 2
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(wq_uniform == 4, f"Expected 4, got {wq_uniform}")
+    check(wq_ml == 20, f"Expected 20, got {wq_ml}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    wq_uniform_str = fmt(wq_uniform, precision=0)
+    wq_ml_str = fmt(wq_ml, precision=0)
+
+wq_uniform_str = QueuingTheory.wq_uniform_str
+wq_ml_str = QueuingTheory.wq_ml_str
+```
+
 ::: {.callout-notebook title="The Queuing Theory of GPU Clusters"}
 
 A GPU cluster can be modeled as an M/G/1 queue, where jobs arrive according to a Poisson process ($\lambda$) and service times follow a general distribution ($G$) with mean $1/\mu$ and standard deviation $\sigma$. The Pollaczek-Khinchine formula defines the expected waiting time in the queue ($W_q$):
@@ -286,7 +322,7 @@ Here, $\rho = \lambda/\mu$ represents cluster utilization, and $C_s = \sigma \mu
 
 In standard web serving, requests are roughly uniform, yielding $C_s \approx 1$. In ML clusters, job durations follow a heavy-tailed distribution: a vast number of short debugging jobs (minutes) mixed with a few massive training runs (weeks). This extreme variance typically yields $C_s$ values between 3 and 5. The impact on wait times is multiplicative.
 
-At 80 percent utilization ($\rho = 0.8$): with a uniform workload ($C_s = 1$), $W_q = 4 \times$ the average job duration. With a typical ML workload ($C_s = 3$), $W_q = 20 \times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at 80 percent load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
+At 80 percent utilization ($\rho = 0.8$): with a uniform workload ($C_s = 1$), $W_q =$ `{python} wq_uniform_str` $\times$ the average job duration. With a typical ML workload ($C_s = 3$), $W_q =$ `{python} wq_ml_str` $\times$ the average job duration. This explains the "utilization wall" in ML infrastructure. A web server cluster feels responsive at 80 percent load, but an ML cluster at the same utilization feels broken, with jobs languishing in the queue for days. The heavy tail of the service distribution acts as a latency multiplier, forcing operators to run ML clusters at lower utilization (often 60 to 70 percent) to maintain acceptable responsiveness for interactive users.
 
 :::
 
@@ -832,15 +868,47 @@ More sophisticated algorithms distinguish between parallelism strategies, recogn
 
 A **hierarchical placement** algorithm assigns resources in layers that match this parallelism hierarchy. First, it assigns tensor parallel groups to individual nodes, ensuring that all GPUs in a tensor parallel group share NVLink connectivity. Second, it groups those nodes into pipeline stages within racks, placing consecutive pipeline stages on nodes connected through the same leaf switch. Third, it distributes data parallel replicas across racks, ensuring that each data parallel group has access to the cluster's full bisection bandwidth for AllReduce operations. This three-level placement mirrors the three-level topology and the three-level parallelism strategy, creating a natural alignment between logical and physical structure.
 
+```{python}
+#| label: lego-topology-placement
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ TOPOLOGY PLACEMENT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-notebook "Napkin Math: The Topology Placement Impact"
+# │
+# │ Goal: Compute speedup from topology-aware placement.
+# │ How: speedup = worst_latency / best_latency
+# │
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: topo_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+
+class TopologyPlacement:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    lat_random_ms = 120
+    lat_rack_ms = 85
+    lat_rail_ms = 40
+    lat_optimal_ms = 25
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    speedup = lat_random_ms / lat_optimal_ms
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(speedup == 4.8, f"Expected 4.8, got {speedup}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    speedup_str = f"{speedup:.1f}"
+
+topo_speedup_str = TopologyPlacement.speedup_str
+```
+
 ::: {.callout-notebook}
 ## Napkin Math: The Topology Placement Impact
-The physical location of GPUs on the network switch fabric dramatically impacts collective performance. Consider an AllReduce operation across 8 GPUs:
+The physical location of GPUs on the network switch fabric dramatically impacts collective performance. Consider an AllReduce operation across 8 GPUs: <!-- lego-ok: latencies are input assumptions -->
 
 *   **Random Placement:** Spread across 8 different racks $\rightarrow$ Traffic traverses core switches $\rightarrow$ **120 ms** latency.
 *   **Rack-Aware:** Confined to a single rack (Top-of-Rack switch) $\rightarrow$ **85 ms**.
 *   **Rail-Optimized:** Aligned to specialized "rails" (dedicated standard IB switches) $\rightarrow$ **40 ms**.
 *   **Topology-Optimal:** All GPUs on the same leaf switch $\rightarrow$ **25 ms**.
-Proper scheduling yields a **4.8$\times$ speedup** purely by respecting the network topology, with zero changes to the model code.
+Proper scheduling yields a **`{python} topo_speedup_str`$\times$ speedup** purely by respecting the network topology, with zero changes to the model code.
 :::
 
 The computational cost of topology-aware placement is non-trivial. Evaluating all possible placements for a 256-GPU job across a 10,000-GPU cluster is combinatorially intractable. Production schedulers use heuristic approaches: greedy algorithms that build placements bottom-up (first fill NVLink domains, then fill racks, then spread across racks), tree-search algorithms with pruning that explore the most promising placements first, or scoring-based approaches that evaluate a sample of feasible placements and select the best. The scheduling latency introduced by topology-aware algorithms (milliseconds to seconds, depending on cluster size and algorithm complexity) is negligible compared to job runtimes of hours to weeks, making the throughput improvement worth the scheduling overhead.
@@ -1059,17 +1127,74 @@ The decision to scale is therefore a function of marginal utility, not just vaca
 
 This logic extends to the temporal dimension, where the scheduler must weigh the immediate progress of a smaller allocation against the deferred gratification of waiting for a larger one. If a 512-GPU job can start immediately with 128 GPUs, or wait two hours for the full request, the optimal choice depends on the integration of throughput over time. The preemption overhead -- the cost of stopping, checkpointing, and restarting to resize -- must be amortized over the subsequent run duration. A policy of "opportunistic scaling" that resizes a job every time a single node becomes free often yields net negative progress due to the constant thrashing of the distributed process group.
 
+```{python}
+#| label: lego-elastic-scaling
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ELASTIC SCALING DECISION (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-notebook "The Elastic Scaling Decision"
+# │
+# │ Goal: Compare three elastic scaling strategies over a 24-hour window.
+# │ How: total_work = run_hours × throughput_at_scale
+# │
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: es_s1_str, es_s2_str, es_s3p1_str, es_s3p2_str, es_s3_str,
+# │          es_rescale_str, es_vs_wait_str, es_vs_imm_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+
+class ElasticScaling:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    window_h = 24
+    wait_h = 4
+    rescale_min = 10
+    rescale_h = rescale_min / 60
+    tp_128 = 1.0
+    tp_256 = 1.8
+    tp_512 = 3.2
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    s1_work = window_h * tp_128
+    s2_run_h = window_h - wait_h
+    s2_work = s2_run_h * tp_512
+    s3_phase1 = wait_h * tp_256
+    s3_phase2_h = window_h - wait_h - rescale_h
+    s3_phase2 = s3_phase2_h * tp_512
+    s3_work = s3_phase1 + s3_phase2
+    elastic_vs_wait_pct = (s3_work - s2_work) / s2_work * 100
+    elastic_vs_immediate = s3_work / s1_work
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(s1_work == 24.0, f"S1: expected 24.0, got {s1_work}")
+    check(s2_work == 64.0, f"S2: expected 64.0, got {s2_work}")
+    check(abs(s3_phase2 - 63.5) < 0.1, f"S3 phase 2: expected ~63.5, got {s3_phase2}")
+    check(abs(s3_work - 70.7) < 0.1, f"S3 total: expected ~70.7, got {s3_work}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    es_s1_str = f"{s1_work:.1f}"
+    es_s2_str = f"{s2_work:.1f}"
+    es_s3p1_str = f"{s3_phase1:.1f}"
+    es_s3p2_str = f"{s3_phase2:.1f}"
+    es_s3_str = f"{s3_work:.1f}"
+    es_rescale_str = f"{rescale_h:.2f}"
+
+es_s1_str = ElasticScaling.es_s1_str
+es_s2_str = ElasticScaling.es_s2_str
+es_s3p1_str = ElasticScaling.es_s3p1_str
+es_s3p2_str = ElasticScaling.es_s3p2_str
+es_s3_str = ElasticScaling.es_s3_str
+es_rescale_str = ElasticScaling.es_rescale_str
+```
+
 ::: {.callout-notebook title="The Elastic Scaling Decision"}
 
-Consider a large language model training job with a target batch size that requires 512 A100s for peak efficiency. Three scheduling strategies are evaluated over a 24-hour window.
+Consider a large language model training job with a target batch size that requires 512 A100s for peak efficiency. Three scheduling strategies are evaluated over a 24-hour window. <!-- lego-ok: throughputs and timing are input assumptions -->
 
-**Assumptions**: Throughput at 128 GPUs is 1.0 epoch/hour (baseline). Throughput at 256 GPUs is 1.8 epochs/hour (90 percent scaling efficiency). Throughput at 512 GPUs is 3.2 epochs/hour (80 percent scaling efficiency). Re-scaling cost is 10 minutes (0.17 hours) to checkpoint, re-shard, and restart.
+**Assumptions**: Throughput at 128 GPUs is 1.0 epoch/hour (baseline). Throughput at 256 GPUs is 1.8 epochs/hour (90 percent scaling efficiency). Throughput at 512 GPUs is 3.2 epochs/hour (80 percent scaling efficiency). Re-scaling cost is 10 minutes (`{python} es_rescale_str` hours) to checkpoint, re-shard, and restart.
 
-**Strategy 1 -- Immediate start (no scaling)**: The job starts immediately with 128 GPUs and runs for the full 24 hours. Total work: $24 \times 1.0 = 24.0$ epochs.
+**Strategy 1 -- Immediate start (no scaling)**: The job starts immediately with 128 GPUs and runs for the full 24 hours. Total work: $24 \times 1.0 =$ `{python} es_s1_str` epochs.
 
-**Strategy 2 -- Wait for capacity (gang scheduling)**: The job waits in the queue for 4 hours until 512 GPUs become available, then runs for 20 hours. Total work: $20 \times 3.2 = 64.0$ epochs.
+**Strategy 2 -- Wait for capacity (gang scheduling)**: The job waits in the queue for 4 hours until 512 GPUs become available, then runs for 20 hours. Total work: $20 \times 3.2 =$ `{python} es_s2_str` epochs.
 
-**Strategy 3 -- Elastic scaling (step-up)**: The job starts immediately with 256 GPUs. After 4 hours, 256 more GPUs become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.8 = 7.2$ epochs. Phase 2: $(24 - 4 - 0.17) \times 3.2 \approx 63.5$ epochs. Total work: $7.2 + 63.5 = 70.7$ epochs.
+**Strategy 3 -- Elastic scaling (step-up)**: The job starts immediately with 256 GPUs. After 4 hours, 256 more GPUs become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.8 =$ `{python} es_s3p1_str` epochs. Phase 2: $(24 - 4 - `{python} es_rescale_str`) \times 3.2 \approx$ `{python} es_s3p2_str` epochs. Total work: $`{python} es_s3p1_str` + `{python} es_s3p2_str` =$ `{python} es_s3_str` epochs.
 
 The elastic strategy outperforms waiting by approximately 10 percent and the immediate small-scale run by nearly 3$\times$. However, if the re-scaling cost exceeded 2 hours (due to slow checkpoint transfer or compilation), Strategy 2 would become superior.
 
@@ -1393,15 +1518,74 @@ Effective scaling policies must be **SLO-driven** rather than utilization-driven
 
 To prevent **oscillation**, where the scaler rapidly adds and removes replicas during noisy traffic, production systems implement **hysteresis** and **cooldown periods**. A typical policy scales up aggressively (no stabilization window) to protect the SLO, but scales down conservatively (15-minute cooldown) to avoid thrashing. This asymmetry acknowledges that the cost of an unnecessary scale-up (wasted compute for 15 minutes) is far lower than the cost of a missed scale-up (SLO violation and user churn).
 
+```{python}
+#| label: lego-autoscaling-lag
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ AUTOSCALING LAG (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-notebook "The Autoscaling Lag"
+# │
+# │ Goal: Compare reactive vs predictive autoscaling for inference serving.
+# │ How: Detection time from linear ramp; ready_time = detect + load_time;
+# │      SLO violations from excess QPS × duration.
+# │
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: as_capacity_str, as_detect_str, as_ready_str, as_excess_str,
+# │          as_violations_str, as_pred_trigger_str, as_pred_capacity_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+
+class AutoscalingLag:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    replicas = 10
+    qps_per_replica = 5
+    traffic_start = 40
+    traffic_end = 80
+    ramp_sec = 60
+    load_time_sec = 180
+    avg_excess_sec = 120
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    capacity = replicas * qps_per_replica
+    detect_sec = int(ramp_sec * (capacity - traffic_start) / (traffic_end - traffic_start))
+    ready_sec = detect_sec + load_time_sec
+    excess_at_peak = traffic_end - capacity
+    slo_violations = int(excess_at_peak * avg_excess_sec)
+    pred_trigger_sec = -load_time_sec
+    pred_capacity = (replicas + replicas) * qps_per_replica
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(capacity == 50, f"Capacity: expected 50, got {capacity}")
+    check(detect_sec == 15, f"Detection: expected 15s, got {detect_sec}")
+    check(ready_sec == 195, f"Ready: expected 195s, got {ready_sec}")
+    check(slo_violations == 3600, f"Violations: expected 3600, got {slo_violations}")
+    check(pred_capacity == 100, f"Pred capacity: expected 100, got {pred_capacity}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    as_capacity_str = fmt(capacity, precision=0)
+    as_detect_str = fmt(detect_sec, precision=0)
+    as_ready_str = fmt(ready_sec, precision=0)
+    as_excess_str = fmt(excess_at_peak, precision=0)
+    as_violations_str = f"{slo_violations:,}"
+    as_pred_trigger_str = fmt(pred_trigger_sec, precision=0)
+    as_pred_capacity_str = fmt(pred_capacity, precision=0)
+
+as_capacity_str = AutoscalingLag.as_capacity_str
+as_detect_str = AutoscalingLag.as_detect_str
+as_ready_str = AutoscalingLag.as_ready_str
+as_excess_str = AutoscalingLag.as_excess_str
+as_violations_str = AutoscalingLag.as_violations_str
+as_pred_trigger_str = AutoscalingLag.as_pred_trigger_str
+as_pred_capacity_str = AutoscalingLag.as_pred_capacity_str
+```
+
 ::: {.callout-notebook title="The Autoscaling Lag"}
 
-Consider a serving fleet with 10 replicas, each capable of 5 queries per second (QPS) while meeting the 500 ms SLO. Total capacity: 50 QPS.
+Consider a serving fleet with 10 replicas, each capable of 5 queries per second (QPS) while meeting the 500 ms SLO. Total capacity: `{python} as_capacity_str` QPS. <!-- lego-ok: replica count, QPS/replica, traffic shape, and load time are input assumptions -->
 
 **Scenario**: Traffic ramps from 40 QPS to 80 QPS linearly over 60 seconds. Model load time: 3 minutes (180 seconds).
 
-**Reactive scaling**: HPA detects overload at $t = 15$ s (when traffic hits 50 QPS). It requests 10 new replicas. These replicas become ready at $t = 195$ s (15 + 180). From $t = 15$ s to $t = 195$ s (3 minutes), demand exceeds capacity. At peak (80 QPS), 30 QPS are queued or dropped. Over this 3-minute window, approximately 3,600 requests (30 QPS$\times$ 120 s average excess) violate the SLO.
+**Reactive scaling**: HPA detects overload at $t =$ `{python} as_detect_str` s (when traffic hits `{python} as_capacity_str` QPS). It requests 10 new replicas. These replicas become ready at $t =$ `{python} as_ready_str` s (`{python} as_detect_str` + 180). From $t =$ `{python} as_detect_str` s to $t =$ `{python} as_ready_str` s (3 minutes), demand exceeds capacity. At peak (80 QPS), `{python} as_excess_str` QPS are queued or dropped. Over this 3-minute window, approximately `{python} as_violations_str` requests (`{python} as_excess_str` QPS$\times$ 120 s average excess) violate the SLO.
 
-**Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t = -180$ s. The 10 new replicas come online at $t = 0$ s, pushing capacity to 100 QPS just as the ramp begins. Zero SLO violations.
+**Predictive scaling**: The scaler forecasts the ramp and triggers scale-up at $t =$ `{python} as_pred_trigger_str` s. The 10 new replicas come online at $t = 0$ s, pushing capacity to `{python} as_pred_capacity_str` QPS just as the ramp begins. Zero SLO violations.
 
 :::
 
@@ -1435,15 +1619,87 @@ This density comes at the cost of **interference**. When two workloads share a G
 
 For a heterogeneous fleet, this logic dictates a bifurcated strategy. Our 175B parameter model, requiring 350 GB of memory, spans 4 to 8 GPUs via tensor parallelism and saturates them completely; it is a candidate for exclusive access. Conversely, the dozens of 1B to 7B parameter support models -- toxicity classifiers, query embedding encoders, draft models for speculative decoding -- are prime candidates for sharing. By packing these smaller models onto shared "utility nodes," the orchestrator liberates high-performance clusters for the heavy lifting of foundation model inference.
 
+```{python}
+#| label: lego-gpu-sharing-roi
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPU SHARING ROI (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-notebook "GPU Sharing ROI"
+# │
+# │ Goal: Compare exclusive vs shared GPU hosting for inference fleets.
+# │ How: Pack 2 small models per GPU; compute savings in GPUs and dollars.
+# │
+# │ Imports: mlsys.formatting (fmt, check), mlsys.constants (HOURS_PER_YEAR)
+# │ Exports: gs_* strings for callout
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+from mlsys.constants import HOURS_PER_YEAR
+
+class GpuSharingRoi:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_small = 100
+    small_footprint_gb = 26
+    n_large = 10
+    large_footprint_gb = 350
+    a100_mem_gb = 80
+    gpus_per_large = 8
+    models_per_gpu_shared = 2
+    gpu_rate = 2.0
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    excl_small_gpus = n_small
+    excl_total_mem_gb = excl_small_gpus * a100_mem_gb
+    excl_used_mem_gb = n_small * small_footprint_gb
+    excl_util_pct = excl_used_mem_gb / excl_total_mem_gb * 100
+    excl_large_gpus = n_large * gpus_per_large
+    excl_total = excl_small_gpus + excl_large_gpus
+    shared_small_gpus = n_small // models_per_gpu_shared
+    shared_mem_per_gpu = models_per_gpu_shared * small_footprint_gb
+    shared_util_pct = shared_mem_per_gpu / a100_mem_gb * 100
+    shared_total = shared_small_gpus + excl_large_gpus
+    saved_gpus = excl_total - shared_total
+    saved_pct = saved_gpus / excl_total * 100
+    annual_savings = saved_gpus * gpu_rate * HOURS_PER_YEAR
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(excl_total == 180, f"Excl total: expected 180, got {excl_total}")
+    check(shared_total == 130, f"Shared total: expected 130, got {shared_total}")
+    check(abs(shared_util_pct - 65) < 1, f"Shared util: expected 65%, got {shared_util_pct}")
+    check(abs(annual_savings - 876000) < 1000, f"Savings: expected ~876K, got {annual_savings}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    gs_excl_util_str = fmt(excl_util_pct, precision=0)
+    gs_excl_total_mem_str = f"{excl_total_mem_gb:,}"
+    gs_excl_large_str = fmt(excl_large_gpus, precision=0)
+    gs_excl_total_str = fmt(excl_total, precision=0)
+    gs_shared_gpus_str = fmt(shared_small_gpus, precision=0)
+    gs_shared_mem_str = fmt(shared_mem_per_gpu, precision=0)
+    gs_shared_util_str = fmt(shared_util_pct, precision=0)
+    gs_shared_total_str = fmt(shared_total, precision=0)
+    gs_saved_gpus_str = fmt(saved_gpus, precision=0)
+    gs_saved_pct_str = fmt(saved_pct, precision=0)
+    gs_annual_str = f"{annual_savings:,.0f}"
+
+gs_excl_util_str = GpuSharingRoi.gs_excl_util_str
+gs_excl_total_mem_str = GpuSharingRoi.gs_excl_total_mem_str
+gs_excl_large_str = GpuSharingRoi.gs_excl_large_str
+gs_excl_total_str = GpuSharingRoi.gs_excl_total_str
+gs_shared_gpus_str = GpuSharingRoi.gs_shared_gpus_str
+gs_shared_mem_str = GpuSharingRoi.gs_shared_mem_str
+gs_shared_util_str = GpuSharingRoi.gs_shared_util_str
+gs_shared_total_str = GpuSharingRoi.gs_shared_total_str
+gs_saved_gpus_str = GpuSharingRoi.gs_saved_gpus_str
+gs_saved_pct_str = GpuSharingRoi.gs_saved_pct_str
+gs_annual_str = GpuSharingRoi.gs_annual_str
+```
+
 ::: {.callout-notebook title="GPU Sharing ROI"}
 
-Consider a fleet serving 100 distinct 7B models (26 GB footprint each) and 10 distinct 175B models (350 GB footprint each).
+Consider a fleet serving 100 distinct 7B models (26 GB footprint each) and 10 distinct 175B models (350 GB footprint each). <!-- lego-ok: model counts, footprints, and GPU specs are input assumptions -->
 
-**Strategy A -- Exclusive access (one model per GPU)**: The 7B models require 100 A100 GPUs (80 GB each), achieving only 32 percent memory utilization ($100\times26$ GB used out of 8,000 GB total). The 175B models require 80 GPUs (10 models$\times$ 8 GPUs each for tensor parallelism). Total fleet: 180 GPUs.
+**Strategy A -- Exclusive access (one model per GPU)**: The 7B models require 100 A100 GPUs (80 GB each), achieving only `{python} gs_excl_util_str` percent memory utilization ($100\times26$ GB used out of `{python} gs_excl_total_mem_str` GB total). The 175B models require `{python} gs_excl_large_str` GPUs (10 models$\times$ 8 GPUs each for tensor parallelism). Total fleet: `{python} gs_excl_total_str` GPUs.
 
-**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack 2 models per A100 for the 7B models ($2\times26$ = 52 GB, well within 80 GB), requiring only 50 GPUs at 65 percent memory utilization. The 175B models remain unchanged at 80 GPUs. Total fleet: 130 GPUs.
+**Strategy B -- Mixed sharing (MPS for small, exclusive for large)**: Pack 2 models per A100 for the 7B models ($2\times26$ = `{python} gs_shared_mem_str` GB, well within 80 GB), requiring only `{python} gs_shared_gpus_str` GPUs at `{python} gs_shared_util_str` percent memory utilization. The 175B models remain unchanged at `{python} gs_excl_large_str` GPUs. Total fleet: `{python} gs_shared_total_str` GPUs.
 
-Sharing reduces the fleet size by 27 percent (50 fewer GPUs). At \$2 per GPU-hour, this saves approximately \$876,000 annually in compute costs, purely through scheduling policy.
+Sharing reduces the fleet size by `{python} gs_saved_pct_str` percent (`{python} gs_saved_gpus_str` fewer GPUs). At \$2 per GPU-hour, this saves approximately \$`{python} gs_annual_str` annually in compute costs, purely through scheduling policy.
 
 :::
 
@@ -1465,15 +1721,67 @@ Repurposing a GPU from training to serving is not instantaneous. The orchestrato
 
 Inference traffic typically follows a "human curve": low at 3 AM, ramping up at 8 AM, peaking at 2 PM, and tapering off at 10 PM. A smart orchestrator forecasts this curve 30 minutes in advance. At 7:30 AM, it preempts low-priority training jobs (like hyperparameter sweeps) to warm up inference replicas. At 10:30 PM, as traffic drops, it drains inference replicas and releases GPUs back to the training scheduler.
 
+```{python}
+#| label: lego-diurnal-gpu-shift
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DIURNAL GPU SHIFT (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: callout-notebook "The Diurnal GPU Shift"
+# │
+# │ Goal: Compare static partitioning vs dynamic sharing for training/serving.
+# │ How: active_gpus / fleet_size; annual_value = reclaimed × rate × hours/yr.
+# │
+# │ Imports: mlsys.formatting (fmt, check), mlsys.constants (HOURS_PER_YEAR)
+# │ Exports: ds_* strings for callout
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+from mlsys.constants import HOURS_PER_YEAR
+
+class DiurnalGpuShift:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    fleet = 1000
+    serving_peak = 400
+    serving_avg = 150
+    training_fixed = 600
+    reclaimed = 130
+    gpu_rate = 2.0
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    static_active = serving_avg + training_fixed
+    static_util_pct = static_active / fleet * 100
+    dynamic_active = serving_avg + training_fixed + reclaimed
+    dynamic_util_pct = dynamic_active / fleet * 100
+    annual_value = reclaimed * gpu_rate * HOURS_PER_YEAR
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(static_active == 750, f"Static: expected 750, got {static_active}")
+    check(static_util_pct == 75, f"Static util: expected 75%, got {static_util_pct}")
+    check(dynamic_active == 880, f"Dynamic: expected 880, got {dynamic_active}")
+    check(dynamic_util_pct == 88, f"Dynamic util: expected 88%, got {dynamic_util_pct}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    ds_static_active_str = fmt(static_active, precision=0)
+    ds_static_util_str = fmt(static_util_pct, precision=0)
+    ds_dynamic_active_str = fmt(dynamic_active, precision=0)
+    ds_dynamic_util_str = fmt(dynamic_util_pct, precision=0)
+    ds_reclaimed_str = fmt(reclaimed, precision=0)
+    ds_annual_str = f"{annual_value / 1e6:.1f}"
+
+ds_static_active_str = DiurnalGpuShift.ds_static_active_str
+ds_static_util_str = DiurnalGpuShift.ds_static_util_str
+ds_dynamic_active_str = DiurnalGpuShift.ds_dynamic_active_str
+ds_dynamic_util_str = DiurnalGpuShift.ds_dynamic_util_str
+ds_reclaimed_str = DiurnalGpuShift.ds_reclaimed_str
+ds_annual_str = DiurnalGpuShift.ds_annual_str
+```
+
 ::: {.callout-notebook title="The Diurnal GPU Shift"}
 
-Consider a fleet of 1,000 GPUs managed under two regimes:
+Consider a fleet of 1,000 GPUs managed under two regimes: <!-- lego-ok: fleet size, serving/training splits are input assumptions -->
 
-**Scenario A -- Static Partitioning**: The serving pool reserves 400 GPUs to handle peak demand, but average usage is only 150 GPUs (37.5 percent utilization). The training pool reserves 600 GPUs, and backlog ensures 100 percent utilization. Result: 150 + 600 = 750 active GPUs. Fleet utilization: **75 percent**.
+**Scenario A -- Static Partitioning**: The serving pool reserves 400 GPUs to handle peak demand, but average usage is only 150 GPUs (37.5 percent utilization). The training pool reserves 600 GPUs, and backlog ensures 100 percent utilization. Result: $150 + 600 =$ `{python} ds_static_active_str` active GPUs. Fleet utilization: **`{python} ds_static_util_str` percent**.
 
-**Scenario B -- Dynamic Sharing**: Serving claims GPUs strictly as needed (average 150). Training reclaims unused serving GPUs (average 250), minus a safety buffer. The orchestrator shifts 200 GPUs between roles twice daily based on diurnal forecasts. Result: serving (150) + training (600 + 130 reclaimed) = 880 active GPUs. Fleet utilization: **88 percent**.
+**Scenario B -- Dynamic Sharing**: Serving claims GPUs strictly as needed (average 150). Training reclaims unused serving GPUs (average 250), minus a safety buffer. The orchestrator shifts 200 GPUs between roles twice daily based on diurnal forecasts. Result: serving (150) + training ($600 +$ `{python} ds_reclaimed_str` reclaimed) $=$ `{python} ds_dynamic_active_str` active GPUs. Fleet utilization: **`{python} ds_dynamic_util_str` percent**.
 
-Dynamic sharing recovers 130 GPUs of effective capacity. At \$2 per GPU-hour, this creates approximately \$2.3 million per year in value without purchasing a single additional accelerator.
+Dynamic sharing recovers `{python} ds_reclaimed_str` GPUs of effective capacity. At \$2 per GPU-hour, this creates approximately \$`{python} ds_annual_str` million per year in value without purchasing a single additional accelerator.
 
 :::
 

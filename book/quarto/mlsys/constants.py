@@ -235,6 +235,7 @@ NETWORK_5G_ENERGY_PER_MB_MJ = 100 * ureg.millijoule / MB
 NVLINK_V100_BW = 300 * GB / second        # NVLink 2.0 (V100, 6 links × 50 GB/s)
 NVLINK_A100_BW = 600 * GB / second        # NVLink 3.0 (A100, 12 links × 50 GB/s)
 NVLINK_H100_BW = 900 * GB / second        # NVLink 4.0 (H100, 18 links × 50 GB/s)
+NVLINK_B200_BW = 1800 * GB / second       # NVLink 5.0 (B200, 72 links × 25 GB/s)
 PCIE_GEN3_BW = 15.75 * GB / second        # PCIe Gen3 x16 (after 128b/130b encoding)
 PCIE_GEN4_BW = 32 * GB / second           # PCIe Gen4 x16 (bidirectional)
 PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (bidirectional)
