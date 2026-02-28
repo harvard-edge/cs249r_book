@@ -163,11 +163,11 @@ A single forward pass through GPT-2 requires roughly `{python} TrainingScenarios
 
 ::: {.callout-definition title="Training Systems"}
 
-***Machine Learning Training Systems***\index{Training Systems!definition} are the compute engines that execute the iterative **Optimization Loop** (Forward Pass, Gradient Computation, Parameter Update).
+***Machine Learning Training Systems***\index{Training Systems!definition} are software-hardware systems that execute the iterative optimization loop — forward pass, loss computation, backward pass, and parameter update — to minimize a loss function over a training dataset.
 
-1.  **Significance (Quantitative):** They minimize **Time-to-Accuracy** by orchestrating the data flow through computational graphs, maximizing the utilization of hardware resources ($R_{peak}, BW$).
-2.  **Distinction (Durable):** Unlike **Inference Systems**, which only perform **Forward Passes**, Training Systems must manage **Backward Passes** and maintain additional **Optimizer State**, typically requiring 4$\times$ more memory per parameter.
-3.  **Common Pitfall:** A frequent misconception is that training is just "compute-intensive." In reality, it is a **State Management Problem**: the challenge is not just performing operations, but storing and updating the billions of weights, gradients, and optimizer moments.
+1.  **Significance (Quantitative):** Training memory cost is 4$\times$ the inference memory cost per parameter when using the Adam optimizer: a 7B-parameter model requires 14 GB (FP16 weights) + 14 GB (gradients) + 28 GB (Adam first and second moments in FP32) = 56 GB minimum, before accounting for activation storage. This 4$\times$ multiplier is the primary reason a model that runs inference on one GPU requires multiple GPUs for training.
+2.  **Distinction (Durable):** Unlike inference systems, which execute a single forward pass and discard intermediate activations, training systems must retain all intermediate activations from the forward pass for use during the backward pass, creating a memory footprint that grows linearly with model depth and batch size.
+3.  **Common Pitfall:** A frequent misconception is that training failures are compute problems. The most common training failure is out-of-memory (OOM) error, which is a memory management problem: the activation tensors from all $L$ layers accumulate during the forward pass and must coexist in GPU memory simultaneously, causing OOM before the first gradient is computed.
 
 :::
 
@@ -841,11 +841,11 @@ However, processing single examples creates new system challenges. Modern accele
 
 ::: {.callout-definition title="Batch Processing"}
 
-***Batch Processing***\index{Batch Processing!definition} is the aggregation of multiple training examples into a single tensor operation to **Amortize Fixed Overhead**.
+***Batch Processing***\index{Batch Processing!definition} is the aggregation of multiple training examples into a single tensor operation to amortize fixed per-step overhead (kernel launch, optimizer update) across $B$ examples, shifting the workload from memory-bandwidth-bound to compute-bound as $B$ increases.
 
-1.  **Significance (Quantitative):** It trades **Inference Latency** ($L_{lat}$) for **System Throughput** ($\eta$), shifting the workload from a memory-bound regime ($BW$) to a compute-bound regime ($R_{peak}$).
-2.  **Distinction (Durable):** Unlike **Stochastic Gradient Descent** (batch=1), which provides high-frequency but noisy updates, **Mini-batch Processing** provides more stable gradients while maximizing accelerator utilization.
-3.  **Common Pitfall:** A frequent misconception is that larger batches always mean faster training. In reality, there is a **Scaling Limit**: beyond a certain point (the "Critical Batch Size"), further increases yield diminishing returns in throughput while potentially degrading model convergence.
+1.  **Significance (Quantitative):** Throughput increases with batch size up to the critical batch size, beyond which additional examples provide diminishing gradient quality without proportional convergence benefit. For ResNet-50 on ImageNet, empirical studies find the critical batch size near $B \approx 8{,}192$: at this batch size, throughput approaches $R_{peak}$ while validation accuracy is preserved; larger batches require learning rate scaling (linear rule: $\text{lr} \propto B$) to compensate for reduced update frequency.
+2.  **Distinction (Durable):** Unlike stochastic gradient descent ($B=1$), which updates parameters after every example with maximum noise, mini-batch processing averages gradients over $B$ examples, reducing gradient variance by $1/\sqrt{B}$ — lowering the $D_{vol}$ transfers per effective update while giving the hardware enough parallel work to reach compute-bound utilization.
+3.  **Common Pitfall:** A frequent misconception is that linear learning rate scaling (multiplying lr by $B/B_0$) works at any batch size. The linear rule holds only up to the critical batch size; beyond it, the noise reduction from larger batches no longer compensates for the reduced number of updates per epoch, and validation accuracy degrades even with perfectly scaled learning rates.
 
 :::
 
@@ -2889,11 +2889,11 @@ The diagnostic methodology that transforms blueprint knowledge into actionable o
 
 ::: {.callout-definition title="Model FLOPs Utilization (MFU)"}
 
-***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the ratio of **Useful Model FLOPs** to **Hardware Peak FLOPs** ($R_{peak}$).
+***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the efficiency metric $\text{MFU} = C_{\text{model}} / (R_{peak} \cdot T_{\text{step}})$, where $C_{\text{model}}$ is the forward-pass FLOP count of the model and $T_{\text{step}}$ is the measured wall-clock time per training step, expressing what fraction of peak hardware throughput is doing useful model computation.
 
-1.  **Significance (Quantitative):** It is the most precise measure of **System Efficiency ($\eta$)** because it excludes "waste" FLOPs from recomputation (e.g., gradient checkpointing), padding, or speculative execution.
-2.  **Distinction (Durable):** Unlike **Hardware Utilization** (which reports how often the GPU is "busy"), MFU reports how much of that busyness contributes to **Model Convergence**.
-3.  **Common Pitfall:** A frequent misconception is that 100% MFU is possible. In reality, production systems typically achieve **30–50% MFU**; the remainder is lost to inescapable memory stalls ($BW$), communication overhead ($L_{lat}$), and pipeline bubbles.
+1.  **Significance (Quantitative):** MFU is the $\eta$ term in the Iron Law made concrete. For a 7B-parameter Transformer on an A100 (312 TFLOPS BF16), a step time of 1.2 ms yields $\text{MFU} = 7\text{B} \times 6 \text{ FLOPs/param} / (312\text{e}12 \times 1.2\text{e}{-3}) \approx 0.11$ (11%) — meaning 89% of peak compute is lost to memory stalls, communication, and scheduling overhead. Production systems typically reach 30–50% MFU; values below 30% indicate a specific addressable bottleneck.
+2.  **Distinction (Durable):** Unlike hardware utilization reported by profilers (which counts all cycles where the compute units are active, including gradient checkpointing recomputation and padding FLOPs), MFU counts only the FLOPs that directly advance the model toward convergence — providing a hardware-agnostic efficiency score that is comparable across different accelerator generations.
+3.  **Common Pitfall:** A frequent misconception is that 100% MFU is achievable. Memory bandwidth is always a finite resource: even a perfectly compute-bound kernel must load weights from DRAM, and the resulting stalls impose a ceiling well below 100%. The practical upper bound for most Transformer training runs is 55–65% MFU, achievable only with FlashAttention and carefully tuned batch sizes.
 
 :::
 
@@ -5274,7 +5274,7 @@ Only when profiling reveals persistent bottlenecks despite these optimizations s
 
 The parallelism strategies introduced in this section---data parallelism for throughput, model parallelism for memory, pipeline parallelism for efficiency, and tensor parallelism for massive layers---provide the conceptual foundation for understanding how production training systems train trillion-parameter models in weeks rather than millennia. The implementation details of multi-node distributed training---collective communication primitives, fault tolerance mechanisms, and elastic scheduling---build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
 
-:::: {.callout-checkpoint title="Scaling Decisions"}
+::: {.callout-checkpoint title="Scaling Decisions"}
 Scaling trades compute bottlenecks for communication bottlenecks.
 
 **When to Scale**
@@ -5286,7 +5286,7 @@ Scaling trades compute bottlenecks for communication bottlenecks.
 
 - [ ] **Data vs. model parallelism**: Given a model that does not fit on one GPU, can you justify why data parallelism fails and what model parallelism must partition?
 - [ ] **Communication tax**: Can you explain why scaling efficiency degrades with GPU count, and what quantity (synchronization fraction) controls the ceiling?
-::::
+:::
 
 The journey from single-GPU optimization through multi-device parallelism reveals a consistent pattern: every technique involves trade-offs, and every optimization introduces new constraints. The systematic methodology developed throughout this chapter---profiling to identify bottlenecks, selecting targeted techniques, composing solutions, and re-profiling---provides a principled framework. Yet even with this framework, experienced practitioners still encounter recurring traps that waste compute, delay research, and cause production failures.
 

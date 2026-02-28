@@ -13,7 +13,7 @@
 
 **Act 1 (Calibration, 12 min):** Students believe that larger models benefit more from compilation because they have "more to optimize." This act shows the opposite: compilation speedup is highest for models with many small kernels (low arithmetic intensity), where the dispatch tax dominates. A KWS model with 1,000 tiny ops sees >30% speedup from `torch.compile`; a single large matmul sees near-zero speedup because the dispatch tax is already negligible.
 
-**Act 2 (Design Challenge, 22 min):** Students apply kernel fusion to a real pipeline — a LayerNorm + Dropout + ReLU sequence — and discover the 5× speedup from fusing three reads/writes into one. Then they confront the compilation break-even: a 48-second compile time is only justified if the model runs ≥ N iterations. Students compute N for their specific deployment scenario and determine whether compilation is net-positive.
+**Act 2 (Design Challenge, 22 min):** Students apply kernel fusion to a real pipeline — a LayerNorm + Dropout + ReLU sequence — and discover the 5× wall-clock speedup and ~3× HBM traffic reduction from fusing three reads/writes into one. Then they confront the compilation break-even: a 30-second compile time is only justified if the model runs ≥ N iterations. Students select the break-even range for their deployment scenario and determine whether compilation is net-positive.
 
 ---
 
@@ -84,15 +84,21 @@ $$t_{launch} \in [5, 20] \; \mu\text{s per kernel (CPU-side)}$$
 ## 4. Act 2: The Compilation Break-Even (Design Challenge — 22 minutes)
 
 ### Pedagogical Goal
-Students believe compilation is a free speedup — "compile once, run fast forever." The chapter shows compilation has a concrete cost: `torch.compile` on ResNet-50 takes ~48 seconds and provides ~48% throughput gain (2,150 vs. 1,450 img/sec). For a web server handling 10,000 requests/day, this break-even is trivially positive. For a CI pipeline running a model once per PR, the 48-second compile time exceeds the total inference cost. Students must compute the break-even point for their deployment and decide whether compilation is net-positive.
+Students believe compilation is a free speedup — "compile once, run fast forever." The chapter shows compilation has a concrete cost: `torch.compile` on ResNet-50 takes ~30 seconds and provides ~48% throughput gain (2,150 vs. 1,450 img/sec). For a web server handling 10,000 requests/day, this break-even is trivially positive. For a CI pipeline running a model once per PR, the 30-second compile time exceeds the total inference cost. Students select the break-even range and determine whether compilation is net-positive for their deployment.
 
-### The Lock (Numeric Prediction)
-Before instruments unlock:
+### The Lock (Structured Prediction)
+Before instruments unlock — **multiple choice** (computing the exact break-even from scratch requires setting up the formula, which is the goal of the instrument, not the lock):
 
-> "torch.compile on ResNet-50 improves throughput by 48% (from 1,450 to 2,150 images/sec) but requires 48 seconds of one-time compilation. How many inferences must you run before the compilation cost is recovered?"
+> "torch.compile on ResNet-50 improves throughput by 48% (from 1,450 to 2,150 images/sec) but requires 30 seconds of one-time compilation. Approximately how many inferences must you run before the compilation cost is recovered?"
 
-Students type a number. Expected wrong answers: very large numbers (students expect high overhead). Actual calculation: at 1,450 img/sec baseline, the break-even number of inferences where compilation time is offset by throughput gain is:
-$$N_{break-even} = \frac{t_{compile}}{\Delta t_{per\text{-}inference}} = \frac{48s}{1/1450 - 1/2150} \approx 48s \times \frac{1450 \times 2150}{2150-1450} \approx 214,000 \text{ images}$$
+Options:
+- A) About 1,000 images — the overhead is tiny
+- B) About 10,000 images — roughly 10 seconds of inference at baseline
+- **C) About 130,000 images — the time saved per image is small, so many images are needed** ← correct
+- D) About 10 million images — compilation is almost never worth it
+
+The calculation students will verify in the instrument:
+$$N_{break-even} = \frac{t_{compile}}{\Delta t_{per\text{-}inference}} = \frac{30s}{1/1450 - 1/2150} = \frac{30s}{0.000224 \text{ s/img}} \approx 134,000 \text{ images}$$
 
 ### The Instrument: Compilation Trade-off Analyzer
 
@@ -106,11 +112,11 @@ Without fusion: 3 separate kernel launches, each reading/writing to HBM:
 - Dropout: read LayerNorm output, compute, write output to HBM
 - ReLU: read Dropout output, compute, write final output
 
-With fusion: 1 kernel launch, input read once, output written once — 10–20× less HBM traffic.
+With fusion: 1 kernel launch, input read once, output written once — **~3× less HBM traffic** (6 reads/writes → 2 reads/writes: 1 read of input, 1 write of final output). Note: the 10–20× HBM traffic reduction cited in the chapter applies to **FlashAttention** (attention matrix tiling), not to element-wise op fusion. Element-wise fusion reduces traffic proportionally to the number of ops fused — 3 ops fused = ~3× HBM reduction.
 
 Controls:
 - **Fusion toggle** (Off / On): Shows before/after memory traffic bar and kernel count.
-- **HBM bandwidth slider**: 1 / 2 / 3.35 TB/s (A100 HBM3 = 3.35 TB/s). As bandwidth increases, the unfused case improves proportionally; the fused case is already compute-bound and doesn't improve as much.
+- **HBM bandwidth slider**: 1 / 2.0 / 3.35 TB/s. Note: A100 uses **HBM2e at 2.0 TB/s** (not HBM3). H100 uses HBM3 at 3.35 TB/s. Default is 2.0 TB/s. As bandwidth increases, the unfused case improves proportionally; the fused case is already closer to compute-bound and benefits less.
 
 Output: **Arithmetic intensity meter** (FLOP/byte). Students observe:
 - Unfused sequence: ~0.1 FLOP/byte (memory-bound; below roofline ridge point of 156 FLOP/byte)
@@ -140,9 +146,9 @@ Students slide the deployment duration until the break-even crossover appears. K
 ### Structured Reflection
 Complete the sentence:
 
-> "Kernel fusion provides [5× / 10–20× / 48%] speedup for LayerNorm + Dropout + ReLU because ___."
+> "Kernel fusion of LayerNorm + Dropout + ReLU provides [5× wall-clock / ~3× HBM traffic / 10–20× HBM traffic] reduction in memory bandwidth because ___."
 
-Dropdown for blank 1: **"5× for wall-clock speedup; 10–20× for HBM traffic reduction"** ← both are chapter-correct; the lab uses 5× wall-clock and 10–20× for HBM.
+Dropdown for blank 1: **"~3× HBM traffic reduction"** ← correct for element-wise fusion. The 5× wall-clock speedup comes from combining the traffic reduction with elimination of two kernel launch overheads. The 10–20× figure is from FlashAttention and applies to attention matrix tiling — a different operation.
 Dropdown for blank 2:
 - **"fusing eliminates intermediate HBM reads and writes between operations, making one pass through memory serve all three computations"** ← correct
 - "fusing increases arithmetic intensity above the roofline ridge point"
@@ -157,7 +163,8 @@ Then four-option multiple choice:
 - D) Negative speedup — compilation makes large kernels slower
 
 **Math Peek:**
-$$N_{break-even} = \frac{t_{compile}}{\Delta t_{per\text{-}inference}} \qquad \text{5× fusion speedup: } \frac{3 \text{ kernels} \times t_{HBM}}{1 \text{ kernel} \times t_{HBM}} \approx 3\times \text{ memory, } 5\times \text{ wall-clock}$$
+$$N_{break-even} = \frac{t_{compile}}{\Delta t_{per\text{-}inference}} = \frac{30\text{s}}{1/1450 - 1/2150} \approx 134{,}000 \text{ images}$$
+$$\text{Element-wise fusion: } 6 \text{ HBM ops} \to 2 \text{ HBM ops} = 3\times \text{ traffic reduction}, \approx 5\times \text{ wall-clock speedup (includes dispatch elimination)}$$
 
 ---
 
@@ -180,7 +187,7 @@ $$N_{break-even} = \frac{t_{compile}}{\Delta t_{per\text{-}inference}} \qquad \t
 
 | Context | Device | Inference Volume | Key Constraint |
 |---|---|---|---|
-| **Production Server** | A100 (312 TFLOPS FP16, 2.0 TB/s HBM) | 10M requests/day | Compilation ROI positive within minutes; fusion provides 10–20× HBM reduction for transformer attention |
+| **Production Server** | A100 (312 TFLOPS FP16, 2.0 TB/s HBM2e) | 10M requests/day | Compilation ROI positive within minutes; element-wise fusion provides ~3× HBM reduction; FlashAttention provides 10–20× for attention ops |
 | **Edge Inference** | Mobile NPU (10 TOPS INT8, 68 GB/s) | 100 requests/hour | Compilation overhead may exceed deployment lifetime for short sessions; dispatch tax is higher % of budget |
 
 The two contexts reveal that compilation decisions are not universal: on a production server handling 10M requests/day, compile-once-run-always is always net-positive. On an edge device with episodic deployments, eager mode may be more efficient overall — a concrete quantitative decision, not a preference.
@@ -195,7 +202,7 @@ The two contexts reveal that compilation decisions are not universal: on a produ
   "execution_mode": "eager | compiled",
   "fusion_enabled": true,
   "compilation_roi_positive": true,
-  "breakeven_inferences": 214000,
+  "breakeven_inferences": 134000,
   "kws_utilization_eager_pct": 33,
   "kws_utilization_compiled_pct": 67
 }
@@ -215,11 +222,13 @@ The `execution_mode` and `fusion_enabled` fields feed forward to:
 | <1% peak compute for ReLU (unfused) | frameworks.qmd, line 301 | "element-wise operations like ReLU achieve less than 1% of peak compute capacity" |
 | >30% speedup from torch.compile | frameworks.qmd, line 127 | "forfeiting potential speedups of over 30% that compilers like torch.compile can provide" |
 | 1.3–2× throughput gain (torch.compile) | frameworks.qmd, line 1036 | "a permanent 1.3–2× throughput gain on transformer models by reducing kernel launch overhead" |
-| 5× speedup (LayerNorm + Dropout + ReLU fusion) | frameworks.qmd, line 305 | "Fusing a sequence of LayerNorm, Dropout, and ReLU into one kernel can yield 5× speedup" |
-| 10–20× HBM traffic reduction (FlashAttention) | frameworks.qmd, line 305 | "reducing HBM traffic by 10–20×" |
+| 5× wall-clock speedup (LayerNorm + Dropout + ReLU fusion) | frameworks.qmd, line 305 | "Fusing a sequence of LayerNorm, Dropout, and ReLU into one kernel can yield 5× speedup" |
+| ~3× HBM traffic reduction (element-wise fusion) | derived: 6 HBM ops → 2 HBM ops for 3 fused element-wise ops | 3 separate read-write pairs collapse to 1 read + 1 write |
+| 10–20× HBM traffic reduction (FlashAttention only) | frameworks.qmd, line 305 | "reducing HBM traffic by 10–20×" — applies to attention tiling, NOT to element-wise fusion |
 | 2–4× wall-clock speedup (FlashAttention) | frameworks.qmd, line 305 | "achieving 2–4× wall-clock speedup" |
 | 48% speedup on ResNet-50 (torch.compile) | frameworks.qmd, line 1283 | "torch.compile provides ~48% speedup on ResNet-50 (2,150 vs 1,450 img/sec)" |
-| 2.0 TB/s A100 bandwidth | frameworks.qmd, line 301 | "A100 GPU with…2.0 TB/s of memory bandwidth" |
+| ~30s compile time for ResNet-50 | frameworks.qmd, line ~1283 | Chapter uses 30s for break-even calculation producing ~134,000 image crossover |
+| 2.0 TB/s A100 bandwidth (HBM2e) | frameworks.qmd, line 301 | "A100 GPU with…2.0 TB/s of memory bandwidth" — A100 = HBM2e; H100 = HBM3 at 3.35 TB/s |
 | 30–80% utilization range (framework choice) | frameworks.qmd, line 2663 | "whether a training loop achieves 30% or 80% of theoretical hardware throughput" |
 | 60× bandwidth gap (PCIe vs HBM) | frameworks.qmd, line 2661 | "bandwidth gap, exceeding 60×, means a single misplaced tensor transfer can erase the entire speedup" |
 | 156 ops/byte ridge point (A100 FP32) | frameworks.qmd, implied | 312 TFLOPS ÷ 2.0 TB/s = 156 FLOP/byte |

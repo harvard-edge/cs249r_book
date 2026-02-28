@@ -68,11 +68,12 @@ Then surface the convergence trade-off:
 ### Reflection (Structured)
 Students complete:
 
-> "Mixed precision reduces memory by approximately ___× because ___."
+> "Mixed precision reduces total training memory by approximately ___× because ___."
 
-Dropdown options for blank 1: `1.3×` / `1.5×` / **`2×`** / `4×`
+Dropdown options for blank 1: `1.3×` / **`1.5×`** / `2×` / `4×`
+Note: `2×` is the common wrong answer. The actual reduction is ~1.5–1.6× because: active buffers (params + grads) halve (from 2W to W in FP16), but the FP32 master copy (W) is retained. So total goes from 4W (FP32 Adam) to ~2.5W, not 2W.
 Dropdown options for blank 2:
-- **"active compute buffers (parameters, gradients) halve from FP32 to FP16, while a FP32 master copy is retained for optimizer updates"** ← correct
+- **"active compute buffers (parameters, gradients) halve from FP32 to FP16, while the FP32 master copy is retained for numerically stable optimizer updates — so memory reduction is ~1.5×, not 2×"** ← correct
 - "the GPU compresses all tensors automatically"
 - "optimizer state is not needed in FP16 mode"
 - "activation memory dominates and activations are always stored in INT8"
@@ -87,14 +88,27 @@ where $W = \text{params} \times \text{bytes\_per\_param}$, $B$ = batch size, $n_
 ## 4. Act 2: The MFU Gap (Design Challenge — 22 minutes)
 
 ### Pedagogical Goal
-Students expect that a well-configured training run uses 80–95% of peak GPU FLOPS. The chapter's GPT-2 walkthrough shows the baseline reality is 45% MFU — with 40% of wall-clock time consumed by data loading and 25% by memory transfers, leaving only 35% for actual compute. Students must diagnose this using the pipeline breakdown, then apply three specific optimizations to reach the chapter's target of 85% MFU. Each optimization has a concrete cost: gradient checkpointing adds 33% recompute overhead; prefetching adds implementation complexity but recovers 35 percentage points of compute time.
+Students expect that a well-configured training run uses 80–95% of peak GPU FLOPS. This act distinguishes two metrics students conflate:
 
-### The Lock (Numeric Prediction)
-Before instruments unlock:
+- **Pipeline Efficiency** = fraction of wall-clock time the GPU is performing any tensor operations (not idle waiting for data or transfers). Baseline: 35%.
+- **MFU (Model FLOPs Utilization)** = actual model FLOPs completed / (wall time × hardware peak FLOPs). Baseline: 45%.
 
-> "A GPT-2 XL training loop on an A100 is fully configured — correct batch size, no bugs, no data augmentation. In a single training iteration, what fraction of wall-clock time is the GPU actually performing tensor operations (not waiting for data or transfers)?"
+These are different because a GPU can be "busy" executing memory-bound ops (high pipeline efficiency) while achieving low MFU — the hardware's compute units are starved of data even when nominally active. Fixing data loading raises pipeline efficiency; fixing arithmetic intensity (kernel fusion from Lab 07) raises MFU. Both are needed to reach the chapter's optimized target of 85% MFU.
 
-Students type a percentage (0–100). The system records it. Expected wrong answers: 70–95%. Actual answer from chapter: 35% (compute) at baseline.
+Students diagnose the baseline state, then apply optimizations in sequence to reach 85% MFU, observing that each fix raises a different metric.
+
+### The Lock (Structured Prediction)
+Before instruments unlock — **multiple choice**:
+
+> "A GPT-2 XL training loop on an A100 is fully configured — correct batch size, no bugs, no data augmentation. What is the approximate MFU (fraction of peak hardware FLOPs actually used for model computation)?"
+
+Options:
+- A) About 85–95% — a well-configured loop should be near peak
+- B) About 60–70% — some overhead is expected
+- **C) About 45% — data loading, memory transfers, and kernel overhead together consume over half of potential compute** ← correct
+- D) About 10–20% — GPUs are almost never well-utilized in practice
+
+The system records the prediction. After Act 2, it shows: "You predicted [X]%. Baseline MFU = 45% (from chapter's GPT-2 walkthrough). Optimized MFU = 85%."
 
 ### The Instrument: Pipeline Breakdown Analyzer
 
@@ -112,10 +126,17 @@ Controls:
 - **Gradient checkpointing toggle** (Off / On): Activation memory bar in the memory panel shrinks 4×; a new "Recompute Overhead" segment appears in the compute bar (+33% of compute time, but allows 4× larger batch or deeper network).
 - **Batch size slider** (16, 32, 64, 128, 256): Shows the 60–70% → 90%+ utilization transition the chapter describes.
 
-A **MFU gauge** (0–100%) updates live:
-$$\text{MFU} = \frac{O_{total}}{T_{wall} \cdot R_{peak}}$$
+**Two separate gauges** update live — students must watch both:
 
-Baseline: 45%. Target: ≥ 80%. Students must apply optimizations to cross the threshold.
+1. **Pipeline Efficiency gauge** (0–100%): fraction of wall time the GPU is executing kernels.
+$$\text{Pipeline Efficiency} = \frac{T_{compute}}{T_{wall}} = \frac{T_{compute}}{T_{data} + T_{transfer} + T_{compute}}$$
+Baseline: 35%. After prefetching: ~75%. This measures *busyness*, not *quality of work*.
+
+2. **MFU gauge** (0–100%): fraction of peak hardware FLOPs used for actual model operations.
+$$\text{MFU} = \frac{O_{total}}{T_{wall} \cdot R_{peak}}$$
+Baseline: 45%. Target: ≥ 80%. This measures *efficiency of work*. MFU > Pipeline Efficiency because the GPU is partially busy with useful ops even during "memory transfer" phases.
+
+Key insight: prefetching raises Pipeline Efficiency most; mixed precision + kernel fusion (from Lab 07) raises MFU most. Students must apply both classes of optimization to reach 85% MFU.
 
 **Secondary instrument:** The Optimizer Walkthrough Summary — a side panel showing the chapter's GPT-2 scenario numbers in a table:
 
@@ -139,10 +160,22 @@ The student starts with the baseline configuration (89 GB total) and must apply 
 
 They must find a valid configuration that fits within 8 GB. The system tracks their move sequence.
 
-Key discovery: even with every optimization applied, GPT-2 XL cannot train in 8 GB at batch ≥ 4. The student must quantify why — and the answer is the static memory floor (parameters + gradients + optimizer state) is already 24 GB in the best case (SGD + FP16). To train GPT-2 XL on a laptop GPU, you would need parameter sharding — which requires multiple machines and is out of scope for Volume 1.
+Key discovery: even with every optimization applied, GPT-2 XL cannot train in 8 GB. The student must quantify the minimum memory floor from first principles:
+
+**Minimum static memory floor derivation (SGD + FP16 with FP32 master copy):**
+| Component | Calculation | Size |
+|---|---|---|
+| Parameters (FP16 active) | 1.5B × 2 bytes | 3 GB |
+| Gradients (FP16) | 1.5B × 2 bytes | 3 GB |
+| FP32 master copy (required for SGD updates) | 1.5B × 4 bytes | 6 GB |
+| **Static floor total** | | **12 GB** |
+
+At batch=1, activation memory for GPT-2 XL ≈ 0.5–1 GB, making total minimum ≈ 12–13 GB. This already exceeds the Laptop GPU's 8 GB. Adam adds 12 GB of optimizer state on top, making the FP32 Adam floor 24 GB (as shown in Act 1).
+
+To train GPT-2 XL on a laptop GPU, you would need parameter sharding — which requires multiple machines and is out of scope for Volume 1.
 
 **Failure state:** When the student has applied all available optimizations and still cannot fit:
-> "🔴 **Physical Limit Reached.** With all single-node optimizations applied, minimum static memory = 18 GB (SGD + FP16). GPT-2 XL cannot train on a Laptop GPU. This boundary is the entry condition for Volume 2: parameter sharding across nodes."
+> "🔴 **Physical Limit Reached.** Static memory floor = **12 GB** (SGD + FP16 active weights + FP32 master copy). This is 4 GB above the Laptop GPU's budget before a single activation is stored. GPT-2 XL cannot train on a Laptop GPU through single-node optimization alone. This boundary is the entry condition for Volume 2: parameter sharding across nodes."
 
 ### Structured Reflection
 Four-option multiple choice:
@@ -201,7 +234,8 @@ The two contexts isolate the chapter's key insight: single-node optimization can
   "final_mfu_pct": 82,
   "baseline_mfu_estimate_pct": 75,
   "laptop_fit_achieved": false,
-  "laptop_minimum_memory_gb": 18
+  "laptop_minimum_memory_gb": 12,
+  "laptop_floor_derivation": "SGD+FP16: params_fp16(3GB) + grads_fp16(3GB) + master_fp32(6GB) = 12GB static floor"
 }
 ```
 
@@ -219,7 +253,7 @@ The `optimizer_chosen` and `precision_chosen` fields feed forward to:
 | GPT-2 XL = 1.5B params, 6 GB FP32 | Lighthouse spec, line 327 | "~6 GB (FP32) for weights alone" |
 | Adam adds 12 GB for GPT-2 XL | Lines 1084–1085 | "1.5B × 8 bytes = [Adam state]"; each vector = 6 GB, two vectors = 12 GB |
 | 50K steps (Adam) vs 150K steps (SGD) | Line 1095 | "GPT-2 converges in ~50K steps…~150K+ steps with SGD+Momentum" |
-| Mixed precision saves ~50% memory | Line 3463 | "memory consumption decreases by approximately 50%" |
+| Mixed precision saves ~50% of active compute buffers (not total training memory) | Line 3463 | "memory consumption decreases by approximately 50%" — applies to active FP16 buffers only; FP32 master copy is retained, making total reduction ~1.5× not 2× |
 | Baseline MFU = 45% | Line 4612 | "accelerator utilization: 45%" |
 | Data loading = 40% of iteration time (baseline) | Line 4613 | "Data loading: 40% of iteration time" |
 | After optimization: compute = 75%, data loading = 5% | Lines 4628–4629 | "Data loading: 5%…Compute: 75% of iteration time (overlapped)" |

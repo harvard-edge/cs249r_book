@@ -142,11 +142,11 @@ Throughout this chapter, we ground each technique in concrete systems: ResNet-50
 
 ::: {.callout-definition title="Model Compression"}
 
-***Model Compression***\index{Model Compression!definition} is the systematic renegotiation of the **Silicon Contract** (Principle \ref{pri-silicon-contract}), transforming research models into efficient deployment artifacts.
+***Model Compression***\index{Model Compression!definition} is a family of techniques that reduce a trained model's computational cost and memory footprint by eliminating redundant parameters (pruning), reducing numerical precision (quantization), or transferring learned behavior into a smaller architecture (distillation), while preserving as much predictive accuracy as possible.
 
-1.  **Significance (Quantitative):** It trades **Redundancy** and **Precision** for **Latency**, **Memory**, and **Energy** savings. Within the **Iron Law**, it reduces the total **Data Volume ($D_{vol}$)** and the **Operation Count ($O$)** of the model.
-2.  **Distinction (Durable):** Unlike **Neural Architecture Search (NAS)**, which discovers new architectures from scratch, Model Compression optimizes an **Existing Model** to fit specific hardware constraints.
-3.  **Common Pitfall:** A frequent misconception is that compression is "free." In reality, it is a **Pareto Frontier**: any gain in efficiency typically comes at a cost in model **Accuracy** or **Generalization Robustness**.
+1.  **Significance (Quantitative):** Compression directly reduces both Iron Law terms. INT8 quantization of a 175B-parameter LLM cuts weight memory from 350 GB (FP16) to 175 GB — a 2$\times$ reduction in $D_{vol}$ — while enabling Tensor Core INT8 paths that are 2$\times$ faster than FP16, yielding up to 4$\times$ combined throughput improvement. Unstructured pruning to 50% sparsity theoretically halves $O$, but hardware speedup only materializes when sparsity is structured (e.g., 2:4 sparse) to match accelerator capabilities.
+2.  **Distinction (Durable):** Unlike Neural Architecture Search, which discovers efficient architectures from scratch by exploring a design space, Model Compression starts from an existing trained model and reduces its cost post hoc — meaning the accuracy ceiling is bounded by the base model, and the compression ratio is constrained by the architecture's inherent redundancy.
+3.  **Common Pitfall:** A frequent misconception is that compression techniques compose without interference. In practice, applying quantization after pruning can amplify quantization error in near-zero weight regions that pruning left behind, causing accuracy degradation that neither technique produces alone.
 
 :::
 
@@ -558,12 +558,44 @@ These three techniques address the challenge through complementary approaches. P
 
 ### Pruning {#sec-model-compression-pruning-d1cb}
 
+```{python}
+#| label: mobilenet-pruning-stats
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MOBILENET PRUNING STATISTICS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Pruning in Practice" section - MobileNet example
+# │
+# │ Goal: Demonstrate realistic pruning gains for a mobile-class model.
+# │ Show: 85% pruning with significant size reduction (14MB to 2MB).
+# │ How: Define standard MobileNet pruning anchor points.
+# │
+# │ Imports: (none)
+# │ Exports: MobileNetCompressionAnchor.pruning_pct_str, .original_size_str, .pruned_size_str
+# └─────────────────────────────────────────────────────────────────────────────
+
+# ┌── LEGO ───────────────────────────────────────────────
+class MobileNetCompressionAnchor:
+    """
+    Namespace for MobileNet pruning anchor.
+    """
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    pruning_pct = 85
+    original_size_mb = 14
+    pruned_size_mb = 2
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    pruning_pct_str = f"{pruning_pct}%"
+    original_size_str = f"{original_size_mb}MB"
+    pruned_size_str = f"{pruned_size_mb}MB"
+```
+
 \index{Pruning!etymology}
 \index{Optimal Brain Damage!LeCun 1989}
 \index{Optimal Brain Surgeon!Hassibi 1993}
 \index{LeCun, Yann!optimal brain damage}
 \index{Han, Song!modern pruning revival}
-Consider a MobileNet trained for image classification on a wearable health monitor. The trained model occupies 14 MB, but the target microcontroller offers only 2 MB of flash memory. Retraining a smaller architecture from scratch would require weeks of data collection and validation — time the product schedule does not allow. Fortunately, analysis reveals that 85% of the model's weights hover near zero, contributing almost nothing to its predictions. Removing those weights and fine-tuning the remainder for a few epochs produces a model that fits in 2 MB with less than 1% accuracy loss. This is pruning in practice.
+Consider a MobileNet trained for image classification on a wearable health monitor. The trained model occupies `{python} MobileNetCompressionAnchor.original_size_str`, but the target microcontroller offers only 2 MB of flash memory. Retraining a smaller architecture from scratch would require weeks of data collection and validation — time the product schedule does not allow. Fortunately, analysis reveals that `{python} MobileNetCompressionAnchor.pruning_pct_str` of the model's weights hover near zero, contributing almost nothing to its predictions. Removing those weights and fine-tuning the remainder for a few epochs produces a model that fits in `{python} MobileNetCompressionAnchor.pruned_size_str` with less than 1% accuracy loss. This is pruning in practice.
 
 Pruning[^fn-pruning-lecun-1989] directly addresses memory efficiency constraints by eliminating redundant parameters. Because neural networks carry far more weights than any single task demands (as established above), we can remove a significant fraction without substantial performance degradation. The central questions are *what* to prune (individual weights versus entire structures), *how* to decide what is expendable (magnitude, gradients, or activations), and *when* to prune (after training, during training, or even at initialization). As we will explore in @sec-hardware-acceleration, specialized hardware can further exploit the resulting sparse structures.
 
@@ -1925,38 +1957,6 @@ While LTH presents a compelling theoretical perspective on pruning, practical im
 Modern machine learning frameworks provide dedicated APIs to automate the pruning and fine-tuning workflow. In PyTorch\index{Framework Toolkits!pruning support}, the `torch.nn.utils.prune` module provides a flexible interface for pruning individual layers or entire models. Users can apply unstructured pruning (e.g., `l1_unstructured`) or structured pruning (e.g., `ln_structured`) with just a few lines of code. PyTorch uses "masks" to handle pruning: the original parameters are preserved, but a binary mask is multiplied element-wise during the forward pass. To realize actual memory savings for deployment, these masks must be "permanently" applied using `prune.remove(module, 'weight')`.
 
 TensorFlow takes a different approach through the TensorFlow Model Optimization Toolkit (TF-MOT). Unlike PyTorch's post-training workflow, TF-MOT often integrates pruning into the training process itself. By using `prune_low_magnitude`, the framework gradually increases sparsity during training, allowing the model to adapt its remaining weights to the sparse structure in real-time.
-
-```{python}
-#| label: mobilenet-pruning-stats
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOBILENET PRUNING STATISTICS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Pruning in Practice" section - MobileNet example
-# │
-# │ Goal: Demonstrate realistic pruning gains for a mobile-class model.
-# │ Show: 85% pruning with significant size reduction (14MB to 2MB).
-# │ How: Define standard MobileNet pruning anchor points.
-# │
-# │ Imports: (none)
-# │ Exports: MobileNetCompressionAnchor.pruning_pct_str, .original_size_str, .pruned_size_str
-# └─────────────────────────────────────────────────────────────────────────────
-
-# ┌── LEGO ───────────────────────────────────────────────
-class MobileNetCompressionAnchor:
-    """
-    Namespace for MobileNet pruning anchor.
-    """
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    pruning_pct = 85
-    original_size_mb = 14
-    pruned_size_mb = 2
-
-    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
-    pruning_pct_str = f"{pruning_pct}%"
-    original_size_str = f"{original_size_mb}MB"
-    pruned_size_str = f"{pruned_size_mb}MB"
-```
 
 \index{BERT!compression techniques}
 These trade-offs become concrete when examining real-world deployments. Several high-profile models have successfully integrated pruning to optimize performance. MobileNet, designed for mobile and embedded applications, has been pruned to reduce inference latency while preserving accuracy [@howard2017mobilenets]. Concretely, removing `{python} MobileNetCompressionAnchor.pruning_pct_str` of near-zero weights in a MobileNet can reduce its size from `{python} MobileNetCompressionAnchor.original_size_str` to `{python} MobileNetCompressionAnchor.pruned_size_str` with less than 1% accuracy loss. BERT[^fn-bert-pruning-scale], a widely used transformer model for natural language processing, has undergone structured pruning of attention heads and intermediate layers to create efficient versions such as DistilBERT and TinyBERT, which retain much of the original performance while reducing computational overhead [@sanh2019distilbert]. In computer vision, EfficientNet has been pruned to remove unnecessary filters, optimizing it for deployment in resource-constrained environments [@tan2019efficientnet].

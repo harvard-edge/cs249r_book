@@ -21,6 +21,13 @@ console = Console()
 # Volume directories
 VOLUME_DIRS = ["vol1", "vol2"]
 
+# Shared content directory (sibling to vol1/, vol2/ under contents/)
+SHARED_DIR = "shared"
+
+# Chapter stems that cannot be rendered standalone and are always excluded from
+# per-chapter build/debug operations.
+SKIP_STEMS = frozenset({"index", "references"})
+
 
 def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
     """Return the ordered list of buildable file stems from the PDF config.
@@ -43,11 +50,8 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
     if not config_file.exists():
         return []
 
-    # Only skip files that genuinely cannot be rendered standalone
-    _SKIP_STEMS = {"index", "references"}
-
     def _is_testable(path_str: str) -> bool:
-        return Path(path_str).stem not in _SKIP_STEMS
+        return Path(path_str).stem not in SKIP_STEMS
 
     # --- YAML-aware path (preferred) ---
     try:
@@ -255,11 +259,19 @@ class ChapterDiscovery:
         # Try exact match first
         exact_matches = list(search_dir.rglob(f"{chapter_name}.qmd"))
 
+        # When a volume prefix was given, also search the shared directory so that
+        # files like contents/shared/notation.qmd are resolvable as "vol1/notation".
+        if volume_filter:
+            shared_dir = self.contents_dir / SHARED_DIR
+            if shared_dir.exists():
+                exact_matches += list(shared_dir.rglob(f"{chapter_name}.qmd"))
+
         # Filter to actual chapter files (in volume directories, not frontmatter/backmatter)
         chapter_matches = []
         for match in exact_matches:
             vol = self._get_volume_from_path(match)
-            if vol or volume_filter:
+            is_shared = SHARED_DIR in match.relative_to(self.contents_dir).parts
+            if vol or volume_filter or is_shared:
                 chapter_matches.append(match)
 
         if not chapter_matches and allow_fuzzy:

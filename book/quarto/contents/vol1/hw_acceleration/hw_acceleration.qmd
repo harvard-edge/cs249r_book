@@ -58,11 +58,11 @@ start_chapter("vol1:hw_acceleration")
 
 ::: {.callout-definition title="Hardware Acceleration"}
 
-***Hardware Acceleration***\index{Hardware Acceleration!definition} is the practice of trading **General-Purpose Programmability** for **Compute Density** to achieve order-of-magnitude efficiency gains.
+***Hardware Acceleration***\index{Hardware Acceleration!definition} is the practice of replacing general-purpose processor logic with domain-specific silicon optimized for a narrow class of operations, trading programmability for the compute density ($R_{peak}$) and energy efficiency ($\eta$) gains that regular, data-parallel workloads like matrix multiplication can exploit.
 
-1.  **Significance (Quantitative):** By eliminating general-purpose control logic (branch prediction, out-of-order execution), it maximizes **Peak Performance ($R_{peak}$)** and **Energy Efficiency ($\eta$)** for regular, data-parallel workloads.
-2.  **Distinction (Durable):** Unlike a **General-Purpose CPU**, which prioritizes **Instruction Latency**, an **Accelerator** prioritizes **Arithmetic Intensity** and deterministic data movement.
-3.  **Common Pitfall:** A frequent misconception is that hardware acceleration "fixes" slow algorithms. In reality, it is a **Multiplier**: it only speeds up algorithms that exhibit the regular structure (e.g., matrix multiplication) the silicon was designed to execute.
+1.  **Significance (Quantitative):** The throughput gain is orders of magnitude. An A100 GPU delivers 312 TFLOPS BF16 for matrix multiplication, while a server-class CPU delivers roughly 1–2 TFLOPS for the same operation — a 150–300$\times$ gap achieved by dedicating 80+ billion transistors to parallel arithmetic units rather than to branch predictors, out-of-order schedulers, and large caches.
+2.  **Distinction (Durable):** Unlike a general-purpose CPU, which is optimized to minimize latency for any single instruction in an arbitrary serial program, an accelerator is optimized to maximize throughput for a specific operation class — meaning it achieves its gains only when the workload presents enough parallel work to keep all arithmetic units busy simultaneously.
+3.  **Common Pitfall:** A frequent misconception is that hardware acceleration uniformly speeds up ML systems. Acceleration is a multiplier only on the parallelizable fraction of the workload (Amdahl's Law): if data loading, Python overhead, and kernel launches constitute 10% of total time, an infinitely fast accelerator can at most achieve a 10$\times$ end-to-end speedup.
 
 :::
 
@@ -72,11 +72,11 @@ Hardware alone, however, cannot achieve these gains. The algorithms must be desi
 
 ::: {.callout-definition title="Hardware-Software Co-design"}
 
-***Hardware-Software Co-design***\index{Hardware-Software Co-design!definition} is the practice of breaking traditional abstraction layers to expose **Hardware Primitives** directly to **Algorithmic Logic**.
+***Hardware-Software Co-design***\index{Hardware-Software Co-design!definition} is a development methodology that intentionally violates traditional hardware-software abstraction layers, allowing algorithm constraints to inform silicon design and hardware capabilities to directly shape algorithm formulation.
 
-1.  **Significance (Quantitative):** It achieves **System Efficiency ($\eta$)** by tailoring algorithms to physical constraints (e.g., quantization for INT8 accelerators) and silicon to algorithmic patterns (e.g., Sparse Tensor Cores).
-2.  **Distinction (Durable):** Unlike **Layered Abstraction**, which hides hardware details for programmer convenience, Co-design exposes them to enable **Cross-Layer Optimization**.
-3.  **Common Pitfall:** A frequent misconception is that Co-design is a "one-off" hardware change. In reality, it is a **Sustained Symbiosis**: it requires the entire software stack (compilers, frameworks, and kernels) to be aware of the underlying hardware primitives.
+1.  **Significance (Quantitative):** Co-design unlocks gains unavailable to either layer acting alone. INT8 quantization delivers 2–4$\times$ throughput improvement not because 8-bit arithmetic is faster in the abstract, but because NVIDIA Tensor Cores are physically designed to execute four INT8 operations in the same die area as one FP32 operation — the algorithm change (quantization) only pays off when the hardware was co-designed to exploit it.
+2.  **Distinction (Durable):** Unlike layered abstraction (where software calls a hardware API without knowing the silicon details), co-design exposes hardware constraints — data alignment requirements, precision formats, memory access patterns — directly to algorithm and compiler authors so that global cross-layer optimizations are possible.
+3.  **Common Pitfall:** A frequent misconception is that co-design is a one-time hardware design choice. In practice, co-design is a continuous feedback loop: NVIDIA Tensor Cores were designed for FP16 matrix multiply, then upgraded to support TF32 and INT8 after observing that ML workloads demanded them, then extended again to sparse 2:4 patterns after algorithmic pruning research demonstrated structured sparsity was trainable.
 
 :::
 
@@ -184,7 +184,8 @@ To see Amdahl's Law in action, consider how the parallel fraction $p$ differs dr
 # │      LLM optimization focuses on reducing serial fraction.
 # │
 # │ Imports: mlsys.constants (H100_FLOPS_INT8), mlsys.formatting (fmt)
-# │ Exports: amdahl_*_str, hw_speedup_str, h100_tflops_int8
+# │ Exports: AmdahlsH100.amdahl_resnet_str, AmdahlsH100.amdahl_gpt2_str,
+# │          AmdahlsH100.hw_speedup_str, AmdahlsH100.h100_tflops_int8
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt, check
 from mlsys.constants import (
@@ -579,8 +580,12 @@ This shift represents an important engineering lesson: the era of "free" perform
 # │ How: Contrast CPU utilization and GFLOPS against accelerator baselines.
 # │
 # │ Imports: mlsys.constants (A100_FLOPS*, MOBILE_NPU_TOPS_INT8)
-# │ Exports: cpu_utilization_min_str, cpu_utilization_max_str, cpu_gflops_str,
-# │          a100_tflops_fp16, a100_tflops_tf32, mobile_tops
+# │ Exports: CpuMlInefficiency.cpu_utilization_min_str,
+# │          CpuMlInefficiency.cpu_utilization_max_str,
+# │          CpuMlInefficiency.cpu_gflops_str,
+# │          CpuMlInefficiency.a100_tflops_fp16,
+# │          CpuMlInefficiency.a100_tflops_tf32,
+# │          CpuMlInefficiency.mobile_tops
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     A100_FLOPS_FP16_TENSOR, A100_FLOPS_TF32,
@@ -618,11 +623,11 @@ Machine learning constitutes a computational domain with unique characteristics 
 
 ::: {.callout-definition title="ML Accelerator"}
 
-***Machine Learning Accelerators***\index{ML Accelerator!definition} are **Domain-Specific Processors** optimized for the dense linear algebra and regular data flow of neural networks.
+***Machine Learning Accelerators***\index{ML Accelerator!definition} are domain-specific processors whose silicon is designed primarily for the dense matrix operations and regular data flow of neural networks, achieving high $R_{peak}$ and memory bandwidth utilization for these workloads by devoting die area to arithmetic units rather than to general-purpose control logic.
 
-1.  **Significance (Quantitative):** They achieve order-of-magnitude efficiency gains over CPUs by maximizing **Parallel Throughput** ($R_{peak}$) and **Data Reuse** (via systolic arrays or tensor cores), specifically addressing the **Integration Bottleneck** of moving data to compute.
-2.  **Distinction (Durable):** Unlike a **General-Purpose CPU**, which is optimized for **Instruction Latency**, an ML Accelerator is optimized for **Throughput** and deterministic data streams.
-3.  **Common Pitfall:** A frequent misconception is that accelerators are "always faster." In reality, they are **Domain-Specific**: they may be significantly *slower* than a CPU for branch-heavy or irregular workloads that do not fit their parallel data paths.
+1.  **Significance (Quantitative):** The efficiency differential over CPUs is quantifiable. An A100 GPU delivers 312 TFLOPS BF16 with 2 TB/s memory bandwidth, while a high-end server CPU delivers roughly 1–2 TFLOPS FP32 with 200 GB/s bandwidth — a 150–300$\times$ compute throughput gap and a 10$\times$ bandwidth gap for the same matrix-multiply workloads that dominate neural network training and inference.
+2.  **Distinction (Durable):** Unlike a general-purpose CPU, which executes complex, branch-dependent serial programs efficiently by minimizing per-instruction latency, an ML accelerator processes thousands of independent arithmetic operations in parallel with predictable memory access patterns — making it 100–1,000$\times$ faster at matrix multiplication but potentially slower than a CPU for irregular control flow programs like tree traversal or dynamic programming.
+3.  **Common Pitfall:** A frequent misconception is that ML accelerators always accelerate ML. An accelerator only delivers its peak throughput when the workload provides enough parallel work to saturate all arithmetic units simultaneously: a batch-1 inference request on a 7B-parameter model utilizes roughly 5–10% of A100 compute capacity, because the sequential token generation cannot fill the thousands of parallel compute lanes.
 
 :::
 
@@ -1018,7 +1023,8 @@ output = relu(Z)  # Vector: applies activation to
 # │ How: Calculate weight matrix dimensions and total parameter counts.
 # │
 # │ Imports: mlsys.formatting (fmt)
-# │ Exports: wm_in_str, wm_out_str, wm_params_str
+# │ Exports: WeightMatrixCalc.wm_in_str, WeightMatrixCalc.wm_out_str,
+# │          WeightMatrixCalc.wm_params_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 
@@ -1554,7 +1560,10 @@ While tensor cores package matrix operations into structured computational units
 # │ How: Compare DRAM access counts for naive vs. systolic matrix multiplication.
 # │
 # │ Imports: mlsys.constants (ENERGY_DRAM_ACCESS_PJ, SYSTOLIC_ARRAY_DIM)
-# │ Exports: energy_ratio_str, vector_energy_str, systolic_energy_str
+# │ Exports: SystolicEnergy.energy_ratio_str, SystolicEnergy.vector_energy_str,
+# │          SystolicEnergy.systolic_energy_str,
+# │          AcceleratorEfficiencyAnchor.systolic_macs_cycle_str,
+# │          AcceleratorEfficiencyAnchor.energy_dividend_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import ENERGY_DRAM_ACCESS_PJ, SYSTOLIC_ARRAY_DIM
@@ -1749,7 +1758,10 @@ node[right]{Data};
 # │ How: Calculate tile count and memory reuse factors.
 # │
 # │ Imports: mlsys.constants (SYSTOLIC_ARRAY_DIM)
-# │ Exports: layer_dim_str, array_dim_str, tile_count_str, reuse_factor_str
+# │ Exports: SystolicArrayScaling.layer_dim_str,
+# │          SystolicArrayScaling.array_dim_str,
+# │          SystolicArrayScaling.tile_count_str,
+# │          SystolicArrayScaling.reuse_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import SYSTOLIC_ARRAY_DIM
 from mlsys.formatting import fmt_percent, fmt, check
@@ -1846,7 +1858,7 @@ The underlying principle remains consistent: data flows systematically through p
 # │ How: Multiply array dimensions to derive total processing element count.
 # │
 # │ Imports: mlsys.constants (SYSTOLIC_ARRAY_DIM), mlsys.formatting (fmt)
-# │ Exports: systolic_dim_str, systolic_ops_str
+# │ Exports: SystolicOpsCalc.systolic_dim_str, SystolicOpsCalc.systolic_ops_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import SYSTOLIC_ARRAY_DIM
@@ -1948,14 +1960,20 @@ These dynamics help explain the rapid adoption of newer accelerators despite hig
 # │
 # │ Imports: mlsys.constants (V100/A100/H100/TPUV4 FLOPS, BW, TFLOPs, second, GB, TB)
 # │          mlsys.Hardware (Cloud.V100, Cloud.A100, Cloud.H100, Cloud.TPUv4)
-# │ Exports: v100_tflops, v100_bw, v100_price_str, v100_pp_str
-# │          CpuMlInefficiency.a100_tflops_fp16, a100_bw, a100_bw_tbs, a100_price_str, a100_pp_str
-# │          h100_tflops_tf32, h100_tflops_fp16, h100_bw, h100_bw_tbs,
-# │          h100_price_str, h100_pp_str
-# │          tpuv4_tflops, tpuv4_bw, tpu_price_str, tpu_pp_str
-# │          gaudi_tflops, gaudi_bw, gaudi_price_str, gaudi_pp_str
+# │ Exports: AcceleratorEconomics.v100_tflops, AcceleratorEconomics.v100_bw,
+# │          AcceleratorEconomics.v100_price_str, AcceleratorEconomics.v100_pp_str,
+# │          AcceleratorEconomics.a100_tflops_fp16, AcceleratorEconomics.a100_bw,
+# │          AcceleratorEconomics.a100_bw_tbs, AcceleratorEconomics.a100_price_str,
+# │          AcceleratorEconomics.a100_pp_str, AcceleratorEconomics.h100_tflops_tf32,
+# │          AcceleratorEconomics.h100_tflops_fp16, AcceleratorEconomics.h100_bw,
+# │          AcceleratorEconomics.h100_bw_tbs, AcceleratorEconomics.h100_price_str,
+# │          AcceleratorEconomics.h100_pp_str, AcceleratorEconomics.tpuv4_tflops,
+# │          AcceleratorEconomics.tpuv4_bw, AcceleratorEconomics.tpu_price_str,
+# │          AcceleratorEconomics.tpu_pp_str, AcceleratorEconomics.gaudi_tflops,
+# │          AcceleratorEconomics.gaudi_bw, AcceleratorEconomics.gaudi_price_str,
+# │          AcceleratorEconomics.gaudi_pp_str
 # │
-# │ Note: PERSISTENT — CpuMlInefficiency.a100_tflops_fp16, a100_bw, a100_bw_tbs used in
+# │ Note: PERSISTENT — a100_tflops_fp16, a100_bw, a100_bw_tbs used in
 # │       §Roofline Model (line ~2922), §Layer-by-Layer Analysis (lines ~3124,
 # │       ~3211), §GPT-2 Throughput (lines ~3408–3428), §Fallacies (~4703, ~4785)
 # │ Note: PERSISTENT — v100_tflops, h100_tflops_fp16, h100_bw_tbs used in
@@ -2283,9 +2301,15 @@ To make these energy costs concrete, we can trace a single tensor through every 
 # │          LATENCY_HBM3, LATENCY_L2_CACHE, LATENCY_L1_REGISTER,
 # │          A100_FLOPS_FP16_TENSOR, TFLOPs, second),
 # │          mlsys.formatting (fmt)
-# │ Exports: kws_tensor_str, kws_samples_str, kws_bytes_str,
-# │          dram_energy_pj_bit_str, latency_hbm_str, latency_l2_str,
-# │          latency_l1_str, AcceleratorEconomics.a100_tflops_fp16, reg_energy_pj_bit_str
+# │ Exports: TensorLifecycleCalc.kws_tensor_str,
+# │          TensorLifecycleCalc.kws_samples_str,
+# │          TensorLifecycleCalc.kws_bytes_str,
+# │          TensorLifecycleCalc.dram_energy_pj_bit_str,
+# │          TensorLifecycleCalc.latency_hbm_str,
+# │          TensorLifecycleCalc.latency_l2_str,
+# │          TensorLifecycleCalc.latency_l1_str,
+# │          AcceleratorEconomics.a100_tflops_fp16,
+# │          TensorLifecycleCalc.reg_energy_pj_bit_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import (
@@ -2636,7 +2660,10 @@ To optimize data movement, we must understand the physical topology of the compu
 # │ How: List bandwidth constants for NVLink, PCIe, and InfiniBand.
 # │
 # │ Imports: mlsys.constants (NVLINK, INFINIBAND bandwidths)
-# │ Exports: nvlink_a100, nvlink_h100, ib_hdr, ib_ndr
+# │ Exports: InterconnectHierarchy.nvlink_a100,
+# │          InterconnectHierarchy.nvlink_h100, InterconnectHierarchy.ib_hdr,
+# │          InterconnectHierarchy.ib_ndr, InterconnectHierarchy.ib_hdr_str,
+# │          InterconnectHierarchy.ib_ndr_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     NVLINK_A100_BW, NVLINK_H100_BW,
@@ -2792,11 +2819,11 @@ The key metric that determines which ceiling a workload hits is *arithmetic inte
 
 ::: {.callout-definition title="Arithmetic Intensity"}
 
-***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the measure of **Computational Density**, defined as the ratio of floating-point operations performed to bytes of memory traffic ($FLOP/\text{byte}$).
+***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the ratio of floating-point operations to bytes of memory traffic for a given computation ($\text{FLOP}/\text{byte}$), determining whether the workload is limited by compute throughput ($R_{peak}$) or memory bandwidth ($BW$) on a given accelerator.
 
-1.  **Significance (Quantitative):** It is the independent variable in the **Roofline Model**, determining whether a workload is **Bandwidth-Bound** ($BW$) or **Compute-Bound** ($R_{peak}$).
-2.  **Distinction (Durable):** Unlike **FLOPs** (which is a total count), Arithmetic Intensity is a **Ratio**: it measures how much "work" is done per unit of data movement.
-3.  **Common Pitfall:** A frequent misconception is that Arithmetic Intensity is a "hardware property." In reality, it is a **Workload Property**: different algorithms (e.g., CNNs vs. MLPs) have vastly different intensities on the *same* hardware.
+1.  **Significance (Quantitative):** The intensity threshold separating memory-bound from compute-bound regimes is the roofline ridge point: $R_{peak} / BW$. For an A100 (312 TFLOPS BF16, 2 TB/s), the ridge point is $312 \times 10^{12} / (2 \times 10^{12}) = 156$ FLOP/byte. A large matrix-multiply achieves $\sim$100–200 FLOP/byte (compute-bound); a pointwise ReLU achieves $\sim$0.5 FLOP/byte (memory-bound) — placing these two operations in completely different optimization regimes on the same hardware.
+2.  **Distinction (Durable):** Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns have different arithmetic intensities and will be bottlenecked by different hardware resources.
+3.  **Common Pitfall:** A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix-multiply that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity — the same mathematical operation, orders of magnitude apart in hardware efficiency.
 
 :::
 
@@ -2836,11 +2863,14 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 # │
 # │ Imports: mlsys.constants (V100/A100/H100 peak_flops, memory_bw, flop, byte, TB, second)
 # │          mlsys.Hardware (Cloud.V100, Cloud.A100, Cloud.H100)
-# │ Exports: v100_ridge, a100_ridge, h100_ridge, a100_ridge_fp32
-# │          v100_ridge_str, a100_ridge_str, h100_ridge_str, a100_ridge_fp32_str
-# │          relu_below_roofline_str, legacy_ai_str, bw_growth_str, flops_growth_str
+# │ Exports: RidgePointTrends.v100_ridge, RidgePointTrends.a100_ridge,
+# │          RidgePointTrends.h100_ridge, RidgePointTrends.a100_ridge_fp32,
+# │          RidgePointTrends.v100_ridge_str, RidgePointTrends.a100_ridge_str,
+# │          RidgePointTrends.h100_ridge_str, RidgePointTrends.a100_ridge_fp32_str,
+# │          RidgePointTrends.relu_below_roofline_str, RidgePointTrends.legacy_ai_str,
+# │          RidgePointTrends.bw_growth_str, RidgePointTrends.flops_growth_str
 # │
-# │ Note: PERSISTENT — a100_ridge, h100_ridge used throughout §Layer-by-Layer
+# │ Note: PERSISTENT — RidgePointTrends.a100_ridge, RidgePointTrends.h100_ridge used throughout §Layer-by-Layer
 # │       Analysis (lines ~3025, ~3124, ~3210, ~3410, ~3424), §GPT-2 Throughput
 # │       (line ~3424), §Fallacies (lines ~4703), §Key Takeaways (line ~5044)
 # └─────────────────────────────────────────────────────────────────────────────
@@ -2947,7 +2977,14 @@ To see how these intensity values translate into real performance predictions, a
 # │ How: Calculate arithmetic intensity for QKV projection vs. softmax.
 # │
 # │ Imports: mlsys.constants (TRANSFORMER_*, BYTES_FP16)
-# │ Exports: t_*_str, qkv_*_str, softmax_*_str
+# │ Exports: TransformerLayerCalc.t_seq_str,
+# │          TransformerLayerCalc.t_hidden_str,
+# │          TransformerLayerCalc.qkv_flops_str,
+# │          TransformerLayerCalc.qkv_params_str,
+# │          TransformerLayerCalc.qkv_ai_str,
+# │          TransformerLayerCalc.softmax_ops_str,
+# │          TransformerLayerCalc.softmax_bytes_str,
+# │          TransformerLayerCalc.softmax_ai_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import (
@@ -3045,9 +3082,14 @@ A *convolutional layer analysis* demonstrates how these formulas apply in practi
 # │
 # │ Imports: mlsys.constants (BYTES_FP16, byte, MB, flop, GFLOPs),
 # │          mlsys.formatting (fmt)
-# │ Exports: conv_out_m_str, conv_flops_per_out_str, conv_total_gflops_str,
-# │          conv_input_mb_str, conv_weights_mb_str, conv_output_mb_str,
-# │          conv_total_mb_str, conv_ai_str
+# │ Exports: Conv2dAnalysisCalc.conv_out_m_str,
+# │          Conv2dAnalysisCalc.conv_flops_per_out_str,
+# │          Conv2dAnalysisCalc.conv_total_gflops_str,
+# │          Conv2dAnalysisCalc.conv_input_mb_str,
+# │          Conv2dAnalysisCalc.conv_weights_mb_str,
+# │          Conv2dAnalysisCalc.conv_output_mb_str,
+# │          Conv2dAnalysisCalc.conv_total_mb_str,
+# │          Conv2dAnalysisCalc.conv_ai_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import BYTES_FP16, byte, MB, flop, GFLOPs
@@ -3130,9 +3172,15 @@ However, not all layers in a neural network exhibit this favorable profile. The 
 # │ Imports: mlsys.constants (BYTES_FP16, byte, MB, KiB, flop, MFLOPs, GFLOPs,
 # │          TFLOPs, A100_MEM_BW, A100_FLOPS_FP16_TENSOR, GB, second),
 # │          mlsys.formatting (fmt)
-# │ Exports: dense_total_mflops_str, dense_input_kb_str, dense_weights_mb_str,
-# │          dense_output_kb_str, dense_total_mb_str, dense_ai_str,
-# │          dense_attainable_str, dense_util_pct_str, AcceleratorEconomics.a100_bw
+# │ Exports: DenseLayerAnalysisCalc.dense_total_mflops_str,
+# │          DenseLayerAnalysisCalc.dense_input_kb_str,
+# │          DenseLayerAnalysisCalc.dense_weights_mb_str,
+# │          DenseLayerAnalysisCalc.dense_output_kb_str,
+# │          DenseLayerAnalysisCalc.dense_total_mb_str,
+# │          DenseLayerAnalysisCalc.dense_ai_str,
+# │          DenseLayerAnalysisCalc.dense_attainable_str,
+# │          DenseLayerAnalysisCalc.dense_util_pct_str,
+# │          AcceleratorEconomics.a100_bw
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import (
@@ -3218,9 +3266,15 @@ The situation becomes even more extreme for element-wise operations like normali
 # │
 # │ Imports: mlsys.constants (byte, MB, A100_MEM_BW, GB, GFLOPs, TFLOPs,
 # │          second), mlsys.formatting (fmt)
-# │ Exports: ln_elements_m_str, ln_total_mflops_str, ln_input_mb_str,
-# │          ln_params_kb_str, ln_output_mb_str, ln_total_mb_str,
-# │          ln_ai_str, ln_attainable_str, a100_bw_str
+# │ Exports: LayernormAnalysisCalc.ln_elements_m_str,
+# │          LayernormAnalysisCalc.ln_total_mflops_str,
+# │          LayernormAnalysisCalc.ln_input_mb_str,
+# │          LayernormAnalysisCalc.ln_params_kb_str,
+# │          LayernormAnalysisCalc.ln_output_mb_str,
+# │          LayernormAnalysisCalc.ln_total_mb_str,
+# │          LayernormAnalysisCalc.ln_ai_str,
+# │          LayernormAnalysisCalc.ln_attainable_str,
+# │          LayernormAnalysisCalc.a100_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import byte, MB, A100_MEM_BW, GB, GFLOPs, TFLOPs, second
@@ -3344,7 +3398,12 @@ For workloads where batching is impractical, such as interactive LLM generation 
 # │ How: Calculate attainable TFLOPS based on GPT-2's arithmetic intensity.
 # │
 # │ Imports: mlsys.constants (GPT2_PARAMS, A100_*, BYTES_FP16)
-# │ Exports: gpt2_*_str, a100_tflops_fp32
+# │ Exports: Gpt2ThroughputCalc.gpt2_flops_b_str,
+# │          Gpt2ThroughputCalc.gpt2_mem_gb_str,
+# │          Gpt2ThroughputCalc.gpt2_ai_str,
+# │          Gpt2ThroughputCalc.gpt2_attainable_str,
+# │          Gpt2ThroughputCalc.gpt2_util_pct_str,
+# │          AcceleratorEconomics.a100_tflops_fp16
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.formulas import model_memory
@@ -3840,7 +3899,9 @@ Building on software optimization techniques from @sec-model-compression and mem
 # │ How: Calculate total memory for ReLU, BatchNorm, and scaling intermediates.
 # │
 # │ Imports: mlsys.constants (BYTES_FP32, byte, MB), mlsys.formatting (fmt)
-# │ Exports: tensor_mb_str, total_mb_str, footprint_ratio_str
+# │ Exports: MemoryFootprintCalc.tensor_mb_str,
+# │          MemoryFootprintCalc.total_mb_str,
+# │          MemoryFootprintCalc.footprint_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import BYTES_FP32, byte, MB
@@ -3963,7 +4024,8 @@ $$
 # │ How: Compare storage needs for intermediate tensors vs. a single fused output.
 # │
 # │ Imports: mlsys.constants (BYTES_FP32)
-# │ Exports: naive_mb_str, fused_mb_str
+# │ Exports: FusionBenefitsCalc.naive_mb_str,
+# │          FusionBenefitsCalc.fused_mb_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import BYTES_FP32
 
@@ -4297,7 +4359,9 @@ Machine learning compilers automate the translation of dataflow strategies into 
 # │ How: Contrast raw framework latency with optimized compiler output.
 # │
 # │ Imports: mlsys.formatting (fmt)
-# │ Exports: naive_inference_ms, optimized_inference_ms, compiler_speedup_str
+# │ Exports: CompilerSpeedupCalc.naive_inference_ms,
+# │          CompilerSpeedupCalc.optimized_inference_ms,
+# │          CompilerSpeedupCalc.compiler_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 
@@ -4516,7 +4580,7 @@ AI runtimes must oversee large-scale tensor execution, multi-device coordination
 # │ How: List TDP wattage constants for different A100 form factors.
 # │
 # │ Imports: mlsys.constants (A100_TDP)
-# │ Exports: a100_tdp
+# │ Exports: RuntimeProductionTdp.a100_tdp
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import A100_TDP, watt
 
@@ -4727,8 +4791,9 @@ Engineers assume specialized accelerators automatically outperform general-purpo
 # │
 # │ Imports: mlsys.constants (ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ),
 # │          mlsys.formatting (fmt)
-# │ Exports: fp_ridge_example_str, fp_layernorm_tflops_str,
-# │          fp_layernorm_util_str
+# │ Exports: FpMemoryEnergyCalc.fp_ridge_example_str,
+# │          FpMemoryEnergyCalc.fp_layernorm_tflops_str,
+# │          FpMemoryEnergyCalc.fp_layernorm_util_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ
@@ -4775,7 +4840,9 @@ Practitioners focus on peak TFLOPS without analyzing whether their workloads can
 # │
 # │ Imports: mlsys.constants (NVLINK_A100_BW, GB, second),
 # │          mlsys.formatting (fmt)
-# │ Exports: fp_nvlink_bw_str, fp_sync_time_str, fp_sync_overhead_str
+# │ Exports: FpMultigpuScalingCalc.fp_nvlink_bw_str,
+# │          FpMultigpuScalingCalc.fp_sync_time_str,
+# │          FpMultigpuScalingCalc.fp_sync_overhead_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import NVLINK_A100_BW, GB, second
@@ -4821,8 +4888,11 @@ Vendors advertise peak FLOPS as the definitive measure of accelerator capability
 # │
 # │ Imports: mlsys.constants (T4_FLOPS_FP16_TENSOR, T4_MEM_BW, TFLOPs,
 # │          second, GB), mlsys.formatting (fmt)
-# │ Exports: fp_ai_b1_str, fp_ai_b256_str, fp_t4_ridge_str,
-# │          fp_t4_flops_str, fp_t4_bw_str
+# │ Exports: FpSmallBatchCalc.fp_ai_b1_str,
+# │          FpSmallBatchCalc.fp_ai_b256_str,
+# │          FpSmallBatchCalc.fp_t4_ridge_str,
+# │          FpSmallBatchCalc.fp_t4_flops_str,
+# │          FpSmallBatchCalc.fp_t4_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt
 from mlsys.constants import T4_FLOPS_FP16_TENSOR, T4_MEM_BW, TFLOPs, second, GB
@@ -4882,7 +4952,9 @@ Organizations optimize exclusively for specific vendors to maximize performance 
 # │
 # │ Imports: mlsys.formatting (fmt, check), mlsys.formulas (model_memory),
 # │          mlsys.constants (GB, BYTES_FP16)
-# │ Exports: headroom_str, token_latency_ms_str, frame_budget_str
+# │ Exports: FeasibilityAssessment.headroom_str,
+# │          FeasibilityAssessment.token_latency_ms_str,
+# │          FeasibilityAssessment.frame_budget_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt, check
 from mlsys.formulas import model_memory
@@ -4976,10 +5048,12 @@ Beyond raw performance, we must evaluate hardware through the lens of *silicon s
 # │      daily energy use and annual carbon savings.
 # │
 # │ Imports: mlsys.constants (DAYS_PER_YEAR), mlsys.formatting (fmt)
-# │ Exports: cpu_power_str, npu_power_str, cpu_tflops_str, npu_tflops_str,
-# │          cpu_eff_str, npu_eff_str, eff_gap_str, workload_str,
-# │          cpu_energy_day_str, npu_energy_day_str, carbon_intensity_str,
-# │          co2_saved_str
+# │ Exports: CarbonRoiCalc.cpu_power_str, CarbonRoiCalc.npu_power_str,
+# │          CarbonRoiCalc.cpu_tflops_str, CarbonRoiCalc.npu_tflops_str,
+# │          CarbonRoiCalc.cpu_eff_str, CarbonRoiCalc.npu_eff_str,
+# │          CarbonRoiCalc.eff_gap_str, CarbonRoiCalc.workload_str,
+# │          CarbonRoiCalc.cpu_energy_day_str, CarbonRoiCalc.npu_energy_day_str,
+# │          CarbonRoiCalc.carbon_intensity_str, CarbonRoiCalc.co2_saved_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import fmt_percent, fmt, check
 from mlsys.constants import DAYS_PER_YEAR

@@ -25,15 +25,15 @@ Students dramatically underestimate the cost of late constraint discovery. The c
 ### The Lock (Structured Prediction)
 Present a **multiple-choice prediction** before any instruments unlock:
 
-> "An ML pipeline has 6 stages: Requirements, Data, Modeling, Evaluation, Deployment, Monitoring. A constraint (model size limit) is discovered at Stage 5 (Deployment) instead of Stage 1 (Requirements). According to the Constraint Propagation Principle, how much more expensive is it to fix?"
+> "An ML pipeline has 6 stages: Requirements, Data, Modeling, Evaluation, Deployment, Monitoring. The Rural Clinic team discovers a memory constraint at Stage 5 (Deployment) — 150 days into the project. Compared to discovering it at Stage 1 (Requirements), how much more expensive is it to fix?"
 
 Options:
-- A) About 5× more expensive — roughly proportional to the stage number
-- B) About 10× more expensive — a common rule of thumb in software engineering
-- **C) About 16× more expensive — the $2^{N-1}$ law: $2^{5-1} = 16$** ← correct (stage 5 vs stage 1: $2^{5-1}/2^{1-1} = 16$)
-- D) About 100× more expensive — exponential blowup dominates
+- A) About 5× more expensive — roughly proportional to how far through the project you are
+- B) About 10× more expensive — late changes always cost more but double-digit is the cap
+- **C) About 16× more expensive — each stage compounds the rework required** ← correct
+- D) About 100× more expensive — exponential blowup dominates by deployment
 
-The $2^{N-1}$ formula gives: Stage 1 = $2^0 = 1$, Stage 5 = $2^4 = 16$, Stage 6 = $2^5 = 32$.
+The answer is 16× because each stage's output becomes the input to the next: discarding at Stage 5 requires redoing Stage 5 and Stage 4 at minimum, plus reconciling Stage 3 decisions. The compounding factor is approximately 2× per stage crossed. Students verify this in the instrument — the formula is revealed *after* prediction, not given in the question.
 
 ### The Instrument: Constraint Propagation Timeline
 
@@ -77,8 +77,10 @@ Four-option multiple choice:
 - D) The data labeling was incomplete, causing distribution shift at deployment
 
 **Math Peek (collapsible):**
-$$\text{Cost}(N) = 2^{N-1} \quad N = \text{stage of constraint discovery}$$
+$$\text{Cost}(N) \approx 2^{N-1} \quad N = \text{stage of constraint discovery (pedagogical model)}$$
 $$\text{Stage 1: } 2^0 = 1\times \quad \text{Stage 3: } 2^2 = 4\times \quad \text{Stage 6: } 2^5 = 32\times$$
+
+> **Note for students:** The $2^{N-1}$ formula is a useful approximation, not a physical law. Real multipliers range from 3× to 1,000× depending on how deeply the constraint is embedded in prior decisions. The principle is empirically grounded — Boehm's Law in software engineering shows post-deployment defects cost 100× more to fix than requirements-phase defects (chapter footnote, line 260) — but the exact multiplier varies by system modularity.
 
 ---
 
@@ -100,17 +102,16 @@ A **dual-line accuracy plot** showing both models across 26 weeks:
 
 - **X-axis:** Project week (0 → 26)
 - **Y-axis:** Model accuracy (85% → 100%, ceiling at 99%)
-- **Large model line** (solid, BlueLine): Starts at 95%, increments +0.15% per week (1 iteration/week)
-- **Small model line** (dashed, GreenLine): Starts at 90%, increments +0.1% per hour × 168 hours/week (capped at diminishing returns)
+- **Large model line** (solid, BlueLine): Starts at 95%, **saturating curve** toward 99% ceiling. Gain per iteration decays as: $\Delta a_n = \Delta a_0 \times r^n$ where $r = 0.95$ (5% decay per iteration). At 26 iterations total, this produces a realistic S-curve, not a linear ramp.
+- **Small model line** (dashed, GreenLine): Starts at 90%, same saturating formula but with 100× more iterations. **Diminishing returns kicks in after ~100 useful iterations on the same data distribution** — gain/iteration drops toward zero until new data is added. This is a hard implementation requirement: the small model line must flatten, not keep climbing.
 
 Controls:
 - **Large model cycle time**: 24 hrs / 1 week / 2 weeks
 - **Small model cycle time**: 1 hr / 4 hrs / 24 hrs
-- **Large model gain per iteration**: 0.05% / 0.15% / 0.3%
-- **Small model gain per iteration**: 0.05% / 0.1% / 0.2%
+- **Decay rate** ($r$): 0.90 / 0.95 / 0.99 — controls how quickly gains saturate
 - **Project window**: 13 / 26 / 52 weeks
 
-A **crossover annotation** appears automatically at the week where the small model's accuracy exceeds the large model's. Students can see this crossover move earlier or later as they adjust the sliders.
+A **crossover annotation** appears automatically at the week where the small model's accuracy exceeds the large model's. Students observe that the crossover week shifts based on the decay rate — if gains decay fast (r=0.90), the small model's advantage depends more on how quickly new data can be injected than on raw iteration count.
 
 **Secondary instrument: Constraint Gate Designer**
 A simplified stage checklist with toggle gates:

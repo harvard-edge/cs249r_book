@@ -81,7 +81,10 @@ Distributed training appears simple: split the work across machines and combine 
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, H100_MEM_CAPACITY,
 # │           NVLINK_A100_BW, NVLINK_H100_BW, GB, second)
-# │ Exports: a100_mem, h100_mem, nvlink_a100, nvlink_h100
+# │ Exports: DistTrainConstants.a100_mem_str,
+# │          DistTrainConstants.h100_mem_str,
+# │          DistTrainConstants.nvlink_a100_str,
+# │          DistTrainConstants.nvlink_h100_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     A100_MEM_CAPACITY, H100_MEM_CAPACITY,
@@ -111,6 +114,8 @@ class DistTrainConstants:
     h100_mem_str = f"{h100_mem_gb:.0f}"
     nvlink_a100_str = f"{nvlink_a100_gbs:.0f}"
     nvlink_h100_str = f"{nvlink_h100_gbs:.0f}"
+    gpt4_mem_tb_str = f"{(GPT4_EST_PARAMS.m_as('param') * 2 / 1e12):.1f}"
+    dlrm_mem_tb_str = "10"
 ```
 
 ## Why Distribution Is Necessary {#sec-distributed-training-systems-systems-multimachine-scaling-fundamentals-ff96}
@@ -690,7 +695,8 @@ Modern distributed training frameworks handle this distribution automatically th
 # │ How: pulling GPT3_PARAMS from mlsys.constants.
 # │
 # │ Imports: mlsys.constants (GPT3_PARAMS, param, BILLION)
-# │ Exports: gpt3_params_b
+# │ Exports: FrontierTrainingContext.frontier_params_b_str,
+# │          FrontierTrainingContext.frontier_name
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys import Models, Applications
 from mlsys.constants import param, BILLION
@@ -712,40 +718,6 @@ class FrontierTrainingContext:
 ```
 
 #### Compute Phase: Forward and Backward Passes {#sec-distributed-training-systems-systems-compute-phase-forward-backward}
-
-```{python}
-#| label: frontier-training-context
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GPT-3 TRAINING CONTEXT (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-distributed-training-systems-systems-compute-phase-forward-backward
-# │
-# │ Goal: Provide GPT-3 scale statistics for distributed training discussion.
-# │ Show: ~175B parameters.
-# │ How: pulling GPT3_PARAMS from mlsys.constants.
-# │
-# │ Imports: mlsys.constants (GPT3_PARAMS, param, BILLION)
-# │ Exports: gpt3_params_b
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Models, Applications
-from mlsys.constants import param, BILLION
-from mlsys.formatting import fmt_percent, fmt
-
-class FrontierTrainingContext:
-    """GPT-3 scale reference for distributed training."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    mission = Applications.Frontier
-    model = mission.model
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    params_b = model.parameters.m_as(param) / BILLION
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt(params_b, precision=0)
-    frontier_name = model.name
-```
 
 The defining feature of data parallelism is that the computation phase—both forward and backward—is **embarrassingly parallel**. Each GPU operates as an isolated island, executing an identical copy of the model on a unique micro-batch of data. For our `{python} FrontierTrainingContext.frontier_params_b_str`B parameter reference model, this isolation is critical: during the forward pass, each GPU independently computes activations for its local batch (micro-batch size 4, sequence length 2048). Without optimization, storing these activations for backpropagation would consume over 200 GB of HBM, exceeding the capacity of even an H100 GPU; techniques like **activation checkpointing**—recomputing activations during the backward pass rather than storing them—are mandatory to suppress this footprint to a manageable ~50 GB.
 
@@ -925,12 +897,6 @@ A concrete scaling experiment reveals how these ceilings manifest in practice.
 
 This example demonstrates how data parallelism scales in practice, including efficiency degradation.
 
-**Single GPU Baseline**
-
-- Batch size: `{python} Scaling8GPU.batch_per_gpu_val` (with gradient checkpointing, fits in 32 GB)
-- Time per step: `{python} Scaling8GPU.single_gpu_step_s` seconds
-- Time to 50K steps: **`{python} Scaling8GPU.training_hours_1gpu` hours**
-
 ```{python}
 #| label: scaling-8gpu-calc
 #| echo: false
@@ -944,9 +910,12 @@ This example demonstrates how data parallelism scales in practice, including eff
 # │ How: Speedup = T_base / (T_compute + T_comm).
 # │
 # │ Imports: mlsys.constants (NVLINK_H100_BW, MILLION, BILLION, GB, byte, ...)
-# │ Exports: total_8gpu_str, speedup_8gpu_str, efficiency_8gpu_str,
-# │          training_8gpu_str, gpt2_sync_size_gb_str, nvlink_h100_gbs,
-# │          comm_8gpu_ms_str, compute_8gpu_ms_str
+# │ Exports: Scaling8GPU.total_8gpu_str, Scaling8GPU.speedup_8gpu_str,
+# │          Scaling8GPU.efficiency_8gpu_str, Scaling8GPU.training_8gpu_str,
+# │          Scaling8GPU.gpt2_sync_size_gb_str, Scaling8GPU.nvlink_h100_gbs,
+# │          Scaling8GPU.comm_8gpu_ms_str, Scaling8GPU.compute_8gpu_ms_str,
+# │          Scaling8GPU.batch_per_gpu_val, Scaling8GPU.single_gpu_step_s,
+# │          Scaling8GPU.training_hours_1gpu, Scaling8GPU.total_8gpu_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     NVLINK_H100_BW, INFINIBAND_HDR_BW, MILLION, BILLION, GB, byte, second,
@@ -994,6 +963,12 @@ class Scaling8GPU:
     compute_8gpu_ms_str = f"{compute_8gpu_ms}"
 ```
 
+**Single GPU Baseline**
+
+- Batch size: `{python} Scaling8GPU.batch_per_gpu_val` (with gradient checkpointing, fits in 32 GB)
+- Time per step: `{python} Scaling8GPU.single_gpu_step_s` seconds
+- Time to 50K steps: **`{python} Scaling8GPU.training_hours_1gpu` hours**
+
 **8 GPUs: Single Node with NVLink**
 
 Configuration:
@@ -1025,8 +1000,12 @@ Training time: 25 hours ÷ (`{python} Scaling8GPU.speedup_8gpu_str` / 8) = **`{p
 # │ How: Comm_pct = T_comm / (T_comp + T_comm).
 # │
 # │ Imports: mlsys.constants (INFINIBAND_HDR_BW, GB, second, ...)
-# │ Exports: compute_pct_str, comm_pct_str, total_32gpu_str, speedup_32gpu_str,
-# │          efficiency_32gpu_str, training_32gpu_str, inter_node_ms_str, ib_hdr_gbs
+# │ Exports: Scaling32GPU.compute_pct_str, Scaling32GPU.comm_pct_str,
+# │          Scaling32GPU.total_32gpu_str, Scaling32GPU.speedup_32gpu_str,
+# │          Scaling32GPU.efficiency_32gpu_str, Scaling32GPU.training_32gpu_str,
+# │          Scaling32GPU.inter_node_ms_str, Scaling32GPU.ib_hdr_gbs,
+# │          Scaling32GPU.compute_32gpu_ms_str, Scaling32GPU.comm_32gpu_ms_str,
+# │          Scaling32GPU.total_32gpu_s_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import INFINIBAND_HDR_BW, GB, second, BILLION
 
@@ -1625,10 +1604,13 @@ To illustrate these concepts concretely, consider *scaling from 8 to 64 workers*
 # │ How: Speedup = base_iters / (actual_iters × (1 + comm_overhead)).
 # │
 # │ Imports: math, mlsys.formatting (check)
-# │ Exports: batch_8_str, batch_64_str, exp_iter_8_str, exp_iter_64_str,
-# │          speedup_8_str, speedup_64_str, speedup_ssp_str, lr_ssp_str,
-# │          base_iters_k_str, base_batch_str, n_workers_8_str,
-# │          n_workers_64_str, ssp_staleness_str, critical_batch_str
+# │ Exports: ScalingWorkers.batch_8_str, ScalingWorkers.batch_64_str,
+# │          ScalingWorkers.exp_iter_8_str, ScalingWorkers.exp_iter_64_str,
+# │          ScalingWorkers.speedup_8_str, ScalingWorkers.speedup_64_str,
+# │          ScalingWorkers.speedup_ssp_str, ScalingWorkers.lr_ssp_str,
+# │          ScalingWorkers.base_iters_k_str, ScalingWorkers.base_batch_str,
+# │          ScalingWorkers.n_workers_8_str, ScalingWorkers.n_workers_64_str,
+# │          ScalingWorkers.ssp_staleness_str, ScalingWorkers.critical_batch_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsys.formatting import check
@@ -1822,7 +1804,9 @@ Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and param
 # │ How: pulling A100_MEM_CAPACITY from mlsys.constants.
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, GB)
-# │ Exports: DistTrainConstants.a100_mem_str, mwa_per_gpu_str, mwa_activation_str
+# │ Imports: mlsys.formatting (fmt)
+# │ Exports: ModelWeightSharding.mwa_per_gpu_str,
+# │          ModelWeightSharding.mwa_activation_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import A100_MEM_CAPACITY, GB
 
@@ -2293,7 +2277,8 @@ This overlaps communication with computation: while GPU $i$ computes attention u
 # │ How: pulling constants from mlsys.constants.
 # │
 # │ Imports: mlsys.constants (H100_MEM_BW, NVLINK_H100_BW, TB, GB, second)
-# │ Exports: h100_hbm_bw_str, DistTrainConstants.nvlink_h100_str
+# │ Imports: mlsys.formatting (fmt)
+# │ Exports: TpAllReduce.h100_hbm_bw_str, TpAllReduce.nvlink_h100_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import H100_MEM_BW, NVLINK_H100_BW, TB, GB, second
 
@@ -2457,7 +2442,9 @@ For a 1-trillion parameter model, Blackwell enables a configuration of $t=16$ (s
 # │ How: Direct multiplication of parallelism dimensions.
 # │
 # │ Imports: mlsys.formatting (check)
-# │ Exports: total_gpus_h100_str, nvlink5_bw_str
+# │ Imports: mlsys.formatting (fmt)
+# │ Exports: TensorParallelEfficiency.total_gpus_h100_str,
+# │          TensorParallelEfficiency.nvlink5_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import check
 
@@ -2633,10 +2620,12 @@ To make the infrastructure trade-off concrete, consider aligning a 70B policy mo
 # │ How: Distribute total model memory across TP×PP GPU mesh.
 # │
 # │ Imports: mlsys.formatting (check)
-# │ Exports: policy_mem_str, ref_mem_str, rlhf_n_gpus_str,
-# │          policy_per_gpu_str, ref_per_gpu_str, ref_per_gpu_sep_str,
-# │          reward_mem_str, value_mem_str, static_per_gpu_str,
-# │          rlhf_remaining_str, kv_per_gpu_str, rlhf_remaining_kv_str
+# │ Exports: RLHFBudget.policy_mem_str, RLHFBudget.ref_mem_str,
+# │          RLHFBudget.rlhf_n_gpus_str, RLHFBudget.policy_per_gpu_str,
+# │          RLHFBudget.ref_per_gpu_str, RLHFBudget.ref_per_gpu_sep_str,
+# │          RLHFBudget.reward_mem_str, RLHFBudget.value_mem_str,
+# │          RLHFBudget.static_per_gpu_str, RLHFBudget.rlhf_remaining_str,
+# │          RLHFBudget.kv_per_gpu_str, RLHFBudget.rlhf_remaining_kv_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import check
 
@@ -2885,8 +2874,9 @@ Engineers checkpoint distributed training "every hour" or "every 1000 steps" bas
 # │ Show: That frequent checkpointing wastes compute while rare ones risk work.
 # │ How: Apply Young-Daly formula (sqrt(2*C*MTBF)) for a 1024-GPU cluster.
 # │
-# │ Imports: mlsys.formatting
-# │ Exports: t_opt_min_str, total_loss_pct_str, daily_savings_str
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: YoungDaly.t_opt_min_str, YoungDaly.loss_pct_str,
+# │          YoungDaly.daily_savings_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 
@@ -3025,8 +3015,8 @@ The "optimal point" in the 3D Parallelism Cube shifts depending on the system's 
 
 | **Archetype**                        | **Primary Partitioning Strategy** | **The Logic**                                                                                 |
 |:-------------------------------------|:----------------------------------|:----------------------------------------------------------------------------------------------|
-| **Archetype A (GPT-4 / Llama-3)**    | Hybrid 3D Parallelism             | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit 1 TB+ of weights.      |
-| **Archetype B (DLRM at Scale)**      | Embedding Sharding                | Partition massive 10 TB+ tables across a Parameter Server fleet; use sparse AllToAll updates. |
+| **Archetype A (GPT-4 / Llama-3)**    | Hybrid 3D Parallelism             | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit `{python} DistTrainConstants.gpt4_mem_tb_str` TB of weights.      |
+| **Archetype B (DLRM at Scale)**      | Embedding Sharding                | Partition massive `{python} DistTrainConstants.dlrm_mem_tb_str` TB+ tables across a Parameter Server fleet; use sparse AllToAll updates. |
 | **Archetype C (Federated MobileNet)**| Federated Learning                | Distribute training *data* to the edge; keep model local; accept asynchronous, stale updates. |
 :::
 

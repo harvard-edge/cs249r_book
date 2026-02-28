@@ -5,8 +5,10 @@ from .hardware import Hardware
 from .models import Models
 from .deployment import Tiers
 from .systems import Systems, Archetypes
+from .clusters import Clusters, Nodes, ClusterSpec, NodeSpec
+from .datacenters import Datacenters, Grids, Racks, GridProfile, RackProfile
 from .engine import Engine
-from .scenarios import Scenarios, Applications
+from .scenarios import Scenarios, Applications, FleetScenarios, Fleet
 
 # Export constants and registry for legacy support
 from .constants import ureg, Q_

@@ -101,13 +101,13 @@ A **two-panel instrument**:
 The student must configure a data pipeline that satisfies the Feeding Tax inequality for a 300 TFLOPS accelerator:
 $$\text{Pipeline Throughput} \geq \text{GPU Consumption Rate}$$
 
-Controls:
-- **Serialization format** (CSV / JSON / Parquet / Protobuf): Sets base throughput (1× / 0.1× / 5× / 8×)
-- **Storage type** (Cloud HDD 250 MB/s / NVMe SSD 3 GB/s / RAM cache 50 GB/s)
-- **Prefetch workers** (1 / 4 / 8 / 16)
-- **Pre-processing location** (CPU-side / GPU-side / Cached)
+Controls — **exactly two** (to keep Act 2 within 22 minutes):
+- **Serialization format** (CSV / JSON / Parquet): Sets base throughput multiplier (1× / 0.1× / 5×). This is the highest-leverage single decision — a format change delivers 5× without touching hardware.
+- **Storage type** (Cloud HDD 250 MB/s / NVMe SSD 3 GB/s): Multiplies the format-adjusted throughput. Students discover that Parquet on a cloud HDD outperforms CSV on NVMe.
 
 Output: A live bar showing GPU consumption rate (fixed, red line) vs. pipeline delivery rate (green bar). When the green bar exceeds the red line, the **"Flow Equilibrium" badge** appears.
+
+> **Why only 2 controls?** Prefetch workers and preprocessing location are real levers, but they require understanding of CPU parallelism not yet introduced. They are extensions available after Flow Equilibrium is achieved. The core lesson is format × storage = the two decisions that require no infrastructure changes.
 
 **Failure state:** When pipeline throughput < GPU consumption rate:
 > "🟠 **Feeding Tax Active.** GPU is idle [X]% of the time. Effective MFU = [Y]% instead of target [Z]%."
@@ -135,21 +135,24 @@ All four are technically valid — the chapter's point is that all four pillars 
 Students then configure a **Schema Validation Gate** and see the timeline truncate at Day 1 with: "Validation error: zip_code expected string, received integer. Pipeline halted."
 
 ### The Scaling Challenge
-A third panel: **"Design a pipeline for a 1 PB dataset with 100 Gbps network."**
+**"Configure a pipeline where the Data Cascade is caught on Day 1, not Day 98."**
 
-Data Gravity formula:
+Using the Schema Validation Gate from Panel B, students configure a complete validation policy:
+- **Schema contract** (type checking on all fields) — catches zip_code integer→string on Day 1
+- **Distribution check** (statistical test comparing today's feature distribution to baseline) — catches drift introduced by the type change
+- **Lineage tag** (links each training batch to the pipeline version that produced it) — enables root-cause in hours instead of weeks
+
+Students toggle each gate On/Off and see the cascade timeline change:
+- No gates: Day 98 discovery
+- Schema contract only: Day 1 discovery (type mismatch caught immediately)
+- All three gates: Day 1 discovery + root cause traceable in < 1 hour
+
+The structured question: "Schema validation catches *type* failures. What class of failure does distribution checking catch that schema validation misses?"
+Expected answer: silent semantic corruption where the type is correct but the values have changed distribution (e.g., a feature that was normalized to [0,1] is now [0, 100] — same type, wrong range).
+
+**Optional extension (for fast students):** The Data Gravity Crossover.
 $$T_{transfer} = \frac{D_{vol}}{BW} = \frac{10^{15} \text{ bytes}}{12.5 \text{ GB/s}} \approx 9.3 \text{ days}$$
-
-Students must answer: **"Is it faster to stream this dataset over 100 Gbps fiber or ship a physical drive?"**
-
-The system computes:
-- Stream time: D_vol / (100 Gbps / 8) = ~9.3 days
-- Physical shipment: drive capacity (20 TB/drive) × drive count, plus 1–2 days shipping
-
-For datasets > ~10 TB with intercontinental distance, the crossover point makes physical shipment competitive — this is the "Sneakernet Crossover" the chapter describes. Students identify the crossover threshold for their selected storage type and distance.
-
-**Failure state (data gravity):** When dataset > 100 TB and link bandwidth is 10 Gbps:
-> "🔴 **Data Gravity Lock.** Transfer time exceeds training time. The data cannot move faster than computation. Pre-process at source or upgrade the network fabric."
+At what dataset size does physical shipment beat 100 Gbps streaming? This is the "Sneakernet Crossover" from the chapter. Answer: ~10–50 TB for intercontinental distances. Available as a toggle after the main scaling challenge is complete.
 
 ### Structured Reflection
 Students select the correct statement:
@@ -178,10 +181,10 @@ $$\text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Dat
 - **Prediction overlay:** Student's choice highlighted; correct answer annotated with "5× = 20/100 features"
 
 ### Act 2: Data Cascade
-- **Primary Panel A:** Pipeline Budget bar — GPU consumption rate (red, fixed) vs. pipeline delivery rate (green, controllable). Flow Equilibrium badge appears when green > red.
-- **Primary Panel B:** Cascade timeline — Day 1 through Day 98, with schema change, silent corruption, and detection markers. Schema gate toggle truncates timeline at Day 1.
-- **Secondary:** Data Gravity calculator — D_vol slider, BW slider, output: transfer time vs. physical shipment time crossover chart.
-- **Failure states:** OrangeLine feeding tax banner; RedLine data gravity lock banner.
+- **Primary Panel A:** Pipeline Budget bar — GPU consumption rate (red, fixed) vs. pipeline delivery rate (green, controllable). Two controls: format selector + storage type toggle. Flow Equilibrium badge appears when green > red.
+- **Primary Panel B:** Cascade timeline — Day 1 through Day 98, with schema change, silent corruption, and detection markers. Three gate toggles (schema contract, distribution check, lineage tag) truncate the timeline progressively.
+- **Optional Extension Panel:** Data Gravity crossover calculator — D_vol slider, BW slider, output: streaming time vs. physical shipment crossover (visible only after Flow Equilibrium is achieved).
+- **Failure states:** OrangeLine feeding tax banner when pipeline throughput < GPU consumption rate.
 
 ---
 
@@ -205,8 +208,9 @@ The two contexts share the same Energy-Movement Invariant but at different scale
   "storage_type": "nvme | cloud_hdd | ram_cache",
   "feeding_tax_eliminated": true,
   "cascade_pillar_identified": "reliability",
-  "data_gravity_crossover_tb": 10.5,
-  "pipeline_throughput_gbps": 2.4
+  "pipeline_throughput_gbps": 2.4,
+  "validation_gates_active": ["schema_contract", "distribution_check", "lineage_tag"],
+  "cascade_detection_day": 1
 }
 ```
 

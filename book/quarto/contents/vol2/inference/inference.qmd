@@ -84,7 +84,8 @@ Optimizations that shave milliseconds from inference latency or percentage point
 # │
 # │ Imports: mlsys.constants (H100_MEM_CAPACITY, H100_MEM_BW, A100_MEM_BW,
 # │          NVLINK_H100_BW, GB, TB, second)
-# │ Exports: h100_mem_gb, h100_mem_bw_tbs, a100_mem_bw_tbs, nvlink_h100_gbs
+# │ Exports: InferenceSetup.h100_mem_gb, InferenceSetup.h100_mem_bw_tbs,
+# │          InferenceSetup.a100_mem_bw_tbs, InferenceSetup.nvlink_h100_gbs
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     H100_MEM_CAPACITY, H100_MEM_BW, A100_MEM_BW, NVLINK_H100_BW,
@@ -239,10 +240,15 @@ where $C_{\text{training}}$ is the one-time cost to train the model, $C_{\text{s
 # │ Show: ~500x leverage for serving optimization in high-traffic RecSys.
 # │ How: Lifetime_cost = Traffic * Duration * Cost_per_query.
 # │
-# │ Imports: mlsys.constants (BILLION, SEC_PER_DAY, SEC_PER_YEAR)
-# │ Exports: lifetime_queries_str, lifetime_queries_latex_str, serving_cost_total_str,
-# │          training_cost_total_str, leverage_ratio_str, qps_str,
-# │          serve_duration_days_str, cost_per_million_str
+# │ Imports: mlsys.constants (BILLION, SEC_PER_DAY, SEC_PER_YEAR, THOUSAND, MILLION)
+# │ Exports: InferenceEconomics.lifetime_queries_str,
+# │          InferenceEconomics.lifetime_queries_latex_str,
+# │          InferenceEconomics.serving_cost_total_str,
+# │          InferenceEconomics.training_cost_total_str,
+# │          InferenceEconomics.leverage_ratio_str,
+# │          InferenceEconomics.qps_str,
+# │          InferenceEconomics.serve_duration_days_str,
+# │          InferenceEconomics.cost_per_million_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
 from mlsys.constants import BILLION, SEC_PER_DAY, SEC_PER_YEAR, THOUSAND, MILLION
@@ -917,7 +923,7 @@ This square root relationship explains why LLMs (high $\alpha$ from weight loadi
 # │ How: pulling GPT3_PARAMS from mlsys.constants.
 # │
 # │ Imports: mlsys.constants (GPT3_PARAMS, param, BILLION)
-# │ Exports: gpt3_params_b
+# │ Exports: Gpt3Scenario.gpt3_params_b
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import GPT3_PARAMS, param, BILLION
 
@@ -970,21 +976,26 @@ Performance at Different Batch Sizes
 
 : **Batch Size Impact on GPT-3 Serving Performance**. Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100%). The optimal operating point balances throughput against latency, with B=32 achieving lowest total latency despite higher service time. {#tbl-batch-size-comparison}
 
-Analysis
-
-1. **Batch sizes 1-4 are unstable**: Utilization exceeds 100%, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
-
-2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct`% utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms).
-
-3. **Batch size 32 minimizes total latency**: Despite longer service time (`{python} GPT3ServingResults.b32_service_ms` ms vs `{python} GPT3ServingResults.b8_service_ms` ms), the dramatic reduction in queue wait time (`{python} GPT3ServingResults.b32_wait_ms` ms vs `{python} GPT3ServingResults.b8_wait_ms` ms) yields lower total latency.
-
-4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
-
-We can confirm these results by *applying Little's Law to verify* internal consistency.
-
 ```{python}
 #| label: littles-law-verify
 #| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GPT-3 SERVING RESULTS AND LITTLE'S LAW VERIFICATION
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: §GPT-3 Serving at 100 QPS Analysis and Little's Law verification
+# │
+# │ Goal: Summarize serving performance and verify consistency via Little's Law.
+# │ Show: Throughput, utilization, and queue lengths for various batch sizes.
+# │ How: Load pre-computed results into GPT3ServingResults class;
+# │      apply L = lambda * W to verify requests in system.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: GPT3ServingResults.b8_util_pct, GPT3ServingResults.b8_wait_ms,
+# │          GPT3ServingResults.b32_service_ms, GPT3ServingResults.b32_wait_ms,
+# │          GPT3ServingResults.b8_service_ms, LittlesLawVerify.expected_total_str,
+# │          LittlesLawVerify.l_str, LittlesLawVerify.in_service_str,
+# │          LittlesLawVerify.in_queue_str, LittlesLawVerify.batch_size
+# └─────────────────────────────────────────────────────────────────────────────
 from mlsys.formatting import check
 
 class GPT3ServingResults:
@@ -1018,12 +1029,24 @@ class LittlesLawVerify:
     in_queue_str = f"{in_queue:.2f}"
 ```
 
+Analysis
+
+1. **Batch sizes 1-4 are unstable**: Utilization exceeds 100%, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
+
+2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct`% utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms).
+
+3. **Batch size 32 minimizes total latency**: Despite longer service time (`{python} GPT3ServingResults.b32_service_ms` ms vs `{python} GPT3ServingResults.b8_service_ms` ms), the dramatic reduction in queue wait time (`{python} GPT3ServingResults.b32_wait_ms` ms vs `{python} GPT3ServingResults.b8_wait_ms` ms) yields lower total latency.
+
+4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
+
+We can confirm these results by *applying Little's Law to verify* internal consistency.
+
 ::: {.callout-notebook title="Applying Little's Law to Verify"}
 **Verification using Little's Law**: $L = \lambda \cdot W$
 
 At B=32 with $\lambda = 100$ req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_str` ms:
 
-$$L = 100 \times `{python} expected_total_ms / 1000` = `{python} LittlesLawVerify.l_str` \text{ requests in system}$$
+$$L = 100 \times `{python} LittlesLawVerify.expected_total_ms / 1000` = `{python} LittlesLawVerify.l_str` \text{ requests in system}$$
 
 With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b32_util_pct` %:
 
@@ -1401,10 +1424,15 @@ Request characteristics
 # │   count for continuous; derive reduction % and per-request improvement ratios.
 # │
 # │ Imports: (none)
-# │ Exports: mean_output_str, total_batch_time_str, total_seq_iters_str,
-# │   useful_seq_iters_str, r1_lat_str, r2_lat_str, r3_lat_str, r4_lat_str,
-# │   trad_lat_str, cont_avg_lat_str, latency_red_str, r1_imp_str, r3_imp_str,
-# │   r4_imp_str
+# │ Exports: BatchingWorkedExample.mean_output_str,
+# │   BatchingWorkedExample.total_batch_time_str,
+# │   BatchingWorkedExample.total_seq_iters_str,
+# │   BatchingWorkedExample.useful_seq_iters_str,
+# │   BatchingWorkedExample.r1_lat_str, BatchingWorkedExample.r2_lat_str,
+# │   BatchingWorkedExample.r3_lat_str, BatchingWorkedExample.r4_lat_str,
+# │   BatchingWorkedExample.trad_lat_str, BatchingWorkedExample.cont_avg_lat_str,
+# │   BatchingWorkedExample.latency_red_str, BatchingWorkedExample.r1_imp_str,
+# │   BatchingWorkedExample.r3_imp_str, BatchingWorkedExample.r4_imp_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1709,7 +1737,10 @@ Even with modern frameworks, diagnosing tail latency anomalies requires systemat
 # │
 # │ Imports: mlsys.constants (A100_MEM_CAPACITY, A100_MEM_BW, NVLINK_A100_BW,
 # │          PCIE_GEN5_BW, GB, TB, second)
-# │ Exports: a100_mem_gb, InferenceSetup.a100_mem_bw_tbs, nvlink_a100_gbs, pcie_gen5_gbs
+# │ Exports: A100HardwareScenario.a100_mem_gb,
+# │          InferenceSetup.a100_mem_bw_tbs,
+# │          A100HardwareScenario.nvlink_a100_gbs,
+# │          A100HardwareScenario.pcie_gen5_gbs
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import A100_MEM_CAPACITY, A100_MEM_BW, NVLINK_A100_BW, PCIE_GEN5_BW, GB, TB, second
 
@@ -2383,8 +2414,12 @@ All three requests reference the same physical blocks for the system prompt. Onl
 # │   divide by 1e12 for TB; compare shared-prefix vs per-user-token totals.
 # │
 # │ Imports: (none)
-# │ Exports: tokens_per_user_str, kv_tb_no_cache_str, total_tokens_cached_str,
-# │   kv_tb_cached_str, memory_reduction_pct_str, concurrent_multiplier_str
+# │ Exports: PrefixCachingAnalysis.tokens_per_user_str,
+# │   PrefixCachingAnalysis.kv_tb_no_cache_str,
+# │   PrefixCachingAnalysis.total_tokens_cached_str,
+# │   PrefixCachingAnalysis.kv_tb_cached_str,
+# │   PrefixCachingAnalysis.memory_reduction_pct_str,
+# │   PrefixCachingAnalysis.concurrent_multiplier_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2477,7 +2512,8 @@ During autoregressive generation, the Key-Value (KV) cache stores the key and va
 # │ How: 2 * layers * heads * head_dim * seq_len * bytes_per_elem.
 # │
 # │ Imports: mlsys.formatting (check)
-# │ Exports: kv_fp16_gb_str, kv_int4_gb_str, kv_savings_gb_str, kv_compression_str
+# │ Exports: KVCacheCalc.kv_fp16_gb_str, KVCacheCalc.kv_int4_gb_str,
+# │          KVCacheCalc.kv_savings_gb_str, KVCacheCalc.kv_compression_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2683,7 +2719,12 @@ The speedup depends on the **acceptance rate** $\alpha$ (probability that the dr
 # │       (E[tokens] * t_target) / (t_draft_total + t_target).
 # │
 # │ Imports: mlsys.formatting (check)
-# │ Exports: sp_high_str, sp_med_str, sp_low_str, et_high_str, et_med_str, et_low_str
+# │ Exports: SpeculativeSpeedupAnalysis.sp_high_str,
+# │          SpeculativeSpeedupAnalysis.sp_med_str,
+# │          SpeculativeSpeedupAnalysis.sp_low_str,
+# │          SpeculativeSpeedupAnalysis.et_high_str,
+# │          SpeculativeSpeedupAnalysis.et_med_str,
+# │          SpeculativeSpeedupAnalysis.et_low_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2921,7 +2962,7 @@ KV Cache management enables a single GPU to handle many concurrent requests with
 # │ How: pulling H100_MEM_CAPACITY from mlsys.constants.
 # │
 # │ Imports: mlsys.constants (H100_MEM_CAPACITY, GB)
-# │ Exports: KVCacheCalc.h100_mem_gb
+# │ Exports: HardwareSetupSharding.h100_mem_gb
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import H100_MEM_CAPACITY, GB
 
@@ -3084,8 +3125,9 @@ $$\text{Memory}_{70B} = 70 \times 10^9 \times 2 = 140\text{ GB}$$
 # │ How: Divide per-layer compute times; multiply by n_layers for full-model timing.
 # │
 # │ Imports: (none — pure Python arithmetic, no pint quantities)
-# │ Exports: tp_speedup_str, tp_theoretical, n_layers, seq_total_ms_str,
-# │   tp8_total_ms_str
+# │ Exports: TpSpeedupCalc.tp_speedup_str, TpSpeedupCalc.tp_theoretical,
+# │   TpSpeedupCalc.n_layers, TpSpeedupCalc.seq_total_ms_str,
+# │   TpSpeedupCalc.tp8_total_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class TpSpeedupCalc:
@@ -3270,7 +3312,8 @@ The economics of MoE serving create a paradox: total parameter count determines 
 # │ How: Memory = params * 2 bytes (FP16). Active BW = active_params * 2 bytes.
 # │
 # │ Imports: mlsys.formatting (check)
-# │ Exports: dense_mem_str, moe_mem_str, compute_ratio_str, bw_ratio_str
+# │ Exports: MoEEconomics.dense_mem_str, MoEEconomics.moe_mem_str,
+# │          MoEEconomics.compute_ratio_str, MoEEconomics.bw_ratio_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3811,9 +3854,16 @@ A *heterogeneous GPU cluster* example demonstrates how weighted routing handles 
 # │   and utilization %; compare with naive equal-share routing.
 # │
 # │ Imports: (none — pure Python arithmetic, no pint quantities)
-# │ Exports: total_cap_str, h100_weight_str, a100_weight_str, h100_load_str,
-# │   a100_load_str, h100_util_str, a100_util_str, equal_load_str,
-# │   h100_util_equal_str, a100_util_equal_str
+# │ Exports: HeterogeneousGpuCluster.total_cap_str,
+# │   HeterogeneousGpuCluster.h100_weight_str,
+# │   HeterogeneousGpuCluster.a100_weight_str,
+# │   HeterogeneousGpuCluster.h100_load_str,
+# │   HeterogeneousGpuCluster.a100_load_str,
+# │   HeterogeneousGpuCluster.h100_util_str,
+# │   HeterogeneousGpuCluster.a100_util_str,
+# │   HeterogeneousGpuCluster.equal_load_str,
+# │   HeterogeneousGpuCluster.h100_util_equal_str,
+# │   HeterogeneousGpuCluster.a100_util_equal_str
 # └─────────────────────────────────────────────────────────────────────────────
 
 class HeterogeneousGpuCluster:
