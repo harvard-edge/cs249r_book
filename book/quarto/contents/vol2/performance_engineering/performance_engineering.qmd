@@ -70,76 +70,6 @@ Performance Engineering is the **Optimization Layer** of the Fleet Stack. While 
 
 :::
 
-```{python}
-#| echo: false
-#| label: perf-eng-setup
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PERFORMANCE ENGINEERING SYSTEM CONSTANTS
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide setup for @sec-performance-engineering
-# │
-# │ Goal: Establish H100/A100/B200 hardware specs as shared reference for roofline,
-# │       bottleneck analysis, and SRAM-vs-HBM energy ratio throughout the chapter.
-# │ Show: H100 ~3.35 TB/s BW, ~989 TFLOPs FP16, ~1979 TFLOPs FP8; ridge points
-# │       ~295 FP16 and ~590 FP8 FLOP/byte; energy ratio ~1280x DRAM/SRAM.
-# │ How: Pull from mlsys.constants; compute ridge points as FLOPS/BW ratio
-# │       (TFLOPs/TB → FLOP/byte via .m_as(flop/byte)).
-# │
-# │ Imports: mlsys.constants (H100_MEM_BW, H100_FLOPS_FP16_TENSOR,
-# │           H100_FLOPS_FP8_TENSOR, H100_MEM_CAPACITY, H100_TDP,
-# │           A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY,
-# │           B200_FLOPS_FP8_TENSOR, B200_MEM_BW, B200_MEM_CAPACITY,
-# │           ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ)
-# │ Exports: h100_hbm_bw_str, h100_hbm_bw_gbs_str, h100_fp16_str, h100_fp8_str,
-# │          h100_mem_str, h100_tdp_str, h100_ridge_fp16_str, h100_ridge_fp8_str,
-# │          a100_hbm_bw_str, a100_hbm_bw_gbs_str, a100_fp16_str, a100_ridge_fp16_str,
-# │          b200_fp8_str, b200_hbm_bw_str, b200_mem_str, energy_ratio_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import (
-    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_FLOPS_FP8_TENSOR, H100_MEM_CAPACITY, H100_TDP,
-    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY,
-    B200_FLOPS_FP8_TENSOR, B200_MEM_BW, B200_MEM_CAPACITY,
-    ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
-    TB, GB, second, TFLOPs, watt, flop, byte
-)
-from mlsys.formatting import fmt
-
-class PerfEngSetup:
-    """Chapter-wide H100/A100/B200 specs and ridge points."""
-    h100_bw = H100_MEM_BW
-    h100_fp16 = H100_FLOPS_FP16_TENSOR
-    h100_fp8 = H100_FLOPS_FP8_TENSOR
-    h100_mem = H100_MEM_CAPACITY
-    h100_tdp = H100_TDP
-    a100_bw = A100_MEM_BW
-    a100_fp16 = A100_FLOPS_FP16_TENSOR
-    a100_mem = A100_MEM_CAPACITY
-    b200_bw = B200_MEM_BW
-    b200_fp8 = B200_FLOPS_FP8_TENSOR
-    b200_mem = B200_MEM_CAPACITY
-    h100_ridge_fp16 = (h100_fp16 / h100_bw).m_as(flop/byte)
-    h100_ridge_fp8 = (h100_fp8 / h100_bw).m_as(flop/byte)
-    a100_ridge_fp16 = (a100_fp16 / a100_bw).m_as(flop/byte)
-    energy_ratio = (ENERGY_DRAM_ACCESS_PJ / ENERGY_SRAM_L1_PJ).magnitude
-
-    h100_hbm_bw_str = f"{h100_bw.m_as(TB/second):.2f}"
-    h100_hbm_bw_gbs_str = f"{h100_bw.m_as(GB/second):.0f}"
-    h100_fp16_str = f"{h100_fp16.m_as(TFLOPs/second):.0f}"
-    h100_fp8_str = f"{h100_fp8.m_as(TFLOPs/second):.0f}"
-    h100_mem_str = f"{h100_mem.m_as(GB):.0f}"
-    h100_tdp_str = f"{h100_tdp.m_as(watt):.0f}"
-    h100_ridge_fp16_str = f"{h100_ridge_fp16:.0f}"
-    h100_ridge_fp8_str = f"{h100_ridge_fp8:.0f}"
-    a100_hbm_bw_str = f"{a100_bw.m_as(TB/second):.2f}"
-    a100_hbm_bw_gbs_str = f"{a100_bw.m_as(GB/second):.0f}"
-    a100_fp16_str = f"{a100_fp16.m_as(TFLOPs/second):.0f}"
-    a100_ridge_fp16_str = f"{a100_ridge_fp16:.0f}"
-    b200_fp8_str = f"{b200_fp8.m_as(TFLOPs/second):.0f}"
-    b200_hbm_bw_str = f"{b200_bw.m_as(TB/second):.2f}"
-    b200_mem_str = f"{b200_mem.m_as(GB):.0f}"
-    energy_ratio_str = f"{energy_ratio:.0f}"
-```
-
 ## The Memory Wall and the Efficiency Frontier {#sec-performance-engineering-memory-wall}
 
 An H100 GPU capable of 989 teraFLOPS often sits 95% idle while generating text from a large language model because the processor is starving for data. Performance engineering operates within a constrained optimization space defined by the Memory Wall, where the speed of moving bytes from memory to compute units fundamentally caps our operational throughput.
@@ -290,8 +220,9 @@ The efficiency frontier establishes what we are optimizing *toward*. The physics
 # │ Imports: mlsys.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
 # │          H100_MEM_CAPACITY, ENERGY_DRAM_ACCESS_PJ, ENERGY_SRAM_L1_PJ,
 # │          TFLOPs, TB, GB, second, flop, byte)
-# │ Exports: PerfEngSetup.h100_fp8_str, PerfEngSetup.h100_hbm_bw_str, PerfEngSetup.h100_ridge_fp8_str,
-# │          PerfEngSetup.energy_ratio_str, PerfEngSetup.h100_mem_str
+# │ Exports: MemoryWallScenario.h100_fp8_str, MemoryWallScenario.h100_hbm_bw_str,
+# │          MemoryWallScenario.h100_ridge_fp8_str, MemoryWallScenario.energy_ratio_str,
+# │          MemoryWallScenario.h100_mem_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     H100_FLOPS_FP8_TENSOR, H100_MEM_BW, H100_MEM_CAPACITY,
@@ -656,33 +587,23 @@ Different ML operations have vastly different arithmetic intensities. Understand
 # │       a GELU element-wise op, and LLM decode at batch=1 on a 4096-dim model
 # │       to show why inference is predominantly memory-bound.
 # │ Show: ~1365 FLOP/byte (GEMM, compute-bound), ~1.25 (GELU, memory-bound),
-# │       ~1 (LLM decode batch=1, deeply memory-bound) — inline and in table.
+# │       ~1 (LLM decode batch=1, deeply memory-bound) — inline prose.
 # │ How: FLOP count / byte count; GEMM uses 2*M*N*K / (M*K + K*N + M*N)*bytes;
 # │       element-wise uses ~5 FLOPs per element / (load + store) bytes.
 # │
-# │ Imports: (none — standalone calculation), mlsys.formatting (check)
-# │ Exports: gemm_intensity_str, elem_intensity_str, decode_intensity_str
+# │ Imports: mlsys.constants (BYTES_FP16), mlsys.formatting (check)
+# │ Exports: WorkloadIntensityCalc.gemm_intensity_str,
+# │          WorkloadIntensityCalc.elem_intensity_str,
+# │          WorkloadIntensityCalc.decode_intensity_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import BYTES_FP16
+from mlsys.formatting import check
 
-# ┌── LEGO ───────────────────────────────────────────────
-from mlsys.constants import (
-    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, BYTES_FP16,
-    BILLION, MILLION, TRILLION, THOUSAND,
-    GB, TB, second, byte, flop, MICROSECOND
-)
-from mlsys.formatting import fmt, check, md
-
-# ┌── LEGO ───────────────────────────────────────────────
 class WorkloadIntensityCalc:
     """Arithmetic intensity for GEMM, GELU, and LLM decode operations."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Level 1: Hardware
-    h100_flops = H100_FLOPS_FP16_TENSOR
-    h100_bw = H100_MEM_BW
     bytes_per_elem = BYTES_FP16
-
-    # Level 2: Workload
     # GEMM: C = A*B where A is MxK, B is KxN
     M, K, N = 4096, 4096, 4096
     # Element-wise (e.g., GELU): ~5 ops per element
@@ -691,8 +612,6 @@ class WorkloadIntensityCalc:
     # LLM decode: batch=1, hidden=4096
     decode_batch = 1
     decode_hidden = 4096
-    # Prefill: batch=1024
-    prefill_batch = 1024
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # GEMM: 2*M*N*K FLOPs, load A (M*K*2) + B (K*N*2) + store C (M*N*2)
@@ -710,44 +629,15 @@ class WorkloadIntensityCalc:
     decode_bytes_val = (decode_hidden * decode_hidden + decode_batch * decode_hidden) * bytes_per_elem
     decode_intensity_val = decode_flops_val / decode_bytes_val
 
-    # Level 4: Ratios
-    h100_ridge = (h100_flops / h100_bw).m_as(flop/byte)
-    prefill_intensity = (2 * prefill_batch) / (2 * bytes_per_elem) # Approx for large hidden
-
-    # Token Rate Physics (Llama-3 70B sharded across 8 GPUs)
-    p_shard = 17.5 * BILLION
-    weight_bytes_val = p_shard * bytes_per_elem
-    decode_step_flops_val = 2 * p_shard
-    t_decode_ms = (weight_bytes_val / h100_bw.m_as(byte/second)) * 1000
-    achieved_tflops = (decode_step_flops_val / (t_decode_ms / 1000)) / TRILLION
-    util_pct = (achieved_tflops / h100_flops.m_as(TFLOPs/second)) * 100
-    tokens_sec = 1000 / t_decode_ms
-
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(gemm_intensity > 100, f"GEMM should have high AI, got {gemm_intensity:.1f}")
     check(elem_intensity < 5, f"Element-wise should have low AI, got {elem_intensity:.1f}")
     check(decode_intensity_val < 5, f"Decode should be memory-bound, got {decode_intensity_val:.1f}")
-    check(h100_ridge > 200, f"H100 ridge point mismatch, got {h100_ridge:.1f}")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gemm_intensity_str = f"{gemm_intensity:.0f}"
-    gemm_flops_str = f"{gemm_flops/BILLION:.0f} billion"
-    gemm_data_mb_str = f"{gemm_bytes/MILLION:.0f} MB"
-
     elem_intensity_str = f"{elem_intensity:.1f}"
-    gelu_flops_per_val_str = f"{elem_flops_per_val}"
-
     decode_intensity_str = f"{decode_intensity_val:.1f}"
-    h100_ridge_str = f"{h100_ridge:.0f}"
-    prefill_intensity_str = f"{prefill_intensity:.0f}"
-    decode_t_ms_str = f"{t_decode_ms:.1f}"
-    decode_util_pct_str = f"{util_pct:.1f}"
-    decode_tokens_sec_str = f"{tokens_sec:.0f}"
-
-    decode_step_param_b_str = f"{p_shard/BILLION:.1f}"
-    decode_step_weight_gb_str = f"{weight_bytes_val/BILLION:.0f}"
-    decode_step_flops_str = f"{decode_step_flops_val/BILLION:.0f}"
-    decode_step_bytes_str = f"{weight_bytes_val/BILLION:.0f}"
 ```
 
 Large matrix multiplications (GEMMs) are the most compute-intensive operations in ML. A square matrix multiplication of dimension $4096\times4096$ in FP16 performs approximately 137 billion FLOPs while loading roughly 100 MB of data, yielding an arithmetic intensity of approximately `{python} WorkloadIntensityCalc.gemm_intensity_str` FLOP/byte. This sits well above the H100's ridge point, making large GEMMs firmly compute-bound.

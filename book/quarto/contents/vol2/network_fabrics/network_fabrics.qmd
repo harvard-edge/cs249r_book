@@ -98,75 +98,65 @@ In a single machine, the memory bus moves data between the processor and memory.
 :::
 
 ```{python}
-#| label: network-fabrics-context-scenario
+#| label: network-fabrics-bandwidth-hierarchy
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ NETWORK FABRICS CONTEXT SPECS (LEGO)
+# │ BANDWIDTH HIERARCHY SPECS (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-network-fabrics-physical-layer
+# │ Context: @sec-network-fabrics-introduction — the bandwidth cliff paragraph,
+# │          and pervasive IB NDR bandwidth references throughout the chapter.
 # │
-# │ Goal: Provide initial networking and hardware specs for fabric discussion.
-# │ Show: ~400 Gbps NDR; ~900 GB/s NVLink; ~1,979 TFLOPS FP16.
-# │ How: pulling constants from mlsys.constants.
+# │ Goal: Compute the bandwidth hierarchy (NVLink vs IB vs HBM) and the
+# │       NVLink-to-IB ratio that defines the intra/inter-node cliff.
+# │ Show: ~400 Gbps NDR, ~50 GB/s NDR, ~900 GB/s NVLink, ~18x ratio.
+# │ How: .m_as() on Pint constants; ratio via simple division.
 # │
-# │ Imports: mlsys.constants (*), mlsys.formatting (fmt, check)
-# │ Exports: ib_ndr_gbps, ib_hdr_gbps, ib_ndr_gbs, ib_hdr_gbs,
-# │          nvlink_h100_gbs, nvlink_a100_gbs, pcie5_gbs, h100_tflops,
-# │          h100_tdp, h100_mem, h100_mem_bw, a100_tflops, b200_tflops,
-# │          b200_mem_bw, ib_ndr_latency_us, nvlink_to_ib_ratio,
-# │          alpha_ib_us, beta_ib_gbs
+# │ Imports: mlsys.constants (INFINIBAND_NDR_BW, NVLINK_H100_BW,
+# │           H100_FLOPS_FP16_TENSOR, H100_MEM_BW,
+# │           Gbps, GB, TB, second, TFLOPs)
+# │ Exports: NetworkFabricsContextScenario.ib_ndr_gbps,
+# │          NetworkFabricsContextScenario.ib_ndr_gbs,
+# │          NetworkFabricsContextScenario.nvlink_h100_gbs,
+# │          NetworkFabricsContextScenario.nvlink_to_ib_ratio,
+# │          NetworkFabricsContextScenario.h100_tflops,
+# │          NetworkFabricsContextScenario.h100_mem_bw
+# │ Used by: @sec-network-fabrics-introduction (line ~173), and IB NDR
+# │          bandwidth refs in Level 1, Level 2, Level 5, Virtualization,
+# │          Monitoring, Fallacies sections.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import *
+from mlsys.constants import (
+    INFINIBAND_NDR_BW, NVLINK_H100_BW,
+    H100_FLOPS_FP16_TENSOR, H100_MEM_BW,
+    Gbps, GB, TB, second, TFLOPs
+)
 from mlsys.formatting import fmt, check
 
 class NetworkFabricsContextScenario:
-    """Namespace for Network Fabrics reference parameters."""
+    """Bandwidth hierarchy specs for the chapter-wide fabric discussion."""
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     ib_ndr_raw = INFINIBAND_NDR_BW
-    ib_hdr_raw = INFINIBAND_HDR_BW
     nvlink_h100_raw = NVLINK_H100_BW
-    nvlink_a100_raw = NVLINK_A100_BW
-    pcie5_raw = PCIE_GEN5_BW
     h100_flops_raw = H100_FLOPS_FP16_TENSOR
-    h100_mem_raw = H100_MEM_CAPACITY
     h100_mem_bw_raw = H100_MEM_BW
-    h100_tdp_raw = H100_TDP
-    a100_flops_raw = A100_FLOPS_FP16_TENSOR
-    b200_flops_raw = B200_FLOPS_FP16_TENSOR
-    b200_mem_bw_raw = B200_MEM_BW
-    fat_tree_k = 64
-    ib_ndr_hop_ns = 500
-    alpha_ib_us_val = 1.5
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     ib_ndr_gbps_val = ib_ndr_raw.m_as(Gbps)
-    ib_ndr_gbs_val = ib_ndr_raw.m_as(GB/second)
-    nvlink_to_ib_ratio_val = nvlink_h100_raw.m_as(GB/second) / ib_ndr_gbs_val
+    ib_ndr_gbs_val = ib_ndr_raw.m_as(GB / second)
+    nvlink_h100_gbs_val = nvlink_h100_raw.m_as(GB / second)
+    nvlink_to_ib_ratio_val = nvlink_h100_gbs_val / ib_ndr_gbs_val
 
-    # Fat-tree hosts for radix k: (k^3)/4
-    fat_tree_hosts_val = (fat_tree_k ** 3) // 4
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(ib_ndr_gbps_val > 300, "NDR BW should exceed 300 Gbps")
+    check(nvlink_to_ib_ratio_val > 10, "NVLink-to-IB ratio should exceed 10x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ib_ndr_gbps = f"{ib_ndr_gbps_val:.0f}"
-    ib_hdr_gbps = f"{ib_hdr_raw.m_as(Gbps):.0f}"
     ib_ndr_gbs = f"{ib_ndr_gbs_val:.0f}"
-    ib_hdr_gbs = f"{ib_hdr_raw.m_as(GB/second):.0f}"
-    nvlink_h100_gbs = f"{nvlink_h100_raw.m_as(GB/second):.0f}"
-    nvlink_a100_gbs = f"{nvlink_a100_raw.m_as(GB/second):.0f}"
-    pcie5_gbs = f"{pcie5_raw.m_as(GB/second):.0f}"
-    h100_tflops = f"{h100_flops_raw.m_as(TFLOPs/second):.0f}"
-    h100_tdp = f"{h100_tdp_raw.m_as(watt):.0f}"
-    h100_mem = f"{h100_mem_raw.m_as(GB):.0f}"
-    h100_mem_bw = f"{h100_mem_bw_raw.m_as(TB/second):.2f}"
-    a100_tflops = f"{a100_flops_raw.m_as(TFLOPs/second):.0f}"
-    b200_tflops = f"{b200_flops_raw.m_as(TFLOPs/second):,.0f}"
-    b200_mem_bw = f"{b200_mem_bw_raw.m_as(TB/second):.0f}"
-    ib_ndr_latency_us = f"{ib_ndr_hop_ns / 1000:.1f}"
+    nvlink_h100_gbs = f"{nvlink_h100_gbs_val:.0f}"
     nvlink_to_ib_ratio = f"{nvlink_to_ib_ratio_val:.0f}"
-    fat_tree_hosts = fmt(fat_tree_hosts_val, precision=0)
-    alpha_ib_us = f"{alpha_ib_us_val:.1f}"
-    beta_ib_gbs = f"{ib_ndr_gbs_val:.0f}"
+    h100_tflops = f"{h100_flops_raw.m_as(TFLOPs / second):.0f}"
+    h100_mem_bw = f"{h100_mem_bw_raw.m_as(TB / second):.2f}"
 ```
 
 The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise.
@@ -862,10 +852,44 @@ The fat-tree[^fn-fat-tree-clos] is the industry standard for ML clusters because
 
 [^fn-fat-tree-clos]: **Fat-Tree (Clos Network)**: The underlying multi-stage switching theory was invented by Charles Clos at Bell Labs in 1953 to minimize the number of electromechanical crosspoints in telephone exchanges. Charles Leiserson at MIT generalized the concept in 1985 as the "fat-tree," where the tree is "fat" because link bandwidth increases toward the root, proving it could emulate any network of equal hardware volume. The same cost-minimization logic that drove 1950s telephony now drives ML cluster design: minimize switch count while guaranteeing non-blocking connectivity for global AllReduce. \index{Fat-Tree!Clos origin}
 
+```{python}
+#| label: network-fabrics-fat-tree-scaling
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FAT-TREE HOST SCALING (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-fat-tree — three-tier fat-tree host count.
+# │
+# │ Goal: Compute the maximum host count for a fat-tree with radix k = 64.
+# │ Show: k^3/4 = 65,536 hosts for a three-tier fat-tree.
+# │ How: Integer arithmetic on switch radix.
+# │
+# │ Imports: mlsys.formatting (fmt, check)
+# │ Exports: FatTreeScaling.fat_tree_hosts
+# │ Used by: paragraph immediately below (three-tier scaling sentence).
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import fmt, check
+
+class FatTreeScaling:
+    """Fat-tree host count for radix-64 switches."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────────────────────
+    fat_tree_k = 64
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────────────────────
+    fat_tree_hosts_val = (fat_tree_k ** 3) // 4
+
+    # ┌── 3. GUARD ─────────────────────────────────────────────────────────
+    check(fat_tree_hosts_val == 65536, f"k=64 fat-tree should support 65,536 hosts, got {fat_tree_hosts_val}")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
+    fat_tree_hosts = fmt(fat_tree_hosts_val, precision=0)
+```
+
 A fat-tree built from switches with **radix**[^fn-switch-radix-density] $k$ supports $N = k^3/4$ hosts. In a two-tier network using radix-64 switches, a single pod can support up to 1,024 GPUs—perfectly accommodating our 1,000-GPU reference cluster with only leaf and spine layers.
 
 [^fn-switch-radix-density]: **Switch Radix**: Modern high-end switches (e.g., NVIDIA Quantum-2) feature a radix of 64 ports, each at 400 Gbps. This density allows a two-tier fat-tree to support up to 2,048 GPUs with only two switch hops. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256) is the only way to avoid adding more tiers and the resulting latency/cost explosion. \index{Switch Radix!port density}
- Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} NetworkFabricsContextScenario.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ tree requires 4,096 switches. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$40 to \$200 million.
+ Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ tree requires 4,096 switches. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$40 to \$200 million.
 
 However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod (leaf-spine-leaf) and 4 for inter-pod (leaf-spine-core-spine-leaf). Each additional hop introduces serialization delay and switch processing time, adding microseconds to the $\alpha$ latency term that accumulates during the thousands of synchronization steps in a training run.
 
@@ -1431,7 +1455,31 @@ Network performance problems in ML clusters are insidious because they manifest 
 
 The physical layer of a high-performance network is surprisingly fragile, making hardware counters the ground truth for fabric reliability. Every RDMA NIC and switch maintains these counters, accessible via the `perfquery` utility. **PortXmitData** and **PortRcvData** provide the raw byte counts used to compute real-time link utilization, while **PortXmitDiscards** tracks packets dropped by the switch—in a properly configured lossless fabric, discards should be exactly zero. Physical signal integrity is tracked via the **SymbolErrorCounter**, which increments on bit-level errors caused by loose cables or dirty optics, and the **LinkDownedCounter**, which logs link flaps often triggered by intermittent hardware faults or overheating transceivers.
 
-These metrics are typically polled by a centralized monitoring system (e.g., Prometheus with Grafana dashboards) at 10–30 second intervals to catch **silent degradation**. A common failure mode involves a QSFP56 cable negotiating at HDR speed (`{python} NetworkFabricsContextScenario.ib_hdr_gbps` Gbps) instead of NDR (`{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps), or silently dropping from 4 lanes to 2 lanes due to a single bad connector pin. The link remains "up" and functional, but its bandwidth is halved. In a 1,000-GPU cluster with over 3,000 links, even a 0.1% component failure rate guarantees that approximately 3 links are degraded at any given moment. Because distributed training algorithms like Ring AllReduce are synchronous, a single degraded link throttles the entire job to the speed of that straggler, transforming a minor hardware fault into a massive waste of idle compute cycles.
+```{python}
+#| label: network-fabrics-hdr-ndr-reference
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HDR / NDR BANDWIDTH REFERENCE (LEGO)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-network-fabrics-link-telemetry — silent degradation from
+# │          HDR fallback; @sec-network-fabrics-fallacies — bandwidth fallacy.
+# │
+# │ Goal: Provide HDR bandwidth for comparison against NDR in monitoring and
+# │       fallacy discussions.
+# │ Show: ~200 Gbps HDR vs ~400 Gbps NDR.
+# │ How: .m_as(Gbps) on the INFINIBAND_HDR_BW constant.
+# │
+# │ Imports: mlsys.constants (INFINIBAND_HDR_BW, Gbps)
+# │ Exports: IbHdrReference.ib_hdr_gbps
+# │ Used by: silent degradation paragraph below; Fallacies section.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import INFINIBAND_HDR_BW, Gbps
+
+class IbHdrReference:
+    ib_hdr_gbps = f"{INFINIBAND_HDR_BW.m_as(Gbps):.0f}"
+```
+
+These metrics are typically polled by a centralized monitoring system (e.g., Prometheus with Grafana dashboards) at 10–30 second intervals to catch **silent degradation**. A common failure mode involves a QSFP56 cable negotiating at HDR speed (`{python} IbHdrReference.ib_hdr_gbps` Gbps) instead of NDR (`{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps), or silently dropping from 4 lanes to 2 lanes due to a single bad connector pin. The link remains "up" and functional, but its bandwidth is halved. In a 1,000-GPU cluster with over 3,000 links, even a 0.1% component failure rate guarantees that approximately 3 links are degraded at any given moment. Because distributed training algorithms like Ring AllReduce are synchronous, a single degraded link throttles the entire job to the speed of that straggler, transforming a minor hardware fault into a massive waste of idle compute cycles.
 
 ### Bandwidth and Latency Validation {#sec-network-fabrics-bw-testing}
 
@@ -1469,7 +1517,7 @@ Designing and operating high-performance fabrics for ML requires unlearning assu
 
 **Fallacy:** *More bandwidth always means faster training.*
 
-Engineers assume upgrading from HDR (`{python} NetworkFabricsContextScenario.ib_hdr_gbps` Gbps) to NDR (`{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps) will yield proportional gains, but the $\alpha$-$\beta$ model (@eq-alpha-beta) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$—dominated by switch hops and FEC (~1 $\mu$s)—dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase might improve end-to-end throughput by less than 5%, while adding 40% to the power and transceiver cost.
+Engineers assume upgrading from HDR (`{python} IbHdrReference.ib_hdr_gbps` Gbps) to NDR (`{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps) will yield proportional gains, but the $\alpha$-$\beta$ model (@eq-alpha-beta) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$—dominated by switch hops and FEC (~1 $\mu$s)—dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase might improve end-to-end throughput by less than 5%, while adding 40% to the power and transceiver cost.
 
 ```{python}
 #| echo: false

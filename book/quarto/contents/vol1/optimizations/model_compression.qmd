@@ -54,122 +54,76 @@ Bridging that gap requires a systematic discipline of *compression*: trading cap
 :::
 
 ```{python}
-#| label: compression-setup
+#| label: compression-model-scale
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ COMPRESSION SETUP
+# │ MODEL SCALE AND DEPLOYMENT GAP
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter-wide constants used across multiple sections, tables,
-# │          and callouts in the Model Compression chapter
+# │ Context: @sec-model-compression-optimization-framework-9e21 opening
+# │          paragraphs and "The Physics of Quantization" callout.
 # │
-# │ Goal: Centralize hardware and model parameters for the entire chapter.
-# │ Show: A single source of truth for energy, scale, and cost constants.
-# │ How: Retrieve constants from mlsys.constants and Digital Twins.
+# │ Goal:    Quantify the gap between model memory and device capacity.
+# │ Show:    LLM weight sizes vs. smartphone/MCU RAM; DRAM and compute
+# │          energy costs that motivate quantization.
+# │ How:     Read model and device specs from mlsys.constants; compute
+# │          FP16 memory footprints; retrieve Horowitz energy numbers.
 # │
-# │ Imports: mlsys.constants (*), mlsys.formatting (fmt, sci)
-# │ Exports: a100_tflops_fp16_str, a100_tflops_int8_str, a100_bw_tbs_str,
-# │          a100_int8_speedup_str, int8_energy_reduction_str,
-# │          energy_dram_str, energy_flop_fp32_str, energy_flop_int8_str,
-# │          v100_bw_gbs_str, resnet_params_m_str, llm_7b_str,
-# │          llm_175b_str, llm_175b_mem_str, smartphone_ram_str,
-# │          mcu_ram_str, gpt3_training_flops_str, and others
+# │ Imports: mlsys.constants (GPT3_PARAMS, SMARTPHONE_RAM_GB, MCU_RAM_KIB,
+# │          ENERGY_DRAM_ACCESS_PJ, ENERGY_DRAM_PJ_PER_BYTE,
+# │          ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ, Bparam, GB, KiB)
+# │ Exports: CompressionSetup.llm_7b_str, .llm_7b_mem_str,
+# │          .smartphone_ram_str, .mcu_ram_str, .llm_175b_str,
+# │          .llm_175b_mem_str, .energy_dram_str, .energy_dram_per_byte_str,
+# │          .energy_flop_fp32_str, .energy_flop_int8_str,
+# │          .int8_energy_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import *
-from mlsys.formatting import fmt, check, sci
+from mlsys.constants import (
+    GPT3_PARAMS, SMARTPHONE_RAM_GB, MCU_RAM_KIB,
+    ENERGY_DRAM_ACCESS_PJ, ENERGY_DRAM_PJ_PER_BYTE,
+    ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ,
+    Bparam, GB, KiB, ureg
+)
+from mlsys.formatting import fmt, check
 
 class CompressionSetup:
-    """Chapter-wide constants: GPU specs, energy physics, model sizes, device constraints."""
+    """Model scale, device constraints, and energy physics for the Optimization Framework."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    # Illustrative energy/perf values
-    int8_energy_reduction = 20
-    mobilenet_int8_mj = 47
-    mobilenet_fp32_mj = 312
-    tpu_v4_tops_per_w = 0.9
-    v100_tops_per_w = 0.3
-    bandwidth_bound_speedup = 4
     llm_7b_params = 7
-    gpt3_training_flops_exp = 23
+    int8_energy_reduction = 20                       # empirical INT8-vs-FP32 ratio
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Step 1: A100 specs
-    a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
-    a100_tflops_int8 = A100_FLOPS_INT8.m_as(TFLOPs / second)
-    a100_bw_tbs = A100_MEM_BW.m_as(TB / second)
-    a100_int8_speedup = int(a100_tflops_int8 / a100_tflops_fp16)
-
-    # Step 2: Energy from constants (Horowitz 2014, 45nm process)
-    energy_dram = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
-    energy_dram_per_byte = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule / ureg.byte)
-    energy_flop_fp32 = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.count)
-    energy_flop_int8 = ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule / ureg.count)
-    energy_add_fp32_pj = ENERGY_ADD_FP32_PJ.m_as(ureg.picojoule)
-    energy_add_fp16_pj = ENERGY_ADD_FP16_PJ.m_as(ureg.picojoule)
-    energy_add_int32_pj = ENERGY_ADD_INT32_PJ.m_as(ureg.picojoule)
-    energy_add_int8_pj = ENERGY_ADD_INT8_PJ.m_as(ureg.picojoule)
-    energy_mul_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.count)
-
-    # Step 3: INT8 vs FP32 MAC energy ratio
-    fp32_mac_pj = energy_mul_fp32_pj + energy_add_fp32_pj   # 3.7 + 0.9 = 4.6 pJ
-    int8_mac_pj = energy_flop_int8 + energy_add_int8_pj     # 0.2 + 0.03 = 0.23 pJ
-    int8_fp32_energy_ratio = fp32_mac_pj / int8_mac_pj
-
-    # Step 4: V100 specs
-    v100_bw_gbs = V100_MEM_BW.m_as(GB / second)
-    v100_tflops_fp32 = V100_FLOPS_FP32.m_as(TFLOPs / second)
-
-    # Step 5: Model specs
-    resnet_params_m = RESNET50_PARAMS.m_as(Mparam)
-    resnet_gflops = RESNET50_FLOPs.m_as(GFLOPs)
-    mobilenetv2_mflops = MOBILENETV2_FLOPs.m_as(GFLOPs) * 1000
-
-    # Step 6: LLM memory
+    # LLM memory (FP16 = 2 bytes per parameter)
     llm_7b_mem_fp16_gb = llm_7b_params * 2
     llm_175b_params = GPT3_PARAMS.m_as(Bparam)
     llm_175b_mem_fp16_gb = llm_175b_params * 2
 
-    # Step 7: Device memory
+    # Device memory
     smartphone_ram_gb = SMARTPHONE_RAM_GB.m_as(GB)
     mcu_ram_kb = MCU_RAM_KIB.m_as(KiB)
 
+    # Energy from constants (Horowitz 2014, 45nm process)
+    energy_dram = ENERGY_DRAM_ACCESS_PJ.m_as(ureg.picojoule)
+    energy_dram_per_byte = ENERGY_DRAM_PJ_PER_BYTE.m_as(ureg.picojoule / ureg.byte)
+    energy_flop_fp32 = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.count)
+    energy_flop_int8 = ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule / ureg.count)
+
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(a100_int8_speedup >= 2, "A100 INT8 should be at least 2x faster than FP16.")
-    check(int8_fp32_energy_ratio > 1, "FP32 MAC must cost more energy than INT8 MAC.")
+    check(llm_7b_mem_fp16_gb > smartphone_ram_gb,
+          "7B model must exceed smartphone RAM to illustrate the deployment gap.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
-    a100_tflops_int8_str = fmt(a100_tflops_int8, precision=0, commas=False)
-    a100_bw_tbs_str = fmt(a100_bw_tbs, precision=1, commas=False)
-    a100_int8_speedup_str = fmt(a100_int8_speedup, precision=0, commas=False)
-    int8_energy_reduction_str = fmt(int8_energy_reduction, precision=0, commas=False)
-    mobilenet_int8_mj_str = fmt(mobilenet_int8_mj, precision=0, commas=False)
-    mobilenet_fp32_mj_str = fmt(mobilenet_fp32_mj, precision=0, commas=False)
-    tpu_v4_tops_per_w_str = fmt(tpu_v4_tops_per_w, precision=1, commas=False)
-    v100_tops_per_w_str = fmt(v100_tops_per_w, precision=1, commas=False)
-    bandwidth_bound_speedup_str = fmt(bandwidth_bound_speedup, precision=0, commas=False)
-    energy_dram_str = fmt(energy_dram, precision=0, commas=False)
-    energy_dram_per_byte_str = fmt(energy_dram_per_byte, precision=0, commas=False)
-    energy_flop_fp32_str = f"{energy_flop_fp32}"
-    energy_flop_int8_str = f"{energy_flop_int8}"
-    energy_add_fp32_str = f"{energy_add_fp32_pj}"
-    energy_add_fp16_str = f"{energy_add_fp16_pj}"
-    energy_add_int32_str = f"{energy_add_int32_pj}"
-    energy_add_int8_str = f"{energy_add_int8_pj}"
-    energy_mul_fp32_str = f"{energy_mul_fp32_pj}"
-    int8_fp32_energy_ratio_str = fmt(int8_fp32_energy_ratio, precision=1, commas=False)
-    v100_bw_gbs_str = fmt(v100_bw_gbs, precision=0, commas=False)
-    v100_tflops_fp32_str = fmt(v100_tflops_fp32, precision=1, commas=False)
-    resnet_params_m_str = fmt(resnet_params_m, precision=1, commas=False)
-    resnet_gflops_str = fmt(resnet_gflops, precision=1, commas=False)
-    mobilenetv2_mflops_str = fmt(mobilenetv2_mflops, precision=0, commas=False)
     llm_7b_str = f"{llm_7b_params}"
     llm_7b_mem_str = fmt(llm_7b_mem_fp16_gb, precision=0, commas=False)
     llm_175b_str = fmt(llm_175b_params, precision=0, commas=False)
     llm_175b_mem_str = fmt(llm_175b_mem_fp16_gb, precision=0, commas=False)
     smartphone_ram_str = f"{smartphone_ram_gb}"
     mcu_ram_str = f"{mcu_ram_kb}"
-    gpt3_training_flops_str = f"$3.14 \\times 10^{{{gpt3_training_flops_exp}}}$"
-# Note: v100_bw_gbs used by downstream FusionCalc cell (CompressionSetup.v100_bw_gbs)
+    energy_dram_str = fmt(energy_dram, precision=0, commas=False)
+    energy_dram_per_byte_str = fmt(energy_dram_per_byte, precision=0, commas=False)
+    energy_flop_fp32_str = f"{energy_flop_fp32}"
+    energy_flop_int8_str = f"{energy_flop_int8}"
+    int8_energy_reduction_str = fmt(int8_energy_reduction, precision=0, commas=False)
 ```
 
 ## Optimization Framework {#sec-model-compression-optimization-framework-9e21}
@@ -2876,10 +2830,56 @@ The accuracy cost of reduced precision varies by model and technique. CNNs typic
 \index{Energy Efficiency!numerical precision impact}
 Efficient numerical representations reduce storage requirements, computation latency, and power usage, benefiting mobile AI, embedded systems, and cloud inference alike. Precision levels can be tuned to specific hardware capabilities, maximizing throughput on AI accelerators such as GPUs, TPUs, NPUs, and edge AI chips.
 
+```{python}
+#| label: compression-energy-costs
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENERGY COSTS BY PRECISION FORMAT
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-model-compression-energy-costs-d1d5 opening paragraph
+# │          (energy per addition at FP32, FP16, INT32, INT8).
+# │
+# │ Goal:    Provide per-operation energy costs across precision formats.
+# │ Show:    Energy per add for FP32, FP16, INT32, INT8 (Horowitz 2014).
+# │ How:     Retrieve constants from mlsys.constants and format for prose.
+# │
+# │ Imports: mlsys.constants (ENERGY_ADD_FP32_PJ, ENERGY_ADD_FP16_PJ,
+# │          ENERGY_ADD_INT32_PJ, ENERGY_ADD_INT8_PJ)
+# │ Exports: EnergyCosts.energy_add_fp32_str, .energy_add_fp16_str,
+# │          .energy_add_int32_str, .energy_add_int8_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    ENERGY_ADD_FP32_PJ, ENERGY_ADD_FP16_PJ,
+    ENERGY_ADD_INT32_PJ, ENERGY_ADD_INT8_PJ, ureg
+)
+
+class EnergyCosts:
+    """Energy per addition operation across numerical precisions (Horowitz 2014)."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    energy_add_fp32_pj = ENERGY_ADD_FP32_PJ.m_as(ureg.picojoule)
+    energy_add_fp16_pj = ENERGY_ADD_FP16_PJ.m_as(ureg.picojoule)
+    energy_add_int32_pj = ENERGY_ADD_INT32_PJ.m_as(ureg.picojoule)
+    energy_add_int8_pj = ENERGY_ADD_INT8_PJ.m_as(ureg.picojoule)
+
+    # ┌── 2. EXECUTE — (values are direct from constants) ─────────────────
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    from mlsys.formatting import check
+    check(energy_add_fp32_pj > energy_add_int8_pj,
+          "FP32 add must cost more energy than INT8 add.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    energy_add_fp32_str = f"{energy_add_fp32_pj}"
+    energy_add_fp16_str = f"{energy_add_fp16_pj}"
+    energy_add_int32_str = f"{energy_add_int32_pj}"
+    energy_add_int8_str = f"{energy_add_int8_pj}"
+```
+
 #### Energy Costs {#sec-model-compression-energy-costs-d1d5}
 
 \index{DRAM!energy cost of access}
-Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately `{python} CompressionSetup.energy_add_fp32_str` pJ, whereas a 16-bit floating-point addition requires only `{python} CompressionSetup.energy_add_fp16_str` pJ. Similarly, a 32-bit integer addition costs `{python} CompressionSetup.energy_add_int32_str` pJ, while an 8-bit integer addition is just `{python} CompressionSetup.energy_add_int8_str` pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
+Beyond computational and memory benefits, the energy costs associated with different numerical precisions reinforce the case for reduced precision. @fig-quantized-energy quantifies these energy differences: a 32-bit floating-point addition (FAdd) consumes approximately `{python} EnergyCosts.energy_add_fp32_str` pJ, whereas a 16-bit floating-point addition requires only `{python} EnergyCosts.energy_add_fp16_str` pJ. Similarly, a 32-bit integer addition costs `{python} EnergyCosts.energy_add_int32_str` pJ, while an 8-bit integer addition is just `{python} EnergyCosts.energy_add_int8_str` pJ. These savings compound across large-scale models operating over billions of operations, supporting both cost reduction and sustainability goals.
 
 ```{python}
 #| label: energy-dividend-calc
@@ -2894,7 +2894,7 @@ Beyond computational and memory benefits, the energy costs associated with diffe
 # │ How: Calculate the ratio of energy per OP using Horowitz (2014) numbers.
 # │
 # │ Imports: mlsys.constants (ENERGY_ADD_FP32_PJ, ENERGY_ADD_INT8_PJ)
-# │ Exports: CompressionSetup.energy_add_fp32_str, CompressionSetup.energy_add_int8_str, energy_dividend_str
+# │ Exports: EnergyDividend.energy_add_fp32_str, .energy_add_int8_str, .energy_dividend_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
     ENERGY_ADD_FP32_PJ, ENERGY_ADD_INT8_PJ
@@ -3397,16 +3397,63 @@ accuracy};
 ```
 :::
 
+```{python}
+#| label: compression-a100-int8-speedup
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ A100 INT8 SPEEDUP CONSTANTS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Quantization Speedup (Compute-Bound)" callout immediately
+# │          below; also referenced in @sec-model-compression-energy-efficiency
+# │          via bandwidth_bound_speedup_str.
+# │
+# │ Goal:    Quantify the throughput gain from INT8 on A100 Tensor Cores.
+# │ Show:    FP16 vs INT8 TFLOPS and the resulting speedup factor.
+# │ How:     Read A100 specs from mlsys.constants; compute ratio.
+# │
+# │ Imports: mlsys.constants (A100_FLOPS_FP16_TENSOR, A100_FLOPS_INT8,
+# │          A100_MEM_BW, TFLOPs, TB, second)
+# │ Exports: A100Int8Speedup.a100_tflops_fp16_str, .a100_tflops_int8_str,
+# │          .a100_int8_speedup_str, .bandwidth_bound_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    A100_FLOPS_FP16_TENSOR, A100_FLOPS_INT8, A100_MEM_BW,
+    TFLOPs, TB, second
+)
+from mlsys.formatting import fmt, check
+
+class A100Int8Speedup:
+    """A100 Tensor Core throughput: FP16 vs INT8."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    a100_tflops_fp16 = A100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
+    a100_tflops_int8 = A100_FLOPS_INT8.m_as(TFLOPs / second)
+    bandwidth_bound_speedup = 4            # memory-traffic-dominated case
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    a100_int8_speedup = int(a100_tflops_int8 / a100_tflops_fp16)
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(a100_int8_speedup >= 2,
+          "A100 INT8 should be at least 2x faster than FP16.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    a100_tflops_fp16_str = fmt(a100_tflops_fp16, precision=0, commas=False)
+    a100_tflops_int8_str = fmt(a100_tflops_int8, precision=0, commas=False)
+    a100_int8_speedup_str = fmt(a100_int8_speedup, precision=0, commas=False)
+    bandwidth_bound_speedup_str = fmt(bandwidth_bound_speedup, precision=0, commas=False)
+```
+
 ::: {.callout-notebook title="The Quantization Speedup (Compute-Bound)"}
 **Problem**: You have a compute-bound matrix multiplication (e.g., in a Transformer MLP block). You switch from FP16 to INT8. What is the expected speedup?
 
 **The Math**: On modern hardware with dedicated INT8 units:
 
-1. **Tensor Core Throughput**: NVIDIA A100 delivers `{python} CompressionSetup.a100_tflops_fp16_str` TFLOPS for FP16 vs `{python} CompressionSetup.a100_tflops_int8_str` TOPS for INT8, a `{python} CompressionSetup.a100_int8_speedup_str`$\times$ peak throughput increase.
+1. **Tensor Core Throughput**: NVIDIA A100 delivers `{python} A100Int8Speedup.a100_tflops_fp16_str` TFLOPS for FP16 vs `{python} A100Int8Speedup.a100_tflops_int8_str` TOPS for INT8, a `{python} A100Int8Speedup.a100_int8_speedup_str`$\times$ peak throughput increase.
 2. **Memory Bandwidth**: INT8 weights are half the size, so loading them from memory takes half the time.
-3. **Combined Effect**: For compute-bound operations, the speedup is primarily from compute throughput: **~`{python} CompressionSetup.a100_int8_speedup_str`$\times$ speedup**.
+3. **Combined Effect**: For compute-bound operations, the speedup is primarily from compute throughput: **~`{python} A100Int8Speedup.a100_int8_speedup_str`$\times$ speedup**.
 
-**The Systems Insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high arithmetic intensity) see ~`{python} CompressionSetup.a100_int8_speedup_str`$\times$ from faster INT8 units. The bandwidth-bound case (demonstrated in the Optimization Framework's napkin math) achieves up to `{python} CompressionSetup.bandwidth_bound_speedup_str`$\times$ because memory traffic dominates, so halving data size nearly doubles effective throughput for both bandwidth and compute.
+**The Systems Insight**: The speedup from quantization depends on the bottleneck. Compute-bound operations (large batch sizes, high arithmetic intensity) see ~`{python} A100Int8Speedup.a100_int8_speedup_str`$\times$ from faster INT8 units. The bandwidth-bound case (demonstrated in the Optimization Framework's napkin math) achieves up to `{python} A100Int8Speedup.bandwidth_bound_speedup_str`$\times$ because memory traffic dominates, so halving data size nearly doubles effective throughput for both bandwidth and compute.
 :::
 
 ### Numerical Format Comparison {#sec-model-compression-numerical-format-comparison-8fa2}
@@ -3512,11 +3559,56 @@ Binary and ternary networks\index{Quantization!binary networks}\index{Quantizati
 For KWS, INT8 quantization is often just the *starting point*. To fit complex acoustic models into embedded sensors, engineers push toward **INT4** or even **Binary** weights. In this regime, the **Information** (Data) is noisy audio, the **Logic** (Algorithm) is highly simplified, and the **Physics** (Machine) has a power budget measured in microwatts.
 :::
 
+```{python}
+#| label: compression-energy-ratio
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ INT8 VS FP32 MAC ENERGY RATIO
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-model-compression-energy-efficiency-sustainability-7150
+# │          opening paragraph ("~Nx less energy than FP32").
+# │
+# │ Goal:    Compute the full MAC (multiply + add) energy ratio INT8 vs FP32.
+# │ Show:    That INT8 MACs use ~20x less energy than FP32 MACs.
+# │ How:     Sum multiply + add energies for each precision; divide.
+# │
+# │ Imports: mlsys.constants (ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ,
+# │          ENERGY_ADD_FP32_PJ, ENERGY_ADD_INT8_PJ)
+# │ Exports: EnergyRatio.int8_fp32_energy_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import (
+    ENERGY_FLOP_FP32_PJ, ENERGY_FLOP_INT8_PJ,
+    ENERGY_ADD_FP32_PJ, ENERGY_ADD_INT8_PJ, ureg
+)
+from mlsys.formatting import fmt, check
+
+class EnergyRatio:
+    """INT8 vs FP32 MAC energy ratio (multiply + add)."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    energy_mul_fp32_pj = ENERGY_FLOP_FP32_PJ.m_as(ureg.picojoule / ureg.count)
+    energy_add_fp32_pj = ENERGY_ADD_FP32_PJ.m_as(ureg.picojoule)
+    energy_flop_int8 = ENERGY_FLOP_INT8_PJ.m_as(ureg.picojoule / ureg.count)
+    energy_add_int8_pj = ENERGY_ADD_INT8_PJ.m_as(ureg.picojoule)
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    fp32_mac_pj = energy_mul_fp32_pj + energy_add_fp32_pj   # ~4.6 pJ
+    int8_mac_pj = energy_flop_int8 + energy_add_int8_pj     # ~0.23 pJ
+    int8_fp32_energy_ratio = fp32_mac_pj / int8_mac_pj
+
+    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
+    check(int8_fp32_energy_ratio > 1,
+          "FP32 MAC must cost more energy than INT8 MAC.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    int8_fp32_energy_ratio_str = fmt(int8_fp32_energy_ratio, precision=1, commas=False)
+```
+
 ### Energy Efficiency and Sustainability {#sec-model-compression-energy-efficiency-sustainability-7150}
 \index{Energy Efficiency!quantization benefits}
 \index{Model Compression!energy efficiency}
 
-Quantization reduces energy consumption through two complementary mechanisms: smaller data types require fewer memory accesses (the dominant energy cost, as established in the Physics of Quantization analysis above), and lower-precision arithmetic units consume less power per operation. An INT8 operation, for example, uses roughly `{python} CompressionSetup.int8_fp32_energy_ratio_str`$\times$ less energy than its FP32 equivalent, compounding the memory energy savings into substantial reductions at system scale.
+Quantization reduces energy consumption through two complementary mechanisms: smaller data types require fewer memory accesses (the dominant energy cost, as established in the Physics of Quantization analysis above), and lower-precision arithmetic units consume less power per operation. An INT8 operation, for example, uses roughly `{python} EnergyRatio.int8_fp32_energy_ratio_str`$\times$ less energy than its FP32 equivalent, compounding the memory energy savings into substantial reductions at system scale.
 
 These gains depend on hardware support. AI accelerators with dedicated low-precision units (Tensor Cores for FP16/INT8, or the newer FP8 units on H100-class hardware) realize the full energy benefit, while general-purpose CPUs lacking such units see limited improvement. The practical implication is that energy efficiency from quantization is not a software-only optimization; it requires matching the chosen precision format to the target hardware's arithmetic capabilities.
 
@@ -4749,6 +4841,43 @@ Feature reuse, activation checkpointing, and parameter reduction form key compon
 Beyond reducing what data must be stored, substantial efficiency gains emerge from optimizing how operations access memory. The next technique addresses this by combining multiple operations to reduce memory traffic.
 
 ```{python}
+#| label: compression-v100-specs
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ V100 HARDWARE SPECS FOR FUSION ANALYSIS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: FusionCalc cell (uses v100_bw_gbs for timing) and prose at
+# │          @sec-model-compression-architectural-efficiency-8dd3 ("On a V100
+# │          GPU with ...").
+# │
+# │ Goal:    Provide V100 bandwidth and compute specs for fusion benchmarks.
+# │ Show:    V100 HBM bandwidth (GB/s) and FP32 compute (TFLOPS).
+# │ How:     Read V100 specs from mlsys.constants.
+# │
+# │ Imports: mlsys.constants (V100_MEM_BW, V100_FLOPS_FP32, GB, TFLOPs, second)
+# │ Exports: V100Specs.v100_bw_gbs, .v100_bw_gbs_str,
+# │          .v100_tflops_fp32_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import V100_MEM_BW, V100_FLOPS_FP32, GB, TFLOPs, second
+from mlsys.formatting import fmt
+
+class V100Specs:
+    """V100 bandwidth and compute specs for operator fusion analysis."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    v100_bw_gbs = V100_MEM_BW.m_as(GB / second)
+    v100_tflops_fp32 = V100_FLOPS_FP32.m_as(TFLOPs / second)
+
+    # ┌── 2. EXECUTE — (values are direct from constants) ─────────────────
+
+    # ┌── 3. GUARD — (no derived quantities to guard) ─────────────────────
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    v100_bw_gbs_str = fmt(v100_bw_gbs, precision=0, commas=False)
+    v100_tflops_fp32_str = fmt(v100_tflops_fp32, precision=1, commas=False)
+```
+
+```{python}
 #| label: fusion-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -4820,8 +4949,8 @@ class FusionCalc:
     saved_latency_ms = saved_latency_us / 1000
 
     # Step 7: V100 timing (memory-bound): MB / (GB/s) * 1000 = µs
-    unfused_time_us = total_unfused_mb / CompressionSetup.v100_bw_gbs * 1000
-    fused_time_us = total_fused_mb / CompressionSetup.v100_bw_gbs * 1000
+    unfused_time_us = total_unfused_mb / V100Specs.v100_bw_gbs * 1000
+    fused_time_us = total_fused_mb / V100Specs.v100_bw_gbs * 1000
     fusion_speedup = unfused_time_us / fused_time_us
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
@@ -4945,7 +5074,7 @@ The same principle extends beyond CNNs. GEMM-bias-activation fusion eliminates i
 
 Memory bandwidth analysis quantifies these fusion benefits concretely. Consider a Conv-BN-ReLU sequence operating on a $28 \times 28 \times 256$ feature map (`{python} FusionCalc.feat_map_kb_str` KB). Without fusion, each operation performs its own memory round-trip: Conv reads input (`{python} FusionCalc.feat_map_kb_str` KB) plus weights (`{python} FusionCalc.weights_mb_str` MB) and writes output (`{python} FusionCalc.feat_map_kb_str` KB), totaling `{python} FusionCalc.unfused_conv_mb_str` MB. BN then reads that output, adds its parameters (`{python} FusionCalc.bn_params_kb_str` KB), and writes again, for `{python} FusionCalc.unfused_bn_mb_str` MB. ReLU repeats the pattern for another `{python} FusionCalc.unfused_relu_mb_str` MB. The total unfused memory traffic is `{python} FusionCalc.total_unfused_mb_str` MB. With fusion, the entire sequence reads input and weights once and writes the final output once, requiring only `{python} FusionCalc.total_fused_mb_str` MB — a `{python} FusionCalc.bandwidth_reduction_pct_str`% bandwidth reduction.
 
-On a V100 GPU with `{python} CompressionSetup.v100_bw_gbs_str` GB/s HBM bandwidth and `{python} CompressionSetup.v100_tflops_fp32_str` TFLOPS FP32 compute, the unfused sequence takes approximately `{python} FusionCalc.unfused_time_us_str` microseconds (memory-bound), while the fused version takes approximately `{python} FusionCalc.fused_time_us_str` microseconds (`{python} FusionCalc.fusion_speedup_str`$\times$ speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
+On a V100 GPU with `{python} V100Specs.v100_bw_gbs_str` GB/s HBM bandwidth and `{python} V100Specs.v100_tflops_fp32_str` TFLOPS FP32 compute, the unfused sequence takes approximately `{python} FusionCalc.unfused_time_us_str` microseconds (memory-bound), while the fused version takes approximately `{python} FusionCalc.fused_time_us_str` microseconds (`{python} FusionCalc.fusion_speedup_str`$\times$ speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
 
 Fusion effectiveness varies by workload characteristics. Memory-bound operations benefit most, while compute-bound operations see minimal improvement:
 

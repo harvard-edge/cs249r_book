@@ -73,167 +73,57 @@ Accelerators can compute faster than storage can feed them. A modern GPU process
 :::
 
 ```{python}
-#| label: storage-setup
+#| label: storage-fuel-line-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ STORAGE HIERARCHY AND PIPELINE ECONOMICS (LEGO)
+# │ STORAGE-COMPUTE GAP AND CHECKPOINT SCALE
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-data-storage — storage hierarchy, I/O bottlenecks, and TCO
+# │ Context: @sec-storage-fuel-line — opening quantitative framing of the
+# │          HBM-vs-NVMe bandwidth gap and checkpoint data volume.
 # │
-# │ Goal: Quantify the 1000x+ gap between accelerator HBM and shared storage,
-# │       derive required pipeline bandwidth, and model checkpoint storm impact.
-# │ Show: ~3.35 TB/s HBM vs ~7 GB/s NVMe; ~20% data stall without pipelining;
-# │       ~1 TB checkpoint save in <1s via tiered staging.
-# │ How: 6NP pipeline eqn; max(T_comp, T_io) for stalls; tiered write latency.
+# │ Goal:    Quantify the ~500x gap between HBM and NVMe, and the PB-scale
+# │          checkpoint volume for a 30-day 175B training run.
+# │ Show:    3.35 TB/s HBM, 7 GB/s NVMe, ~479x ratio, ~1,050 GB checkpoint,
+# │          ~4.5 PB total checkpoint writes.
+# │ How:     Read H100 HBM BW and NVMe BW from constants; compute checkpoint
+# │          size from GPT-3 params × bytes per param; derive fleet total.
 # │
-# │ Imports: mlsys.constants (H100_MEM_BW, GPT3_PARAMS, NVME_SEQUENTIAL_BW, ...)
-# │ Exports: h100_bw_tbs, nvme_bw, gpt3_params_b, req_bw_imagenet,
-# │          data_stall_pct_str, stall_pct_display_math, s3_annual_cost,
-# │          ckpt_total_gb, ckpt_nvme_s, ckpt_pfs_s, tier_cost_ratio,
-# │          egress_100tb_cost, prob_tail_all_str, fail_rate_pct_str, n_tail_servers_str
+# │ Imports: mlsys.constants (H100_MEM_BW, NVME_SEQUENTIAL_BW, GPT3_PARAMS,
+# │          BYTES_FP16, BYTES_FP32, GB, TB, second, byte, BILLION)
+# │ Exports: bw_ratio_str, ckpt_fleet_total_pb
+# │          (plus StorageHierarchyAnalysis.h100_bw_tbs, .nvme_bw_str,
+# │           .ckpt_total_gb_str, .gpt3_params_b used in prose)
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsys.constants import (
-    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, NVME_SEQUENTIAL_BW,
-    GPT3_PARAMS, BILLION, MILLION, TRILLION, THOUSAND,
-    GB, TB, second, byte, flop, USD, kilowatt, hour,
-    GPUS_PER_HOST, SEC_PER_DAY, SEC_PER_YEAR,
-    H100_MEM_CAPACITY, BYTES_FP16, BYTES_FP32,
-    Mparam, RESNET50_PARAMS,
-    NVLINK_H100_BW, PCIE_GEN5_BW,
-    A100_MEM_CAPACITY, H100_FLOPS_FP8_TENSOR, H100_TDP
+    H100_MEM_BW, NVME_SEQUENTIAL_BW, GPT3_PARAMS,
+    BYTES_FP16, BYTES_FP32, GB, TB, second, byte, BILLION
 )
 from mlsys.formatting import fmt, check, md
-import math
 
-# ┌── LEGO ───────────────────────────────────────────────
 class StorageHierarchyAnalysis:
-    """
-    Namespace for global storage hierarchy and pipeline calculations.
-    """
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    h100_bw       = H100_MEM_BW
+    nvme_bw_raw   = NVME_SEQUENTIAL_BW
+    gpt3_params   = GPT3_PARAMS.m_as('param')
 
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    h100_bw = H100_MEM_BW
-    h100_flops_fp16 = H100_FLOPS_FP16_TENSOR
-    h100_cap = H100_MEM_CAPACITY
-    nvme_bw_raw = NVME_SEQUENTIAL_BW
-    pfs_node_bw = (4.0 * GB / second)
-    s3_bw = (1.0 * GB / second)
-
-    gpt3_params = GPT3_PARAMS.m_as('param')
-    t_step_ms = 200
-
-    n_gpus_image = 256
-    img_size = 150 * THOUSAND
-    batch_img_gpu = 256
-    util_target = 0.80
-
-    dataset_size_tb = 100
-    cost_s3_gb_mo = 0.02
-    cost_nvme_gb_mo = 0.10
-    cost_glacier_gb_mo = 0.004
-    cost_egress_gb = 0.09
-
-    n_tail_servers = 100
-    p_tail_fail = 0.01
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    t_step_s = t_step_ms / 1000
-    req_bw_imagenet_val = (n_gpus_image * util_target * (batch_img_gpu * img_size)) / t_step_s
-    req_bw_imagenet_gbs = req_bw_imagenet_val / BILLION
-
-    t_comp_val = 200
-    t_io_val = 250
-    stall_max_t = max(t_comp_val, t_io_val)
-    data_stall_pct_val = ((stall_max_t - t_comp_val) / stall_max_t) * 100
-
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    bw_ratio_val        = h100_bw.m_as(GB / second) / nvme_bw_raw.m_as(GB / second)
     bytes_per_param_ckpt = BYTES_FP16.m_as(byte) + (2 * BYTES_FP32.m_as(byte))
-    ckpt_total_gb_val = (gpt3_params * bytes_per_param_ckpt) / BILLION
-
-    n_nodes = 256
-    node_shard_gb = ckpt_total_gb_val / n_nodes
-    ckpt_nvme_s_val = node_shard_gb / (4 * nvme_bw_raw.m_as(GB/second))
-    ckpt_pfs_s_val = node_shard_gb / pfs_node_bw.m_as(GB/second)
-    ckpt_weights_gb = (gpt3_params * 2) / BILLION
-    ckpt_optimizer_gb = (gpt3_params * 8) / BILLION
-
-    s3_annual_val = dataset_size_tb * 1000 * cost_s3_gb_mo * 12
-    nvme_annual_val = dataset_size_tb * 1000 * cost_nvme_gb_mo * 12
-    glacier_annual_val = dataset_size_tb * 1000 * cost_glacier_gb_mo * 12
-    tier_cost_ratio_val = cost_nvme_gb_mo / cost_s3_gb_mo
-    egress_100tb_val = dataset_size_tb * 1000 * cost_egress_gb
-
-    prob_tail_all = (1.0 - p_tail_fail) ** n_tail_servers
-
-    images_per_sec = 1000
-    raw_bw_val = (images_per_sec * img_size) / MILLION
-    hdd_iops = 100
-    hdd_slowdown_val = images_per_sec / hdd_iops
-
-    gds_trad_us = 120
-    gds_bypass_us = 30
-    t_io_p99 = 500
-    t_compute = 200
-    gds_speedup_val = gds_trad_us / gds_bypass_us
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(req_bw_imagenet_gbs > 10, f"ImageNet aggregate BW should be high, got {req_bw_imagenet_gbs:.1f} GB/s")
-    check(ckpt_total_gb_val > 1000, "175B checkpoint must be > 1 TB")
-    check(data_stall_pct_val == 20, "Data stall calculation mismatch")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_bw_tbs = f"{h100_bw.m_as(TB/second):.2f}"
-    nvme_bw_str = f"{nvme_bw_raw.m_as(GB/second):.1f}"
-    gpt3_params_b = f"{gpt3_params / BILLION:.0f}"
-    h100_hbm_cap_gb = f"{h100_cap.m_as(GB):.0f}"
-
-    req_bw_imagenet_str = f"{req_bw_imagenet_gbs:.1f}"
-    data_stall_pct_str = f"{data_stall_pct_val:.0f}"
-
-    ckpt_total_gb_str = f"{ckpt_total_gb_val:,.0f}"
-    ckpt_nvme_s_str = f"{ckpt_nvme_s_val:.1f}"
-    ckpt_pfs_s_str = f"{ckpt_pfs_s_val:.1f}"
-    ckpt_weights_gb_str = f"{ckpt_weights_gb:,.0f}"
-    ckpt_optimizer_gb_str = f"{ckpt_optimizer_gb:,.0f}"
-
-    s3_annual_str = f"{s3_annual_val:,.0f}"
-    nvme_annual_str = f"{nvme_annual_val:,.0f}"
-    glacier_annual_str = f"{glacier_annual_val:,.0f}"
-    tier_cost_ratio_str = f"{tier_cost_ratio_val:.0f}"
-    egress_100tb_str = f"{egress_100tb_val:,.0f}"
-
-    prob_tail_all_str = f"{prob_tail_all:.3f}"
-    fail_rate_pct_str = f"{p_tail_fail * 100:.0f}"
-    n_tail_servers_str = f"{n_tail_servers}"
-
-    raw_bw_str = f"{raw_bw_val:.0f}"
-    hdd_slowdown_factor = f"{hdd_slowdown_val:.0f}"
-    gds_trad_us_str = f"{gds_trad_us}"
-    gds_bypass_us_str = f"{gds_bypass_us}"
-    prefetch_t_io_p99_str = f"{t_io_p99}"
-    prefetch_t_compute_str = f"{t_compute}"
-    prefetch_min_depth = f"{math.ceil(t_io_p99/t_compute)}"
-    prefetch_safe_depth = f"{math.ceil(t_io_p99/t_compute) + 2}"
-    gds_speedup_str = f"{gds_speedup_val:.0f}"
-    t_comp_stall_str = f"{t_comp_val}"
-    t_io_stall_str = f"{t_io_val}"
+    ckpt_total_gb_val   = (gpt3_params * bytes_per_param_ckpt) / BILLION
     ckpt_fleet_total_pb_val = (ckpt_total_gb_val * 4320) / 1e6
-    bw_ratio_val = h100_bw.m_as(GB/second) / nvme_bw_raw.m_as(GB/second)
-stall_pct_display_math = md(
-    f"$$\\text{{Stall \\%}} = \\frac{{{StorageHierarchyAnalysis.t_io_val} - {StorageHierarchyAnalysis.t_comp_val}}}{{{StorageHierarchyAnalysis.t_io_val}}} = "
-    f"\\mathbf{{{StorageHierarchyAnalysis.data_stall_pct_str}\\%}}$$"
-)
-ckpt_fleet_total_pb = f"{StorageHierarchyAnalysis.ckpt_fleet_total_pb_val:,.1f}"
-bw_ratio_str = f"{StorageHierarchyAnalysis.bw_ratio_val:,.0f}"
 
-# GPU Specs for setup
-a100_mem = f"{A100_MEM_CAPACITY.m_as(GB):.0f}"
-h100_mem = f"{H100_MEM_CAPACITY.m_as(GB):.0f}"
-h100_fp8_tflops = f"{H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second):,.0f}"
-h100_fp16_tflops = f"{H100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second):,.0f}"
-h100_tdp_w = f"{H100_TDP.m_as(watt):.0f}"
-resnet_params_m = f"{RESNET50_PARAMS.m_as(Mparam):.1f}"
-nvlink_bw_gbs = f"{NVLINK_H100_BW.m_as(GB/second):.0f}"
-pcie5_bw_gbs = f"{PCIE_GEN5_BW.m_as(GB/second):.0f}"
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(ckpt_total_gb_val > 1000, "175B checkpoint must be > 1 TB")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    h100_bw_tbs      = f"{h100_bw.m_as(TB / second):.2f}"
+    nvme_bw_str      = f"{nvme_bw_raw.m_as(GB / second):.1f}"
+    gpt3_params_b    = f"{gpt3_params / BILLION:.0f}"
+    ckpt_total_gb_str = f"{ckpt_total_gb_val:,.0f}"
+
+# Module-level exports
+bw_ratio_str       = f"{StorageHierarchyAnalysis.bw_ratio_val:,.0f}"
+ckpt_fleet_total_pb = f"{StorageHierarchyAnalysis.ckpt_fleet_total_pb_val:,.1f}"
 ```
 
 ## The Fuel Line {#sec-storage-fuel-line}
@@ -593,9 +483,33 @@ The batch lifecycle within HBM illustrates how transient storage at this tier tr
 
 From the data pipeline's perspective, Tier 0 is not a storage tier to be managed but a constraint to be satisfied. The pipeline's purpose is to ensure that the batch the accelerator needs *next* is already resident in HBM before the current batch's computation completes. If it arrives late, the accelerator stalls. If it arrives early, it consumes HBM that could hold activations. The tension between "just in time" and "just too late" defines the pipeline's buffer management strategy, which we quantify in @sec-storage-pipeline-equation.
 
+```{python}
+#| label: storage-dram-interconnect-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ HOST DRAM INTERCONNECT BANDWIDTHS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-tier1-dram — PCIe Gen 5 and NVLink bandwidth figures
+# │          used in the Tier 1 Host DRAM discussion.
+# │
+# │ Goal:    Format PCIe Gen 5 and NVLink 4.0 bandwidths for inline prose.
+# │ Show:    64 GB/s (PCIe Gen 5), 900 GB/s (NVLink 4.0).
+# │ How:     Read PCIE_GEN5_BW and NVLINK_H100_BW from constants; extract GB/s.
+# │
+# │ Imports: mlsys.constants (PCIE_GEN5_BW, NVLINK_H100_BW, GB, second)
+# │ Exports: DRAMInterconnect.pcie5_bw_gbs, DRAMInterconnect.nvlink_bw_gbs
+# └─────────────────────────────────────────────────────────────────────────────
+class DRAMInterconnect:
+    pcie5_val  = PCIE_GEN5_BW.m_as(GB / second)
+    nvlink_val = NVLINK_H100_BW.m_as(GB / second)
+
+    pcie5_bw_gbs  = f"{pcie5_val:.0f}"
+    nvlink_bw_gbs = f"{nvlink_val:.0f}"
+```
+
 ### Tier 1: Host DRAM {#sec-storage-tier1-dram}
 
-\index{DRAM!data pipeline staging}One level below HBM, host DRAM serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPU Direct Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (`{python} pcie5_bw_gbs` GB/s bidirectional) or NVLink (`{python} nvlink_bw_gbs` GB/s) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
+\index{DRAM!data pipeline staging}One level below HBM, host DRAM serves as the staging area for the data pipeline. Every byte of training data that reaches the accelerator passes through host DRAM first (unless GPU Direct Storage bypasses it, as described in @sec-storage-gds). A typical training node contains 512 GB to 2 TB of system memory shared across the host CPU and its peripherals. While the bandwidth between host DRAM and the accelerator is limited to what PCIe Gen 5 (`{python} DRAMInterconnect.pcie5_bw_gbs` GB/s bidirectional) or NVLink (`{python} DRAMInterconnect.nvlink_bw_gbs` GB/s) can provide, host DRAM plays three critical roles in the ML storage hierarchy.
 
 The data loader pipeline that runs in host DRAM follows a multi-stage architecture. First, I/O threads read compressed data from NVMe or network storage into read buffers. Second, decode threads decompress the data (JPEG decoding for images, decompression for text). Third, augmentation threads apply transformations (random cropping, flipping, normalization for images; tokenization and sequence packing for text). Fourth, the collation stage assembles individual samples into batches and pins the memory for efficient DMA transfer to the accelerator. Each stage runs concurrently, forming a pipeline that overlaps I/O, CPU computation, and data transfer. The efficiency of this pipeline determines whether host DRAM can keep up with the accelerator's appetite.
 
@@ -612,6 +526,60 @@ The three roles interact in subtle ways. The prefetch buffer and the augmentatio
 The physical layout of DRAM has performance implications that are invisible in single-socket benchmarks but critical at production scale. Modern multi-socket servers exhibit **Non-Uniform Memory Access (NUMA)** topology where each CPU socket has "local" DRAM that it can access at full bandwidth and "remote" DRAM attached to the other socket at roughly half bandwidth. In a dual-socket DGX node with eight GPUs split four per socket, a data loader thread running on socket 0 that allocates its prefetch buffer in socket 1's DRAM pays a roughly 2$\times$ bandwidth penalty on every buffer access. The fix is **NUMA-aware allocation**: pin each data loader worker to the same CPU socket -- the same NUMA domain -- as the GPUs it serves, and use `numactl` or `libnuma` to ensure memory allocation stays local. Proper NUMA pinning can improve data loading throughput by 30--50% on dual-socket systems, a gain that is invisible in development environments but essential when every percentage point of utilization translates to thousands of dollars per day.
 
 The gap between host DRAM bandwidth and HBM bandwidth is the first major cliff in the hierarchy: roughly 5$\times$ to 15$\times$, depending on interconnect. Any failure to keep host DRAM populated from lower tiers cascades immediately to accelerator starvation, because the accelerator cannot fetch directly from NVMe or network storage. In our running example, the 256-GPU cluster requires each node's host DRAM to sustain a continuous flow of decoded, augmented batches ready for PCIe transfer. If the NVMe-to-DRAM read pipeline falls behind by even a few hundred milliseconds, the prefetch buffer drains and the accelerator idles until the next batch arrives.
+
+```{python}
+#| label: storage-nvme-tier-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NVME TIER: I/O BANDWIDTH, HDD COMPARISON, AND CHECKPOINT WRITE TIMES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-tier2-nvme — NVMe I/O characteristics, HDD contrast,
+# │          and local checkpoint staging times.
+# │
+# │ Goal:    Quantify raw image bandwidth, HDD IOPS shortfall, and per-node
+# │          checkpoint write times to NVMe vs PFS.
+# │ Show:    150 MB/s raw image BW; 10x HDD slowdown; 0.3s NVMe / 1.0s PFS
+# │          checkpoint write for a 175B model shard.
+# │ How:     BW = images/s × size; HDD ratio = images/s / IOPS; ckpt time =
+# │          shard_GB / drive_BW.
+# │
+# │ Imports: mlsys.constants (NVME_SEQUENTIAL_BW, GB, second, BILLION, THOUSAND,
+# │          MILLION)
+# │ Exports: NVMeTierCalcs.raw_bw_str, .hdd_slowdown_factor,
+# │          .ckpt_nvme_s_str, .ckpt_pfs_s_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import NVME_SEQUENTIAL_BW, GB, second, BILLION, THOUSAND, MILLION
+from mlsys.formatting import check
+
+class NVMeTierCalcs:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    nvme_bw_raw    = NVME_SEQUENTIAL_BW
+    pfs_node_bw    = 4.0 * GB / second
+    images_per_sec = 1000
+    img_size       = 150 * THOUSAND
+    hdd_iops       = 100
+
+    # Checkpoint sizing (from StorageHierarchyAnalysis)
+    ckpt_total_gb_val = StorageHierarchyAnalysis.ckpt_total_gb_val
+    n_nodes           = 256
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    raw_bw_val       = (images_per_sec * img_size) / MILLION
+    hdd_slowdown_val = images_per_sec / hdd_iops
+    node_shard_gb    = ckpt_total_gb_val / n_nodes
+    ckpt_nvme_s_val  = node_shard_gb / (4 * nvme_bw_raw.m_as(GB / second))
+    ckpt_pfs_s_val   = node_shard_gb / pfs_node_bw.m_as(GB / second)
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(raw_bw_val == 150, "Raw image BW should be 150 MB/s")
+    check(hdd_slowdown_val == 10, "HDD slowdown should be 10x")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    raw_bw_str          = f"{raw_bw_val:.0f}"
+    hdd_slowdown_factor = f"{hdd_slowdown_val:.0f}"
+    ckpt_nvme_s_str     = f"{ckpt_nvme_s_val:.1f}"
+    ckpt_pfs_s_str      = f"{ckpt_pfs_s_val:.1f}"
+```
 
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
 
@@ -645,8 +613,8 @@ At the NVMe tier, compression represents a critical tradeoff between I/O bandwid
 
 **The Math**:
 
-1.  **Raw Bandwidth**: 1,000 images/s$\times$ 150 KB/image = **`{python} StorageHierarchyAnalysis.raw_bw_str` MB/s**.
-2.  **HDD Reality**: A 7200 RPM HDD delivers 100 random IOPS. For 1,000 images/s, you need **`{python} StorageHierarchyAnalysis.hdd_slowdown_factor`$\times$ more IOPS** than the disk provides.
+1.  **Raw Bandwidth**: 1,000 images/s$\times$ 150 KB/image = **`{python} NVMeTierCalcs.raw_bw_str` MB/s**.
+2.  **HDD Reality**: A 7200 RPM HDD delivers 100 random IOPS. For 1,000 images/s, you need **`{python} NVMeTierCalcs.hdd_slowdown_factor`$\times$ more IOPS** than the disk provides.
 3.  **The Result**: Shuffling individual files on an HDD will starve the GPU, reducing utilization to <5%.
 
 **The Systems Conclusion**: You must either use NVMe (sub-10 μs random access) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
@@ -654,7 +622,7 @@ At the NVMe tier, compression represents a critical tradeoff between I/O bandwid
 
 The central challenge at this tier is the I/O Wall: even the fastest NVMe RAID configuration is roughly 500$\times$ slower than HBM. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPU Direct Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O Wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 14 GB/s as superabundant. But relative to the accelerator's appetite, 14 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
 
-Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter checkpoint of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB writes to local NVMe in approximately `{python} StorageHierarchyAnalysis.ckpt_nvme_s_str` seconds, compared to `{python} StorageHierarchyAnalysis.ckpt_pfs_s_str` seconds if written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint *frequency* depends on cluster failure rates and is derived quantitatively in @sec-fault-tolerance-young-daly using the Young-Daly formula. From a storage perspective, the key design goal is minimizing $T_{save}$ through tiered staging: write to local NVMe at full bandwidth, then background-copy to shared storage.
+Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter checkpoint of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB writes to local NVMe in approximately `{python} NVMeTierCalcs.ckpt_nvme_s_str` seconds, compared to `{python} NVMeTierCalcs.ckpt_pfs_s_str` seconds if written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint *frequency* depends on cluster failure rates and is derived quantitatively in @sec-fault-tolerance-young-daly using the Young-Daly formula. From a storage perspective, the key design goal is minimizing $T_{save}$ through tiered staging: write to local NVMe at full bandwidth, then background-copy to shared storage.
 
 A practical concern at this tier is **SSD endurance**. NAND flash memory can sustain a limited number of write-erase cycles before the cells degrade. Enterprise NVMe drives are rated for 1 to 3 Drive Writes Per Day (DWPD) over a 5-year lifespan. For a 7.68 TB drive at 1 DWPD, this means the drive can absorb 7.68 TB of writes per day, or roughly 14 PB total over its lifetime. ML training workloads are predominantly read-heavy (the dataset is written once and read many times), which is favorable for SSD endurance. However, checkpoint writes can be intensive: if each node saves a 4 GB checkpoint shard every 10 minutes, that is 576 GB per day of checkpoint writes, well within the 1 DWPD budget. The risk emerges when local NVMe is used as a staging buffer for both checkpoint writes *and* dataset caching: the combined write volume from initial dataset staging plus repeated checkpoint saves must remain within the drive's endurance rating.
 
@@ -764,7 +732,38 @@ Object storage achieves "eleven nines"[^fn-eleven-nines-durability] of durabilit
 
 The engineering behind erasure coding illustrates a recurring theme in storage systems: achieving extreme durability through redundancy that is invisible to the application. When an ML training job reads a shard from object storage, the storage service transparently reads $k$ fragments from available nodes, reconstructs the original shard, and returns it to the client. If one fragment is on a failed disk, the service reads the corresponding parity fragment instead and reconstructs the missing data. The client never observes the failure. The reconstruction adds latency (typically 10 to 50 ms for a single fragment recovery), which contributes to the higher tail latency of object storage compared to local NVMe.
 
-The cost advantage of object storage is significant: at roughly \$0.02/GB/month, it is 750$\times$ cheaper per byte than HBM and 5$\times$ cheaper than local NVMe. For a 100 TB training dataset, object storage costs roughly \$`{python} StorageHierarchyAnalysis.s3_annual_str` per year, compared to \$`{python} StorageHierarchyAnalysis.nvme_annual_str` for local NVMe. This cost advantage makes object storage the natural home for the organization's training data lake, where all raw data, preprocessed datasets, and archived model artifacts reside permanently.
+```{python}
+#| label: storage-object-cost-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ OBJECT STORAGE ANNUAL COST COMPARISON
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-hierarchy (Tier 4 prose) — S3 vs NVMe annual cost
+# │          for a 100 TB dataset.
+# │
+# │ Goal:    Quantify yearly storage cost at the object and NVMe tiers.
+# │ Show:    $24,000/yr for S3 Standard; $120,000/yr for NVMe.
+# │ How:     100 TB × 1000 GB/TB × $/GB/month × 12 months.
+# │
+# │ Imports: (none — uses literal cost constants)
+# │ Exports: ObjectStorageCost.s3_annual_str, .nvme_annual_str
+# └─────────────────────────────────────────────────────────────────────────────
+class ObjectStorageCost:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    dataset_size_tb  = 100
+    cost_s3_gb_mo    = 0.02
+    cost_nvme_gb_mo  = 0.10
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    s3_annual_val   = dataset_size_tb * 1000 * cost_s3_gb_mo * 12
+    nvme_annual_val = dataset_size_tb * 1000 * cost_nvme_gb_mo * 12
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    s3_annual_str   = f"{s3_annual_val:,.0f}"
+    nvme_annual_str = f"{nvme_annual_val:,.0f}"
+```
+
+The cost advantage of object storage is significant: at roughly \$0.02/GB/month, it is 750$\times$ cheaper per byte than HBM and 5$\times$ cheaper than local NVMe. For a 100 TB training dataset, object storage costs roughly \$`{python} ObjectStorageCost.s3_annual_str` per year, compared to \$`{python} ObjectStorageCost.nvme_annual_str` for local NVMe. This cost advantage makes object storage the natural home for the organization's training data lake, where all raw data, preprocessed datasets, and archived model artifacts reside permanently.
 
 The latency disadvantage is equally significant. Every GET request to object storage incurs 50 to 100 ms of latency, a consequence of the multi-layer indirection that provides durability. When a client requests an object, the storage service must look up the object's location in a distributed metadata index, identify which erasure-coded fragments to read, retrieve fragments from potentially different storage nodes, and reconstruct the original object. This overhead is invisible for large objects (where transfer time dominates) but catastrophic for small ones (where per-request latency dominates).
 
@@ -786,9 +785,36 @@ This consistency guarantee makes object storage suitable for both training data 
 
 The transition from Tier 4 to Tier 5 is driven entirely by economics: data that is accessed less than once per quarter should be moved to archive storage, where the cost is an order of magnitude lower.
 
+```{python}
+#| label: storage-glacier-cost-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ARCHIVE TIER ANNUAL COST
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-tier5-archive — archive storage cost for 100 TB.
+# │
+# │ Goal:    Compute annual Glacier cost for 100 TB dataset.
+# │ Show:    $4,800/year at $0.004/GB/month.
+# │ How:     100 TB × 1000 GB/TB × $0.004/GB/month × 12 months.
+# │
+# │ Imports: (none — uses literal cost constants)
+# │ Exports: GlacierCost.glacier_annual_str
+# └─────────────────────────────────────────────────────────────────────────────
+class GlacierCost:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    dataset_size_tb    = 100
+    cost_glacier_gb_mo = 0.004
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    glacier_annual_val = dataset_size_tb * 1000 * cost_glacier_gb_mo * 12
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    glacier_annual_str = f"{glacier_annual_val:,.0f}"
+```
+
 ### Tier 5: Archive and Cold Storage {#sec-storage-tier5-archive}
 
-The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At roughly \$0.004/GB/month, archive storage costs roughly \$`{python} StorageHierarchyAnalysis.glacier_annual_str` per year for 100 TB, which is 20$\times$ cheaper than standard object storage. The tradeoff is retrieval latency measured in minutes to hours, making this tier unsuitable for any operational access.
+The final tier provides long-term preservation for compliance and auditability. Archive services (such as S3 Glacier) are designed for data that is rarely accessed: training logs from previous years, superseded model checkpoints, audit trails for regulatory compliance. At roughly \$0.004/GB/month, archive storage costs roughly \$`{python} GlacierCost.glacier_annual_str` per year for 100 TB, which is 20$\times$ cheaper than standard object storage. The tradeoff is retrieval latency measured in minutes to hours, making this tier unsuitable for any operational access.
 
 The primary value of archive storage is organizational memory. When a model trained two years ago produces unexpected behavior in production, the ability to recover the exact training data, hyperparameters, and intermediate checkpoints for forensic analysis depends on archive storage. Organizations that aggressively purge old data to save costs discover, often at the worst possible moment, that they cannot reproduce or explain the behavior of deployed models.
 
@@ -828,6 +854,64 @@ For our running example, the 1.5 trillion token dataset is stored as 1,000 shard
 
 : **Data Format Comparison for ML Training**: Per-sample overhead determines whether the storage hardware's bandwidth is realized or wasted on metadata operations. {#tbl-data-formats}
 
+```{python}
+#| label: storage-pipeline-equation-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DATA PIPELINE BANDWIDTH AND STALL CALCULATIONS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-pipeline-equation — required aggregate bandwidth for
+# │          ImageNet-scale training and data stall ratio with pipelining.
+# │
+# │ Goal:    Derive the required storage bandwidth for 256-GPU ImageNet training
+# │          and show the 20% stall from a 250 ms I/O vs 200 ms compute overlap.
+# │ Show:    ~24.6 GB/s required; 20% stall; rendered display equation.
+# │ How:     BW = N_gpu × U × (batch × img_size) / T_step; stall = (max-comp)/max.
+# │
+# │ Imports: mlsys.constants (BILLION, THOUSAND)
+# │          mlsys.formatting (fmt, check, md)
+# │ Exports: PipelineCalcs.req_bw_imagenet_str, .data_stall_pct_str,
+# │          .t_comp_stall_str, .t_io_stall_str, stall_pct_display_math
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.constants import BILLION, THOUSAND
+from mlsys.formatting import check, md
+import math
+
+class PipelineCalcs:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    n_gpus_image  = 256
+    img_size      = 150 * THOUSAND
+    batch_img_gpu = 256
+    util_target   = 0.80
+    t_step_ms     = 200
+    t_comp_val    = 200
+    t_io_val      = 250
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    t_step_s             = t_step_ms / 1000
+    req_bw_imagenet_val  = (n_gpus_image * util_target * (batch_img_gpu * img_size)) / t_step_s
+    req_bw_imagenet_gbs  = req_bw_imagenet_val / BILLION
+    stall_max_t          = max(t_comp_val, t_io_val)
+    data_stall_pct_val   = ((stall_max_t - t_comp_val) / stall_max_t) * 100
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(req_bw_imagenet_gbs > 10,
+          f"ImageNet aggregate BW should be high, got {req_bw_imagenet_gbs:.1f} GB/s")
+    check(data_stall_pct_val == 20, "Data stall calculation mismatch")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    req_bw_imagenet_str = f"{req_bw_imagenet_gbs:.1f}"
+    data_stall_pct_str  = f"{data_stall_pct_val:.0f}"
+    t_comp_stall_str    = f"{t_comp_val}"
+    t_io_stall_str      = f"{t_io_val}"
+
+stall_pct_display_math = md(
+    f"$$\\text{{Stall \\%}} = \\frac{{{PipelineCalcs.t_io_val} - {PipelineCalcs.t_comp_val}}}"
+    f"{{{PipelineCalcs.t_io_val}}} = "
+    f"\\mathbf{{{PipelineCalcs.data_stall_pct_str}\\%}}$$"
+)
+```
+
 ## The Data Pipeline Equation {#sec-storage-pipeline-equation}
 
 Every storage tier in the hierarchy exists to serve one purpose: delivering data to the accelerator at the rate it can consume it. But *what* rate is that? The answer depends on the training configuration, and getting it wrong in either direction is expensive. Under-provisioning storage bandwidth starves accelerators. Over-provisioning wastes budget on storage capacity that sits partially idle. The fundamental question of ML storage design is: *how much bandwidth does the pipeline need to sustain so that accelerators never wait for data?* The answer is the **data pipeline throughput equation**:
@@ -838,7 +922,7 @@ where $N_{GPUs}$ is the number of accelerators, $U_{target}$ is the target utili
 
 The equation reveals four levers for controlling storage demand. Reducing $N_{GPUs}$ (fewer accelerators) directly reduces bandwidth requirements but also reduces training throughput. Lowering $U_{target}$ (accepting lower utilization) reduces the bandwidth needed but wastes expensive hardware. Decreasing $S_{batch}$ (smaller batches) reduces per-iteration data volume but may harm model convergence. Increasing $T_{iteration}$ (slower iterations, perhaps from a larger model) gives storage more time to deliver each batch but extends total training time. In practice, none of these levers is free; the pipeline must be engineered to deliver the bandwidth that the training configuration demands.
 
-Return to our running example. Training on 256 GPUs with ImageNet-scale images, 200 ms iterations, and 80% target utilization requires **`{python} StorageHierarchyAnalysis.req_bw_imagenet_str` GB/s** of aggregate storage throughput. This bandwidth must be sustained continuously for the duration of training, which may last days or weeks. If at any point the storage system delivers less than `{python} StorageHierarchyAnalysis.req_bw_imagenet_str` GB/s, accelerators begin to idle. For a language model training on tokenized text (where each sample is small but the number of samples is enormous), the required bandwidth is lower per batch but the total data volume over the training run is much larger, shifting the bottleneck from peak bandwidth to sustained throughput over weeks.
+Return to our running example. Training on 256 GPUs with ImageNet-scale images, 200 ms iterations, and 80% target utilization requires **`{python} PipelineCalcs.req_bw_imagenet_str` GB/s** of aggregate storage throughput. This bandwidth must be sustained continuously for the duration of training, which may last days or weeks. If at any point the storage system delivers less than `{python} PipelineCalcs.req_bw_imagenet_str` GB/s, accelerators begin to idle. For a language model training on tokenized text (where each sample is small but the number of samples is enormous), the required bandwidth is lower per batch but the total data volume over the training run is much larger, shifting the bottleneck from peak bandwidth to sustained throughput over weeks.
 
 The consequences of falling short are captured by the **data stall ratio**, which measures the fraction of each training step where the accelerator waits for data:
 
@@ -848,7 +932,7 @@ where $T_{\text{step}} = \max(T_{\text{compute}}, T_{I/O})$ when I/O and compute
 
 ::: {.callout-notebook title="The Data Stall Ratio"}
 
-\index{data stall ratio!GPU utilization}**Scenario**: Your GPU processes a batch in `{python} StorageHierarchyAnalysis.t_comp_stall_str` ms, but storage takes `{python} StorageHierarchyAnalysis.t_io_stall_str` ms to deliver the next batch.
+\index{data stall ratio!GPU utilization}**Scenario**: Your GPU processes a batch in `{python} PipelineCalcs.t_comp_stall_str` ms, but storage takes `{python} PipelineCalcs.t_io_stall_str` ms to deliver the next batch.
 
 **Without pipelining** (sequential I/O then compute):
 
@@ -860,7 +944,7 @@ $$\text{Stall \%} = \frac{250}{450} = 55.6\%$$
 $$T_{\text{step}} = \max(200, 250) = 250 \text{ ms}$$
 `{python} stall_pct_display_math`
 
-**The Systems Conclusion**: Even with pipelining, the accelerator is idle `{python} StorageHierarchyAnalysis.data_stall_pct_str`% of the time. To eliminate the stall entirely, storage throughput must be reduced below 200 ms, either by using faster storage, deeper prefetch buffers, or more parallel I/O streams.
+**The Systems Conclusion**: Even with pipelining, the accelerator is idle `{python} PipelineCalcs.data_stall_pct_str`% of the time. To eliminate the stall entirely, storage throughput must be reduced below 200 ms, either by using faster storage, deeper prefetch buffers, or more parallel I/O streams.
 :::
 
 The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute-bound or I/O-bound. A stall ratio below 2% indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2% and 10% suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10% indicates a clear storage bottleneck that wastes significant compute budget. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data versus computing.
@@ -1064,6 +1148,42 @@ Pipeline orchestration at petabyte scale treats data movement as a Directed Acyc
 
 Beyond pipeline orchestration, a hardware optimization eliminates one of the most common bottlenecks: the CPU's role as intermediary between storage and accelerator.
 
+```{python}
+#| label: storage-gds-latency-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GDS LATENCY AND CPU BYPASS SAVINGS
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-storage-gds — traditional vs GDS data path latency comparison.
+# │
+# │ Goal:    Quantify the per-transfer latency reduction from GDS and the
+# │          resulting CPU core savings.
+# │ Show:    120 μs traditional vs 30 μs GDS; 4x speedup.
+# │ How:     Ratio of traditional to bypass latency per transfer.
+# │
+# │ Imports: (none — uses representative latency constants)
+# │ Exports: GDSLatency.gds_trad_us_str, .gds_bypass_us_str,
+# │          .gds_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class GDSLatency:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    gds_trad_us   = 120
+    gds_bypass_us = 30
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    gds_speedup_val = gds_trad_us / gds_bypass_us
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    check(gds_speedup_val == 4.0, "GDS speedup should be 4x")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    gds_trad_us_str   = f"{gds_trad_us}"
+    gds_bypass_us_str = f"{gds_bypass_us}"
+    gds_speedup_str   = f"{gds_speedup_val:.0f}"
+```
+
 ## GPU Direct Storage and the CPU Bypass {#sec-storage-gds}
 
 The previous sections described what data must be stored at each tier and how much bandwidth is needed. But *how* does data physically move from storage to the accelerator? The answer involves a software stack that, in the traditional case, introduces unnecessary overhead that GDS eliminates. Understanding the traditional path first makes the GDS optimization clear.
@@ -1086,7 +1206,7 @@ The software layers in the traditional I/O path contribute to the latency overhe
 
 GDS eliminates these software layers for the data path. The cuFile API registers a GPU memory region with the NVMe controller, establishing a direct DMA mapping. Subsequent reads transfer data from NVMe to GPU memory without traversing the kernel's file system or block layers. The CPU's role is reduced to issuing the DMA command and checking for completion, a few microseconds of work compared to the 50+ microseconds of the traditional path.
 
-The latency reduction from GDS matters most when the training pipeline is already optimized and the remaining bottleneck is the CPU's ability to mediate transfers. In a node with 8 GPUs, each running a data loader with 4 workers, the CPU must manage 32 concurrent I/O streams. At `{python} StorageHierarchyAnalysis.gds_trad_us_str` μs per transfer, the CPU spends significant time in interrupt handling and buffer management. GDS offloads this work to hardware DMA engines, freeing CPU cores for data augmentation and other preprocessing tasks.
+The latency reduction from GDS matters most when the training pipeline is already optimized and the remaining bottleneck is the CPU's ability to mediate transfers. In a node with 8 GPUs, each running a data loader with 4 workers, the CPU must manage 32 concurrent I/O streams. At `{python} GDSLatency.gds_trad_us_str` μs per transfer, the CPU spends significant time in interrupt handling and buffer management. GDS offloads this work to hardware DMA engines, freeing CPU cores for data augmentation and other preprocessing tasks.
 
 ::: {#fig-gds-path fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. GPU Direct Storage Path**. The traditional path (top) requires two copies and CPU involvement. The GDS path (bottom) uses DMA to transfer data directly from NVMe to GPU memory, eliminating the CPU as a bottleneck." fig-alt="Diagram comparing traditional three-hop storage path with GDS direct DMA path from NVMe to GPU."}
 ```{.tikz}
@@ -1140,9 +1260,9 @@ The throughput improvement from GDS is most pronounced for workloads that read m
 
 \index{GPU Direct Storage!CPU bypass}**Problem**: A training node with 8 GPUs loads 150 KB images at 8,000 images/second per GPU (64,000 images/second total). Compare the CPU load under traditional I/O versus GDS.
 
-**Traditional path**: Each image requires a DMA from NVMe to DRAM, a `memcpy` from kernel to user space, and a PCIe transfer to GPU. At 64,000 images/second with `{python} StorageHierarchyAnalysis.gds_trad_us_str` μs of CPU time per image, the CPU spends 7.68 seconds of CPU time per wall-clock second, consuming roughly 8 cores worth of processing just for data movement.
+**Traditional path**: Each image requires a DMA from NVMe to DRAM, a `memcpy` from kernel to user space, and a PCIe transfer to GPU. At 64,000 images/second with `{python} GDSLatency.gds_trad_us_str` μs of CPU time per image, the CPU spends 7.68 seconds of CPU time per wall-clock second, consuming roughly 8 cores worth of processing just for data movement.
 
-**GDS path**: Each image is DMA'd directly from NVMe to GPU. At `{python} StorageHierarchyAnalysis.gds_bypass_us_str` μs of CPU time per image (for initiating the DMA), the CPU spends 1.92 seconds of CPU time per wall-clock second, freeing 6 cores for data augmentation.
+**GDS path**: Each image is DMA'd directly from NVMe to GPU. At `{python} GDSLatency.gds_bypass_us_str` μs of CPU time per image (for initiating the DMA), the CPU spends 1.92 seconds of CPU time per wall-clock second, freeing 6 cores for data augmentation.
 
 **The Systems Conclusion**: GDS does not just reduce latency. It shifts CPU utilization from data copying (which adds no value) to data augmentation (which improves model quality).
 :::
@@ -1172,32 +1292,51 @@ With the physical data path established, we turn to the economic dimension of st
 \index{Storage!economics}A 100 TB training dataset can reside on any tier of the hierarchy, but the cost differs by orders of magnitude depending on which tier is chosen and how the data is accessed. The economic design of ML storage is not simply about choosing the cheapest tier; it is about minimizing **total cost of data delivery**, which includes storage costs, transfer costs, and the opportunity cost of idle accelerators.
 
 ```{python}
-#| label: storage-economics-calc
+#| label: storage-economics-ratios-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ STORAGE ECONOMICS COMPARISON
+# │ STORAGE TIER COST RATIO AND EGRESS COSTS
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Used in the Storage Economics section for tier cost comparison.
+# │ Context: @sec-storage-economics — tier cost comparison and egress analysis.
 # │
-# │ Goal: Show the 1000x+ cost variation across tiers.
-# │ Show: Annual storage cost for 100 TB and egress costs.
+# │ Goal:    Compute the NVMe-to-S3 cost ratio and 100 TB egress cost.
+# │ Show:    5x tier cost ratio; $9,000 egress for 100 TB.
+# │ How:     Divide per-GB monthly costs; multiply dataset size by egress rate.
 # │
-# │ Imports: (uses values from StorageCost class above)
-# │ Exports: (none - uses exports from setup cell)
+# │ Imports: (none — uses literal cost constants)
+# │ Exports: EconRatios.tier_cost_ratio_str,
+# │          EconRatios.egress_100tb_str
 # └─────────────────────────────────────────────────────────────────────────────
-# All values computed in StorageCost class above
+class EconRatios:
+    # ┌── 1. LOAD ─────────────────────────────────────────
+    cost_nvme_gb_mo = 0.10
+    cost_s3_gb_mo   = 0.02
+    cost_egress_gb  = 0.09
+    dataset_size_tb = 100
+
+    # ┌── 2. EXECUTE ──────────────────────────────────────
+    tier_cost_ratio_val = cost_nvme_gb_mo / cost_s3_gb_mo
+    egress_100tb_val    = dataset_size_tb * 1000 * cost_egress_gb
+
+    # ┌── 3. GUARD ────────────────────────────────────────
+    from mlsys.formatting import check
+    check(tier_cost_ratio_val == 5.0, "NVMe/S3 cost ratio should be 5x")
+
+    # ┌── 4. OUTPUT ───────────────────────────────────────
+    tier_cost_ratio_str = f"{tier_cost_ratio_val:.0f}"
+    egress_100tb_str    = f"{egress_100tb_val:,.0f}"
 ```
 
 Consider storing a 100 TB training dataset. The annual storage cost varies enormously by tier:
 
-- **Object storage (S3 Standard)**: \$`{python} StorageHierarchyAnalysis.s3_annual_str`/year
-- **Local NVMe (provisioned)**: \$`{python} StorageHierarchyAnalysis.nvme_annual_str`/year
-- **Archive (Glacier)**: \$`{python} StorageHierarchyAnalysis.glacier_annual_str`/year
+- **Object storage (S3 Standard)**: \$`{python} ObjectStorageCost.s3_annual_str`/year
+- **Local NVMe (provisioned)**: \$`{python} ObjectStorageCost.nvme_annual_str`/year
+- **Archive (Glacier)**: \$`{python} GlacierCost.glacier_annual_str`/year
 - **HBM equivalent** (if you could store 100 TB in GPU memory at \$15/GB): \$15,000,000/year in hardware amortization
 
-The `{python} StorageHierarchyAnalysis.tier_cost_ratio_str`$\times$ cost difference between HBM and archive storage explains why the hierarchy exists: data must live at the cheapest tier possible, migrating upward only when needed and returning downward when done. This cost gradient is not merely an economic observation; it reflects the underlying physics. Faster storage requires more expensive materials (HBM uses 3D-stacked silicon with through-silicon vias), more energy per bit accessed, and more physical proximity to the accelerator (which limits the amount that can be provisioned per node). Cheaper storage uses commodity components (standard hard drives for archive), consumes minimal energy when idle, and can be located anywhere with network connectivity.
+The `{python} EconRatios.tier_cost_ratio_str`$\times$ cost difference between HBM and archive storage explains why the hierarchy exists: data must live at the cheapest tier possible, migrating upward only when needed and returning downward when done. This cost gradient is not merely an economic observation; it reflects the underlying physics. Faster storage requires more expensive materials (HBM uses 3D-stacked silicon with through-silicon vias), more energy per bit accessed, and more physical proximity to the accelerator (which limits the amount that can be provisioned per node). Cheaper storage uses commodity components (standard hard drives for archive), consumes minimal energy when idle, and can be located anywhere with network connectivity.
 
-Storage cost, however, is only part of the equation. **Data transfer costs** can dominate, especially in cloud environments. Reading the 100 TB dataset from S3 to compute instances incurs an egress charge of \$`{python} StorageHierarchyAnalysis.egress_100tb_str`. For multi-epoch training that reads the dataset 10 times, the egress cost alone exceeds \$90,000, more than the annual storage cost. This inversion, where *reading* data costs more than *storing* it, drives the architecture decision to cache data on local NVMe rather than streaming from object storage each epoch.
+Storage cost, however, is only part of the equation. **Data transfer costs** can dominate, especially in cloud environments. Reading the 100 TB dataset from S3 to compute instances incurs an egress charge of \$`{python} EconRatios.egress_100tb_str`. For multi-epoch training that reads the dataset 10 times, the egress cost alone exceeds \$90,000, more than the annual storage cost. This inversion, where *reading* data costs more than *storing* it, drives the architecture decision to cache data on local NVMe rather than streaming from object storage each epoch.
 
 The economic analysis changes further when accounting for the opportunity cost of accelerator idle time. A 1,000-GPU cluster at \$2/GPU/hour costs \$48,000 per day. If an undersized storage system reduces accelerator utilization from 90% to 70%, the organization loses \$9,600 per day in wasted compute. Over a 30-day training run, this amounts to \$288,000 of lost compute value, an amount that would easily fund a parallel file system upgrade or additional NVMe capacity. The economically rational approach treats storage investment not as an expense but as an enabler of compute utilization: every dollar spent improving storage throughput returns several dollars of increased accelerator productivity.
 
@@ -1430,10 +1569,10 @@ The economics of the hierarchy are equally consequential. The orders-of-magnitud
 *   **ML workloads invert storage assumptions**: Traditional caching, IOPS optimization, and small-write durability patterns all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS. Small files are the enemy; aggregated shards are the solution.
 *   **The pipeline equation governs design**: Required bandwidth scales linearly with GPU count and inversely with iteration time. Use $BW_{\text{required}} = N_{GPUs} \times U_{target} \times S_{batch} / T_{iteration}$ to size every tier.
 *   **Pipelining hides average latency, not tail latency**: Prefetch buffers must be sized for P99 I/O latency, not average, to prevent accelerator stalls at scale. Buffer depth of $\lceil T_{I/O,p99} / T_{\text{compute}} \rceil$ is the minimum.
-*   **GPU Direct Storage eliminates CPU bottlenecks**: GDS bypasses the CPU in the data path, reducing per-transfer latency by `{python} StorageHierarchyAnalysis.gds_speedup_str`$\times$ and freeing CPU cores for augmentation.
+*   **GPU Direct Storage eliminates CPU bottlenecks**: GDS bypasses the CPU in the data path, reducing per-transfer latency by `{python} GDSLatency.gds_speedup_str`$\times$ and freeing CPU cores for augmentation.
 *   **Metadata, not bandwidth, is the first bottleneck**: The small file problem collapses parallel file system throughput to a fraction of rated capacity. Aggregate samples into large shards to reduce metadata operations by 10,000$\times$ or more.
 *   **Checkpoint staging minimizes $T_{save}$**: Write to local NVMe first, then replicate asynchronously to shared storage. This decouples checkpoint pause time from parallel file system performance.
-*   **Economics drive tiering**: The `{python} StorageHierarchyAnalysis.tier_cost_ratio_str`$\times$ cost difference between HBM and archive storage mandates a tiering strategy. Egress fees often exceed storage fees; design for total cost of data delivery, not storage cost alone.
+*   **Economics drive tiering**: The `{python} EconRatios.tier_cost_ratio_str`$\times$ cost difference between HBM and archive storage mandates a tiering strategy. Egress fees often exceed storage fees; design for total cost of data delivery, not storage cost alone.
 :::
 
 Engineers who internalize the storage hierarchy gain a systematic diagnostic framework for training performance. When a cluster reports low accelerator utilization, the instinct is often to suspect the compute configuration or the model itself. In practice, the root cause is frequently buried in the data path: a data loader reading individual files instead of shards, a prefetch buffer sized for average latency rather than tail latency, a checkpoint strategy that blocks training while writing to a slow parallel file system, or a NUMA-unaware memory allocation that halves effective DRAM bandwidth. Diagnosing these failures requires understanding which tier is the bottleneck and why, a question that the pipeline equation and the storage hierarchy framework make answerable.

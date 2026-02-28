@@ -76,6 +76,8 @@ INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+(?:\.\w+)?)`")
 CELL_START_PATTERN = re.compile(r"^```\{python\}|^```python")
 CELL_END_PATTERN = re.compile(r"^```\s*$")
 ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
+# Tuple unpacking: "a, b = ..." — captures all names on the left side
+TUPLE_ASSIGN_PATTERN = re.compile(r"^((?:[A-Za-z_]\w*\s*,\s*)+[A-Za-z_]\w*)\s*=")
 CLASS_DEF_PATTERN = re.compile(r"^class\s+(\w+)\s*[:(]")
 GRID_TABLE_SEP_PATTERN = re.compile(r"^\+[-:=+]+\+$")
 LATEX_INLINE_PATTERN = re.compile(r"(?<!\\)\$\s*`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`|`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*(?<!\\)\$")
@@ -813,6 +815,10 @@ class ValidateCommand:
                     assign = ASSIGN_PATTERN.match(line.strip())
                     if assign:
                         compute_vars.add(assign.group(1))
+                    tuple_assign = TUPLE_ASSIGN_PATTERN.match(line.strip())
+                    if tuple_assign:
+                        for name in re.split(r'\s*,\s*', tuple_assign.group(1)):
+                            compute_vars.add(name.strip())
 
                 for match in INLINE_REF_PATTERN.finditer(line):
                     refs.append((idx, match.group(1)))
