@@ -260,11 +260,6 @@ class WorkloadSignatures:
     resnet_intensity_str = fmt(resnet_i, precision=1, commas=False)
     gpt2_intensity_str = fmt(gpt2_i, precision=2, commas=False)
     mobilenet_intensity_str = fmt(mobilenet_i, precision=1, commas=False)
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-resnet_intensity_str = WorkloadSignatures.resnet_intensity_str
-gpt2_intensity_str = WorkloadSignatures.gpt2_intensity_str
-mobilenet_intensity_str = WorkloadSignatures.mobilenet_intensity_str
 ```
 
 ### Workload Signatures: The Arithmetic Intensity Table {#sec-network-architectures-workload-signatures}
@@ -275,9 +270,9 @@ These bottlenecks are not accidental; they are the "signatures" of the underlyin
 
 | **Model Family**     | **Lighthouse**  | **Intensity ($I$)**                 | **Hardware Affinity**          |
 |:---------------------|:----------------|:------------------------------------|:-------------------------------|
-| **Dense CNN**        | **ResNet-50**   | ~`{python} resnet_intensity_str`    | **Compute-Rich** (GPUs/TPUs)   |
-| **Efficient Vision** | **MobileNetV2** | ~`{python} mobilenet_intensity_str` | **Balanced** (Mobile NPUs)     |
-| **Transformer**      | **GPT-2 (Inf)** | ~`{python} gpt2_intensity_str`      | **Bandwidth-Rich** (HBM3/H100) |
+| **Dense CNN**        | **ResNet-50**   | ~`{python} WorkloadSignatures.resnet_intensity_str`    | **Compute-Rich** (GPUs/TPUs)   |
+| **Efficient Vision** | **MobileNetV2** | ~`{python} WorkloadSignatures.mobilenet_intensity_str` | **Balanced** (Mobile NPUs)     |
+| **Transformer**      | **GPT-2 (Inf)** | ~`{python} WorkloadSignatures.gpt2_intensity_str`      | **Bandwidth-Rich** (HBM3/H100) |
 
 : **Lighthouse Workload Signatures**: The arithmetic intensity ($I$) of a model family determines its "natural" hardware home. High-intensity models like ResNet saturate the ALUs of a GPU, while low-intensity models like GPT-2 are perpetually "starved" for data, making memory bandwidth the only metric that matters for their performance. {#tbl-workload-signatures}
 
@@ -388,7 +383,6 @@ class LighthouseSpecs:
 
     a100_mem_str = fmt(a100_mem_gib, precision=0)
 
-
 class TransformerScaling:
     """
     Namespace for Transformer Scaling Laws.
@@ -434,7 +428,7 @@ Architecture selection is ultimately an engineering trade-off between **Math** (
 
 This spectrum determines whether the system needs a faster processor or faster memory to improve performance. The Roofline Model (@sec-machine-foundations-roofline-model-2529) provides the analytical framework for quantifying these limits on specific hardware, with applied examples in @sec-hardware-acceleration.
 
-::: {.callout-checkpoint title="Arithmetic Intensity and Architecture" collapse="false"}
+::: {.callout-checkpoint title="Arithmetic Intensity and Architecture"}
 Match the architectural choice to its systems implication:
 
 - [ ] **Weight Reuse (CNNs)**: Increases arithmetic intensity by using the same weights across many inputs.
@@ -1535,7 +1529,7 @@ Different tasks impose different requirements on where equivariance should be ma
 
 These task-specific requirements illustrate the **inductive bias** principle defined in @sec-network-architectures-architectural-principles-engineering-tradeoffs-362e: by restricting connectivity to local neighborhoods and sharing parameters across spatial positions, CNNs encode prior knowledge about the structure of visual data — that important features are local and translation-invariant. This architectural constraint reduces the hypothesis space that the network must search, enabling more efficient learning from limited data compared to fully connected networks.
 
-::: {.callout-checkpoint title="Spatial Inductive Bias" collapse="false"}
+::: {.callout-checkpoint title="Spatial Inductive Bias"}
 CNNs succeed because they match the structure of image data. Verify you understand how:
 
 - [ ] Can you explain **Parameter Sharing**: how using the same filter across the image reduces parameter count by orders of magnitude compared to MLPs?
@@ -1775,22 +1769,17 @@ class CNNSysImpl:
     weights_single_ch_str = fmt(weights_single_ch, precision=0, commas=True)
     spatial_positions_str = fmt(spatial_positions, precision=0, commas=True)
     activations_str = fmt(activations / 1e6, precision=1)       # "3.2" (millions)
-
-# ┌── EXPORTS (Bridge to Text) ────────────────────────────────────────────────
-cnn_weights_single_ch_str = CNNSysImpl.weights_single_ch_str
-cnn_spatial_positions_str = CNNSysImpl.spatial_positions_str
-cnn_activations_m_str = CNNSysImpl.activations_str
 ```
 
 #### Memory Requirements {#sec-network-architectures-memory-requirements-a1a1}
 
-For convolutional layers, memory requirements center around two key components: filter weights and feature maps. Unlike MLPs that require storing full connection matrices, CNNs use small, reusable filters. For a typical CNN processing $224 \times 224$ ImageNet images, a convolutional layer with 64 filters of size $3 \times 3$ applied to a single input channel requires storing only `{python} cnn_weights_single_ch_str` weight parameters ($3 \times 3 \times 1 \times 64$); for $C_{in}$ input channels, this becomes $3 \times 3 \times C_{in} \times 64$ parameters, still dramatically less than the millions of weights needed for equivalent fully-connected processing. The system must store feature maps for all spatial positions, creating a different memory demand. A $224 \times 224$ input with 64 output channels requires storing `{python} cnn_activations_m_str` million activation values ($224 \times 224 \times 64$).
+For convolutional layers, memory requirements center around two key components: filter weights and feature maps. Unlike MLPs that require storing full connection matrices, CNNs use small, reusable filters. For a typical CNN processing $224 \times 224$ ImageNet images, a convolutional layer with 64 filters of size $3 \times 3$ applied to a single input channel requires storing only `{python} CNNSysImpl.weights_single_ch_str` weight parameters ($3 \times 3 \times 1 \times 64$); for $C_{in}$ input channels, this becomes $3 \times 3 \times C_{in} \times 64$ parameters, still dramatically less than the millions of weights needed for equivalent fully-connected processing. The system must store feature maps for all spatial positions, creating a different memory demand. A $224 \times 224$ input with 64 output channels requires storing `{python} CNNSysImpl.activations_str` million activation values ($224 \times 224 \times 64$).
 
 These memory access patterns suggest opportunities for optimization through weight reuse and careful feature map management. Processors optimize these spatial patterns by caching filter weights for reuse across positions while streaming feature map data. CPUs use their cache hierarchy to keep frequently used filters resident, while GPUs employ specialized memory architectures designed for the spatial access patterns of image processing. The detailed architecture design principles for these specialized processors are covered in @sec-hardware-acceleration.
 
 #### Computation Needs {#sec-network-architectures-computation-needs-85cd}
 
-The core computation in CNNs involves repeatedly applying small filters across spatial positions. Each output value requires a local multiply-accumulate operation over the filter region. For ImageNet processing with $3 \times 3$ filters and 64 output channels, computing one spatial position involves $3 \times 3 \times C_{in} \times 64$ multiply-accumulates (`{python} cnn_weights_single_ch_str` per input channel), and this must be repeated for all `{python} cnn_spatial_positions_str` spatial positions ($224 \times 224$). While each individual computation involves fewer operations than an MLP layer, the total computational load remains large due to spatial repetition.
+The core computation in CNNs involves repeatedly applying small filters across spatial positions. Each output value requires a local multiply-accumulate operation over the filter region. For ImageNet processing with $3 \times 3$ filters and 64 output channels, computing one spatial position involves $3 \times 3 \times C_{in} \times 64$ multiply-accumulates (`{python} CNNSysImpl.weights_single_ch_str` per input channel), and this must be repeated for all `{python} CNNSysImpl.spatial_positions_str` spatial positions ($224 \times 224$). While each individual computation involves fewer operations than an MLP layer, the total computational load remains large due to spatial repetition.
 
 This computational pattern presents different optimization opportunities than MLPs. The regular, repeated nature of convolution operations enables efficient hardware utilization through structured parallelism. Modern processors exploit this pattern in various ways. CPUs use SIMD instructions[^fn-simd] to process multiple filter positions simultaneously, while GPUs parallelize computation across spatial positions and channels. The model optimization techniques that further reduce these computational demands, including specialized convolution optimizations and sparsity patterns, are detailed in @sec-model-compression.
 
@@ -1798,9 +1787,9 @@ This computational pattern presents different optimization opportunities than ML
 
 #### Data Movement {#sec-network-architectures-data-movement-36f6}
 
-The sliding window pattern of convolutions creates a distinctive data movement profile. Unlike MLPs where each weight is used once per forward pass, CNN filter weights are reused many times as the filter slides across spatial positions. For ImageNet processing, each $3 \times 3$ filter weight is reused `{python} cnn_spatial_positions_str` times (once for each position in the $224 \times 224$ feature map). This creates a different challenge: the system must stream input features through the computation unit while keeping filter weights stable.
+The sliding window pattern of convolutions creates a distinctive data movement profile. Unlike MLPs where each weight is used once per forward pass, CNN filter weights are reused many times as the filter slides across spatial positions. For ImageNet processing, each $3 \times 3$ filter weight is reused `{python} CNNSysImpl.spatial_positions_str` times (once for each position in the $224 \times 224$ feature map). This creates a different challenge: the system must stream input features through the computation unit while keeping filter weights stable.
 
-The predictable spatial access pattern enables strategic data movement optimizations. The CPU/GPU caching strategies described above apply directly to data movement: frameworks orchestrate computation to maximize the `{python} cnn_spatial_positions_str`$\times$ filter weight reuse and minimize redundant feature map accesses, exploiting the same spatial locality that makes CNNs memory-efficient.
+The predictable spatial access pattern enables strategic data movement optimizations. The CPU/GPU caching strategies described above apply directly to data movement: frameworks orchestrate computation to maximize the `{python} CNNSysImpl.spatial_positions_str`$\times$ filter weight reuse and minimize redundant feature map accesses, exploiting the same spatial locality that makes CNNs memory-efficient.
 
 ### Efficient Architectures: Keyword Spotting {#sec-network-architectures-efficient-architectures-keyword-spotting-0625}
 
@@ -1996,16 +1985,11 @@ class RNNCompute:
     recurrent_str = fmt(macs_recurrent, precision=0, commas=True)
     input_str = fmt(macs_input, precision=0, commas=True)
     total_str = fmt(macs_total, precision=0, commas=True)
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-rnn_recurrent_macs_str = RNNCompute.recurrent_str
-rnn_input_macs_str = RNNCompute.input_str
-rnn_macs_step_str = RNNCompute.total_str
 ```
 
 @lst-rnn_layer_step demonstrates the operation using high-level matrix operations found in deep learning frameworks. The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_xh` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
 
-::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications (h_prev x W_hh and x_t x W_xh) per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} rnn_recurrent_macs_str` + `{python} rnn_input_macs_str` = `{python} rnn_macs_step_str` MACs, but sequential dependencies prevent parallelization across time."}
+::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications (h_prev x W_hh and x_t x W_xh) per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
 ```{.python}
 def rnn_layer_step(x_t, h_prev, W_hh, W_xh, b):
     # x_t: input at time t (batch_size$\times$ input_dim)
@@ -2494,12 +2478,9 @@ class AttentionComputeCosts:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     attn_score_macs_m_str = fmt(score_macs / MILLION, precision=1, commas=False)  # e.g. "16.8"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-attn_score_macs_m_str = AttentionComputeCosts.attn_score_macs_m_str
 ```
 
-::: {#lst-attention_layer_compute lst-cap="**Attention Computation**: Two implementations showing the same O(N^2$\times$ d) complexity. The matrix form (top) uses optimized GEMM, while the nested loops (bottom) expose the quadratic pairwise comparisons: for sequence length 512 and dimension 64, computing attention scores requires 512$\times$ $512\times64$ = `{python} attn_score_macs_m_str` million MACs per attention head, plus another `{python} attn_score_macs_m_str`M for value aggregation."}
+::: {#lst-attention_layer_compute lst-cap="**Attention Computation**: Two implementations showing the same O(N^2$\times$ d) complexity. The matrix form (top) uses optimized GEMM, while the nested loops (bottom) expose the quadratic pairwise comparisons: for sequence length 512 and dimension 64, computing attention scores requires 512$\times$ $512\times64$ = `{python} AttentionComputeCosts.attn_score_macs_m_str` million MACs per attention head, plus another `{python} AttentionComputeCosts.attn_score_macs_m_str`M for value aggregation."}
 ```{.python}
 def attention_layer_matrix(Q, K, V):
     # Q, K, V: (batch_size$\times$ seq_len$\times$ d_model)
@@ -2509,7 +2490,6 @@ def attention_layer_matrix(Q, K, V):
     weights = softmax(scores)  # Normalize scores
     output = matmul(weights, V)  # Combine values
     return output
-
 
 # Core computational pattern
 def attention_layer_compute(Q, K, V):
@@ -2581,9 +2561,6 @@ class TransformerComplexityAnchor:
     scaling_ratio = 4.0 # doubling sequence quadruples memory
     scaling_ratio_str = f"{scaling_ratio:.0f}"
 
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-transformer_scaling_ratio_str = TransformerComplexityAnchor.scaling_ratio_str
-
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionMemory:
     """
@@ -2620,12 +2597,6 @@ class AttentionMemory:
 
 # Note: Use AttentionMemory.total_gb_str directly.
 # Legacy support for prose
-attn_seq_len_str = AttentionMemory.seq_len_str
-attn_elements_str = AttentionMemory.elements_str
-attn_bytes_str = AttentionMemory.bytes_per_element_str
-attn_layers_str = AttentionMemory.num_layers_str
-attn_single_gb_str = AttentionMemory.single_layer_gb_str
-attn_total_gb_str = AttentionMemory.total_gb_str
 
 # Note: Use AttentionMemory.total_gb_str directly.
 ```
@@ -2658,7 +2629,7 @@ Data movement in attention mechanisms presents challenges distinct from all prev
 
 These distinctive memory, computation, and data movement characteristics shape system design in fundamental ways. They also raise a natural question: attention may be effective enough to replace other architectural components entirely.
 
-::: {.callout-checkpoint title="Quadratic Scaling Intuition" collapse="false"}
+::: {.callout-checkpoint title="Quadratic Scaling Intuition"}
 Modern AI scaling is defined by the cost of Attention. Verify your intuition:
 
 - [ ] **Complexity**: Do you understand why doubling the sequence length quadruples the memory required for the Attention Matrix?
@@ -2844,7 +2815,6 @@ def self_attention_layer(X, W_Q, W_K, W_V, d_k):
     output = matmul(attention_weights, V)
 
     return output
-
 
 def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
     outputs = []
@@ -3131,7 +3101,7 @@ A quick calculation illustrates *the capacity wall*—how fast embedding tables 
 **The Systems Conclusion**: A single embedding table for one feature (Items) already consumes **`{python} CapacityWall.cw_utilization_pct_str`%** of an `{python} CapacityWall.a100_mem_str` GB A100 GPU. If you add a User table of the same size, the model **cannot fit** on a single machine. DLRM is **Capacity-Bound**, necessitating the "scale-out" distributed memory systems discussed in @sec-model-training.
 :::
 
-:::: {.callout-checkpoint title="DLRM and Sparse Scatter" collapse="false"}
+:::: {.callout-checkpoint title="DLRM and Sparse Scatter"}
 Recommendation systems stress a different part of the machine than CNNs or Transformers.
 
 - [ ] **Capacity-bound**: Can you explain why embedding tables push DLRM into a **memory capacity** regime where "FLOPs" is not the binding constraint?
@@ -3316,15 +3286,11 @@ class ResNetSkipOverhead:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     skip_memory_overhead_pct_str = fmt(memory_overhead_pct, precision=0, commas=False)  # e.g. "20"
     skip_epoch_cost_pct_str = fmt(epoch_cost_pct, precision=0, commas=False)            # e.g. "10"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-skip_memory_overhead_pct_str = ResNetSkipOverhead.skip_memory_overhead_pct_str
-skip_epoch_cost_pct_str = ResNetSkipOverhead.skip_epoch_cost_pct_str
 ```
 
-While skip connections solve gradient flow, they introduce system-level costs. Memory overhead increases because skip connections require storing the input to each residual block for the addition operation during the forward pass and for backpropagation. For a ResNet-50 with batch size 32 processing $224 \times 224$ RGB images, this adds approximately `{python} skip_memory_overhead_pct_str`% memory overhead compared to a plain network. The computational cost of the addition operation ($y = \mathcal{F}(x) + x$) is computationally trivial, adding negligible compute time. The primary cost is the residual function $\mathcal{F}(x)$ itself.
+While skip connections solve gradient flow, they introduce system-level costs. Memory overhead increases because skip connections require storing the input to each residual block for the addition operation during the forward pass and for backpropagation. For a ResNet-50 with batch size 32 processing $224 \times 224$ RGB images, this adds approximately `{python} ResNetSkipOverhead.skip_memory_overhead_pct_str`% memory overhead compared to a plain network. The computational cost of the addition operation ($y = \mathcal{F}(x) + x$) is computationally trivial, adding negligible compute time. The primary cost is the residual function $\mathcal{F}(x)$ itself.
 
-Better gradient flow accelerates convergence and reduces total training time. ResNet-50 typically converges in 90 epochs on ImageNet, while plain 50-layer networks may not converge at all. The per-epoch cost increases by approximately `{python} skip_epoch_cost_pct_str`% due to memory overhead, but total training time decreases dramatically because the network actually learns.
+Better gradient flow accelerates convergence and reduces total training time. ResNet-50 typically converges in 90 epochs on ImageNet, while plain 50-layer networks may not converge at all. The per-epoch cost increases by approximately `{python} ResNetSkipOverhead.skip_epoch_cost_pct_str`% due to memory overhead, but total training time decreases dramatically because the network actually learns.
 
 These empirical results establish a systems constraint: depth requires architectural support for gradient flow. The relationship is quantitative. Networks with fewer than 20 layers can train without skip connections, as demonstrated by architectures like VGG-16 [@simonyan2014very]. Between 20 and 100 layers, skip connections become necessary, which is why ResNet-50 and ResNet-101 incorporate them. Beyond 100 layers, skip connections alone prove insufficient; architectures like ResNet-v2 with pre-activation require skip connections plus careful normalization to maintain trainability.
 
@@ -3821,13 +3787,9 @@ class EnergyConsumptionAnalysis:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     energy_mac_pj_str = f"{mac_pj}"                             # e.g. "4.6"
     energy_dram_str = fmt(dram_pj, precision=0, commas=False)   # e.g. "26"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-energy_mac_pj_str = EnergyConsumptionAnalysis.energy_mac_pj_str
-energy_dram_str = EnergyConsumptionAnalysis.energy_dram_str
 ```
 
-Dense matrix operations in MLPs achieve excellent arithmetic intensity (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately `{python} energy_mac_pj_str` pJ, while data movement from DRAM costs `{python} energy_dram_str` pJ per 32-bit value [@horowitz2014computing]. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
+Dense matrix operations in MLPs achieve excellent arithmetic intensity (computation per data movement) but consume significant absolute energy. Each multiply-accumulate operation consumes approximately `{python} EnergyConsumptionAnalysis.energy_mac_pj_str` pJ, while data movement from DRAM costs `{python} EnergyConsumptionAnalysis.energy_dram_str` pJ per 32-bit value [@horowitz2014computing]. Given this energy ratio, typical MLP inference spends the majority of its energy budget on data movement rather than computation, making memory bandwidth optimization critical for energy efficiency.
 
 Convolutional operations reduce energy consumption through data reuse but exhibit variable efficiency depending on implementation. Im2col-based convolution implementations trade memory for simplicity, often doubling memory requirements and energy consumption. Direct convolution implementations can achieve substantially better energy efficiency by eliminating redundant data movement, particularly for larger kernel sizes where im2col duplication is most severe.
 
@@ -3922,11 +3884,6 @@ class WinogradCalc:
     winograd_reduction_str = fmt(winograd_reduction, precision=2, commas=False)  # e.g. "2.25"
     std_muls_3x3_str = f"{std_muls_3x3}"                         # e.g. "9"
     winograd_muls_str = f"{winograd_muls}"                       # e.g. "4"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-winograd_reduction_str = WinogradCalc.winograd_reduction_str
-std_muls_3x3_str = WinogradCalc.std_muls_3x3_str
-winograd_muls_str = WinogradCalc.winograd_muls_str
 ```
 
 [^fn-winograd]: **Winograd Algorithm**: This method achieves its 2.25$\times$ arithmetic reduction for $3 \times 3$ convolutions by trading expensive multiplications for a larger number of cheaper additions. The intermediate mathematical transforms required for this trade, however, amplify rounding errors. This loss of numerical precision makes Winograd unsuitable for FP16 training, creating a direct trade-off between arithmetic throughput and model stability. \index{Winograd Algorithm!convolution}\index{Winograd Algorithm!precision trade-off}
@@ -4086,31 +4043,19 @@ class ThroughputCeilingCalc:
     tc_objdet_gflops_str = f"{objdet_gflops}"                    # e.g. "100"
     tc_objdet_sustained_str = fmt(objdet_sustained_tflops, precision=0, commas=False) # e.g. "3"
     tc_objdet_headroom_str = fmt(objdet_headroom, precision=0, commas=False)    # e.g. "2"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-tc_fps_str = ThroughputCeilingCalc.tc_fps_str
-tc_resnet_gflops_str = ThroughputCeilingCalc.tc_resnet_gflops_str
-tc_sustained_gflops_str = ThroughputCeilingCalc.tc_sustained_gflops_str
-tc_gpu_tflops_str = ThroughputCeilingCalc.tc_gpu_tflops_str
-tc_effective_low_str = ThroughputCeilingCalc.tc_effective_low_str
-tc_effective_high_str = ThroughputCeilingCalc.tc_effective_high_str
-tc_headroom_str = ThroughputCeilingCalc.tc_headroom_str
-tc_objdet_gflops_str = ThroughputCeilingCalc.tc_objdet_gflops_str
-tc_objdet_sustained_str = ThroughputCeilingCalc.tc_objdet_sustained_str
-tc_objdet_headroom_str = ThroughputCeilingCalc.tc_objdet_headroom_str
 ```
 
 ::: {.callout-notebook title="The Throughput Ceiling"}
 
-**Problem**: You need to process **`{python} tc_fps_str` frames per second** of video with ResNet-50 for a real-time application. What sustained compute throughput do you need?
+**Problem**: You need to process **`{python} ThroughputCeilingCalc.tc_fps_str` frames per second** of video with ResNet-50 for a real-time application. What sustained compute throughput do you need?
 
 **The Math**:
 
-1.  **Model Cost**: ResNet-50 requires ~`{python} tc_resnet_gflops_str` GFLOPs per $224\times224$ image.
-2.  **Frame Rate**: `{python} tc_fps_str` FPS required.
-3.  **Sustained Throughput**: `{python} tc_fps_str`$\times$ `{python} tc_resnet_gflops_str` GFLOPs = **`{python} tc_sustained_gflops_str` GFLOPs/sec**.
+1.  **Model Cost**: ResNet-50 requires ~`{python} ThroughputCeilingCalc.tc_resnet_gflops_str` GFLOPs per $224\times224$ image.
+2.  **Frame Rate**: `{python} ThroughputCeilingCalc.tc_fps_str` FPS required.
+3.  **Sustained Throughput**: `{python} ThroughputCeilingCalc.tc_fps_str`$\times$ `{python} ThroughputCeilingCalc.tc_resnet_gflops_str` GFLOPs = **`{python} ThroughputCeilingCalc.tc_sustained_gflops_str` GFLOPs/sec**.
 
-**The Systems Conclusion**: A mid-range GPU delivering `{python} tc_gpu_tflops_str` TFLOPS theoretical peak achieves ~50--60% utilization in practice, yielding **`{python} tc_effective_low_str`--`{python} tc_effective_high_str` TFLOPS effective**. For ResNet-50 at `{python} tc_fps_str` FPS, you have **`{python} tc_headroom_str`$\times$ headroom**, easily achievable. Switch to an object detection model at `{python} tc_objdet_gflops_str` GFLOPs per frame, however, and you need **`{python} tc_objdet_sustained_str` TFLOPS sustained**, leaving only **`{python} tc_objdet_headroom_str`$\times$ headroom**. Add batch size constraints or multi-stream processing, and you quickly approach the compute ceiling. ResNet-50 is **Compute-Bound**, yet with comfortable margins on modern hardware.
+**The Systems Conclusion**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflops_str` TFLOPS theoretical peak achieves ~50--60% utilization in practice, yielding **`{python} ThroughputCeilingCalc.tc_effective_low_str`--`{python} ThroughputCeilingCalc.tc_effective_high_str` TFLOPS effective**. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str` FPS, you have **`{python} ThroughputCeilingCalc.tc_headroom_str`$\times$ headroom**, easily achievable. Switch to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflops_str` GFLOPs per frame, however, and you need **`{python} ThroughputCeilingCalc.tc_objdet_sustained_str` TFLOPS sustained**, leaving only **`{python} ThroughputCeilingCalc.tc_objdet_headroom_str`$\times$ headroom**. Add batch size constraints or multi-stream processing, and you quickly approach the compute ceiling. ResNet-50 is **Compute-Bound**, yet with comfortable margins on modern hardware.
 :::
 
 ```{python}
@@ -4181,20 +4126,6 @@ class WildlifeModelSizing:
     kws_example_flops_str = fmt(kws_example_flops_mflops, precision=0, commas=False)    # e.g. "6"
     energy_mj_str = fmt(energy_per_inf_mj, precision=0, commas=False)  # e.g. "15"
     energy_j_str = fmt(energy_per_day_j, precision=1, commas=False)    # e.g. "1.5"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-mnv1_params_str = WildlifeModelSizing.mnv1_params_str
-mnv1_flops_str = WildlifeModelSizing.mnv1_flops_str
-mnv1_fp32_str = WildlifeModelSizing.mnv1_fp32_str
-mnv1_int8_str = WildlifeModelSizing.mnv1_int8_str
-mnv2_params_str = WildlifeModelSizing.mnv2_params_str
-mnv2_flops_str = WildlifeModelSizing.mnv2_flops_str
-mnv2_fp32_str = WildlifeModelSizing.mnv2_fp32_str
-mnv2_int8_str = WildlifeModelSizing.mnv2_int8_str
-kws_example_params_str = WildlifeModelSizing.kws_example_params_str
-kws_example_flops_str = WildlifeModelSizing.kws_example_flops_str
-energy_mj_str = WildlifeModelSizing.energy_mj_str
-energy_j_str = WildlifeModelSizing.energy_j_str
 ```
 
 With the throughput ceiling established, we can now apply the complete decision framework to a realistic scenario that exercises every step.
@@ -4228,13 +4159,13 @@ The input is spatial data (images from camera traps, typically $1920\times1080$ 
 Compare candidates against our Lighthouse models:
 
 - **ResNet-50** (`{python} LighthouseSpecs.resnet_params_m_str` M params, `{python} LighthouseSpecs.resnet_gflops_str` GFLOPs): Too large. At ~`{python} LighthouseSpecs.resnet_fp32_mb_str` MB FP32, leaves no room for OS and buffers. Power consumption would exceed budget.
-- **MobileNetV1** (`{python} mnv1_params_str` M params, `{python} mnv1_flops_str` MFLOPs): Promising. ~`{python} mnv1_fp32_str` MB at FP32, ~`{python} mnv1_int8_str` MB quantized to INT8. Power-efficient depthwise separable convolutions.
-- **KWS DS-CNN** (`{python} kws_example_params_str` K params, `{python} kws_example_flops_str` MFLOPs): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
+- **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` M params, `{python} WildlifeModelSizing.mnv1_flops_str` MFLOPs): Promising. ~`{python} WildlifeModelSizing.mnv1_fp32_str` MB at FP32, ~`{python} WildlifeModelSizing.mnv1_int8_str` MB quantized to INT8. Power-efficient depthwise separable convolutions.
+- **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` K params, `{python} WildlifeModelSizing.kws_example_flops_str` MFLOPs): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
 
 **Architecture Selection:** MobileNetV2 variant with width multiplier 0.75
 
-- **Parameters:** ~`{python} mnv2_params_str` M (~`{python} mnv2_fp32_str` MB FP32, ~`{python} mnv2_int8_str` MB INT8)
-- **FLOPs:** ~`{python} mnv2_flops_str` MFLOPs at $224\times224$
+- **Parameters:** ~`{python} WildlifeModelSizing.mnv2_params_str` M (~`{python} WildlifeModelSizing.mnv2_fp32_str` MB FP32, ~`{python} WildlifeModelSizing.mnv2_int8_str` MB INT8)
+- **FLOPs:** ~`{python} WildlifeModelSizing.mnv2_flops_str` MFLOPs at $224\times224$
 - **Rationale:** Sufficient capacity for 50-class problem; fits memory budget with margin; depthwise separable convolutions are power-efficient
 
 #### Step 4: Systems Validation {.unnumbered}
@@ -4249,8 +4180,8 @@ $$
 $$\frac{150 \text{ MOPs}}{2 \text{ GOPS}} = 75 \text{ ms latency} \ll 500 \text{ ms target} \checkmark$$
 
 *Power Check:*
-Estimated inference power: ~200 mW for 75 ms = `{python} energy_mj_str` mJ per inference
-At 100 inferences/day: `{python} energy_j_str` J/day → negligible vs. sleep power budget $\checkmark$
+Estimated inference power: ~200 mW for 75 ms = `{python} WildlifeModelSizing.energy_mj_str` mJ per inference
+At 100 inferences/day: `{python} WildlifeModelSizing.energy_j_str` J/day → negligible vs. sleep power budget $\checkmark$
 
 #### Step 5: Risk Assessment {.unnumbered}
 
@@ -4320,14 +4251,11 @@ class A100ClusterMemory:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     a100_8x_mem_str = f"{a100_8x_mem}"                           # e.g. "640"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-a100_8x_mem_str = A100ClusterMemory.a100_8x_mem_str
 ```
 
 **Pitfall:** *Optimizing architectural decisions for training hardware without considering deployment constraints.*
 
-Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} a100_8x_mem_str` GB total memory) cannot deploy to edge devices with 4 GB—the 160$\times$ reduction requires architectural changes, not just quantization. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
+Teams design for high-end GPU clusters, then discover deployment failures on target hardware. An architecture exploiting 8$\times$ A100 GPUs (`{python} A100ClusterMemory.a100_8x_mem_str` GB total memory) cannot deploy to edge devices with 4 GB—the 160$\times$ reduction requires architectural changes, not just quantization. As @sec-network-architectures-decision-framework-a889 emphasizes, architecture selection must analyze the full system stack. Edge deployment compounds constraints: models must fit 10–100 MB storage, execute in 50–200 ms, and operate within 2–5 W power. Organizations deferring deployment considerations to "optimize later" encounter mismatches requiring costly redesigns that delay products by months.
 
 **Pitfall:** *Ignoring KV cache growth when estimating Transformer serving costs.*
 

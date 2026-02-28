@@ -3,10 +3,12 @@ import { QmdPythonValueResolver, extractInlineRefs } from './qmdPythonValueResol
 
 // ─── Shared regex ────────────────────────────────────────────────────────────
 
-const INLINE_PYTHON_REGEX = /`\{python\}\s+(\w+)`/g;
+const INLINE_PYTHON_REGEX = /`\{python\}\s+(\w+(?:\.\w+)?)`/g;
 const CODE_BLOCK_START = /^```\{python\}/;
 const CODE_BLOCK_END = /^```\s*$/;
 const EXPORT_ASSIGNMENT = /^(\w+)\s*=\s*/;
+const CLASS_DEF = /^class\s+(\w+)\s*[:(]/;
+const INDENTED_ASSIGNMENT = /^\s+(\w+)\s*=\s*/;
 
 // ─── Hover Provider ──────────────────────────────────────────────────────────
 
@@ -284,16 +286,27 @@ export class QmdPythonCodeLensProvider implements vscode.CodeLensProvider, vscod
     // Find code blocks that contain export assignments for inline vars
     inBlock = false;
     let currentBlockStart = -1;
+    let currentClass: string | null = null;
     const blockExports = new Map<number, string[]>();
 
     for (let i = 0; i < lines.length; i++) {
       if (CODE_BLOCK_START.test(lines[i])) {
         inBlock = true;
         currentBlockStart = i;
+        currentClass = null;
       } else if (inBlock && CODE_BLOCK_END.test(lines[i])) {
         inBlock = false;
         currentBlockStart = -1;
+        currentClass = null;
       } else if (inBlock && currentBlockStart >= 0) {
+        const classMatch = lines[i].match(CLASS_DEF);
+        if (classMatch) {
+          currentClass = classMatch[1];
+        } else if (currentClass && /^\S/.test(lines[i]) && lines[i].trim().length > 0) {
+          currentClass = null;
+        }
+
+        // Module-level assignments (bridge pattern)
         const assignMatch = lines[i].match(EXPORT_ASSIGNMENT);
         if (assignMatch) {
           const varName = assignMatch[1];
@@ -302,6 +315,20 @@ export class QmdPythonCodeLensProvider implements vscode.CodeLensProvider, vscod
               blockExports.set(currentBlockStart, []);
             }
             blockExports.get(currentBlockStart)!.push(varName);
+          }
+        }
+
+        // Class attribute assignments (direct ClassName.attr pattern)
+        if (currentClass) {
+          const indentedMatch = lines[i].match(INDENTED_ASSIGNMENT);
+          if (indentedMatch) {
+            const dottedName = `${currentClass}.${indentedMatch[1]}`;
+            if (inlineVars.includes(dottedName) && values.has(dottedName)) {
+              if (!blockExports.has(currentBlockStart)) {
+                blockExports.set(currentBlockStart, []);
+              }
+              blockExports.get(currentBlockStart)!.push(dottedName);
+            }
           }
         }
       }

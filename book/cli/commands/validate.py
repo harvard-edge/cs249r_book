@@ -72,13 +72,14 @@ class ValidationRunResult:
         }
 
 
-INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+)`")
+INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+(?:\.\w+)?)`")
 CELL_START_PATTERN = re.compile(r"^```\{python\}|^```python")
 CELL_END_PATTERN = re.compile(r"^```\s*$")
 ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
+CLASS_DEF_PATTERN = re.compile(r"^class\s+(\w+)\s*[:(]")
 GRID_TABLE_SEP_PATTERN = re.compile(r"^\+[-:=+]+\+$")
-LATEX_INLINE_PATTERN = re.compile(r"(?<!\\)\$\s*`\{python\}\s+[^`]+`|`\{python\}\s+[^`]+`\s*(?<!\\)\$")
-LATEX_ADJACENT_PATTERN = re.compile(r"`\{python\}\s+[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$")
+LATEX_INLINE_PATTERN = re.compile(r"(?<!\\)\$\s*`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`|`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*(?<!\\)\$")
+LATEX_ADJACENT_PATTERN = re.compile(r"`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$")
 
 CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
@@ -223,6 +224,8 @@ class ValidateCommand:
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
         parser.add_argument("--check-patterns", action="store_true", default=True, help="refs --scope inline: include pattern hazard checks (default: on)")
         parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
+        parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
+        parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
         parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
         parser.add_argument("--tables", action="store_true", help="labels: filter to tables")
         parser.add_argument("--sections", action="store_true", help="labels: filter to sections")
@@ -307,7 +310,8 @@ class ValidateCommand:
                 checks_raw = ns.citations_in_raw or (not ns.citations_in_code and not ns.citations_in_raw)
                 results.append(method(root, citations_in_code=checks_code, citations_in_raw=checks_raw))
             elif method_name == "_run_inline_refs":
-                results.append(method(root, check_patterns=ns.check_patterns))
+                results.append(method(root, check_patterns=ns.check_patterns,
+                                      check_scope=getattr(ns, 'check_scope', False)))
             elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
                 results.append(method(root, self._selected_label_types(ns)))
             elif method_name == "_run_check_references":
@@ -777,7 +781,8 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
-    def _run_inline_refs(self, root: Path, check_patterns: bool) -> ValidationRunResult:
+    def _run_inline_refs(self, root: Path, check_patterns: bool,
+                         check_scope: bool = False) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -791,6 +796,7 @@ class ValidateCommand:
             lines = self._read_text(file).splitlines()
             refs: List[Tuple[int, str]] = []
             compute_vars: Set[str] = set()
+            compute_classes: Set[str] = set()
             in_cell = False
 
             for idx, line in enumerate(lines, 1):
@@ -801,6 +807,9 @@ class ValidateCommand:
                     in_cell = False
                     continue
                 if in_cell:
+                    cls_match = CLASS_DEF_PATTERN.match(line.strip())
+                    if cls_match:
+                        compute_classes.add(cls_match.group(1))
                     assign = ASSIGN_PATTERN.match(line.strip())
                     if assign:
                         compute_vars.add(assign.group(1))
@@ -808,15 +817,20 @@ class ValidateCommand:
                 for match in INLINE_REF_PATTERN.finditer(line):
                     refs.append((idx, match.group(1)))
 
-            for line_no, var in refs:
-                if var not in compute_vars:
+            for line_no, ref in refs:
+                if "." in ref:
+                    cls_name = ref.split(".", 1)[0]
+                    resolved = cls_name in compute_classes or cls_name in compute_vars
+                else:
+                    resolved = ref in compute_vars
+                if not resolved:
                     issues.append(ValidationIssue(
                         file=self._relative_file(file),
                         line=line_no,
                         code="undefined_inline_ref",
-                        message=f"Inline reference `{var}` is not defined in python cells",
+                        message=f"Inline reference `{ref}` is not defined in python cells",
                         severity="error",
-                        context=f"`{{python}} {var}`",
+                        context=f"`{{python}} {ref}`",
                     ))
 
             if check_patterns:
@@ -890,6 +904,22 @@ class ValidateCommand:
                             severity="error",
                             context=stripped[:160],
                         ))
+
+            if check_scope:
+                from book.quarto.mlsys.validate_inline_refs import check_scope as _check_scope, BOOK_ROOT
+                try:
+                    scope_warnings = _check_scope(file, verbose=False)
+                    for filepath, lineno, check_type, msg in scope_warnings:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=lineno,
+                            code=check_type.lower(),
+                            message=msg,
+                            severity="warning",
+                            context="",
+                        ))
+                except Exception:
+                    pass
 
         return ValidationRunResult(
             name="inline-refs",
