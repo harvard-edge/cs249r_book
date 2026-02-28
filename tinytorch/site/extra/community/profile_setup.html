@@ -307,9 +307,10 @@
 </script>
 
 <script type="module">
-    import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
     import { SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY, SUPABASE_URL, getBasePath } from './modules/config.js';
     import { initCandle } from './modules/candle.js';
+    import { supabase } from './modules/state.js';
+    import './modules/guard.js'; // Guard handles access control and completeness redirects
 
     // Initialize Candle
     initCandle('candleCanvas');
@@ -380,65 +381,48 @@
     const depthSegments = 100;
     const geometry = new THREE.PlaneGeometry(width, depth, widthSegments, depthSegments);
     geometry.rotateX(-Math.PI / 2);
-    const count = geometry.attributes.position.count;
-    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
-    const material = new THREE.MeshBasicMaterial({ vertexColors: true, wireframe: true, transparent: true, opacity: 0.4 });
-    const terrain = new THREE.Mesh(geometry, material);
+
+    const terrainMat = new THREE.ShaderMaterial({
+        vertexShader: document.getElementById('terrain-vs').textContent,
+        fragmentShader: document.getElementById('terrain-fs').textContent,
+        uniforms: {
+            uTime: { value: 0 },
+            uNoiseScale: { value: 0.15 },
+            uHeightScale: { value: 4.0 }
+        },
+        wireframe: true,
+        transparent: true
+    });
+
+    const terrain = new THREE.Mesh(geometry, terrainMat);
     scene.add(terrain);
 
-    const solidMat = new THREE.MeshBasicMaterial({ color: 0xf5f5f0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
+    // Solid base layer
+    const solidMat = new THREE.ShaderMaterial({
+        vertexShader: document.getElementById('terrain-vs').textContent,
+        fragmentShader: document.getElementById('terrain-fs').textContent,
+        uniforms: {
+            uTime: { value: 0 },
+            uNoiseScale: { value: 0.15 },
+            uHeightScale: { value: 4.0 }
+        },
+        polygonOffset: true,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits: 1
+    });
     const terrainSolid = new THREE.Mesh(geometry, solidMat);
     scene.add(terrainSolid);
 
-    const noiseScale = 0.15;
-    const heightScale = 4.0;
-    const positionAttribute = geometry.attributes.position;
-    const colorAttribute = geometry.attributes.color;
-    const originalPositions = positionAttribute.array.slice();
-
-    const colorWater = new THREE.Color(0x3498db);
-    const colorSand = new THREE.Color(0xf1c40f);
-    const colorGrass = new THREE.Color(0x2ecc71);
-    const colorRock = new THREE.Color(0xe74c3c);
-
-    function getColorForHeight(h) {
-        let finalColor = new THREE.Color();
-        if (h < -0.2) finalColor.copy(colorWater);
-        else if (h < 0.1) finalColor.lerpColors(colorWater, colorSand, (h + 0.2) / 0.3);
-        else if (h < 0.6) finalColor.lerpColors(colorSand, colorGrass, (h - 0.1) / 0.5);
-        else finalColor.lerpColors(colorGrass, colorRock, Math.min((h - 0.6) / 0.9, 1));
-        return finalColor;
-    }
-
-    function updateScene() {
-        skyMesh.material.uniforms.uTime.value += 0.01;
-        const time = skyMesh.material.uniforms.uTime.value;
-        const flyOverY = time * 2; // Simpler flyover
-
-        for (let i = 0; i < count; i++) {
-            const ix = i * 3;
-            const iz = i * 3 + 2;
-            const x = originalPositions[ix];
-            const z = originalPositions[iz];
-            const vZ = z - flyOverY;
-            const noiseVal = Noise.perlin2(x * noiseScale, vZ * noiseScale);
-            let height = noiseVal * heightScale;
-            if (height < -1) height = -1;
-            positionAttribute.setY(i, height);
-            const c = getColorForHeight(noiseVal);
-            c.multiplyScalar(0.9);
-            colorAttribute.setXYZ(i, c.r, c.g, c.b);
-        }
-        positionAttribute.needsUpdate = true;
-        colorAttribute.needsUpdate = true;
-    }
-
     function animate() {
         requestAnimationFrame(animate);
-        updateScene();
+        const time = performance.now() * 0.001;
+        skyMesh.material.uniforms.uTime.value = time;
+        terrain.material.uniforms.uTime.value = time;
+        terrainSolid.material.uniforms.uTime.value = time;
         renderer.render(scene, camera);
     }
     animate();
+
     window.addEventListener('resize', () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
@@ -447,17 +431,7 @@
 
 
     // --- AUTH & PROFILE LOGIC ---
-    const supabase = createClient(SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY);
-
-    // --- 0. HYDRATE SESSION ---
-    const storedToken = localStorage.getItem("tinytorch_token");
-    const storedRefresh = localStorage.getItem("tinytorch_refresh_token");
-    if (storedToken && storedRefresh) {
-        await supabase.auth.setSession({
-            access_token: storedToken,
-            refresh_token: storedRefresh
-        });
-    }
+    // supabase is imported from state.js above
 
     // --- 1. AUTOCOMPLETE LOGIC ---
     const locInput = document.getElementById('locationInput');
@@ -491,63 +465,27 @@
         }, 300);
     });
 
-    // --- 2. PRE-FILL LOGIC (WITH FALLBACK) ---
-    async function loadUser() {
-        const { data: { user } } = await supabase.auth.getUser();
-        let userProfile = null;
-        let userId = null;
+    // --- 2. PRE-FILL LOGIC ---
+    async function loadUser(user) {
+        if (!user) return;
 
-        if(!user) {
-            // Fallback: Check Token Manually if getUser failed (e.g. missing refresh token)
-            if (storedToken) {
-                 try {
-                      // Fetch details directly to confirm token and get user ID
-                      const res = await fetch(`${SUPABASE_URL}/get-profile-details`, {
-                          headers: { 'Authorization': `Bearer ${storedToken}` }
-                      });
-                      if (res.ok) {
-                          const data = await res.json();
-                          // Construct a minimal user object or just use the profile data
-                          // We need userId to query 'profiles' or we can just use the data returned
-                          userProfile = data.profile;
-                          userId = data.profile.id; // Assuming profile has ID, or we get it from token decoding (complicated without lib)
-                          // Actually, get-profile-details returns the profile! We can use it directly.
-                      } else {
-                          // Token invalid
-                          window.location.href = getBasePath() + '/index.html';
-                          return;
-                      }
-                 } catch(e) {
-                      window.location.href = getBasePath() + '/index.html';
-                      return;
-                 }
-            } else {
-                 window.location.href = getBasePath() + '/index.html';
-                 return;
-            }
-        } else {
-             userId = user.id;
-        }
-
-        // 1. Try to grab name from Google/GitHub metadata (if available from getUser)
-        if(user && user.user_metadata) {
+        // 1. Try to grab name from Google/GitHub metadata
+        if(user.user_metadata) {
             if(user.user_metadata.full_name) {
                 document.getElementById('fullName').value = user.user_metadata.full_name;
                 const parts = user.user_metadata.full_name.split(' ');
-                if(parts.length > 0) document.getElementById('displayName').value = parts[0];
+                if(parts.length > 0 && !document.getElementById('displayName').value) {
+                    document.getElementById('displayName').value = parts[0];
+                }
             }
             if(user.user_metadata.name && !document.getElementById('fullName').value) {
                  document.getElementById('fullName').value = user.user_metadata.name;
             }
         }
 
-        // 2. Load Profile Data (Either from fallback or DB)
-        if (userProfile) {
-            populateForm(userProfile);
-        } else if (userId) {
-            const { data: profile } = await supabase.from('profiles').select('*').eq('id', userId).single();
-            if(profile) populateForm(profile);
-        }
+        // 2. Load Profile Data from DB
+        const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        if(profile) populateForm(profile);
     }
 
     function populateForm(profile) {
@@ -572,7 +510,17 @@
         }
     }
 
-    loadUser();
+    // Listen for auth state to trigger load
+    supabase.auth.onAuthStateChange((event, session) => {
+        if (session && session.user) {
+            loadUser(session.user);
+        }
+    });
+
+    // Initial load check
+    supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) loadUser(user);
+    });
 
     // --- 3. SUBMIT LOGIC ---
     document.getElementById('setupForm').addEventListener('submit', async (e) => {
@@ -582,8 +530,11 @@
         btn.disabled = true;
 
         const { data: { session } } = await supabase.auth.getSession();
-        // Use stored token if session is missing (Fallback)
-        const tokenToUse = session ? session.access_token : storedToken;
+        if (!session) {
+            alert("Session lost. Please log in again.");
+            window.location.href = getBasePath() + '/index.html?action=login';
+            return;
+        }
 
         const instVal = document.getElementById('institution').value.trim();
         const institutions = instVal ? [instVal] : ["Independent"];
@@ -595,7 +546,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${tokenToUse}`
+                    'Authorization': `Bearer ${session.access_token}`
                 },
                 body: JSON.stringify({
                     display_name: document.getElementById('displayName').value,
@@ -612,6 +563,8 @@
             });
 
             if(!res.ok) throw new Error("Save failed");
+            
+            // Success! Guard will now see profile as complete and allow dashboard access
             window.location.href = getBasePath() + '/dashboard.html';
 
         } catch(err) {

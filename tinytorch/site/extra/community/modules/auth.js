@@ -1,11 +1,8 @@
 import { NETLIFY_URL, SUPABASE_URL, SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY, getBasePath } from './config.js';
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
-import { updateNavState } from './ui.js?v=2';
+import { updateNavState } from './ui.js';
 import { closeProfileModal, openProfileModal } from './profile.js';
-import { getSession, forceLogin, clearSession } from './state.js?v=2';
+import { getSession, forceLogin, clearSession, supabase } from './state.js';
 
-// Initialize Supabase Client
-const supabase = createClient(SUPABASE_PROJECT_URL, SUPABASE_ANON_KEY);
 export { supabase };
 
 export async function signInWithSocial(provider) {
@@ -267,19 +264,50 @@ export async function handleAuth(e) {
     authSubmit.innerHTML = '<div class="spinner"></div>';
 
     try {
-        let endpoint, body;
-
-        if (currentMode === 'forgot') {
-            endpoint = '/api/auth/reset-password';
-            body = { email };
-        } else {
-            endpoint = currentMode === 'login' ? '/api/auth/login' : '/api/auth/signup';
-            body = {
+        // Direct Supabase flow for Signup
+        if (currentMode === 'signup') {
+            const redirectUrl = window.location.origin + basePath + '/index.html?action=login&confirmed_email=true';
+            console.log("Requesting signup with redirect to:", redirectUrl);
+            
+            const { error } = await supabase.auth.signUp({
                 email,
                 password,
-                redirect_to: window.location.origin + basePath + '/index.html?action=login&confirmed_email=true'
-            };
+                options: {
+                    emailRedirectTo: redirectUrl
+                }
+            });
+            if (error) throw error;
+
+            closeModal();
+            showMessageModal(
+                'Check your Email', 
+                'If you don\'t already have an account, we have sent you an email. Please check your inbox to confirm your signup.'
+            );
+            return;
         }
+
+        // Direct Supabase flow for Password Reset
+        if (currentMode === 'forgot') {
+            const redirectUrl = window.location.origin + basePath + '/index.html?action=reset-password';
+            console.log("Requesting password reset with redirect to:", redirectUrl);
+
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: redirectUrl
+            });
+            if (error) throw error;
+            
+            showMessageModal('Reset Link Sent', 'If an account exists, a reset link has been sent.');
+            setMode('login');
+            return;
+        }
+
+        // Keep existing API flow for Login
+        const endpoint = '/api/auth/login';
+        const body = {
+            email,
+            password,
+            redirect_to: window.location.origin + basePath + '/index.html?action=login&confirmed_email=true'
+        };
 
         const url = `${NETLIFY_URL}${endpoint}`;
 
@@ -294,72 +322,60 @@ export async function handleAuth(e) {
 
         const data = await response.json();
 
-        if (currentMode === 'forgot') {
-                if (response.ok) {
-                    showMessageModal('Reset Link Sent', data.message || 'If an account exists, a reset link has been sent.');
-                    setMode('login');
-                } else {
-                    throw new Error(data.error || 'Failed to send reset link');
+        if (!response.ok) {
+            throw new Error(data.error || 'Login failed');
+        }
+
+        if (data.access_token) {
+            localStorage.setItem("tinytorch_token", data.access_token);
+            if (data.refresh_token) localStorage.setItem("tinytorch_refresh_token", data.refresh_token);
+            localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
+
+            // Sync Supabase Client so it doesn't trigger SIGNED_OUT
+            if (data.refresh_token) {
+                const { error: sessionError } = await supabase.auth.setSession({
+                    access_token: data.access_token,
+                    refresh_token: data.refresh_token
+                });
+                if (sessionError) {
+                    console.error("Supabase setSession error during login:", sessionError);
                 }
-        } else {
-            if (!response.ok) {
-                throw new Error(data.error || (currentMode === 'login' ? 'Login failed' : 'Signup failed'));
             }
 
-            if (currentMode === 'login') {
-                if (data.access_token) {
-                    localStorage.setItem("tinytorch_token", data.access_token);
-                    if (data.refresh_token) localStorage.setItem("tinytorch_refresh_token", data.refresh_token);
-                    localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
+            updateNavState();
 
-                    // Sync Supabase Client so it doesn't trigger SIGNED_OUT
-                    if (data.refresh_token) {
-                        const { error: sessionError } = await supabase.auth.setSession({
-                            access_token: data.access_token,
-                            refresh_token: data.refresh_token
-                        });
-                        if (sessionError) {
-                            console.error("Supabase setSession error during login:", sessionError);
-                        }
-                    }
+            // Check Profile Completeness immediately
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('display_name, institution, location')
+                .eq('id', data.user.id)
+                .single();
 
-                    updateNavState();
+            const hasName = profile && profile.display_name;
+            const hasInst = profile && profile.institution && (Array.isArray(profile.institution) ? profile.institution.length > 0 : !!profile.institution);
+            const hasLoc = profile && profile.location;
 
-                    // Check Profile Completeness immediately
-                    const { data: profile } = await supabase
-                        .from('profiles')
-                        .select('display_name, institution, location')
-                        .eq('id', data.user.id)
-                        .single();
+            const params = new URLSearchParams(window.location.search);
+            const nextParam = params.get('next');
+            
+            closeModal(); // Always close modal on success
 
-                    const hasName = profile && profile.display_name;
-                    const hasInst = profile && profile.institution && (Array.isArray(profile.institution) ? profile.institution.length > 0 : !!profile.institution);
-                    const hasLoc = profile && profile.location;
+            if (nextParam) {
+                // Ensure nextParam is a clean path if it was encoded
+                const cleanNext = decodeURIComponent(nextParam).split('?')[0];
+                window.location.href = cleanNext;
+                return;
+            }
 
-                    if (!hasName || !hasInst || !hasLoc) {
-                        window.location.href = basePath + '/profile_setup.html';
-                        return;
-                    }
+            if (!hasName || !hasInst || !hasLoc) {
+                window.location.href = basePath + '/profile_setup.html';
+                return;
+            }
 
-                    const params = new URLSearchParams(window.location.search);
-                    if (params.get('action') === 'profile') {
-                        closeModal();
-                        openProfileModal();
-                    } else {
-                        window.location.href = basePath + '/dashboard.html';
-                    }
-                }
+            if (params.get('action') === 'profile') {
+                openProfileModal();
             } else {
-                // Signup Success - Show Message Modal
-                // We close the auth modal first so it doesn't overlap
-                closeModal();
-                showMessageModal(
-                    'Check your Email', 
-                    'If you don\'t already have an account, we have sent you an email. Please check your inbox to confirm your signup.',
-                    () => {
-                        window.location.href = basePath + '/dashboard.html';
-                    }
-                );
+                window.location.href = basePath + '/dashboard.html';
             }
         }
 
