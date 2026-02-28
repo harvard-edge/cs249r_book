@@ -26,6 +26,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+
 console = Console()
 
 # Path to section_splitter (in content scripts)
@@ -69,68 +70,25 @@ def _assimilate_legacy_debug_logs(book_dir: Path) -> List[Tuple[Path, Path]]:
     return migrated
 
 
-def _get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
-    """Read ordered chapter list from the PDF config file.
-
-    Extracts chapter names from the volume's PDF config, excluding
-    frontmatter, backmatter, parts, and other non-chapter files.
-    """
-    config_file = book_dir / "config" / f"_quarto-pdf-{volume}.yml"
-
-    if not config_file.exists():
-        return []
-
-    content = config_file.read_text()
-
-    # Match chapter paths like: - contents/vol1/training/training.qmd
-    # Also matches commented-out lines (# - contents/...)
-    pattern = rf'#?\s*-\s*contents/{volume}/[^/]+/([^/]+)\.qmd'
-
-    exclude = {
-        "index", "references", "glossary", "foreword", "about",
-        "acknowledgements", "foundations_principles", "build_principles",
-        "optimize_principles", "deploy_principles", "inference_principles",
-        "infrastructure_principles", "production_principles",
-        "responsible_principles", "scale_principles",
-    }
-
-    chapters = []
-    for match in re.finditer(pattern, content):
-        chapter = match.group(1)
-        if chapter not in chapters and chapter not in exclude:
-            chapters.append(chapter)
-
-    return chapters
-
-
-def _get_chapters_from_directory(book_dir: Path, volume: str) -> List[str]:
-    """Fallback: scan filesystem for chapter directories."""
-    contents_dir = book_dir / "contents" / volume
-
-    if not contents_dir.exists():
-        return []
-
-    exclude = {"parts", "frontmatter", "backmatter", "index", "glossary"}
-
-    chapters = []
-    for item in sorted(contents_dir.iterdir()):
-        if item.is_dir() and item.name not in exclude:
-            qmd_file = item / f"{item.name}.qmd"
-            if qmd_file.exists():
-                chapters.append(item.name)
-
-    return chapters
-
 
 def _find_chapter_qmd(book_dir: Path, chapter: str, volume: str) -> Path:
-    """Locate the .qmd file for a chapter."""
-    contents_dir = book_dir / "contents" / volume
-    for subdir in contents_dir.iterdir():
-        if subdir.is_dir():
-            qmd = subdir / f"{chapter}.qmd"
-            if qmd.exists():
-                return qmd
-    raise FileNotFoundError(f"Chapter '{chapter}' not found in {contents_dir}")
+    """Locate the .qmd file for a chapter.
+
+    Searches the volume directory first, then falls back to the shared
+    directory (e.g. contents/shared/notation.qmd).
+    """
+    contents_dir = book_dir / "contents"
+    # Search volume dir and shared dir (covers frontmatter, parts, shared files)
+    for matches in [
+        list((contents_dir / volume).rglob(f"{chapter}.qmd")),
+        list((contents_dir / "shared").rglob(f"{chapter}.qmd")),
+    ]:
+        if matches:
+            return matches[0]
+    raise FileNotFoundError(
+        f"Chapter '{chapter}' not found under {contents_dir / volume} "
+        f"or {contents_dir / 'shared'}"
+    )
 
 
 def _get_output_dir(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
@@ -371,10 +329,7 @@ class DebugCommand:
         Returns:
             List of (chapter_name, error_snippet) for each failure
         """
-        chapters = _get_chapters_from_config(self.book_dir, volume)
-        if not chapters:
-            console.print("[yellow]Config not found, falling back to directory scan...[/yellow]")
-            chapters = _get_chapters_from_directory(self.book_dir, volume)
+        chapters = self.chapter_discovery.get_chapters_from_config(volume)
 
         if not chapters:
             console.print("[red]No chapters found.[/red]")

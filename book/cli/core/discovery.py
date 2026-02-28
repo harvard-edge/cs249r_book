@@ -3,6 +3,11 @@ File and chapter discovery for MLSysBook CLI.
 
 Handles finding chapter files, validating paths, and managing file operations.
 Supports volume-aware discovery for vol1 and vol2.
+
+Single source of truth for chapter ordering: `get_chapters_from_config()` reads
+the PDF YAML config for a volume and returns the ordered list of testable chapter
+stems. All commands (debug, build, validate, etc.) should call this method rather
+than maintaining their own exclusion lists or filesystem scans.
 """
 
 import re
@@ -15,6 +20,85 @@ console = Console()
 
 # Volume directories
 VOLUME_DIRS = ["vol1", "vol2"]
+
+
+def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
+    """Return the ordered list of buildable file stems from the PDF config.
+
+    Reads ``book/config/_quarto-pdf-{volume}.yml`` and extracts every entry
+    under ``book.chapters`` — including frontmatter, parts pages, and shared
+    files.  Appendices are excluded.  Only ``index.qmd`` and ``references.qmd``
+    are skipped, as they cannot be rendered standalone.
+
+    Args:
+        book_dir: Path to the ``book/quarto`` directory.
+        volume: ``"vol1"`` or ``"vol2"``.
+
+    Returns:
+        Ordered list of file stems in YAML order (e.g. ``["dedication",
+        "introduction", "distributed_training", ...]``).  Empty list if the
+        config is missing or cannot be parsed.
+    """
+    config_file = book_dir / "config" / f"_quarto-pdf-{volume}.yml"
+    if not config_file.exists():
+        return []
+
+    # Only skip files that genuinely cannot be rendered standalone
+    _SKIP_STEMS = {"index", "references"}
+
+    def _is_testable(path_str: str) -> bool:
+        return Path(path_str).stem not in _SKIP_STEMS
+
+    # --- YAML-aware path (preferred) ---
+    try:
+        import yaml  # type: ignore
+
+        raw = yaml.safe_load(config_file.read_text())
+        chapter_entries = raw.get("book", {}).get("chapters", [])
+
+        chapters: List[str] = []
+        seen: set = set()
+        for entry in chapter_entries:
+            if isinstance(entry, str):
+                path = entry
+            elif isinstance(entry, dict):
+                path = entry.get("file", "")
+            else:
+                continue
+            if not path or not _is_testable(path):
+                continue
+            stem = Path(path).stem
+            if stem and stem not in seen:
+                seen.add(stem)
+                chapters.append(stem)
+        return chapters
+
+    except Exception:
+        pass
+
+    # --- Regex fallback (no PyYAML) ---
+    content = config_file.read_text()
+
+    # Isolate the chapters: block (stop before appendices:)
+    chapters_block_match = re.search(
+        r'^\s{2}chapters:\s*\n(.*?)(?=^\s{2}\w|\Z)',
+        content,
+        re.MULTILINE | re.DOTALL,
+    )
+    block = chapters_block_match.group(1) if chapters_block_match else content
+
+    chapters = []
+    seen = set()
+    for m in re.finditer(r'\s*-\s*(contents/[^\s#]+\.qmd)', block):
+        path_str = m.group(1)
+        if not _is_testable(path_str):
+            continue
+        stem = Path(path_str).stem
+        if stem not in seen:
+            seen.add(stem)
+            chapters.append(stem)
+
+    return chapters
 
 
 class AmbiguousChapterError(Exception):
@@ -39,6 +123,22 @@ class ChapterDiscovery:
         """
         self.book_dir = Path(book_dir)
         self.contents_dir = self.book_dir / "contents"
+
+    def get_chapters_from_config(self, volume: str) -> List[str]:
+        """Return the ordered list of testable chapter stems for a volume.
+
+        Delegates to the module-level ``get_chapters_from_config`` function so
+        that all CLI commands share a single implementation.  Call this instead
+        of ``get_volume_chapters`` whenever the canonical build order matters.
+
+        Args:
+            volume: ``"vol1"`` or ``"vol2"``.
+
+        Returns:
+            Ordered list of chapter stems from the PDF config (e.g.
+            ``["introduction", "distributed_training", ...]``).
+        """
+        return get_chapters_from_config(self.book_dir, volume)
 
     def _get_volume_from_path(self, path: Path) -> Optional[str]:
         """Extract volume (vol1/vol2) from a file path.

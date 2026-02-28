@@ -388,14 +388,14 @@ class BuildCommand:
         if not config_file.exists():
             console.print(f"[yellow]⚠️ Volume-specific config not found: {config_file}[/yellow]")
             console.print(f"[yellow]Falling back to chapter-based build...[/yellow]")
-            # Fallback to old behavior
-            chapter_files = self.chapter_discovery.get_volume_chapters(volume)
-            if not chapter_files:
+            # Fallback to config-ordered chapter list
+            chapter_stems = self.chapter_discovery.get_chapters_from_config(volume)
+            if not chapter_stems:
                 console.print(f"[red]No chapters found in {volume}[/red]")
                 return False
-            console.print(f"[dim]Found {len(chapter_files)} chapters in {volume}[/dim]")
+            console.print(f"[dim]Found {len(chapter_stems)} chapters in {volume}[/dim]")
             return self.build_chapters(
-                [f"{volume}/{ch.stem}" for ch in chapter_files],
+                [f"{volume}/{stem}" for stem in chapter_stems],
                 format_type
             )
 
