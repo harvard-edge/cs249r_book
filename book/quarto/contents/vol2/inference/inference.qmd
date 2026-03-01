@@ -145,6 +145,17 @@ The perceived responsiveness of interactive systems depends on both **Time to Fi
 
 : **Triggers for Distributed Inference**. Each constraint type indicates different distribution strategies. Memory constraints require model sharding; throughput constraints require replication; latency constraints may require either depending on whether the bottleneck is compute or memory bandwidth. {#tbl-distribution-triggers}
 
+::: {.callout-checkpoint title="Distribution Strategy Selection"}
+
+Verify your understanding of when to move from single-machine to distributed inference:
+
+- [ ] A 13B model (26 GB weights) fits on a single A100. If the throughput requirements double, should you use model sharding or horizontal replication?
+- [ ] For a real-time speech-to-text service, the primary bottleneck is **inter-token latency**. Does adding more GPUs through data-parallel replication reduce this latency?
+- [ ] Why is **Model Sharding** mandatory for a 175B model on 80 GB GPUs, regardless of the request volume?
+- [ ] Identify the trade-off: what is the "Serving Tax" mentioned in the next section, and how does it affect the decision to shard across machines versus staying within a single node?
+
+:::
+
 ### The Fundamental Inversion: Training vs Inference {#sec-inference-scale-fundamental-inversion-training-vs-inference-8834}
 
 The contrast between training and inference optimization extends beyond the basic throughput-versus-latency distinction. Training optimizes for samples processed per hour and tolerates latency variations. Inference optimizes for response time and must meet strict latency bounds. At scale, this inversion manifests in system architecture, resource allocation, and operational priorities. @tbl-training-inference-inversion details six key system aspects where these differences emerge.
@@ -315,13 +326,16 @@ class InferenceEconomics:
 - Efficiency: `{python} InferenceEconomics.cost_per_million_str` dollars per million queries
 
 **Lifetime Volume ($Q_{total}$)**
-$$ Q_{total} = `{python} InferenceEconomics.qps_str` \text{/s} \times 86,400 \text{ s/day} \times `{python} InferenceEconomics.serve_duration_days_str` \text{ days} \approx \mathbf{`{python} InferenceEconomics.lifetime_queries_latex_str` \text{ queries}} $$
+$Q_{total} \approx$ **`{python} InferenceEconomics.lifetime_queries_latex_str` queries**
+(`{python} InferenceEconomics.qps_str` QPS $\times$ 86,400 s/day $\times$ `{python} InferenceEconomics.serve_duration_days_str` days)
 
 **Total Serving Cost**
-$$ C_{serve\_total} = `{python} InferenceEconomics.lifetime_queries_latex_str` \times \$10^{-5} = \mathbf{`{python} InferenceEconomics.serving_cost_total_str`} $$
+
+$C_{serve\_total} =$ `{python} InferenceEconomics.lifetime_queries_latex_str` $\times \$10^{-5} =$ **`{python} InferenceEconomics.serving_cost_total_str`**
 
 **Conclusion**:
-$$ \text{Ratio} = \frac{`{python} InferenceEconomics.serving_cost_total_str`}{`{python} InferenceEconomics.training_cost_total_str`} \approx \mathbf{`{python} InferenceEconomics.leverage_ratio_str`\times} $$
+
+Ratio = `{python} InferenceEconomics.serving_cost_total_str` / `{python} InferenceEconomics.training_cost_total_str` $\approx$ **`{python} InferenceEconomics.leverage_ratio_str`$\times$**
 Serving optimization leverage is `{python} InferenceEconomics.leverage_ratio_str`$\times$ higher than training optimization. A 1% serving efficiency gain saves significant capital—far exceeding the entire training budget.
 :::
 
@@ -577,6 +591,17 @@ Each level has distinct optimization levers. @tbl-serving-hierarchy maps these l
 
 : **Serving Hierarchy Optimization Targets**. Each level of the hierarchy addresses different metrics with different techniques. {#tbl-serving-hierarchy}
 
+::: {.callout-checkpoint title="The Serving Hierarchy"}
+
+Verify your understanding of where specific optimizations sit within the serving hierarchy:
+
+- [ ] Which level of the hierarchy is responsible for managing **KV cache fragmentation** to increase concurrent request capacity?
+- [ ] If you implement **Speculative Decoding** to reduce token latency for a single request, at which level are you operating?
+- [ ] **Load Balancing** algorithms (like Power-of-Two-Choices) operate at the Service level. What is their primary optimization target?
+- [ ] True or False: Multi-tenancy and resource isolation are primarily Request-level concerns.
+
+:::
+
 The remainder of this chapter progresses through these levels: batching and caching (request level), model sharding (replica level), load balancing and autoscaling (service level), and multi-tenancy (platform level).
 
 ## Serving Architecture Dimensions {#sec-inference-scale-serving-framework-selection-45d3}
@@ -648,6 +673,17 @@ The choice between stateless and stateful serving is not a framework feature but
 | **State**      | Stateless                       | Stateful (KV cache)           | Stateless (feature store)             |
 
 : **Serving Architecture Dimensions by Workload Type**. Each workload's constraint profile determines the optimal design point along five architectural dimensions. Selecting a serving system amounts to choosing the combination that matches the workload's constraints. {#tbl-serving-architecture-dimensions}
+
+::: {.callout-checkpoint title="Serving Dimensions"}
+
+Verify your understanding of how workload constraints drive architectural choices:
+
+- [ ] Why is **Preemptive Scheduling** more critical for LLMs than for Vision models?
+- [ ] For which workload type is **Stateful Serving** (requiring sticky routing) a fundamental requirement?
+- [ ] Explain why **Feature-Parallel Batching** is the standard for Recommendation systems but not for LLMs.
+- [ ] Which dimension (Batching, Memory, Scheduling, Topology, State) is primarily affected by the **outlier features** problem in quantization?
+
+:::
 
 These architectural dimensions determine which serving system to select for a given workload. Rather than comparing frameworks feature by feature, an engineer should identify the workload's position along each dimension -- its batching pattern, memory profile, scheduling requirements, deployment topology, and statefulness -- and select the system that matches. The techniques developed in the remainder of this chapter (batching, KV cache management, model sharding, load balancing, autoscaling) operate within this architectural framework, each addressing optimization at a specific dimension.
 
@@ -749,7 +785,72 @@ This relationship reveals the **Batching Efficiency Curve**:
 2.  **Large $B$**: As $B \to \infty$, the $T_{\text{fixed}}$ term becomes negligible. Throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$. The system becomes **compute-bound** (or bandwidth-bound for LLMs).
 3.  **The Knee**: The optimal batch size is the point where throughput gains diminish while latency continues to grow linearly.
 
-The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{\text{variable}}$) saturate at smaller batches than LLMs (high $T_{\text{fixed}}$ due to weight loading), requiring different tuning strategies. Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
+The engineering goal is to find the maximum $B$ such that $L(B) \le \text{SLO}$. This formulation explains why vision models (high $T_{\text{variable}}$) saturate at smaller batches than LLMs (high $T_{\text{fixed}}$ due to weight loading), requiring different tuning strategies.
+
+```{python}
+#| label: batching-efficiency-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATCHING EFFICIENCY CURVE (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Batching Efficiency Curve" .callout-notebook
+# │
+# │ Goal: Quantify throughput-latency trade-offs for vision vs LLM batching.
+# │ Show: LLM knee at B=128; Vision knee at B=32.
+# │ How: X(B) = B / (T_fixed + B * T_var).
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: bec_llm_knee_str, bec_vision_knee_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class BatchingEfficiency:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    # LLM (Weights limited)
+    t_fixed_llm = 40 # ms
+    t_var_llm = 0.5 # ms
+    # Vision (Compute limited)
+    t_fixed_vis = 2 # ms
+    t_var_vis = 1.0 # ms
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    def get_x(b, tf, tv): return b / (tf + b * tv) * 1000 # req/s
+
+    # Knee occurs where marginal throughput gain slows significantly
+    # Approximate: B where B*T_var ≈ T_fixed
+    b_knee_llm = int(t_fixed_llm / t_var_llm)
+    b_knee_vis = int(t_fixed_vis / t_var_vis)
+
+    x_knee_llm = get_x(b_knee_llm, t_fixed_llm, t_var_llm)
+    x_knee_vis = get_x(b_knee_vis, t_fixed_vis, t_var_vis)
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(b_knee_llm == 80, f"LLM knee mismatch: {b_knee_llm}")
+    check(b_knee_vis == 2, f"Vision knee mismatch: {b_knee_vis}")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    bec_llm_knee_str = f"{b_knee_llm}"
+    bec_vision_knee_str = f"{b_knee_vis}"
+
+```
+
+::: {.callout-notebook title="The Batching Efficiency Curve"}
+
+**Problem**: You are optimizing two services: a Vision model (ResNet) and an LLM (70B). At what batch size does each hit the "Knee" of its efficiency curve?
+
+**The Math**:
+The knee occurs where the variable compute cost ($B \times T_{var}$) starts to exceed the fixed overhead ($T_{fixed}$).
+
+1. **Vision Model** ($T_{fixed}=2ms$, $T_{var}=1ms$):
+   - Knee: $B \approx 2ms / 1ms =$ **`{python} BatchingEfficiency.bec_vision_knee_str`**.
+   - *Result*: Vision models saturate at very small batches because the compute per sample is high.
+
+2. **LLM Decode** ($T_{fixed}=40ms$, $T_{var}=0.5ms$):
+   - Knee: $B \approx 40ms / 0.5ms =$ **`{python} BatchingEfficiency.bec_llm_knee_str`**.
+   - *Result*: LLMs require massive batches to amortize the expensive weight-loading overhead.
+
+**The Systems Insight**: Because the LLM's "Fixed Overhead" (loading 140 GB of weights from HBM) is so large, you haven't reached the efficiency knee until batch size **`{python} BatchingEfficiency.bec_llm_knee_str`**. This is why LLM serving requires **Continuous Batching** and **Paged Memory**—you must pack hundreds of concurrent users into a single batch just to overcome the memory bandwidth bottleneck.
+
+:::
+
+Translating these batch-level equations into system-wide capacity planning requires a classical result from queuing theory: **Little's Law**[^fn-littles-law], which relates concurrency, throughput, and latency in any stable system. @tbl-batching-by-model summarizes how these batching characteristics vary across model architectures.
 
 [^fn-littles-law]: **Little's Law**: From queuing theory ($L = \lambda W$): Concurrency = Arrival Rate $\times$ Latency. For a serving fleet, this defines the **Capacity Envelope**: if a GPU can handle 32 concurrent requests and each takes 100 ms, the maximum arrival rate is 320 req/s. Beyond this, queues build up exponentially, and tail latency ($L_{\text{lat}}$) collapses. \index{Little's Law!capacity planning}
 
@@ -1003,7 +1104,7 @@ class GPT3ServingResults:
     b8_service_ms = 54.0
     b8_util_pct = 67.5
     b8_wait_ms = 42.3
-    
+
     # Batch 32 results
     b32_service_ms = 66.0
     b32_util_pct = 20.6
@@ -1046,9 +1147,9 @@ We can confirm these results by *applying Little's Law to verify* internal consi
 
 At B=32 with $\lambda = 100$ req/s and $E[T] =$ `{python} LittlesLawVerify.expected_total_str` ms:
 
-$$L = 100 \times `{python} LittlesLawVerify.expected_total_ms / 1000` = `{python} LittlesLawVerify.l_str` \text{ requests in system}$$
+$L = 100 \times$ `{python} LittlesLawVerify.expected_total_ms / 1000` $=$ `{python} LittlesLawVerify.l_str` requests in system
 
-With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b32_util_pct` %:
+With batch size `{python} LittlesLawVerify.batch_size` and utilization `{python} GPT3ServingResults.b32_util_pct`%:
 
 - Expected requests in service: `{python} LittlesLawVerify.batch_size` $\times$ `{python} LittlesLawVerify.utilization` = `{python} LittlesLawVerify.in_service_str`
 - Expected requests in queue: `{python} LittlesLawVerify.l_str` - `{python} LittlesLawVerify.in_service_str` = `{python} LittlesLawVerify.in_queue_str`
@@ -1957,7 +2058,20 @@ The system automatically increases batch size to maintain throughput as traffic 
 
 ### Quantitative Summary: Batching Strategy Selection {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. @fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage. The following decision framework guides selection:
+The choice of batching strategy depends on model characteristics, traffic patterns, and latency requirements. @fig-inference-lifecycle visualizes the end-to-end request path, highlighting latency sources at each stage.
+
+::: {.callout-checkpoint title="Batching Strategy Trade-offs"}
+
+Verify your understanding of different batching mechanics:
+
+- [ ] A vision service has highly uniform input sizes and predictable traffic. Which is more appropriate: **Static Batching** or **Continuous Batching**?
+- [ ] For an LLM serving chat requests, why does the "Waste Ratio" ($1 - \bar{L}/L_{max}$) collapse to zero when moving from static to continuous batching?
+- [ ] Explain why **Adaptive Batching** (shrinking the window when traffic is high) reduces P99 latency without sacrificing throughput.
+- [ ] In **Feature-Parallel Batching** for RecSys, which component of the Fleet Stack acts as the primary bottleneck: the GPU's Tensor Cores or the distributed Embedding Store's memory bandwidth?
+
+:::
+
+The following decision framework guides selection:
 
 ::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time." fig-alt="Flowchart with 5 stages: Client, Load Balancer, Request Queue, Dynamic Batcher, Model Execution. Arrows show request flow with dashed return path. Red annotations below highlight latency sources at each stage."}
 ```{.tikz}

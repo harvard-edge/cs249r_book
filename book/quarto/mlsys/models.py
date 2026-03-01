@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 from .constants import (
     ureg, Q_,
-    GPT2_PARAMS, GPT3_PARAMS, GPT4_TRAINING_GPU_DAYS,
+    GPT2_PARAMS, GPT3_PARAMS, GPT4_EST_PARAMS, GPT4_TRAINING_GPU_DAYS,
     BERT_BASE_PARAMS, BERT_LARGE_PARAMS,
     ALEXNET_PARAMS, RESNET50_PARAMS, MOBILENETV2_PARAMS,
     KWS_DSCNN_PARAMS, ANOMALY_MODEL_PARAMS,
@@ -62,7 +62,7 @@ class GPT:
     """GPT Model Family."""
     GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer", layers=48)
     GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer", layers=96, training_ops=GPT3_TRAINING_OPS)
-    GPT4 = ModelSpec("GPT-4", 1.8e12 * ureg.param, "Transformer", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
+    GPT4 = ModelSpec("GPT-4", GPT4_EST_PARAMS, "Transformer", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
 
 class Language:
     """Large Language Models."""
@@ -70,6 +70,8 @@ class Language:
     BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer", layers=12, inference_flops=22e9 * ureg.flop)
     BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer", layers=24)
     Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.param, "Transformer", layers=80)
+    Llama3_70B = ModelSpec("Llama-3-70B", 70.6e9 * ureg.param, "Transformer", layers=80)
+    Llama3_405B = ModelSpec("Llama-3.1-405B", 405e9 * ureg.param, "Transformer", layers=126)
 
 class Recommendation:
     """Recommendation Models."""

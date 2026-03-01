@@ -65,11 +65,11 @@ This imperative for fault tolerance establishes what we define as Robust AI:
 
 ::: {.callout-definition title="Robust AI"}
 
-***Robust AI***\index{Robust AI!definition} is the engineering discipline of ensuring that machine learning systems maintain performance and reliability despite system errors, malicious inputs, or environmental shifts.
+***Robust AI***\index{Robust AI!definition} is the measurable systems property that a model's predictions remain valid — within specified error bounds — under distribution shift, adversarial perturbation, and hardware or software faults, as opposed to the average-case accuracy achieved under ideal i.i.d. conditions.
 
-1.  **Significance (Quantitative):** It treats reliability as a **System Invariant**. It focuses on the **Worst-Case Error Bound** rather than the average-case accuracy, ensuring the system's **Validity Confidence** remains high across the entire deployment distribution ($D_{\text{vol}}$).
-2.  **Distinction (Durable):** Unlike **Standard Generalization** (performance on unseen i.i.d. data), Robustness addresses performance on **Non-i.i.d. Data**, including adversarial perturbations and out-of-distribution shifts.
-3.  **Common Pitfall:** A frequent misconception is that robustness is a "final check." In reality, it is an **Architectural Constraint**: a model that is not robust by design (e.g., through adversarial training or architectural priors) cannot easily be "fixed" with downstream monitoring.
+1.  **Significance (Quantitative):** Robustness is quantified by worst-case guarantees: a certified robust classifier guarantees accuracy above a threshold for all inputs within an $\ell_\infty$ ball of radius $\varepsilon$ around any test point. For image classification, $\varepsilon = 8/255$ (a perturbation invisible to humans) typically reduces accuracy by 30–60% in non-robust models. Distribution shift compounds this: a clinical NLP model trained on 2019 records and deployed in 2021 without retraining can see accuracy drop 15–25% as medical coding practices and terminology evolve.
+2.  **Distinction (Durable):** Unlike standard generalization (which measures average-case accuracy on held-out i.i.d. test data drawn from the same distribution as training), robustness measures worst-case performance on adversarial or out-of-distribution inputs — a distinction that matters because a model can achieve 95% i.i.d. test accuracy while failing completely on inputs that differ from training by amounts imperceptible to humans.
+3.  **Common Pitfall:** A frequent misconception is that robustness can be added as a post-hoc monitoring layer to any existing model. A model's robustness properties are determined primarily during training — models trained without adversarial examples or robustness objectives cannot achieve certified robustness through inference-time filtering alone, because the vulnerability is in the learned decision boundary, not in which inputs reach the model.
 
 :::
 
@@ -589,6 +589,56 @@ These three categories of challenges stem from different sources but share sever
 
 Detection and monitoring form the foundation of any robustness strategy. Hardware monitoring systems typically sample metrics at 1-10 Hz frequencies and detect temperature anomalies (±5°C from baseline), voltage fluctuations (±5% from nominal), and memory error rates exceeding 10^-12 errors per bit per hour. Adversarial input detection uses statistical tests with p-value thresholds of 0.01-0.05 and achieves 85-95% detection rates with false positive rates below 2%. Distribution monitoring using MMD[^fn-mmd-drift] tests processes 1,000-10,000 samples per evaluation and detects shifts with Cohen's d > 0.3 within 95% confidence intervals.
 
+```{python}
+#| label: adversarial-payback-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ADVERSARIAL ATTACK PAYBACK (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Cost of Defense" .callout-notebook
+# │
+# │ Goal: Quantify the compute overhead of adversarial training.
+# │ Show: training_slowdown ≈ 8x — inline in notebook result.
+# │ How: T_total = T_std + N_Steps * T_std (Conceptual PGD).
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: ap_n_pgd_steps_str, ap_slowdown_str, ap_cert_acc_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class AdversarialPayback:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_pgd_steps = 7 # PGD-7 is standard for adversarial training
+    std_acc = 0.95
+    robust_acc = 0.70 # Accuracy against worst-case attack
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Each training step requires generating an attack (7 forward/backward passes)
+    # total steps per batch = 1 (std) + 7 (attack) = 8
+    slowdown = 1 + n_pgd_steps
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(slowdown == 8, f"Slowdown {slowdown} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    ap_n_pgd_steps_str = f"{n_pgd_steps}"
+    ap_slowdown_str = f"{slowdown}"
+    ap_cert_acc_str = f"{robust_acc*100:.0f}%"
+
+```
+
+::: {.callout-notebook title="The Cost of Defense"}
+
+**Problem**: You are training a robust classifier for an autonomous vehicle. You use **Adversarial Training** (PGD-7), which generates a worst-case attack for every training batch. How much does this "Robustness Tax" slow down your training run?
+
+**The Math**:
+Generating an adversarial example requires $K$ additional gradient steps per training sample.
+
+1. **Forward/Backward Passes**: 1 (Standard) + 7 (Attack Generation) = **8 total passes**.
+2. **Training Slowdown**: **`{python} AdversarialPayback.ap_slowdown_str`$\times$ slower**.
+3. **Utility Cost**: Accuracy on clean data drops from 95% to **`{python} AdversarialPayback.ap_cert_acc_str`**.
+
+**The Systems Insight**: Robustness is an **Efficiency-Utility Trade-off**. To guarantee that your model won't misclassify a stop sign with a few stickers on it, you must pay **8$\times$ the training cost** and accept a **25% drop in general performance**. In the Machine Learning Fleet, "Robustness" is not a setting you turn on; it is a budget you spend. This is why most fleets use **Detection** (cheaper) rather than **Certification** (robust training) for all but the most safety-critical components.
+
+:::
+
 [^fn-mmd-drift]: **Maximum Mean Discrepancy (MMD)**: A kernel-based statistical test measuring distance between two distributions in a reproducing kernel Hilbert space, without parametric assumptions. Unlike univariate tests (K-S, PSI) that require per-feature evaluation, MMD operates on joint distributions natively---critical for ML inputs where drift manifests in feature correlations, not individual features. The trade-off is compute: MMD scales $O(n^2)$ in sample size, making it impractical for real-time monitoring without subsampling or random feature approximations. \index{MMD!drift detection}
 
 Graceful degradation ensures that systems maintain core functionality even when operating under stress. Rather than catastrophic failure, robust systems exhibit predictable performance reduction that preserves critical capabilities. ECC memory systems recover from single-bit errors with 99.9% success rates while adding 12.5% bandwidth overhead. Model quantization from FP32 to INT8 reduces memory requirements by 75% and inference time by 2-4$\times$, trading 1-3% accuracy for continued operation under resource constraints. Ensemble fallback systems maintain 85-90% of peak performance when primary models fail, with switchover latency under 10&nbsp;ms.
@@ -664,6 +714,59 @@ The most pervasive robustness challenge addresses the natural evolution of real-
 
 Consider a medical diagnosis model trained on X-ray images from a modern hospital. When deployed in a rural clinic with older equipment, the model's accuracy plummets not because the underlying medical conditions have changed, but because the image characteristics differ. This exemplifies distribution shift: the world the model encounters differs from the world it learned from.
 
+```{python}
+#| label: distribution-shift-confidence-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DISTRIBUTION SHIFT CONFIDENCE (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Is the World Changing?" .callout-notebook
+# │
+# │ Goal: Quantify the confidence of a distribution shift detection.
+# │ Show: p_value ≈ 0.001 — inline in notebook result.
+# │ How: P-value for shift detection (Conceptual MMD/PSI).
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: ds_n_samples_str, ds_p_value_str, ds_shift_detected_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class ShiftConfidence:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_samples = 1000
+    baseline_mean = 0.5
+    current_mean = 0.55 # A 5% shift in feature distribution
+    std_dev = 0.3
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Z-score = (mean_diff) / (std / sqrt(N))
+    z_score = (current_mean - baseline_mean) / (std_dev / (n_samples ** 0.5))
+    # For Z=5.27, p-value is extremely small
+    p_value = 0.000001
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(z_score > 5, f"Z-score {z_score:.2f} too low for significant shift")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    ds_n_samples_str = f"{n_samples:,}"
+    ds_p_value_str = "< 0.001"
+    ds_shift_detected_str = "YES"
+
+```
+
+::: {.callout-notebook title="Is the World Changing?"}
+
+**Problem**: Your model monitors a critical input feature. The baseline mean was `{python} ShiftConfidence.baseline_mean`. Over the last `{python} ShiftConfidence.ds_n_samples_str` requests, the mean has shifted to `{python} ShiftConfidence.current_mean`. Is this a random fluctuation or a real **Distribution Shift**?
+
+**The Math**:
+Detection requires proving that the observed change is statistically unlikely under the baseline distribution.
+
+1. **Difference in Means**: 0.05.
+2. **Standard Error**: 0.3 / $\sqrt{1000} \approx$ **0.009**.
+3. **Statistical Significance**: The shift is **5.5 standard errors** away from the mean.
+4. **P-Value**: **`{python} ShiftConfidence.ds_p_value_str`**.
+
+**The Systems Insight**: Statistical significance is the "Signal-to-Noise Ratio" of your monitoring system. A shift of 0.05 might seem "small," but with 1,000 samples, the probability of it being random noise is less than **0.1%**. In the Machine Learning Fleet, this is a **Confirmed Regression**. You must trigger an automated response: either falling back to a more robust model or initiating an emergency retraining run on the new data distribution.
+
+:::
+
 ::: {.callout-note title="Figure: Types of Distribution Shift"}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.7, node distance=6cm and 4cm]
@@ -723,7 +826,7 @@ Covariate shift occurs when the input distribution changes while the relationshi
 
 ::: {.callout-note title="Decision Boundary Under Shift"}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=2cm, 
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=2cm,
   BlueLine/.style={line width=1.0pt, color=blue},
   RedLine/.style={line width=1.0pt, color=red},
   GreenL/.style={fill=green},
@@ -1450,7 +1553,7 @@ to[out=270,in=0](0.36,-0.15)to[out=160,in=340](0.2,-0.051)to cycle;
         \fill[draw=none,fill=BrownLine,even odd rule,xshift=3.8mm,yshift=2mm] \gear{11}{0.25}{0.21}{10}{1}{0.07};
         \fill[draw=none,fill=BrownLine,even odd rule,xshift=0.6mm,yshift=5.8mm] coordinate(F) \gear{11}{0.25}{0.21}{10}{1}{0.07};
     \end{scope}
-    
+
     % Channels
     \begin{scope}[local bounding box=CHANEL2,shift={(0,3.5)}]
         \foreach \i/\sf in {5/0.7,6/0.8,7/0.9} {
@@ -1463,26 +1566,26 @@ to[out=270,in=0](0.36,-0.15)to[out=160,in=340](0.2,-0.051)to cycle;
             \pic[shift={(2.55,0)}] at ({-\i*0.13}, {-0.13*\i}) {channel={scalefac=0.5,picname=\i-CH3,filllcolor=BrownLine,drawcolor=BrownLine}};
         }
     \end{scope}
-    
+
     % Brain
     \begin{scope}[local bounding box=BRAIN1,shift={(0,0)},scale=1, every node/.append style={transform shape}]
         \pic[shift={(0,0)}] at (0,0) {brain={scalefac=0.7,picname=1,filllcolor=OrangeL, Linewidth=0.75pt}};
     \end{scope}
-    
+
     % Persons
     \foreach \i in {1,2,3} {
         \pic[shift={(0,0)}] at (7-CH\i) {person={scalefac=0.3,picname=1,drawcolor=BrownLine,filllcolor=GreenL, Linewidth=0.75pt}};
     }
-    
+
     \draw[LineA] (BRAIN1) -- ++(90:1.32);
     \foreach \i in {1,2,3} {
         \draw[Line] (7-CH\i.south) -- (F);
     }
-    
+
     \scoped[on background layer]
     \node[draw=BlueLine,inner xsep=3mm,inner ysep=2mm,fill=BlueL,fit=(BRAIN1)(7-CH1)(5-CH3),line width=0.75pt] (BB1) {};
     \node[above=2pt of BB1,BlueLine] {Normal learning};
-    
+
     \path[RedLine] (7-CH1) -- ++(180:3) coordinate(DA);
     \path[RedLine] (DA) |- coordinate(LE) (GEAR1);
     \path[RedLine] (DA) |- coordinate(MA) (BRAIN1);
@@ -1499,7 +1602,7 @@ to[out=270,in=0](0.36,-0.15)to[out=160,in=340](0.2,-0.051)to cycle;
         \fill[draw=none,fill=BrownLine,even odd rule,xshift=3.8mm,yshift=2mm] \gear{11}{0.25}{0.21}{10}{1}{0.07};
         \fill[draw=none,fill=BrownLine,even odd rule,xshift=0.6mm,yshift=5.8mm] coordinate(F) \gear{11}{0.25}{0.21}{10}{1}{0.07};
     \end{scope}
-    
+
     % Channels
     \begin{scope}[local bounding box=CHANEL2,shift={(0,3.5)}]
         \foreach \i/\sf in {5/0.7,6/0.8,7/0.9} {
@@ -1512,30 +1615,30 @@ to[out=270,in=0](0.36,-0.15)to[out=160,in=340](0.2,-0.051)to cycle;
             \pic[shift={(2.55,0)}] at ({-\i*0.13}, {-0.13*\i}) {channel={scalefac=0.5,picname=\i-CH3,filllcolor=BrownLine,drawcolor=BrownLine}};
         }
     \end{scope}
-    
+
     % Brain
     \begin{scope}[local bounding box=BRAIN1,shift={(0,0)},scale=1, every node/.append style={transform shape}]
         \pic[shift={(0,0)}] at (0,0) {brain={scalefac=0.7,picname=1,filllcolor=BrownL, Linewidth=0.75pt, filllcirclecolor=BrownL,drawcircle=BrownLine}};
     \end{scope}
-    
+
     % Skull
     \begin{scope}[local bounding box=SKULL1,shift={(0,0)},scale=1, every node/.append style={transform shape}]
         \pic[shift={(0,0)}] at (0,0) {skull={scalefac=0.8,picname=1,filllcolor=RedLine, Linewidth=0.75pt}};
     \end{scope}
-    
+
     % Persons
     \foreach \i in {1,3} {
         \pic[shift={(0,0)}] at (7-CH\i) {person={scalefac=0.3,picname=1,drawcolor=BrownLine,filllcolor=GreenL, Linewidth=0.75pt}};
     }
-    
+
     % Skull
     \pic[shift={(0,0)}] at (7-CH2) {skull={scalefac=0.8,picname=1,filllcolor=RedLine, Linewidth=0.75pt}};
-    
+
     \draw[LineA] (BRAIN1) -- ++(90:1.32);
     \foreach \i in {1,2,3} {
         \draw[Line] (7-CH\i.south) -- (F);
     }
-    
+
     \scoped[on background layer]
     \node[draw=RedLine,inner xsep=3mm,inner ysep=2mm,fill=RedL,fit=(BRAIN1)(7-CH1)(5-CH3),line width=0.75pt] (BB1) {};
     \node[above=2pt of BB1,RedLine] {Poisoning attack};

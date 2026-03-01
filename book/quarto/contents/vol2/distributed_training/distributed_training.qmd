@@ -300,11 +300,11 @@ The central challenge of distributed training is ensuring that 1,024 GPUs, opera
 
 ::: {.callout-definition title="Distributed Training"}
 
-***Distributed Training***\index{Distributed Training!definition} is the parallelization of the optimization loop across **Multiple Compute Devices** through coordinated partitioning and synchronization.
+***Distributed Training***\index{Distributed Training!definition} is a training methodology that partitions the optimization loop across multiple compute nodes — distributing either data, model layers, or individual tensor operations — and coordinates their outputs through synchronized communication primitives to produce a single coherent model.
 
-1.  **Significance (Quantitative):** It enables the training of models that exceed the **Memory Capacity** and **Compute Throughput** ($R_{\text{peak}}$) of a single device, reducing the total wall-clock time $T$ for a given $O$.
-2.  **Distinction (Durable):** Unlike **Traditional Distributed Systems** (which scale for independent requests), Distributed Training scales for **Coordinated State Updates**, requiring high-bandwidth, low-latency synchronization of gradients and weights.
-3.  **Common Pitfall:** A frequent misconception is that performance scales linearly with the number of devices ($N$). In reality, the **Communication Overhead ($L_{\text{lat}}$)** and **Bisection Bandwidth ($BW$)** eventually create a scaling ceiling (Amdahl's Law).
+1.  **Significance (Quantitative):** Distributed training becomes necessary when a model's memory requirement exceeds a single accelerator's capacity. GPT-3 (175B parameters) requires approximately 350 GB in BF16 — more than 4$\times$ the 80 GB capacity of a single H100. Training it requires at least 5 H100s for model sharding alone, with production runs using thousands to achieve tractable wall-clock time.
+2.  **Distinction (Durable):** Unlike distributed systems for independent requests (web serving, database reads) where nodes share no mutable state, distributed training requires every node to maintain a consistent view of model parameters — making gradient synchronization a mandatory coordination step, not an optional optimization.
+3.  **Common Pitfall:** A frequent misconception is that distributed training scales linearly with node count. In practice, communication overhead grows with cluster size and the serial fraction of each step (Amdahl's Law): with 30% of a step's time spent on synchronization, the theoretical scaling ceiling is $1/0.30 \approx 3\times$ regardless of how many accelerators are added.
 
 :::
 
@@ -561,11 +561,11 @@ The simplest approach gives each GPU a complete, identical copy of the model and
 
 ::: {.callout-definition title="Data Parallelism"}
 
-***Data Parallelism***\index{Data Parallelism!definition} is a distributed training strategy where the **Model is Replicated** across all workers, but the **Dataset is Sharded**.
+***Data Parallelism***\index{Data Parallelism!definition} is a distributed training strategy in which each worker holds a complete replica of the model and processes an independent shard of the minibatch, then synchronizes gradient updates via AllReduce so all replicas apply identical parameter changes each step.
 
-1.  **Significance (Quantitative):** It maximizes **Throughput ($\eta$)** by allowing $N$ workers to process independent data samples simultaneously. It is mathematically equivalent to single-device training with a batch size $N\times$ larger.
-2.  **Distinction (Durable):** Unlike **Model Parallelism**, where the weights are split across devices, Data Parallelism requires every worker to have enough **Memory Capacity** to store the full model state.
-3.  **Common Pitfall:** A frequent misconception is that Data Parallelism scales infinitely. In reality, it is constrained by the **Communication Bottleneck**: the time to synchronize gradients (AllReduce) must be hidden by the time to compute them, or else the system becomes bandwidth-bound ($BW$).
+1.  **Significance (Quantitative):** With $N$ workers each processing batch size $B$, the effective global batch size is $N \times B$, scaling throughput linearly while keeping per-worker memory constant. For a 1B-parameter model at 2 GB in BF16, 1,024 workers achieve 1,024$\times$ the single-GPU throughput — until the gradient AllReduce (2 GB per step at ring-optimal $2(N-1)/N$ per worker) exceeds backward compute time and creates the communication bottleneck.
+2.  **Distinction (Durable):** Unlike model parallelism, where parameters are partitioned so no single worker holds the full model, data parallelism requires every worker to have sufficient memory capacity to store the complete model state — making it inapplicable for models larger than a single accelerator's memory without combining it with model sharding (ZeRO, FSDP).
+3.  **Common Pitfall:** A frequent misconception is that data parallelism scales indefinitely with worker count. Scaling the effective batch size beyond the critical batch size (roughly 8,192 for ResNet-50, ~4M tokens for LLM pretraining) degrades statistical efficiency, requiring more training steps to reach target loss and eroding the throughput gains from adding more workers.
 
 :::
 
@@ -596,6 +596,17 @@ g_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}}
 $$
 
 This equivalence shows why data parallelism maintains the statistical properties of SGD training. The approach distributes distinct data subsets across devices, computes local gradients independently, and averages these gradients to approximate the full-batch gradient.
+
+::: {.callout-checkpoint title="Data Parallelism Mechanics"}
+
+Verify your understanding of how data parallelism distributes work:
+
+- [ ] In data parallelism, is the **model state** (weights) sharded or replicated across GPUs?
+- [ ] If you have 8 GPUs and a per-GPU batch size of 32, what is the **effective global batch size**?
+- [ ] Why is data parallelism mathematically equivalent to single-device training with a larger batch size?
+- [ ] What is the primary hardware resource that constrains data parallelism as you add more nodes: GPU TFLOPS or Network Bandwidth?
+
+:::
 
 The method parallels gradient accumulation, where a single device accumulates gradients over multiple forward passes before updating parameters. Both techniques use the additive properties of gradients to process large batches efficiently. However, *data parallelism at scale* introduces operational challenges beyond this theoretical equivalence.
 
@@ -980,7 +991,6 @@ Performance results:
 
 - Computation: `{python} Scaling8GPU.compute_8gpu_ms_str`ms per step
 - Communication: `{python} Scaling8GPU.comm_8gpu_ms_str`ms per step
-
 - Total: `{python} Scaling8GPU.total_8gpu_str`ms per step
 - Speedup (throughput): `{python} Scaling8GPU.speedup_8gpu_str`$\times$
 - Parallel efficiency: `{python} Scaling8GPU.efficiency_8gpu_str`%
@@ -1051,6 +1061,43 @@ class Scaling32GPU:
     comm_32gpu_ms_str = f"{comm_32gpu_ms_val:.0f}"
 ```
 
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+class GradAccumScenario:
+    """Scenario: 8-GPU gradient accumulation vs. 32-GPU naive scaling."""
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    n_gpus_ga = 8
+    batch_per_gpu = 16
+    accum_steps = 4
+    compute_8gpu_ms = Scaling8GPU.compute_8gpu_ms
+    comm_8gpu_ms = Scaling8GPU.comm_8gpu_ms_val
+    training_hours_1gpu = 25
+    hourly_rate = 128  # USD per hour for 8 GPUs
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    effective_batch_val = n_gpus_ga * batch_per_gpu * accum_steps
+    # AllReduce once per accum_steps steps
+    overhead_val = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
+    # Effective speedup: 8 GPUs, nearly no comm overhead
+    effective_speedup = n_gpus_ga * (1 - overhead_val / 100)
+    ga_training_hours_val = training_hours_1gpu / effective_speedup
+    ga_cost_val = ga_training_hours_val * hourly_rate
+    ga_savings_val = Scaling32GPU.training_32gpu_hours_val * hourly_rate - ga_cost_val
+    ga_savings_pct_val = ga_savings_val / (Scaling32GPU.training_32gpu_hours_val * hourly_rate) * 100
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(effective_batch_val == 512, f"Effective batch should be 512, got {effective_batch_val}")
+
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
+    effective_batch_str = f"{effective_batch_val:,}"
+    comm_overhead_pct_str = f"{overhead_val:.2f}"
+    ga_training_hours_str = f"{ga_training_hours_val:.1f}"
+    ga_cost_str = f"{ga_cost_val:,.0f}"
+    ga_savings_str = f"{ga_savings_val:,.0f}"
+    ga_savings_pct_str = f"{ga_savings_pct_val:.0f}"
+```
+
 **32 GPUs: 4 Nodes with Commodity Network**
 
 Configuration:
@@ -1071,50 +1118,20 @@ Communication dominates and becomes the bottleneck.
 
 Better Approach: 8 GPUs with Gradient Accumulation
 
-```{python}
-#| label: grad-accum-calc
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GRADIENT ACCUMULATION ALTERNATIVE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Overcoming the Communication Wall.
-# │
-# │ Goal: Show how gradient accumulation recovers efficiency.
-# │ Show: Drastic reduction in communication overhead and cost.
-# │ How: effective_batch = N * b * steps; overhead = T_comm / (steps * T_comp).
-# └─────────────────────────────────────────────────────────────────────────────
+::: {.callout-notebook title="Gradient Accumulation Speedup"}
 
-# ┌── LEGO ───────────────────────────────────────────────
-class GradAccumScenario:
-    """Scenario: 8 GPUs with 4-step gradient accumulation."""
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    n_gpus_ga = 8
-    batch_per_gpu = 16
-    accum_steps = 4
-    compute_8gpu_ms = 180
-    comm_8gpu_ms = 5
-    ga_training_hours = 3.8
-    cost_per_hour_8gpu = 128
-    cost_32gpu_reference = 3021 # from earlier calc
+**Problem**: You are training GPT-2 on a commodity 10G network. A 32-GPU configuration was communication-bound, costing \$3,021 for a fixed number of samples. Can you achieve the same effective batch size on a single 8-GPU node using gradient accumulation more efficiently?
 
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    effective_batch_val = n_gpus_ga * batch_per_gpu * accum_steps
-    comm_overhead_pct_val = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
-    ga_cost_val = cost_per_hour_8gpu * ga_training_hours
-    ga_savings_val = cost_32gpu_reference - ga_cost_val
-    ga_savings_pct_val = ga_savings_val / cost_32gpu_reference * 100
+**The Math**:
+1. **Effective Batch Size**: 8 GPUs $\times$ batch 16 $\times$ 4 accumulation steps = **`{python} GradAccumScenario.effective_batch_str`**.
+2. **Communication Overhead**: With 4-step accumulation, we AllReduce once every 4 steps.
+   - Overhead = $5 \text{ ms} / (4 \times 180 \text{ ms}) \approx$ **`{python} GradAccumScenario.comm_overhead_pct_str`%**.
+3. **Training Duration**: Total time reduces to **`{python} GradAccumScenario.ga_training_hours_str` hours**.
+4. **Total Cost**: `{python} GradAccumScenario.ga_training_hours_str` hrs $\times$ \$128/hr = **\$`{python} GradAccumScenario.ga_cost_str`**.
 
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(comm_overhead_pct_val < 1.0, "Accumulation should minimize overhead to <1%")
+**The Systems Insight**: Gradient accumulation saves **\$`{python} GradAccumScenario.ga_savings_str`** (`{python} GradAccumScenario.ga_savings_pct_str`%) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When your network is slow, don't scale out—scale the batch size locally.
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    effective_batch_str = f"{effective_batch_val}"
-    comm_overhead_pct_str = f"{comm_overhead_pct_val:.1f}"
-    ga_training_hours_str = f"{ga_training_hours}"
-    ga_cost_str = f"{ga_cost_val:.0f}"
-    ga_savings_str = f"{ga_savings_val:,.0f}"
-    ga_savings_pct_str = f"{ga_savings_pct_val:.0f}"
-```
+:::
 
 - Configuration: `{python} GradAccumScenario.n_gpus_ga` GPUs$\times$ batch `{python} GradAccumScenario.batch_per_gpu`$\times$ `{python} GradAccumScenario.accum_steps` accumulation steps = `{python} GradAccumScenario.effective_batch_str` effective batch
 - Communication overhead: `{python} GradAccumScenario.comm_8gpu_ms`ms ÷ (`{python} GradAccumScenario.accum_steps`$\times$ `{python} GradAccumScenario.compute_8gpu_ms`ms) = `{python} GradAccumScenario.comm_overhead_pct_str`%
@@ -1871,6 +1888,17 @@ This distribution method enables training of large-scale models. GPT-3, with `{p
 
 Device coordination follows a specific pattern during training. In the forward pass, data flows sequentially through model segments on different devices. The backward pass propagates gradients in reverse order through these segments. During parameter updates, each device modifies only its assigned portion of the model. This coordination ensures mathematical equivalence to training on a single device while enabling the handling of models that exceed individual device memory capacities.
 
+::: {.callout-checkpoint title="Model Parallelism Foundations"}
+
+Verify your understanding of model sharding:
+
+- [ ] Does Model Parallelism reduce the **memory footprint** per GPU for a given model?
+- [ ] In which phase—forward or backward—do sequential dependencies between model shards arise?
+- [ ] Why does pure Model Parallelism often lead to lower GPU utilization (the "Pipeline Bubble") compared to Data Parallelism?
+- [ ] Can you identify two ways to split a Transformer layer: **Layer-based** versus **Tensor-based**?
+
+:::
+
 ### Model Parallelism Implementation {#sec-distributed-training-systems-systems-model-parallelism-implementation-0728}
 
 Model parallelism divides neural networks across multiple computing devices, with each device computing a distinct portion of the model's operations. This division allows training of models whose parameter counts exceed single-device memory capacity. The technique encompasses device coordination, data flow management, and gradient computation across distributed model segments. @fig-dist-model-parallelism captures this bidirectional data flow: input data propagates forward through sequentially assigned model partitions while gradients flow backward to update parameters, with intermediate results transferring across device boundaries at each stage.
@@ -2011,11 +2039,60 @@ Pipeline parallelism extends layer-wise partitioning by introducing microbatchin
 
 ::: {.callout-definition title="Pipeline Parallelism"}
 
-***Pipeline Parallelism***\index{Pipeline Parallelism!definition} is a model parallelism technique where layers are partitioned into **Sequential Stages** assigned to different devices.
+***Pipeline Parallelism***\index{Pipeline Parallelism!definition} is a model parallelism technique that partitions a neural network's layers into sequential stages assigned to different devices, passing activations forward and gradients backward between stages while overlapping computation across stages using micro-batches to maintain throughput.
 
-1.  **Significance (Quantitative):** It enables the training of models that exceed the memory of a single node by sharding the model depth. To maintain **Throughput ($\eta$)**, input batches are split into **Micro-batches** that pipeline through the stages, overlapping computation with communication.
-2.  **Distinction (Durable):** Unlike **Tensor Parallelism**, which shards individual operations (Intra-layer), Pipeline Parallelism shards the model at **Layer Boundaries** (Inter-layer), typically requiring lower communication bandwidth ($BW$).
-3.  **Common Pitfall:** A frequent misconception is that Pipeline Parallelism is "perfectly efficient." In reality, it suffers from the **Pipeline Bubble**: idle time at the beginning and end of each iteration where devices wait for micro-batches to reach them.
+1.  **Significance (Quantitative):** Inter-stage communication transmits only the activation tensor at each stage boundary — for a hidden dimension of 8,192 at BF16 with micro-batch size 1, this is $8192 \times 2 = 16$ KB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes $(p-1)/m$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches — with $p=8$ stages and $m=32$ micro-batches, bubble overhead is 22%.
+2.  **Distinction (Durable):** Unlike tensor parallelism, which shards individual matrix multiplications within a single layer and requires AllReduce on every layer's output (demanding NVLink-class bandwidth within each stage), pipeline parallelism shards at layer boundaries and requires only point-to-point activation transfers between stages — tolerating InfiniBand bandwidth between nodes.
+3.  **Common Pitfall:** A frequent misconception is that adding more pipeline stages always improves throughput. The pipeline bubble fraction grows as $(p-1)/(m+p-1)$: with $p=16$ stages and $m=16$ micro-batches, 48% of compute is wasted idle — requiring large micro-batch counts ($m \gg p$) to keep the bubble below 10%, which in turn increases peak activation memory and the memory pressure on each stage.
+
+:::
+
+```{python}
+#| label: pipeline-bubble-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PIPELINE BUBBLE TAX (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Cost of the Pipeline Bubble" .callout-notebook
+# │
+# │ Goal: Quantify the GPU idle time (bubble) in pipeline parallelism.
+# │ Show: bubble_fraction_pct ≈ 18% — inline in notebook result.
+# │ How: Bubble_Fraction = (P - 1) / (P - 1 + M).
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: pb_stages_str, pb_microbatches_str, pb_bubble_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class PipelineBubble:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    p_stages = 8 # Number of nodes/stages
+    m_microbatches = 32 # Microbatches per global batch
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Bubble overhead is the time GPUs spend waiting for the first/last samples
+    bubble_fraction = (p_stages - 1) / (p_stages - 1 + m_microbatches)
+    bubble_pct = bubble_fraction * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(17 < bubble_pct < 19, f"Bubble {bubble_pct:.1f}% unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    pb_stages_str = f"{p_stages}"
+    pb_microbatches_str = f"{m_microbatches}"
+    pb_bubble_pct_str = f"{bubble_pct:.1f}"
+
+```
+
+::: {.callout-notebook title="The Cost of the Pipeline Bubble"}
+
+**Problem**: You are training a frontier model using **Pipeline Parallelism** across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, you split your batch into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is your "Bubble Tax"—the fraction of GPU cycles lost to idle waiting?
+
+**The Math**:
+In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio of stages to microbatches.
+
+1. **Wait time**: At the start and end of each batch, GPUs sit idle for $P-1$ steps.
+2. **Productive time**: GPUs compute for $M$ steps.
+3. **Bubble Fraction**: $(P-1) / (P-1+M) = 7 / (7+32) \approx$ **`{python} PipelineBubble.pb_bubble_pct_str`%**.
+
+**The Systems Insight**: Pipeline parallelism is a **Utilization-Memory Trade-off**. To reduce the bubble from 18% to 5%, you must increase the number of microbatches ($M$), which consumes more **Activation Memory** on each GPU. In the Machine Learning Fleet, you don't scale depth for free—you pay a **`{python} PipelineBubble.pb_bubble_pct_str`%** capacity tax just to keep the stages coordinated. This is why techniques like **Interleaved Pipelining** are essential: they chop the bubble into smaller pieces to recover that lost 18% of your fleet.
 
 :::
 
@@ -2132,11 +2209,11 @@ Tensor parallelism takes a fundamentally different approach: instead of assignin
 
 ::: {.callout-definition title="Tensor Parallelism"}
 
-***Tensor Parallelism***\index{Tensor Parallelism!definition} is a model parallelism technique where individual **Tensors and Operations** (e.g., matrix multiplications) are split across multiple devices.
+***Tensor Parallelism***\index{Tensor Parallelism!definition} is a model parallelism technique that partitions individual tensor operations — primarily matrix multiplications — across multiple devices using column-parallel or row-parallel weight splits, requiring one AllReduce per transformer block to sum partial results from all participating devices.
 
-1.  **Significance (Quantitative):** It enables the parallelization of massive layers that exceed single-device memory. It requires **High-Bandwidth Interconnects** (e.g., NVLink) because it necessitates all-reduce or all-gather operations within the critical path of every layer.
-2.  **Distinction (Durable):** Unlike **Pipeline Parallelism** (Inter-layer), Tensor Parallelism operates at the **Intra-layer** granularity, distributing the computation of a single mathematical operation across $N$ workers.
-3.  **Common Pitfall:** A frequent misconception is that Tensor Parallelism can be used across any network. In reality, it is **Bandwidth-Bound ($BW$)**: the high frequency of synchronization makes it feasible only within a single node or across extremely low-latency fabrics.
+1.  **Significance (Quantitative):** Megatron-LM style tensor parallelism places two AllReduce operations per transformer block — one after attention and one after the MLP — with each AllReduce transferring the activation tensor ($\text{hidden\_dim} \times \text{batch} \times 2$ bytes in BF16). At degree $t=8$ on NVLink with 900 GB/s bandwidth, each AllReduce takes approximately 0.1–0.5 ms. The same operation over InfiniBand (50 GB/s) takes 2–10 ms per layer — with 96 transformer blocks, this adds 200–960 ms of pure synchronization overhead per step, collapsing MFU to single digits.
+2.  **Distinction (Durable):** Unlike pipeline parallelism, which communicates only at layer boundaries and transfers small activation slices, tensor parallelism synchronizes within every layer via AllReduce, making it sensitive to the per-operation latency of the interconnect and restricting it to within-node NVLink fabrics in practice.
+3.  **Common Pitfall:** A frequent misconception is that tensor parallelism can simply be scaled across nodes over InfiniBand. NVLink delivers approximately 900 GB/s bidirectional bandwidth; InfiniBand NDR delivers 50 GB/s — an 18$\times$ gap. Running tensor parallelism across InfiniBand typically collapses MFU to single-digit percentages, making the communication overhead larger than the compute benefit of distributing the matrix multiplication.
 
 :::
 
@@ -2475,6 +2552,17 @@ Designing the training topology for GPT-3 (175B parameters) requires balancing m
 With the Blackwell architecture, we can exploit the `{python} ThreeDParallelism.nvlink5_bw_str` NVLink 5 and FP4 precision. For a 175B model, we can increase **Tensor Parallelism to TP=16** (across two nodes) while maintaining the same low latency. This reduces the required **Pipeline Parallelism to PP=8**, cutting the pipeline bubble fraction by half ($P=8$ vs $P=16$). The resulting fleet is not only faster due to higher TFLOPS but also more efficient due to reduced coordination overhead ($T_{coord}$).
 :::
 
+::: {.callout-checkpoint title="Hybrid 3D Parallelism"}
+
+Verify your understanding of how parallelism strategies combine:
+
+- [ ] In a **TP=8, PP=16, DP=128** configuration, which dimension is responsible for sharding layers *within* a single node?
+- [ ] How does moving from **PP=16** to **PP=8** affect the "Pipeline Bubble" fraction?
+- [ ] If you have a total budget of 1,024 GPUs, what is the trade-off between increasing **DP** (Data Parallelism) versus increasing **PP** (Pipeline Parallelism)?
+- [ ] Which dimension—TP, PP, or DP—is most sensitive to **inter-node latency**?
+
+:::
+
 The MFU values cited above raise a natural question: how did the field arrive at 50% utilization, and what trajectory brought it there? @fig-mfu-progression traces the evolution of Model FLOPs Utilization across published training systems from 2020 to 2024. The progression from GPT-3's 21% MFU to PaLM's 46% MFU reflects not improvements in raw hardware speed but advances in the parallelism strategies, communication overlap techniques, and scheduling optimizations discussed throughout this chapter. The plateau near 40-46% reveals that the theoretical ceiling imposed by communication overhead, pipeline bubbles, and memory management remains formidable even with the most advanced hybrid parallelism techniques available. Notably, Meta's Llama 3 training at 16,384 H100 GPUs achieved slightly lower MFU (41%) than the same model at 8,192 GPUs (43%), confirming that the Scaling Tax described in @sec-distributed-training-systems-systems-physics-scaling-amdahls-law-communication-4d7f is not merely theoretical but measurable in production.
 
 ::: {#fig-mfu-progression fig-env="figure" fig-pos="htb" fig-cap="**The MFU Progression**. Model FLOPs Utilization across published training systems, ordered chronologically. MFU doubled from 21% (GPT-3, 2020) to 46% (PaLM, 2022) through advances in hybrid parallelism and communication overlap, then plateaued near 40-45% for frontier-scale runs. The Llama 3 data points illustrate the Scaling Tax: MFU drops from 43% at 8,192 GPUs to 41% at 16,384 GPUs as communication overhead grows with cluster size. Data sources: Chowdhery et al. (2022), Meta (2024)." fig-alt="Horizontal bar chart of MFU percentages for six training systems from 2020 to 2024 showing progression from 21 percent to 46 percent with a plateau near 41 to 43 percent."}
@@ -2687,13 +2775,13 @@ class RLHFBudget:
 
 The policy model under 3D parallelism with TP=8 and PP=4 distributes its `{python} RLHFBudget.policy_mem_str` GB training state across `{python} RLHFBudget.n_gpus_str` GPUs, yielding `{python} RLHFBudget.policy_per_gpu_str` GB per GPU. The reference model, requiring only `{python} RLHFBudget.ref_mem_str` GB for inference, can be sharded across a separate pool of 8 GPUs at `{python} RLHFBudget.ref_per_gpu_sep_str` GB each, or co-located with the policy GPUs at an additional `{python} RLHFBudget.ref_per_gpu_str` GB per GPU (`{python} RLHFBudget.ref_mem_str` / `{python} RLHFBudget.n_gpus_str`). The 13B reward model adds `{python} RLHFBudget.reward_mem_str` GB shared across its pool. The 13B value model in training mode adds approximately `{python} RLHFBudget.value_mem_str` GB (13B $\times$ 16 bytes/param) across its pool.
 
-Total static memory (co-located policy + reference on `{python} RLHFBudget.n_gpus_str` GPUs): $`{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` \approx$ `{python} RLHFBudget.static_per_gpu_str` GB per GPU, leaving $\sim$`{python} RLHFBudget.remaining_str` GB for activations and KV cache. With generation-phase KV caches for 256 sequences of 1,024 tokens, each policy GPU must reserve an additional $172 / `{python} RLHFBudget.n_gpus_str` \approx$ `{python} RLHFBudget.kv_per_gpu_str` GB for its KV cache shard. The remaining $\sim$`{python} RLHFBudget.remaining_kv_str` GB constrains the micro-batch size during the training phase.
+Total static memory (co-located policy + reference on `{python} RLHFBudget.n_gpus_str` GPUs): `{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` $\approx$ `{python} RLHFBudget.static_per_gpu_str` GB per GPU, leaving $\sim$ `{python} RLHFBudget.remaining_str` GB for activations and KV cache. With generation-phase KV caches for 256 sequences of 1,024 tokens, each policy GPU must reserve an additional $172/$ `{python} RLHFBudget.n_gpus_str` $\approx$ `{python} RLHFBudget.kv_per_gpu_str` GB for its KV cache shard. The remaining $\sim$ `{python} RLHFBudget.remaining_kv_str` GB constrains the micro-batch size during the training phase.
 
 **DPO Memory Budget (same parallelism configuration)**
 
 The policy model uses the same `{python} RLHFBudget.policy_per_gpu_str` GB per GPU. The reference model adds `{python} RLHFBudget.ref_per_gpu_str` GB per GPU (co-located). No reward model, no value model, no KV cache for generation.
 
-Total static memory: $`{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` =$ `{python} RLHFBudget.static_per_gpu_str` GB per GPU — identical to PPO's static footprint, but without the generation-phase KV cache burden. The full $\sim$`{python} RLHFBudget.remaining_str` GB remaining is available for training activations, permitting 2$\times$ larger micro-batch sizes or eliminating the need for activation checkpointing that PPO requires.
+Total static memory: `{python} RLHFBudget.policy_per_gpu_str` + `{python} RLHFBudget.ref_per_gpu_str` = `{python} RLHFBudget.static_per_gpu_str` GB per GPU — identical to PPO's static footprint, but without the generation-phase KV cache burden. The full $\sim$ `{python} RLHFBudget.remaining_str` GB remaining is available for training activations, permitting 2$\times$ larger micro-batch sizes or eliminating the need for activation checkpointing that PPO requires.
 
 **Throughput Comparison**
 
@@ -2702,7 +2790,7 @@ PPO's two-phase design (generate then train) introduces a fundamental throughput
 | **Metric**                 | **PPO (70B policy)**           | **DPO (70B policy)**    |
 |:---------------------------|:-------------------------------|:------------------------|
 | **Models required**        | 4 (policy, ref, reward, value) | 2 (policy, reference)   |
-| **Total parameter memory** | $\sim$2,406 GB                 | $\sim$1,260 GB          |
+| **Total parameter memory** | $\sim$ 2,406 GB                | $\sim$ 1,260 GB         |
 | **Minimum GPUs (memory)**  | 64--128                        | 32--64                  |
 | **Generation phase**       | Yes (sequential, BW-bound)     | None                    |
 | **Effective training MFU** | 15--25%                        | 40--55%                 |
@@ -3013,11 +3101,11 @@ Throughout this chapter, we applied these partitioning strategies to our Lightho
 ::: {.callout-lighthouse title="Distributed Archetype Spectrum"}
 The "optimal point" in the 3D Parallelism Cube shifts depending on the system's primary bottleneck:
 
-| **Archetype**                        | **Primary Partitioning Strategy** | **The Logic**                                                                                 |
-|:-------------------------------------|:----------------------------------|:----------------------------------------------------------------------------------------------|
-| **Archetype A (GPT-4 / Llama-3)**    | Hybrid 3D Parallelism             | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit `{python} DistTrainConstants.gpt4_mem_tb_str` TB of weights.      |
-| **Archetype B (DLRM at Scale)**      | Embedding Sharding                | Partition massive `{python} DistTrainConstants.dlrm_mem_tb_str` TB+ tables across a Parameter Server fleet; use sparse AllToAll updates. |
-| **Archetype C (Federated MobileNet)**| Federated Learning                | Distribute training *data* to the edge; keep model local; accept asynchronous, stale updates. |
+| **Archetype**                         | **Primary Partitioning Strategy** | **The Logic**                                                                                                                            |
+|:--------------------------------------|:----------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|
+| **Archetype A (GPT-4 / Llama-3)**     | Hybrid 3D Parallelism             | Combine Tensor (width), Pipeline (depth), and Data (throughput) to fit `{python} DistTrainConstants.gpt4_mem_tb_str` TB of weights.      |
+| **Archetype B (DLRM at Scale)**       | Embedding Sharding                | Partition massive `{python} DistTrainConstants.dlrm_mem_tb_str` TB+ tables across a Parameter Server fleet; use sparse AllToAll updates. |
+| **Archetype C (Federated MobileNet)** | Federated Learning                | Distribute training *data* to the edge; keep model local; accept asynchronous, stale updates.                                            |
 :::
 
 ::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Strategy Space**: The three independent axes of distributed training parallelism. Data Parallelism (d) replicates models across workers. Pipeline Parallelism (p) partitions model layers vertically. Tensor Parallelism (t) splits individual operations horizontally. Real systems combine all three dimensions." fig-alt="Three-dimensional cube diagram with axes labeled Data Parallel, Pipeline Parallel, and Tensor Parallel. Colored planes show Model Replicas, Intra-layer partitioning, and pipeline stages."}

@@ -84,6 +84,7 @@ class EdgeIntelligenceSetup:
     h100_mem_bw_raw = H100_MEM_BW
     phone_battery_raw = PHONE_BATTERY_WH
     dram_energy_raw = ENERGY_DRAM_ACCESS_PJ
+    smartphone_ram_raw = SMARTPHONE_RAM_GB
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     mobile_npu_tops = int(mobile_npu_tops_raw.m_as(TFLOPs / second))
@@ -91,6 +92,7 @@ class EdgeIntelligenceSetup:
     phone_battery_wh = int(phone_battery_raw.m_as(watt * hour))
     phone_battery_j = f"{int(phone_battery_raw.m_as(joule)):,}"
     dram_energy_pj = f"{dram_energy_raw.m_as(ureg.picojoule):.0f}"
+    smartphone_ram_gb = int(smartphone_ram_raw.m_as(GB))
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     # No check() calls needed — values are direct unit conversions.
@@ -110,6 +112,57 @@ A smartphone learning to predict user text input, a smart home device adapting t
 These scenarios require on-device learning, where models must train and adapt directly on the devices where they operate.[^fn-a11-bionic-ondevice] This shifts machine learning from centralized training to distributed learning across millions of heterogeneous devices, each operating under unique constraints and local conditions. Within *the Fleet Stack*, this shift pushes the physical layer to its thermodynamic limits.
 
 [^fn-a11-bionic-ondevice]: **A11 Bionic (2017)**: The first mobile SoC with a dedicated Neural Engine, delivering 0.6 TOPS versus the A10's 0.2 TOPS. This 3$\times$ jump enabled gradient computation on a phone for the first time, but the real systems consequence was establishing the mobile NPU as a distinct power domain: on-device training became feasible only when inference-optimized silicon freed enough thermal headroom for backpropagation bursts. \index{A11 Bionic!on-device learning}
+
+```{python}
+#| label: edge-npu-speedup-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ NPU VS CPU SPEEDUP (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "NPU: The Silicon Dividend" .callout-notebook
+# │
+# │ Goal: Quantify the latency and energy benefits of mobile NPUs.
+# │ Show: speedup ≈ 20x, energy_gain ≈ 50x — inline in notebook result.
+# │ How: T_cpu / T_npu; E_cpu / E_npu.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: npu_cpu_lat_ms_str, npu_lat_ms_str, npu_speedup_str, npu_energy_gain_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class EdgeNpuSpeedup:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_cpu_ms = 400 # Typical CPU inference for MobileNet
+    t_npu_ms = 20  # NPU accelerated
+    e_cpu_j = 0.8  # Joules per inference on CPU
+    e_npu_j = 0.016 # Joules per inference on NPU
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    speedup = t_cpu_ms / t_npu_ms
+    energy_gain = e_cpu_j / e_npu_j
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(speedup == 20, f"Speedup {speedup:.1f}x unexpected")
+    check(energy_gain == 50, f"Energy gain {energy_gain:.1f}x unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    npu_cpu_lat_ms_str = f"{t_cpu_ms}"
+    npu_lat_ms_str = f"{t_npu_ms}"
+    npu_speedup_str = f"{speedup:.0f}"
+    npu_energy_gain_str = f"{energy_gain:.0f}"
+
+```
+
+::: {.callout-notebook title="NPU: The Silicon Dividend"}
+
+**Problem**: You are comparing the performance of a MobileNet classifier on a generic mobile CPU versus a specialized Neural Processing Unit (NPU). How much "Silicon Dividend" does the NPU provide in terms of speed and battery life?
+
+**The Math**:
+The dividend is the ratio of general-purpose to specialized efficiency.
+
+1. **Latency Speedup**: `{python} EdgeNpuSpeedup.npu_cpu_lat_ms_str` ms / `{python} EdgeNpuSpeedup.npu_lat_ms_str` ms = **`{python} EdgeNpuSpeedup.npu_speedup_str`$\times$**.
+2. **Energy Efficiency**: 0.8 J (CPU) / 0.016 J (NPU) = **`{python} EdgeNpuSpeedup.npu_energy_gain_str`$\times$**.
+
+**The Systems Insight**: Specialized hardware doesn't just make the model faster; it makes it **feasible**. A **50$\times$ energy gain** means you can run 50 times more inferences on the same battery charge. On the edge, the CPU is for **Coordination**, but the NPU is for **Survival**. If you miss the NPU target and fall back to the CPU, you haven't just lost performance—you've likely made the application unusable due to rapid battery drain and thermal throttling.
+
+:::
 
 The transition to on-device learning introduces fundamental tension in machine learning systems design. While cloud-based architectures use abundant computational resources and controlled operational environments, edge devices must function within severely constrained resource envelopes. Memory is measured in megabytes rather than gigabytes; power budgets are measured in milliwatts rather than watts; and network connectivity may be intermittent or entirely absent.
 
@@ -179,7 +232,9 @@ For applications with critical timing requirements, network round-trip times mak
 
 These motivations are grounded in the broader concept of knowledge transfer, where a pretrained model transfers useful representations to a new task or domain. This foundational principle makes on-device learning both feasible and effective, enabling sophisticated adaptation with minimal local resources. @fig-transfer-conceptual illustrates how knowledge transfer occurs between closely related tasks such as playing different board games or musical instruments, or across domains that share structure such as from riding a bicycle to driving a scooter. In the context of on-device learning, this means using a model pretrained in the cloud and adapting it efficiently to a new context using only local data and limited updates, allowing fast adaptation without relearning from scratch even when the new task diverges in input modality or goal.
 
-![Knowledge Transfer: Pretrained models accelerate learning on new tasks by leveraging existing representations, as seen by adapting skills between related board games or musical instruments. This transfer extends across domains like bicycle riding and scooter operation, where shared underlying structures allow efficient adaptation with limited new data.](images/png/ondevice_transfer_learning_apps.png){#fig-transfer-conceptual fig-alt="Conceptual diagram with four transfer learning examples: chess to checkers, violin to cello, bicycle to scooter, showing how similar skills transfer between related domains."}
+::: {#fig-transfer-conceptual fig-env="figure" fig-pos="htb" fig-cap="**Knowledge Transfer**: Pretrained models accelerate learning on new tasks by leveraging existing representations, as seen by adapting skills between related board games or musical instruments. This transfer extends across domains like bicycle riding and scooter operation, where shared underlying structures allow efficient adaptation with limited new data." fig-alt="Conceptual diagram with four transfer learning examples: chess to checkers, violin to cello, bicycle to scooter, showing how similar skills transfer between related domains."}
+![](images/png/ondevice_transfer_learning_apps.png)
+:::
 
 This conceptual shift, enabled by transfer learning and adaptation, enables real-world on-device applications. Whether adapting a language model for personal typing preferences, adjusting gesture recognition to individual movement patterns, or recalibrating a sensor model in changing environments, on-device learning allows systems to remain responsive, efficient, and user-aligned over time.
 
@@ -195,7 +250,9 @@ For instance, Google's Gboard employs **federated learning**[^fn-federated-metap
 
 @fig-ondevice-gboard demonstrates how different prediction strategies enable local adaptation in real time. Next-word prediction suggests likely continuations based on prior text, while Smart Compose uses on-the-fly rescoring to offer dynamic completions. These techniques demonstrate the sophistication of local inference mechanisms.
 
-![On-Device Prediction Strategies: Gboard employs both next-word prediction and smart compose with on-the-fly rescoring to adapt to user typing patterns locally, enhancing personalization and preserving privacy. These techniques demonstrate how machine learning models can refine predictions in real time without transmitting data to a central server, enabling efficient and private mobile input experiences.](images/png/ondevice_gboard_example.png){#fig-ondevice-gboard fig-alt="Mobile keyboard interface showing two prediction modes: next-word suggestions above keys and smart compose autocomplete in the text field, both adapting to user typing patterns."}
+::: {#fig-ondevice-gboard fig-env="figure" fig-pos="htb" fig-cap="**On-Device Prediction Strategies**: Gboard employs both next-word prediction and smart compose with on-the-fly rescoring to adapt to user typing patterns locally, enhancing personalization and preserving privacy. These techniques demonstrate how machine learning models can refine predictions in real time without transmitting data to a central server, enabling efficient and private mobile input experiences." fig-alt="Mobile keyboard interface showing two prediction modes: next-word suggestions above keys and smart compose autocomplete in the text field, both adapting to user typing patterns."}
+![](images/png/ondevice_gboard_example.png)
+:::
 
 Wearable and health monitoring devices present equally compelling use cases with additional regulatory constraints. These systems rely on real-time data from accelerometers, heart rate sensors, and electrodermal activity monitors to track user health and fitness. Physiological baselines vary dramatically between individuals, creating a personalization challenge that static models cannot address effectively. On-device learning allows models to adapt to these individual baselines over time, substantially improving the accuracy of activity recognition, stress detection, and sleep staging while meeting regulatory requirements for data localization.
 
@@ -561,9 +618,20 @@ fig = plt.gcf()
 
 #### Peak Memory Usage
 
-Memory consumption during training is not static. It fluctuates dynamically, reaching a maximum during the backward pass when activations, gradients, and optimizer states must coexist. This peak memory usage determines whether a model can be trained on a device. For a 10M parameter model on a smartphone with 6 GB RAM, the 40 MB of FP32 weights might spike to over 200 MB during backpropagation as activations, gradients, and optimizer states accumulate---competing directly with the operating system and foreground applications for the device's limited memory. Techniques like gradient checkpointing mitigate this by discarding intermediate activations during the forward pass and recomputing them on-demand during the backward pass. This approach trades increased computation (20 to 30%) for a dramatic reduction in peak memory, often achieving 3 to 4 times reduction.
+Memory consumption during training is not static. It fluctuates dynamically, reaching a maximum during the backward pass when activations, gradients, and optimizer states must coexist. This peak memory usage determines whether a model can be trained on a device. For a 10M parameter model on a smartphone with `{python} EdgeIntelligenceSetup.smartphone_ram_gb}` GB RAM, the 40 MB of FP32 weights might spike to over 200 MB during backpropagation as activations, gradients, and optimizer states accumulate---competing directly with the operating system and foreground applications for the device's limited memory. Techniques like gradient checkpointing mitigate this by discarding intermediate activations during the forward pass and recomputing them on-demand during the backward pass. This approach trades increased computation (20 to 30%) for a dramatic reduction in peak memory, often achieving 3 to 4 times reduction.
 
 These amplifications explain why standard optimization techniques fail when applied to training workloads without modification. Each constraint category shapes on-device learning system design, requiring approaches that build on but extend beyond inference-focused methods.
+
+::: {.callout-checkpoint title="On-Device Training Constraints"}
+
+Verify your understanding of how training amplifies edge constraints:
+
+- [ ] Why does on-device training typically require **4x to 12x more memory** than on-device inference for the same model?
+- [ ] What is the "Data Stall" risk in edge intelligence, and how does it relate to the device's NPU throughput?
+- [ ] If a smartphone has 8 GB of RAM, why might a 100M parameter model still trigger out-of-memory errors during the backward pass?
+- [ ] True or False: Gradient checkpointing reduces the total energy consumed by on-device training.
+
+:::
 
 @fig-ondevice-pretraining illustrates how the complete training pipeline combines offline pre-training with online adaptive learning on resource-constrained IoT devices. The system first undergoes meta-training with generic data. During deployment, device-specific constraints such as data availability, compute, and memory shape the adaptation strategy by ranking and selecting layers and channels to update. This allows efficient on-device learning within limited resource envelopes.
 
@@ -957,6 +1025,54 @@ Beyond the individual constraints of models, data, and computation, on-device le
 
 Energy and thermal management represent the most challenging aspects of on-device learning system design, as they directly impact user experience and device longevity. Mobile devices operate under strict power budgets that fundamentally determine feasible model complexity and training schedules.
 
+```{python}
+#| label: edge-battery-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BATTERY LIFE FOR ON-DEVICE LEARNING (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Battery Drain: The Cost of Edge Learning" .callout-notebook
+# │
+# │ Goal: Quantify the battery impact of a background fine-tuning job on a phone.
+# │ Show: battery_drain_pct ≈ 15% — inline in notebook result.
+# │ How: Drain = (Power_W * Duration_H) / Battery_Wh * 100.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: battery_power_w_str, battery_duration_min_str, battery_drain_pct_str, battery_total_wh_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class EdgeBattery:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    p_train_w = 4.5  # Typical sustained SoC power during training
+    t_train_min = 30 # 30 minute adaptation job
+    battery_wh = 15  # Modern flagship smartphone battery
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_train_h = t_train_min / 60
+    energy_wh = p_train_w * t_train_h
+    drain_pct = (energy_wh / battery_wh) * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(14 < drain_pct < 16, f"Drain {drain_pct:.1f}% unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    battery_power_w_str = f"{p_train_w:.1f}"
+    battery_duration_min_str = f"{t_train_min}"
+    battery_drain_pct_str = f"{drain_pct:.1f}"
+    battery_total_wh_str = f"{battery_wh}"
+
+```
+
+::: {.callout-notebook title="Battery Drain: The Cost of Edge Learning"}
+
+**Problem**: You are designing a background fine-tuning job for a personalized voice assistant on a smartphone. The training job consumes `{python} EdgeBattery.battery_power_w_str` Watts and takes `{python} EdgeBattery.battery_duration_min_str` minutes to complete. If the phone has a `{python} EdgeBattery.battery_total_wh_str` Wh battery, how much of the user's battery will this "invisible" update consume?
+
+**The Math**:
+1. **Total Energy**: `{python} EdgeBattery.battery_power_w_str` W $\times$ (30/60) hours = **2.25 Wh**.
+2. **Battery Impact**: 2.25 Wh / 15 Wh = **`{python} EdgeBattery.battery_drain_pct_str`%**.
+
+**The Systems Insight**: Consuming **`{python} EdgeBattery.battery_drain_pct_str`%** of a user's battery for a background task is a severe violation of mobile UX principles—it's equivalent to losing an hour of screen-on time. This is why on-device training is typically restricted to **Opportunistic Scheduling**: it only runs when the device is plugged in, connected to Wi-Fi, and thermally stable. Designing for the edge means respecting the user's energy budget as strictly as the model's accuracy budget.
+
+:::
+
 Because these energy constraints are a primary driver of sustainable system design, we provide a detailed quantitative analysis of the **Battery Wall**, the **Energy Hierarchy** (compute vs. communication), and the feasibility of on-device fine-tuning in @sec-sustainable-ai-edge-learning-battery.
 
 #### Memory Hierarchy Optimization {#sec-edge-intelligence-memory-hierarchy-optimization-8396}
@@ -1011,6 +1127,55 @@ Each solution pillar extends model optimization principles and distributed syste
 ## Model Adaptation {#sec-edge-intelligence-model-adaptation-6a82}
 
 Personalizing a billion-parameter model on a smartwatch with 500 MB of total system memory is impossible without abandoning the goal of updating the complete model. The answer is that we do not update the whole model. We freeze the vast majority of the network and only train a tiny, strategically placed set of new parameters. This is the essence of resource-efficient model adaptation.
+
+```{python}
+#| label: local-storage-wall-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOCAL STORAGE WALL (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Hidden Cost of Personalization" .callout-notebook
+# │
+# │ Goal: Quantify the storage savings of using adapters vs full fine-tuning.
+# │ Show: per_context_savings ≈ 200x — inline in notebook result.
+# │ How: Ratio = Size_Full / Size_Adapter.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: ls_full_mb_str, ls_adapter_kb_str, ls_savings_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class StorageWall:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    model_params_m = 10
+    bytes_per_param = 4 # FP32 for training/fine-tuning
+    adapter_params = 50000 # Rank-64 adapter
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    size_full_mb = (model_params_m * 1e6 * bytes_per_param) / 1e6
+    size_adapter_kb = (adapter_params * bytes_per_param) / 1e3
+    per_context_savings = (size_full_mb * 1000) / size_adapter_kb
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(per_context_savings == 200, f"Ratio {per_context_savings} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    ls_full_mb_str = f"{size_full_mb:.0f}"
+    ls_adapter_kb_str = f"{size_adapter_kb:.0f}"
+    ls_savings_ratio_str = f"{per_context_savings:.0f}"
+
+```
+
+::: {.callout-notebook title="The Hidden Cost of Personalization"}
+
+**Problem**: You are deploying a 10M parameter vision model to a smartphone. You want to support 10 different "User Contexts" (Home, Office, Car, etc.). If a full fine-tuned model requires `{python} StorageWall.ls_full_mb_str` MB, how much storage do you save by using **Residual Adapters** instead?
+
+**The Math**:
+1. **Full Fine-Tuning**: 10 contexts $\times$ 40 MB = **400 MB**.
+2. **Adapter Approach**: (1 $\times$ 40 MB backbone) + (10 $\times$ `{python} StorageWall.ls_adapter_kb_str` KB adapters) $\approx$ **42 MB**.
+3. **Storage Savings**: 400 MB / 42 MB $\approx$ **9.5$\times$** total device storage reduction.
+4. **Per-Context Efficiency**: `{python} StorageWall.ls_full_mb_str` MB / 0.2 MB = **`{python} StorageWall.ls_savings_ratio_str`$\times$**.
+
+**The Systems Insight**: Personalization is a **Storage Density** problem. On a device with limited flash memory, storing 10 versions of the same 400 MB model is impossible. By sharding the model into a **Frozen Backbone** and **Dynamic Adapters**, you reduce the marginal cost of a new user context by **`{python} StorageWall.ls_savings_ratio_str`$\times$**. In the edge fleet, modularity is the only way to scale intelligence without exhausting the physical hardware.
+
+:::
 
 The engineering challenge centers on navigating a fundamental trade-off space: adaptation expressivity versus resource consumption. At one extreme, updating all parameters provides maximum flexibility but exceeds edge device capabilities. At the other extreme, no adaptation preserves resources but fails to capture user-specific patterns. Effective on-device learning systems must operate in the middle ground, selecting adaptation strategies based on three key engineering criteria.
 
@@ -1443,11 +1608,22 @@ This adapter adds a small residual transformation to a frozen layer. When insert
 
 #### Edge Personalization {#sec-edge-intelligence-edge-personalization-a511}
 
-Adapters enable an efficient multi-tenant architecture for edge intelligence, where a single frozen backbone supports multiple personalized contexts. Consider a 10M parameter vision model deployed on a smartphone with 6 GB RAM. Full fine-tuning would require storing a separate 40 MB copy of the model weights for each personalization context (home, office, outdoor), rapidly consuming the device's storage. A rank-64 adapter introduces only approximately 50,000 parameters (roughly 200 KB) per context---a 200$\times$ reduction in storage. This efficiency allows the device to store dozens of specialized adapters that share the same frozen backbone, swapping them dynamically based on the user's location or activity.
+Adapters enable an efficient multi-tenant architecture for edge intelligence, where a single frozen backbone supports multiple personalized contexts. Consider a 10M parameter vision model deployed on a smartphone with `{python} EdgeIntelligenceSetup.smartphone_ram_gb}` GB RAM. Full fine-tuning would require storing a separate 40 MB copy of the model weights for each personalization context (home, office, outdoor), rapidly consuming the device's storage. A rank-64 adapter introduces only approximately 50,000 parameters (roughly 200 KB) per context---a 200$\times$ reduction in storage. This efficiency allows the device to store dozens of specialized adapters that share the same frozen backbone, swapping them dynamically based on the user's location or activity.
 
 This **adapter switching** pattern transforms the smartphone from a static inference engine into a context-aware learning system. When the user enters a low-light environment, the system hot-swaps the appropriate adapter into the vision pipeline in milliseconds. The modularity extends naturally to federated learning: instead of transmitting 40 MB full-model updates over bandwidth-constrained cellular connections, the device transmits only the 200 KB adapter weights. Empirical studies show that these lightweight adapters capture over 90% of the quality gains of full fine-tuning [@rebuffi2017learning], offering a Pareto-optimal trade-off between personalization quality and system resources. The frozen backbone ensures that fundamental visual representations remain robust, while adapters act as specialized lenses that refocus the model's attention on user-specific details without risking catastrophic forgetting of general knowledge.
 
 In smartphone camera pipelines, environmental lighting, user preferences, and lens distortion vary between users. A shared model can be frozen and fine-tuned per-device using a few residual modules, allowing lightweight personalization without destabilizing the base model. In voice-based systems, adapter modules reduce word error rates in personalized speech recognition without retraining the full acoustic model. They also allow easy rollback or switching between user-specific versions---a critical operational capability when local adaptation occasionally degrades rather than improves performance.
+
+::: {.callout-checkpoint title="Edge Personalization"}
+
+Verify your understanding of efficient on-device adaptation:
+
+- [ ] Why is **Adapter Switching** more storage-efficient than maintaining separate full-model copies for different user contexts?
+- [ ] How does the size of a **rank-64 adapter** compare to a standard 10M parameter vision model?
+- [ ] In which deployment tier (Tier 1, 2, or 3) are **Residual Adapters** preferred over LoRA, and why?
+- [ ] True or False: Transmitting adapter weights in federated learning consumes more bandwidth than transmitting the entire model.
+
+:::
 
 #### Performance vs. Resource Trade-offs {#sec-edge-intelligence-performance-vs-resource-tradeoffs-2be2}
 
@@ -1457,7 +1633,7 @@ The decision between LoRA and residual adapters often hinges on inference latenc
 
 Implementing these adaptation techniques requires system-level support for dynamic computation graphs and the ability to selectively inject trainable parameters. Not all deployment environments or inference engines support such capabilities natively. TensorFlow Lite and ONNX Runtime Mobile provide increasingly robust support for adapter-style architectures, but custom inference stacks on microcontrollers may require manual implementation of the adapter forward pass.
 
-System architects should apply a device-tier framework to this decision [@quinonero2009dataset]. On flagship phones (Tier 1) with dedicated Neural Engines and 8+ GB RAM, residual adapters provide the best balance of modularity and speed, enabling context-aware switching with minimal latency impact. On mid-range devices (Tier 2) with 4--6 GB RAM, LoRA is preferred because weight merging eliminates runtime overhead entirely. For ultra-constrained IoT endpoints (Tier 3) with less than 1 GB RAM, bias-only updates remain the only viable option. This tiered approach ensures that the adaptation mechanism matches the physical reality of the hardware, preventing thermal throttling while delivering meaningful personalization at each capability level.
+System architects should apply a device-tier framework to this decision [@quinonero2009dataset]. On flagship phones (Tier 1) with dedicated Neural Engines and 8+ GB RAM, residual adapters provide the best balance of modularity and speed, enabling context-aware switching with minimal latency impact. On mid-range devices (Tier 2) with 4--`{python} EdgeIntelligenceSetup.smartphone_ram_gb}` GB RAM, LoRA is preferred because weight merging eliminates runtime overhead entirely. For ultra-constrained IoT endpoints (Tier 3) with less than 1 GB RAM, bias-only updates remain the only viable option. This tiered approach ensures that the adaptation mechanism matches the physical reality of the hardware, preventing thermal throttling while delivering meaningful personalization at each capability level.
 
 ### Sparse Updates {#sec-edge-intelligence-sparse-updates-879b}
 
@@ -1725,6 +1901,58 @@ Federated learning emerges as the solution to distributed coordination constrain
 1.  **Significance (Quantitative):** It transforms the constraint of **Data Locality** into a privacy feature. Within the **Iron Law**, Federated Learning is constrained by the **Wide-Area Bandwidth ($BW$)** and the extreme **Heterogeneity of the Fleet**, where device-specific efficiency ($\eta$) and availability can vary by orders of magnitude.
 2.  **Distinction (Durable):** Unlike **Centralized Training**, where data is moved to the compute, Federated Learning moves the **Compute to the Data**, ensuring that raw information never leaves the device.
 3.  **Common Pitfall:** A frequent misconception is that Federated Learning is "inherently private." In reality, model updates themselves can leak information through **Gradient Inversion** attacks, requiring additional protections like **Differential Privacy** or **Secure Aggregation**.
+
+:::
+
+```{python}
+#| label: federated-savings-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ FEDERATED COMMUNICATION SAVINGS (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Model Updates vs Raw Data" .callout-notebook
+# │
+# │ Goal: Quantify the bandwidth savings of federated learning for a wearable.
+# │ Show: bandwidth_reduction ≈ 78x — inline in notebook result.
+# │ How: Ratio = Data_Raw / Data_Model_Updates.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: fs_raw_data_mb_str, fs_update_mb_str, fs_reduction_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class FederatedSavings:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_images = 1000 # Images collected by user per week
+    img_size_kb = 200 # Compressed JPEG
+    model_params_m = 5
+    compression_ratio = 10 # Quantized updates (e.g. 4-bit)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    raw_data_mb = (n_images * img_size_kb) / 1024
+    # Update size: 5M params * 4 bits = 2.5 MB
+    update_mb = (model_params_m * 4) / 8
+    reduction = raw_data_mb / update_mb
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(70 < reduction < 90, f"Reduction {reduction:.1f}x unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    fs_raw_data_mb_str = f"{raw_data_mb:.0f}"
+    fs_update_mb_str = f"{update_mb:.1f}"
+    fs_reduction_str = f"{reduction:.0f}"
+
+```
+
+::: {.callout-notebook title="Model Updates vs Raw Data"}
+
+**Problem**: You are designing a federated health monitor that learns from `{python} FederatedSavings.fs_raw_data_mb_str` MB of user sensor data per week. Should you upload the raw data to the cloud for training, or use **Federated Learning** to send model updates instead?
+
+**The Math**:
+Bandwidth efficiency is the ratio of raw data volume to model update size.
+
+1. **Raw Data Upload**: **`{python} FederatedSavings.fs_raw_data_mb_str` MB/week**.
+2. **Federated Update**: A compressed model update (5M params) is only **`{python} FederatedSavings.fs_update_mb_str` MB**.
+3. **Bandwidth Reduction**: 195 MB / 2.5 MB = **`{python} FederatedSavings.fs_reduction_str`$\times$ savings**.
+
+**The Systems Insight**: Federated learning is a **Network Multiplier**. For a user on a limited cellular plan, uploading 200 MB of raw data is expensive and slow. Uploading a **`{python} FederatedSavings.fs_update_mb_str` MB update** is nearly invisible. By shifting the "Compute to the Data," you reduce the network load by **`{python} FederatedSavings.fs_reduction_str`$\times$**, enabling continuous learning even in bandwidth-constrained environments. In the Machine Learning Fleet, this is how you scale to billions of users without bankrupting your networking budget or violating user privacy.
 
 :::
 

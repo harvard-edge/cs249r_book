@@ -165,6 +165,56 @@ $$ \text{Utilization} = \min\!\left(1,\;\frac{BW_{\text{storage}}}{N_{GPU} \time
 **The Implication**: A storage system that was adequate for 8 GPUs becomes the bottleneck at 64. **The I/O Wall** scales with the number of accelerators: every GPU added to the cluster raises the throughput floor that storage must sustain, making the data pipeline — not the model — the limiting factor.
 :::
 
+```{python}
+#| label: shard-contention-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ SHARD CONTENTION PROBABILITY (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Thundering Herd: Shard Contention" .callout-notebook
+# │
+# │ Goal: Quantify the probability of multiple GPUs hitting the same storage shard.
+# │ Show: contention_prob_pct ≈ 63% — inline in notebook result.
+# │ How: P(at least one collision) = 1 - (Shards! / (Shards^Workers * (Shards-Workers)!)).
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: sc_n_workers_str, sc_n_shards_str, sc_collision_prob_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+import math
+
+class ShardContention:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_workers = 32 # GPUs in a data-parallel group
+    n_shards = 1000 # Total shards in the dataset
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Classic birthday problem: P(no collision)
+    # For small n/N, approx e^(-n^2 / 2N)
+    p_no_collision = math.exp(-(n_workers**2) / (2 * n_shards))
+    p_collision = 1 - p_no_collision
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(0.3 < p_collision < 0.5, f"Prob {p_collision:.2f} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    sc_n_workers_str = f"{n_workers}"
+    sc_n_shards_str = f"{n_shards}"
+    sc_collision_prob_str = f"{p_collision * 100:.1f}"
+
+```
+
+::: {.callout-notebook title="The Thundering Herd: Shard Contention"}
+
+**Problem**: You have a dataset split into `{python} ShardContention.sc_n_shards_str` shards on a shared file system. If `{python} ShardContention.sc_n_workers_str` GPUs each pick a shard at random to start their next epoch, what is the probability that at least two GPUs "collide" on the same storage server, causing a performance bottleneck?
+
+**The Math**:
+This is a variant of the "Birthday Problem" in probability.
+
+1. **Probability of No Collision**: $\approx e^{-n^2 / 2N} = e^{-32^2 / 2000} \approx 0.60$.
+2. **Probability of Contention**: $1 - 0.60 = \mathbf{40\%}$.
+
+**The Systems Insight**: Even with a large number of shards, there is a **`{python} ShardContention.sc_collision_prob_str`% chance** that your storage system will experience a "Hot Spot" in any given epoch. In a distributed fleet, these collisions create **Tail Latency**: the entire cluster waits for the two GPUs sharing a disk to finish. To solve this, production data loaders use **Global Shuffling** and **Deterministic Shard Assignment** to ensure that workers are perfectly distributed across the storage fabric, eliminating the "Thundering Herd" effect.
+
+:::
+
 ::: {.callout-perspective title="The Widening I/O Wall"}
 The I/O Wall is not static -- it is widening. Between 2018 and 2025, accelerator compute throughput grew by roughly 10$\times$ (V100 at 125 TFLOPS to B200 at 2,250 TFLOPS in FP8). Over the same period, NVMe sequential bandwidth grew by roughly 2$\times$ (3.5 GB/s to 7 GB/s per drive). The compute-to-storage bandwidth ratio has therefore worsened by 5$\times$ in seven years. If this trend continues, the storage hierarchy must add new tiers (persistent memory, CXL-attached storage) or fundamentally change the data pipeline architecture (compute-near-storage, in-storage processing) to prevent the I/O Wall from becoming the dominant constraint on training throughput. The history of computing suggests that the gap will continue to widen, because the economic incentives favor investing in faster compute (which directly reduces training time) over faster storage (which only indirectly improves utilization).
 :::
@@ -362,14 +412,14 @@ How should a system architect organize storage to serve workloads that simultane
 
 To resolve the tensions between bandwidth, latency, capacity, and cost, ML systems use a multi-tier storage hierarchy. Each tier exists because it resolves a specific tension between physics (bandwidth and latency are governed by distance from the accelerator) and economics (cost per bit decreases as capacity increases). The hierarchy extends the classic processor memory hierarchy (registers, L1/L2 cache, DRAM) that students encounter in computer architecture courses, adding tiers below DRAM that are unique to large-scale data systems. @tbl-storage-hierarchy-merged reveals the extreme bandwidth disparities that ML systems must navigate.
 
-| **Storage Tier**         | **Typical Capacity** |               **Bandwidth** |      **Latency** | **Cost ($/GB)** |
-|:-------------------------|:---------------------|----------------------------:|-----------------:|----------------:|
+| **Storage Tier**         | **Typical Capacity** |                                        **Bandwidth** |      **Latency** | **Cost ($/GB)** |
+|:-------------------------|:---------------------|-----------------------------------------------------:|-----------------:|----------------:|
 | **GPU HBM**              | 80 GB                | `{python} StorageHierarchyAnalysis.h100_bw_tbs` TB/s |           ~10 ns |          ~15.00 |
-| **Host DRAM**            | 512 GB–2 TB          |                    200 GB/s |          ~100 ns |           ~3.00 |
-| **Local NVMe SSD**       | 4–30 TB              |                   7–25 GB/s |           ~10 μs |           ~0.10 |
-| **Parallel File System** | 100+ PB              |           1+ TB/s aggregate |            ~1 ms |           ~0.03 |
-| **Object Storage**       | Unlimited            |          100 GB/s aggregate |           ~50 ms |           ~0.02 |
-| **Archive/Cold Storage** | Unlimited            |                      1 GB/s | Minutes to hours |          ~0.004 |
+| **Host DRAM**            | 512 GB–2 TB          |                                             200 GB/s |          ~100 ns |           ~3.00 |
+| **Local NVMe SSD**       | 4–30 TB              |                                            7–25 GB/s |           ~10 μs |           ~0.10 |
+| **Parallel File System** | 100+ PB              |                                    1+ TB/s aggregate |            ~1 ms |           ~0.03 |
+| **Object Storage**       | Unlimited            |                                   100 GB/s aggregate |           ~50 ms |           ~0.02 |
+| **Archive/Cold Storage** | Unlimited            |                                               1 GB/s | Minutes to hours |          ~0.004 |
 
 : **Extended Memory Hierarchy for ML Systems**: The 300,000$\times$ bandwidth gap between HBM and object storage drives the need for sophisticated prefetching and caching across multiple levels. {#tbl-storage-hierarchy-merged}
 
@@ -386,12 +436,12 @@ Storage performance decreases and capacity increases as data moves further from 
     Box/.style={draw=black!60, line width=0.75pt, rounded corners=1pt, align=center},
     Line/.style={->, line width=1.0pt},
     Layer/.style={
-      trapezium, 
-      trapezium angle=70, 
-      draw, 
-      line width=0.75pt, 
-      minimum height=1cm, 
-      inner sep=0pt, 
+      trapezium,
+      trapezium angle=70,
+      draw,
+      line width=0.75pt,
+      minimum height=1cm,
+      inner sep=0pt,
       outer sep=0pt,
       align=center
     },
@@ -622,6 +672,59 @@ The central challenge at this tier is the I/O Wall: even the fastest NVMe RAID c
 
 Local NVMe is also the primary tier for **local checkpoint staging**. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability. A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter checkpoint of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB writes to local NVMe in approximately `{python} NVMeTierCalcs.ckpt_nvme_s_str` seconds, compared to `{python} NVMeTierCalcs.ckpt_pfs_s_str` seconds if written directly to a parallel file system where the node competes with hundreds of other writers. The optimal checkpoint *frequency* depends on cluster failure rates and is derived quantitatively in @sec-fault-tolerance-young-daly using the Young-Daly formula. From a storage perspective, the key design goal is minimizing $T_{save}$ through tiered staging: write to local NVMe at full bandwidth, then background-copy to shared storage.
 
+```{python}
+#| label: local-cache-roi-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ LOCAL CACHE ROI (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "ROI of Local NVMe Caching" .callout-notebook
+# │
+# │ Goal: Quantify GPU utilization gain from local caching.
+# │ Show: util_gain_pct ≈ 15% — inline in notebook result.
+# │ How: T_step_remote = T_compute + T_IO_remote; T_step_local = T_compute.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: lc_compute_ms_str, lc_remote_io_ms_str, lc_util_remote_str, lc_util_local_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class LocalCacheRoi:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_compute_ms = 800
+    t_io_remote_ms = 150 # Remote PFS latency + bandwidth limit
+    t_io_local_ms = 10   # Local NVMe prefetch (effective overhead)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_step_remote = t_compute_ms + t_io_remote_ms
+    t_step_local = t_compute_ms + t_io_local_ms
+    util_remote = (t_compute_ms / t_step_remote) * 100
+    util_local = (t_compute_ms / t_step_local) * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(util_remote < 85, f"Remote util {util_remote:.1f}% too high")
+    check(util_local > 98, f"Local util {util_local:.1f}% too low")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    lc_compute_ms_str = f"{t_compute_ms}"
+    lc_remote_io_ms_str = f"{t_io_remote_ms}"
+    lc_util_remote_str = f"{util_remote:.1f}"
+    lc_util_local_str = f"{util_local:.1f}"
+
+```
+
+::: {.callout-notebook title="ROI of Local NVMe Caching"}
+
+**Problem**: You are training a vision model where each step takes `{python} LocalCacheRoi.lc_compute_ms_str` ms. Fetching data from a shared Parallel File System adds `{python} LocalCacheRoi.lc_remote_io_ms_str` ms of I/O wait because of network congestion. How much does adding local NVMe SSDs to each node improve GPU utilization?
+
+**The Math**:
+GPU utilization ($\eta$) is the fraction of step time spent in computation.
+
+1. **Remote Only**: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + `{python} LocalCacheRoi.lc_remote_io_ms_str`) $\approx$ **`{python} LocalCacheRoi.lc_util_remote_str`%**.
+2. **Local Cache**: Using prefetching into local NVMe reduces the exposed I/O wait to near zero.
+   - New Util: `{python} LocalCacheRoi.lc_compute_ms_str` / (`{python} LocalCacheRoi.lc_compute_ms_str` + 10) $\approx$ **`{python} LocalCacheRoi.lc_util_local_str`%**.
+
+**The Systems Insight**: Local storage is a **GPU Utilization Multiplier**. By adding a \$500 NVMe drive to a \$30,000 GPU node, you recover **15% of the GPU's capacity** that was previously wasted on I/O wait. Across a 1,000-GPU cluster, this is equivalent to adding **150 GPUs** for "free." In modern ML infrastructure, local NVMe is not auxiliary; it is the "Physical Buffer" that decouples expensive compute from unpredictable shared storage.
+
+:::
+
 A practical concern at this tier is **SSD endurance**. NAND flash memory can sustain a limited number of write-erase cycles before the cells degrade. Enterprise NVMe drives are rated for 1 to 3 Drive Writes Per Day (DWPD) over a 5-year lifespan. For a 7.68 TB drive at 1 DWPD, this means the drive can absorb 7.68 TB of writes per day, or roughly 14 PB total over its lifetime. ML training workloads are predominantly read-heavy (the dataset is written once and read many times), which is favorable for SSD endurance. However, checkpoint writes can be intensive: if each node saves a 4 GB checkpoint shard every 10 minutes, that is 576 GB per day of checkpoint writes, well within the 1 DWPD budget. The risk emerges when local NVMe is used as a staging buffer for both checkpoint writes *and* dataset caching: the combined write volume from initial dataset staging plus repeated checkpoint saves must remain within the drive's endurance rating.
 
 Local NVMe provides high bandwidth and low latency within a single node, but distributed training requires every node to access the same datasets and see the same checkpoints. This shared-namespace requirement cannot be satisfied by node-local storage alone and motivates the next tier in the hierarchy.
@@ -636,9 +739,9 @@ Local NVMe provides high bandwidth and low latency within a single node, but dis
 
 ***Parallel File System (PFS)***\index{Parallel File System!definition} is a distributed storage architecture that stripes data across many storage servers to provide aggregate throughput exceeding the capacity of any single device.
 
-1.  **Significance (Quantitative):** In ML fleets, a PFS (e.g., Lustre, GPFS) provides the shared namespace for training data and model artifacts. It allows a single client to aggregate the **I/O Bandwidth ($BW_{io}$)** of multiple storage nodes, which is essential for loading petabyte-scale datasets and writing multi-terabyte checkpoints.
-2.  **Distinction (Durable):** Unlike **Network Attached Storage (NAS)**, where a client talks to one server at a time, a PFS client communicates with many servers simultaneously to parallelize the data stream.
-3.  **Common Pitfall:** A frequent misconception is that a PFS has "infinite throughput." In reality, it is constrained by **Metadata Latency ($L_{\text{lat}}$)**: while bulk data transfers are fast, operations like opening millions of small files can overwhelm the filesystem's central directory servers.
+1.  **Significance (Quantitative):** A PFS aggregates $BW_{io}$ linearly with the number of storage servers (Object Storage Servers). A Lustre cluster with 20 OSS nodes each delivering 10 GB/s provides 200 GB/s aggregate — versus a single NAS server capped at 10 GB/s — enabling an 8,000-GPU training job to load each 512-token batch in under 50 ms rather than 1 second. This aggregate bandwidth directly reduces the $D_{vol}/BW$ term in the Iron Law.
+2.  **Distinction (Durable):** Unlike Network Attached Storage (NAS), where every I/O request routes through a single server, a PFS client receives stripe location metadata from a dedicated Metadata Server (MDS) and then reads data directly from multiple OSS nodes in parallel — the MDS and OSS paths are architecturally separated, so data bandwidth scales with OSS count while metadata operations scale with MDS count.
+3.  **Common Pitfall:** A frequent misconception is that a PFS has unlimited throughput if enough OSS nodes are added. In reality, a Lustre MDS handles roughly 100,000–300,000 metadata operations per second; at 10,000 workers each opening one small file, the MDS saturates in under 1 second and becomes the serialization point that idles the entire cluster regardless of how many OSS nodes are present.
 
 :::
 
@@ -1441,9 +1544,9 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 ***Checkpoint Storm***\index{Checkpoint Storm!definition} is a burst of synchronized network and storage traffic that occurs when all nodes in a training fleet save model state simultaneously.
 
-1.  **Significance (Quantitative):** In a large-scale cluster, a single checkpoint event can generate tens of terabytes of write traffic in seconds, saturating the **Bisection Bandwidth ($BW$)** and stalling the optimization loop. The total training time ($T$) increases by the duration of the storm ($T_{save}$), reducing the **System Efficiency ($\eta$)**.
-2.  **Distinction (Durable):** Unlike **General I/O Contention** (which is stochastic), a Checkpoint Storm is **Synchronous and Periodic**, driven by the deterministic cycle of the training orchestrator.
-3.  **Common Pitfall:** A frequent misconception is that storms are unavoidable. In reality, they can be mitigated through **Staggered Checkpointing**, multi-tiered buffering (local NVMe to remote PFS), and **Asynchronous Serialization** that overlaps the write with the next compute step.
+1.  **Significance (Quantitative):** The storm magnitude scales as $T_{save} = N \times \text{per-node-shard} / BW_{fabric}$. For a 70B-parameter model trained across 1,000 nodes with ZeRO-3 sharding ($\approx$140 GB per node at FP16), a checkpoint generates 140 TB of simultaneous writes; at 100 GB/s fabric bandwidth, $T_{save} \approx 1{,}400$ seconds — over 23 minutes of training stall per checkpoint event. This adds directly to the $L_{lat}$ term and can dwarf the compute time between checkpoints.
+2.  **Distinction (Durable):** Unlike general I/O contention (which is stochastic and unpredictable), a Checkpoint Storm is synchronous and periodic — every node writes at the same moment because the training orchestrator triggers checkpoint after a fixed step count. Its predictability makes it both more damaging (all nodes compete simultaneously) and more tractable (it can be prevented by design through staggered scheduling or asynchronous serialization).
+3.  **Common Pitfall:** A frequent misconception is that checkpointing every 100 steps is "low overhead." At 70B scale, this assumption is catastrophically wrong: if each training step takes 10 seconds and a checkpoint storm takes 1,400 seconds, checkpointing every 100 steps means spending $1400/(100 \times 10) = 140\%$ of compute time on checkpointing — more time saving state than doing useful training.
 
 :::
 
@@ -1453,7 +1556,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 
 1. **Per-node write to local NVMe** (4 drives at 3.5 GB/s each = 14 GB/s): $4 \text{ GB} \div 14 \text{ GB/s} = 0.29$ seconds.
 2. **Async copy to PFS**: 256 nodes$\times$ 4 GB = 1,024 GB total. If the PFS provides 1 TB/s aggregate, the storm completes in roughly 1 second.
-3. **Per-node PFS bandwidth**: If all 256 nodes write simultaneously, each gets $1{,}000 / 256 = 3.9$ GB/s. Per-node async copy: $4 / 3.9 = 1.03$ seconds.
+3. **Per-node PFS bandwidth**: If all 256 nodes write simultaneously, each gets $1000 / 256 = 3.9$ GB/s. Per-node async copy: $4 / 3.9 = 1.03$ seconds.
 4. **Training pause**: only 0.29 seconds (the local NVMe write). The PFS copy overlaps with the next training iteration.
 5. **Overhead**: 0.29 s pause every 600 s = **0.05%** training time lost to checkpointing.
 
@@ -1516,7 +1619,7 @@ Storing each training sample as an individual file (one JPEG per image, one JSON
 
 **Pitfall:** *Ignoring egress costs when designing the storage architecture.*
 
-Cloud egress costs ($0.09/GB for most providers) are invisible during development but dominate at scale. A training job that reads a 100 TB dataset from object storage 10 times incurs \$90,000 in egress fees, far exceeding the annual storage cost of \$27,600. Teams that prototype with small datasets on object storage and then scale up discover that their storage architecture is economically unsustainable. The fix is to budget egress costs explicitly and to design the data pipeline to minimize cross-tier transfers, typically by staging data on local NVMe at job start rather than streaming from object storage each epoch.
+Cloud egress costs (\$0.09/GB for most providers) are invisible during development but dominate at scale. A training job that reads a 100 TB dataset from object storage 10 times incurs \$90,000 in egress fees, far exceeding the annual storage cost of \$27,600. Teams that prototype with small datasets on object storage and then scale up discover that their storage architecture is economically unsustainable. The fix is to budget egress costs explicitly and to design the data pipeline to minimize cross-tier transfers, typically by staging data on local NVMe at job start rather than streaming from object storage each epoch.
 
 **Pitfall:** *Designing checkpoint storage for average write performance rather than burst performance.*
 
@@ -1542,15 +1645,15 @@ This is only true if the pipeline is I/O-bound. Compression reduces I/O volume b
 
 The complete storage picture for our running example -- a 30-day training run of a 175B-parameter model on 256 nodes:
 
-| **Category**                               | **Volume** | **Primary Tier**                                           |
-|:-------------------------------------------|-----------:|:-----------------------------------------------------------|
-| Training dataset (compressed)              |       3 TB | Object Storage $\to$ NVMe cache                            |
-| Training dataset (decoded, per epoch)      |     ~15 TB | Host DRAM (transient)                                      |
-| Model weights (FP16)                       |     350 GB | GPU HBM (distributed)                                      |
-| Optimizer state (FP32)                     |   1,400 GB | GPU HBM (ZeRO-partitioned)                                 |
-| Single checkpoint (full)                   |   1,050 GB | NVMe $\to$ PFS $\to$ Object Storage                        |
-| All checkpoints (30 days, 10-min interval) |     `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
-| Archive (retained checkpoints + dataset)   |     ~50 TB | Glacier                                                    |
+| **Category**                               |                                                 **Volume** | **Primary Tier**                                           |
+|:-------------------------------------------|-----------------------------------------------------------:|:-----------------------------------------------------------|
+| Training dataset (compressed)              |                                                       3 TB | Object Storage $\to$ NVMe cache                            |
+| Training dataset (decoded, per epoch)      |                                                     ~15 TB | Host DRAM (transient)                                      |
+| Model weights (FP16)                       |                                                     350 GB | GPU HBM (distributed)                                      |
+| Optimizer state (FP32)                     |                                                   1,400 GB | GPU HBM (ZeRO-partitioned)                                 |
+| Single checkpoint (full)                   |                                                   1,050 GB | NVMe $\to$ PFS $\to$ Object Storage                        |
+| All checkpoints (30 days, 10-min interval) | `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB | NVMe (transient) $\to$ PFS (recent) $\to$ Object (archive) |
+| Archive (retained checkpoints + dataset)   |                                                     ~50 TB | Glacier                                                    |
 
 **Total data moved through the hierarchy**: approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data plus 3 TB$\times$ epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over 1,000.
 :::

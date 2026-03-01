@@ -777,6 +777,17 @@ Text/.style={%
 ```
 :::
 
+::: {.callout-checkpoint title="Detecting Silent Corruption"}
+
+Verify your understanding of non-stop failures and SDC:
+
+- [ ] Why is **Silent Data Corruption (SDC)** more dangerous for ML training than a simple node crash?
+- [ ] How does a **Hot Spare** redundancy strategy differ from a traditional **Checkpoint-Restart** approach in terms of recovery latency?
+- [ ] In the Google case study, which metric was used as a "Sanity Checker" to identify potential hardware faults: GPU Temperature or Gradient Norm?
+- [ ] True or False: Byzantine failures only occur when a malicious actor intentionally sabotages the training cluster.
+
+:::
+
 Byzantine failures include:
 
 - **Silent data corruption**: Memory or computation errors produce wrong values without triggering errors
@@ -854,8 +865,18 @@ Defending against correlated failures requires understanding failure domains and
 
 : **Failure Domains in ML Infrastructure**: Understanding failure domain boundaries enables placement of redundant components across independent domains, preventing correlated failures from defeating redundancy strategies. {#tbl-failure-domains}
 
-::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of Failure Domains**. Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (e.g., different racks or rows) to survive correlated failures." fig-alt="Nested rectangles showing failure domain hierarchy. Region contains Zone A and Zone B. Each zone contains a rack with switch and PDU. Each rack contains a node with OS and PCIe. Each node contains multiple GPUs. Annotation explains containment."}
-```{.tikz}
+::: {.callout-checkpoint title="Mapping Failure Domains"}
+
+Verify your understanding of how failure domains nest and their operational impact:
+
+- [ ] If a rack switch fails, how many 8-GPU nodes are typically affected in a standard datacenter configuration?
+- [ ] Why does placing all 3 model replicas in the same Zone (e.g., `us-east-1a`) fail to provide protection against a regional power outage?
+- [ ] Which failure domain is uniquely addressed by **Staged Rollouts** rather than hardware redundancy?
+- [ ] Can you explain the concept of **Hierarchical Containment**? If a Zone fails, does the corresponding Rack failure domain still matter for that event?
+
+:::
+
+::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of Failure Domains**. Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (e.g., different racks or rows) to survive correlated failures." fig-alt="Nested rectangles showing failure domain hierarchy. Region contains Zone A and Zone B. Each zone contains a rack with switch and PDU. Each rack contains a node with OS and PCIe. Each node contains multiple GPUs. Annotation explains containment."}```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=0.5cm and 0.5cm]
 \tikzset{
   Region/.style={draw=GrayLine, fill=GrayL, line width=0.75pt, inner sep=10pt},
@@ -918,7 +939,7 @@ The practical implication for ML systems is that fleet-wide failure rates depend
 
 ::: {#fig-bathtub-curve fig-env="figure" fig-pos="htb" fig-cap="**The Bathtub Curve**. Hardware failure rates $\lambda(t)$ vary over time. (1) **Infant Mortality**: High failure rate initially due to manufacturing defects. (2) **Useful Life**: Constant, low failure rate where random failures dominate. (3) **Wear-Out**: Increasing failure rate as components age. Burn-in testing aims to filter out infant mortality failures before deployment." fig-alt="Line graph of failure rate versus component age showing bathtub shape. Three phases: infant mortality with high decreasing rate, useful life with constant low rate, and wear-out with increasing rate. Vertical dashed line marks burn-in period."}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, 
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n},
   node distance=1cm and 1cm,
   RedLine/.style={draw=red, thick},
   BlueLine/.style={draw=blue, thick},
@@ -1963,9 +1984,60 @@ plt.show()
 
 The U-shaped cost curve in @fig-young-daly-storage visualizes this trade-off: checkpoint overhead decreases as intervals lengthen, while rework cost from failures increases linearly. The optimal point minimizes their sum.
 
-For our 10,000 GPU cluster with calculated system \text{MTBF} of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB checkpoint at 100 GB/s), @eq-young-daly-applied computes the optimal interval:
+For our 10,000 GPU cluster with calculated system \text{MTBF} of 3.69 hours (from @sec-fault-tolerance-reliability-reliability-worked-example-cluster-mtbf-calculation-9255) and checkpoint time of 21 seconds (from `{python} FaultToleranceSetup.gpt3_ckpt_tb` TB checkpoint at 100 GB/s), @eq-young-daly-applied computes the optimal interval.
 
-$$ T_{\text{opt}} = \sqrt{2 \times 21s \times 3.69hr \times 3600s/hr} \approx 12.4 \text{ minutes} $$ {#eq-young-daly-applied}
+```{python}
+#| label: young-daly-optimal-interval
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ YOUNG-DALY OPTIMAL INTERVAL (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Young-Daly Optimal Interval" .callout-notebook
+# │
+# │ Goal: Quantify the optimal checkpoint interval for a 10K-GPU cluster
+# │       to minimize wasted work using the square-root law.
+# │ Show: tau_opt_min_str ≈ 12.4 min — inline in notebook steps.
+# │ How: τ = sqrt(2 * T_save * MTBF); bare arithmetic for clarity.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: yd_t_save_s_str, yd_mtbf_h_str, yd_tau_opt_min_str, yd_overhead_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+import math
+
+class YoungDalyOptimal:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_save_s = 21
+    mtbf_h = 3.69
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    mtbf_s = mtbf_h * 3600
+    tau_opt_s = math.sqrt(2 * t_save_s * mtbf_s)
+    tau_opt_min = tau_opt_s / 60
+    overhead_pct = (t_save_s / tau_opt_s + tau_opt_s / (2 * mtbf_s)) * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(10 < tau_opt_min < 15, f"Interval {tau_opt_min:.1f}m outside expected range")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    t_save_s_str = f"{t_save_s}"
+    mtbf_h_str = f"{mtbf_h}"
+    tau_opt_min_str = f"{tau_opt_min:.1f}"
+    overhead_pct_str = f"{overhead_pct:.1f}"
+
+```
+
+::: {.callout-notebook title="The Young-Daly Optimal Interval"}
+
+**Problem**: Your 10,000-GPU cluster has an MTBF of `{python} YoungDalyOptimal.mtbf_h_str` hours. A full model checkpoint takes `{python} YoungDalyOptimal.t_save_s_str` seconds to write. What is the optimal checkpoint frequency?
+
+**The Math**:
+Apply the Young-Daly formula: $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{save}} \cdot \text{MTBF}}$
+
+1. **Convert to common units**: MTBF = `{python} YoungDalyOptimal.mtbf_h_str` $\times$ 3,600s = `{python} f"{3.69 * 3600:,.0f}"` seconds.
+2. **Calculate**: $\tau_{\text{opt}} = \sqrt{2 \cdot 21 \cdot 13,284} = \sqrt{557,928} \approx$ `{python} f"{math.sqrt(2 * 21 * 13284):,.0f}"` seconds.
+3. **Result**: $\tau_{\text{opt}} \approx$ **`{python} YoungDalyOptimal.tau_opt_min_str` minutes**.
+
+**The Systems Insight**: At this interval, the "Checkpoint Tax" (time spent saving + time spent re-computing) is minimized to approximately **`{python} YoungDalyOptimal.overhead_pct_str`%**. If you checkpointed every hour instead, your failure risk would increase, wasting nearly 10% of your cluster's capacity. As clusters scale, the optimal interval *must* shrink to keep up with the falling MTBF.
+
+:::
 
 This result demonstrates why failure analysis matters: without knowing the system \text{MTBF}, we cannot set checkpoint intervals rationally. With this interval, checkpoint overhead consumes approximately 2.8% of training time. However, practitioners should be aware of the *Young-Daly formula assumptions* that underpin this estimate.
 
@@ -2905,11 +2977,11 @@ When full redundancy fails—such as when an edge device loses connectivity, or 
 
 ::: {.callout-definition title="Graceful Degradation"}
 
-***Graceful Degradation***\index{Graceful Degradation!definition} is the systematic reduction of model quality, latency, or coverage to maintain system **Availability** under conditions that exceed primary fault tolerance limits.
+***Graceful Degradation***\index{Graceful Degradation!definition} is a fault tolerance strategy in which a system responds to resource exhaustion or component failure by deliberately reducing service quality — falling back to a smaller model, serving cached results, or returning partial outputs — rather than failing completely, maintaining measurable availability at reduced capability.
 
-1.  **Significance (Quantitative):** It allows the system to remain functional by trading **Model Accuracy** for lower resource requirements ($R_{\text{peak}}, BW$). For example, a system may fall back to a smaller model or use fewer features to maintain its **Inference SLO** ($L_{\text{lat}}$) during high load.
-2.  **Distinction (Durable):** Unlike **System Failure** (total loss of service), Graceful Degradation is a **Managed Transition** where the system continues to provide "best-effort" results through secondary mechanisms (e.g., cached predictions).
-3.  **Common Pitfall:** A frequent misconception is that degradation is "automatic." In reality, it is an **Architectural Choice**: it requires pre-computed fallback models and logic that can detect failure and switch execution paths without user intervention.
+1.  **Significance (Quantitative):** Graceful degradation converts total outage risk into a controlled quality reduction. A recommendation system that falls back from a 7B-parameter ranker to a collaborative-filtering model on GPU failure may reduce click-through rate by 8–15% but maintains 100% request availability versus 0% during a hard failure. At \$1M/day in revenue dependent on recommendations, an 8% CTR reduction (\$80K/day degraded) is sharply preferable to a 10-minute outage (\$7K/minute lost).
+2.  **Distinction (Durable):** Unlike complete system failure (where the service returns errors to all requests), graceful degradation provides a managed transition through a predefined capability hierarchy — each fallback level has known accuracy, latency, and resource characteristics that allow the system to continue satisfying SLOs at reduced quality.
+3.  **Common Pitfall:** A frequent misconception is that degradation is automatic in well-designed systems. Graceful degradation requires explicit pre-engineering: fallback models must be pre-loaded or pre-computed, switchover logic must detect the failure condition and trigger the transition without human intervention, and each degradation level must have been validated to actually satisfy its reduced SLO before it is needed in production.
 
 :::
 

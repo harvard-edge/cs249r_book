@@ -648,7 +648,7 @@ The core quantization mathematics: scale calculation, zero-point mapping, INT8 r
 
 To appreciate why quantization is critical for production ML, consider these deployment scenarios:
 
-- **Mobile AI**: iPhone has 6 GB RAM shared across all apps. A quantized BERT (110 MB) fits comfortably; FP32 version (440 MB) causes memory pressure and swapping.
+- **Mobile AI**: Modern smartphones have 8 GB+ RAM shared across all apps. A quantized BERT (110 MB) fits comfortably; FP32 version (440 MB) causes memory pressure and swapping.
 - **Edge computing**: IoT devices often have 512 MB RAM. Quantization enables on-device inference for privacy-sensitive applications (medical devices, security cameras).
 - **Data centers**: Serving 1000 requests/second requires multiple model replicas. With 4× memory reduction, you fit 4× more models per GPU, reducing serving costs by 75%.
 - **Battery life**: INT8 operations consume 2-4× less energy than FP32 on mobile processors. Quantized models drain battery slower, improving user experience.

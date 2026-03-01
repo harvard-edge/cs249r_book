@@ -194,7 +194,59 @@ To make the scheduling problem concrete, consider a research organization operat
 
 The economic stakes make these decisions consequential at every scale. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster at $`{python} f"{ClusterEconomicsContext.gpu_hour_cost_usd:.0f}"` per GPU-hour costs $`{python} ClusterEconomicsContext.daily_cost_str` per day to operate, whether the GPUs are computing useful work or sitting idle in a queue. If scheduling inefficiencies leave `{python} f"{ClusterEconomicsContext.idle_fraction*100:.0f}"` percent of GPUs idle, that translates to $`{python} ClusterEconomicsContext.daily_waste_str` per day in wasted capacity, or over $`{python} ClusterEconomicsContext.annual_waste_str` million annually. Conversely, improving utilization from `{python} f"{ClusterEconomicsContext.util_low*100:.0f}"` percent to `{python} f"{ClusterEconomicsContext.util_high*100:.0f}"` percent effectively adds `{python} ClusterEconomicsContext.equivalent_gpus_str` GPUs worth of productive capacity without purchasing additional hardware. At this scale, a one-percentage-point improvement in utilization is worth more annually than the salary of the engineer who achieves it. Scheduling is not operational overhead; it is one of the highest-leverage engineering investments in ML infrastructure.
 
-ML workloads present scheduling challenges that distinguish them fundamentally from traditional high-performance computing and cloud computing. **Gang scheduling**[^fn-gang-scheduling] represents the most critical difference: a distributed training job requiring 1,024 GPUs cannot make progress with only 512. Unlike traditional HPC simulations that can often scale to whatever resources are available, synchronous data parallelism demands all-or-nothing allocation. Every worker must participate in every AllReduce operation, and a missing worker blocks all others. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster. Beyond gang scheduling, topology awareness via **placement groups**[^fn-placement-groups] adds a second hard constraint: to support tensor parallelism, the scheduler must ensure GPUs are placed within the same high-bandwidth NVLink domain rather than scattered across the datacenter. Tools like Slurm (from the HPC world) and Kubernetes (from the cloud-native world) are the two primary vehicles for implementing these policies, and each makes different trade-offs that shape how these constraints are enforced.
+ML workloads present scheduling challenges that distinguish them fundamentally from traditional high-performance computing and cloud computing. **Gang scheduling**[^fn-gang-scheduling] represents the most critical difference: a distributed training job requiring 1,024 GPUs cannot make progress with only 512. Unlike traditional HPC simulations that can often scale to whatever resources are available, synchronous data parallelism demands all-or-nothing allocation. Every worker must participate in every AllReduce operation, and a missing worker blocks all others. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster.
+
+```{python}
+#| label: gang-scheduling-deadlock-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GANG SCHEDULING DEADLOCK (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Physics of Deadlock" .callout-notebook
+# │
+# │ Goal: Quantify the risk of cluster deadlock without gang scheduling.
+# │ Show: deadlock_prob_pct ≈ 100% — inline in notebook result.
+# │ How: P(allocation) = (Free_Gpus / Req_Gpus)^N_Jobs. (Conceptual)
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: gs_n_gpus_str, gs_n_jobs_str, gs_waste_m_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class GangSchedulingDeadlock:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_total_gpus = 1024
+    n_jobs = 4
+    gpus_per_job = 512 # Each job needs half the cluster
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # If scheduler allocates partially (e.g. 256 to each), no job can run.
+    # Total idle waste per hour if deadlock occurs:
+    gpu_hour_cost = 2.0 # $/hr
+    waste_per_hour = n_total_gpus * gpu_hour_cost
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(waste_per_hour == 2048, f"Waste ${waste_per_hour} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    gs_n_gpus_str = f"{n_total_gpus}"
+    gs_n_jobs_str = f"{n_jobs}"
+    gs_waste_m_str = f"{waste_per_hour:,.0f}"
+
+```
+
+::: {.callout-notebook title="The Physics of Deadlock"}
+
+**Problem**: You have a `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster. Two teams each submit a job requiring 512 GPUs. A naive scheduler (non-gang) allocates 256 GPUs to Team A and 256 to Team B, then waits for more GPUs to become available. What happens next?
+
+**The Math**:
+1. **Team A Status**: Holds 256, Needs 512. Progress = **0%**.
+2. **Team B Status**: Holds 256, Needs 512. Progress = **0%**.
+3. **Cluster Status**: 512 GPUs allocated, 0 samples processed.
+4. **Waste**: `{python} GangSchedulingDeadlock.gs_waste_m_str` dollars per hour in idle electricity and capital.
+
+**The Systems Insight**: This is a **Circular Dependency**: Team A is waiting for Team B's GPUs, and Team B is waiting for Team A's. Without **Gang Scheduling** (all-or-nothing allocation), your cluster efficiency drops to zero. In a large fleet, even a 5-minute deadlock can cost thousands of dollars. Schedulers like Kubernetes (via Coscheduling plugins) and Slurm enforce atomicity to ensure that if a job can't run in full, it doesn't run at all.
+
+:::
+
+Beyond gang scheduling, topology awareness via **placement groups**[^fn-placement-groups] adds a second hard constraint: to support tensor parallelism, the scheduler must ensure GPUs are placed within the same high-bandwidth NVLink domain rather than scattered across the datacenter. Tools like Slurm (from the HPC world) and Kubernetes (from the cloud-native world) are the two primary vehicles for implementing these policies, and each makes different trade-offs that shape how these constraints are enforced.
 
 [^fn-gang-scheduling]: **Gang Scheduling**: Formalized by John Ousterhout in 1982 for parallel systems, where the "Ousterhout matrix" co-schedules related threads across processors in synchronized time slices. In ML clusters, the constraint is stricter: synchronous AllReduce requires *all* workers simultaneously, so partial allocation wastes 100% of held resources rather than merely degrading throughput. A 1,024-GPU job holding 900 GPUs while waiting for 124 more burns approximately $1,800/hour in idle capacity. \index{Gang Scheduling!scheduling}
 
@@ -783,7 +835,7 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
   \begin{scope}[shift={(6,0)}, local bounding box=rightScope]
     % Node A
     \node[switch, fill=GreenL, minimum width=1.2cm] (nvsw_a) {NVSw};
-    
+
     \node[gpu, fill=GreenL, below left=0.3cm and 0.1cm of nvsw_a] (sg1) {G1};
     \node[gpu, fill=GreenL, left=0.2cm of sg1] (sg0) {G0};
     \node[gpu, fill=GreenL, right=0.2cm of sg1] (sg2) {G2};
@@ -800,7 +852,7 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
 
     % Node B
     \node[switch, fill=GreenL, minimum width=1.2cm, below=1.5cm of nvsw_a] (nvsw_b) {NVSw};
-    
+
     \node[gpu, fill=RedL, below left=0.3cm and 0.1cm of nvsw_b] (sg5) {G5};
     \node[gpu, fill=RedL, left=0.2cm of sg5] (sg4) {G4};
     \node[gpu, fill=RedL, right=0.2cm of sg5] (sg6) {G6};
@@ -1156,7 +1208,7 @@ Consider a large language model training job with a target batch size that requi
 
 **Strategy 2 -- Wait for capacity (gang scheduling)**: The job waits in the queue for 4 hours until 512 GPUs become available, then runs for 20 hours. Total work: $20 \times 3.2 =$ `{python} ElasticScaling.es_s2_str` epochs.
 
-**Strategy 3 -- Elastic scaling (step-up)**: The job starts immediately with 256 GPUs. After 4 hours, 256 more GPUs become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.8 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: $(24 - 4 - `{python} ElasticScaling.es_rescale_str`) \times 3.2 \approx$ `{python} ElasticScaling.es_s3p2_str` epochs. Total work: $`{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` =$ `{python} ElasticScaling.es_s3_str` epochs.
+**Strategy 3 -- Elastic scaling (step-up)**: The job starts immediately with 256 GPUs. After 4 hours, 256 more GPUs become available. The job pauses, scales up, and resumes. Phase 1: $4 \times 1.8 =$ `{python} ElasticScaling.es_s3p1_str` epochs. Phase 2: $(24 - 4 -$ `{python} ElasticScaling.es_rescale_str`$) \times 3.2 \approx$ `{python} ElasticScaling.es_s3p2_str` epochs. Total work: `{python} ElasticScaling.es_s3p1_str` + `{python} ElasticScaling.es_s3p2_str` = `{python} ElasticScaling.es_s3_str` epochs.
 
 The elastic strategy outperforms waiting by approximately 10 percent and the immediate small-scale run by nearly 3$\times$. However, if the re-scaling cost exceeded 2 hours (due to slow checkpoint transfer or compilation), Strategy 2 would become superior.
 
@@ -1883,8 +1935,8 @@ The **Fleet Stack** framework (@sec-vol2-introduction) provides a structured app
 
 **Infrastructure Layer Analysis**: The cluster contains heterogeneous hardware acquired over three procurement cycles:
 
-| **GPU Type**  | **Count** | **Memory**  | **Interconnect**    | **Nodes**               |
-|:--------------|----------:|:------------|:--------------------|:------------------------|
+| **GPU Type**   | **Count** | **Memory**  | **Interconnect**    | **Nodes**               |
+|:---------------|----------:|:------------|:--------------------|:------------------------|
 | **A100-80 GB** |       400 | 80 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
 | **A100-40 GB** |       400 | 40 GB HBM2e | NVLink (600 GB/s)   | 50 nodes$\times$ 8 GPUs |
 | **V100-32 GB** |       200 | 32 GB HBM2  | PCIe Gen3 (32 GB/s) | 50 nodes$\times$ 4 GPUs |
@@ -1964,14 +2016,29 @@ class DebugValueCalc:
 
 | **Pool**         | **Before**                   | **After**                    | **Change**    |
 |:-----------------|:-----------------------------|:-----------------------------|:--------------|
-| **A100-80 GB**    | 95% allocated, 72% effective | 89% allocated, 94% effective | +5% effective |
-| **A100-40 GB**    | 64% allocated                | 88% allocated                | +24%          |
+| **A100-80 GB**   | 95% allocated, 72% effective | 89% allocated, 94% effective | +5% effective |
+| **A100-40 GB**   | 64% allocated                | 88% allocated                | +24%          |
 | **V100**         | 0% allocated                 | 71% allocated                | +71%          |
 | **Cluster-wide** | **60%**                      | **84%**                      | **+40%**      |
 
 : **Utilization Recovery Results**: The distinction between "allocated" and "effective" utilization captures the gang scheduling deadlock: before the fix, A100-80 GB GPUs showed high allocation in Slurm but low actual compute utilization because allocated jobs could not start. {#tbl-fleet-orchestration-debug-results}
 
-This 40% improvement in effective cluster capacity equals approximately `{python} DebugValueCalc.debug_recovered_str` additional GPUs worth of productive work. At \$2 per GPU-hour, this represents approximately \$`{python} DebugValueCalc.debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
+This 40% improvement in effective cluster capacity equals approximately `{python} DebugValueCalc.debug_recovered_str` additional GPUs worth of productive work.
+
+::: {.callout-notebook title="The Value of a Profiler"}
+
+**Problem**: You manage a `{python} DebugValueCalc.debug_cluster`-GPU cluster. Your initial monitoring shows 60% average utilization. After a week of systematic debugging (identifying stragglers, optimizing AllReduce buckets, and tuning data loaders), your utilization increases to 84%. What is the financial value of that one week of engineering work?
+
+**The Math**:
+1. **Capacity Recovery**: (0.84 - 0.60) / 0.60 = **40% increase in productive throughput**.
+2. **Recovered Hardware**: 40% of 1,000 GPUs = **`{python} DebugValueCalc.debug_recovered_str` GPUs**.
+3. **Annual Value**: `{python} DebugValueCalc.debug_recovered_str` GPUs $\times$ \$2/hr $\times$ 8,760 hrs/year $\approx$ **\$`{python} DebugValueCalc.debug_annual_str` Million**.
+
+**The Systems Insight**: Debugging is not a "maintenance task"; it is a **Capacity Generator**. Increasing utilization from 60% to 84% has the same business impact as buying **400 new GPUs** (costing ~$12 Million in CapEx). In the Machine Learning Fleet, performance engineering is often the most cost-effective way to scale—it is cheaper to make your existing GPUs 40% faster than to buy 40% more hardware.
+
+:::
+
+At \$2 per GPU-hour, this represents approximately \$`{python} DebugValueCalc.debug_annual_str` million in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
 
 **The Fleet Stack Lesson**: Surface-level diagnosis suggested a scheduling algorithm problem (Distribution Layer), perhaps requiring a more sophisticated scheduler like those discussed in @sec-fleet-orchestration-custom-schedulers. Management initially proposed evaluating Pollux or a custom scheduling solution, which would have required months of engineering effort and introduced operational risk. Deeper analysis revealed the root cause as a **mismatch between Infrastructure Layer heterogeneity and Distribution Layer policies designed for homogeneous infrastructure**. The scheduler algorithm was not the problem; the policies it implemented were the problem. The scheduler correctly implemented its configured policy; the policy itself created the utilization gap.
 

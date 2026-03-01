@@ -364,11 +364,11 @@ Before analyzing protocols and topologies, we must understand the physical mediu
 
 ::: {.callout-definition title="PAM4 Signaling"}
 
-***PAM4 Signaling***\index{PAM4 Signaling!definition} is a modulation scheme that uses four voltage levels to encode two bits per symbol, doubling the data rate for a given symbol rate.
+***PAM4 Signaling***\index{PAM4 Signaling!definition} is an electrical modulation scheme that uses four distinct voltage levels to encode two bits per symbol period, doubling the data rate achievable over a given physical medium without requiring a higher symbol rate.
 
-1.  **Significance (Quantitative):** It enables the high **Network Bandwidth ($\text{BW}$)** required for exa-scale fleets (e.g., 400G/800G links). However, the reduced signal-to-noise ratio necessitates **Forward Error Correction (FEC)**, which adds irreducible **Fixed Latency ($L_{\text{lat}}$)** to every packet hop.
-2.  **Distinction (Durable):** Unlike **NRZ Signaling** (binary on/off), PAM4 uses multi-level amplitude to overcome the physical symbol-rate limits of copper and fiber.
-3.  **Common Pitfall:** A frequent misconception is that doubling the bits per symbol is "free." In reality, it is a **Reliability-Latency Trade-off**: the processing time for error correction makes PAM4 links fundamentally higher-latency than their NRZ predecessors.
+1.  **Significance (Quantitative):** PAM4 enables 400 Gb/s and 800 Gb/s link speeds that sustain the $\text{BW}$ required for large-scale gradient synchronization. However, the reduced gap between voltage levels increases susceptibility to noise, requiring Forward Error Correction (FEC) — typically Reed-Solomon RS(544,514) — that adds 100–200 ns of irreducible processing latency per hop. Across a three-tier fat-tree (3 hops each way), FEC alone contributes 600–1,200 ns of fixed latency to every packet, setting a hard lower bound on the $\alpha$ term in the communication cost model.
+2.  **Distinction (Durable):** Unlike NRZ (Non-Return-to-Zero) binary signaling, which uses only two voltage levels and offers better noise margin but is limited to half the data rate per lane, PAM4 trades signal-to-noise ratio for bandwidth density — the same copper trace carries twice the data at the cost of requiring FEC at every port.
+3.  **Common Pitfall:** A frequent misconception is that doubling bits per symbol is a free throughput gain. PAM4 links require FEC at both endpoints, making them fundamentally higher-latency than equivalent NRZ links; latency-sensitive collectives like AllReduce pay this FEC tax on every packet regardless of message size.
 
 :::
 
@@ -413,11 +413,11 @@ Large-scale training requires sustained, synchronized bulk transfers. A single A
 
 ::: {.callout-definition title="Remote Direct Memory Access (RDMA)"}
 
-***Remote Direct Memory Access (RDMA)***\index{Remote Direct Memory Access!definition} is a networking technology that allows one computer to access the memory of another directly without involving the operating system or CPU of either machine.
+***Remote Direct Memory Access (RDMA)***\index{Remote Direct Memory Access!definition} is a networking technology that allows one machine to read or write the memory of another machine directly, bypassing the operating system kernel and CPU of both endpoints by offloading transport processing to the network interface card.
 
-1.  **Significance (Quantitative):** it provides **Kernel Bypass** and **Zero-Copy** capabilities, reducing the **Communication Overhead ($L_{\text{lat}}$)** by eliminating context switches and intermediate memory copies. It is essential for saturating high-bandwidth links ($BW$) during gradient synchronization.
-2.  **Distinction (Durable):** Unlike **Traditional TCP/IP Networking**, where the CPU must process every packet through a complex software stack, RDMA offloads the entire transport protocol to the network hardware (HCA).
-3.  **Common Pitfall:** A frequent misconception is that RDMA is just "fast Ethernet." In reality, it requires specialized **Lossless Fabric** (like InfiniBand or RoCE with PFC) because it lacks the robust congestion control mechanisms of TCP; a single lost packet can cause massive performance collapses.
+1.  **Significance (Quantitative):** RDMA reduces end-to-end message latency from the 50–100 μs typical of kernel TCP to approximately 1–2 μs, cutting the $L_{\text{lat}}$ term in the Iron Law by 25–50$\times$. For a 175B-parameter model exchanging 350 GB of gradient data across 1,000 GPUs, RDMA also eliminates 700 GB of redundant memory copies per step by allowing the NIC to read GPU memory directly without staging through host RAM (GPUDirect RDMA).
+2.  **Distinction (Durable):** Unlike traditional TCP/IP, where the CPU processes every packet through the kernel network stack — consuming tens of CPU cores to saturate a 400 Gbps link — RDMA offloads the entire transport to dedicated NIC hardware, freeing the CPU to orchestrate computation rather than move data.
+3.  **Common Pitfall:** A frequent misconception is that RDMA works reliably on any Ethernet network. RDMA lacks TCP's retransmission logic; a single dropped packet can stall an entire 1,024-GPU AllReduce for 100–500 ms as the Go-Back-N recovery retransmits from the loss point. RDMA requires a lossless fabric — InfiniBand or Ethernet with Priority Flow Control — to operate correctly at scale.
 
 :::
 
@@ -577,11 +577,32 @@ The model reveals two regimes:
 1. **Latency-dominated ($n < \alpha\beta$):** Transfer time is dominated by the startup cost $\alpha$. Small control messages and pipeline bubbles fall here.
 2. **Bandwidth-dominated ($n > \alpha\beta$):** Transfer time scales with $n/\beta$. Gradient AllReduce typically falls here.
 
-For NDR InfiniBand with $\alpha \approx `{python} NetworkAlphaBeta.ib_alpha_us_str` \mu\text{s}$ and $\beta \approx `{python} NetworkAlphaBeta.ib_beta_gbs_str` \text{GB/s}$, the crossover point $n = \alpha\beta \approx `{python} NetworkAlphaBeta.n_cross_ib_kb_str` \text{ KB}$. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency.
+For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` $\mu\text{s}$ and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gbs_str` GB/s, the crossover point $n = \alpha\beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str` KB. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency.
 
-To see why this distinction matters in practice, consider two messages that our 175B model training job sends every iteration. The first is a 4 KB pipeline-scheduling control message that coordinates microbatch handoffs between pipeline stages. Applying the model: $T(4\text{ KB}) \approx \mathbf{`{python} NetworkAlphaBeta.t_small_ib_us_str` \mu\text{s}}$. The bandwidth term contributes only `{python} NetworkAlphaBeta.small_bw_pct_str`% of the total. Doubling the link speed would save a negligible fraction of a microsecond. For this message, the only way to reduce transfer time is to reduce the hop count (which lowers $\alpha$), not to buy faster links.
+::: {.callout-notebook title="The Alpha-Beta Crossover"}
 
-The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T(350\text{ MB}) \approx \mathbf{`{python} NetworkAlphaBeta.t_large_ib_ms_str` \text{ ms}}$. The latency term is invisible. Doubling bandwidth to 100 GB/s would halve this transfer time, a direct and proportional gain. These two cases illustrate why network design must address both $\alpha$ and $\beta$ simultaneously: topology and hop count control the latency-dominated regime, while link speed and path diversity control the bandwidth-dominated regime.
+**Problem**: You are comparing InfiniBand NDR (`{python} NetworkAlphaBeta.ib_alpha_us_str` $\mu s$, `{python} NetworkAlphaBeta.ib_beta_gbs_str` GB/s) against a slower Ethernet baseline (5.0 $\mu s$, 12.5 GB/s). At what message size does the faster link's bandwidth advantage finally outweigh its higher cost?
+
+**The Math**:
+Apply $T(n) = \alpha + n/\beta$ for a 4 KB control message and a 100 MB gradient shard.
+
+1. **Small Message (4 KB)**:
+   - InfiniBand: $1.5\mu s + 4KB/50GB/s = 1.5 + 0.08 = \mathbf{1.58 \mu s}$
+   - Ethernet: $5.0\mu s + 4KB/12.5GB/s = 5.0 + 0.32 = \mathbf{5.32 \mu s}$
+   - *Verdict*: InfiniBand is $3.4\times$ faster purely due to lower $\alpha$.
+
+2. **Large Message (100 MB)**:
+   - InfiniBand: $1.5\mu s + 100MB/50GB/s = 0.0015 + 2.0 = \mathbf{2.00 ms}$
+   - Ethernet: $5.0\mu s + 100MB/12.5GB/s = 0.005 + 8.0 = \mathbf{8.01 ms}$
+   - *Verdict*: InfiniBand is $4\times$ faster purely due to higher $\beta$.
+
+**The Systems Insight**: For large-scale training, the "Crossover Point" ($n^* = \alpha\beta$) is typically around **`{python} NetworkAlphaBeta.n_cross_ib_kb_str` KB**. Since gradients are megabytes to gigabytes, we are almost always in the **bandwidth-dominated regime**. However, pipeline parallelism and distributed coordination rely on small messages in the **latency-dominated regime**, where wire-speed upgrades provide zero benefit—only topology and hop-count reductions matter.
+
+:::
+
+To see why this distinction matters in practice, consider two messages that our 175B model training job sends every iteration. The first is a 4 KB pipeline-scheduling control message that coordinates microbatch handoffs between pipeline stages. Applying the model: $T(4\text{ KB}) \approx$ **`{python} NetworkAlphaBeta.t_small_ib_us_str` $\mu\text{s}$**. The bandwidth term contributes only `{python} NetworkAlphaBeta.small_bw_pct_str`% of the total. Doubling the link speed would save a negligible fraction of a microsecond. For this message, the only way to reduce transfer time is to reduce the hop count (which lowers $\alpha$), not to buy faster links.
+
+The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T(350\text{ MB}) \approx$ **`{python} NetworkAlphaBeta.t_large_ib_ms_str` ms**. The latency term is invisible. Doubling bandwidth to 100 GB/s would halve this transfer time, a direct and proportional gain. These two cases illustrate why network design must address both $\alpha$ and $\beta$ simultaneously: topology and hop count control the latency-dominated regime, while link speed and path diversity control the bandwidth-dominated regime.
 
 @fig-alpha-beta-crossover makes these two regimes visible across the full range of message sizes. For InfiniBand, the crossover occurs at approximately `{python} NetworkAlphaBeta.n_cross_ib_kb_str` KB: messages smaller than this are latency-dominated (the flat region on the left), while larger messages are bandwidth-dominated (the linear region on the right). The 5$\times$ latency gap between InfiniBand and Ethernet RoCE dominates for small messages but becomes irrelevant for the multi-megabyte gradient transfers that dominate training communication.
 
@@ -773,11 +794,11 @@ The physical arrangement of switches determines the **bisection bandwidth** and 
 
 ::: {.callout-definition title="Bisection Bandwidth"}
 
-***Bisection Bandwidth***\index{Bisection Bandwidth!definition} is the minimum total bandwidth across any cut that divides the network into two equal halves.
+***Bisection Bandwidth***\index{Bisection Bandwidth!definition} is a network topology metric defined as the minimum aggregate link capacity crossing any partition that divides the cluster into two equal halves, representing the worst-case throughput ceiling for all-to-all communication patterns such as AllReduce.
 
-1.  **Significance (Quantitative):** It represents the **Worst-Case Throughput** for global communication patterns (e.g., AllReduce). Within the **Iron Law**, bisection bandwidth defines the **Aggregate Bandwidth ($\text{BW}_{\text{bisect}}$)** available when the entire fleet must synchronize its state simultaneously.
-2.  **Distinction (Durable):** Unlike **Aggregate Bandwidth** (the sum of all link speeds), Bisection Bandwidth measures the **Global Connectivity** of the fabric, identifying the narrowest bottleneck in the cluster.
-3.  **Common Pitfall:** A frequent misconception is that adding more switches always increases bisection bandwidth. In reality, it is a **Topology Property**: if the upper tiers of the network are oversubscribed, the bisection bandwidth will be significantly lower than the sum of the edge links.
+1.  **Significance (Quantitative):** Bisection bandwidth directly sets the $\text{BW}$ ceiling in the Iron Law for global synchronization. A 1,024-GPU fat-tree with 400 Gb/s (50 GB/s) links at 1:1 subscription provides $512 \times 50\,\text{GB/s} = 25.6\,\text{TB/s}$ of bisection bandwidth; a 4:1 oversubscribed spine reduces this to $6.4\,\text{TB/s}$, making each AllReduce step 4$\times$ slower and turning the network into the dominant Iron Law bottleneck rather than the accelerator.
+2.  **Distinction (Durable):** Unlike aggregate bandwidth (the sum of all edge link speeds, which can be high even in a poorly connected topology), bisection bandwidth measures global connectivity — a star topology with 1,000 edge links all meeting at one central switch has high aggregate bandwidth but bisection bandwidth limited by that switch's backplane capacity.
+3.  **Common Pitfall:** A frequent misconception is that adding more leaf switches always increases bisection bandwidth. In a three-tier fat-tree, oversubscribing the spine layer — using fewer uplinks than downlinks per pod switch — reduces bisection bandwidth below the edge-link total regardless of how many leaf switches are present.
 
 :::
 
@@ -785,11 +806,11 @@ For ML training, where all-to-all communication is standard, full bisection band
 
 ::: {.callout-definition title="Non-blocking Fabric"}
 
-***Non-blocking Fabric***\index{Non-blocking Fabric!definition} is a network topology in which any permutation of input-output port pairs can communicate simultaneously at full line rate without internal contention.
+***Non-blocking Fabric***\index{Non-blocking Fabric!definition} is a network topology in which any permutation of input-output port pairs can communicate simultaneously at full line rate without internal contention, achieved by ensuring that uplink capacity at every switch tier equals or exceeds downlink capacity.
 
-1.  **Significance (Quantitative):** In ML fleets, it ensures that synchronization traffic from any subset of accelerators does not compete for shared links, maximizing the **System Throughput ($\eta$)** by eliminating network-induced stalls.
-2.  **Distinction (Durable):** Unlike **Oversubscribed Fabrics** (common in web datacenters), where upper-tier links are shared among many lower-tier nodes, a Non-blocking Fabric provides **Dedicated Path Capacity** for every possible pairing.
-3.  **Common Pitfall:** A frequent misconception is that non-blocking means "zero congestion." In reality, **Endpoint Congestion** (Incast) can still occur if multiple senders target the same receiver simultaneously, regardless of the topology's internal capacity.
+1.  **Significance (Quantitative):** In ML fleets, a non-blocking fabric ensures that AllReduce traffic from any accelerator subset does not compete for shared links, preserving the full $\text{BW}$ term of the Iron Law. A 2:1 oversubscribed spine halves the effective bisection bandwidth, doubling AllReduce time for global gradients and dropping system efficiency $\eta$ accordingly — in a 30%-communication workload, this costs roughly 15% of total cluster throughput.
+2.  **Distinction (Durable):** Unlike oversubscribed fabrics common in web datacenters, where upper-tier links are shared among many lower-tier nodes, a non-blocking fabric provides dedicated path capacity for every possible pairing of senders and receivers simultaneously.
+3.  **Common Pitfall:** A frequent misconception is that non-blocking means zero congestion. Endpoint congestion (incast) can still occur if multiple senders simultaneously target the same receiver port, regardless of how much internal fabric capacity is available.
 
 :::
 
@@ -861,11 +882,11 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 
 ::: {.callout-definition title="Fat-Tree"}
 
-***Fat-Tree***\index{Fat-Tree!definition} is a hierarchical network topology where the aggregate bandwidth increases toward the root to provide multiple equal-cost paths between any two nodes.
+***Fat-Tree***\index{Fat-Tree!definition} is a hierarchical network topology in which the number of parallel paths — and therefore aggregate cross-sectional capacity — increases at each switch tier toward the spine, providing full bisection bandwidth and multiple equal-cost routes between any two nodes.
 
-1.  **Significance (Quantitative):** It is the standard for providing **Full Bisection Bandwidth ($\text{BW}_{\text{bisect}}$)**. It ensures that the fabric can sustain simultaneous full-rate communication from all endpoints, which is a non-negotiable requirement for the AllReduce collectives that dominate training.
-2.  **Distinction (Durable):** Unlike a **Standard Tree** (where links near the root become bottlenecks), a Fat-Tree uses redundant switches and links to ensure the network is **Non-blocking**.
-3.  **Common Pitfall:** A frequent misconception is that Fat-Trees are the most "efficient" topology. In reality, they are the most **Reliable but Expensive**: they require a massive number of switches ($O(N \log N)$) and complex cabling compared to more specialized topologies like Dragonflies or Torus networks.
+1.  **Significance (Quantitative):** A fat-tree built from radix-$k$ switches supports $k^3/4$ hosts with full bisection bandwidth. With $k=64$, a two-tier pod supports 1,024 GPUs and a three-tier fabric supports 65,536 hosts. Because every AllReduce can use any available spine path, the fabric sustains simultaneous full-rate communication from all accelerators, meeting the $\text{BW}$ requirement in the Iron Law for gradient synchronization.
+2.  **Distinction (Durable):** Unlike a standard tree (where bandwidth at the root is a single bottleneck shared by all leaves), a fat-tree replaces each root with multiple spine switches whose combined uplink capacity matches the total edge bandwidth, eliminating the bottleneck.
+3.  **Common Pitfall:** A frequent misconception is that fat-trees guarantee zero network cost. They require $O(N \log N)$ switches and dense cabling: a 4,096-GPU non-blocking fat-tree needs roughly 2,048 switches, costing \$20–100 million in switching hardware alone.
 
 :::
 
@@ -908,6 +929,73 @@ class FatTreeScaling:
 ```
 
 A fat-tree built from switches with **radix**[^fn-switch-radix-density] $k$ supports $N = k^3/4$ hosts. In a two-tier network using radix-64 switches, a single pod can support up to 1,024 GPUs—perfectly accommodating our 1,000-GPU reference cluster with only leaf and spine layers.
+
+```{python}
+#| label: bisection-bandwidth-scaling
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ BISECTION BANDWIDTH SCALING (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "Bisection Bandwidth: The Cost of Oversubscription" .callout-notebook
+# │
+# │ Goal: Quantify the synchronization slowdown when moving from a
+# │       non-blocking (1:1) to an oversubscribed (4:1) network.
+# │ Show: slowdown_factor ≈ 4x — inline in notebook result.
+# │ How: T = M / (Bisect_BW); Bisect_BW = N * Beta / Oversub_Ratio.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: bbs_n_gpus_str, bbs_gradient_gb_str, bbs_slowdown_str, bbs_time_1_1_ms_str, bbs_time_4_1_ms_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class BisectionScaling:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 1024
+    beta_gbs = 50
+    gradient_gb = 100
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    bw_1_1 = n_gpus * beta_gbs
+    bw_4_1 = bw_1_1 / 4
+    time_1_1 = gradient_gb / bw_1_1
+    time_4_1 = gradient_gb / bw_4_1
+    slowdown = time_4_1 / time_1_1
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(slowdown == 4.0, "Slowdown must match oversubscription ratio")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    bbs_n_gpus_str = f"{n_gpus}"
+    bbs_gradient_gb_str = f"{gradient_gb}"
+    bbs_slowdown_str = f"{int(slowdown)}"
+    bbs_time_1_1_ms_str = f"{time_1_1 * 1000:.1f}"
+    bbs_time_4_1_ms_str = f"{time_4_1 * 1000:.1f}"
+
+```
+
+::: {.callout-notebook title="Bisection Bandwidth: The Cost of Oversubscription"}
+
+**Problem**: You are choosing between a "Non-blocking" (1:1) fat-tree and a "Cost-optimized" (4:1) spine for a `{python} BisectionScaling.bbs_n_gpus_str`-GPU cluster. How much slower will a `{python} BisectionScaling.bbs_gradient_gb_str` GB AllReduce be on the cheaper network?
+
+**The Math**:
+Bisection bandwidth ($BW_{bisect}$) is the minimum pipe diameter between halves of your cluster.
+
+1. **Non-blocking (1:1)**: $BW_{bisect} =$ `{python} BisectionScaling.bbs_n_gpus_str` $\times 50 \text{ GB/s} = 51,200 \text{ GB/s}$.
+   - Time: $100 \text{ GB} / 51,200 \approx$ **`{python} BisectionScaling.bbs_time_1_1_ms_str` ms**.
+2. **Oversubscribed (4:1)**: $BW_{bisect} = 51,200 / 4 = 12,800 \text{ GB/s}$.
+   - Time: $100 \text{ GB} / 12,800 \approx$ **`{python} BisectionScaling.bbs_time_4_1_ms_str` ms**.
+
+**The Systems Insight**: Saving money on core switches creates a **`{python} BisectionScaling.bbs_slowdown_str`$\times$ bottleneck** for global synchronization. For a \$300M supercomputer where training is 30% communication, this "saving" wastes approximately **\$75 Million** in idle compute time. For training, network oversubscription is a false economy.
+
+:::
+
+::: {.callout-checkpoint title="Fat-Tree Topologies"}
+
+Verify your understanding of hierarchical switch fabrics:
+
+- [ ] In a **Radix-64** two-tier fat-tree, what is the maximum number of GPUs you can connect without core switches?
+- [ ] Why does a **Non-blocking** fabric require a 1:1 subscription ratio at every tier of the network?
+- [ ] If you move from a two-tier to a three-tier fat-tree, how does the **$\alpha$ (startup latency)** of a message change?
+- [ ] Explain the difference between **Aggregate Bandwidth** and **Bisection Bandwidth**. Which one matters for AllReduce?
+
+:::
 
 [^fn-switch-radix-density]: **Switch Radix**: Modern high-end switches (e.g., NVIDIA Quantum-2) feature a radix of 64 ports, each at 400 Gbps. This density allows a two-tier fat-tree to support up to 2,048 GPUs with only two switch hops. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256) is the only way to avoid adding more tiers and the resulting latency/cost explosion. \index{Switch Radix!port density}
  Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ tree requires 4,096 switches. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$40 to \$200 million.
@@ -976,12 +1064,72 @@ However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod
 
 In distributed training, **tensor parallelism** creates a deterministic and highly stratified communication pattern that standard topologies fail to exploit. Because large models partition individual matrix multiplications across GPUs, GPU 0 on one node must frequently exchange activations with GPU 0 on other nodes, but rarely with GPU 1. A **rail-optimized topology** physically hardwires this logic by isolating these communication paths into dedicated networks. Instead of connecting all 8 GPUs in a node to a single ToR switch, the network connects all GPU 0s across the entire cluster to a dedicated "Rail 0" switch fabric, all GPU 1s to "Rail 1," and so on.
 
+```{python}
+#| label: rail-optimized-latency-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ RAIL-OPTIMIZED LATENCY BUDGET (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Rail-Optimized Dividend" .callout-notebook
+# │
+# │ Goal: Quantify the latency savings of rail-optimized topology.
+# │ Show: speedup ≈ 2x — inline in notebook result.
+# │ How: T = Hop_Count * T_hop.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: rol_hop_lat_us_str, rol_speedup_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class RailLatency:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_hop_us = 0.6 # switch + wire latency
+    # Standard fat-tree: Leaf -> Spine -> Leaf (2 hops)
+    # Rail-optimized: Leaf (direct) (1 hop)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    lat_std = 2 * t_hop_us
+    lat_rail = 1 * t_hop_us
+    speedup = lat_std / lat_rail
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(speedup == 2.0, f"Speedup {speedup:.1f}x unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    rol_hop_lat_us_str = f"{t_hop_us}"
+    rol_speedup_str = f"{speedup:.0f}"
+
+```
+
+::: {.callout-notebook title="The Rail-Optimized Dividend"}
+
+**Problem**: You are synchronizing activations for tensor parallelism across 128 nodes. In a standard fat-tree, each message traverses a Leaf switch and a Spine switch (2 hops). In a rail-optimized network, all corresponding GPUs are on the same switch (1 hop). How much "Latency Dividend" do you earn?
+
+**The Math**:
+Communication latency ($\alpha$) is proportional to the number of switch hops.
+
+1. **Standard Latency**: 2 hops $\times$ `{python} RailLatency.rol_hop_lat_us_str` $\mu s$ = **1.2 $\mu s$**.
+2. **Rail-Optimized**: 1 hop $\times$ `{python} RailLatency.rol_hop_lat_us_str` $\mu s$ = **0.6 $\mu s$**.
+3. **Verdict**: **`{python} RailLatency.rol_speedup_str`$\times$ lower latency**.
+
+**The Systems Insight**: For high-frequency tensor parallelism (which synchronizes every layer), a 2$\times$ latency reduction is the difference between 80% and 95% scaling efficiency. By physically aligning the network to the model's math, you eliminate the "Spine Tax" for the most sensitive traffic. This is why Archetype A clusters are not just big—they are **Structured**.
+
+:::
+
 ::: {.callout-lighthouse title="Archetype A (GPT-4 / Llama-3): The Rail-Optimized Fleet"}
 **Archetype A (GPT-4)** is the primary driver for rail-optimized fabrics. Because it uses **3D Parallelism**, it generates two distinct traffic patterns: (1) high-frequency, latency-sensitive activation exchanges for tensor parallelism, and (2) massive, bandwidth-hungry gradient averaging for data parallelism. The rail-optimized design ensures that tensor-parallel traffic traverses only a single switch hop between nodes, minimizing the latency that would otherwise stall the synchronous training loop.
 :::
 
 For our 1,000-GPU cluster spanning 125 nodes, this creates 8 parallel networks of 125 GPUs each, allowing tensor-parallel traffic to traverse a single switch hop rather than the multi-hop leaf-spine-leaf path required by a standard fat-tree.
  The latency benefit is significant for the frequent, small activation exchanges that tensor parallelism demands. However, this architecture introduces a sharp trade-off: data parallelism requires global synchronization across *all* GPUs, crossing all rails. Modern clusters therefore employ a hybrid approach, using rail-optimized leaves for tensor-parallel traffic while bridging the rails with a full fat-tree spine to support the global AllReduce patterns of data parallelism.
+
+::: {.callout-checkpoint title="Rail-Optimized Networks"}
+
+Verify your understanding of workload-specific network design:
+
+- [ ] Which dimension of 3D Parallelism—TP, PP, or DP—is the primary beneficiary of a **Rail-Optimized** design?
+- [ ] Why does a rail-optimized network reduce the number of switch hops for activation exchanges compared to a standard fat-tree?
+- [ ] What is the "Traffic Isolation" benefit: why do we want all GPU 0s on one rail and all GPU 1s on another?
+- [ ] True or False: A rail-optimized network eliminates the need for high-bandwidth core switches connecting different rails.
+
+:::
 
 ### Dragonfly and Torus Alternatives {#sec-network-fabrics-dragonfly}
 
@@ -1191,11 +1339,11 @@ Real fabrics deviate from theoretical full-bisection bandwidth due to **congesti
 
 ::: {.callout-definition title="Bulk Synchronous Parallel (BSP)"}
 
-***Bulk Synchronous Parallel (BSP)***\index{Bulk Synchronous Parallel!definition} is a parallel computing model where execution proceeds in discrete **Supersteps**, each consisting of local computation, global communication, and a barrier synchronization.
+***Bulk Synchronous Parallel (BSP)***\index{Bulk Synchronous Parallel!definition} is a parallel execution model in which every worker completes a local computation phase, exchanges data with all other workers, and then waits at a global barrier before any worker begins the next phase — making the slowest participant the pacing constraint for the entire cluster.
 
-1.  **Significance (Quantitative):** It is the standard execution model for synchronous distributed training. Within the **Iron Law**, BSP dictates that the total time $T$ is governed by the **Slowest Worker** (Straggler), making the **System Efficiency ($\eta$)** highly sensitive to network jitter and hardware variation.
-2.  **Distinction (Durable):** Unlike **Asynchronous Parallelism**, which allows workers to use stale weights, BSP ensures **Mathematical Equivalence** to single-device training by enforcing a global state update at every step.
-3.  **Common Pitfall:** A frequent misconception is that BSP is "inefficient" compared to async models. In reality, while it has higher **Synchronization Overhead ($L_{\text{lat}}$)**, it provides superior **Convergence Stability**, often leading to lower total operations ($O$) to reach a target loss.
+1.  **Significance (Quantitative):** BSP makes system efficiency $\eta$ directly proportional to the slowest worker: if one GPU in a 1,024-GPU cluster runs 10% slower due to thermal throttling or network jitter, the barrier stalls the remaining 1,023 GPUs for that fraction of the step, wasting effectively 102 GPU-steps of compute per iteration. At \$3/GPU-hour, a 5% straggler gap across a \$50M training run wastes roughly \$2.5M in idle accelerator time.
+2.  **Distinction (Durable):** Unlike asynchronous parallelism, which allows workers to proceed with stale weights from previous steps, BSP enforces a global state update at every barrier, providing mathematical equivalence to single-device training and predictable convergence behavior.
+3.  **Common Pitfall:** A frequent misconception is that BSP is simply inefficient compared to async models. Asynchronous training often requires more total steps to converge because stale gradient updates introduce noise — in practice, BSP with careful straggler mitigation typically reaches the same loss in fewer wall-clock hours than async alternatives.
 
 :::
 
@@ -1207,11 +1355,11 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 
 ::: {.callout-definition title="Priority Flow Control"}
 
-***Priority Flow Control (PFC)***\index{Priority Flow Control!definition} is a link-level mechanism that prevents buffer overflow by sending PAUSE frames to the upstream sender on a per-priority basis.
+***Priority Flow Control (PFC)***\index{Priority Flow Control!definition} is a link-layer mechanism that prevents switch buffer overflow by sending PAUSE frames to an upstream sender when a port's queue depth crosses a configured threshold, throttling injection on a per-priority basis without dropping packets.
 
-1.  **Significance (Quantitative):** It is the foundation for **Lossless Ethernet** (RoCE), ensuring that RDMA traffic is not dropped due to buffer exhaustion. This maintains the high **Effective Bandwidth ($\text{BW}$)** required for gradient synchronization.
-2.  **Distinction (Durable):** Unlike **Standard Flow Control** (which pauses all traffic on a link), PFC allows latency-sensitive control traffic to proceed while only pausing the congested data-intensive queues.
-3.  **Common Pitfall:** A frequent misconception is that PFC "solves" congestion. In reality, it transforms packet loss into **Congestion Spreading**: a single slow receiver can trigger a backpressure cascade that freezes unrelated flows across the entire fabric, significantly increasing the **Tail Latency ($L_{\text{lat}}$)** of the cluster.
+1.  **Significance (Quantitative):** PFC is the foundation for lossless Ethernet required by RoCEv2 RDMA. A PFC PAUSE frame must reach the upstream sender within one round-trip time — roughly 1–5 μs at switch-to-switch distances — before the buffer overflows. In a 1,000-node cluster, a single slow receiver can trigger PAUSE frames that propagate 3–5 hops upstream within 10–50 ms, halting gradient traffic across thousands of unrelated GPU pairs and collapsing cluster throughput to near zero.
+2.  **Distinction (Durable):** Unlike standard IEEE 802.3 flow control, which pauses all traffic classes on a link, PFC operates per priority class, allowing latency-sensitive control messages to continue flowing while only pausing the congested gradient data queue.
+3.  **Common Pitfall:** A frequent misconception is that PFC solves congestion. It transforms packet loss into congestion spreading: a backpressure cascade can freeze the entire fabric within 200 ms of a single faulty transceiver (as in the 2022 incident documented in this chapter), because no mechanism limits how far PAUSE frames propagate across the network.
 
 :::
 
@@ -1227,7 +1375,7 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
   \definecolor{RedL}{HTML}{F5D2D5}
   \definecolor{GreenLine}{HTML}{008F45}
   \definecolor{GreenL}{HTML}{D4EFDF}
-  
+
   \tikzset{
     switch/.style={draw=black!70, fill=gray!10, line width=0.75pt, rounded corners=2pt, minimum width=1.5cm, minimum height=1cm, font=\bfseries, align=center},
     gpu/.style={draw=black!70, circle, fill=black!10, line width=0.75pt, minimum size=0.6cm, inner sep=0pt, font=\bfseries},
@@ -1295,6 +1443,56 @@ The insidious aspect was that no alarms fired. PFC pauses are a *normal* flow-co
 
 This incident illustrates why InfiniBand's credit-based flow control is fundamentally more robust: credits are consumed and replenished per-hop, so a slow receiver cannot propagate backpressure beyond its immediate neighbor. PFC, by contrast, operates as a blunt per-priority mechanism that has no concept of individual flow isolation.
 
+```{python}
+#| label: pfc-storm-probability
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PFC STORM PROBABILITY (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Probability of a PFC Storm" .callout-notebook
+# │
+# │ Goal: Quantify the risk of congestion spreading in a large RoCE cluster.
+# │ Show: storm_prob_pct ≈ 12% — inline in notebook result.
+# │ How: P(storm) = 1 - (1 - p_link_degrade)^N_links.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: pfc_n_gpus_str, pfc_p_degrade_str, pfc_storm_prob_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class PfcStormRisk:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 4096
+    links_per_gpu = 3 # leaf + spine + core
+    p_link_degrade = 1e-5 # 0.001% per day
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    n_total_links = n_gpus * links_per_gpu
+    p_safe = (1 - p_link_degrade) ** n_total_links
+    p_storm = 1 - p_safe
+    # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────
+    check(0.1 < p_storm < 0.2, f"Storm probability {p_storm:.2f} outside expected range")
+    # ┌── 4. OUTPUT (Formatting) ────────────────────────────────────────
+    pfc_n_gpus_str = f"{n_gpus}"
+    pfc_p_degrade_str = "0.001%"
+    pfc_storm_prob_str = f"{p_storm * 100:.1f}"
+
+```
+
+::: {.callout-notebook title="The Probability of a PFC Storm"}
+
+**Problem**: You operate a `{python} PfcStormRisk.pfc_n_gpus_str`-GPU RoCE cluster. If the probability of a single transceiver degrading and triggering PFC pauses is just `{python} PfcStormRisk.pfc_p_degrade_str` per day, what is the chance of a cluster-wide "PFC Storm" occurring today?
+
+**The Math**:
+In a lossless Ethernet fabric, one bad link can pause its neighbor, which pauses its neighbor, eventually freezing the entire tree.
+
+1. **Total links**: 4,096 GPUs $\times$ 3 tiers = ~12,288 links.
+2. **Probability of zero failures**: $P(\text{safe}) = (1 - 0.00001)^{12,288} \approx 0.88$.
+3. **Probability of at least one storm**: $P(\text{storm}) = 1 - 0.88 = \mathbf{0.12}$ (12%).
+
+**The Systems Insight**: Even with "five-nines" reliable components, a large-scale RoCE cluster faces a **`{python} PfcStormRisk.pfc_storm_prob_str`% daily risk** of a fabric-wide freeze. This is why RoCE deployments require aggressive **PFC Watchdogs** and hardware-level telemetry—at scale, "rare" link degradations become daily operational realities that must be handled automatically.
+
+:::
+
 :::
 
 ### Proactive Congestion Control: DCQCN and HPCC {#sec-network-fabrics-congestion-control}
@@ -1332,11 +1530,11 @@ This mechanism becomes essential for Mixture-of-Experts (MoE) models. Unlike the
 
 ::: {.callout-definition title="Incast"}
 
-***Incast***\index{Incast!definition} is a many-to-one traffic pattern where multiple senders simultaneously transmit data to a single receiver, overwhelming the receiver's switch port buffer.
+***Incast***\index{Incast!definition} is a many-to-one traffic pattern in which a large number of senders simultaneously transmit data to a single receiver port, concentrating line-rate traffic from multiple sources into a single switch queue and causing buffer overflow even when the rest of the fabric is uncongested.
 
-1.  **Significance (Quantitative):** In ML fleets, incast occurs during the **Reduce Phase** of collective operations (e.g., AllReduce). It causes momentary buffer exhaustion, triggering packet drops or flow-control pauses that increase the **Tail Latency ($L_{\text{lat}}$)** of the entire cluster.
-2.  **Distinction (Durable):** Unlike **General Congestion** (which occurs on shared core links), Incast is an **Endpoint Bottleneck**: it occurs even if the internal network fabric has infinite capacity.
-3.  **Common Pitfall:** A frequent misconception is that incast is "rare." In reality, because ML training is **Synchronously Burstive**, incast is a routine event at the end of every layer's gradient computation, requiring proactive mitigation through jitter-aware scheduling or large switch buffers.
+1.  **Significance (Quantitative):** In the reduce phase of AllReduce, every participating GPU simultaneously sends gradients toward the same aggregation points. With 256 senders each at 50 GB/s targeting one switch port, the instantaneous incast exceeds 12.8 TB/s — orders of magnitude above a 400 Gb/s port's absorption capacity. A 32 MB switch buffer absorbs approximately 640 μs at 400 Gb/s before overflowing, triggering either PFC cascade or packet drops that elevate $L_{\text{lat}}$ cluster-wide.
+2.  **Distinction (Durable):** Unlike general congestion (which occurs on shared internal links when aggregate traffic exceeds link capacity), incast is an endpoint bottleneck: it occurs even if every internal spine and leaf link is completely uncongested, because the bottleneck is the single destination port, not the fabric interior.
+3.  **Common Pitfall:** A frequent misconception is that incast is rare or unpredictable. Because ML training synchronizes all GPUs at each backward pass, incast is a deterministic event at the end of every layer's gradient computation — it occurs hundreds of times per training step and must be architecturally mitigated through layer-staggered AllReduce or tree-based collective algorithms, not treated as an edge case.
 
 :::
 

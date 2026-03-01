@@ -92,13 +92,13 @@ class ReliabilityFoundations:
     t_detect = HEARTBEAT_TIMEOUT_S
     t_reschedule = RESCHEDULE_TIME_S
     ckpt_write_bw = CHECKPOINT_WRITE_BW_GBS
-    
+
     model_sizes_params = [7e9, 13e9, 70e9, 175e9, 1e12]
     model_labels = ["7B", "13B", "70B", "175B", "1T"]
-    
+
     overhead_ckpt = 0.05
     overhead_failure = 0.05
-    
+
     avail_replicas = [1, 2, 3, 4, 5]
     avail_single = 0.99
 
@@ -299,7 +299,7 @@ for n_gpus in R.cluster_sizes:
 | **`{python} mtbf_data[4]["gpus"]`** | `{python} mtbf_data[4]["nodes"]` | `{python} mtbf_data[4]["mtbf"]` | `{python} mtbf_data[4]["per_day"]` |
 | **`{python} mtbf_data[5]["gpus"]`** | `{python} mtbf_data[5]["nodes"]` | `{python} mtbf_data[5]["mtbf"]` | `{python} mtbf_data[5]["per_day"]` |
 
-: **Cluster MTBF by Scale.** As cluster size grows, the aggregate MTBF shrinks proportionally. At 10,000 GPUs, failures occur every few hours; at 100,000 GPUs, they occur continuously. Node configuration: `{python} f"{R.n_gpus_per_node}"` GPUs, `{python} f"{R.n_nics_per_node}"` NICs, `{python} f"{R.n_psus_per_node}"` PSUs per node. {#tbl-mtbf-cluster}
+: **Cluster MTBF by Scale.** As cluster size grows, the aggregate MTBF shrinks proportionally. At 10,000 GPUs, failures occur every few hours; at 100,000 GPUs, they occur continuously. Node configuration: 8 GPUs, 2 NICs, 2 PSUs per node. {#tbl-mtbf-cluster}
 
 The table makes a visceral point: the transition from "hundreds of GPUs" to "tens of thousands" is not merely a quantitative change but a qualitative one. At 256 GPUs, you might go a full day between failures. At 10,000 GPUs, you should expect multiple failures per shift. At 100,000 GPUs, failures are a continuous background condition---the system is never fully healthy.
 
@@ -433,7 +433,7 @@ for i, n_params in enumerate(R.model_sizes_params):
 | **`{python} ckpt_data[2]["label"]`** | `{python} ckpt_data[2]["ckpt_gb"]` | `{python} ckpt_data[2]["write_time"]`                      |
 | **`{python} ckpt_data[3]["label"]`** | `{python} ckpt_data[3]["ckpt_gb"]` | `{python} ckpt_data[3]["write_time"]`                      |
 
-: **Checkpoint Sizes for Mixed-Precision Adam Training.** Each parameter requires 16 bytes of state (weights + gradients + optimizer state). Write times assume `{python} f"{R.ckpt_write_bw:.0f}"` GB/s aggregate storage bandwidth. {#tbl-checkpoint-size}
+: **Checkpoint Sizes for Mixed-Precision Adam Training.** Each parameter requires 16 bytes of state (weights + gradients + optimizer state). Write times assume 100 GB/s aggregate storage bandwidth. {#tbl-checkpoint-size}
 
 At frontier scale (175B+ parameters), checkpoint sizes reach the terabyte range. This makes checkpoint write time a significant cost that directly affects the Young-Daly optimal interval. The checkpoint strategies in @sec-fault-tolerance-reliability discuss techniques for reducing $\delta$---asynchronous checkpointing, incremental deltas, and distributed storage---all of which improve the Young-Daly result by shrinking the numerator under the square root.
 
@@ -558,13 +558,13 @@ class RecoveryAnatomy:
     t_total       = fmt(R.t_recovery_total_s, precision=1)
 ```
 
-| **Phase**                     | **Typical Duration**                          | **What Happens**                                |
-|:------------------------------|:----------------------------------------------|:------------------------------------------------|
-| **$T_\text{detect}$**         | `{python} RecoveryAnatomy.t_detect` s         | Heartbeat timeout expires; failure is confirmed |
-| **$T_\text{reschedule}$**     | `{python} RecoveryAnatomy.t_reschedule` s     | Replacement node allocated from spare pool      |
-| **$T_\text{reload}$**         | `{python} RecoveryAnatomy.t_reload` s         | Checkpoint read from storage into GPU memory    |
-| **$T_\text{replay}$**         | ~`{python} RecoveryAnatomy.t_replay` min      | Recompute training steps since last checkpoint  |
-| **Total $T_\text{recovery}$** | ~`{python} RecoveryAnatomy.t_total` min       | System fully productive again                   |
+| **Phase**                     | **Typical Duration**                      | **What Happens**                                |
+|:------------------------------|:------------------------------------------|:------------------------------------------------|
+| **$T_\text{detect}$**         | `{python} RecoveryAnatomy.t_detect` s     | Heartbeat timeout expires; failure is confirmed |
+| **$T_\text{reschedule}$**     | `{python} RecoveryAnatomy.t_reschedule` s | Replacement node allocated from spare pool      |
+| **$T_\text{reload}$**         | `{python} RecoveryAnatomy.t_reload` s     | Checkpoint read from storage into GPU memory    |
+| **$T_\text{replay}$**         | ~`{python} RecoveryAnatomy.t_replay` min  | Recompute training steps since last checkpoint  |
+| **Total $T_\text{recovery}$** | ~`{python} RecoveryAnatomy.t_total` min   | System fully productive again                   |
 
 : **Recovery Time Breakdown.** Each phase contributes to the total time between failure and full-speed resumption. For the 10K-GPU, 175B-model scenario, replay dominates because it recomputes work lost since the last checkpoint. {#tbl-recovery-anatomy}
 
@@ -670,7 +670,7 @@ for k in R.avail_replicas:
 | **`{python} avail_data[1]["k"]`** | `{python} avail_data[1]["avail"]` | `{python} avail_data[1]["nines"]` | `{python} avail_data[1]["downtime"]` |
 | **`{python} avail_data[2]["k"]`** | `{python} avail_data[2]["avail"]` | `{python} avail_data[2]["nines"]` | `{python} avail_data[2]["downtime"]` |
 
-: **Availability Stacking with Independent Replicas.** Starting from a single-replica availability of `{python} f"{R.avail_single * 100:.0f}"`%, each additional replica dramatically reduces expected downtime. Assumes replica failures are independent. {#tbl-availability-stacking}
+: **Availability Stacking with Independent Replicas.** Starting from a single-replica availability of 99%, each additional replica dramatically reduces expected downtime. Assumes replica failures are independent. {#tbl-availability-stacking}
 
 The power of stacking is dramatic: two replicas of a 99%-available system yield 99.99% availability, reducing annual downtime from roughly 87 hours to under an hour. This is why inference serving systems almost universally deploy multiple replicas behind a load balancer---the cost of an extra replica is small compared to the business value of four-nines availability.
 

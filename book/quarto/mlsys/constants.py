@@ -145,10 +145,17 @@ H100_TDP = 700 * watt                     # SXM variant
 
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
 B200_FLOPS_FP16_TENSOR = 2250 * TFLOPs / second  # Dense. Sparse is 4500.
+B200_FLOPS_FP16_SPARSE = 4500 * TFLOPs / second
 B200_FLOPS_FP8_TENSOR = 4500 * TFLOPs / second   # Dense. Sparse is 9000.
 B200_MEM_BW = 8 * TB / second             # HBM3e
 B200_MEM_CAPACITY = 192 * GiB
 B200_TDP = 1000 * watt
+
+# AMD Instinct MI300X (CDNA 3, 2023) — Source: AMD Instinct MI300X Data Sheet
+MI300X_FLOPS_FP16_TENSOR = 1307 * TFLOPs / second  # Dense. Sparse is 2614.
+MI300X_MEM_BW = 5.3 * TB / second
+MI300X_MEM_CAPACITY = 192 * GiB
+MI300X_TDP = 750 * watt
 
 # NVIDIA T4 (Turing, 2018) — Source: NVIDIA T4 Data Sheet
 T4_FLOPS_FP16_TENSOR = 65 * TFLOPs / second
@@ -209,7 +216,8 @@ LATENCY_INFINIBAND = 5000 * NS
 LATENCY_NVME_SSD = 100000 * NS
 
 # Mobile NPU
-MOBILE_NPU_TOPS_INT8 = 35 * TFLOPs / second
+MOBILE_NPU_TOPS_INT8 = 50 * TFLOPs / second
+MOBILE_FLAGSHIP_NPU_TOPS_INT8 = 100 * TFLOPs / second
 MOBILE_NPU_MEM_BW = 100 * GB / second
 
 # --- Datasets ---
@@ -379,7 +387,7 @@ MOBILE_STORAGE_RANGE = "128 GB-1 TB"
 MOBILE_TDP_RANGE_W = "3-5"
 
 # Deployment tiers (reference capacities)
-SMARTPHONE_RAM_GB = 6 * GB
+SMARTPHONE_RAM_GB = 8 * GB
 MCU_RAM_KIB = 512 * KiB
 CLOUD_MEM_GIB = 100 * GiB
 MOBILE_MEM_GIB = 8 * GiB

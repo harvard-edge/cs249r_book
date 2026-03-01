@@ -102,7 +102,7 @@ def test_flop_units():
     ok &= check("V100 125 TFLOPs/s", V100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 125.0)
     ok &= check("H100 989 TFLOPs/s", H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 989.0)
     ok &= check("T4 65 TFLOPs/s", T4_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 65.0)
-    ok &= check("Mobile 35 TFLOPs/s", MOBILE_NPU_TOPS_INT8.to(TFLOPs / second).magnitude, 35.0)
+    ok &= check("Mobile 50 TFLOPs/s", MOBILE_NPU_TOPS_INT8.to(TFLOPs / second).magnitude, 50.0)
 
     # Model FLOPs
     ok &= check("ResNet 4.1 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 4.1)
@@ -251,9 +251,13 @@ def test_extended_gpu_specs():
     ok &= check("V100 TDP", V100_TDP.to(watt).magnitude, 300.0)
 
     # B200
-    ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 4500.0)
+    ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 2250.0)
     ok &= check("B200 BW", B200_MEM_BW.to(TB / second).magnitude, 8.0)
     ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GiB).magnitude, 192.0)
+
+    # MI300X
+    ok &= check("MI300X FP16", MI300X_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 1307.0, tol=0.01)
+    ok &= check("MI300X BW", MI300X_MEM_BW.to(TB / second).magnitude, 5.3)
 
     # TPUv4
     ok &= check("TPUv4 BF16", TPUV4_FLOPS_BF16.to(TFLOPs / second).magnitude, 275.0)

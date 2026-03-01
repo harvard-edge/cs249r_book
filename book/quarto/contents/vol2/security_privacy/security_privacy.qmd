@@ -120,11 +120,11 @@ Security in machine learning focuses on defending systems from adversarial behav
 
 ::: {.callout-definition title="Security"}
 
-***Security***\index{Security!definition} is the protection of ML system assets (data, models, and infrastructure) from unauthorized access, manipulation, or disruption.
+***Security***\index{Security!definition} is the set of system properties — confidentiality, integrity, and availability — that protect an ML system's data, model weights, and inference pipeline from intentional adversarial actions, spanning both the infrastructure layer (network intrusion, credential theft) and the algorithmic layer (model extraction, prompt injection, adversarial examples).
 
-1.  **Significance (Quantitative):** It ensures the **Integrity** of the system's learned behavior and the **Availability** of its services. Within the **Iron Law**, security failures (e.g., DDoS, model theft) can collapse the **Duty Cycle ($\eta$)** or compromise the proprietary value of the model operations ($O$).
-2.  **Distinction (Durable):** Unlike **General Robustness** (which handles stochastic environmental errors), Security addresses **Intentional Adversarial Threats** designed to exploit system vulnerabilities.
-3.  **Common Pitfall:** A frequent misconception is that security is "solved" by traditional IT firewalling. In reality, ML systems introduce a new **Attack Surface** at the algorithmic layer (e.g., prompt injection, adversarial examples) that traditional security tools cannot detect.
+1.  **Significance (Quantitative):** Security failures operate on both surfaces simultaneously. At the infrastructure layer, a stolen GPT-4-class model (training cost ~\$100M) represents direct IP loss. At the algorithmic layer, model extraction via black-box queries can reconstruct a functionally equivalent copy with as few as 10,000–100,000 API calls — orders of magnitude cheaper than training — bypassing the investment and competitive moat. Either failure collapses the business value of the $O$ (model operations) term in the Iron Law.
+2.  **Distinction (Durable):** Unlike general robustness (which addresses stochastic distribution shift from unintentional environmental change), security addresses intentional adversarial threats where an attacker actively maximizes the probability of a targeted failure — requiring worst-case rather than average-case analysis.
+3.  **Common Pitfall:** A frequent misconception is that traditional IT security (firewalls, access controls, encryption) adequately secures ML systems. ML introduces an algorithmic attack surface orthogonal to infrastructure: a properly authenticated API request containing an adversarial input or a prompt injection bypasses all network-layer defenses and manipulates model behavior through the model's own learned functions.
 
 :::
 
@@ -198,11 +198,57 @@ class DPCostAnalysis:
 
 1.  **Sensitivity ($S$)**: The maximum one person can change the sum is **\$`{python} DPCostAnalysis.sensitivity_str`**.
 2.  **Privacy Budget ($\epsilon$)**: `{python} DPCostAnalysis.epsilon`.
-3.  **Laplace Noise Scale ($b$)**: $S / \epsilon = `{python} DPCostAnalysis.sensitivity_str` / `{python} DPCostAnalysis.epsilon` = \mathbf{`{python} DPCostAnalysis.noise_scale_str`}$.
+3.  **Laplace Noise Scale ($b$)**: $S / \epsilon =$ `{python} DPCostAnalysis.sensitivity_str` / `{python} DPCostAnalysis.epsilon` = **`{python} DPCostAnalysis.noise_scale_str`**.
 4.  **Impact on Mean**: The noise added to the *sum* has magnitude $\approx `{python} DPCostAnalysis.noise_scale_str`.
     *   Noise per person (average) = `{python} DPCostAnalysis.noise_scale_str` / `{python} DPCostAnalysis.n_employees` = **\$`{python} DPCostAnalysis.error_per_person_str`**.
 
-**The Systems Conclusion**: Protecting one outlier introduces a **\$`{python} DPCostAnalysis.error_per_person_str` error** to the average. For a dataset of $N=`{python} DPCostAnalysis.n_small`, the error would be **\$`{python} DPCostAnalysis.error_small_str`**! Differential Privacy kills utility for small $N$. It only works at scale where $1/N$ dampens the noise.
+**The Systems Conclusion**: Protecting one outlier introduces a **\$`{python} DPCostAnalysis.error_per_person_str` error** to the average. For a dataset of $N=$ `{python} DPCostAnalysis.n_small`, the error would be **\$`{python} DPCostAnalysis.error_small_str`**! Differential Privacy kills utility for small $N$. It only works at scale where $1/N$ dampens the noise.
+:::
+
+```{python}
+#| label: isolation-tax-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ MULTI-TENANT ISOLATION TAX (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Tax of Secure Multi-Tenancy" .callout-notebook
+# │
+# │ Goal: Quantify the throughput loss from secure GPU partitioning (MIG/SR-IOV).
+# │ Show: isolation_overhead_pct ≈ 15% — inline in notebook result.
+# │ How: Throughput_shared = Throughput_peak * (1 - Isolation_Tax).
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: mt_peak_tokens_str, mt_secure_tokens_str, mt_overhead_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class MultiTenantIsolation:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    peak_throughput = 1000 # tokens/sec on dedicated GPU
+    secure_throughput = 850 # after MIG partitioning + secure context switching
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    overhead_pct = (1 - secure_throughput / peak_throughput) * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(overhead_pct == 15.0, f"Overhead {overhead_pct}% unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    mt_peak_tokens_str = f"{peak_throughput:,}"
+    mt_secure_tokens_str = f"{secure_throughput:,}"
+    mt_overhead_pct_str = f"{overhead_pct:.0f}"
+
+```
+
+::: {.callout-notebook title="The Tax of Secure Multi-Tenancy"}
+
+**Problem**: You are hosting two models on a single H100 using **Multi-Instance GPU (MIG)** to provide hardware-level isolation. On a dedicated GPU, your model achieves `{python} MultiTenantIsolation.mt_peak_tokens_str` tokens/sec. After enabling secure partitioning, it achieves `{python} MultiTenantIsolation.mt_secure_tokens_str` tokens/sec. What is the performance cost of security?
+
+**The Math**:
+Isolation requires dedicated hardware resources (SRAM, cache) and adds context-switching overhead.
+
+1. **Throughput Loss**: `{python} MultiTenantIsolation.mt_peak_tokens_str` - `{python} MultiTenantIsolation.mt_secure_tokens_str` = **150 tokens/sec**.
+2. **The Isolation Tax**: (150 / 1000) = **`{python} MultiTenantIsolation.mt_overhead_pct_str`%**.
+
+**The Systems Insight**: Security is a **Capacity Drain**. Providing a "Secure Enclave" for your model costs **`{python} MultiTenantIsolation.mt_overhead_pct_str`%** of your GPU's raw throughput. In the Machine Learning Fleet, multi-tenancy is an economic necessity, but it is not free. You must decide if your data sensitivity justifies losing 15% of your fleet's total capacity. For most public-facing APIs, this "Tax" is the price of preventing one tenant's prompt from leaking into another's response.
+
 :::
 
 ### Security versus Privacy {#sec-security-privacy-security-versus-privacy-e0b8}
@@ -1084,7 +1130,7 @@ Model theft can target two distinct objectives: extracting exact model propertie
 ```
 :::
 
-::: {.callout-war-story title="The GPT-2 Model Extraction"}
+::: {.callout-war-story title="The BERT Model Extraction"}
 Researchers demonstrated that proprietary models behind APIs are vulnerable to functional extraction. By querying a victim BERT-based API with just 2 million carefully crafted inputs (costing roughly \$50 in query fees), they trained a "student" model that achieved >97% agreement with the victim on test tasks. This "model stealing" attack exploited the high-information signal returned by confidence scores and logits. It proved that API access alone is sufficient to replicate intellectual property, forcing providers to implement defensive measures like API rate limiting, query auditing, and output truncation to obscure decision boundaries.
 :::
 
@@ -1515,7 +1561,9 @@ Physical adversarial attacks against traffic signs reveal how small, targeted pe
 
 In 2017, researchers demonstrated this vulnerability in the physical world by placing small black and white stickers on stop signs [@eykholt2018robust]. @fig-adversarial-stickers shows the physical implementation: stickers occupying less than 10% of the sign's surface area, designed to be nearly imperceptible to the human eye, yet sufficient to shift the sign's representation across the model's decision boundary. When images of these modified stop signs were fed into standard traffic sign classification models, they were misclassified as speed limit signs over 85% of the time, while human observers identified the signs correctly in every trial.
 
-![**Adversarial Stickers**: Nearly imperceptible stickers can trick machine learning models into misclassifying stop signs as speed limit signs over 85% of the time. This emphasizes the vulnerability of ML systems to adversarial attacks.](./images/png/stop_signs.png){#fig-adversarial-stickers fig-alt="Photo of stop signs with small black and white stickers applied. Original signs appear normal to humans but cause ML classifiers to misread them as speed limit signs."}
+::: {#fig-adversarial-stickers fig-env="figure" fig-pos="htb" fig-cap="**Adversarial Stickers**: Nearly imperceptible stickers can trick machine learning models into misclassifying stop signs as speed limit signs over 85% of the time. This emphasizes the vulnerability of ML systems to adversarial attacks." fig-alt="Photo of stop signs with small black and white stickers applied. Original signs appear normal to humans but cause ML classifiers to misread them as speed limit signs."}
+![](./images/png/stop_signs.png)
+:::
 
 This demonstration showed how simple adversarial stickers could trick ML systems into misreading important road signs. If deployed realistically, these attacks could endanger public safety, causing autonomous vehicles to misinterpret stop signs as speed limits. Researchers warned this could potentially cause dangerous rolling stops or acceleration into intersections.
 
@@ -1688,11 +1736,15 @@ For machine learning systems, these attacks pose several concrete risks. Fault i
 
 The practical viability of these attacks has been demonstrated through controlled experiments. One notable example is the work by @breier2018deeplaser, where researchers successfully used a laser fault injection attack on a deep neural network deployed on a microcontroller. @fig-laser-bitflip captures the mechanism: by heating specific transistors with focused laser pulses, they forced the hardware to skip execution steps, including a ReLU activation function.
 
-![**Laser Fault Injection**: Focused laser pulses induce bit flips within microcontroller memory, enabling attackers to manipulate model execution and compromise system integrity. Researchers use this technique to simulate hardware errors, revealing vulnerabilities in embedded machine learning systems and informing the development of fault-tolerant designs.](images/png/laser_bitflip.png){#fig-laser-bitflip fig-pos=t! fig-alt="Diagram showing laser beam targeting microcontroller chip. Beam focuses on specific memory location, causing bit flip that changes stored value and corrupts neural network computation."}
+::: {#fig-laser-bitflip fig-env="figure" fig-pos="htb" fig-cap="**Laser Fault Injection**: Focused laser pulses induce bit flips within microcontroller memory, enabling attackers to manipulate model execution and compromise system integrity. Researchers use this technique to simulate hardware errors, revealing vulnerabilities in embedded machine learning systems and informing the development of fault-tolerant designs." fig-alt="Diagram showing laser beam targeting microcontroller chip. Beam focuses on specific memory location, causing bit flip that changes stored value and corrupts neural network computation."}
+![](images/png/laser_bitflip.png)
+:::
 
 @fig-injection reveals the assembly-level consequences: a segment implementing the ReLU activation function that compares the most significant bit (MSB) of the accumulator to zero and uses a brge (branch if greater or equal) instruction to skip the assignment if the value is non-positive. The fault injection suppresses the branch, causing the processor to always execute the "else" block. As a result, the neuron's output is forcibly zeroed out, regardless of the input value.
 
-![**Fault Injection Attack**: Manipulating assembly code bypasses safety checks, forcing a neuron's output to zero regardless of input and demonstrating a hardware vulnerability in machine learning systems.](images/png/fault-injection_demonstrated_with_assembly_code.png){#fig-injection width=75% fig-pos=b! fig-alt="Assembly code snippet showing ReLU implementation with branch instruction. Red annotation indicates fault injection point where branch is skipped, forcing neuron output to zero."}
+::: {#fig-injection fig-env="figure" fig-pos="htb" fig-cap="**Fault Injection Attack**: Manipulating assembly code bypasses safety checks, forcing a neuron's output to zero regardless of input and demonstrating a hardware vulnerability in machine learning systems." fig-alt="Assembly code snippet showing ReLU implementation with branch instruction. Red annotation indicates fault injection point where branch is skipped, forcing neuron output to zero."}
+![](images/png/fault-injection_demonstrated_with_assembly_code.png){width=75%}
+:::
 
 Fault injection attacks can also be combined with side-channel analysis, where attackers first observe power or timing characteristics to infer model structure or data flow. This reconnaissance allows them to target specific layers or operations, such as activation functions or final decision layers, maximizing the impact of the injected faults.
 
@@ -1718,15 +1770,21 @@ A useful example of this attack technique can be seen in a power analysis of a p
 
 @fig-encryption establishes the baseline: with the correct password entered, the red waveform captures the serial data stream, marking each byte as it is received, while the blue curve records the device's power consumption over time. When the full, correct password is supplied, the power profile remains stable and consistent across all five bytes, providing a clear reference for comparison with failed attempts.
 
-![**Power Profile**: The device's power consumption remains stable during authentication when the correct password is entered, setting a baseline for comparison in subsequent figures through This figure. Source: colin o'flynn.](images/png/power_analysis_of_an_encryption_device_with_a_correct_password.png){#fig-encryption fig-alt="Oscilloscope trace with two signals. Red line shows serial data with five password bytes. Blue line shows steady power consumption throughout all five bytes, indicating successful authentication."}
+::: {#fig-encryption fig-env="figure" fig-pos="htb" fig-cap="**Power Profile**: The device's power consumption remains stable during authentication when the correct password is entered, setting a baseline for comparison in subsequent figures. Source: Colin O'Flynn." fig-alt="Oscilloscope trace with two signals. Red line shows serial data with five password bytes. Blue line shows steady power consumption throughout all five bytes, indicating successful authentication."}
+![](images/png/power_analysis_of_an_encryption_device_with_a_correct_password.png)
+:::
 
 @fig-encryption2 demonstrates what happens when an incorrect password is entered: the power signature diverges. In this case, the first three bytes (`0x61, 0x52, 0x77`) are correct, so the power patterns closely match the correct password up to that point. However, when the fourth byte (`0x42`) is processed and found to be incorrect, the device halts authentication. This change is reflected in the sudden jump in the blue power line, indicating that the device has stopped processing and entered an error state.
 
-![**Side-Channel Attack Vulnerability**: Power consumption patterns reveal cryptographic key information during authentication; consistent power usage indicates correct password bytes, while abrupt changes signal incorrect input and halted processing. Even without knowing the password, an attacker can infer it by analyzing the device's power usage during authentication attempts via this figure. Source: Colin O'Flynn.](images/png/power_analysis_of_an_encryption_device_with_a_partially_wrong_password.png){#fig-encryption2 fig-alt="Oscilloscope trace showing red serial data line and blue power line. Power remains stable through first three correct bytes, then jumps sharply at fourth incorrect byte, revealing partial password match through timing."}
+::: {#fig-encryption2 fig-env="figure" fig-pos="htb" fig-cap="**Side-Channel Attack Vulnerability**: Power consumption patterns reveal cryptographic key information during authentication; consistent power usage indicates correct password bytes, while abrupt changes signal incorrect input and halted processing. Even without knowing the password, an attacker can infer it by analyzing the device's power usage during authentication attempts. Source: Colin O'Flynn." fig-alt="Oscilloscope trace showing red serial data line and blue power line. Power remains stable through first three correct bytes, then jumps sharply at fourth incorrect byte, revealing partial password match through timing."}
+![](images/png/power_analysis_of_an_encryption_device_with_a_partially_wrong_password.png)
+:::
 
 @fig-encryption3 shows the extreme case: with an entirely incorrect password (`0x30, 0x30, 0x30, 0x30, 0x30`), the device fails immediately. The device detects the mismatch after the first byte and halts processing much earlier. This is visible in the power profile, where the blue line exhibits a sharp jump following the first byte, reflecting the device's early termination of authentication.
 
-![**Power Consumption Jump**: The blue line's sharp increase after processing the first byte indicates immediate authentication failure, highlighting how incorrect passwords are quickly detected through power usage. Source: Colin O'Flynn.](images/png/power_analysis_of_an_encryption_device_with_a_wrong_password.png){#fig-encryption3 fig-alt="Oscilloscope trace showing red serial data and blue power consumption. Blue line jumps sharply after first byte, indicating immediate authentication failure with completely wrong password."}
+::: {#fig-encryption3 fig-env="figure" fig-pos="htb" fig-cap="**Power Consumption Jump**: The blue line's sharp increase after processing the first byte indicates immediate authentication failure, highlighting how incorrect passwords are quickly detected through power usage. Source: Colin O'Flynn." fig-alt="Oscilloscope trace showing red serial data and blue power consumption. Blue line jumps sharply after first byte, indicating immediate authentication failure with completely wrong password."}
+![](images/png/power_analysis_of_an_encryption_device_with_a_wrong_password.png)
+:::
 
 These examples demonstrate how attackers can exploit observable power consumption differences to reduce the search space and eventually recover secret data through brute-force analysis. By systematically measuring power consumption patterns and correlating them with different inputs, attackers can extract sensitive information that should remain hidden.
 
@@ -1956,7 +2014,7 @@ To illustrate these offensive capabilities concretely, we examine a specific cas
         \addplot+[domain=-0.75:0.75, plotline] {6.5*exp(-x^2/2)} node[pos=0.66, outer sep=0pt, inner sep=0pt] (T1) {};
         \addplot+[domain=-0.796:0.796, plotline] {6.75*exp(-x^2/2)} node[pos=0.63, outer sep=0pt, inner sep=0pt] (T2) {};
         \addplot+[domain=-0.84:0.84, plotline] {7*exp(-x^2/2)} node[pos=0.6, outer sep=0pt, inner sep=0pt] (T3) {};
-        
+
         \draw[BlueLine, arrow] (T1) -- ++(0:9.5mm) node[right] {0000};
         \draw[GreenLine, arrow] (T2) -- ++(0:9.9mm) node[right] {1111};
         \draw[VioletLine, arrow] (T3) -- ++(0:10.4mm) node[right] {0101};
@@ -1987,7 +2045,9 @@ In their study, @scaaml_2019 trained a convolutional neural network to extract A
 
 @fig-stm32f-board shows the experimental hardware configuration: a ChipWhisperer setup with a custom STM32F target board that executes AES operations while allowing external equipment to monitor power consumption with high temporal precision. This setup demonstrates how even inexpensive, low-power embedded devices can leak information through side channels that modern machine learning models can learn to exploit.
 
-![**STM32F415 Target Board**: Enables monitoring of power consumption during AES operations on the microcontroller, highlighting side-channel vulnerabilities that can be exploited by machine learning models.](images/png/stm32f_board.png){#fig-stm32f-board fig-alt="Photo of ChipWhisperer setup with STM32F415 target board. Green PCB with microcontroller chip connected to measurement probes for monitoring power consumption during cryptographic operations."}
+::: {#fig-stm32f-board fig-env="figure" fig-pos="htb" fig-cap="**STM32F415 Target Board**: Enables monitoring of power consumption during AES operations on the microcontroller, highlighting side-channel vulnerabilities that can be exploited by machine learning models." fig-alt="Photo of ChipWhisperer setup with STM32F415 target board. Green PCB with microcontroller chip connected to measurement probes for monitoring power consumption during cryptographic operations."}
+![](images/png/stm32f_board.png)
+:::
 
 Subsequent work expanded on this approach by introducing long-range models capable of exploiting broader temporal dependencies in the traces, improving performance even under noise and desynchronization [@bursztein2023generic]. These developments highlight the potential for machine learning models to serve as offensive cryptanalysis tools, especially in the analysis of secure hardware.
 
@@ -2290,7 +2350,9 @@ However, prompt filtering alone is insufficient for safety. Research has shown t
 
 @fig-adversarial-nibbler provides concrete examples revealing how innocuous prompts can trigger unsafe generations. Such examples highlight the limitations of pre-generation safety checks and reinforce the necessity of output-based monitoring as a second line of defense. This two-stage pipeline consisting of prompt filtering followed by post-hoc content analysis is essential for ensuring the safe deployment of generative models in open-ended or user-facing environments.
 
-![**Adversarial Prompt Evasion**: Implicitly adversarial prompts bypass typical content filters by triggering unintended generations, revealing limitations of solely relying on pre-generation safety checks. These examples underscore the necessity of post-hoc content analysis as a complementary defense layer for robust generative AI systems.](images/png/adversarial_nibbler_example.png){#fig-adversarial-nibbler fig-alt="Grid of generated images from text-to-image model. Prompts appear innocuous but produce policy-violating outputs, demonstrating how adversarial prompts bypass content filters."}
+::: {#fig-adversarial-nibbler fig-env="figure" fig-pos="htb" fig-cap="**Adversarial Prompt Evasion**: Implicitly adversarial prompts bypass typical content filters by triggering unintended generations, revealing limitations of solely relying on pre-generation safety checks. These examples underscore the necessity of post-hoc content analysis as a complementary defense layer for robust generative AI systems." fig-alt="Grid of generated images from text-to-image model. Prompts appear innocuous but produce policy-violating outputs, demonstrating how adversarial prompts bypass content filters."}
+![](images/png/adversarial_nibbler_example.png)
+:::
 
 In the domain of language generation, output monitoring plays a different but equally important role. Here, the goal is often to detect toxicity, hallucinated claims, or off-distribution responses. For example, a customer support chatbot may be monitored for keyword presence, tonal alignment, or semantic coherence. If a response contains profanity, unsupported assertions, or syntactically malformed text, the system may trigger a rephrasing, initiate a fallback to scripted templates, or halt the response altogether.
 
@@ -2384,7 +2446,64 @@ Hardware security mechanisms introduce measurable overhead that must be factored
 
 Security features scale differently than computational resources. TEE memory limitations constrain model size regardless of available system memory. A quantized ResNet-18 model (47 MB) can operate within ARM TrustZone constraints, while ResNet-50 (176 MB) requires careful memory management or model partitioning. These constraints create architectural decisions that must be made early in system design.
 
-Different threat models and protection levels require quantitative trade-off analysis. For ML workloads requiring cryptographic verification, AES-256 operations add 0.1--0.5 ms per inference depending on model size and hardware acceleration availability. Homomorphic encryption operations impose 100-100,000$\times$ computational overhead, with fully homomorphic encryption (FHE) at the higher end and somewhat homomorphic encryption (SHE) at the lower end, making them viable only for small models or offline scenarios where strong privacy guarantees justify the performance cost.
+Different threat models and protection levels require quantitative trade-off analysis. For ML workloads requiring cryptographic verification, AES-256 operations add 0.1--0.5 ms per inference depending on model size and hardware acceleration availability.
+
+```{python}
+#| label: encryption-overhead-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ENCRYPTION LATENCY OVERHEAD (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Tax of Trusted Compute" .callout-notebook
+# │
+# │ Goal: Quantify the latency overhead of different encryption levels.
+# │ Show: fhe_latency_ratio ≈ 10,000x — inline in notebook result.
+# │ How: T_total = T_inference * Overhead_Multiplier.
+# │
+# │ Imports: mlsys.formatting (check)
+# │ Exports: eo_base_ms_str, eo_aes_ms_str, eo_fhe_sec_str, eo_fhe_ratio_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsys.formatting import check
+
+class EncryptionOverhead:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_inference_ms = 20 # Baseline plaintext inference (MobileNet)
+    overhead_aes_ms = 0.5 # AES-NI accelerated encryption
+    multiplier_fhe = 10000 # Fully Homomorphic Encryption overhead
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_aes = t_inference_ms + overhead_aes_ms
+    t_fhe_ms = t_inference_ms * multiplier_fhe
+    t_fhe_sec = t_fhe_ms / 1000
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(t_fhe_sec == 200, f"FHE time {t_fhe_sec}s unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    eo_base_ms_str = f"{t_inference_ms}"
+    eo_aes_ms_str = f"{t_aes:.1f}"
+    eo_fhe_sec_str = f"{t_fhe_sec:.0f}"
+    eo_fhe_ratio_str = "10,000"
+
+```
+
+::: {.callout-notebook title="The Tax of Trusted Compute"}
+
+**Problem**: You are deploying a health-monitoring model. You compare three security levels:
+1. **Plaintext**: Standard inference.
+2. **Encrypted Transport (AES)**: Model/Data encrypted at rest/transit.
+3. **Encrypted Compute (FHE)**: Inference performed *on* encrypted data.
+How do these choices affect your real-time responsiveness?
+
+**The Math**:
+Inference latency scales by the complexity of the security protocol.
+
+1. **Plaintext**: **`{python} EncryptionOverhead.eo_base_ms_str` ms**.
+2. **AES-256**: 20 ms + 0.5 ms = **`{python} EncryptionOverhead.eo_aes_ms_str` ms** (negligible tax).
+3. **FHE**: 20 ms $\times$ `{python} EncryptionOverhead.eo_fhe_ratio_str` = **`{python} EncryptionOverhead.eo_fhe_sec_str` seconds**.
+
+**The Systems Insight**: Security is a **Latency-Utility Trade-off**. Standard encryption (AES) is "nearly free" on modern hardware, but it only protects data *between* computations. Privacy-preserving compute (FHE) protects data *during* computation but costs **`{python} EncryptionOverhead.eo_fhe_ratio_str`$\times$ in performance**. For a real-time monitor, FHE is currently architecturally impossible. This is why most "Secure AI" relies on **Trusted Execution Environments (TEEs)** like Intel SGX or NVIDIA H100 Confidential Computing, which provide AES-like speed with FHE-like isolation.
+
+:::
+
+Homomorphic encryption operations impose 100-100,000$\times$ computational overhead, with fully homomorphic encryption (FHE) at the higher end and somewhat homomorphic encryption (SHE) at the lower end, making them viable only for small models or offline scenarios where strong privacy guarantees justify the performance cost.
 
 #### Trusted Execution Environments {#sec-security-privacy-trusted-execution-environments-80ed}
 
@@ -2665,7 +2784,9 @@ PUFs also support authentication in distributed ML pipelines. If the drone offlo
 
 @fig-pfu demonstrates how PUF operation depends on inherent physical variation. At a high level, a PUF accepts a challenge input and produces a unique response determined by the physical microstructure of the chip [@gao2020physical]. Variants include optical PUFs, in which the challenge consists of a light pattern and the response is a speckle image, and electronic PUFs such as Arbiter PUFs (APUFs), where timing differences between circuit paths produce a binary output. Another common implementation is the SRAM PUF, which exploits the power-up state of uninitialized SRAM cells: due to threshold voltage mismatch, each cell tends to settle into a preferred value when power is first applied. These response patterns form a stable, reproducible hardware fingerprint.
 
-![**Physical Unclonable Functions**: Pufs generate unique hardware fingerprints from inherent manufacturing variations, enabling device authentication and secure key generation without storing secrets. Optical and electronic PUF implementations use physical phenomena—such as light speckle patterns or timing differences—to produce challenge-response pairs that are difficult to predict or replicate.](images/png/puf_basics.png){#fig-pfu fig-alt="Diagram showing optical and electronic PUF types. Left: optical PUF with laser input producing speckle pattern response. Right: electronic arbiter PUF circuit with challenge bits producing binary response based on timing differences."}
+::: {#fig-pfu fig-env="figure" fig-pos="htb" fig-cap="**Physical Unclonable Functions**: PUFs generate unique hardware fingerprints from inherent manufacturing variations, enabling device authentication and secure key generation without storing secrets. Optical and electronic PUF implementations use physical phenomena such as light speckle patterns or timing differences to produce challenge-response pairs that are difficult to predict or replicate." fig-alt="Diagram showing optical and electronic PUF types. Left: optical PUF with laser input producing speckle pattern response. Right: electronic arbiter PUF circuit with challenge bits producing binary response based on timing differences."}
+![](images/png/puf_basics.png)
+:::
 
 Despite their promise, PUFs present several challenges in system design. Their outputs can be sensitive to environmental variation, such as changes in temperature or voltage, which can introduce instability or bit errors in the response. To ensure reliability, PUF systems must often incorporate error correction codes or helper data schemes. Managing large sets of challenge-response pairs also raises questions about storage, consistency, and revocation. Additionally, the unique statistical structure of PUF outputs may make them vulnerable to machine learning-based modeling attacks if not carefully shielded from external observation.
 
@@ -2735,10 +2856,10 @@ Differential privacy formalizes this intuition through a comparison of algorithm
 
 ::: {.callout-note title="Differential Privacy Diagram"}
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8, 
-  BlueLine/.style={draw=blue, line width=1.0pt}, 
-  RedLine/.style={draw=red, line width=1.0pt}, 
-  GrayL/.style={fill=gray, opacity=0.5}, 
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8,
+  BlueLine/.style={draw=blue, line width=1.0pt},
+  RedLine/.style={draw=red, line width=1.0pt},
+  GrayL/.style={fill=gray, opacity=0.5},
   GrayLine/.style={text=gray}]
 
   % Curves
