@@ -1,8 +1,8 @@
-# book/quarto/mlsys/deployment.py
+# book/quarto/mlsysim/deployment.py
 # Hierarchical Deployment Tier Definitions for MLSys Textbook
 
 from dataclasses import dataclass
-from .constants import (
+from ..core.constants import (
     ureg, Q_,
     SMARTPHONE_RAM_GB, MCU_RAM_KIB, CLOUD_MEM_GIB,
     TINY_MEM_KIB
@@ -18,13 +18,13 @@ class DeploymentTier:
 class Tiers:
     Cloud = DeploymentTier(
         name="Cloud",
-        ram=100 * ureg.GB,
+        ram=512 * ureg.GB,
         storage=10 * ureg.TB,
         typical_latency_budget=200 * ureg.ms
     )
     Edge = DeploymentTier(
         name="Edge",
-        ram=16 * ureg.GB,
+        ram=32 * ureg.GB,
         storage=1 * ureg.TB,
         typical_latency_budget=50 * ureg.ms
     )

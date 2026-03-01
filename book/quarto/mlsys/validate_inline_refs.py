@@ -18,7 +18,7 @@ Inline refs may be simple identifiers (`{python} var_name`) or dotted class
 attribute access (`{python} ClassName.attr`).
 
 Usage:
-    python3 book/quarto/mlsys/validate_inline_refs.py [--verbose] [--check-patterns] [--check-lego] [--check-scope]
+    python3 book/quarto/mlsysim/validate_inline_refs.py [--verbose] [--check-patterns] [--check-lego] [--check-scope]
 
 Exit codes:
     0 = all checks pass
@@ -377,7 +377,7 @@ _sys_path_patched = False
 
 
 def _ensure_book_on_path():
-    """Add book/quarto to sys.path so mlsys.* imports resolve for star-import analysis."""
+    """Add book/quarto to sys.path so mlsysim.* imports resolve for star-import analysis."""
     global _sys_path_patched
     if _sys_path_patched:
         return

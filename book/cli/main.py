@@ -14,52 +14,22 @@ from rich.panel import Panel
 from rich.text import Text
 
 # Import our modular components
-try:
-    # When run as installed package (via `binder` entry point)
-    from book.cli.core.config import ConfigManager
-    from book.cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
-    from book.cli.commands.build import BuildCommand
-    from book.cli.commands.preview import PreviewCommand
-    from book.cli.commands.doctor import DoctorCommand
-    from book.cli.commands.clean import CleanCommand
-    from book.cli.commands.maintenance import MaintenanceCommand
-    from book.cli.commands.debug import DebugCommand
-    from book.cli.commands.validate import ValidateCommand
-    from book.cli.commands.formatting import FormatCommand
-    from book.cli.commands.info import InfoCommand
-    from book.cli.commands.bib import BibCommand
-    from book.cli.commands.render import RenderCommand
-except ImportError:
-    try:
-        # When run as `python -m cli.main` from book/ directory
-        from cli.core.config import ConfigManager
-        from cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
-        from cli.commands.build import BuildCommand
-        from cli.commands.preview import PreviewCommand
-        from cli.commands.doctor import DoctorCommand
-        from cli.commands.clean import CleanCommand
-        from cli.commands.maintenance import MaintenanceCommand
-        from cli.commands.debug import DebugCommand
-        from cli.commands.validate import ValidateCommand
-        from cli.commands.formatting import FormatCommand
-        from cli.commands.info import InfoCommand
-        from cli.commands.bib import BibCommand
-        from cli.commands.render import RenderCommand
-    except ImportError:
-        # When run as local script from cli/ directory
-        from core.config import ConfigManager
-        from core.discovery import ChapterDiscovery, AmbiguousChapterError
-        from commands.build import BuildCommand
-        from commands.preview import PreviewCommand
-        from commands.doctor import DoctorCommand
-        from commands.clean import CleanCommand
-        from commands.maintenance import MaintenanceCommand
-        from commands.debug import DebugCommand
-        from commands.validate import ValidateCommand
-        from commands.formatting import FormatCommand
-        from commands.info import InfoCommand
-        from commands.bib import BibCommand
-        from commands.render import RenderCommand
+# Ensure the book directory is in sys.path so 'from cli...' works regardless of CWD
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from cli.core.config import ConfigManager
+from cli.core.discovery import ChapterDiscovery, AmbiguousChapterError
+from cli.commands.build import BuildCommand
+from cli.commands.preview import PreviewCommand
+from cli.commands.doctor import DoctorCommand
+from cli.commands.clean import CleanCommand
+from cli.commands.maintenance import MaintenanceCommand
+from cli.commands.debug import DebugCommand
+from cli.commands.validate import ValidateCommand
+from cli.commands.formatting import FormatCommand
+from cli.commands.info import InfoCommand
+from cli.commands.bib import BibCommand
+from cli.commands.render import RenderCommand
 
 console = Console()
 

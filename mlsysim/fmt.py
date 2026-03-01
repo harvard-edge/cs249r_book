@@ -1,10 +1,10 @@
 """
-formatting.py
+fmt.py
 Formatting + presentation helpers for QMD output.
-Keep science in formulas.py; keep display here.
+Keep science in core/formulas.py; keep display here.
 """
 
-from .constants import ureg
+from .core.constants import ureg
 
 # Lazy import for IPython.display.Markdown
 _Markdown = None
@@ -111,7 +111,7 @@ def display_percent(ratio, precision=0):
         ratio = float(ratio.m_as(''))
     else:
         ratio = float(ratio)
-        
+
     pct = ratio * 100
     return {
         "value": ratio,

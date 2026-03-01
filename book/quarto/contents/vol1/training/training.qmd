@@ -10,9 +10,7 @@ engine: jupyter
 ```{python}
 #| echo: false
 #| label: chapter-start
-from mlsys.registry import start_chapter
 
-start_chapter("vol1:training")
 ```
 
 ::: {layout-narrow}
@@ -38,15 +36,15 @@ start_chapter("vol1:training")
 # │ Show: GPT-2 training vs inference cost in the Purpose hook.
 # │ How:  Hard-coded cost strings; imports from mlsys for downstream cells.
 # │
-# │ Imports: mlsys (Hardware, Models), mlsys.constants (*),
-# │          mlsys.formatting (fmt_percent, fmt, sci, md_math, check),
-# │          mlsys.formulas (model_memory)
+# │ Imports: mlsysim (Hardware, Models), mlsysim.constants (*),
+# │          mlsysim.book (fmt_percent, fmt, sci, md_math, check),
+# │          mlsysim.formulas (model_memory)
 # │ Exports: PurposeCosts.gpt2_train_cost_str, PurposeCosts.gpt2_inf_cost_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware, Models
-from mlsys.constants import *
-from mlsys.formatting import fmt_percent, fmt, sci, md_math, check
-from mlsys.formulas import model_memory
+from mlsysim import Hardware, Models
+from mlsysim.core.constants import *
+from mlsysim.fmt import fmt_percent, fmt, sci, md_math, check
+from mlsysim.core.formulas import model_memory
 
 class PurposeCosts:
     """Cost strings for the Purpose section hook."""
@@ -93,8 +91,8 @@ Inference computes a single forward pass: data flows through the network, a pred
 # │ Show: Training cost asymmetry, GPT-2/3 specs, failure scenario numbers.
 # │ How:  Retrieve model specs from Digital Twins; format costs and FLOPs.
 # │
-# │ Imports: mlsys.constants (Bparam, Mparam, BYTES_FP32, BYTES_ADAM_STATE,
-# │          GB, MILLION), mlsys.formatting (fmt, sci, check)
+# │ Imports: mlsysim.core.constants (Bparam, Mparam, BYTES_FP32, BYTES_ADAM_STATE,
+# │          GB, MILLION), mlsysim.book (fmt, sci, check)
 # │ Exports: TrainingModels.*, TrainingScenarios.{cost,flops,loss,fp16}
 # └─────────────────────────────────────────────────────────────────────────────
 
@@ -180,12 +178,12 @@ Each of these challenges opens a corresponding optimization pathway. Computation
 
 A training system is not a single loop; it is a **Staged System Pipeline**\index{Training Pipeline!staged system workflow}. To reach the "Titan" standard of efficiency, we must analyze training as a factory floor where four distinct stages coordinate to keep the ALUs busy:
 
-1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits, decoding, and augmenting.
-2.  **Forward Pass** (Accelerator): Propagating activations through layers.
-3.  **Backward Pass** (Accelerator): Computing gradients via the chain rule.
-4.  **Parameter Update** (Accelerator/CPU): Applying gradients to weights via the optimizer.
+1.  **Data Loading & Preprocessing** (CPU/Storage): Fetching raw bits from NVMe, decoding, and augmenting on CPU cores.
+2.  **Host-to-Device Transfer** (PCIe): Moving the processed batch over the **PCIe bus** into GPU memory via DMA.
+3.  **Forward/Backward Pass** (Accelerator): Propagating activations and gradients through layers on the GPU.
+4.  **Parameter Synchronization** (NVLink): Exchanging gradients between GPUs over **NVLink (900 GB/s)** in multi-GPU configurations to update weights.
 
-Any mismatch in the throughput of these stages creates **Accelerator Bubbles**\index{Accelerator Bubbles!pipeline idleness}—intervals of idle silicon where the "Machine" axis of the AI Triad sits at 0% utilization while waiting for the "Data" axis to catch up. A systems engineer's primary task during training is to eliminate these bubbles through **asynchronous prefetching** and **pipeline overlapping**, ensuring that the next batch is ready before the current backward pass completes. We develop the quantitative tools for measuring and fixing these bubbles in @sec-model-training-identifying-bottlenecks-f57f.
+Any mismatch in the throughput of these stages creates **Accelerator Bubbles**\index{Accelerator Bubbles!pipeline idleness}—intervals of idle silicon where the "Machine" axis of the AI Triad sits at 0% utilization while waiting for the "Data" axis to catch up. A systems engineer's primary task during training is to eliminate these bubbles through **asynchronous prefetching** and **pipeline overlapping**, ensuring that the next batch is ready on the PCIe bus before the current backward pass completes. We develop the quantitative tools for measuring and fixing these bubbles in @sec-model-training-identifying-bottlenecks-f57f.
 
 [^fn-checkpointing-training]: **Gradient Checkpointing (Activation Checkpointing)**: The memory pressure described here arises because backpropagation requires every layer's activations from the forward pass. Checkpointing breaks this requirement by saving activations at only $\sqrt{L}$ strategic layers and recomputing the rest during the backward pass, trading roughly 33% additional compute for up to 10$\times$ activation memory reduction. For GPT-2's 48 layers, this means storing 7 checkpoints instead of 48 full activation tensors. \index{Activation Checkpointing!compute-memory trade-off}
 
@@ -278,7 +276,7 @@ The Iron Law provides a static framework for reasoning about training performanc
 # │ Show: GPT-2 lighthouse table specs; V100 throughput in system implication.
 # │ How:  Hard-coded model sizes; V100 specs from Hardware Digital Twin.
 # │
-# │ Imports: mlsys.constants (TFLOPs, second, GB, GiB)
+# │ Imports: mlsysim.core.constants (TFLOPs, second, GB, GiB)
 # │ Exports: GPT2LighthouseSpecs.gpt2_weights_*, dlrm_*, resnet50_act_*;
 # │          TrainingHardware.v100_*
 # └─────────────────────────────────────────────────────────────────────────────
@@ -419,17 +417,17 @@ To illustrate the scale of these operations concretely, consider the *attention 
 # │ Show: That FFN FLOPs dominate Attention FLOPs at standard sequence lengths.
 # │ How: Calculate FLOPs for projections, attention scores, and FFN blocks.
 # │
-# │ Imports: mlsys.constants (GPT2_HIDDEN_DIM, GPT2_LAYERS,
+# │ Imports: mlsysim.core.constants (GPT2_HIDDEN_DIM, GPT2_LAYERS,
 # │          V100_FLOPS_FP16_TENSOR, TFLOPs, second, flop, GFLOP, TFLOP,
-# │          PFLOPs), mlsys.formatting (fmt)
+# │          PFLOPs), mlsysim.book (fmt)
 # │ Exports: qkv_billion_str, attn_billion_str, total_layer_str,
 # │          per_step_t_str, total_peta_str, v100_time_str, batch_str,
 # │          seq_len_str, hidden_str, n_heads_str, head_dim_str,
 # │          n_layers_gpt2_str, training_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware, Models
-from mlsys.constants import TFLOPs, second, GPT2_HIDDEN_DIM, GPT2_LAYERS
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim import Hardware, Models
+from mlsysim.core.constants import TFLOPs, second, GPT2_HIDDEN_DIM, GPT2_LAYERS
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Compute:
@@ -586,7 +584,7 @@ Matrix multiplications dominate training compute, but neural networks require mo
 # │ Show: Relative costs of sigmoid, tanh, ReLU, softmax; GELU overhead.
 # │ How:  Hard-coded benchmark times; derived speedup ratios.
 # │
-# │ Imports: mlsys.formatting (fmt, check)
+# │ Imports: mlsysim.book (fmt, check)
 # │ Exports: ActivationBenchmarks.{tanh,sigmoid,relu,softmax,gelu}_*_str
 # └─────────────────────────────────────────────────────────────────────────────
 class ActivationBenchmarks:
@@ -781,7 +779,7 @@ Forward pass operations and their computational characteristics establish the wo
 # │ Show: SGD iteration count range; Adam optimizer state memory for 7B model.
 # │ How:  Hard-coded training scenario values.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: OptimizerScenarios.{sgd_iterations,adam_7b}_*_str
 # └─────────────────────────────────────────────────────────────────────────────
 class OptimizerScenarios:
@@ -869,12 +867,12 @@ $$\begin{aligned}
 # │ Show: The linear growth of activations vs. fixed parameter memory.
 # │ How: Calculate memory for activations, gradients, and parameters.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: resnet50_act_mem_b32_gb_str, resnet50_grad_mem_b32_gb_str,
 # │          resnet50_param_mem_b32_mb_str, resnet50_act_mem_b64_gb_str,
 # │          resnet50_grad_mem_b64_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetBatchMemory:
@@ -958,11 +956,11 @@ v_t = \beta_2 v_{t-1} + (1-\beta_2)\big(\nabla \mathcal{L}(\theta_t)\big)^2
 # │ Show: That Adam's state vectors (m_t, v_t) triple the parameter memory footprint.
 # │ How: Calculate total bytes for weight, momentum, and variance vectors.
 # │
-# │ Imports: mlsys.constants (BYTES_FP32, byte)
+# │ Imports: mlsysim.core.constants (BYTES_FP32, byte)
 # │ Exports: adam_overhead_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import BYTES_FP32, byte, Mparam
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import BYTES_FP32, byte, Mparam
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AdamMemory:
@@ -1020,16 +1018,16 @@ The choice of optimization algorithm creates specific patterns of computation an
 # │ Show: That mixed-precision Adam requires more memory than pure FP32 SGD.
 # │ How: Compare weight, gradient, and state bytes for GPT-2.
 # │
-# │ Imports: mlsys.constants (GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB,
-# │          BYTES_FP32, BYTES_FP16, GB), mlsys.formatting (fmt),
-# │          mlsys.formulas (model_memory)
+# │ Imports: mlsysim.core.constants (GPT2_PARAMS, Mparam, V100_MEM_CAPACITY, GiB,
+# │          BYTES_FP32, BYTES_FP16, GB), mlsysim.book (fmt),
+# │          mlsysim.formulas (model_memory)
 # │ Exports: param_fp32_str, grad_fp32_str, adam_state_str,
 # │          total_static_fp32_str, total_static_amp_str, v100_mem_gib_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware, Models
-from mlsys.constants import BYTES_FP32, BYTES_FP16, GB, GiB
-from mlsys.formatting import fmt_percent, fmt, check
-from mlsys.formulas import model_memory
+from mlsysim import Hardware, Models
+from mlsysim.core.constants import BYTES_FP32, BYTES_FP16, GB, GiB
+from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.core.formulas import model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2Optimizer:
@@ -1269,18 +1267,18 @@ Here, we shift focus from *what* backpropagation computes to *what it costs* to 
 # │ Show: That activations scale with batch size and eventually dwarf weights.
 # │ How: Calculate memory for attention, FFN, and optimizer states.
 # │
-# │ Imports: mlsys.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
+# │ Imports: mlsysim.core.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
 # │          V100_MEM_CAPACITY, GiB, BYTES_FP16, MB, GB, BYTES_ADAM_STATE),
-# │          mlsys.formatting (fmt), mlsys.formulas (model_memory)
+# │          mlsysim.book (fmt), mlsysim.formulas (model_memory)
 # │ Exports: batch_size_str, seq_len_str, n_layers_str, hidden_dim_str,
 # │          ffn_dim_str, attn_act_str, ffn_act_str, per_layer_str,
 # │          total_act_str, params_gb_str, grad_gb_str, opt_gb_str,
 # │          peak_gb_str, v100_mem_str, ckpt_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware, Models
-from mlsys.constants import BYTES_FP16, BYTES_ADAM_STATE, GB, MB, GiB, GPT2_HIDDEN_DIM, GPT2_LAYERS
-from mlsys.formatting import fmt_percent, fmt, check
-from mlsys.formulas import model_memory
+from mlsysim import Hardware, Models
+from mlsysim.core.constants import BYTES_FP16, BYTES_ADAM_STATE, GB, MB, GiB, GPT2_HIDDEN_DIM, GPT2_LAYERS
+from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.core.formulas import model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2ActivationMemory:
@@ -1485,7 +1483,7 @@ The mathematical operations we have examined---forward propagation, gradient com
 # │ Show: FLOP/byte ratios classifying operations as memory- or compute-bound.
 # │ How:  Hard-coded benchmark values from hardware profiling.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: ArithmeticIntensityScenarios.{ai_act_fp16,ai_norm,ai_softmax}_str
 # └─────────────────────────────────────────────────────────────────────────────
 class ArithmeticIntensityScenarios:
@@ -1539,11 +1537,11 @@ To build intuition for these relationships, study the roofline diagram in @fig-t
 # │ Show: Log-log roofline; memory-bound vs compute-bound regions; op scatter.
 # │ How: A100 peak specs; y = min(bw*x, peak_flops); viz.setup_plot().
 # │
-# │ Imports: numpy (np), mlsys.viz (viz)
+# │ Imports: numpy (np), mlsysim.core.viz (viz)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsys import viz
+from mlsysim import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
@@ -1605,14 +1603,14 @@ plt.show()
 # │ Show: That GPT-2 Small attention falls below the A100 ridge point.
 # │ How: Apply the H/8 formula using standard transformer dimensions.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: attn_intensity_str, H_small_str
 # │
 # │ Note: The prose following this cell references a100_tflops_fp16_str,
 # │       a100_bw_tbs_str, a100_ridge_str, h100_tflops_fp16_str,
 # │       h100_bw_tbs_str, h100_ridge_str — all defined in training-setup.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionIntensity:
@@ -1651,9 +1649,9 @@ class AttentionIntensity:
 # │ Show: Peak throughput at each precision, memory bandwidth, ridge points.
 # │ How:  Read hardware specs from Hardware twins; compute ridge points.
 # │
-# │ Imports: Hardware (Cloud.A100, Cloud.H100), mlsys.constants (TFLOPs,
+# │ Imports: Hardware (Cloud.A100, Cloud.H100), mlsysim.constants (TFLOPs,
 # │          PFLOPs, TB, GB, GiB, second, flop, byte, watt),
-# │          mlsys.formatting (fmt)
+# │          mlsysim.book (fmt)
 # │ Exports: AcceleratorSpecs.{a100,h100}_*_str
 # └─────────────────────────────────────────────────────────────────────────────
 class AcceleratorSpecs:
@@ -1895,7 +1893,7 @@ These three components form a tightly coupled system where throughput depends on
 # │       prefetch buffer memory requirements.
 # │ How:  Hardware constants from Digital Twins; hard-coded benchmark times.
 # │
-# │ Imports: mlsys.constants (NVME_SEQUENTIAL_BW, SYSTEM_MEMORY_BW,
+# │ Imports: mlsysim.core.constants (NVME_SEQUENTIAL_BW, SYSTEM_MEMORY_BW,
 # │          NVLINK_H100_BW, GB, second, GIB_TO_BYTES)
 # │ Exports: StorageBandwidth.{nvme,system_mem,nvlink}_*_str;
 # │          PreprocessingScenarios.{crop,jitter,norm,total_preprocess,
@@ -2083,14 +2081,14 @@ Applying this throughput analysis to our GPT-2 Lighthouse Model reveals where th
 # │ Show: That tokenization can become a CPU bottleneck for language models.
 # │ How: Calculate latency for tokenization and PCIe transfer phases.
 # │
-# │ Imports: mlsys.constants (PCIE_GEN3_BW, GB, second),
-# │          mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (PCIE_GEN3_BW, GB, second),
+# │          mlsysim.book (fmt)
 # │ Exports: tokens_per_batch_str, tokenization_ms_str, batch_kb_str,
 # │          pcie_gen3_str, transfer_ms_str, n_cpu_workers_str,
 # │          parallel_tokenization_ms_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import PCIE_GEN3_BW, GB, second
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import PCIE_GEN3_BW, GB, second
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2DataPipeline:
@@ -2189,13 +2187,13 @@ While data pipeline throughput determines how fast training data reaches the GPU
 # │ Show: That AllReduce time can exceed computation time for large models.
 # │ How: Calculate synchronization latency over a 100 Gbps network.
 # │
-# │ Imports: mlsys.constants (BYTES_FP16, ALLREDUCE_FACTOR),
-# │          mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (BYTES_FP16, ALLREDUCE_FACTOR),
+# │          mlsysim.book (fmt)
 # │ Exports: model_params_b_str, gradient_size_str, allreduce_str,
 # │          network_time_str, network_bw_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
-from mlsys.constants import BYTES_FP16, ALLREDUCE_FACTOR
+from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.core.constants import BYTES_FP16, ALLREDUCE_FACTOR
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NetworkWall:
@@ -2301,7 +2299,7 @@ For image classification pipelines where resizing, augmentation, and normalizati
 # │       backward-pass tensor shapes.
 # │ How:  Hard-coded architectural dimensions; derived md_math strings.
 # │
-# │ Imports: mlsys.formatting (fmt, md_math)
+# │ Imports: mlsysim.book (fmt, md_math)
 # │ Exports: TrainingDimensions.*
 # └─────────────────────────────────────────────────────────────────────────────
 class TrainingDimensions:
@@ -2439,15 +2437,15 @@ These hardware utilization patterns reinforce the batch-size--utilization relati
 # │ Show: That model state alone can exceed consumer GPU capacity.
 # │ How: Sum weights, gradients, optimizer states, and activations for a 7B model.
 # │
-# │ Imports: mlsys.constants (BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte),
-# │          mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte),
+# │          mlsysim.book (fmt)
 # │ Exports: vram_params_b_str, vram_gpu_capacity_str, vram_fp16_bytes_str,
 # │          vram_adam_bytes_str, vram_weights_gb_str, vram_gradients_gb_str,
 # │          vram_optimizer_gb_str, vram_subtotal_gb_str, vram_seq_str,
 # │          vram_hidden_str, vram_layers_str, vram_activations_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import BYTES_FP16, BYTES_FP32, BYTES_ADAM_STATE, byte
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VRAMRequirements:
@@ -2529,17 +2527,17 @@ The total memory scales linearly with batch size (as established in @eq-activati
 # │ Show: That doubling batch size can push memory usage into the "Danger Zone".
 # │ How: Calculate memory footprint for ResNet-50 and GPT-3.
 # │
-# │ Imports: mlsys.constants (RESNET50_PARAMS, Mparam, BYTES_FP32, BYTES_FP16,
-# │          byte, GB, MB, MiB, param), mlsys.formatting (fmt),
-# │          mlsys.formulas (model_memory)
+# │ Imports: mlsysim.core.constants (RESNET50_PARAMS, Mparam, BYTES_FP32, BYTES_FP16,
+# │          byte, GB, MB, MiB, param), mlsysim.book (fmt),
+# │          mlsysim.formulas (model_memory)
 # │ Exports: first_conv_mb_str, total_gb_b32_str, pct_a100_str,
 # │          act_gb_b64_str, grad_gb_b64_str, total_gb_b64_str,
 # │          gpt3_fp32_str, gpt3_fp16_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware, Models
-from mlsys.constants import BYTES_FP32, BYTES_FP16, GB, MB, Mparam, Bparam
-from mlsys.formatting import fmt_percent, fmt, check
-from mlsys.formulas import model_memory
+from mlsysim import Hardware, Models
+from mlsysim.core.constants import BYTES_FP32, BYTES_FP16, GB, MB, Mparam, Bparam
+from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.core.formulas import model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ResNetMemoryScaling:
@@ -2724,11 +2722,11 @@ Doubling the batch size halves the number of updates per epoch. If the learning 
 # │ Show: Loss vs epochs; three curves; "Optimization Gap" annotation.
 # │ How: Exponential decay curves; viz.setup_plot().
 # │
-# │ Imports: numpy (np), mlsys.viz (viz)
+# │ Imports: numpy (np), mlsysim.core.viz (viz)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsys import viz
+from mlsysim import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
@@ -2769,17 +2767,17 @@ Beyond batch size tuning, practitioners must also confront the economic reality 
 # │ Show: Rental vs. purchase economics for a 1,000-GPU cluster.
 # │ How: Calculate total FLOPs, wall-clock time, and breakeven point.
 # │
-# │ Imports: mlsys.constants, mlsys.formatting
+# │ Imports: mlsysim.core.constants, mlsysim.book
 # │ Exports: ub_flops_mantissa_str, ub_flops_exp_str, ub_time_s_mantissa_str,
 # │          ub_time_s_exp_str, ub_years_str, ub_cluster_days_str,
 # │          ub_rental_str, ub_purchase_str, ub_breakeven_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware
-from mlsys.constants import (
+from mlsysim import Hardware
+from mlsysim.core.constants import (
     BILLION, TRILLION, MILLION, THOUSAND,
     TFLOPs, TRILLION, SEC_PER_DAY, SEC_PER_YEAR_LEAP, HOURS_PER_DAY
 )
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class LlamaTraining:
@@ -3333,7 +3331,7 @@ The primary trade-off is memory: prefetch buffers consume GPU or host memory pro
 # │       exponents, gradient ranges, and learning rate values.
 # │ How:  Hard-coded from IEEE 754 spec and standard training recipes.
 # │
-# │ Imports: mlsys.constants (BYTES_FP16, byte)
+# │ Imports: mlsysim.core.constants (BYTES_FP16, byte)
 # │ Exports: MixedPrecisionScenarios.{bytes_fp16,model_1b_fp32_gb,
 # │          model_1b_fp16_gb,mp_mem_savings_pct,loss_scale_exp,
 # │          grad_range_min_exp,grad_range_max_exp,small_lr}_str
@@ -3480,17 +3478,17 @@ These benefits compound: a practitioner might simultaneously double batch size (
 # │ Show: How the combination of mixed precision and checkpointing fits large models onto single GPUs.
 # │ How: Calculate memory for FP32 baseline, FP16 mixed precision, and checkpointed activations.
 # │
-# │ Imports: mlsys.constants (GPT2_PARAMS, Mparam, Bparam, BYTES_FP32,
-# │          BYTES_FP16, BYTES_ADAM_STATE, GB), mlsys.formatting (fmt),
-# │          mlsys.formulas (model_memory)
+# │ Imports: mlsysim.core.constants (GPT2_PARAMS, Mparam, Bparam, BYTES_FP32,
+# │          BYTES_FP16, BYTES_ADAM_STATE, GB), mlsysim.book (fmt),
+# │          mlsysim.formulas (model_memory)
 # │ Exports: gpt2_b_str, mp_batch_size_str, fp32_act_str, fp16_act_str,
 # │          fp32_p_str, fp32_g_str, fp32_opt_str, fp32_t_str, fp16_p_str,
 # │          fp16_g_str, master_str, opt_str, fp16_t_str, ckpt_act_str,
 # │          ckpt_total_str, v100_capacity_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import GPT2_PARAMS, Mparam, Bparam, BYTES_FP32, BYTES_FP16, BYTES_ADAM_STATE, GB
-from mlsys.formatting import fmt_percent, fmt, check
-from mlsys.formulas import model_memory
+from mlsysim.core.constants import GPT2_PARAMS, Mparam, Bparam, BYTES_FP32, BYTES_FP16, BYTES_ADAM_STATE, GB
+from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.core.formulas import model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MixedPrecisionMemory:
@@ -3578,10 +3576,10 @@ class MixedPrecisionMemory:
 # │ Show: The 3× speedup gained from hardware tensor cores in mixed precision mode.
 # │ How: Compare benchmarked samples per second on V100 hardware.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: v100_mp_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MixedPrecisionSpeedup:
@@ -3787,10 +3785,10 @@ Optimal mixed-precision training requires matching the precision format to hardw
 # │ Show: The 20× speedup delivered by hardware-software co-design.
 # │ How: Compare throughput across three GPU generations and four numerical formats.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: v100_fp16_speedup_str, a100_over_v100_str, h100_over_v100_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CrossGenPrecisionCalc:
@@ -3844,13 +3842,13 @@ $$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right
 # │ Show: That intermediate attention matrices can consume gigabytes of VRAM.
 # │ How: Calculate total bytes for N×N scores across multiple attention heads.
 # │
-# │ Imports: mlsys.constants (BYTES_FP32, MB, GB, byte),
-# │          mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (BYTES_FP32, MB, GB, byte),
+# │          mlsysim.book (fmt)
 # │ Exports: fa_seq_len_str, embed_dim_str, fa_n_heads_str, bytes_fp32_str,
 # │          attn_matrix_mb_str, total_attn_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import BYTES_FP32, MB, GB, byte
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import BYTES_FP32, MB, GB, byte
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AttentionMemoryCalc:
@@ -3936,11 +3934,11 @@ Flash Attention achieves asymptotic improvements in both memory footprint and me
 # │ Show: The order-of-magnitude reduction in peak memory achieved via tiling.
 # │ How: Compare N×N matrix size to 3×N×D input tensor size.
 # │
-# │ Imports: mlsys.constants (BYTES_FP32, MB), mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (BYTES_FP32, MB), mlsysim.book (fmt)
 # │ Exports: fa_standard_mb_str, fa_flash_mb_str, fa_reduction_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import BYTES_FP32, MB
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import BYTES_FP32, MB
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionCalc:
@@ -4046,10 +4044,10 @@ The benefits of Flash Attention become concrete when measured on real hardware. 
 # │ Show: That FlashAttention speedup is more pronounced in the backward pass.
 # │ How: Divide standard attention latency by FlashAttention latency.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: flash_fwd_speedup_str, flash_bwd_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionSpeedup:
@@ -4337,13 +4335,13 @@ Returning to our GPT-2 Lighthouse Model, *gradient accumulation* is essential fo
 # │ Show: The significant dollar savings achieved by reducing cluster size.
 # │ How: Calculate costs for naive large clusters vs. small clusters with accumulation.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: gpus_naive_str, batch_per_gpu_str, naive_hourly_str,
 # │          accum_hourly_str, savings_hourly_str, savings_pct_str,
 # │          accum_2wk_str, naive_2wk_str, comm_reduction_pct_str,
 # │          accum_steps_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradientAccumulation:
@@ -4518,18 +4516,18 @@ To answer that question, let us walk through optimizing GPT-2 (1.5B parameters) 
 # │ Show: The incremental effect of mixed precision and checkpointing on peak VRAM.
 # │ How: Calculate memory footprint across three distinct optimization tiers.
 # │
-# │ Imports: mlsys.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
+# │ Imports: mlsysim.core.constants (GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM,
 # │          V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB, byte),
-# │          mlsys.formatting (fmt), mlsys.formulas (model_memory)
+# │          mlsysim.book (fmt), mlsysim.formulas (model_memory)
 # │ Exports: params_fp32_str, grads_fp32_str, adam_fp32_str, act_fp32_str,
 # │          total_fp32_str, params_fp16_str, grads_fp16_str,
 # │          master_weights_str, adam_amp_str, act_fp16_str, total_amp_str,
 # │          static_mem_str, act_ckpt_str, total_ckpt_str, wt_v100_mem_str,
 # │          amp_reduction_str, recompute_overhead_str, checkpoint_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB, byte
-from mlsys.formatting import fmt_percent, fmt, check
-from mlsys.formulas import model_memory
+from mlsysim.core.constants import GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, V100_MEM_CAPACITY, GiB, BYTES_FP32, BYTES_FP16, GB, byte
+from mlsysim.fmt import fmt_percent, fmt, check
+from mlsysim.core.formulas import model_memory
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2WalkthroughCalc:
@@ -4670,10 +4668,10 @@ The GPT-2 case study demonstrates how the optimization techniques examined in th
 # │      a single comparison table, showing students the end-to-end effect of
 # │      mixed precision + checkpointing on a real model.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: b_param_str..b_carbon_str, o_param_str..o_carbon_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2SummaryCalc:
@@ -4762,10 +4760,10 @@ class GPT2SummaryCalc:
 # │ Goal: Distills the optimization table into three headline numbers (memory
 # │      reduction, time speedup, energy savings) for the summary prose.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: mem_reduction_str, energy_reduction_pct_str, time_speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class OptimizationSummaryCalc:
@@ -4818,11 +4816,11 @@ Not all workloads benefit equally from adding more GPUs---the relationship betwe
 # │ Show: Log-log axes; ideal linear vs three r-values; speedup = N/(1+(N-1)*r).
 # │ How: N = [1..256]; fill_between for tax region; viz.setup_plot().
 # │
-# │ Imports: numpy (np), mlsys.viz (viz)
+# │ Imports: numpy (np), mlsysim.core.viz (viz)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 import numpy as np
-from mlsys import viz
+from mlsysim import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
@@ -5155,17 +5153,17 @@ With this historical context in mind, the practical decision is *when* to accept
 # │ Show: Energy consumption in household-months and CO₂ tonnage.
 # │ How: Calculate total Joules from GPU TDP and training duration.
 # │
-# │ Imports: mlsys.constants, mlsys.formatting
+# │ Imports: mlsysim.core.constants, mlsysim.book
 # │ Exports: cf_num_gpus_str, cf_hosts_str, cf_cpu_tdp_per_host_w_str,
 # │          cf_gpu_tdp_str, cf_time_days_str, cf_time_hours_str,
 # │          cf_energy_kwh_str, cf_energy_saved_str, cf_co2_str,
 # │          cf_household_months_str, cf_flops_mantissa_str, cf_flops_exp_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import (
+from mlsysim.core.constants import (
     A100_TDP, watt, GPUS_PER_HOST, BILLION, TRILLION,
     SEC_PER_HOUR, HOURS_PER_DAY, THOUSAND
 )
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TrainingCarbonFootprint:
@@ -5305,11 +5303,11 @@ The journey from single-GPU optimization through multi-device parallelism reveal
 # │ Goal: Provides concrete numbers for each fallacy/pitfall so the discussion
 # │      is grounded in realistic scenarios rather than hand-waving.
 # │
-# │ Imports: mlsys.constants (*), mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (*), mlsysim.book (fmt)
 # │ Exports: fp_model_20b_params_str..fp_prefetch_reduction_str (~30 vars)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import *
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import *
+from mlsysim.fmt import fmt_percent, fmt, check
 
 class FallaciesPitfallsSetup:
     """Quantitative values for all Fallacies and Pitfalls examples."""
@@ -5484,6 +5482,4 @@ Training produces the model artifact---a collection of billions of learned param
 ```{python}
 #| echo: false
 #| label: chapter-end
-from mlsys.registry import end_chapter
-end_chapter("vol1:training")
 ```

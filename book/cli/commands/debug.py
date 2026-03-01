@@ -176,7 +176,7 @@ def _build_and_check(
         return False, 0.0, "Unknown format type", []
 
     # Delete previous output to ensure clean test (same rule: any .pdf, any .epub, index.html)
-    from cli.core.config import get_output_file
+    from ..core.config import get_output_file
     existing = get_output_file(output_dir, format_type)
     if existing is not None:
         try:

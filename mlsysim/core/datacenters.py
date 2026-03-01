@@ -7,7 +7,7 @@
 # specific buildings.
 #
 # Usage in QMD cells:
-#   from mlsys import Datacenters
+#   from mlsysim import Datacenters
 #   ci = Datacenters.Quebec.carbon_intensity_kg_kwh   # 0.02 kg/kWh
 #   pue = Datacenters.HyperscaleAir.pue               # 1.12
 

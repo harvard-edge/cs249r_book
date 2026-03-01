@@ -6,7 +6,7 @@
 import pint
 ureg = pint.UnitRegistry()
 ureg.default_format = "~P"           # compact Pretty: "312 TFLOPs/s" not "312.0 teraFLOPs / second"
-pint.set_application_registry(ureg)  # canonical registry for the whole mlsys package
+pint.set_application_registry(ureg)  # canonical registry for the whole mlsysim package
 Q_ = ureg.Quantity
 
 # --- Dimensionless Scalars (Helpers) ---
@@ -147,6 +147,7 @@ H100_TDP = 700 * watt                     # SXM variant
 B200_FLOPS_FP16_TENSOR = 2250 * TFLOPs / second  # Dense. Sparse is 4500.
 B200_FLOPS_FP16_SPARSE = 4500 * TFLOPs / second
 B200_FLOPS_FP8_TENSOR = 4500 * TFLOPs / second   # Dense. Sparse is 9000.
+B200_FLOPS_INT4 = 9000 * TFLOPs / second         # Dense. Sparse is 18 PFLOPS.
 B200_MEM_BW = 8 * TB / second             # HBM3e
 B200_MEM_CAPACITY = 192 * GiB
 B200_TDP = 1000 * watt
@@ -186,6 +187,11 @@ TPUV5P_FLOPS_BF16 = 459 * TFLOPs / second
 TPUV5P_MEM_BW = 2.76 * TB / second
 TPUV5P_MEM_CAPACITY = 95 * GiB
 TPUV5P_ICI_BW = 1600 * GB / second        # Inter-Chip Interconnect
+
+# Google TPU v6 (Trillium, 2024/25) — Source: Google Blog (Projected/Early)
+TPUV6_FLOPS_BF16 = 2150 * TFLOPs / second  # ~4.7x over v5p (estimated peak)
+TPUV6_MEM_BW = 4.5 * TB / second
+TPUV6_MEM_CAPACITY = 128 * GiB
 
 # Cerebras Wafer-Scale Engine (WSE) — Source: Cerebras Whitepapers
 WSE1_CORES = 400000 * count
@@ -251,6 +257,8 @@ PCIE_GEN5_BW = 64 * GB / second           # PCIe Gen5 x16 (bidirectional)
 # Inter-node interconnects
 INFINIBAND_HDR_BW = 200 * Gbps            # HDR InfiniBand (25 GB/s)
 INFINIBAND_NDR_BW = 400 * Gbps            # NDR InfiniBand (50 GB/s)
+INFINIBAND_XDR_BW = 800 * Gbps            # XDR InfiniBand (100 GB/s)
+INFINIBAND_GXDR_BW = 1600 * Gbps          # GXDR InfiniBand (200 GB/s, 2026)
 
 # --- Energy (Horowitz, 2014 @ 45nm) ---
 ENERGY_DRAM_ACCESS_PJ = 640 * ureg.picojoule
@@ -353,6 +361,11 @@ GPT3_TRAINING_ENERGY_MWH = 1287 # MWh, estimated per Patterson et al. (2021)
 # GPT-4 (Reference) - Note: Unofficial public estimates
 GPT4_EST_PARAMS = 1.76e12 * param
 GPT4_TRAINING_GPU_DAYS = 2.5e6 # A100 days
+
+# Llama 3.1
+LLAMA3_8B_PARAMS = 8.03e9 * param
+LLAMA3_70B_PARAMS = 70.6e9 * param
+LLAMA3_405B_PARAMS = 405e9 * param
 
 # BERT-Base
 BERT_BASE_PARAMS = 110e6 * param

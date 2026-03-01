@@ -23,12 +23,10 @@ engine: jupyter
 # │ Show: Correct registration for cross-chapter constant resolution.
 # │ How: Invoke start_chapter from the mlsys registry module.
 # │
-# │ Imports: mlsys.registry (start_chapter)
+# │ Imports: mlsysim.registry (start_chapter)
 # │ Exports: (none — side effect only)
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.registry import start_chapter
 
-start_chapter("vol1:introduction")
 ```
 
 ::: {layout-narrow}
@@ -80,12 +78,12 @@ Machine learning systems have a *physics*. Data must move through memory hierarc
 # │ Show: Google Search volume vs. the GPU/CPU compute performance gap.
 # │ How: Compare daily search counts (SI units) and TFLOPS density (A100 vs. CPU).
 # │
-# │ Imports: mlsys.constants (GOOGLE_SEARCHES_PER_DAY, H100/CPU FLOPS)
+# │ Imports: mlsysim.core.constants (GOOGLE_SEARCHES_PER_DAY, H100/CPU FLOPS)
 # │ Exports: AIMomentStats.google_search_b_str,
 # │          AIMomentStats.h100_fp16_tflops_str,
 # │          AIMomentStats.cpu_fp32_tflops_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import (
+from mlsysim.core.constants import (
     GOOGLE_SEARCHES_PER_DAY,
     H100_FLOPS_FP16_TENSOR,
     CPU_FLOPS_FP32,
@@ -93,7 +91,7 @@ from mlsys.constants import (
     second,
     BILLION, MILLION, TRILLION, THOUSAND
 )
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AIMomentStats:
@@ -129,7 +127,67 @@ Artificial intelligence has moved from research laboratories to the fabric of da
 
 *What* makes building these systems an engineering challenge distinct from traditional software? The answer lies in a **Dual Mandate**\index{Dual Mandate}. Every ML system must simultaneously manage statistical uncertainty, because the model's predictions are probabilistic, and physical constraints, because executing those predictions requires moving terabytes of data and performing quintillions of arithmetic operations, often within milliseconds. The difference becomes clearest at failure boundaries. When a traditional program crashes, an engineer traces the bug to specific lines of code. When an ML system's accuracy drops by five percentage points, there may be no bug to find: the code executes correctly, but the learned behavior has changed\index{Silent Degradation}. Concretely, a code bug causes a crash (a loud failure), whereas a data bug causes a wrong prediction (a silent failure). The training data may have shifted. The hardware may have run out of memory mid-training. The model may not have converged. Debugging, testing, and architectural design all change when a system's behavior is defined by data rather than by code.
 
-This dual mandate is visible in every large-scale AI deployment. ChatGPT coordinates thousands of GPUs[^fn-gpu-parallel] across data centers, executing trillions of operations per query while managing memory, network bandwidth, and thermal constraints. Tesla's collision avoidance relies on dozens of neural networks[^fn-neural-network-origin] processing data from cameras, radar, and ultrasonic sensors simultaneously, fusing their outputs into a control decision within milliseconds. Google processes `{python} AIMomentStats.google_search_b_str` billion searches per day, each one triggering multiple AI systems for ranking, knowledge extraction, and spell-checking, all while meeting strict latency targets on globally distributed infrastructure. These systems do not merely run algorithms. They orchestrate data, computation, and hardware under tight physical constraints to deliver statistically reliable results at scale.
+This dual mandate is visible in every large-scale AI deployment. ChatGPT coordinates thousands of GPUs[^fn-gpu-parallel] across data centers, executing trillions of operations per query while managing memory, network bandwidth, and thermal constraints. Tesla's collision avoidance relies on dozens of neural networks processing data from cameras, radar, and ultrasonic sensors simultaneously, fusing their outputs into a control decision within milliseconds. Google processes `{python} AIMomentStats.google_search_b_str` billion searches per day, each one triggering multiple AI systems for ranking, knowledge extraction, and spell-checking, all while meeting strict latency targets on globally distributed infrastructure. These systems do not merely run algorithms. They orchestrate data, computation, and hardware under tight physical constraints to deliver statistically reliable results at scale.
+
+## Scaling the Machine: From Node to Fleet {#sec-introduction-scaling-regimes}
+
+\index{Single-Node Stack!scaling regimes}\index{Distributed Fleet!scaling regimes}The "Machine" axis of the AI Triad operates across two distinct scaling regimes, each governed by its own physical bottlenecks. Engineering a robust ML system requires mastering the first before attempting to scale to the second.
+
+@fig-system-scaling-regimes visualizes this transition. In the **Single-Node** regime (the focus of this textbook), we optimize for 1–8 GPUs connected by shared memory and high-speed intra-node interconnects like **NVLink**. Here, the binding constraint is the **Memory Wall**—the rate at which we can move data from local HBM to compute units. As applications grow beyond the capacity of a single machine, we enter the **Distributed Fleet** regime: thousands of nodes coordinated across a high-speed switch fabric. There, the bottleneck shifts to the **Bisection Bandwidth Wall**, where network congestion and message-passing latency dominate. The engineering principles covered in these chapters—maximizing hardware utilization and mitigating data movement costs on a single node—are the essential prerequisites for eventually engineering the fleet.
+
+::: {#fig-system-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The Scaling Regimes of ML Systems**: Machine learning engineering is partitioned into two distinct physical regimes. Single-node systems are limited by local memory bandwidth (**Memory Wall**), while distributed fleets are limited by network communication (**Bisection Bandwidth Wall**). Mastery of intra-node data movement is the prerequisite for distributed scaling." fig-alt="Diagram comparing Single-Node Stack (App, Framework, OS, HW) to Distributed Fleet (Governance, Serving, Distribution, Infra)."}
+```{.tikz}
+\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\footnotesize, x=1cm, y=1.1cm]
+  \tikzset{
+    stack/.style={rectangle, rounded corners=2pt, draw, align=center, minimum width=3.5cm, minimum height=0.8cm, line width=0.8pt},
+    label/.style={font=\usefont{T1}{phv}{b}{n}\small, align=center},
+    sublabel/.style={font=\usefont{T1}{phv}{m}{n}\scriptsize, color=black!70, align=center},
+    bottleneck/.style={rectangle, rounded corners=2pt, draw, dashed, align=center, minimum width=3.5cm, minimum height=0.6cm, line width=0.6pt, fill=RedLine!5},
+    arrow/.style={-latex, line width=1.5pt, draw=GreenLine}
+  }
+
+  % Single Node Stack
+  \node[label] at (0, 4.5) {Single-Node Stack};
+  \node[sublabel] at (0, 4.1) {1–8 GPUs, Shared Memory};
+  
+  \node[stack, fill=RedLine!15, draw=RedLine] (app1) at (0, 3.2) {Application};
+  \node[sublabel] at (0, 3.2) {\\[0.4em]Training Loop / Inference};
+  
+  \node[stack, fill=OrangeLine!15, draw=OrangeLine] (fw1) at (0, 2.2) {ML Framework};
+  \node[sublabel] at (0, 2.2) {\\[0.4em]PyTorch / JAX / Kernels};
+  
+  \node[stack, fill=GreenLine!15, draw=GreenLine] (os1) at (0, 1.2) {Operating System};
+  \node[sublabel] at (0, 1.2) {\\[0.4em]CUDA / PCIe DMA};
+  
+  \node[stack, fill=BlueLine!15, draw=BlueLine] (hw1) at (0, 0.2) {Hardware};
+  \node[sublabel] at (0, 0.2) {\\[0.4em]HBM / NVLink (900 GB/s)};
+  
+  \node[bottleneck, draw=RedLine] (bn1) at (0, -0.8) {\textbf{Bottleneck: Memory Wall}};
+
+  % Scaling Arrow
+  \draw[arrow] (2, 1.7) -- (3, 1.7) node[midway, above, color=GreenLine, font=\usefont{T1}{phv}{b}{n}] {Scaling};
+
+  % Distributed Fleet Stack
+  \node[label] at (5, 4.5) {Distributed Fleet Stack};
+  \node[sublabel] at (5, 4.1) {1,000–100,000+ GPUs};
+  
+  \node[stack, fill=VioletLine!15, draw=VioletLine] (app2) at (5, 3.2) {Governance};
+  \node[sublabel] at (5, 3.2) {\\[0.4em]Responsible AI / Security};
+  
+  \node[stack, fill=OrangeLine!15, draw=OrangeLine] (fw2) at (5, 2.2) {Serving / Ops};
+  \node[sublabel] at (5, 2.2) {\\[0.4em]Orchestration / CI/CD};
+  
+  \node[stack, fill=GreenLine!15, draw=GreenLine] (os2) at (5, 1.2) {Distribution};
+  \node[sublabel] at (5, 1.2) {\\[0.4em]NCCL / RDMA / Comms};
+  
+  \node[stack, fill=BlueLine!15, draw=BlueLine] (hw2) at (5, 0.2) {Infrastructure};
+  \node[sublabel] at (5, 0.2) {\\[0.4em]Fabric / RDMA (InfiniBand)};
+  
+  \node[bottleneck, draw=RedLine] (bn2) at (5, -0.8) {\textbf{Bottleneck: Network Wall}};
+
+\end{tikzpicture}
+```
+:::
 
 [^fn-gpu-parallel]: **GPU (Graphics Processing Unit)**: Originally designed for rendering video game graphics, a workload requiring thousands of simple, parallel pixel calculations. This hardware-algorithm alignment proved decisive for neural networks, where the same massively parallel arithmetic structure maps directly onto matrix multiplication, making GPUs the primary physical enabler of modern training scale (see @sec-hardware-acceleration). \index{GPU!etymology}
 
@@ -194,18 +252,18 @@ Debugging an ML system therefore means debugging the *data*, not the Python scri
 # │ Show: The astronomical size of the image input space vs. test set coverage.
 # │ How: Calculate total possible pixel configurations for 224x224 RGB images.
 # │
-# │ Imports: math (standard library), mlsys.constants, mlsys.formatting
+# │ Imports: math (standard library), mlsysim.constants, mlsysim.book
 # │ Exports: VerificationGap.vg_digits_str,
 # │          VerificationGap.imagenet_test_images_str
 # └─────────────────────────────────────────────────────────────────────────────
 import math
-from mlsys.constants import (
+from mlsysim.core.constants import (
     IMAGE_DIM_RESNET,
     IMAGE_CHANNELS_RGB,
     COLOR_DEPTH_8BIT,
     IMAGENET_TEST_IMAGES,
 )
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class VerificationGap:
@@ -550,13 +608,13 @@ This hybrid approach combined human-engineered features with statistical learnin
 # │ Show: The 42% relative error reduction driven by GPU-algorithm alignment.
 # │ How: Calculate top-5 error improvement over second place.
 # │
-# │ Imports: mlsys.constants (ALEXNET_PARAMS)
+# │ Imports: mlsysim.core.constants (ALEXNET_PARAMS)
 # │ Exports: AlexNetBreakthrough.alexnet_relative_improvement_str,
 # │          AlexNetBreakthrough.alexnet_params_m_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Models
-from mlsys.constants import MILLION
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim import Models
+from mlsysim.core.constants import MILLION
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AlexNetBreakthrough:
@@ -1021,14 +1079,14 @@ node[below]{dense}(X1-|B1D.north west);
 # │ Show: The infrastructure challenge defined by 175B parameters and zettaFLOP scale.
 # │ How: Retrieve GPT-3 specifications and calculate training ZFLOPS.
 # │
-# │ Imports: mlsys.constants (GPT3_PARAMS, GPT3_TRAINING_OPS)
+# │ Imports: mlsysim.core.constants (GPT3_PARAMS, GPT3_TRAINING_OPS)
 # │ Exports: GPT3Scale.gpt3_params_billion_str, GPT3Scale.gpt3_params_b_str,
 # │          GPT3Scale.gpt3_training_zflops_str, GPT3Scale.gpt3_gpus_str,
 # │          GPT3Scale.data_scale_gb_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Hardware, Models
-from mlsys.constants import Bparam, ZFLOPs, byte, GB
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim import Hardware, Models
+from mlsysim.core.constants import Bparam, ZFLOPs, byte, GB
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT3Scale:
@@ -1096,12 +1154,12 @@ The shift from expert systems to statistical learning to deep learning has drama
 # │ Show: The transition from minimal compute to millions of GPU-days.
 # │ How: Retrieve GPT-4 training stats from the mlsys Digital Twins.
 # │
-# │ Imports: mlsys.constants (GPT4_TRAINING_GPU_DAYS)
+# │ Imports: mlsysim.core.constants (GPT4_TRAINING_GPU_DAYS)
 # │ Exports: GPT4Scale.gpt4_gpu_m_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Models
-from mlsys.constants import MILLION
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim import Models
+from mlsysim.core.constants import MILLION
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT4Scale:
@@ -1179,11 +1237,11 @@ Rather than beginning with an abstract definition, consider a system most people
 # │ Show: That even "simple" ML tasks like spam filtering operate at massive scale.
 # │ How: Calculate annual email volume from Gmail's daily traffic.
 # │
-# │ Imports: mlsys.constants (GMAIL_EMAILS_PER_DAY)
+# │ Imports: mlsysim.core.constants (GMAIL_EMAILS_PER_DAY)
 # │ Exports: EmailScale.gmail_emails_t_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import GMAIL_EMAILS_PER_DAY, TRILLION
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import GMAIL_EMAILS_PER_DAY, TRILLION
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class EmailScale:
@@ -1502,9 +1560,9 @@ Throughout this book, every optimization technique we study, from pruning to ker
 # │ Show: That improving efficiency from 45% to 60% saves significant compute days.
 # │ How: Calculate training duration using the dTime formula for GPT-3.
 # │
-# │ Imports: mlsys.constants (GPT3_TRAINING_OPS, A100_FLOPS_FP16_TENSOR,
+# │ Imports: mlsysim.core.constants (GPT3_TRAINING_OPS, A100_FLOPS_FP16_TENSOR,
 # │          TFLOPs, second, day),
-# │          mlsys.formulas (dTime), mlsys.formatting (fmt, md_math)
+# │          mlsysim.formulas (dTime), mlsysim.book (fmt, md_math)
 # │ Exports: GPT3Training.num_gpus_str, GPT3Training.eta_base_pct_str,
 # │          GPT3Training.eta_opt_pct_str, GPT3Training.days_initial_str,
 # │          GPT3Training.days_optimized_str, GPT3Training.days_saved_str,
@@ -1512,13 +1570,13 @@ Throughout this book, every optimization technique we study, from pruning to ker
 # │          GPT3Training.time_value_math, GPT3Training.time_days_math,
 # │          GPT3Training.ops_math
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Models, Hardware
-from mlsys.constants import (
+from mlsysim import Models, Hardware
+from mlsysim.core.constants import (
     GPT3_TRAINING_OPS, A100_FLOPS_FP16_TENSOR, TFLOPs, second, day,
     TRILLION, SEC_PER_DAY, flop
 )
-from mlsys.formulas import dTime
-from mlsys.formatting import fmt_percent, fmt, md_math
+from mlsysim.core.formulas import dTime
+from mlsysim.fmt import fmt_percent, fmt, md_math
 
 # --- Inputs (cluster configuration) ---
 num_gpus_value = 1024
@@ -1687,11 +1745,11 @@ Each archetype manifests different constraints along the D·A·M axes, ensuring 
 # │ Show: That even foundational benchmarks required significant systems engineering.
 # │ How: Calculate millions of training images from the mlsys Digital Twins.
 # │
-# │ Imports: mlsys.constants (IMAGENET_IMAGES)
+# │ Imports: mlsysim.core.constants (IMAGENET_IMAGES)
 # │ Exports: ImageNetStats.images_m_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import IMAGENET_IMAGES, MILLION
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import IMAGENET_IMAGES, MILLION
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ImageNetStats:
@@ -1862,7 +1920,7 @@ To appreciate the magnitude of these gains, consider the trajectory in @fig-algo
 # │ Show: The 44× compute reduction from AlexNet to EfficientNet.
 # │ How: Plot historical ImageNet training compute data points.
 # │
-# │ Imports: sys, os, matplotlib.pyplot, numpy, mlsys.viz
+# │ Imports: sys, os, matplotlib.pyplot, numpy, mlsysim.core.viz
 # │ Exports: (figure output)
 # └─────────────────────────────────────────────────────────────────────────────
 import sys
@@ -1872,7 +1930,7 @@ import numpy as np
 
 # Ensure mlsys/viz is available in Quarto execution.
 sys.path.insert(0, ".")
-from mlsys import viz
+from mlsysim import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
@@ -1955,7 +2013,7 @@ Efficiency gains tell only half the story. @fig-ai-training-compute-growth revea
 # │ Show: The $10^7$ growth in FLOPs that outpaces Moore's Law.
 # │ How: Plot training compute data points from the Deep Learning era.
 # │
-# │ Imports: sys, os, matplotlib.pyplot, numpy, mlsys.viz
+# │ Imports: sys, os, matplotlib.pyplot, numpy, mlsysim.core.viz
 # │ Exports: (figure output)
 # └─────────────────────────────────────────────────────────────────────────────
 import sys
@@ -1965,7 +2023,7 @@ import numpy as np
 
 # Ensure mlsys/viz is available in Quarto execution.
 sys.path.insert(0, ".")
-from mlsys import viz
+from mlsysim import viz
 
 fig, ax, COLORS, plt = viz.setup_plot()
 
@@ -2128,12 +2186,12 @@ fill=OrangeL,draw=OrangeLine](DB2){Model\ Monitoring};
 # │ Show: How Lighthouse Models map to specific User Missions.
 # │ How: Reference the Application Archetypes (Frontier, AutoDrive, Doorbell).
 # │
-# │ Imports: mlsys.Applications, mlsys.formatting
+# │ Imports: mlsysim.Applications, mlsysim.book
 # │ Exports: ScenarioRegistry.frontier_limit, ScenarioRegistry.drive_limit,
 # │          ScenarioRegistry.doorbell_limit
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Applications
-from mlsys.formatting import fmt_percent, fmt
+from mlsysim import Applications
+from mlsysim.fmt import fmt_percent, fmt
 
 # ┌── LEGO ───────────────────────────────────────────────
 class ScenarioRegistry:
@@ -2251,12 +2309,12 @@ The interdependencies across the D·A·M axes create specific challenge categori
 # │ Show: The TB/hour scale of real-world multimodal data ingestion.
 # │ How: List low and high data rates from Waymo's public specifications.
 # │
-# │ Imports: mlsys.constants (WAYMO_DATA_PER_HOUR_LOW, WAYMO_DATA_PER_HOUR_HIGH,
-# │          TB, hour), mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.constants (WAYMO_DATA_PER_HOUR_LOW, WAYMO_DATA_PER_HOUR_HIGH,
+# │          TB, hour), mlsysim.book (fmt)
 # │ Exports: WaymoStats.low_str, WaymoStats.high_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.constants import WAYMO_DATA_PER_HOUR_LOW, WAYMO_DATA_PER_HOUR_HIGH, TB, hour
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.constants import WAYMO_DATA_PER_HOUR_LOW, WAYMO_DATA_PER_HOUR_HIGH, TB, hour
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class WaymoStats:
@@ -2389,14 +2447,14 @@ Engineers assume benchmark performance predicts production accuracy, but distrib
 # │ Show: That a 3× component speedup yields only a marginal end-to-end gain.
 # │ How: Calculate total latency before and after local optimization.
 # │
-# │ Imports: mlsys.formulas (calc_amdahls_speedup), mlsys.formatting (fmt)
+# │ Imports: mlsysim.core.formulas (calc_amdahls_speedup), mlsysim.book (fmt)
 # │ Exports: AmdahlsPitfall.t_inference_str, AmdahlsPitfall.t_inf_new_str,
 # │          AmdahlsPitfall.t_pre_str, AmdahlsPitfall.t_post_str,
 # │          AmdahlsPitfall.total_ms, AmdahlsPitfall.new_total_ms,
 # │          AmdahlsPitfall.improv_pct, AmdahlsPitfall.naive_p
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formulas import calc_amdahls_speedup
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core.formulas import calc_amdahls_speedup
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # --- Inputs (hypothetical pipeline timings) ---
 t_inference_value = 45  # ms
@@ -2470,11 +2528,11 @@ Engineers optimize inference latency in isolation, but **Amdahl's Law** governs 
 # │ Show: How a recommendation system loses accuracy over 6 months without retraining.
 # │ How: Apply the Degradation Equation using linear drift points per month.
 # │
-# │ Imports: mlsys.formatting (fmt)
+# │ Imports: mlsysim.book (fmt)
 # │ Exports: DriftFallacy.acc_initial_str, DriftFallacy.acc_final_str,
 # │          DriftFallacy.acc_drop_str, DriftFallacy.months_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DriftFallacy:
@@ -2547,7 +2605,7 @@ This book makes a stronger claim: ML systems engineering is not merely a collect
 # │ Show: RAM, Compute, and Power constraints for the 4 deployment paradigms.
 # │ How: Reference the Systems Archetypes (Cloud, Edge, Mobile, Tiny).
 # │
-# │ Imports: mlsys.Systems, mlsys.formatting
+# │ Imports: mlsysim.Systems, mlsysim.book
 # │ Exports: DeploymentSystems.cloud_mem_str, DeploymentSystems.cloud_compute_str,
 # │          DeploymentSystems.cloud_power_str, DeploymentSystems.edge_mem_str,
 # │          DeploymentSystems.edge_compute_str, DeploymentSystems.edge_power_str,
@@ -2556,9 +2614,9 @@ This book makes a stronger claim: ML systems engineering is not merely a collect
 # │          DeploymentSystems.tiny_compute_str, DeploymentSystems.tiny_power_str,
 # │          DeploymentSystems.mem_span_str, DeploymentSystems.compute_span_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsys import Systems
-from mlsys.constants import GB, MB, KiB, watt, milliwatt, TFLOPs, second, flop
-from mlsys.formatting import fmt_percent, fmt, check
+from mlsysim.core import Systems
+from mlsysim.core.constants import GB, MB, KiB, watt, milliwatt, TFLOPs, second, flop
+from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class DeploymentSystems:
@@ -2633,6 +2691,4 @@ Welcome to AI Engineering.
 ```{python}
 #| echo: false
 #| label: chapter-end
-from mlsys.registry import end_chapter
-end_chapter("vol1:introduction")
 ```

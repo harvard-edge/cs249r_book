@@ -217,7 +217,7 @@ class Clusters:
     Named reference clusters for Vol2 prose and LEGO blocks.
 
     Usage in QMD cells:
-        from mlsys import Clusters
+        from mlsysim import Clusters
         c = Clusters.Research_512
         print(f"{c.total_gpus} GPUs, {c.peak_flops_pflops:.0f} PFLOPs peak")
     """

@@ -13,12 +13,12 @@ Severity levels:
   INFO    — style improvement opportunity (.to().magnitude → .m_as())
 
 Usage:
-    python3 book/quarto/mlsys/validate_pint_usage.py
-    python3 book/quarto/mlsys/validate_pint_usage.py --vol1
-    python3 book/quarto/mlsys/validate_pint_usage.py --vol2
-    python3 book/quarto/mlsys/validate_pint_usage.py --strict
-    python3 book/quarto/mlsys/validate_pint_usage.py --file path/to/file.qmd
-    python3 book/quarto/mlsys/validate_pint_usage.py --no-info
+    python3 book/quarto/mlsysim/validate_pint_usage.py
+    python3 book/quarto/mlsysim/validate_pint_usage.py --vol1
+    python3 book/quarto/mlsysim/validate_pint_usage.py --vol2
+    python3 book/quarto/mlsysim/validate_pint_usage.py --strict
+    python3 book/quarto/mlsysim/validate_pint_usage.py --file path/to/file.qmd
+    python3 book/quarto/mlsysim/validate_pint_usage.py --no-info
 """
 
 import re
@@ -251,7 +251,7 @@ def main() -> None:
 
     # Locate repository root relative to this script
     script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent.parent.parent  # mlsysbook-vols/
+    repo_root = script_dir.parent.parent.parent  # mlsysimbook-vols/
     contents_dir = repo_root / "book" / "quarto" / "contents"
 
     if specific_file:

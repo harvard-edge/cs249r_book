@@ -4,6 +4,7 @@ Build command implementation for MLSysBook CLI.
 Handles building chapters and full books in different formats (HTML, PDF, EPUB).
 """
 
+import os
 import platform
 import subprocess
 import signal
@@ -39,7 +40,7 @@ class BuildCommand:
         Uses shared rule: PDF = any .pdf, EPUB = any .epub, HTML = index.html.
         Always prints a clickable "Output created:" line for Cursor/VSCode terminals.
         """
-        from cli.core.config import get_output_file
+        from ..core.config import get_output_file
         target = get_output_file(output_dir, format_type)
 
         if target is None:
@@ -473,6 +474,15 @@ class BuildCommand:
         Returns:
             True if command succeeded, False otherwise
         """
+        # Set up environment with PYTHONPATH including the project root
+        env = os.environ.copy()
+        root_dir = str(self.config_manager.root_dir.resolve())
+        current_pythonpath = env.get("PYTHONPATH", "")
+        if current_pythonpath:
+            env["PYTHONPATH"] = f"{root_dir}:{current_pythonpath}"
+        else:
+            env["PYTHONPATH"] = root_dir
+
         try:
             if self.verbose:
                 # Verbose mode: stream output in real-time
@@ -480,6 +490,7 @@ class BuildCommand:
                 process = subprocess.Popen(
                     cmd,
                     cwd=cwd,
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -511,6 +522,7 @@ class BuildCommand:
                     result = subprocess.run(
                         cmd,
                         cwd=cwd,
+                        env=env,
                         capture_output=True,
                         text=True,
                         timeout=1800  # 30 minute timeout

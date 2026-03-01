@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 from .constants import (
     ureg, Q_,
     GPT2_PARAMS, GPT3_PARAMS, GPT4_EST_PARAMS, GPT4_TRAINING_GPU_DAYS,
+    LLAMA3_8B_PARAMS, LLAMA3_70B_PARAMS, LLAMA3_405B_PARAMS,
     BERT_BASE_PARAMS, BERT_LARGE_PARAMS,
     ALEXNET_PARAMS, RESNET50_PARAMS, MOBILENETV2_PARAMS,
     KWS_DSCNN_PARAMS, ANOMALY_MODEL_PARAMS,
@@ -70,8 +71,9 @@ class Language:
     BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer", layers=12, inference_flops=22e9 * ureg.flop)
     BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer", layers=24)
     Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.param, "Transformer", layers=80)
-    Llama3_70B = ModelSpec("Llama-3-70B", 70.6e9 * ureg.param, "Transformer", layers=80)
-    Llama3_405B = ModelSpec("Llama-3.1-405B", 405e9 * ureg.param, "Transformer", layers=126)
+    Llama3_8B = ModelSpec("Llama-3.1-8B", LLAMA3_8B_PARAMS, "Transformer", layers=32)
+    Llama3_70B = ModelSpec("Llama-3.1-70B", LLAMA3_70B_PARAMS, "Transformer", layers=80)
+    Llama3_405B = ModelSpec("Llama-3.1-405B", LLAMA3_405B_PARAMS, "Transformer", layers=126)
 
 class Recommendation:
     """Recommendation Models."""
