@@ -17,7 +17,7 @@
 ## 📐 Architecture (The 3-Layer Stack)
 The package is organized into three professional domains:
 
-1.  **`mlsysim.core` (The Physics & Definitions)**: 
+1.  **`mlsysim.core` (The Physics & Definitions)**:
     *   **Constants**: Immutable physical truths (H100 specs, Grid carbon intensity).
     *   **Formulas**: The "Iron Laws" of ML systems (Stateless math via `pint`).
     *   **Scenarios**: Definitive workloads like **Doorbell**, **AV**, and **GPT-4**.
@@ -64,6 +64,6 @@ Because this core powers a printed textbook, we enforce strict **Invariant Verif
 ---
 
 ## 👩‍💻 For Contributors & TAs
-We built `mlsysim` to be extensible. To add a new domain lab, simply subclass `BaseSimulation` in the `sim` sub-package. 
+We built `mlsysim` to be extensible. To add a new domain lab, simply subclass `BaseSimulation` in the `sim` sub-package.
 
 See the [**Developer Documentation**](docs/index.qmd) for full API details and the "Wicked Sick" guide to building custom systems models.

@@ -41,7 +41,7 @@
 ### Part 3: The Privacy Frontier (Synthesis - 15 Mins)
 *   **Objective:** Implement Differential Privacy (DP) to satisfy strict data governance laws.
 *   **The "Lock" (Prediction):** "Does adding noise ($\epsilon$) to your gradients increase or decrease the total compute required to reach convergence?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Privacy Epsilon ($\epsilon$) Slider**. **Clip-Norm Scrubber**. **Local vs. Global Aggregation Toggle**.
     *   **The "Stakeholder" Challenge:** The **Privacy Officer** demands $\epsilon < 1.0$. You must find an architecture that satisfies this without dropping the model's 'Safety-Critical' accuracy below the mission SPEC.
 *   **Reflect (The Ledger):** "Defend your final 'Edge Intelligence Strategy.' Did you prioritize 'Personalization' or 'Privacy'? Justify why 'Data Locality' was your only path to real-time reliability."

@@ -41,7 +41,7 @@
 ### Part 3: Node to Fleet (Synthesis - 15 Mins)
 *   **Objective:** Identify the physical limit of the "Single Node" and prepare for Volume 2.
 *   **The "Lock" (Prediction):** "At what exact model scale or user load does your single-node architecture hit an absolute physical wall that no further local optimization can fix?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Scale-out Scrubber**. Slide the load until the "Node Feasibility" gauge turns permanently red.
     *   **The "Stakeholder" Challenge:** The **CEO** demands a 100x scale-up. You must use **Amdahl's Law** to prove that single-node physics have reached their saturation point.
 *   **Reflect (The Ledger):** "Defend your 'Graduation' to Volume 2. What specific constraint (Network, Reliability, or Contention) is now forcing you to move from 'The Node' to 'The Fleet'?"

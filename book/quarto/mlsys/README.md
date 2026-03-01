@@ -28,12 +28,12 @@ class MyCustomSimulation(BaseSimulation):
         # 1. Get baseline node performance
         system = self._get_system_archetype()
         perf = Engine.solve(self.scenario.model, system)
-        
+
         # 2. Scale by persona
         scale = self.persona.scale_factor
-        
+
         # 3. Add your custom physics logic here...
-        
+
         # 4. Return a SystemLedger
         return SystemLedger(...)
 ```

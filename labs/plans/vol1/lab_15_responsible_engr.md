@@ -41,7 +41,7 @@
 ### Part 3: The Lifecycle Ledger (Synthesis - 15 Mins)
 *   **Objective:** Calculate the 3-year TCO and Carbon Footprint of the entire system.
 *   **The "Lock" (Prediction):** "Over a 3-year period, which will contribute more to the carbon footprint: Training the model once, or Serving it 1 million times?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Deployment Duration Slider** (1mo -> 3yr). **Energy Grid Mix Selector** (Green vs. Coal).
     *   **The "Stakeholder" Challenge:** The **Sustainability Lead** (or CFO) demands a "Lifecycle Audit." You must prove that using a **Compressed Model** (from Lab 10) saves more in carbon over 3 years than it cost in "Accuracy Loss" at launch.
 *   **Reflect (The Ledger):** "Defend your final 'Responsible Architecture.' Did you prioritize Carbon, Fairness, or Privacy? Justify your choice using the 3-year TCO projections."

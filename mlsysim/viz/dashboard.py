@@ -60,10 +60,10 @@ def metric_card(label: str, value: str, trend: str, detail: str, color: str = "#
 def telemetry_scorecard(ledger):
     """Renders Zone 3 (Top): The 4-axis System Ledger."""
     return mo.hstack([
-        metric_card("Performance", f"{ledger.performance.mfu_pct:.1f}%", "MFU", "Silicon Efficiency", "#3182ce"),
+        metric_card("Performance", f"{ledger.performance.mfu * 100:.1f}%", "MFU", "Silicon Efficiency", "#3182ce"),
         metric_card("Sustainability", f"{ledger.sustainability.carbon_kg / 1000:,.1f}t", "CO2e", "Fleet Footprint", "#38a169"),
         metric_card("Economics", f"${ledger.economics.tco / 1_000_000:,.1f}M", "TCO", "Annual Cost", "#dd6b20"),
-        metric_card("Reliability", f"{ledger.reliability.goodput_pct:.1f}%", "Goodput", "Effective Work", "#e53e3e"),
+        metric_card("Reliability", f"{ledger.reliability.goodput * 100:.1f}%", "Goodput", "Effective Work", "#e53e3e"),
     ], justify="space-between", gap=1)
 
 def pareto_plot(x_val: float, y_val: float, x_label: str, y_label: str, title: str, 

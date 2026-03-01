@@ -41,7 +41,7 @@
 ### Part 3: The Utilization Cliff (Synthesis - 15 Mins)
 *   **Objective:** Design a serving architecture that maintains 80% utilization under "Bursty" traffic.
 *   **The "Lock" (Prediction):** "If request traffic follows a Poisson distribution (Bursty), can you achieve 100% hardware utilization without causing infinite queues?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Poisson Traffic Toggle**. **KV-Cache Optimization Level**. **PagedAttention Level**.
     *   **The "Stakeholder" Challenge:** The **UX Designer** (Mobile) or **CFO** (Cloud) demands zero lag. You must implement **Continuous Batching** to fill the GPU bubbles.
 *   **Reflect (The Ledger):** "Defend your final Serving Configuration. Did you prioritize 'Throughput' or 'Responsiveness'? Explain how Little's Law influenced your final 'Capacity Plan'."

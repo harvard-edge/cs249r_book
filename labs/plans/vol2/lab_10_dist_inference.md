@@ -41,7 +41,7 @@
 ### Part 3: The Memory Wall (Synthesis - 15 Mins)
 *   **Objective:** Optimize KV-Cache management to maximize user concurrency.
 *   **The "Lock" (Prediction):** "If you use 'PagedAttention' to eliminate internal fragmentation, how many more concurrent users can you fit in 80GB of HBM?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Fragmentation Slider**. **KV-Cache Eviction Policy**. **Request Preemption Budget**.
     *   **The "Stakeholder" Challenge:** The **CFO** demands a 50% reduction in 'Cost-per-User'. You must implement **Speculative Decoding** to reduce the 'Tokens-per-Second' cost without regressing on P99 latency.
 *   **Reflect (The Ledger):** "Defend your final 'Fleet Serving Strategy.' Did you prioritize 'Throughput' (Continuous Batching) or 'Responsiveness' (Zero-Batching)? Justify how you solved the 'Tail at Scale' problem."

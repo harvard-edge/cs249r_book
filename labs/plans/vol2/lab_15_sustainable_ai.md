@@ -41,7 +41,7 @@
 ### Part 3: The Jevons Equilibrium (Synthesis - 15 Mins)
 *   **Objective:** Design a "Sustainable Scale Plan" that accounts for Induced Demand.
 *   **The "Lock" (Prediction):** "If you optimize your model to be 50% smaller, will your organization use 50% less compute, or train a model that is 2x larger?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Efficiency Slider**. **Organization Growth Scrubber**. **Total Fleet Footprint Monitor**.
     *   **The "Stakeholder" Challenge:** The **Sustainability Lead** (or Board) demands a "Net-Zero" path. You must prove that using **Embodied Carbon Credits** (device recycling) is more impactful than another 5% gain in NPU efficiency.
 *   **Reflect (The Ledger):** "Defend your final 'Sustainability Strategy.' Did you prioritize 'Operational Carbon' (Energy) or 'Embodied Carbon' (Hardware)? Justify using the Jevons Paradox math."

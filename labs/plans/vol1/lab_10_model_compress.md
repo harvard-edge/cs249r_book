@@ -41,7 +41,7 @@
 ### Part 3: The Distillation Bridge (Synthesis - 15 Mins)
 *   **Objective:** Use a 'Teacher' model to recover the accuracy lost during aggressive compression.
 *   **The "Lock" (Prediction):** "Can a 4-bit model trained with Distillation outperform an 8-bit model trained from scratch?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Distillation Toggle**. **Temperature Slider**. **Student Model Selection**.
     *   **The "Stakeholder" Challenge:** The **UX Designer** (Mobile) or **Hardware Lead** (Tiny) demands a further 20% power reduction. You must use the 'Distillation Bridge' to move to an even smaller student model while staying 'In-Spec.'
 *   **Reflect (The Ledger):** "Defend your final 'Silicon Contract.' Did you choose a 'Heavy' model with aggressive quantization or a 'Light' student model with high precision? Justify your choice using the Energy-per-Inference metric."

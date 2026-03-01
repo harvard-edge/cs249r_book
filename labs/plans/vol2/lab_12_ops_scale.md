@@ -41,7 +41,7 @@
 ### Part 3: The Ensemble Lockdown (Synthesis - 15 Mins)
 *   **Objective:** Manage a "Model Handshake" between upstream and downstream dependencies in an ensemble.
 *   **The "Lock" (Prediction):** "If you update the 'Feature Extractor' without retraining the 'Classifier', will the system accuracy drop even if the new extractor is 'better'?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Upstream Version Selector**. **Downstream Retrain Toggle**. **Feature Store Consistency Check**.
     *   **The "Stakeholder" Challenge:** The **Software Lead** wants to deploy the new extractor tonight. You must use the **Ensemble Trace** to prove that this will cause a 'Silent Failure' in the downstream wake-word detector.
 *   **Reflect (The Ledger):** "Defend your final 'Governance Policy.' Did you choose 'Loose Versioning' or 'Strict Immutable Contracts'? Justify using the Training-Serving Skew Invariant."

@@ -41,7 +41,7 @@
 ### Part 3: The Scaling Cliff (Fleet Economics - 15 Mins)
 *   **Objective:** Perform a "Build-vs-Buy" audit for your track's infrastructure.
 *   **The "Lock" (Prediction):** "Over a 3-year period, is it cheaper to rent cloud TFLOPS or own a private pod, factoring in hardware failure (MTBF)?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Ownership Toggle**. **MTBF Slider** (Hours between failures). **Electricity Price ($/kWh)**.
     *   **The "Stakeholder" Challenge:** The **CFO** demands a 20% reduction in OpEx. You must use the **TCO Waterfall** to prove that investing in "Efficient Power Delivery" saves more than "Cheaper Nodes."
 *   **Reflect (The Ledger):** "Defend your final 'Fleet Infrastructure' choice. Did you prioritize 'Density' or 'Efficiency'? Justify why 'Availability' was your primary constraint."

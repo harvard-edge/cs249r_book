@@ -41,7 +41,7 @@
 ### Part 3: The Synchronization Audit (Synthesis - 15 Mins)
 *   **Objective:** Choose between Synchronous and Asynchronous SGD based on fleet-scale noise.
 *   **The "Lock" (Prediction):** "In a fleet with 5% 'Straggler' nodes (slow GPUs), will Async SGD achieve a higher samples-per-second than Sync SGD?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Sync/Async Toggle**. **Straggler Intensity Slider**. **Check-pointing Cost**.
     *   **The "Stakeholder" Challenge:** The **Infrastructure Lead** warns that "Wait-for-All" synchronization is wasting $1M per month. You must prove that switching to **ZeRO-Redundancy Optimizer** (ZeRO) saves more than switching to Async updates.
 *   **Reflect (The Ledger):** "Defend your final 'Distributed Strategy.' Did you prioritize 'Gradient Consistency' or 'Raw Throughput'? Justify how you bypassed the Parallelism Paradox."

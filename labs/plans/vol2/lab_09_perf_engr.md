@@ -41,7 +41,7 @@
 ### Part 3: Algorithmic Innovation (Synthesis - 15 Mins)
 *   **Objective:** Implement 'Speculative Decoding' or 'MoE' to bypass physical walls.
 *   **The "Lock" (Prediction):** "If we use a tiny 'Draft Model' to predict tokens, will it increase or decrease the total TFLOPS used per final word?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Speculative Decoding Toggle**. **Expert Selection (MoE)**. **Sparsity Scrubber**.
     *   **The "Stakeholder" Challenge:** The **Product Lead** demands a 2x throughput boost. You must prove that using **Mixture of Experts** (MoE) hits the target by reducing the *Active Parameter* count while the *Memory Footprint* grows.
 *   **Reflect (The Ledger):** "Defend your final 'Performance Strategy.' Did you optimize the 'Machine' (Fusion) or the 'Algorithm' (Speculation)? Justify how you bridged the Systems Gap."

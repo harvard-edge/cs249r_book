@@ -41,7 +41,7 @@
 ### Part 3: The Elastic Buffer (Synthesis - 15 Mins)
 *   **Objective:** Design an "Elastic Training" strategy that survives node preemption.
 *   **The "Lock" (Prediction):** "If 20% of your nodes are 'Spot Instances' that can be killed at any time, should your 'AllReduce' ring be static or elastic?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Spot Intensity Slider**. **Enable Elastic-Horovod**. **Preemption Frequency Scrubber**.
     *   **The "Stakeholder" Challenge:** The **CFO** wants to move 100% of training to Spot Instances to save $5M. You must prove that without **Elastic Checkpointing**, the "Time-to-Converge" will actually double due to constant restarts.
 *   **Reflect (The Ledger):** "Defend your final 'Orchestration Policy.' Did you prioritize 'Packing Density' or 'Job Locality'? Justify how you bypassed the Utilization Paradox."

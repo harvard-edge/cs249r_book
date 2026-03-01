@@ -41,7 +41,7 @@
 ### Part 3: The Acceleration Ceiling (Synthesis - 15 Mins)
 *   **Objective:** Apply Amdahl's Law to find the true limit of hardware speedups.
 *   **The "Lock" (Prediction):** "If 10% of your code is non-parallelizable (Serial), what is the maximum possible speedup if you buy a 1,000,000x faster accelerator?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Accelerator Speedup Slider (S)**. **Serial Fraction Slider (1-p)**.
     *   **The "Stakeholder" Challenge:** The **Software Lead** wants to spend the budget on a faster NPU. You must prove, using the **Amdahl Heatmap**, that spending the budget on "Reducing Driver Overhead" yields a 4x better ROI.
 *   **Reflect (The Ledger):** "Defend your final Hardware Selection. Did you prioritize raw TFLOPS or Memory Bandwidth? Explain how the 'Memory Wall' influenced your final 'Silicon Contract'."

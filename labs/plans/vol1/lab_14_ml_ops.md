@@ -41,7 +41,7 @@
 ### Part 3: Slice-Aware Deployment (Synthesis - 15 Mins)
 *   **Objective:** Manage a "Shadow Deployment" to validate a new model on a specific failing slice of data.
 *   **The "Lock" (Prediction):** "If the 'Aggregate' accuracy is 95%, is it safe to deploy to the entire fleet? (Hint: Check the 'Minority Slice' metrics)."
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Shadow Mode Toggle**. **Slice Selector** (e.g., Night-time, Low-battery, Accented Speech).
     *   **The "Stakeholder" Challenge:** The **Safety Director** (Edge) or **Product Manager** (Mobile) blocks the rollout. You must use the **Slice Metrics Card** to prove the new model fixed the specific drift issue without regressing on the majority.
 *   **Reflect (The Ledger):** "Defend your final 'Rollout Strategy.' Why did you choose a 'Staged Canary' deployment over a 'Big Bang' update? Justify using the Degradation Equation."

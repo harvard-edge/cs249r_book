@@ -41,7 +41,7 @@
 ### Part 3: The Comparative Audit (Synthesis - 15 Mins)
 *   **Objective:** Perform a head-to-head audit of two hardware platforms using the 'Pareto Efficiency' metric.
 *   **The "Lock" (Prediction):** "Will the chip with the highest 'Peak TFLOPS' necessarily deliver the highest 'Sustained Throughput' for your mission?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** Compare **System A** (High Peak, Low BW) vs. **System B** (Low Peak, High BW).
     *   **The "Stakeholder" Challenge:** The **Purchasing Lead** wants to buy System A because it has a better marketing spec. You must use the **Comparative Roofline** to prove that System B is 2x more efficient for your specific Lighthouse Model.
 *   **Reflect (The Ledger):** "Define your final 'Benchmark Strategy.' Which specific metric ($/Token, FPS/Watt, or P99 ms) is your ultimate measure of success? Justify why you ignored the 'Peak' marketing numbers."

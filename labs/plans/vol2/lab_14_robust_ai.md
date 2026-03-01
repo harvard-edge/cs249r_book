@@ -41,7 +41,7 @@
 ### Part 3: Defense-in-Depth Architecture (Synthesis - 15 Mins)
 *   **Objective:** Design a "Resilient Pipeline" that survives a combined SDC and Adversarial attack.
 *   **The "Lock" (Prediction):** "Which defense adds more latency to the 10ms budget: 'Input Pre-processing' or 'MC Dropout' (running the model 10 times for uncertainty)?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Defense Checklist** (Adversarial Training, TMR, MC Dropout, Input Smoothing).
     *   **The "Stakeholder" Challenge:** The **Safety Lead** demands 100% SDC resilience. You must prove that using **Error-Correcting Codes (ECC)** on weights is 100x more efficient than running the model three times (TMR).
 *   **Reflect (The Ledger):** "Defend your final 'Robust Architecture.' Did you prioritize 'Model Integrity' or 'Latency Budget'? Justify how you bypassed the Robustness Invariant."

@@ -41,7 +41,7 @@
 ### Part 3: Compound System Synthesis (Synthesis - 15 Mins)
 *   **Objective:** Architect a "Compound AI System" using the **Compound Capability Law**.
 *   **The "Lock" (Prediction):** "To achieve a 100x leap in system reliability, should you focus on building a 100x larger model, or a 10x more resilient ensemble of 10 models?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Model Mesh Selector** (Router, Verifier, Reasoner). **Ensemble Size Slider**. **Voter Consensus Level**.
     *   **The "Stakeholder" Challenge:** The **Board of Directors** demands "Superhuman Safety" (Five Nines). You must use the **Compound Probability Plot** to prove that an ensemble of 5 'Small' models beats a single 'Giant' model in both accuracy and cost.
 *   **Reflect (The Ledger):** "Defend your final 'Fleet Legacy.' How did you bridge the gap from single-node physics to global-scale orchestration? Justify why the future belongs to **Composition**, not just **Scaling**."

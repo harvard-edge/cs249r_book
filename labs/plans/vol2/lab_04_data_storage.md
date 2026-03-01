@@ -41,7 +41,7 @@
 ### Part 3: The Checkpoint Wall (Synthesis - 15 Mins)
 *   **Objective:** Optimize the Checkpoint Interval to minimize the "Reliability Tax."
 *   **The "Lock" (Prediction):** "Does saving a checkpoint every 10 minutes increase or decrease the total time to finish a 1-month training run?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Checkpoint Frequency Slider**. **Write-Bandwidth Selector**. **MTBF (Mean Time Between Failures) Scrubber**.
     *   **The "Stakeholder" Challenge:** The **Ops Lead** warns that the MTBF of the cluster has dropped. You must use the **Young-Daly Plot** to find the optimal checkpoint frequency that minimizes "Wasted Work" without crashing the storage.
 *   **Reflect (The Ledger):** "Defend your final 'Storage Strategy.' Did you choose 'Local-First' or 'Cloud-Native'? Justify how you solved the 'Feeding Problem' for your fleet."

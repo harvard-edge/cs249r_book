@@ -41,7 +41,7 @@
 ### Part 3: Compression & Error Feedback (Synthesis - 15 Mins)
 *   **Objective:** Implement 1-bit Gradient Compression to bypass the bandwidth wall without breaking convergence.
 *   **The "Lock" (Prediction):** "If you compress gradients to 1-bit (32x reduction), what happens to the 'Accuracy' of the next training step?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Compression Ratio Slider**. **Error Feedback Toggle**. **Convergence Monitor**.
     *   **The "Stakeholder" Challenge:** The **ML Lead** refuses to use 1-bit compression because the model is diverging. You must prove that enabling **Error Feedback** (residual accumulation) recovers the accuracy loss while maintaining the 32x bandwidth gain.
 *   **Reflect (The Ledger):** "Defend your final 'Communication Strategy.' Did you choose 'Raw Speed' (Ring) or 'Rigor' (Sync + Compression)? Justify using the Communication-to-Compute ratio."

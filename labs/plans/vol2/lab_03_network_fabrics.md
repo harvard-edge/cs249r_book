@@ -41,7 +41,7 @@
 ### Part 3: Congestion Control Audit (Synthesis - 15 Mins)
 *   **Objective:** Configure RDMA/RoCE congestion control (DCQCN vs. HPCC) to eliminate "PFC Storms."
 *   **The "Lock" (Prediction):** "If one node is slow, will it cause 'Head-of-Line' blocking for all other nodes in a lossless network?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **RDMA Toggle**. **Congestion Control Level**. **Incast Intensity**.
     *   **The "Stakeholder" Challenge:** The **Networking Lead** warns that "Pause Frames" are killing the fleet throughput. You must tune the ECN (Explicit Congestion Notification) thresholds to maintain "Deterministic Jitter."
 *   **Reflect (The Ledger):** "Defend your final 'Fabric Configuration.' Did you prioritize 'Peak Throughput' or 'Tail Latency'? Justify why the 'Alpha' term was the killer for your specific track."

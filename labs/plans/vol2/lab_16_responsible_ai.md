@@ -25,7 +25,7 @@
 *   **Objective:** Quantify the "Accuracy Penalty" required to achieve demographic parity.
 *   **The "Lock" (Prediction):** "If you enforce 'Equal Opportunity' across all subgroups, will your 'Aggregate' accuracy increase, decrease, or stay the same?"
 *   **The Workbench:**
-    *   **Action:** Slide the **Fairness Constraint** ($\gamma$) from 0 to 1.0. 
+    *   **Action:** Slide the **Fairness Constraint** ($\gamma$) from 0 to 1.0.
     *   **Observation:** The **Fairness-Accuracy Pareto Frontier**. Watch the gap between subgroups shrink while the global average capability drops.
 *   **Reflect:** "Patterson asks: 'Identify the exact Accuracy Loss ($pts$) required to hit your track's fairness SLA.' Use the term **'Pareto Suboptimality'** in your answer."
 
@@ -41,7 +41,7 @@
 ### Part 3: Explainability Performance (Synthesis - 15 Mins)
 *   **Objective:** Design an "Auditable Pipeline" that hits the 10ms budget.
 *   **The "Lock" (Prediction):** "Does adding 'SHAP' or 'LIME' explainability increase the memory bandwidth requirement ($D_{vol}/BW$) of your serving system?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Explainability Level Toggle** (None -> Heatmap -> Full Trace). **Saliency Resolution Slider**.
     *   **The "Stakeholder" Challenge:** The **Regulatory Board** blocks the project because the model is a 'Black Box.' You must implement **Model Surgery** (distilling a transparent student model) to provide explanations within the 1mW/10ms power/latency wall.
 *   **Reflect (The Ledger):** "Defend your final 'Responsible Architecture.' Did you prioritize 'Model Transparency' or 'Peak Utility'? Justify why 'Accountability' is a first-order design variable at scale."

@@ -41,7 +41,7 @@
 ### Part 3: The SDC Detective (Synthesis - 15 Mins)
 *   **Objective:** Implement "Checksumming" and "Dual-Modular Redundancy" to detect Silent Data Corruption.
 *   **The "Lock" (Prediction):** "If a weight bit flips from 1 to 0, will the model's 'Loss' function immediately alert you to the error?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Inject Bit-Flip**. **Enable Checksums**. **Toggle DMR (Run model twice)**.
     *   **The "Stakeholder" Challenge:** The **Safety Director** (Edge) demands 100% SDC detection. You must prove that **Re-computing the Activation Hash** is 10x cheaper than running the whole model twice.
 *   **Reflect (The Ledger):** "Defend your final 'Fault Tolerance Strategy.' Did you prioritize 'Throughput' or 'Integrity'? Justify why 'Availability' was your primary constraint."

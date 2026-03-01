@@ -1,18 +1,21 @@
-# mlsys — The MLSys Physics Engine
-# Hierarchical Digital Twins for Hardware and Models
+# mlsys — compatibility shim for book/quarto/mlsys/ local scripts
+# Adds repo root to sys.path so mlsysim (the real package) is importable.
 
-from .hardware import Hardware
-from .models import Models
-from .deployment import Tiers
-from .systems import Systems, Archetypes
-from .clusters import Clusters, Nodes, ClusterSpec, NodeSpec
-from .datacenters import Datacenters, Grids, Racks, GridProfile, RackProfile
-from .engine import Engine
-from .scenarios import Scenarios, Applications, FleetScenarios, Fleet
+import sys
+import os as _os
 
-# The Simulator Sub-package
-from . import sim
+_here = _os.path.dirname(_os.path.abspath(__file__))         # book/quarto/mlsys/
+_quarto = _os.path.dirname(_here)                             # book/quarto/
+_repo_root = _os.path.dirname(_os.path.dirname(_quarto))     # repo root (mlsysbook-vols/)
 
-# Export constants and registry for legacy support
-from .constants import ureg, Q_
-from .registry import start_chapter, end_chapter
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+from mlsysim.core import (
+    Hardware, Models, Engine, Systems, Archetypes,
+    Datacenters, Scenarios, Applications, Fleet, Tiers,
+)
+from mlsysim.core.constants import *
+from mlsysim.core.formulas import *
+from mlsysim.fmt import fmt, sci, fmt_full, fmt_split, check, md_math
+from mlsysim import sim

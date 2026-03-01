@@ -41,7 +41,7 @@
 ### Part 3: The Defense-in-Depth Audit (Synthesis - 15 Mins)
 *   **Objective:** Design a "Hardened Architecture" that satisfies the Security Lead within the 10ms budget.
 *   **The "Lock" (Prediction):** "Will running the model in a TEE (Trusted Execution Environment) be faster or slower than running it in plaintext with input sanitization?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **TEE Toggle**. **Input Validator Toggle**. **Output Smoothing Slider**.
     *   **The "Stakeholder" Challenge:** The **Security Lead** rejects any design that doesn't use TEEs. You must prove that using **Model Sharding** (keeping only sensitive layers in TEE) hits the safety goal with 50% less latency than a full-TEE approach.
 *   **Reflect (The Ledger):** "Defend your final 'Secure Design.' Did you prioritize 'Model Integrity' or 'User Experience'? Justify how you managed the 'Privacy-Utility-Budget Triangle'."

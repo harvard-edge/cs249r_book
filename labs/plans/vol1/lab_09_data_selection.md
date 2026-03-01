@@ -41,7 +41,7 @@
 ### Part 3: The Domain Gap Synthesis (Synthesis - 15 Mins)
 *   **Objective:** Balance Synthetic and Real data to maximize generalization.
 *   **The "Lock" (Prediction):** "What happens to your 'Safety Metric' if you move from 10% Synthetic data to 90% Synthetic data?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** **Data Mix Ratio Slider** (Synthetic vs. Real). **Domain Randomization Intensity**.
     *   **The "Stakeholder" Challenge:** The **Safety Lead** warns that the synthetic simulator doesn't model 'Rain' correctly. You must find a mix that hits the accuracy target while maintaining a 'FID Score' (Domain Gap) below the safety threshold.
 *   **Reflect (The Ledger):** "Defend your final Data Acquisition Strategy. Did you prioritize 'Quantity' (Synthetic) or 'Quality' (Expert-Labeled Real)? Explain how the $1/\epsilon^2$ noise penalty influenced your choice."

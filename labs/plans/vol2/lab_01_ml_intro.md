@@ -41,7 +41,7 @@
 ### Part 3: The C³ Design Review (Synthesis - 15 Mins)
 *   **Objective:** Balance the **C³ Taxonomy** (Compute, Communication, Coordination) to hit a fleet-scale target.
 *   **The "Lock" (Prediction):** "To reduce 'Coordination Overhead', should you use Synchronous (faster convergence) or Asynchronous (higher throughput) updates?"
-*   **The Workbench:** 
+*   **The Workbench:**
     *   **Interaction:** Toggle between **Sync/Async SGD**. Adjust **Topology** (Ring vs. Tree).
     *   **The "Stakeholder" Challenge:** **Jeff Dean** (Systems Lead) warns that the tail latency of the slowest GPU is killing the entire cluster. You must implement **Speculative Execution** or **Staggard Checkpoints** to save the mission.
 *   **Reflect (The Ledger):** "Defend your final 'Fleet Architecture.' Did you prioritize 'Reliability' or 'Speed'? Justify how you bridged the **Fleet-Node Divergence**."
