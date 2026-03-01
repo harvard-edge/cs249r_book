@@ -12,6 +12,8 @@
 #     name: python3
 # ---
 
+from __future__ import annotations
+
 # %% [markdown]
 """
 # Module 02: Activations - Intelligence Through Nonlinearity
@@ -86,12 +88,12 @@ This module imports directly from the TinyTorch package (`from tinytorch.core.*`
 If you see import errors, ensure you've run `tito export` after completing Module 01.
 """
 
+
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}
 #| default_exp core.activations
 #| export
 
 import numpy as np
-from typing import Optional
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -218,7 +220,7 @@ class Sigmoid:
     Perfect for probabilities and binary classification.
     """
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (activations have no learnable parameters)."""
         return []
 
@@ -336,7 +338,7 @@ class ReLU:
     Most popular activation for hidden layers.
     """
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (activations have no learnable parameters)."""
         return []
 
@@ -456,7 +458,7 @@ class Tanh:
     Zero-centered alternative to sigmoid.
     """
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (activations have no learnable parameters)."""
         return []
 
@@ -592,7 +594,7 @@ class GELU:
     Where Φ(x) is the cumulative distribution function of standard normal.
     """
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (activations have no learnable parameters)."""
         return []
 
@@ -717,7 +719,7 @@ class Softmax:
     Sum of all outputs equals 1.0.
     """
 
-    def parameters(self):
+    def parameters(self) -> list[Tensor]:
         """Return empty list (activations have no learnable parameters)."""
         return []
 

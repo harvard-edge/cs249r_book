@@ -12,6 +12,8 @@
 #     name: python3
 # ---
 
+from __future__ import annotations
+
 # %% [markdown]
 """
 # Module 01: Tensor Foundation - Building Blocks of ML
@@ -60,6 +62,11 @@ Let's get started!
 #| export
 
 import numpy as np
+from numpy.typing import ArrayLike
+from typing import Union, TypeAlias, Optional
+
+# Types
+TensorLike: TypeAlias = Union[ArrayLike, "Tensor"]
 
 # Constants for memory calculations
 BYTES_PER_FLOAT32 = 4  # Standard float32 size in bytes
@@ -267,7 +274,7 @@ class Tensor:
     All arithmetic, matrix, and shape operations are built on this foundation.
     """
 
-    def __init__(self, data):
+    def __init__(self, data: ArrayLike) -> None:
         """Create a new tensor from data.
 
         TODO: Initialize a Tensor by wrapping data in a NumPy array and setting attributes.
@@ -294,19 +301,19 @@ class Tensor:
         self.dtype = self.data.dtype
         ### END SOLUTION
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """String representation of tensor for debugging."""
         return f"Tensor(data={self.data}, shape={self.shape})"
 
-    def __str__(self):
+    def __str__(self) -> str:
         """Human-readable string representation."""
         return f"Tensor({self.data})"
 
-    def numpy(self):
+    def numpy(self) -> ArrayLike:
         """Return the underlying NumPy array."""
         return self.data
 
-    def memory_footprint(self):
+    def memory_footprint(self) -> int:
         """Calculate exact memory usage in bytes.
 
         Systems Concept: Understanding memory footprint is fundamental to ML systems.
@@ -317,7 +324,7 @@ class Tensor:
         """
         return self.data.nbytes
 
-    def __add__(self, other):
+    def __add__(self, other: TensorLike) -> Tensor:
         """Add two tensors element-wise with broadcasting support.
 
         TODO: Implement element-wise addition that works with both Tensors and scalars.
@@ -344,7 +351,7 @@ class Tensor:
             return Tensor(self.data + other)
         ### END SOLUTION
 
-    def __sub__(self, other):
+    def __sub__(self, other: TensorLike) -> Tensor:
         """Subtract two tensors element-wise.
 
         TODO: Implement element-wise subtraction (same pattern as __add__).
@@ -371,7 +378,7 @@ class Tensor:
             return Tensor(self.data - other)
         ### END SOLUTION
 
-    def __mul__(self, other):
+    def __mul__(self, other: TensorLike) -> Tensor:
         """Multiply two tensors element-wise (NOT matrix multiplication).
 
         TODO: Implement element-wise multiplication (same pattern as __add__).
@@ -398,7 +405,7 @@ class Tensor:
             return Tensor(self.data * other)
         ### END SOLUTION
 
-    def __truediv__(self, other):
+    def __truediv__(self, other: TensorLike) -> Tensor:
         """Divide two tensors element-wise.
 
         TODO: Implement element-wise division (same pattern as __add__).
@@ -425,7 +432,7 @@ class Tensor:
             return Tensor(self.data / other)
         ### END SOLUTION
 
-    def _validate_matmul_shapes(self, other):
+    def _validate_matmul_shapes(self, other: TensorLike) -> Tensor:
         """Validate that two tensors are compatible for matrix multiplication.
 
         This helper checks three conditions before any computation begins:
@@ -535,11 +542,11 @@ class Tensor:
         return Tensor(result_data)
         ### END SOLUTION
 
-    def __matmul__(self, other):
+    def __matmul__(self, other: TensorLike) -> Tensor:
         """Enable @ operator for matrix multiplication."""
         return self.matmul(other)
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Union[int, slice, tuple[int|slice,...]]) -> Tensor:
         """Enable indexing and slicing operations on Tensors.
 
         TODO: Implement indexing and slicing that returns a new Tensor.
@@ -567,7 +574,7 @@ class Tensor:
         return Tensor(result_data)
         ### END SOLUTION
 
-    def reshape(self, *shape):
+    def reshape(self, *shape: Union[int, tuple[int, ...], list[int]]) -> Tensor:
         """Reshape tensor to new dimensions.
 
         TODO: Reshape tensor while preserving total element count.
@@ -628,7 +635,7 @@ class Tensor:
         return Tensor(reshaped_data)
         ### END SOLUTION
 
-    def transpose(self, dim0=None, dim1=None):
+    def transpose(self, dim0: Optional[int] = None, dim1: Optional[int] = None) -> Tensor:
         """Transpose tensor dimensions.
 
         TODO: Swap tensor dimensions (default: swap last two dimensions).
@@ -677,7 +684,7 @@ class Tensor:
         return Tensor(transposed_data)
         ### END SOLUTION
 
-    def sum(self, axis=None, keepdims=False):
+    def sum(self, axis: Union[int, tuple[int,...], None] = None, keepdims: bool = False) -> Tensor:
         """Sum tensor along specified axis.
 
         TODO: Sum all elements or along specific axes.
@@ -705,7 +712,7 @@ class Tensor:
         return Tensor(result)
         ### END SOLUTION
 
-    def mean(self, axis=None, keepdims=False):
+    def mean(self, axis: Union[int, tuple[int,...], None] = None, keepdims: bool = False) -> Tensor:
         """Compute mean of tensor along specified axis.
 
         TODO: Calculate average of elements along axis (same pattern as sum).
@@ -732,7 +739,7 @@ class Tensor:
         return Tensor(result)
         ### END SOLUTION
 
-    def max(self, axis=None, keepdims=False):
+    def max(self, axis: Union[int, tuple[int,...], None] = None, keepdims: bool = False) -> Tensor:
         """Find maximum values along specified axis.
 
         TODO: Find maximum element(s) along axis (same pattern as sum).
