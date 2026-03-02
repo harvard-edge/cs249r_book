@@ -441,6 +441,33 @@ export function injectStyles() {
             background: #b71c1c;
         }
 
+        .profile-delete-btn {
+            width: 100%;
+            padding: 12px;
+            background: transparent;
+            color: #d32f2f;
+            border: 1px solid #d32f2f;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .profile-delete-btn:hover:not(:disabled) {
+            background: #fff5f5;
+        }
+
+        #profileDeleteFinalBtn {
+            background: #d32f2f;
+            color: white;
+            border: none;
+        }
+
+        #profileDeleteFinalBtn:hover:not(:disabled) {
+            background: #b71c1c;
+        }
+
         /* --- Mobile Optimizations --- */
         @media (max-width: 768px) {
             /* Sidebar becomes a bottom sheet */
