@@ -1579,6 +1579,8 @@ class ValidateCommand:
         )
         # Hex literal pattern to exclude matches like 0x61, 0xff
         hex_literal_pat = re.compile(r"0x[0-9a-fA-F]")
+        # Cross-reference ID pattern: @tbl-foo300x, @fig-bar2x, @sec-baz1x — these are labels not multiplication
+        xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst)-[a-z0-9_-]+x\b")
         # fig-alt lines to skip
         fig_alt_pat = re.compile(r'fig-alt\s*=\s*"')
 
@@ -1636,10 +1638,12 @@ class ValidateCommand:
                 # Lowercase 'x' used as multiplication in prose
                 # Skip fig-alt lines and index entries
                 if not fig_alt_pat.search(line) and not stripped.startswith("\\index"):
-                    for rm in lowercase_x_mult_pat.finditer(line):
+                    # Strip cross-reference IDs before checking (e.g. @tbl-mi300x, @fig-foo2x)
+                    line_no_xrefs = xref_id_pat.sub("", line)
+                    for rm in lowercase_x_mult_pat.finditer(line_no_xrefs):
                         # Exclude hex literals like 0x61, 0xff
                         ctx_start = max(0, rm.start() - 1)
-                        if hex_literal_pat.match(line[ctx_start : rm.end()]):
+                        if hex_literal_pat.match(line_no_xrefs[ctx_start : rm.end()]):
                             continue
                         issues.append(
                             ValidationIssue(
@@ -1653,8 +1657,12 @@ class ValidateCommand:
                         )
 
                 # Standard regex checks
+                # For currency check, strip inline math spans first to avoid
+                # false positives like $312 \times 10^{12} being flagged as currency.
+                line_no_math = math_span_pat.sub("MATHSPAN", line)
                 for code, pattern, message, severity in regex_checks:
-                    for rm in pattern.finditer(line):
+                    check_line = line_no_math if code == "unescaped_currency" else line
+                    for rm in pattern.finditer(check_line):
                         issues.append(
                             ValidationIssue(
                                 file=self._relative_file(file),

@@ -3,7 +3,12 @@
 # Ensures all generated figures across Vol 1 & 2 share a consistent,
 # MIT Press-ready aesthetic.
 
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+    _matplotlib_available = True
+except ImportError:
+    plt = None
+    _matplotlib_available = False
 
 # --- Brand & Book Palette ---
 COLORS = {
