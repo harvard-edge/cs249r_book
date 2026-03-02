@@ -207,10 +207,10 @@ class DatasetManager:
                 url = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
                 self.download_with_progress(url, data_file)
 
-            # Extract
+            # Extract (filter='data' prevents path traversal; Python 3.12+)
             print("📦 Extracting CIFAR-10...")
             with tarfile.open(data_file, 'r:gz') as tar:
-                tar.extractall(cifar_dir)
+                tar.extractall(cifar_dir, filter='data')
             print("✅ Extraction complete!")
         else:
             print(f"✅ CIFAR-10 already downloaded at {cifar_dir}")

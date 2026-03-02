@@ -388,9 +388,12 @@ The best way to learn:
                     )
                     return 1
 
-            # Skip banner for dev command with --json flag (CI/CD output)
+            # Skip banner for machine-readable output (--json flag, module path)
             skip_banner = (
-                parsed_args.command == 'dev' and hasattr(parsed_args, 'json') and parsed_args.json
+                (hasattr(parsed_args, 'json') and parsed_args.json) or
+                (parsed_args.command == 'module' and
+                 hasattr(parsed_args, 'module_command') and
+                 parsed_args.module_command == 'path')
             )
             if parsed_args.command and not self.config.no_color and not skip_banner:
                 print_banner()

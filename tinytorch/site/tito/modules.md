@@ -77,8 +77,8 @@ Here's what a complete session looks like:
 
 **1. Start Session**
 ```bash
-cd TinyTorch
-source activate.sh
+cd tinytorch
+source .venv/bin/activate
 tito system health # Verify environment
 ```
 
@@ -182,6 +182,18 @@ Convenience command to launch Jupyter Lab from the correct directory.
 
 ## Module Lifecycle Commands
 
+### List Available Modules
+
+<div style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
+
+```bash
+tito module list
+```
+
+**What this does**: Shows all 20 modules with names and tier groupings.
+
+</div>
+
 ### Start a Module (First Time)
 
 <div style="background: #fffbeb; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
@@ -223,6 +235,20 @@ tito module resume 01
 
 </div>
 
+### View a Module (Read-Only)
+
+<div style="background: #e8eaf6; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #5c6bc0; margin: 1.5rem 0;">
+
+```bash
+tito module view 01
+```
+
+**What this does**: Opens the module notebook in Jupyter Lab without updating any status tracking. Useful for reviewing a module you've already completed or browsing ahead.
+
+**Difference from start/resume**: No progress tracking changes, no backup creation.
+
+</div>
+
 ### Complete & Export (Essential)
 
 <div style="background: #f0fdf4; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
@@ -257,6 +283,24 @@ y = x * 2
 y.backward()
 print(x.grad) # Uses YOUR autograd!
 ```
+
+</div>
+
+### Test a Module (Without Exporting)
+
+<div style="background: #e3f2fd; padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid #2196f3; margin: 1.5rem 0;">
+
+```bash
+tito module test 01
+```
+
+**What this does**: Runs inline, pytest, and integration tests for a module without exporting or updating progress. Useful for checking your work before committing to `complete`.
+
+**Options**:
+- `--all` — Test all modules
+- `--verbose` / `-v` — Show detailed output
+- `--unit-only` — Skip integration tests
+- `--stop-on-fail` — Stop at first failure
 
 </div>
 
@@ -365,11 +409,11 @@ src/ ← Developer source code
 
 modules/ ← Generated notebooks (students use)
 ├── 01_tensor/
-│ └── 01_tensor.ipynb ← AUTO-GENERATED for students
+│ └── tensor.ipynb ← AUTO-GENERATED for students
 ├── 02_activations/
-│ └── 02_activations.ipynb ← AUTO-GENERATED for students
+│ └── activations.ipynb ← AUTO-GENERATED for students
 └── 03_layers/
- └── 03_layers.ipynb ← AUTO-GENERATED for students
+ └── layers.ipynb ← AUTO-GENERATED for students
 ```
 
 ### Where Code Exports
@@ -401,9 +445,12 @@ tinytorch/
 
 **Solution**:
 ```bash
-# Re-run setup
-./setup-environment.sh
-source activate.sh
+# Re-activate environment
+cd tinytorch
+source .venv/bin/activate
+
+# Re-run setup if needed
+tito setup
 
 # Verify
 tito system health

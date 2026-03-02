@@ -3,20 +3,19 @@
 # =============================================================================
 # Automatically adds contributors when someone comments with @all-contributors.
 #
-# Uses Ollama LLM to parse natural language and extract:
-#   - GitHub username (with or without @)
-#   - Contribution type(s)
+# Username is extracted DETERMINISTICALLY via regex from @mentions.
+# Uses Ollama LLM ONLY to classify contribution type(s) from natural language.
 #
-# Project detection is DETERMINISTIC (not LLM-guessed):
-#   - PR file paths:  tinytorch/ → tinytorch, book/ → book, kits/ → kits, labs/ → labs
-#   - Explicit mention in comment: "in tinytorch", "for kits", etc.
+# Project detection is DETERMINISTIC (not LLM-guessed); MULTIPLE projects supported:
+#   - Explicit mention in comment: "in TinyTorch", "for book, kits" → adds to all mentioned
+#   - PR file paths (single project only): tinytorch/ → tinytorch, book/ → book, etc.
 #   - Issue labels/title context
 #   - If none of the above → asks the user (never silently defaults)
 #
 # Flexible formats - all of these work:
 #   @all-contributors @username helped verify the fix worked
-#   @all-contributors please add @jane-doe for documentation
-#   @all-contributors @user123 fixed typos in the book
+#   @all-contributors please add @jane-doe for Doc in TinyTorch
+#   @all-contributors @user123 for code, doc in tinytorch, book
 #   @all-contributors @dev42 implemented feature and wrote tests in tinytorch
 # =============================================================================
 
@@ -61,7 +60,7 @@ jobs:
       # =====================================================================
       # STEP 1: Extract trigger line + detect project from PR files
       # =====================================================================
-      - name: Extract trigger line and detect project
+      - name: Extract trigger line, username, and detect project
         id: extract
         uses: actions/github-script@v7
         env:
@@ -93,16 +92,17 @@ jobs:
               });
             }
 
-            // --- Helper: detect project name in text ---
-            const detectProjectInText = (text) => {
+            // --- Helper: detect ALL project names in text (for multi-project support) ---
+            const detectProjectsInText = (text) => {
               const lower = text.toLowerCase();
+              const found = new Set();
               for (const p of validProjects) {
-                if (lower.includes(p)) return p;
+                if (lower.includes(p)) found.add(p);
               }
               for (const [alias, proj] of Object.entries(projectAliases)) {
-                if (lower.includes(alias)) return proj;
+                if (lower.includes(alias)) found.add(proj);
               }
-              return null;
+              return [...found];
             };
 
             // --- Get issue/PR context ---
@@ -112,20 +112,21 @@ jobs:
 
             // =============================================================
             // PROJECT DETECTION (deterministic, priority order)
+            // Supports multiple projects in one comment, e.g. "in TinyTorch, Book, Kits"
             // =============================================================
-            let project = null;
+            let projects = [];
             let projectSource = 'unknown';
 
-            // Priority 1: Explicit mention in the trigger comment
-            const commentProject = detectProjectInText(triggerLine);
-            if (commentProject) {
-              project = commentProject;
+            // Priority 1: Explicit mention(s) in the trigger comment (can be multiple)
+            const commentProjects = detectProjectsInText(triggerLine);
+            if (commentProjects.length > 0) {
+              projects = commentProjects;
               projectSource = 'comment';
-              console.log(`Project from comment text: "${project}"`);
+              console.log(`Projects from comment: ${JSON.stringify(projects)}`);
             }
 
             // Priority 2: PR changed files (top-level dir → project)
-            if (!project && issue.pull_request) {
+            if (projects.length === 0 && issue.pull_request) {
               try {
                 const { data: files } = await github.rest.pulls.listFiles({
                   owner: context.repo.owner,
@@ -146,9 +147,9 @@ jobs:
                 console.log('PR file project counts:', JSON.stringify(projectCounts));
 
                 if (detected.length === 1) {
-                  project = detected[0];
+                  projects = [detected[0]];
                   projectSource = 'pr_files';
-                  console.log(`Project from PR files: "${project}"`);
+                  console.log(`Project from PR files: "${projects[0]}"`);
                 } else if (detected.length > 1) {
                   projectSource = 'ambiguous';
                   console.log('PR spans multiple projects:', detected.join(', '));
@@ -159,35 +160,51 @@ jobs:
             }
 
             // Priority 3: Issue labels / title
-            if (!project) {
-              const contextProject = detectProjectInText(issueContext);
-              if (contextProject) {
-                project = contextProject;
+            if (projects.length === 0) {
+              const contextProjects = detectProjectsInText(issueContext);
+              if (contextProjects.length > 0) {
+                projects = contextProjects;
                 projectSource = 'issue_context';
-                console.log(`Project from issue context: "${project}"`);
+                console.log(`Projects from issue context: ${JSON.stringify(projects)}`);
               }
             }
 
-            // If still null → projectSource stays 'unknown', handled downstream
-            console.log(`Final project: ${project || 'NONE'} (source: ${projectSource})`);
+            console.log(`Final projects: ${JSON.stringify(projects)} (source: ${projectSource})`);
+
+            // =============================================================
+            // USERNAME EXTRACTION (deterministic — regex, not LLM)
+            // =============================================================
+            const mentions = triggerLine.match(/@([\w][\w-]*)/g);
+            const cleanMentions = mentions
+              ? mentions.map(m => m.replace(/^@/, '')).filter(m => m !== 'all-contributors')
+              : [];
+
+            const username = cleanMentions.length > 0 ? cleanMentions[0] : '';
+            console.log(`Username from @mention: "${username}"`);
+
+            if (!username) {
+              console.log('No username @mention found in trigger line');
+            }
 
             core.setOutput('should_run', 'true');
             core.setOutput('trigger_line', triggerLine);
+            core.setOutput('username', username);
             core.setOutput('issue_context', issueContext);
-            core.setOutput('project', project || '');
+            core.setOutput('projects', JSON.stringify(projects));
+            core.setOutput('project', projects.length > 0 ? projects[0] : '');
             core.setOutput('project_source', projectSource);
 
       # =====================================================================
-      # STEP 2: LLM parses username + contribution types (NOT project)
+      # STEP 2: LLM classifies contribution types ONLY (username is from regex)
       # =====================================================================
-      - name: Parse with LLM
-        if: steps.extract.outputs.should_run == 'true'
+      - name: Classify contribution types with LLM
+        if: steps.extract.outputs.should_run == 'true' && steps.extract.outputs.username != ''
         uses: ai-action/ollama-action@v2
         id: llm
         with:
           model: ${{ env.LLM_MODEL }}
           prompt: |
-            Parse this contributor recognition comment. Extract ONLY the username and contribution types.
+            Classify the contribution type(s) from this comment.
 
             COMMENT: ${{ steps.extract.outputs.trigger_line }}
 
@@ -201,71 +218,79 @@ jobs:
             - test: Tested features, verified fixes, QA testing
             - tool: Built tools, scripts, automation, CLI utilities
 
-            Return ONLY a JSON object with exactly these 2 fields:
+            Return ONLY a JSON object with exactly this field:
             {
-              "username": "<github-username-without-@>",
               "types": ["<contribution-type>"]
             }
 
             RULES:
-            - username: The GitHub username WITHOUT the @ symbol. Ignore @all-contributors itself.
             - types: Array of one or more contribution types from the list above.
-            - Do NOT include a "project" field. Project is detected separately.
+            - Do NOT include username or project fields. Those are detected separately.
 
             EXAMPLES:
             Input: "@all-contributors @jane-doe fixed typos in the documentation"
-            Output: {"username": "jane-doe", "types": ["doc"]}
-
-            Input: "@all-contributors please add @ngbolin for Doc in Tinytorch"
-            Output: {"username": "ngbolin", "types": ["doc"]}
+            Output: {"types": ["doc"]}
 
             Input: "@all-contributors @dev42 implemented the new feature and wrote tests"
-            Output: {"username": "dev42", "types": ["code", "test"]}
+            Output: {"types": ["code", "test"]}
 
             Input: "@all-contributors please add @user123 for code"
-            Output: {"username": "user123", "types": ["code"]}
+            Output: {"types": ["code"]}
+
+            Input: "@all-contributors @reviewer99 gave feedback on the PR"
+            Output: {"types": ["review"]}
 
             Return ONLY the JSON object, no explanation or other text.
 
       # =====================================================================
-      # STEP 3: Parse LLM JSON + combine with deterministic project
+      # STEP 3: Parse LLM types + combine with deterministic username & project
       # =====================================================================
-      - name: Parse LLM response and validate
+      - name: Validate and combine results
         if: steps.extract.outputs.should_run == 'true'
         id: parse
         uses: actions/github-script@v7
         env:
-          LLM_RESPONSE: ${{ steps.llm.outputs.response }}
+          LLM_RESPONSE: ${{ steps.llm.outputs.response || '' }}
+          USERNAME: ${{ steps.extract.outputs.username }}
           TRIGGER_LINE: ${{ steps.extract.outputs.trigger_line }}
-          PROJECT: ${{ steps.extract.outputs.project }}
+          PROJECTS_JSON: ${{ steps.extract.outputs.projects }}
           PROJECT_SOURCE: ${{ steps.extract.outputs.project_source }}
           CONTRIBUTION_TYPES: ${{ env.CONTRIBUTION_TYPES }}
           PROJECTS: ${{ env.PROJECTS }}
         with:
           script: |
             const response = process.env.LLM_RESPONSE || '';
+            const username = process.env.USERNAME || '';
             const triggerLine = process.env.TRIGGER_LINE || '';
-            const project = process.env.PROJECT || '';
-            const projectSource = process.env.PROJECT_SOURCE || '';
             const validTypes = process.env.CONTRIBUTION_TYPES.split(',');
             const validProjects = process.env.PROJECTS.split(',');
 
+            let projects = [];
+            try {
+              projects = JSON.parse(process.env.PROJECTS_JSON || '[]');
+              if (!Array.isArray(projects)) projects = [];
+            } catch (e) {
+              console.log('Failed to parse projects JSON');
+            }
+            const projectSource = process.env.PROJECT_SOURCE || '';
+
+            console.log('Username (from regex):', username);
             console.log('LLM response:', response);
-            console.log('Deterministic project:', project || 'NONE', `(source: ${projectSource})`);
+            console.log('Projects:', JSON.stringify(projects), `(source: ${projectSource})`);
 
-            let username = null;
+            // --- Validate username (extracted deterministically in Step 1) ---
+            if (!username) {
+              core.setOutput('success', 'false');
+              core.setOutput('error', 'no_username');
+              return;
+            }
+
+            // --- Parse contribution types from LLM response ---
             let types = [];
-
-            // --- Parse LLM JSON response ---
             try {
               const jsonMatch = response.match(/\{[\s\S]*?\}/);
               if (jsonMatch) {
                 const parsed = JSON.parse(jsonMatch[0]);
-
-                if (parsed.username && typeof parsed.username === 'string') {
-                  username = parsed.username.replace(/^@/, '');
-                }
-
                 if (parsed.types && Array.isArray(parsed.types)) {
                   types = parsed.types
                     .map(t => t.toLowerCase().trim())
@@ -276,22 +301,6 @@ jobs:
               console.log('Failed to parse LLM JSON:', e.message);
             }
 
-            // --- Fallback: extract username from @mentions ---
-            if (!username) {
-              const mentions = triggerLine.match(/@([\w][\w-]*)/g);
-              if (mentions && mentions.length > 1) {
-                username = mentions[1].replace(/^@/, '');
-                console.log('Username from @mention fallback:', username);
-              }
-            }
-
-            // --- Validate username ---
-            if (!username) {
-              core.setOutput('success', 'false');
-              core.setOutput('error', 'no_username');
-              return;
-            }
-
             // --- Validate types ---
             if (types.length === 0) {
               core.setOutput('success', 'false');
@@ -300,9 +309,10 @@ jobs:
               return;
             }
 
-            // --- Validate project (deterministic — already resolved in Step 1) ---
-            if (!project || !validProjects.includes(project)) {
-              console.log('No valid project detected — will ask user');
+            // --- Validate projects (one or more, all must be valid) ---
+            const validProjectList = projects.filter(p => p && validProjects.includes(p));
+            if (validProjectList.length === 0) {
+              console.log('No valid project(s) detected — will ask user');
               core.setOutput('success', 'false');
               core.setOutput('error', 'no_project');
               core.setOutput('username', username);
@@ -311,13 +321,14 @@ jobs:
               return;
             }
 
-            // --- All good ---
-            console.log('✅ Final result:', { username, types, project, projectSource });
+            // --- All good (may have multiple projects) ---
+            console.log('Final result:', { username, types, projects: validProjectList, projectSource });
 
             core.setOutput('success', 'true');
             core.setOutput('username', username);
             core.setOutput('types', JSON.stringify(types));
-            core.setOutput('project', project);
+            core.setOutput('projects', JSON.stringify(validProjectList));
+            core.setOutput('project', validProjectList[0]);
             core.setOutput('project_source', projectSource);
 
       # =====================================================================
@@ -370,70 +381,71 @@ jobs:
           import json
           import os
 
-          project = "${{ steps.parse.outputs.project }}"
+          projects = json.loads('${{ steps.parse.outputs.projects }}')
           username = "${{ steps.parse.outputs.username }}"
           types = json.loads('${{ steps.parse.outputs.types }}')
           name = "${{ steps.userinfo.outputs.name }}"
           avatar_url = "${{ steps.userinfo.outputs.avatar_url }}"
           profile = "${{ steps.userinfo.outputs.profile }}"
 
-          # Build config paths from PROJECTS env var
-          projects = os.environ.get('PROJECTS', 'book').split(',')
-          config_paths = {p: f'{p}/.all-contributorsrc' for p in projects}
+          valid_projects = os.environ.get('PROJECTS', 'book').split(',')
+          config_paths = {p: f'{p}/.all-contributorsrc' for p in valid_projects}
+          updated_paths = []
 
-          config_path = config_paths[project]
+          for project in projects:
+              config_path = config_paths.get(project)
+              if not config_path or not os.path.isfile(config_path):
+                  print(f"Skipping {project}: no config at {config_path}")
+                  continue
 
-          # Read existing config
-          with open(config_path, 'r') as f:
-              config = json.load(f)
+              with open(config_path, 'r') as f:
+                  config = json.load(f)
 
-          contributors = config.get('contributors', [])
+              contributors = config.get('contributors', [])
 
-          # Check if user already exists
-          existing = None
-          for i, c in enumerate(contributors):
-              if c.get('login', '').lower() == username.lower():
-                  existing = i
-                  break
+              existing = None
+              for i, c in enumerate(contributors):
+                  if c.get('login', '').lower() == username.lower():
+                      existing = i
+                      break
 
-          if existing is not None:
-              # Merge contribution types
-              existing_types = set(contributors[existing].get('contributions', []))
-              new_types = existing_types | set(types)
-              contributors[existing]['contributions'] = sorted(list(new_types))
-              print(f"Updated existing contributor {username} with types: {sorted(list(new_types))}")
-          else:
-              # Add new contributor
-              new_contributor = {
-                  'login': username,
-                  'name': name,
-                  'avatar_url': avatar_url,
-                  'profile': profile,
-                  'contributions': sorted(types)
-              }
-              contributors.append(new_contributor)
-              print(f"Added new contributor {username} with types: {sorted(types)}")
+              if existing is not None:
+                  existing_types = set(contributors[existing].get('contributions', []))
+                  new_types = existing_types | set(types)
+                  contributors[existing]['contributions'] = sorted(list(new_types))
+                  print(f"[{project}] Updated existing contributor {username} with types: {sorted(list(new_types))}")
+              else:
+                  new_contributor = {
+                      'login': username,
+                      'name': name,
+                      'avatar_url': avatar_url,
+                      'profile': profile,
+                      'contributions': sorted(types)
+                  }
+                  contributors.append(new_contributor)
+                  print(f"[{project}] Added new contributor {username} with types: {sorted(types)}")
 
-          config['contributors'] = contributors
+              config['contributors'] = contributors
 
-          # Write updated config
-          with open(config_path, 'w') as f:
-              json.dump(config, f, indent=4)
-              f.write('\n')
+              with open(config_path, 'w') as f:
+                  json.dump(config, f, indent=4)
+                  f.write('\n')
 
-          print(f"Updated {config_path}")
+              print(f"Updated {config_path}")
+              updated_paths.append(config_path)
 
-          # Save info for later steps
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"config_path={config_path}\n")
+              f.write(f"updated_configs={json.dumps(updated_paths)}\n")
           EOF
 
       - name: Generate README tables
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         run: |
-          # Generate tables for the specific project
-          python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project ${{ steps.parse.outputs.project }} --update
-
+          # Generate tables for each project we updated
+          PROJECTS_JSON='${{ steps.parse.outputs.projects }}'
+          for project in $(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
+            python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project "$project" --update
+          done
           # Also regenerate the main README
           python3 ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
 
@@ -446,18 +458,22 @@ jobs:
       - name: Commit and push changes
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         run: |
-          PROJECT="${{ steps.parse.outputs.project }}"
+          PROJECTS_JSON='${{ steps.parse.outputs.projects }}'
           USERNAME="${{ steps.parse.outputs.username }}"
           TYPES=$(echo '${{ steps.parse.outputs.types }}' | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
+          PROJECTS_LIST=$(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
 
-          # Stage contributor files
-          git add "${PROJECT}/.all-contributorsrc" "${PROJECT}/README.md" README.md 2>/dev/null || true
+          # Stage contributor files for each project
+          for project in $(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
+            git add "${project}/.all-contributorsrc" "${project}/README.md" 2>/dev/null || true
+          done
+          git add README.md 2>/dev/null || true
 
-          # Check if there are changes to commit
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "docs: add @${USERNAME} as ${PROJECT} contributor for ${TYPES}"
+            git commit -m "docs: add @${USERNAME} as contributor for ${TYPES} (${PROJECTS_LIST})"
+            git pull --rebase origin ${{ env.TARGET_BRANCH }}
             git push origin ${{ env.TARGET_BRANCH }}
             echo "Changes committed and pushed!"
           fi
@@ -470,7 +486,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            // Add reaction to the comment
             await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -478,14 +493,12 @@ jobs:
               content: '+1'
             });
 
-            // Post a reply
             const username = '${{ steps.parse.outputs.username }}';
-            const project = '${{ steps.parse.outputs.project }}';
+            const projects = JSON.parse('${{ steps.parse.outputs.projects }}');
             const projectSource = '${{ steps.parse.outputs.project_source }}';
             const types = JSON.parse('${{ steps.parse.outputs.types }}');
             const triggerLine = `${{ steps.extract.outputs.trigger_line }}`;
 
-            // Map source to human-readable explanation
             const sourceLabels = {
               comment: 'explicitly mentioned in comment',
               pr_files: 'detected from PR changed files',
@@ -493,16 +506,18 @@ jobs:
             };
             const sourceNote = sourceLabels[projectSource] || projectSource;
 
+            const projectList = projects.length === 1 ? projects[0] : projects.join(', ');
+            const filesList = projects.map(p => `- \`${p}/.all-contributorsrc\`, \`${p}/README.md\``).join('\n');
+
             const body = [
-              "I've added @" + username + " as a contributor to **" + project + "**! :tada:",
+              "I've added @" + username + " as a contributor" + (projects.length > 1 ? " to **" + projectList + "**" : " to **" + projects[0] + "**") + "! :tada:",
               "",
               "**Recognized for:** " + types.join(', '),
-              "**Project:** " + project + " (" + sourceNote + ")",
+              "**Project(s):** " + projectList + " (" + sourceNote + ")",
               "**Based on:** " + triggerLine,
               "",
               "The contributor list has been updated in:",
-              "- `" + project + "/.all-contributorsrc`",
-              "- `" + project + "/README.md`",
+              filesList,
               "- Main `README.md`",
               "",
               "We love recognizing our contributors! :heart:"
@@ -541,28 +556,31 @@ jobs:
               const typesPart = types.length > 0 ? ` for ${types.join(', ')}` : ' for code';
 
               if (projectSource === 'ambiguous') {
-                // PR touches multiple projects
                 body = [
-                  "This PR touches files in **multiple projects**, so I need you to tell me which one. :thinking:",
+                  "This PR touches files in **multiple projects**, so I need you to tell me which one(s). :thinking:",
                   "",
-                  `I detected${userPart}${typesPart}, but which project should I add them to?`,
+                  `I detected${userPart}${typesPart}, but which project(s) should I add them to?`,
                   "",
-                  "Please reply with the project specified:",
-                  ...projects.map(p => `- \`@all-contributors${userPart}${typesPart} in ${p}\``),
+                  "You can specify **one or more** projects in your reply, e.g.:",
+                  "- `@all-contributors" + userPart + typesPart + " in tinytorch`",
+                  "- `@all-contributors" + userPart + typesPart + " in tinytorch, book, kits`",
+                  "",
+                  "Options: " + projects.map(p => `\`${p}\``).join(', '),
                 ].join('\n');
               } else {
-                // No project signal at all (issue with no labels, no PR files)
                 body = [
-                  `I couldn't determine which project to add the contributor to. :thinking:`,
+                  `I couldn't determine which project(s) to add the contributor to. :thinking:`,
                   "",
                   "**Your comment:** " + triggerLine,
                   "",
-                  "This repo has multiple projects, so please specify which one:",
-                  ...projects.map(p => `- \`@all-contributors${userPart}${typesPart} in ${p}\``),
+                  "This repo has multiple projects. Specify one or more explicitly, e.g.:",
+                  "- `@all-contributors" + userPart + typesPart + " in tinytorch`",
+                  "- `@all-contributors" + userPart + typesPart + " in TinyTorch, Book, Kits`",
                   "",
                   "**How project detection works:**",
-                  "- On **PRs**: auto-detected from changed file paths (`tinytorch/` → tinytorch, `book/` → book, etc.)",
-                  "- On **issues**: detected from labels or title, otherwise you need to specify explicitly",
+                  "- **In comment:** Say \"in TinyTorch\", \"for book, labs\", etc. (multiple projects OK)",
+                  "- **On PRs:** Auto-detected from changed file paths when only one project is touched",
+                  "- **On issues:** From labels or title, or specify in the comment",
                 ].join('\n');
               }
             } else {
@@ -582,16 +600,14 @@ jobs:
                 "**Example formats that work:**",
                 "```",
                 "@all-contributors @jane-doe fixed typos in the documentation",
-                "@all-contributors please add @john_smith for reviewing the PR",
-                "@all-contributors @user123 helped verify the fix worked",
+                "@all-contributors please add @john_smith for Doc in TinyTorch",
+                "@all-contributors @user123 for code, doc in tinytorch, book",
                 "@all-contributors @dev42 implemented the new caching feature in tinytorch",
                 "```",
                 "",
-                "**Contribution types I understand:**",
-                "bug, code, doc, design, ideas, review, test, tool",
+                "**Contribution types:** bug, code, doc, design, ideas, review, test, tool",
                 "",
-                `**Projects:** ${projects.join(', ')}`,
-                "On PRs, project is auto-detected from file paths. Otherwise, specify explicitly (e.g., 'in tinytorch')."
+                `**Projects (one or more):** ${projects.join(', ')} — specify in comment (e.g. "in TinyTorch, Book") or auto-detected from PR file paths.`
               ].join('\n');
             }
 

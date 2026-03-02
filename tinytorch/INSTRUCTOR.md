@@ -12,7 +12,7 @@ TinyTorch teaches ML systems engineering through building, not just using. Stude
 ```bash
 # Clone and setup
 git clone https://github.com/harvard-edge/cs249r_book.git
-cd TinyTorch
+cd cs249r_book/tinytorch
 
 # Virtual environment (MANDATORY)
 python -m venv .venv

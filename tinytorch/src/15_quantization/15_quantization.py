@@ -27,8 +27,8 @@ Welcome to Module 15! You're about to build a complete INT8 quantization system 
 
 **Connection Map**:
 ```
-Profiling (14) → Quantization (15) → Compression (16) → Acceleration (17)
-(measure memory) (reduce precision)  (reduce parameters) (vectorize)
+Profiling (14) → Quantization (15)
+(measure memory)   (reduce precision)
 ```
 
 ## 🎯 Learning Objectives
@@ -106,8 +106,6 @@ if __name__ == "__main__":
 Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers)
      ↓                                              ↓
 Module 14 (Profiling) ─────────────────────→ Module 15 (Quantization)
-                                                    ↓
-                                            Module 16 (Compression)
 ```
 
 Students completing this module will have built a complete
@@ -123,7 +121,7 @@ FP32 weights actually consume. This will show us why reduced precision matters.
 """
 
 # %%
-def demo_motivation_profiling():
+def explore_motivation_profiling():
     """Profile model memory usage to discover the quantization problem."""
     from tinytorch.perf.profiling import Profiler
 
@@ -178,7 +176,7 @@ def demo_motivation_profiling():
     print("   Accuracy: Minimal loss (<1% typically) with proper calibration\n")
 
 if __name__ == "__main__":
-    demo_motivation_profiling()
+    explore_motivation_profiling()
 
 # %% [markdown]
 """
@@ -312,11 +310,11 @@ Small Scale (high precision):       Large Scale (low precision):
 Symmetric Range:                    Asymmetric Range:
  FP32: [-2.0, 2.0]                  FP32: [-1.0, 3.0]
    ↓     ↓     ↓                       ↓     ↓     ↓
- INT8: -128    0   127              INT8: -128   64   127
+ INT8: -128    0   127              INT8: -128  -64   127
         │     │     │                      │     │     │
      -2.0    0.0   2.0                  -1.0   0.0   3.0
 
- Zero Point = 0                     Zero Point = 64
+ Zero Point = 0                     Zero Point = -64
 ```
 
 ### Visual Example: Weight Quantization
@@ -324,8 +322,8 @@ Symmetric Range:                    Asymmetric Range:
 ```
 Original FP32 Weights:           Quantized INT8 Mapping:
 ┌─────────────────────────┐      ┌─────────────────────────┐
-│ -0.8  -0.3   0.0   0.5  │  →   │ -102  -38    0   64     │
-│  0.9   1.2  -0.1   0.7  │      │  115  153  -13   89     │
+│ -0.8  -0.3   0.0   0.5  │  →   │ -128  -64  -26   38     │
+│  0.9   1.2  -0.1   0.7  │      │   89  127  -39   63     │
 └─────────────────────────┘      └─────────────────────────┘
      4 bytes each                      1 byte each
    Total: 32 bytes                   Total: 8 bytes
@@ -425,10 +423,10 @@ Quantization Process Visualization:
 Step 1: Analyze Range              Step 2: Calculate Parameters       Step 3: Apply Formula
 ┌─────────────────────────┐    ┌─────────────────────────┐  ┌─────────────────────────┐
 │ Input: [-1.5, 0.2, 2.8] │    │ Min: -1.5               │  │ quantized = round(      │
-│                         │    │ Max: 2.8                │  │   (value - zp*scale)    │
-│ Find min/max values     │ →  │ Range: 4.3              │ →│   / scale)              │
+│                         │    │ Max: 2.8                │  │   value / scale + zp)   │
+│ Find min/max values     │ →  │ Range: 4.3              │ →│                         │
 │                         │    │ Scale: 4.3/255 = 0.017  │  │                         │
-│                         │    │ Zero Point: 88          │  │ Result: [-128, 12, 127] │
+│                         │    │ Zero Point: -39         │  │ Result: [-128,-27, 127] │
 └─────────────────────────┘    └─────────────────────────┘  └─────────────────────────┘
 ```
 
@@ -456,8 +454,9 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     APPROACH:
     1. Find min/max values in tensor data
     2. Calculate scale: (max_val - min_val) / 255 (INT8 range: -128 to 127)
-    3. Calculate zero_point: offset to map FP32 zero to INT8 zero
-    4. Apply quantization formula: round((value - zero_point) / scale)
+    3. Calculate zero_point: offset that maps min_val to INT8_MIN (-128)
+       Formula: zero_point = round(INT8_MIN - min_val / scale)
+    4. Apply quantization formula: round(value / scale + zero_point)
     5. Clamp to INT8 range [-128, 127]
 
     Args:
@@ -472,7 +471,7 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     >>> tensor = Tensor([[-1.0, 0.0, 2.0], [0.5, 1.5, -0.5]])
     >>> q_tensor, scale, zero_point = quantize_int8(tensor)
     >>> print(f"Scale: {scale:.4f}, Zero point: {zero_point}")
-    Scale: 0.0118, Zero point: 42
+    Scale: 0.0118, Zero point: -43
 
     HINTS:
     - Use np.round() for quantization
@@ -566,9 +565,9 @@ Dequantization Process:
 INT8 Values + Parameters → FP32 Reconstruction
 
 ┌───────────────────────────────────┐
-│ Quantized: [-128, 12, 127]        │
+│ Quantized: [-128, -27, 127]       │
 │ Scale: 0.017                      │
-│ Zero Point: 88                    │
+│ Zero Point: -39                   │
 └───────────────────────────────────┘
                  │
                  ▼ Apply Formula
@@ -579,9 +578,9 @@ INT8 Values + Parameters → FP32 Reconstruction
                  │
                  ▼
 ┌───────────────────────────────────┐
-│ Result: [-1.496, 0.204, 2.799]    │
+│ Result: [-1.501, 0.202, 2.799]    │
 │ Original: [-1.5, 0.2, 2.8]        │
-│ Error: [0.004, 0.004, 0.001]      │
+│ Error: [0.001, 0.002, 0.001]      │
 └───────────────────────────────────┘
        ↑
   Excellent approximation!
@@ -620,11 +619,11 @@ def dequantize_int8(q_tensor: Tensor, scale: float, zero_point: int) -> Tensor:
         Reconstructed FP32 tensor
 
     EXAMPLE:
-    >>> q_tensor = Tensor([[-42, 0, 85]])  # INT8 values
-    >>> scale, zero_point = 0.0314, 64
+    >>> q_tensor = Tensor([[-100, 0, 50]])  # INT8 values
+    >>> scale, zero_point = 0.02, -25
     >>> fp32_tensor = dequantize_int8(q_tensor, scale, zero_point)
     >>> print(fp32_tensor.data)
-    [[-1.31, 2.01, 2.67]]  # Approximate original values
+    [[-1.5, 0.5, 1.5]]  # Reconstructed FP32 values
 
     HINT:
     - Formula: dequantized = (quantized - zero_point) * scale
@@ -1038,7 +1037,14 @@ Now let's implement the functions that make this transformation possible!
 """
 ## 🔧 Model Quantization - Scaling to Full Networks
 
-This function transforms entire neural networks from FP32 to quantized versions. It's like upgrading a whole building to be more energy efficient!
+Quantizing individual layers is useful, but real applications need to quantize entire neural
+networks. We'll build this capability in two steps:
+
+1. **Collect layer inputs** - Forward calibration data through preceding layers to get
+   the activation distribution at each layer's input
+2. **Quantize a single layer** - Replace one Linear layer with its QuantizedLinear equivalent
+
+Then the composition function `quantize_model()` ties them together to transform a full model.
 
 ```
 Model Transformation Process:
@@ -1054,56 +1060,240 @@ Input Model:                    Quantized Model:
    Memory: 100%                      Memory: ~25%
    Interface: Same                   Interface: Identical
 ```
+"""
 
-**Smart Layer Selection Logic:**
+# %% [markdown]
+"""
+## 🏗️ Collecting Layer Inputs - Calibration Data Flow
+
+Before we can calibrate a quantized layer, we need to know what its inputs look like
+at runtime. This helper forwards calibration samples through all preceding layers
+to collect the activation tensors that arrive at a given layer index.
+
 ```
-Quantization Decision Tree:
+Calibration Data Flow for Layer at Index i:
 
-For each layer in model:
-    │
-    ├── Is it a Linear layer?
-    │   │
-    │   └── YES → Replace with QuantizedLinear
-    │
-    └── Is it ReLU/Activation?
-        │
-        └── NO → Keep unchanged (no parameters to quantize)
+  Sample Data          Layers 0..i-1          Activations at Layer i
+  ┌──────────┐      ┌──────────────────┐      ┌──────────────────┐
+  │ sample_0  │ ──→ │ forward through  │ ──→  │ activation_0     │
+  │ sample_1  │ ──→ │ preceding layers │ ──→  │ activation_1     │
+  │ ...       │     │ (0, 1, ..., i-1) │      │ ...              │
+  │ sample_N  │ ──→ │                  │ ──→  │ activation_N     │
+  └──────────┘      └──────────────────┘      └──────────────────┘
 ```
+"""
 
-**Calibration Integration:**
+# %% nbgrader={"grade": false, "grade_id": "collect_layer_inputs", "solution": true}
+#| export
+def _collect_layer_inputs(model, layer_index: int, calibration_data: List[Tensor], max_samples: int = 10) -> List[Tensor]:
+    """
+    Forward calibration data through preceding layers to collect inputs for a specific layer.
+
+    TODO: Forward each calibration sample through layers 0..layer_index-1
+
+    APPROACH:
+    1. Take up to max_samples from calibration_data for efficiency
+    2. For each sample, forward through all layers before layer_index
+    3. Collect the resulting activations as the input distribution for this layer
+
+    Args:
+        model: Model with .layers attribute (Sequential pattern)
+        layer_index: Index of the layer we want inputs for
+        calibration_data: List of sample input tensors
+        max_samples: Maximum number of samples to process (default 10)
+
+    Returns:
+        List of Tensor activations arriving at layer_index
+
+    EXAMPLE:
+    >>> model = Sequential(Linear(4, 8), ReLU(), Linear(8, 3))
+    >>> samples = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+    >>> inputs_at_layer2 = _collect_layer_inputs(model, 2, samples)
+    >>> print(len(inputs_at_layer2))  # 5 activation tensors
+    5
+
+    HINT:
+    - Use model.layers[j].forward(x) to pass through each preceding layer
+    """
+    ### BEGIN SOLUTION
+    sample_inputs = []
+    for data in calibration_data[:max_samples]:
+        x = data
+        for j in range(layer_index):
+            x = model.layers[j].forward(x)
+        sample_inputs.append(x)
+    return sample_inputs
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Collect Layer Inputs
+
+This test validates that we correctly forward calibration data through preceding layers.
+
+**What we're testing**: Intermediate activation collection for calibration
+**Why it matters**: Accurate calibration requires knowing the true input distribution at each layer
+**Expected**: Correct number of samples with correct shape after forwarding through preceding layers
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-collect-layer-inputs", "locked": true, "points": 3}
+def test_unit_collect_layer_inputs():
+    """Test collecting intermediate activations for calibration."""
+    print("Unit Test: Collect Layer Inputs...")
+
+    # Create a simple model
+    layer1 = Linear(4, 8)
+    layer1.weight = Tensor(np.random.randn(4, 8) * 0.5)
+    layer1.bias = Tensor(np.random.randn(8) * 0.1)
+    activation = ReLU()
+    layer2 = Linear(8, 3)
+    layer2.weight = Tensor(np.random.randn(8, 3) * 0.5)
+    layer2.bias = Tensor(np.random.randn(3) * 0.1)
+    model = Sequential(layer1, activation, layer2)
+
+    samples = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+
+    # Collect inputs for layer at index 0 (no preceding layers)
+    inputs_at_0 = _collect_layer_inputs(model, 0, samples)
+    assert len(inputs_at_0) == 5
+    assert inputs_at_0[0].shape == (1, 4), "Layer 0 inputs should match original shape"
+
+    # Collect inputs for layer at index 2 (after Linear + ReLU)
+    inputs_at_2 = _collect_layer_inputs(model, 2, samples)
+    assert len(inputs_at_2) == 5
+    assert inputs_at_2[0].shape == (1, 8), f"Layer 2 inputs should be (1, 8), got {inputs_at_2[0].shape}"
+
+    # Verify max_samples limiting
+    inputs_limited = _collect_layer_inputs(model, 2, samples, max_samples=2)
+    assert len(inputs_limited) == 2, "Should respect max_samples"
+
+    print("Collect layer inputs works correctly!")
+
+if __name__ == "__main__":
+    test_unit_collect_layer_inputs()
+
+# %% [markdown]
+"""
+## 🏗️ Quantizing a Single Layer - The Replacement Step
+
+This helper takes one Linear layer, wraps it in a QuantizedLinear, and optionally
+calibrates it using pre-collected activation samples. This is the atomic operation
+that `quantize_model()` applies to each eligible layer.
+
 ```
-Calibration Data Flow:
+Single Layer Quantization:
 
-     Input Data              Layer-by-Layer Processing
-         │                            │
-         ▼                            ▼
-  ┌───────────────────┐    ┌─────────────────────────────────────────────────────────┐
-  │ Sample Batch 1    │    │ Layer 0: Forward → Collect activation statistics       │
-  │ Sample Batch 2    │ →  │    ↓                                                   │
-  │ ...               │    │ Layer 2: Forward → Collect activation statistics       │
-  │ Sample Batch N    │    │    ↓                                                   │
-  └───────────────────┘    │ Layer 4: Forward → Collect activation statistics       │
-                           │    ↓                                                   │
-                           │ For each layer: calibrate optimal quantization         │
-                           └─────────────────────────────────────────────────────────┘
+  Linear Layer          QuantizedLinear
+  ┌──────────────┐      ┌──────────────────────────┐
+  │ weight: FP32 │  →   │ q_weight: INT8           │
+  │ bias: FP32   │      │ q_bias: INT8             │
+  │              │      │ weight_scale, zero_point  │
+  └──────────────┘      │ calibrated: Yes/No       │
+                        └──────────────────────────┘
+       4 bytes/param          1 byte/param + overhead
 ```
+"""
 
-**Why In-Place Modification:**
-- **Preserves model structure** - Same interface, same behavior
-- **Memory efficient** - No copying of large tensors
-- **Drop-in replacement** - Existing code works unchanged
-- **Gradual quantization** - Can selectively quantize sensitive layers
+# %% nbgrader={"grade": false, "grade_id": "quantize_single_layer", "solution": true}
+#| export
+def _quantize_single_layer(layer: Linear, calibration_inputs: Optional[List[Tensor]] = None) -> QuantizedLinear:
+    """
+    Quantize a single Linear layer and optionally calibrate it.
 
-**Deployment Benefits:**
+    TODO: Create a QuantizedLinear from a Linear layer, then calibrate if inputs provided
+
+    APPROACH:
+    1. Wrap the Linear layer in a QuantizedLinear (quantizes weights/bias)
+    2. If calibration_inputs provided, call calibrate() on the quantized layer
+
+    Args:
+        layer: Linear layer to quantize
+        calibration_inputs: Optional list of activation tensors for calibration
+
+    Returns:
+        QuantizedLinear: The quantized replacement layer
+
+    EXAMPLE:
+    >>> original = Linear(8, 3)
+    >>> original.weight = Tensor(np.random.randn(8, 3) * 0.5)
+    >>> quantized = _quantize_single_layer(original)
+    >>> print(quantized.q_weight.data.dtype)
+    int8
+
+    HINT:
+    - QuantizedLinear(layer) handles weight/bias quantization
+    - quantized_layer.calibrate(inputs) sets input quantization parameters
+    """
+    ### BEGIN SOLUTION
+    quantized_layer = QuantizedLinear(layer)
+
+    if calibration_inputs is not None:
+        quantized_layer.calibrate(calibration_inputs)
+
+    return quantized_layer
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Quantize Single Layer
+
+This test validates that we correctly quantize one Linear layer with optional calibration.
+
+**What we're testing**: Single-layer quantization and calibration
+**Why it matters**: This is the atomic building block for full model quantization
+**Expected**: INT8 weights, optional calibration parameters set
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-quantize-single-layer", "locked": true, "points": 3}
+def test_unit_quantize_single_layer():
+    """Test single layer quantization with and without calibration."""
+    print("Unit Test: Quantize Single Layer...")
+
+    # Create a linear layer
+    layer = Linear(4, 3)
+    layer.weight = Tensor(np.random.randn(4, 3) * 0.5)
+    layer.bias = Tensor(np.random.randn(3) * 0.1)
+
+    # Quantize without calibration
+    q_layer = _quantize_single_layer(layer)
+    assert isinstance(q_layer, QuantizedLinear)
+    assert q_layer.q_weight is not None, "Quantized weights should exist"
+    assert q_layer.input_scale is None, "Without calibration, input_scale should be None"
+
+    # Quantize with calibration
+    cal_inputs = [Tensor(np.random.randn(1, 4)) for _ in range(5)]
+    q_layer_cal = _quantize_single_layer(layer, calibration_inputs=cal_inputs)
+    assert isinstance(q_layer_cal, QuantizedLinear)
+    assert q_layer_cal.input_scale is not None, "With calibration, input_scale should be set"
+
+    # Verify forward pass works
+    x = Tensor(np.random.randn(2, 4))
+    output = q_layer.forward(x)
+    assert output.shape == (2, 3), f"Output shape should be (2, 3), got {output.shape}"
+
+    print("Quantize single layer works correctly!")
+
+if __name__ == "__main__":
+    test_unit_quantize_single_layer()
+
+# %% [markdown]
+"""
+## 🔧 Model Quantization - The Composition Function
+
+Now we compose the helpers into the full model quantization function. For each Linear
+layer in the model, we collect its calibration inputs and replace it with a quantized version.
+
 ```
-Before Quantization:              After Quantization:
-┌───────────────────────────┐     ┌───────────────────────────┐
-│ ❌ Can't fit on phone     │     │ ✅ Fits on mobile device  │
-│ ❌ Slow cloud deployment  │     │ ✅ Fast edge inference    │
-│ ❌ High memory usage      │ →   │ ✅ 4× memory efficiency   │
-│ ❌ Expensive to serve     │     │ ✅ Lower serving costs    │
-│ ❌ Battery drain          │     │ ✅ Extended battery life  │
-└───────────────────────────┘     └───────────────────────────┘
+quantize_model() orchestrates the full pipeline:
+
+  For each layer in model.layers:
+      │
+      ├── isinstance(layer, Linear)?
+      │   ├── YES → _collect_layer_inputs()  → calibration activations
+      │   │         _quantize_single_layer()  → QuantizedLinear
+      │   │         Replace model.layers[i]
+      │   │
+      │   └── NO  → Keep unchanged (ReLU, etc.)
 ```
 """
 
@@ -1116,10 +1306,10 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
     TODO: Replace all Linear layers with QuantizedLinear versions
 
     APPROACH:
-    1. Find all Linear layers in the model
-    2. Replace each with QuantizedLinear version
-    3. If calibration data provided, calibrate input quantization
-    4. Handle models with .layers attribute (Sequential pattern)
+    1. Validate model has .layers attribute (Sequential pattern)
+    2. Iterate through layers, find Linear layers
+    3. For each Linear layer, collect calibration inputs (if data provided)
+    4. Replace with quantized version using _quantize_single_layer()
 
     Args:
         model: Model to quantize (with .layers or similar structure)
@@ -1137,35 +1327,22 @@ def quantize_model(model, calibration_data: Optional[List[Tensor]] = None) -> No
     >>> # Now model uses quantized layers
 
     HINT:
-    - Handle models with .layers attribute (Sequential pattern)
-    - Use isinstance(layer, Linear) to identify layers to quantize
+    - Use _collect_layer_inputs() to get calibration activations
+    - Use _quantize_single_layer() to create the replacement
     """
     ### BEGIN SOLUTION
-    # Handle Sequential pattern (has .layers attribute)
     if hasattr(model, 'layers'):
         for i, layer in enumerate(model.layers):
             if isinstance(layer, Linear):
-                # Replace with quantized version
-                quantized_layer = QuantizedLinear(layer)
-
-                # Calibrate if data provided
+                # Collect calibration inputs if data provided
+                cal_inputs = None
                 if calibration_data is not None:
-                    # Run forward passes to get intermediate activations
-                    sample_inputs = []
-                    for data in calibration_data[:10]:  # Use first 10 samples for efficiency
-                        # Forward through layers up to this point
-                        x = data
-                        for j in range(i):
-                            # All layers in Sequential have .forward() method
-                            x = model.layers[j].forward(x)
-                        sample_inputs.append(x)
+                    cal_inputs = _collect_layer_inputs(model, i, calibration_data)
 
-                    quantized_layer.calibrate(sample_inputs)
+                # Replace with quantized version
+                model.layers[i] = _quantize_single_layer(layer, cal_inputs)
 
-                model.layers[i] = quantized_layer
-
-    elif isinstance(model, Linear):  # Single Linear layer
-        # Can't replace in-place for single layer, user should handle
+    elif isinstance(model, Linear):
         raise ValueError(
             f"Cannot quantize single Linear layer in-place\n"
             f"  ❌ quantize_model() modifies models in-place, but a single layer has no container to modify\n"
@@ -1244,63 +1421,158 @@ if __name__ == "__main__":
 """
 ## 🔧 Model Size Comparison - Measuring the Impact
 
-This function provides detailed analysis of memory savings achieved through quantization. It's like a before/after comparison for model efficiency.
+To compare memory usage between original and quantized models, we need to measure
+bytes at the individual layer level first, then aggregate. We'll build this in two steps:
+
+1. **Measure one layer** - Count parameters and bytes for a single layer, handling both
+   FP32 (Linear) and INT8 (QuantizedLinear) layers correctly
+2. **Aggregate and compare** - Sum across all layers and compute compression metrics
 
 ```
-Memory Analysis Framework:
+Per-Layer Measurement:
 
-┌───────────────────┬──────────────────┬──────────────────┬─────────────────┐
-│                   │  Memory Breakdown Analysis                          │
-├───────────────────┼──────────────────┼──────────────────┼─────────────────┤
-│  Component        │  Original (FP32) │ Quantized (INT8) │  Savings        │
-├───────────────────┼──────────────────┼──────────────────┼─────────────────┤
-│ Layer 1 weights   │    12.8 MB       │     3.2 MB       │  9.6 MB (75%)   │
-│ Layer 1 bias      │     0.5 MB       │     0.1 MB       │  0.4 MB (75%)   │
-│ Layer 2 weights   │     2.0 MB       │     0.5 MB       │  1.5 MB (75%)   │
-│ Layer 2 bias      │     0.3 MB       │     0.1 MB       │  0.2 MB (67%)   │
-│ Overhead          │     0.0 MB       │     0.02 MB      │ -0.02 MB        │
-├───────────────────┼──────────────────┼──────────────────┼─────────────────┤
-│ TOTAL             │    15.6 MB       │     3.92 MB      │ 11.7 MB (74%)   │
-└───────────────────┴──────────────────┴──────────────────┴─────────────────┘
-                            ↑
-                    4× compression ratio!
+  Layer Type          Measurement Strategy
+  ┌──────────────┐    ┌───────────────────────────────────┐
+  │ Linear       │ →  │ params × 4 bytes (FP32)           │
+  │ QuantizedLin │ →  │ memory_usage() dict (INT8 + ovhd) │
+  │ ReLU/other   │ →  │ 0 params, 0 bytes (no weights)    │
+  └──────────────┘    └───────────────────────────────────┘
 ```
+"""
 
-**Comprehensive Metrics Provided:**
+# %% [markdown]
+"""
+## 🏗️ Measuring a Single Layer - Per-Layer Byte Accounting
+
+This helper measures the parameter count and byte usage for one layer. It handles
+the key distinction: FP32 layers store parameters at 4 bytes each, while QuantizedLinear
+layers use INT8 storage with a small overhead for scale/zero_point metadata.
+
 ```
-Output Dictionary:
-{
-  'original_params': 4000000,        # Total parameter count
-  'quantized_params': 4000000,       # Same count, different precision
-  'original_bytes': 16000000,        # 4 bytes per FP32 parameter
-  'quantized_bytes': 4000016,        # 1 byte per INT8 + overhead
-  'compression_ratio': 3.99,         # Nearly 4× compression
-  'memory_saved_mb': 11.7,           # Absolute savings in MB
-  'memory_saved_percent': 74.9       # Relative savings percentage
-}
+Byte Accounting per Layer Type:
+
+  FP32 Linear:                     QuantizedLinear:
+  ┌─────────────────────────┐      ┌─────────────────────────────────┐
+  │ weight: N × 4 bytes     │      │ q_weight: N × 1 byte            │
+  │ bias:   M × 4 bytes     │      │ q_bias:   M × 1 byte            │
+  │                         │      │ overhead: ~8 bytes (scale+zp)    │
+  │ Total: (N+M) × 4       │      │ Total: (N+M) × 1 + overhead     │
+  └─────────────────────────┘      └─────────────────────────────────┘
 ```
+"""
 
-**Why These Metrics Matter:**
+# %% nbgrader={"grade": false, "grade_id": "measure_layer_bytes", "solution": true}
+def _measure_layer_bytes(layer, is_quantized: bool = False) -> Tuple[int, int]:
+    """
+    Measure parameter count and byte usage for a single layer.
 
-**For Developers:**
-- **compression_ratio** - How much smaller is the model?
-- **memory_saved_mb** - Actual bytes freed up
-- **memory_saved_percent** - Efficiency improvement
+    TODO: Count parameters and bytes differently for quantized vs FP32 layers
 
-**For Deployment:**
-- **Model fits in device memory?** Check memory_saved_mb
-- **Network transfer time?** Reduced by compression_ratio
-- **Disk storage savings?** Shown by memory_saved_percent
+    APPROACH:
+    1. If QuantizedLinear: use layer.memory_usage() for accurate byte count
+    2. If regular layer with parameters: count params × BYTES_PER_FLOAT32
+    3. If no parameters (e.g., ReLU): return (0, 0)
 
-**For Business:**
-- **Cloud costs** reduced by compression_ratio
-- **User experience** improved (faster downloads)
-- **Device support** expanded (fits on more devices)
+    Args:
+        layer: A single layer (Linear, QuantizedLinear, ReLU, etc.)
+        is_quantized: Whether to measure as quantized (uses memory_usage() for QuantizedLinear)
 
-**Validation Checks:**
-- **Parameter count preservation** - same functionality
-- **Reasonable compression ratio** - should be ~4× for INT8
-- **Minimal overhead** - quantization parameters are tiny
+    Returns:
+        Tuple of (param_count, byte_count)
+
+    EXAMPLE:
+    >>> linear = Linear(100, 50)
+    >>> params, bytes_ = _measure_layer_bytes(linear)
+    >>> print(f"Params: {params}, Bytes: {bytes_}")
+    Params: 5050, Bytes: 20200
+
+    HINT:
+    - QuantizedLinear.memory_usage() returns a dict with 'quantized_bytes'
+    - Regular layers: sum param.data.size for count, multiply by BYTES_PER_FLOAT32 for bytes
+    """
+    ### BEGIN SOLUTION
+    if is_quantized and isinstance(layer, QuantizedLinear):
+        memory_info = layer.memory_usage()
+        param_count = sum(p.data.size for p in layer.parameters())
+        return param_count, memory_info['quantized_bytes']
+
+    if hasattr(layer, 'parameters'):
+        params = layer.parameters()
+        param_count = sum(p.data.size for p in params)
+        byte_count = param_count * BYTES_PER_FLOAT32
+        return param_count, byte_count
+
+    return 0, 0
+    ### END SOLUTION
+
+# %% [markdown]
+"""
+### 🧪 Unit Test: Measure Layer Bytes
+
+This test validates that we correctly measure bytes for both FP32 and quantized layers.
+
+**What we're testing**: Per-layer byte accounting for different layer types
+**Why it matters**: Accurate per-layer measurement is needed for reliable compression metrics
+**Expected**: FP32 layers use 4 bytes/param, quantized layers use ~1 byte/param + overhead
+"""
+
+# %% nbgrader={"grade": true, "grade_id": "test-measure-layer-bytes", "locked": true, "points": 3}
+def test_unit_measure_layer_bytes():
+    """Test per-layer byte measurement for FP32 and quantized layers."""
+    print("Unit Test: Measure Layer Bytes...")
+
+    # Test FP32 Linear layer
+    linear = Linear(10, 5)
+    linear.weight = Tensor(np.random.randn(10, 5))
+    linear.bias = Tensor(np.random.randn(5))
+    params, bytes_ = _measure_layer_bytes(linear)
+    assert params == 55, f"Expected 55 params (10*5 + 5), got {params}"
+    assert bytes_ == 55 * BYTES_PER_FLOAT32, f"Expected {55 * BYTES_PER_FLOAT32} bytes, got {bytes_}"
+
+    # Test ReLU (no parameters)
+    relu = ReLU()
+    params_relu, bytes_relu = _measure_layer_bytes(relu)
+    assert params_relu == 0, "ReLU should have 0 params"
+    assert bytes_relu == 0, "ReLU should have 0 bytes"
+
+    # Test QuantizedLinear layer
+    q_linear = QuantizedLinear(linear)
+    params_q, bytes_q = _measure_layer_bytes(q_linear, is_quantized=True)
+    assert params_q > 0, "QuantizedLinear should have params"
+    assert bytes_q < bytes_, f"Quantized bytes ({bytes_q}) should be less than FP32 ({bytes_})"
+
+    print(f"  FP32: {params} params, {bytes_} bytes")
+    print(f"  INT8: {params_q} params, {bytes_q} bytes")
+    print(f"  Ratio: {bytes_ / bytes_q:.1f}x")
+    print("Measure layer bytes works correctly!")
+
+if __name__ == "__main__":
+    test_unit_measure_layer_bytes()
+
+# %% [markdown]
+"""
+## 🔧 Model Size Analysis - The Composition Function
+
+Now we aggregate per-layer measurements across the full model to produce a comprehensive
+comparison between original and quantized versions.
+
+```
+Aggregation Flow:
+
+  Original Model                    Quantized Model
+  ┌──────────────────────────┐      ┌──────────────────────────┐
+  │ Layer 0: _measure(FP32)  │      │ Layer 0: _measure(INT8)  │
+  │ Layer 1: _measure(skip)  │      │ Layer 1: _measure(skip)  │
+  │ Layer 2: _measure(FP32)  │      │ Layer 2: _measure(INT8)  │
+  └──────────────────────────┘      └──────────────────────────┘
+           │                                  │
+           ▼                                  ▼
+     Sum params, bytes                  Sum params, bytes
+           │                                  │
+           └─────────────┬────────────────────┘
+                         ▼
+               Compression metrics
+```
 """
 
 # %% nbgrader={"grade": false, "grade_id": "analyze_model_sizes", "solution": true}
@@ -1309,64 +1581,49 @@ def analyze_model_sizes(original_model, quantized_model) -> Dict[str, float]:
     """
     Compare memory usage between original and quantized models.
 
-    TODO: Calculate comprehensive memory comparison
+    TODO: Aggregate per-layer measurements and compute compression metrics
 
     APPROACH:
-    1. Count parameters in both models
-    2. Calculate bytes used (FP32 vs INT8)
-    3. Include quantization overhead
-    4. Return comparison metrics
+    1. Iterate original model layers, measure each with _measure_layer_bytes()
+    2. Iterate quantized model layers, measure each (with is_quantized=True for QuantizedLinear)
+    3. Compute compression ratio and savings from the totals
 
     Args:
         original_model: Model before quantization
         quantized_model: Model after quantization
 
     Returns:
-        Dictionary with 'original_mb', 'quantized_mb', 'reduction_ratio', 'memory_saved_mb'
+        Dictionary with compression metrics
 
     EXAMPLE:
     >>> layer1 = Linear(100, 50)
     >>> layer2 = Linear(50, 10)
     >>> model = Sequential(layer1, layer2)
     >>> quantize_model(model)
-    >>> stats = analyze_model_sizes(model, model)  # Same model after in-place quantization
-    >>> print(f"Reduced to {stats['reduction_ratio']:.1f}x smaller")
-    Reduced to 4.0x smaller
+    >>> stats = analyze_model_sizes(model, model)
+    >>> print(f"Reduced to {stats['compression_ratio']:.1f}x smaller")
 
-    HINTS:
-    - FP32 uses 4 bytes per parameter, INT8 uses 1 byte
-    - Include scale/zero_point overhead (2 values per quantized layer)
-    - Expected ratio: ~4x for INT8 quantization
+    HINT:
+    - Use _measure_layer_bytes(layer) for original FP32 layers
+    - Use _measure_layer_bytes(layer, is_quantized=True) for quantized layers
     """
     ### BEGIN SOLUTION
-    # Count original model parameters
-    # Sequential has .layers attribute, layers may have .parameters() method
+    # Measure original model
     original_params = 0
     original_bytes = 0
     for layer in original_model.layers:
-        if hasattr(layer, 'parameters'):
-            params = layer.parameters()
-            for param in params:
-                original_params += param.data.size
-                original_bytes += param.data.size * BYTES_PER_FLOAT32
+        p, b = _measure_layer_bytes(layer, is_quantized=False)
+        original_params += p
+        original_bytes += b
 
-    # Count quantized model parameters
+    # Measure quantized model
     quantized_params = 0
     quantized_bytes = 0
     for layer in quantized_model.layers:
-        if isinstance(layer, QuantizedLinear):
-            memory_info = layer.memory_usage()
-            quantized_bytes += memory_info['quantized_bytes']
-            params = layer.parameters()
-            for param in params:
-                quantized_params += param.data.size
-        else:
-            # Non-quantized layers - may have .parameters() method
-            if hasattr(layer, 'parameters'):
-                params = layer.parameters()
-                for param in params:
-                    quantized_params += param.data.size
-                    quantized_bytes += param.data.size * BYTES_PER_FLOAT32
+        is_q = isinstance(layer, QuantizedLinear)
+        p, b = _measure_layer_bytes(layer, is_quantized=is_q)
+        quantized_params += p
+        quantized_bytes += b
 
     compression_ratio = original_bytes / quantized_bytes if quantized_bytes > 0 else 1.0
     memory_saved = original_bytes - quantized_bytes
@@ -1685,7 +1942,7 @@ This is the production workflow: measure -> compress -> validate -> deploy.
 # Import Profiler from Module 14
 from tinytorch.perf.profiling import Profiler
 
-def demo_quantization_with_profiler():
+def explore_quantization_with_profiler():
     """Demonstrate memory savings using Profiler from Module 14."""
     print("Measuring Quantization Memory Savings with Profiler")
     print("=" * 70)
@@ -1747,7 +2004,7 @@ def demo_quantization_with_profiler():
     print("\nThis is the power of quantization: same functionality, 4x less memory!")
 
 if __name__ == "__main__":
-    demo_quantization_with_profiler()
+    explore_quantization_with_profiler()
 
 # %% [markdown]
 """
@@ -1825,7 +2082,7 @@ Final validation that everything works together correctly before module completi
 
 # %% nbgrader={"grade": true, "grade_id": "test_module", "locked": true, "points": 20, "solution": false, "schema_version": 3}
 def test_module():
-    """Module Test: Complete Integration
+    """🧪 Module Test: Complete Integration
 
     Comprehensive test of entire module functionality.
 
@@ -1834,7 +2091,7 @@ def test_module():
     - Functions work together correctly
     - Module is ready for integration with TinyTorch
     """
-    print("RUNNING MODULE INTEGRATION TEST")
+    print("🧪 RUNNING MODULE INTEGRATION TEST")
     print("=" * 50)
 
     # Run all unit tests
@@ -1842,7 +2099,10 @@ def test_module():
     test_unit_quantize_int8()
     test_unit_dequantize_int8()
     test_unit_quantized_linear()
+    test_unit_collect_layer_inputs()
+    test_unit_quantize_single_layer()
     test_unit_quantize_model()
+    test_unit_measure_layer_bytes()
     test_unit_analyze_model_sizes()
 
     print("\nRunning integration scenarios...")
@@ -1932,8 +2192,8 @@ def test_module():
     print("Edge cases handled correctly!")
 
     print("\n" + "=" * 50)
-    print("ALL TESTS PASSED! Module ready for export.")
-    print("Run: tito module complete 15_quantization")
+    print("🎉 ALL TESTS PASSED! Module ready for export.")
+    print("Run: tito module complete 15")
 
 # %% [markdown]
 """
@@ -2037,8 +2297,8 @@ Your quantization system is ready for production deployment!
 
 # %%
 def demo_quantization():
-    """See quantization shrink model size."""
-    print("AHA MOMENT: Quantization Shrinks Models")
+    """🎯 See quantization shrink model size."""
+    print("🎯 AHA MOMENT: Quantization Shrinks Models")
     print("=" * 45)
 
     # Create FP32 weights with concrete values
@@ -2064,7 +2324,7 @@ def demo_quantization():
     print(f"INT8 range: [{q_weights.data.min()}, {q_weights.data.max()}]")
     print(f"Restoration error: {error:.6f}")
 
-    print("\nSame values, 4x less memory!")
+    print("\n✨ Same values, 4x less memory!")
 
 # %%
 if __name__ == "__main__":
@@ -2092,7 +2352,7 @@ Congratulations! You've built a complete INT8 quantization system that can reduc
 - Hardware efficiency: Specialized INT8 instructions provide 2-4x speedup
 - Deployment benefits: Smaller models fit on mobile and edge devices
 
-Export with: `tito module complete 15_quantization`
+Export with: `tito module complete 15`
 
-**Next**: Module 16 will add model compression through pruning - removing unnecessary weights entirely!
+Quantization is one of the most impactful optimization techniques — reducing precision to INT8 delivers 4x memory savings with minimal accuracy loss.
 """

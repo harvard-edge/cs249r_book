@@ -465,38 +465,39 @@ Think of magnitude pruning like editing a document - you remove words that don't
 ```
 Magnitude Pruning Process:
 
-Step 1: Collect All Weights
+Step 1: Collect All Weights (20 total across 2 layers)
 ┌──────────────────────────────────────────────────┐
-│ Layer 1: [2.1, 0.1, -1.8, 0.05, 3.2, -0.02]      │
-│ Layer 2: [1.5, -0.03, 2.8, 0.08, -2.1, 0.01]     │
-│ Layer 3: [0.7, 2.4, -0.06, 1.9, 0.04, -1.3]      │
+│ Layer 1: [2.1, 0.08, -1.8, 0.04, 3.2,             │
+│           -0.02, 1.5, -0.03, 2.8, 0.06]           │
+│ Layer 2: [0.7, 2.4, -0.05, 1.9, 0.01,             │
+│           -1.3, 0.03, 2.1, -0.07, 0.09]           │
 └──────────────────────────────────────────────────┘
                     ↓
 Step 2: Calculate Magnitudes
 ┌──────────────────────────────────────────────────┐
-│ Magnitudes: [2.1, 0.1, 1.8, 0.05, 3.2, 0.02,     │
-│              1.5, 0.03, 2.8, 0.08, 2.1, 0.01,    │
-│              0.7, 2.4, 0.06, 1.9, 0.04, 1.3]     │
+│ Sorted: [0.01, 0.02, 0.03, 0.03, 0.04, 0.05,     │
+│          0.06, 0.07, 0.08, 0.09, 0.7, 1.3,       │
+│          1.5, 1.8, 1.9, 2.1, 2.1, 2.4, 2.8, 3.2] │
 └──────────────────────────────────────────────────┘
                     ↓
-Step 3: Find Threshold (e.g., 70th percentile)
+Step 3: Find Threshold (e.g., 50th percentile)
 ┌──────────────────────────────────────────────────┐
-│ Sorted: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06,     │
-│          0.08, 0.1, 0.7, 1.3, 1.5, 1.8,          │ Threshold: 0.1
-│          1.9, 2.1, 2.1, 2.4, 2.8, 3.2]           │ (70% of weights removed)
+│ 20 values → 50th pctile between 10th and 11th    │ Threshold ≈ 0.4
+│ Values ≤ 0.4: ten small weights get zeroed        │ (50% of weights removed)
 └──────────────────────────────────────────────────┘
                     ↓
 Step 4: Apply Pruning Mask
 ┌──────────────────────────────────────────────────┐
-│ Layer 1: [2.1, 0.0, -1.8, 0.0, 3.2, 0.0]         │
-│ Layer 2: [1.5, 0.0, 2.8, 0.0, -2.1, 0.0]         │ 70% weights → 0
-│ Layer 3: [0.7, 2.4, 0.0, 1.9, 0.0, -1.3]         │ 30% preserved
+│ Layer 1: [2.1, 0.0, -1.8, 0.0, 3.2,              │
+│           0.0, 1.5, 0.0, 2.8, 0.0]               │ 50% weights → 0
+│ Layer 2: [0.7, 2.4, 0.0, 1.9, 0.0,               │ 50% preserved
+│           -1.3, 0.0, 2.1, 0.0, 0.0]              │
 └──────────────────────────────────────────────────┘
 
 Memory Impact:
-- Dense storage: 18 values
-- Sparse storage: 6 values + 6 indices = 12 values (33% savings)
-- Theoretical limit: 70% savings with perfect sparse format
+- Dense storage: 20 values × 4 bytes = 80 bytes
+- Sparse storage: 10 values + 10 indices = 80 bytes (no savings!)
+- At 90% sparsity: 2 values + 2 indices = 16 bytes (80% savings)
 ```
 
 ### Why Global Thresholding Works
@@ -719,9 +720,9 @@ def structured_prune(model, prune_ratio=0.5):
     Structured sparsity: 30.0%
 
     HINTS:
-    - Calculate L2 norm along input dimension for each output channel
-    - Use np.linalg.norm(weights[:, channel]) for channel importance
-    - Set entire channels to zero (not just individual weights)
+    - Calculate L2 norm for all channels at once: np.linalg.norm(weight, axis=0)
+    - Find the lowest-norm channels: np.argpartition(norms, k)[:k] or np.argsort(norms)[:k]
+    - Set entire channels to zero: weight[:, prune_indices] = 0
     """
     ### BEGIN SOLUTION
     # All Linear layers have .weight attribute
@@ -1426,7 +1427,7 @@ This is the production workflow: measure → prune → validate → deploy.
 # %% nbgrader={"grade": false, "grade_id": "demo-profiler-compression", "solution": true}
 # Import Profiler from Module 14 (already imported above)
 
-def demo_compression_with_profiler():
+def explore_compression_with_profiler():
     """📊 Demonstrate parameter reduction using Profiler from Module 14."""
     print("📊 Measuring Compression Impact with Profiler")
     print("=" * 70)
@@ -1447,9 +1448,9 @@ def demo_compression_with_profiler():
     memory_before = profiler.measure_memory(model, input_shape)
 
     print(f"   Parameters: {param_count_before:,}")
-    print(f"   Sparsity: {sparsity_before*100:.1f}% (zeros)")
+    print(f"   Sparsity: {sparsity_before:.1f}% (zeros)")
     print(f"   Memory: {memory_before['parameter_memory_mb']:.2f} MB")
-    print(f"   Active parameters: {int(param_count_before * (1 - sparsity_before)):,}")
+    print(f"   Active parameters: {int(param_count_before * (1 - sparsity_before / 100)):,}")
 
     # Apply magnitude pruning
     target_sparsity = 0.7  # Remove 70% of parameters
@@ -1466,19 +1467,19 @@ def demo_compression_with_profiler():
     memory_after = profiler.measure_memory(pruned_model, input_shape)
 
     print(f"   Parameters: {param_count_after:,} (same, but many are zero)")
-    print(f"   Sparsity: {sparsity_after*100:.1f}% (zeros)")
+    print(f"   Sparsity: {sparsity_after:.1f}% (zeros)")
     print(f"   Memory: {memory_after['parameter_memory_mb']:.2f} MB (same storage)")
-    print(f"   Active parameters: {int(param_count_after * (1 - sparsity_after)):,}")
+    print(f"   Active parameters: {int(param_count_after * (1 - sparsity_after / 100)):,}")
 
     print("\n📈 COMPRESSION RESULTS")
     print("=" * 70)
-    sparsity_gain = (sparsity_after - sparsity_before) * 100
-    active_before = int(param_count_before * (1 - sparsity_before))
-    active_after = int(param_count_after * (1 - sparsity_after))
+    sparsity_gain = sparsity_after - sparsity_before
+    active_before = int(param_count_before * (1 - sparsity_before / 100))
+    active_after = int(param_count_after * (1 - sparsity_after / 100))
     reduction_ratio = active_before / active_after if active_after > 0 else 1
     params_removed = active_before - active_after
 
-    print(f"   Sparsity increased: {sparsity_before*100:.1f}% → {sparsity_after*100:.1f}%")
+    print(f"   Sparsity increased: {sparsity_before:.1f}% → {sparsity_after:.1f}%")
     print(f"   Active params reduced: {active_before:,} → {active_after:,}")
     print(f"   Parameters removed: {params_removed:,} ({sparsity_gain:.1f}% of total)")
     print(f"   Compression ratio: {reduction_ratio:.1f}x fewer active parameters")
@@ -1490,7 +1491,7 @@ def demo_compression_with_profiler():
     print("\n✅ This is the power of compression: remove what doesn't matter!")
 
 if __name__ == "__main__":
-    demo_compression_with_profiler()
+    explore_compression_with_profiler()
 
 # %% [markdown]
 """
@@ -1678,72 +1679,6 @@ class Compressor:
 
 # %% [markdown]
 """
-## 🤔 ML Systems Reflection Questions
-
-Answer these to deepen your understanding of compression techniques and their systems implications:
-
-### 1. Compression Trade-offs
-**Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
-
-**Consider**:
-- How many parameters remain active? _____ M parameters
-- If the original model was 40MB, what's the theoretical minimum storage? _____ MB
-- Why might actual speedup be less than 10x?
-
-**Real-world context**: Sparse matrix formats have indexing overhead, and many hardware accelerators cannot efficiently exploit unstructured sparsity.
-
----
-
-### 2. Structured vs Unstructured Sparsity
-**Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
-
-**Consider**:
-- Which enables better hardware acceleration?
-- Which preserves accuracy better at high sparsity?
-- Which creates more predictable memory access patterns?
-
-**Think about**: How would you choose between these approaches for different deployment targets (GPU, CPU, mobile)?
-
----
-
-### 3. Knowledge Distillation Efficiency
-**Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
-
-**Calculate**:
-- Compression ratio: _____x
-- If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
-- Why is the speedup greater than the compression ratio?
-
-**Real-world context**: Smaller models often have better cache locality and fewer memory bottlenecks.
-
----
-
-### 4. Low-Rank Decomposition
-**Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
-
-**Calculate**:
-- Original parameter count: _____ parameters
-- Decomposed parameter count: (512 x 64) + 64 + (64 x 256) = _____ parameters
-- Compression ratio: _____x
-- At what rank does compression become ineffective? rank > _____
-
-**Trade-offs to consider**: Reconstruction error vs. compression ratio, and the overhead of two matrix multiplications vs. one.
-
----
-
-### 5. Pruning Strategy Selection
-**Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
-
-**Consider**:
-- Which pruning strategy optimizes for memory? [magnitude/structured/both]
-- Which pruning strategy optimizes for speed? [magnitude/structured/both]
-- What order should you apply compression techniques?
-
-**Real-world context**: Mobile devices have limited memory bandwidth, making structured sparsity more beneficial for latency.
-"""
-
-# %% [markdown]
-"""
 ## 🔧 Verification: Prove Pruning Works
 
 Before running the full integration test, let's create a verification function that
@@ -1917,6 +1852,72 @@ def test_module():
     print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 16")
+
+# %% [markdown]
+"""
+## 🤔 ML Systems Reflection Questions
+
+Answer these to deepen your understanding of compression techniques and their systems implications:
+
+### 1. Compression Trade-offs
+**Question**: You implemented magnitude pruning that removes 90% of weights from a 10M parameter model.
+
+**Consider**:
+- How many parameters remain active? _____ M parameters
+- If the original model was 40MB, what's the theoretical minimum storage? _____ MB
+- Why might actual speedup be less than 10x?
+
+**Real-world context**: Sparse matrix formats have indexing overhead, and many hardware accelerators cannot efficiently exploit unstructured sparsity.
+
+---
+
+### 2. Structured vs Unstructured Sparsity
+**Question**: Your structured pruning removes entire channels, while magnitude pruning creates scattered zeros.
+
+**Consider**:
+- Which enables better hardware acceleration?
+- Which preserves accuracy better at high sparsity?
+- Which creates more predictable memory access patterns?
+
+**Think about**: How would you choose between these approaches for different deployment targets (GPU, CPU, mobile)?
+
+---
+
+### 3. Knowledge Distillation Efficiency
+**Question**: A teacher model has 100M parameters, student has 10M parameters, both achieve 85% accuracy.
+
+**Calculate**:
+- Compression ratio: _____x
+- If teacher inference takes 100ms, student takes 15ms, what's the speedup? _____x
+- Why is the speedup greater than the compression ratio?
+
+**Real-world context**: Smaller models often have better cache locality and fewer memory bottlenecks.
+
+---
+
+### 4. Low-Rank Decomposition
+**Question**: You approximate a (512, 256) weight matrix with rank 64 using SVD.
+
+**Calculate**:
+- Original parameter count: _____ parameters
+- Decomposed parameter count: (512 x 64) + 64 + (64 x 256) = _____ parameters
+- Compression ratio: _____x
+- At what rank does compression become ineffective? rank > _____
+
+**Trade-offs to consider**: Reconstruction error vs. compression ratio, and the overhead of two matrix multiplications vs. one.
+
+---
+
+### 5. Pruning Strategy Selection
+**Question**: For deploying on a mobile device with 50MB model limit and 100ms latency requirement:
+
+**Consider**:
+- Which pruning strategy optimizes for memory? [magnitude/structured/both]
+- Which pruning strategy optimizes for speed? [magnitude/structured/both]
+- What order should you apply compression techniques?
+
+**Real-world context**: Mobile devices have limited memory bandwidth, making structured sparsity more beneficial for latency.
+"""
 
 # %% [markdown]
 """

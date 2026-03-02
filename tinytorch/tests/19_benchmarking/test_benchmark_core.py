@@ -14,7 +14,7 @@ If benchmarking is broken:
 
 WHAT WE TEST:
 -------------
-1. TinyMLPerf can run benchmarks
+1. MLPerf can run benchmarks
 2. Metrics are computed correctly
 3. Results are reproducible
 """
@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
-from tinytorch.perf.benchmarking import Benchmark, TinyMLPerf
+from tinytorch.perf.benchmarking import Benchmark, MLPerf
 
 
 class TestBenchmarkBasics:
@@ -37,7 +37,7 @@ class TestBenchmarkBasics:
     def test_benchmark_import(self):
         """Verify Benchmark can be imported."""
         assert Benchmark is not None
-        assert TinyMLPerf is not None
+        assert MLPerf is not None
 
     def test_benchmark_can_instantiate(self):
         """Verify Benchmark can be created."""
@@ -80,17 +80,17 @@ class TestBenchmarkBasics:
             )
 
 
-class TestTinyMLPerf:
-    """Test TinyMLPerf benchmark suite."""
+class TestMLPerf:
+    """Test MLPerf benchmark suite."""
 
-    def test_tiny_mlperf_can_run(self):
+    def test_mlperf_can_run(self):
         """
-        WHAT: Verify TinyMLPerf benchmark suite can execute.
+        WHAT: Verify MLPerf benchmark suite can execute.
 
         WHY: This is the capstone benchmarking tool students build.
         """
         # Create and run minimal benchmark
-        mlperf = TinyMLPerf()
+        mlperf = MLPerf()
 
         # Should at least be able to list available benchmarks
         if hasattr(mlperf, 'list_benchmarks'):

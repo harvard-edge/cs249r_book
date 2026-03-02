@@ -261,6 +261,7 @@ tito milestone run 03
  Module 05 - complete
  Module 06 - complete
  Module 07 - complete
+ Module 08 - complete
 
  All prerequisites met!
 ```
@@ -282,13 +283,13 @@ You'll see a helpful error:
 ```bash
  Missing Required Modules
 
-Milestone 03 requires modules: 01, 02, 03, 04, 05, 06, 07
-Missing: 05, 06, 07
+Milestone 03 requires modules: 01, 02, 03, 04, 05, 06, 07, 08
+Missing: 06, 07, 08
 
 Complete the missing modules first:
- tito module start 05
  tito module start 06
  tito module start 07
+ tito module start 08
 ```
 
 ## Achievement Celebration
@@ -315,7 +316,7 @@ Achievement saved to your progress!
 
  What's Next:
 Milestone 04: CNN Revolution (1998)
-Unlock by completing modules: 08, 09
+Unlock by completing module: 09
 ```
 
 ## Understanding Your Progress
