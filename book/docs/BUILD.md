@@ -52,7 +52,7 @@ By default, Quarto can build the HTML version pretty easily. But **building the 
 
 | Tool | Why It's Needed | Version |
 |------|------------------|---------|
-| **Quarto** | The core tool that converts the `.qmd` files into HTML/PDF | 1.7.31+ |
+| **Quarto** | The core tool that converts the `.qmd` files into HTML/PDF | 1.9.27+ |
 | **Python** | Required for Book Binder CLI and build scripts | 3.9+ |
 | **Python packages** | Dependencies (see `tools/dependencies/requirements.txt`) | See below |
 | **R** | Some chapters include R code chunks and R-based plots | 4.0+ |
@@ -98,8 +98,8 @@ For the complete list, see `tools/dependencies/requirements.txt` and `pyproject.
 Quarto is what drives the entire build process.
 
 ```sh
-wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb
-sudo dpkg -i quarto-1.7.31-linux-amd64.deb
+wget https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-amd64.deb
+sudo dpkg -i quarto-1.9.27-linux-amd64.deb
 ```
 
 Test it with:

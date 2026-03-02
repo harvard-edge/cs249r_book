@@ -6,10 +6,10 @@ This directory contains the Windows Server 2022 container configuration for buil
 
 - **Base Image**: Windows Server 2022 LTSC
 - **PowerShell**: 7.4.1 (ZIP install, container-safe)
-- **Quarto**: 1.7.31 (ZIP install)
+- **Quarto**: 1.9.27 (Scoop)
 - **Python**: 3.13.1 + production dependencies
 - **TeX Live**: 2025 snapshot with required packages
-- **R**: 4.3.2 + R Markdown packages
+- **R**: 4.5.2 + R Markdown packages
 - **Graphics**: Ghostscript + Inkscape (via Chocolatey)
 
 ## 🔧 Key Fixes Applied
@@ -69,7 +69,7 @@ This workflow is triggered manually or on a weekly schedule.
 6. **Python**: 3.13.1 + production requirements
 7. **Graphics**: Ghostscript + Inkscape
 8. **TeX Live**: 2025 snapshot + packages
-9. **R**: 4.3.2 + R Markdown packages
+9. **R**: 4.5.2 + R Markdown packages
 10. **Cleanup**: Remove temporary files
 
 ## 🔍 Verification Steps

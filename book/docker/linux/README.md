@@ -21,7 +21,7 @@ docker/quarto-build/
 - **TeX Live**: Full distribution (texlive-full)
 - **R**: R-base with all required packages
 - **Python**: Python 3.13 with all requirements
-- **Quarto**: Version 1.7.31
+- **Quarto**: Version 1.9.27
 - **Tools**: Inkscape, Ghostscript, fonts
 - **Dependencies**: All from `tools/dependencies/`
 
@@ -94,7 +94,7 @@ The container reduces build times significantly:
 
 1. **System Dependencies** - Core Ubuntu packages and libraries
 2. **Inkscape Installation** - SVG to PDF conversion capability
-3. **Quarto Installation** - Latest Quarto CLI (v1.7.31)
+3. **Quarto Installation** - Latest Quarto CLI (v1.9.27)
 4. **TeX Live Installation** - Complete LaTeX distribution
 5. **Ghostscript Installation** - PDF processing capabilities
 6. **R Installation** - R base and development packages

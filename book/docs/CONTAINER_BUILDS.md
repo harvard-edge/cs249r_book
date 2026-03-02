@@ -97,7 +97,7 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 - **TeX Live**: Full distribution (texlive-full)
 - **R**: R-base with all required packages
 - **Python**: Python 3.13 with all requirements
-- **Quarto**: Version 1.7.31
+- **Quarto**: Version 1.9.27
 - **Tools**: Inkscape, Ghostscript, fonts
 
 #### Windows Container
@@ -105,7 +105,7 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 - **TeX Live**: MiKTeX distribution
 - **R**: R-base with all required packages
 - **Python**: Python 3.x with all requirements
-- **Quarto**: Version 1.7.31
+- **Quarto**: Version 1.9.27
 - **Tools**: Inkscape, Ghostscript, Chocolatey package manager
 
 ### Environment Variables

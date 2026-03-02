@@ -418,17 +418,23 @@ RUN echo "🔄 Verifying TeX Live installation..." && \
     fi && \
     echo "✅ TeX Live verification complete (allowing partial failures)"
 
-# === PHASE 6: R INSTALLATION ===
+# === PHASE 6: R INSTALLATION (R 4.5 from CRAN) ===
 RUN echo "🚀 === STARTING R INSTALLATION ===" && \
     echo "⏰ Estimated time: 1-2 minutes" && \
     start_time=$(date +%s) && \
+    \
+    echo "📦 Adding CRAN repository for R 4.5..." && \
+    apt-get update && apt-get install -y --no-install-recommends software-properties-common dirmngr && \
+    wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc > /dev/null && \
+    add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu jammy-cran40/" && \
+    apt-get update && \
     \
     echo "📦 Installing R and development packages..." && \
     echo "📋 R packages:" && \
     echo "  - r-base" && \
     echo "  - r-base-dev" && \
     echo "  - r-recommended" && \
-    apt-get update && apt-get install -y \
+    apt-get install -y --no-install-recommends \
     r-base \
     r-base-dev \
     r-recommended && \
@@ -526,18 +532,18 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "⏰ Estimated time: 1 minute" && \
     start_time=$(date +%s) && \
     \
-    echo "📦 Downloading Quarto 1.7.31..." && \
-    wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.7.31/quarto-1.7.31-linux-amd64.deb && \
+    echo "📦 Downloading Quarto 1.9.27..." && \
+    wget -q https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-linux-amd64.deb && \
     if [ $? -ne 0 ]; then \
         echo "❌ Failed to download Quarto"; \
         exit 1; \
     fi && \
     echo "📥 Download completed" && \
     echo "📊 Downloaded file size:" && \
-    ls -lh quarto-1.7.31-linux-amd64.deb && \
+    ls -lh quarto-1.9.27-linux-amd64.deb && \
     \
     echo "📦 Installing Quarto..." && \
-    dpkg -i quarto-1.7.31-linux-amd64.deb && \
+    dpkg -i quarto-1.9.27-linux-amd64.deb && \
     if [ $? -ne 0 ]; then \
         echo "❌ Failed to install Quarto"; \
         exit 1; \
@@ -545,7 +551,7 @@ RUN echo "🚀 === STARTING QUARTO INSTALLATION ===" && \
     echo "📦 Quarto installed" && \
     \
     echo "🧹 Cleaning up installer..." && \
-    rm quarto-1.7.31-linux-amd64.deb && \
+    rm quarto-1.9.27-linux-amd64.deb && \
     echo "🧹 Installer cleaned up" && \
     \
     end_time=$(date +%s) && \

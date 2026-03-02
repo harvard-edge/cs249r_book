@@ -1,11 +1,11 @@
 # escape=`
 # MLSysBook Windows Quarto Build Container (Windows Server 2022)
 # - PowerShell 7 via ZIP (no MSI)
-# - Quarto 1.7.31 via ZIP (no MSI)
+# - Quarto 1.9.27 via Scoop
 # - Python 3.13.1 + requirements
 # - Ghostscript + Inkscape (Chocolatey)
 # - TeX Live 2025.20251008.0+ (pinned version fixes install-tl.zip issue) + packages from tl_packages
-# - R 4.3.2 + packages via install_packages.R
+# - R 4.5.2 + packages via install_packages.R
 # - Verifications: versions, kpsewhich font files, TikZ smoke test
 
 FROM mcr.microsoft.com/windows/server:ltsc2022
@@ -196,12 +196,19 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
 
 # ------------------------------------------------------------
 # PHASE 6: Install Quarto (Main tool)
+# Scoop Extras has 1.8.27; we need 1.9.27, so install via direct download
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
-    Write-Host 'Installing Quarto via Scoop...' ; `
-    scoop install quarto ; `
+    Write-Host 'Downloading Quarto 1.9.27 (not yet in Scoop Extras)...' ; `
+    $quartoZip = 'C:\temp\quarto-1.9.27-win.zip' ; `
+    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-win.zip' -OutFile $quartoZip -UseBasicParsing ; `
+    Expand-Archive -Path $quartoZip -DestinationPath 'C:\' -Force ; `
+    $quartoBin = 'C:\quarto-1.9.27\bin' ; `
+    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ($quartoBin + ';' + $mach), 'Machine') ; `
+    $env:PATH = "$quartoBin;$env:PATH" ; `
+    Remove-Item $quartoZip -Force ; `
     Write-Host '📦 Quarto installed' ; `
-    Write-Host 'Verifying Quarto installation...' ; `
     quarto --version ; `
     Write-Host '✅ Quarto installation completed!'
 
@@ -267,9 +274,8 @@ RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
 # PHASE 12: Install R (Medium complexity)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
-    Write-Host 'Installing R via Scoop (same as quarto-build workflow)...' ; `
-    Write-Host 'Installing R from main bucket...' ; `
-    scoop install main/r ; `
+    Write-Host 'Installing R 4.5.2 via Scoop (main bucket)...' ; `
+    scoop install main/r@4.5.2 ; `
     Write-Host '📦 R installed' ; `
     Write-Host 'Verifying R installation...' ; `
     R --version ; `

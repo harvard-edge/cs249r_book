@@ -8,7 +8,7 @@
 required_packages <- c(
   "downlit",    # Required for code linking in Quarto
   "ggplot2",    # Visualization package
-  "ggrepel",    # Visualization package
+  "ggrepel",    # Visualization package (pinned below for R < 4.5)
   "knitr",      # Needed for Quarto rendering
   "png",        # PNG support
   "rmarkdown",  # Markdown rendering in R
