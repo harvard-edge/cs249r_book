@@ -63,7 +63,7 @@ REVIEW CHECKLIST — evaluate every item and report findings organized by catego
 - Are terms used consistently? (e.g., don't switch between "inference" and
   "prediction" without reason)
 - Is notation consistent with the notation guide in
-  contents/vol1/frontmatter/notation.qmd?
+  contents/shared/notation.qmd?
 
 ## D. Narrative Flow & Structure
 - Does the chapter opening ("Purpose" section) accurately preview what follows?
@@ -633,7 +633,7 @@ READ THESE FILES:
 1. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/config/_quarto-pdf-vol1.yml (full file)
 2. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/parts/summaries.yml
 3. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/index.qmd
-4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/frontmatter/notation.qmd
+4. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/shared/notation.qmd
 5. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/contents/vol1/backmatter/glossary/glossary.qmd
 6. /Users/VJ/GitHub/mlsysbook-vols/book/quarto/tex/header-includes.tex
 

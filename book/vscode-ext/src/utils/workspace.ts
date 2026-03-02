@@ -27,14 +27,16 @@ export function getRepoRoot(): string | undefined {
     }
   }
 
-  return folders[0].uri.fsPath;
+  // No book/binder found — do not return a root. Extension will bail early.
+  return undefined;
 }
 
 export function parseQmdFile(uri: vscode.Uri): QmdFileContext | undefined {
-  const match = uri.fsPath.match(/contents\/(vol[12])\/([^/]+)\//);
+  const match = uri.fsPath.match(/contents\/(vol[12])\/(.+)\.qmd$/i);
   if (!match) { return undefined; }
+  const stem = match[2].split(/[/\\]/).pop() ?? '';
   return {
     volume: match[1] as VolumeId,
-    chapter: match[2],
+    chapter: stem,
   };
 }

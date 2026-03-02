@@ -39,6 +39,7 @@ scripts/
 - `content/manage_section_ids.py` - Manage `@sec-` cross-reference IDs
 
 ### Validation
+- **Reference check** — `./book/binder validate references` (native CLI; validates .bib vs academic DBs via [hallucinator](https://github.com/gianlucasb/hallucinator)). See [README_REFERENCE_CHECK.md](README_REFERENCE_CHECK.md).
 - `content/check_duplicate_labels.py` - Find duplicate labels
 - `content/check_fig_references.py` - Validate figure references
 - `content/check_unreferenced_labels.py` - Find unused labels

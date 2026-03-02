@@ -143,12 +143,11 @@ on:
           - 'yes'
         default: 'no'
       deploy_target:
-        description: 'Deploy target (combined=book only, vol1, vol2, all=everything)'
+        description: 'Deploy target (vol1, vol2, all=everything)'
         required: false
         type: choice
         options:
           - 'all'
-          - 'combined'
           - 'vol1'
           - 'vol2'
         default: 'all'
@@ -762,7 +761,7 @@ jobs:
       build_html: true     # HTML + PDF + EPUB for production
       build_pdf: true
       build_epub: true
-      build_target: ${{ github.event.inputs.deploy_target || 'all' }}
+      build_target: all
       target: main
       container_registry: 'ghcr.io'
       container_tag: 'latest'
@@ -847,54 +846,15 @@ jobs:
       - name: 🔍 Validate API Contract
         run: |
           echo "🔍 Validating artifact names from API..."
-
-          HTML_ARTIFACT="${{ needs.call-production-build.outputs.linux_html_artifact }}"
-          PDF_ARTIFACT="${{ needs.call-production-build.outputs.linux_pdf_artifact }}"
-          EPUB_ARTIFACT="${{ needs.call-production-build.outputs.linux_epub_artifact }}"
-
-          echo "📄 HTML artifact name: '$HTML_ARTIFACT'"
-          echo "📑 PDF artifact name: '$PDF_ARTIFACT'"
-          echo "📚 EPUB artifact name: '$EPUB_ARTIFACT'"
-
-          # Fail explicitly if API didn't provide artifact names
-          if [ -z "$HTML_ARTIFACT" ]; then
-            echo "❌ CRITICAL: HTML artifact name not provided by build workflow API!"
-            echo "🔧 This indicates the workflow output contract is broken."
+          VOL1_HTML="${{ needs.call-production-build.outputs.linux_html_vol1_artifact }}"
+          VOL2_HTML="${{ needs.call-production-build.outputs.linux_html_vol2_artifact }}"
+          echo "📘 Vol1 HTML artifact: '$VOL1_HTML'"
+          echo "📙 Vol2 HTML artifact: '$VOL2_HTML'"
+          if [ -z "$VOL1_HTML" ] || [ -z "$VOL2_HTML" ]; then
+            echo "❌ CRITICAL: Volume artifact names missing from build workflow outputs"
             exit 1
           fi
-
-          if [ -z "$PDF_ARTIFACT" ]; then
-            echo "❌ CRITICAL: PDF artifact name not provided by build workflow API!"
-            echo "🔧 This indicates the workflow output contract is broken."
-            exit 1
-          fi
-
-          if [ -z "$EPUB_ARTIFACT" ]; then
-            echo "❌ CRITICAL: EPUB artifact name not provided by build workflow API!"
-            echo "🔧 This indicates the workflow output contract is broken."
-            exit 1
-          fi
-
-          echo "✅ API contract validated - all artifact names provided"
-
-      - name: 📦 Download HTML Artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.call-production-build.outputs.linux_html_artifact }}
-          path: ./html-temp
-
-      - name: 📦 Download PDF Artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.call-production-build.outputs.linux_pdf_artifact }}
-          path: ./pdf-temp
-
-      - name: 📦 Download EPUB Artifacts
-        uses: actions/download-artifact@v7
-        with:
-          name: ${{ needs.call-production-build.outputs.linux_epub_artifact }}
-          path: ./epub-temp
-        continue-on-error: true
+          echo "✅ API contract validated for volume artifacts"
 
       # =================================================================
       # Volume I Artifacts (when deploy_target is vol1 or all)
@@ -953,119 +913,9 @@ jobs:
       - name: 📋 Verify Downloaded Artifacts
         run: |
           echo "📦 Verifying downloaded artifacts..."
-
-          # Find HTML build directory - check if html-temp has content
-          if [ ! -d "html-temp" ] || [ -z "$(ls -A html-temp 2>/dev/null)" ]; then
-            echo "❌ HTML build directory not found or empty!"
-            echo "📊 HTML artifact contents:"
-            find html-temp -type f -o -type d | head -20
+          if [ ! -d "html-vol1-temp" ] || [ ! -d "html-vol2-temp" ]; then
+            echo "❌ Required volume HTML artifacts were not downloaded."
             exit 1
-          fi
-
-          # Look for the actual HTML build structure
-          HTML_BUILD_DIR="html-temp"
-          if [ -d "html-temp/html" ]; then
-            HTML_BUILD_DIR="html-temp/html"
-            echo "✅ HTML build found in subdirectory: $HTML_BUILD_DIR"
-          else
-            echo "✅ HTML build found at root level: $HTML_BUILD_DIR"
-          fi
-
-          echo "📊 HTML structure preview:"
-          ls -la "$HTML_BUILD_DIR" | head -5
-
-          # Find PDF file
-          PDF_FILE=$(find pdf-temp -name "Machine-Learning-Systems.pdf" -type f | head -1)
-          if [ -z "$PDF_FILE" ] || [ ! -f "$PDF_FILE" ]; then
-            echo "❌ PDF file not found in extracted artifacts!"
-            echo "📊 PDF artifact contents:"
-            find pdf-temp -type f -o -type d | head -20
-            exit 1
-          fi
-
-          echo "✅ PDF found: $PDF_FILE"
-          echo "📊 PDF size: $(du -h "$PDF_FILE" | cut -f1)"
-
-          # Find EPUB file if available
-          EPUB_FILE=""
-          if [ -d "epub-temp" ]; then
-            EPUB_FILE=$(find epub-temp -name "Machine-Learning-Systems.epub" -type f | head -1)
-            if [ -z "$EPUB_FILE" ] || [ ! -f "$EPUB_FILE" ]; then
-              # Try alternative EPUB filenames
-              EPUB_FILE=$(find epub-temp -name "*.epub" -type f | head -1)
-              if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
-                echo "✅ EPUB found (alternative name): $EPUB_FILE"
-                echo "📊 EPUB size: $(du -h "$EPUB_FILE" | cut -f1)"
-              else
-                echo "⚠️ EPUB file not found in extracted artifacts - will skip EPUB deployment"
-                EPUB_FILE=""
-              fi
-            else
-              echo "✅ EPUB found: $EPUB_FILE"
-              echo "📊 EPUB size: $(du -h "$EPUB_FILE" | cut -f1)"
-            fi
-          else
-            echo "⚠️ No EPUB artifact extracted - will skip EPUB deployment"
-          fi
-
-          # Prepare combined site
-          echo "🔄 Preparing combined HTML site with PDF and EPUB..."
-          mkdir -p combined-site
-
-          # Copy HTML content
-          cp -r "$HTML_BUILD_DIR"/* combined-site/
-
-          # Create assets and downloads directories
-          mkdir -p combined-site/assets/downloads
-
-          # Copy PDF if available
-          if [ -n "$PDF_FILE" ] && [ -f "$PDF_FILE" ]; then
-            PDF_SIZE_MB=$(du -m "$PDF_FILE" | cut -f1)
-            echo "📊 PDF size: ${PDF_SIZE_MB}MB"
-
-            # Deploy PDF to both GitHub Pages and GitHub Release
-            cp "$PDF_FILE" combined-site/assets/downloads/Machine-Learning-Systems.pdf
-            echo "✅ PDF deployed to GitHub Pages (${PDF_SIZE_MB}MB)"
-
-            # Also copy PDF for GitHub release
-            cp "$PDF_FILE" "Machine-Learning-Systems.pdf"
-            echo "✅ PDF prepared for release"
-          else
-            echo "❌ PDF file not found - skipping PDF deployment"
-          fi
-
-          # Copy EPUB if available
-          if [ -n "$EPUB_FILE" ] && [ -f "$EPUB_FILE" ]; then
-            EPUB_SIZE_MB=$(du -m "$EPUB_FILE" | cut -f1)
-            echo "📊 EPUB size: ${EPUB_SIZE_MB}MB"
-
-            # Deploy EPUB to both GitHub Pages and GitHub Release
-            cp "$EPUB_FILE" combined-site/assets/downloads/Machine-Learning-Systems.epub
-            echo "✅ EPUB deployed to GitHub Pages (${EPUB_SIZE_MB}MB)"
-
-            # Also copy EPUB for GitHub release
-            cp "$EPUB_FILE" "Machine-Learning-Systems.epub"
-            echo "✅ EPUB prepared for release"
-          else
-            echo "❌ EPUB file not found - skipping EPUB deployment"
-          fi
-
-          echo "📊 Combined site structure:"
-          ls -la combined-site/ | head -10
-          echo "📊 Assets directory:"
-          ls -la combined-site/assets/
-
-          # Summary of what was prepared
-          echo "📋 Asset preparation complete:"
-          if [ -f "Machine-Learning-Systems.pdf" ]; then
-            echo "  ✅ PDF: Ready for deployment"
-          else
-            echo "  ❌ PDF: Not available"
-          fi
-          if [ -f "Machine-Learning-Systems.epub" ]; then
-            echo "  ✅ EPUB: Ready for deployment"
-          else
-            echo "  ❌ EPUB: Not available"
           fi
 
           # =================================================================
@@ -1166,9 +1016,8 @@ jobs:
           # =================================================================
           # Each subsite has its own directory:
           #   /           - Landing page (AI Engineering)
-          #   /book/      - Combined textbook (Vol I + II)
-          #   /vol1/      - Volume I standalone
-          #   /vol2/      - Volume II standalone
+          #   /book/vol1/ - Volume I
+          #   /book/vol2/ - Volume II
           #   /tinytorch/ - TinyTorch framework
           #   /kits/      - Hardware Kits
           #   /labs/      - Labs
@@ -1187,41 +1036,30 @@ jobs:
           echo "✅ Stale files removed"
 
           # =================================================================
-          # Deploy Combined Book to /book/ (if target is combined or all)
-          # =================================================================
-          if [[ "$DEPLOY_TARGET" == "combined" || "$DEPLOY_TARGET" == "all" ]]; then
-            echo "📦 Deploying combined textbook to /book/..."
-            rm -rf book/
-            mkdir -p book
-            cp -r ../combined-site/* book/
-            echo "✅ Combined textbook deployed to /book/"
-          fi
-
-          # =================================================================
-          # Deploy Volume I to /vol1/ (if target is vol1 or all)
+          # Deploy Volume I to /book/vol1/ (if target is vol1 or all)
           # =================================================================
           if [[ "$DEPLOY_TARGET" == "vol1" || "$DEPLOY_TARGET" == "all" ]]; then
             if [ -d "../vol1-site" ]; then
-              echo "📦 Deploying Volume I to /vol1/..."
-              rm -rf vol1/
-              mkdir -p vol1
-              cp -r ../vol1-site/* vol1/
-              echo "✅ Volume I deployed to /vol1/"
+              echo "📦 Deploying Volume I to /book/vol1/..."
+              rm -rf book/vol1/
+              mkdir -p book/vol1
+              cp -r ../vol1-site/* book/vol1/
+              echo "✅ Volume I deployed to /book/vol1/"
             else
               echo "⚠️ Volume I site not found - skipping"
             fi
           fi
 
           # =================================================================
-          # Deploy Volume II to /vol2/ (if target is vol2 or all)
+          # Deploy Volume II to /book/vol2/ (if target is vol2 or all)
           # =================================================================
           if [[ "$DEPLOY_TARGET" == "vol2" || "$DEPLOY_TARGET" == "all" ]]; then
             if [ -d "../vol2-site" ]; then
-              echo "📦 Deploying Volume II to /vol2/..."
-              rm -rf vol2/
-              mkdir -p vol2
-              cp -r ../vol2-site/* vol2/
-              echo "✅ Volume II deployed to /vol2/"
+              echo "📦 Deploying Volume II to /book/vol2/..."
+              rm -rf book/vol2/
+              mkdir -p book/vol2
+              cp -r ../vol2-site/* book/vol2/
+              echo "✅ Volume II deployed to /book/vol2/"
             else
               echo "⚠️ Volume II site not found - skipping"
             fi
@@ -1237,14 +1075,14 @@ jobs:
               cp ../landing-page/logo.png . 2>/dev/null || true
               echo "✅ Landing page deployed to root"
             else
-              echo "⚠️ Landing page not found - creating redirect to /book/"
-              echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/"><link rel="canonical" href="https://mlsysbook.ai/book/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/">ML Systems</a>...</p></body></html>' > index.html
+              echo "⚠️ Landing page not found - creating redirect to /book/vol1/"
+              echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/vol1/"><link rel="canonical" href="https://mlsysbook.ai/book/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/vol1/">ML Systems Volume I</a>...</p></body></html>' > index.html
             fi
           else
             # For non-all deployments, keep existing root or create redirect
             if [ ! -f "index.html" ]; then
-              echo "📦 Creating root redirect to /book/..."
-              echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/"><link rel="canonical" href="https://mlsysbook.ai/book/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/">ML Systems</a>...</p></body></html>' > index.html
+              echo "📦 Creating root redirect to /book/vol1/..."
+              echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="refresh" content="0;url=/book/vol1/"><link rel="canonical" href="https://mlsysbook.ai/book/vol1/"><title>Redirecting...</title></head><body><p>Redirecting to <a href="/book/vol1/">ML Systems Volume I</a>...</p></body></html>' > index.html
             fi
           fi
 

@@ -101,7 +101,13 @@ CHAPTER_MAPPING = {
     "sec-image-classification-overview-3e02": "contents/labs/raspi/image_classification/image_classification.html#sec-image-classification-overview-3e02",
     "sec-object-detection-overview-1133": "contents/labs/raspi/object_detection/object_detection.html#sec-object-detection-overview-1133",
     "sec-small-language-models-slm-overview-ef83": "contents/labs/raspi/llm/llm.html#sec-small-language-models-slm-overview-ef83",
-    "sec-visionlanguage-models-vlm-introduction-4272": "contents/labs/raspi/vlm/vlm.html#sec-visionlanguage-models-vlm-introduction-4272"
+    "sec-visionlanguage-models-vlm-introduction-4272": "contents/labs/raspi/vlm/vlm.html#sec-visionlanguage-models-vlm-introduction-4272",
+
+    # Principle refs (Vol1 part intros)
+    "pri-data-as-code": "contents/vol1/parts/foundations_principles.html#pri-data-as-code",
+    "pri-data-gravity": "contents/vol1/parts/foundations_principles.html#pri-data-gravity",
+    "pri-iron-law": "contents/vol1/parts/build_principles.html#pri-iron-law",
+    "pri-silicon-contract": "contents/vol1/parts/build_principles.html#pri-silicon-contract",
 }
 
 # Chapter titles for readable link text
@@ -158,7 +164,13 @@ CHAPTER_TITLES = {
     "sec-image-classification-overview-3e02": "Image Classification",
     "sec-object-detection-overview-1133": "Object Detection",
     "sec-small-language-models-slm-overview-ef83": "Small Language Models",
-    "sec-visionlanguage-models-vlm-introduction-4272": "Visual-Language Models"
+    "sec-visionlanguage-models-vlm-introduction-4272": "Visual-Language Models",
+
+    # Principle refs (Vol1 part intros)
+    "pri-data-as-code": "Principle 1: The Data as Code Invariant",
+    "pri-data-gravity": "Principle 2: The Data Gravity Invariant",
+    "pri-iron-law": "Principle 3: The Iron Law of ML Systems",
+    "pri-silicon-contract": "Principle 4: The Silicon Contract",
 }
 
 def build_epub_section_mapping(epub_dir):
@@ -304,9 +316,9 @@ def fix_cross_references(html_content, from_file, build_dir, epub_mapping=None, 
     pattern1 = r'<a href="#(sec-[a-zA-Z0-9-]+)" class="quarto-xref"><span class="quarto-unresolved-ref">[^<]*</span></a>'
 
     # Pattern 2: Match simple unresolved references (what we see in selective builds)
-    # Example: <strong>?@sec-ml-systems</strong>
+    # Example: <strong>?@sec-ml-systems</strong> or <strong>?@pri-data-as-code</strong>
     # This is what Quarto outputs when it can't resolve a reference to an unbuilt chapter
-    pattern2 = r'<strong>\?\@(sec-[a-zA-Z0-9-]+)</strong>'
+    pattern2 = r'<strong>\?\@(sec-[a-zA-Z0-9-]+|pri-[a-zA-Z0-9-]+)</strong>'
 
     # Pattern 3: Match EPUB-specific unresolved references
     # Example: <a href="@sec-xxx">Link Text</a>

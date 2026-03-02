@@ -38,16 +38,21 @@ class NavigatorSectionItem extends vscode.TreeItem {
     const listingCount = visibleEntries.filter(entry => entry.kind === 'listing').length;
     const figureCount = visibleEntries.filter(entry => entry.kind === 'figure').length;
     const tableCount = visibleEntries.filter(entry => entry.kind === 'table').length;
+    const equationCount = visibleEntries.filter(entry => entry.kind === 'equation').length;
     const counts: string[] = [];
     if (figureCount > 0) { counts.push(`${figureCount} fig`); }
     if (tableCount > 0) { counts.push(`${tableCount} tbl`); }
+    if (equationCount > 0) { counts.push(`${equationCount} eq`); }
     if (listingCount > 0) { counts.push(`${listingCount} code`); }
     const calloutCount = visibleEntries.filter(entry => entry.kind === 'callout').length;
     if (calloutCount > 0) { counts.push(`${calloutCount} callout`); }
     const countsText = counts.length > 0 ? ` · ${counts.join(' · ')}` : '';
     this.description = `${depthLabel} · L${section.line + 1} · ${entryCount} items${countsText}`;
     this.contextValue = 'navigator-section';
-    this.iconPath = new vscode.ThemeIcon(section.level === 0 ? 'note' : 'list-tree');
+    this.iconPath = new vscode.ThemeIcon(
+      section.level === 0 ? 'note' : 'list-tree',
+      new vscode.ThemeColor('descriptionForeground'),
+    );
     this.command = {
       command: 'mlsysbook.openNavigatorLocation',
       title: 'Open Section',
@@ -58,21 +63,31 @@ class NavigatorSectionItem extends vscode.TreeItem {
   readonly sectionId: string;
 }
 
+/** ThemeColor keys for colored entry icons (figures, tables, equations, callouts, listings). */
+const ENTRY_ICON_COLORS: Record<NavigatorEntryKind, string> = {
+  figure: 'charts.blue',
+  table: 'charts.purple',
+  listing: 'charts.green',
+  equation: 'charts.orange',
+  callout: 'charts.yellow',
+};
+
+const ENTRY_ICONS: Record<NavigatorEntryKind, string> = {
+  figure: 'symbol-field',
+  table: 'table',
+  listing: 'code',
+  equation: 'symbol-operator',
+  callout: 'comment-discussion',
+};
+
 class NavigatorEntryItem extends vscode.TreeItem {
   constructor(uri: vscode.Uri, entry: NavigatorEntry) {
     super(`${entry.id}  ·  L${entry.line + 1}`, vscode.TreeItemCollapsibleState.None);
     this.description = entry.preview;
     this.tooltip = `${entry.id}\n${entry.preview}`;
-    const icon = entry.kind === 'figure'
-      ? 'symbol-field'
-      : entry.kind === 'table'
-        ? 'table'
-        : entry.kind === 'listing'
-          ? 'code'
-          : entry.kind === 'equation'
-            ? 'symbol-operator'
-            : 'comment-discussion';
-    this.iconPath = new vscode.ThemeIcon(icon);
+    const iconId = ENTRY_ICONS[entry.kind];
+    const colorKey = ENTRY_ICON_COLORS[entry.kind];
+    this.iconPath = new vscode.ThemeIcon(iconId, new vscode.ThemeColor(colorKey));
     this.command = {
       command: 'mlsysbook.openNavigatorLocation',
       title: 'Open Location',
@@ -145,14 +160,15 @@ export class ChapterNavigatorProvider implements vscode.TreeDataProvider<TreeNod
   }
 
   private sectionHasVisibleContent(section: NavigatorSection): boolean {
+    // Show all heading levels (## and deeper) so the full outline is visible
+    if (section.level >= 2) {
+      return true;
+    }
     if (section.entries.some(entry => this.isEntryVisible(entry.kind))) {
       return true;
     }
-    for (const childId of section.childSectionIds) {
-      const child = this.sections.get(childId);
-      if (child && this.sectionHasVisibleContent(child)) {
-        return true;
-      }
+    if (section.childSectionIds.length > 0) {
+      return true;
     }
     return false;
   }

@@ -59,7 +59,7 @@ The following keys are defined in `quarto/contents/parts/summaries.yml`:
 | `vol1_development` | System Development | Part |
 | `vol1_optimization` | Model Optimization | Part |
 | `vol1_operations` | System Operations | Part |
-| `volume_2` | Volume II: Advanced Machine Learning Systems | Division |
+| `volume_2` | Volume II: Machine Learning Systems at Scale | Division |
 | `vol2_scale` | Foundations of Scale | Part |
 | `vol2_distributed` | Distributed Systems | Part |
 | `vol2_production` | Production Challenges | Part |

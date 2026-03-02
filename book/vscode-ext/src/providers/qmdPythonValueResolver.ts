@@ -73,7 +73,7 @@ function extractPythonBlocks(text: string): { source: string; hash: string } {
  * Extracts all inline `{python} var_name` references from a document.
  */
 export function extractInlineRefs(text: string): string[] {
-  const regex = /`\{python\}\s+(\w+)`/g;
+  const regex = /`\{python\}\s+(\w+(?:\.\w+)?)`/g;
   const vars: string[] = [];
   let match: RegExpExecArray | null;
   while ((match = regex.exec(text)) !== null) {

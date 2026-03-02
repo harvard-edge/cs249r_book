@@ -4,6 +4,7 @@ Build command implementation for MLSysBook CLI.
 Handles building chapters and full books in different formats (HTML, PDF, EPUB).
 """
 
+import os
 import platform
 import subprocess
 import signal
@@ -36,33 +37,21 @@ class BuildCommand:
     def _open_output(self, output_dir: Path, format_type: str) -> None:
         """Open the build output using the system's default application.
 
-        For PDF/EPUB: finds and opens the first matching file.
-        For HTML: opens index.html in the default browser.
-
-        Args:
-            output_dir: Path to the build output directory
-            format_type: Format type ('html', 'pdf', 'epub')
+        Uses shared rule: PDF = any .pdf, EPUB = any .epub, HTML = index.html.
+        Always prints a clickable "Output created:" line for Cursor/VSCode terminals.
         """
-        if not self.open_after:
-            return
-
-        target = None
-
-        if format_type == "pdf":
-            pdf_files = list(output_dir.glob("*.pdf"))
-            if pdf_files:
-                target = pdf_files[0]
-        elif format_type == "epub":
-            epub_files = list(output_dir.glob("*.epub"))
-            if epub_files:
-                target = epub_files[0]
-        elif format_type == "html":
-            index = output_dir / "index.html"
-            if index.exists():
-                target = index
+        from ..core.config import get_output_file
+        target = get_output_file(output_dir, format_type)
 
         if target is None:
-            console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
+            if self.open_after:
+                console.print(f"[yellow]⚠️  No {format_type.upper()} output found to open in {output_dir}/[/yellow]")
+            return
+
+        # Print absolute path — Cursor/VSCode terminals auto-linkify file paths
+        console.print(f"Output created: {target.resolve()}")
+
+        if not self.open_after:
             return
 
         console.print(f"[cyan]🔗 Opening {target.name}...[/cyan]")
@@ -278,6 +267,8 @@ class BuildCommand:
             # Auto-prefix chapter names with volume to disambiguate
             prefixed_chapters = []
             for ch in chapter_names:
+                # Normalize: strip .qmd extension so find_chapter_file gets a stem
+                ch = ch.removesuffix(".qmd")
                 # Only prefix if not already prefixed
                 if not ch.startswith(f"{volume}/"):
                     prefixed_chapters.append(f"{volume}/{ch}")
@@ -398,14 +389,14 @@ class BuildCommand:
         if not config_file.exists():
             console.print(f"[yellow]⚠️ Volume-specific config not found: {config_file}[/yellow]")
             console.print(f"[yellow]Falling back to chapter-based build...[/yellow]")
-            # Fallback to old behavior
-            chapter_files = self.chapter_discovery.get_volume_chapters(volume)
-            if not chapter_files:
+            # Fallback to config-ordered chapter list
+            chapter_stems = self.chapter_discovery.get_chapters_from_config(volume)
+            if not chapter_stems:
                 console.print(f"[red]No chapters found in {volume}[/red]")
                 return False
-            console.print(f"[dim]Found {len(chapter_files)} chapters in {volume}[/dim]")
+            console.print(f"[dim]Found {len(chapter_stems)} chapters in {volume}[/dim]")
             return self.build_chapters(
-                [f"{volume}/{ch.stem}" for ch in chapter_files],
+                [f"{volume}/{stem}" for stem in chapter_stems],
                 format_type
             )
 
@@ -483,6 +474,15 @@ class BuildCommand:
         Returns:
             True if command succeeded, False otherwise
         """
+        # Set up environment with PYTHONPATH including the project root
+        env = os.environ.copy()
+        root_dir = str(self.config_manager.root_dir.resolve())
+        current_pythonpath = env.get("PYTHONPATH", "")
+        if current_pythonpath:
+            env["PYTHONPATH"] = f"{root_dir}:{current_pythonpath}"
+        else:
+            env["PYTHONPATH"] = root_dir
+
         try:
             if self.verbose:
                 # Verbose mode: stream output in real-time
@@ -490,6 +490,7 @@ class BuildCommand:
                 process = subprocess.Popen(
                     cmd,
                     cwd=cwd,
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -521,6 +522,7 @@ class BuildCommand:
                     result = subprocess.run(
                         cmd,
                         cwd=cwd,
+                        env=env,
                         capture_output=True,
                         text=True,
                         timeout=1800  # 30 minute timeout

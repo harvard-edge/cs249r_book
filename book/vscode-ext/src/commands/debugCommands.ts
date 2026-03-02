@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { VolumeId } from '../types';
 import { getRepoRoot } from '../utils/workspace';
 import { discoverChapters } from '../utils/chapters';
 import { runInVisibleTerminal } from '../utils/terminal';
+import { showBuildManifest } from '../utils/buildManifest';
 import {
   cancelActiveDebugSession,
   getDebugSessionById,
@@ -68,6 +68,17 @@ async function runTestAllChapters(
   await context.workspaceState.update(STATE_LAST_PARALLEL_FORMAT, format);
 
   const allChapters = volume.chapters.map(ch => ch.name);
+
+  const parallelCmd = `./book/binder ${format} reset --${volumeId} && [parallel: ${workers} workers × ./book/binder build ${format} <chapter> --${volumeId} -v]`;
+  showBuildManifest({
+    repoRoot,
+    vol: volumeId,
+    format,
+    mode: 'parallel',
+    command: parallelCmd,
+    workers,
+  });
+
   vscode.window.showInformationMessage(
     `Testing ${allChapters.length} chapters (${format.toUpperCase()}, ${workers} workers)...`
   );
@@ -82,9 +93,9 @@ async function runTestAllChapters(
 }
 
 /**
- * Debug All Chapters (Sequential) — runs `./binder debug pdf --vol1` in a
- * visible terminal.  This builds each chapter one-by-one inside the current
- * repo (no worktrees), reports pass/fail, and binary-searches any failures.
+ * Debug All Chapters (Sequential) — runs `./book/binder debug pdf --vol1` in a
+ * visible terminal from repo root.  This builds each chapter one-by-one inside
+ * the current repo (no worktrees), reports pass/fail, and binary-searches any failures.
  */
 async function runDebugAllChapters(
   root: string,
@@ -102,9 +113,15 @@ async function runDebugAllChapters(
 
   await context.workspaceState.update(STATE_LAST_PARALLEL_VOLUME, selection.id);
 
-  const bookDir = path.join(root, 'book');
-  const cmd = `./binder debug pdf --${selection.id} -v`;
-  runInVisibleTerminal(cmd, bookDir, `Debug All Chapters (${selection.id})`);
+  const cmd = `./book/binder debug pdf --${selection.id} -v`;
+  showBuildManifest({
+    repoRoot: root,
+    vol: selection.id,
+    format: 'pdf',
+    mode: 'sequential',
+    command: cmd,
+  });
+  runInVisibleTerminal(cmd, root, `Debug All Chapters (${selection.id})`);
 }
 
 export function registerDebugCommands(context: vscode.ExtensionContext): void {

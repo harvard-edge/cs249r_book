@@ -26,6 +26,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+
 console = Console()
 
 # Path to section_splitter (in content scripts)
@@ -69,87 +70,31 @@ def _assimilate_legacy_debug_logs(book_dir: Path) -> List[Tuple[Path, Path]]:
     return migrated
 
 
-def _get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
-    """Read ordered chapter list from the PDF config file.
-
-    Extracts chapter names from the volume's PDF config, excluding
-    frontmatter, backmatter, parts, and other non-chapter files.
-    """
-    config_file = book_dir / "config" / f"_quarto-pdf-{volume}.yml"
-
-    if not config_file.exists():
-        return []
-
-    content = config_file.read_text()
-
-    # Match chapter paths like: - contents/vol1/training/training.qmd
-    # Also matches commented-out lines (# - contents/...)
-    pattern = rf'#?\s*-\s*contents/{volume}/[^/]+/([^/]+)\.qmd'
-
-    exclude = {
-        "index", "references", "glossary", "foreword", "about",
-        "acknowledgements", "foundations_principles", "build_principles",
-        "optimize_principles", "deploy_principles", "inference_principles",
-        "infrastructure_principles", "production_principles",
-        "responsible_principles", "scale_principles",
-    }
-
-    chapters = []
-    for match in re.finditer(pattern, content):
-        chapter = match.group(1)
-        if chapter not in chapters and chapter not in exclude:
-            chapters.append(chapter)
-
-    return chapters
-
-
-def _get_chapters_from_directory(book_dir: Path, volume: str) -> List[str]:
-    """Fallback: scan filesystem for chapter directories."""
-    contents_dir = book_dir / "contents" / volume
-
-    if not contents_dir.exists():
-        return []
-
-    exclude = {"parts", "frontmatter", "backmatter", "index", "glossary"}
-
-    chapters = []
-    for item in sorted(contents_dir.iterdir()):
-        if item.is_dir() and item.name not in exclude:
-            qmd_file = item / f"{item.name}.qmd"
-            if qmd_file.exists():
-                chapters.append(item.name)
-
-    return chapters
-
 
 def _find_chapter_qmd(book_dir: Path, chapter: str, volume: str) -> Path:
-    """Locate the .qmd file for a chapter."""
-    contents_dir = book_dir / "contents" / volume
-    for subdir in contents_dir.iterdir():
-        if subdir.is_dir():
-            qmd = subdir / f"{chapter}.qmd"
-            if qmd.exists():
-                return qmd
-    raise FileNotFoundError(f"Chapter '{chapter}' not found in {contents_dir}")
+    """Locate the .qmd file for a chapter.
 
-
-def _get_output_path(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
-    """Get the expected output file path for a build.
-
-    For PDF/EPUB, looks for any matching file in the output directory since
-    the filename depends on the book title configured in each volume's YAML.
+    Searches the volume directory first, then falls back to the shared
+    directory (e.g. contents/shared/notation.qmd).
     """
-    _TITLES = {
-        "vol1": "Introduction-to-Machine-Learning-Systems",
-        "vol2": "Advanced-Machine-Learning-Systems",
-    }
-    title = _TITLES.get(volume, "Machine-Learning-Systems")
-    if format_type == "pdf":
-        return book_dir / "_build" / f"pdf-{volume}" / f"{title}.pdf"
-    elif format_type == "epub":
-        return book_dir / "_build" / f"epub-{volume}" / f"{title}.epub"
-    elif format_type == "html":
-        return book_dir / "_build" / f"html-{volume}" / "index.html"
+    contents_dir = book_dir / "contents"
+    # Search volume dir and shared dir (covers frontmatter, parts, shared files)
+    for matches in [
+        list((contents_dir / volume).rglob(f"{chapter}.qmd")),
+        list((contents_dir / "shared").rglob(f"{chapter}.qmd")),
+    ]:
+        if matches:
+            return matches[0]
+    raise FileNotFoundError(
+        f"Chapter '{chapter}' not found under {contents_dir / volume} "
+        f"or {contents_dir / 'shared'}"
+    )
+
+
+def _get_output_dir(book_dir: Path, format_type: str, volume: str) -> Optional[Path]:
+    """Return the build output directory (same for all formats: PDF, EPUB, HTML)."""
+    if format_type in ("pdf", "epub", "html"):
+        return book_dir / "_build" / f"{format_type}-{volume}"
     return None
 
 
@@ -157,6 +102,48 @@ def _safe_artifact_stem(stem: str) -> str:
     """Convert arbitrary labels into filesystem-safe artifact names."""
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._")
     return cleaned or "artifact"
+
+
+def _print_step_result(success: bool, duration: float, warnings: List[str]) -> None:
+    """Print PASS/WARN status and any Quarto warnings for a build step."""
+    if warnings:
+        console.print(f"[yellow]WARN[/yellow] ({duration:.1f}s)")
+        for w in warnings:
+            console.print(f"         [yellow]⚠ {w}[/yellow]")
+    else:
+        console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+
+
+# Quarto warning patterns to surface even when the build succeeds.
+# Each entry is (pattern, human_label).
+_QUARTO_WARN_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    (
+        re.compile(r"Duplicate note reference '([^']+)'", re.IGNORECASE),
+        "Duplicate footnote reference",
+    ),
+    (
+        re.compile(r"The following string was found in the document: :::", re.IGNORECASE),
+        "Unclosed/stray fenced div (:::)",
+    ),
+]
+
+
+def _extract_quarto_warnings(output: str) -> List[str]:
+    """Scan build output for known Quarto warning patterns.
+
+    Returns a deduplicated list of human-readable warning strings.
+    """
+    found: List[str] = []
+    seen: set = set()
+    for pattern, label in _QUARTO_WARN_PATTERNS:
+        for m in pattern.finditer(output):
+            # Include the captured group (e.g., fn ID) if present
+            detail = m.group(1) if m.lastindex else ""
+            msg = f"{label}: {detail}" if detail else label
+            if msg not in seen:
+                seen.add(msg)
+                found.append(msg)
+    return found
 
 
 def _build_and_check(
@@ -168,11 +155,11 @@ def _build_and_check(
     verbose: bool = False,
     artifact_dir: Optional[Path] = None,
     artifact_stem: Optional[str] = None,
-) -> Tuple[bool, float, str]:
+) -> Tuple[bool, float, str, List[str]]:
     """Run a single chapter build and check if output was created.
 
     Returns:
-        (success, duration_seconds, error_snippet)
+        (success, duration_seconds, error_snippet, quarto_warnings)
     """
     cmd = [
         "./binder",
@@ -183,12 +170,17 @@ def _build_and_check(
         "-v",
     ]
 
-    output_path = _get_output_path(book_dir, format_type, volume)
+    output_dir = _get_output_dir(book_dir, format_type, volume)
+    if not output_dir:
+        log_file.write_text("Unknown format type\n")
+        return False, 0.0, "Unknown format type", []
 
-    # Delete previous output to ensure clean test
-    if output_path and output_path.exists():
+    # Delete previous output to ensure clean test (same rule: any .pdf, any .epub, index.html)
+    from ..core.config import get_output_file
+    existing = get_output_file(output_dir, format_type)
+    if existing is not None:
         try:
-            output_path.unlink()
+            existing.unlink()
         except Exception:
             pass
 
@@ -212,33 +204,37 @@ def _build_and_check(
         full_output += f"=== DURATION ===\n{duration:.1f}s\n"
         log_file.write_text(full_output)
 
-        if output_path and output_path.exists():
+        # Success = output file present (any .pdf, any .epub, or index.html)
+        resolved = get_output_file(output_dir, format_type)
+        combined = result.stdout + result.stderr
+        quarto_warnings = _extract_quarto_warnings(combined)
+
+        if resolved is not None and resolved.exists():
             if artifact_dir is not None:
                 try:
                     artifact_dir.mkdir(parents=True, exist_ok=True)
                     stem = _safe_artifact_stem(artifact_stem or chapter_name)
-                    ext = output_path.suffix or ".artifact"
-                    artifact_path = artifact_dir / f"{stem}{ext}"
-                    shutil.copy2(output_path, artifact_path)
+                    artifact_ext = resolved.suffix or ".artifact"
+                    artifact_path = artifact_dir / f"{stem}{artifact_ext}"
+                    shutil.copy2(resolved, artifact_path)
                     console.print(f"[dim]Saved debug artifact: {artifact_path}[/dim]")
                 except Exception as exc:
                     console.print(
                         f"[yellow]⚠️ Failed to save debug artifact for {chapter_name}: {exc}[/yellow]"
                     )
-            return True, duration, ""
+            return True, duration, "", quarto_warnings
         else:
-            combined = result.stdout + result.stderr
             error_lines = combined.strip().split("\n")[-20:]
-            return False, duration, "\n".join(error_lines)
+            return False, duration, "\n".join(error_lines), quarto_warnings
 
     except subprocess.TimeoutExpired:
         duration = time.time() - start
         log_file.write_text(f"TIMEOUT after {duration:.0f}s\nCommand: {' '.join(cmd)}")
-        return False, duration, "TIMEOUT: Build exceeded 10 minutes"
+        return False, duration, "TIMEOUT: Build exceeded 10 minutes", []
     except Exception as e:
         duration = time.time() - start
         log_file.write_text(f"EXCEPTION: {e}\nCommand: {' '.join(cmd)}")
-        return False, duration, f"EXCEPTION: {e}"
+        return False, duration, f"EXCEPTION: {e}", []
 
 
 class DebugCommand:
@@ -333,10 +329,7 @@ class DebugCommand:
         Returns:
             List of (chapter_name, error_snippet) for each failure
         """
-        chapters = _get_chapters_from_config(self.book_dir, volume)
-        if not chapters:
-            console.print("[yellow]Config not found, falling back to directory scan...[/yellow]")
-            chapters = _get_chapters_from_directory(self.book_dir, volume)
+        chapters = self.chapter_discovery.get_chapters_from_config(volume)
 
         if not chapters:
             console.print("[red]No chapters found.[/red]")
@@ -357,7 +350,7 @@ class DebugCommand:
             chapter_log_dir.mkdir(parents=True, exist_ok=True)
             log_file = chapter_log_dir / f"{chapter_name}.log"
 
-            success, duration, error = _build_and_check(
+            success, duration, error, warnings = _build_and_check(
                 self.book_dir,
                 chapter_name,
                 volume,
@@ -369,11 +362,19 @@ class DebugCommand:
             )
 
             if success:
-                console.print(f" [green]PASS[/green] ({duration:.1f}s)")
+                if warnings:
+                    console.print(f" [yellow]WARN[/yellow] ({duration:.1f}s)")
+                    for w in warnings:
+                        console.print(f"         [yellow]⚠ {w}[/yellow]")
+                else:
+                    console.print(f" [green]PASS[/green] ({duration:.1f}s)")
                 passed += 1
             else:
                 console.print(f" [red]FAIL[/red] ({duration:.1f}s)")
                 failures.append((chapter_name, error))
+                if warnings:
+                    for w in warnings:
+                        console.print(f"         [yellow]⚠ {w}[/yellow]")
                 if self.verbose and error:
                     for line in error.strip().split("\n")[-3:]:
                         console.print(f"         [dim]{line}[/dim]")
@@ -515,7 +516,7 @@ class DebugCommand:
         content = self._assemble_content(chapter, -1)
         qmd_path.write_text(content, encoding="utf-8")
         log_file = log_dir / "binary_preamble.log"
-        success, duration, _ = _build_and_check(
+        success, duration, _, warnings = _build_and_check(
             self.book_dir,
             chapter_name,
             volume,
@@ -528,14 +529,14 @@ class DebugCommand:
         if not success:
             console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
             return -1
-        console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+        _print_step_result(success, duration, warnings)
 
         # Step 2: Test full chapter (confirm it actually fails)
         console.print(f"  [dim][full][/dim] All {num_sections} sections", end="  ")
         content = self._assemble_content(chapter, num_sections - 1)
         qmd_path.write_text(content, encoding="utf-8")
         log_file = log_dir / "binary_full.log"
-        success, duration, _ = _build_and_check(
+        success, duration, _, warnings = _build_and_check(
             self.book_dir,
             chapter_name,
             volume,
@@ -546,9 +547,11 @@ class DebugCommand:
             artifact_stem="full",
         )
         if success:
-            console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+            _print_step_result(success, duration, warnings)
             return None
         console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
+        for w in warnings:
+            console.print(f"         [yellow]⚠ {w}[/yellow]")
 
         # Step 3: Binary search
         lo, hi = 0, num_sections - 1
@@ -565,7 +568,7 @@ class DebugCommand:
             content = self._assemble_content(chapter, mid)
             qmd_path.write_text(content, encoding="utf-8")
             log_file = log_dir / f"binary_step_{build_count:02d}_upto_{mid}.log"
-            success, duration, _ = _build_and_check(
+            success, duration, _, warnings = _build_and_check(
                 self.book_dir,
                 chapter_name,
                 volume,
@@ -577,10 +580,12 @@ class DebugCommand:
             )
 
             if success:
-                console.print(f"[green]PASS[/green] ({duration:.1f}s)")
+                _print_step_result(success, duration, warnings)
                 lo = mid + 1
             else:
                 console.print(f"[red]FAIL[/red] ({duration:.1f}s)")
+                for w in warnings:
+                    console.print(f"         [yellow]⚠ {w}[/yellow]")
                 hi = mid
 
         console.print(f"\n[dim]Isolated in {build_count} builds (binary search).[/dim]")

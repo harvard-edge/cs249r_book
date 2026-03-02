@@ -1,9 +1,9 @@
 # test_registry.py
-# Unit tests for the mlsys Hardware and Models registries.
+# Unit tests for the mlsysim Hardware and Models registries.
 
 import unittest
-from mlsys import Hardware, Models
-from mlsys.constants import ureg
+from mlsysim import Hardware, Models
+from mlsysim.constants import ureg
 
 class TestMLSysRegistry(unittest.TestCase):
     def test_hardware_ridge_points(self):
@@ -20,7 +20,7 @@ class TestMLSysRegistry(unittest.TestCase):
     def test_model_size(self):
         """Test model weight storage calculations."""
         gpt3 = Models.GPT3
-        from mlsys.constants import BYTES_FP16, BYTES_INT4
+        from mlsysim.constants import BYTES_FP16, BYTES_INT4
         
         # GPT-3 175B @ FP16 (2 bytes) = 350 GB
         size_fp16 = gpt3.size_in_bytes(BYTES_FP16)
@@ -32,8 +32,8 @@ class TestMLSysRegistry(unittest.TestCase):
 
     def test_assertions(self):
         """Test that unrealistic hardware/models trigger assertions."""
-        from mlsys.hardware import HardwareSpec
-        from mlsys.models import ModelSpec
+        from mlsysim.hardware import HardwareSpec
+        from mlsysim.models import ModelSpec
         
         # Non-positive bandwidth
         with self.assertRaises(AssertionError):

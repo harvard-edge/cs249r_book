@@ -74,6 +74,15 @@ function shouldRevealOnFailure(): boolean {
     .get<boolean>('revealTerminalOnFailure', true);
 }
 
+/**
+ * Shell-safe prefix so the command runs in the given directory. Reused terminals
+ * keep their previous cwd; prefixing with cd ensures the command runs in the
+ * intended directory (e.g. repo root for ./book/binder).
+ */
+function withCwd(cwd: string, command: string): string {
+  return `cd ${JSON.stringify(cwd)} && ${command}`;
+}
+
 function getOrCreateTerminal(cwd: string): vscode.Terminal {
   let terminal = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
   if (!terminal) {
@@ -155,6 +164,11 @@ function getLastFailure(): LastFailureState | undefined {
   return context.workspaceState.get<LastFailureState>(STATE_LAST_FAILURE_KEY);
 }
 
+/** Exposed so build manifest can append to the same channel without creating a duplicate. */
+export function getBuildChannel(): vscode.OutputChannel {
+  return getOutputChannel();
+}
+
 export function initializeRunManager(context: vscode.ExtensionContext): void {
   extensionContext = context;
   const savedRuns = context.workspaceState.get<CommandRunRecord[]>(STATE_COMMAND_HISTORY_KEY, []);
@@ -182,7 +196,7 @@ export async function runBookCommand(command: string, cwd: string, options: RunO
   if (mode === 'raw') {
     const terminal = getOrCreateTerminal(cwd);
     terminal.show(false);
-    terminal.sendText(command);
+    terminal.sendText(withCwd(cwd, command));
     getOutputChannel().appendLine(`[run ${runId}] RAW started: ${label}`);
     getOutputChannel().appendLine(`Command: ${command}`);
     return;
@@ -256,7 +270,7 @@ export async function runBookCommand(command: string, cwd: string, options: RunO
   if (selected === 'Reveal Terminal') {
     const terminal = getOrCreateTerminal(cwd);
     terminal.show(false);
-    terminal.sendText(`# Last failed command:\n${command}`);
+    terminal.sendText(`# Last failed command:\n${withCwd(cwd, command)}`);
     return;
   }
   if (selected === 'Rerun in Raw Terminal') {
@@ -275,7 +289,7 @@ export function runInTerminal(command: string, cwd: string): void {
 export function runInVisibleTerminal(command: string, cwd: string, label = 'MLSysBook command'): void {
   const terminal = getOrCreateTerminal(cwd);
   terminal.show(false);
-  terminal.sendText(command);
+  terminal.sendText(withCwd(cwd, command));
   recordCommandStart(command, cwd, label, 'raw');
   storeLastCommand({
     command,

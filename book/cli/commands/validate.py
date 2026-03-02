@@ -1,8 +1,10 @@
 """
 Native validation commands for MLSysBook Binder CLI.
 
-This module intentionally implements validation logic directly in Binder,
-without shelling out to legacy scripts under tools/scripts.
+Validation logic is implemented in Binder where possible (e.g. references,
+citations, labels, figures, rendering). Some checks still delegate to scripts
+under book/tools/scripts/ (tables, spelling, epub, sources, grid-tables,
+images). See book/cli/BINDER_NATIVE_AUDIT.md for the full list.
 """
 
 from __future__ import annotations
@@ -20,6 +22,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+
+from . import reference_check
 
 console = Console()
 
@@ -68,13 +72,16 @@ class ValidationRunResult:
         }
 
 
-INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+)`")
+INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+(?:\.\w+)?)`")
 CELL_START_PATTERN = re.compile(r"^```\{python\}|^```python")
 CELL_END_PATTERN = re.compile(r"^```\s*$")
 ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
+# Tuple unpacking: "a, b = ..." — captures all names on the left side
+TUPLE_ASSIGN_PATTERN = re.compile(r"^((?:[A-Za-z_]\w*\s*,\s*)+[A-Za-z_]\w*)\s*=")
+CLASS_DEF_PATTERN = re.compile(r"^class\s+(\w+)\s*[:(]")
 GRID_TABLE_SEP_PATTERN = re.compile(r"^\+[-:=+]+\+$")
-LATEX_INLINE_PATTERN = re.compile(r"(?<!\\)\$\s*`\{python\}\s+[^`]+`|`\{python\}\s+[^`]+`\s*(?<!\\)\$")
-LATEX_ADJACENT_PATTERN = re.compile(r"`\{python\}\s+[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$")
+LATEX_INLINE_PATTERN = re.compile(r"(?<!\\)\$\s*`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`|`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*(?<!\\)\$")
+LATEX_ADJACENT_PATTERN = re.compile(r"`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$")
 
 CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
@@ -101,7 +108,7 @@ LABEL_DEF_PATTERNS = {
 }
 LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
 
-EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-")
+EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-")
 
 
 class ValidateCommand:
@@ -148,6 +155,7 @@ class ValidateCommand:
         ],
         "rendering": [
             ("patterns", "_run_rendering"),
+            ("python-echo", "_run_python_echo"),
             ("indexes", "_run_indexes"),
             ("dropcaps", "_run_dropcaps"),
             ("parts", "_run_parts"),
@@ -156,6 +164,12 @@ class ValidateCommand:
             ("grid-tables", "_run_grid_tables"),
             ("tables", "_run_table_content"),
             ("ascii", "_run_ascii"),
+            ("percent-spacing", "_run_percent_spacing"),
+            ("unit-spacing", "_run_unit_spacing"),
+            ("binary-units", "_run_binary_units"),
+            ("contractions", "_run_contractions"),
+            ("unblended-prose", "_run_unblended_prose"),
+            ("times-spacing", "_run_times_spacing"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
@@ -177,6 +191,12 @@ class ValidateCommand:
         "sources": [
             ("citations", "_run_sources"),
         ],
+        "references": [
+            ("hallucinator", "_run_check_references"),
+        ],
+        "content": [
+            ("tree", "_run_content_tree"),
+        ],
     }
 
     def __init__(self, config_manager, chapter_discovery):
@@ -194,7 +214,7 @@ class ValidateCommand:
             "subcommand",
             nargs="?",
             choices=all_group_names,
-            help="Check group to run (refs, labels, headers, footnotes, figures, rendering, all)",
+            help="Check group to run (refs, labels, headers, footnotes, figures, rendering, references, content, all)",
         )
         parser.add_argument("--scope", default=None, help="Narrow to a specific check within a group")
         parser.add_argument("--path", default=None, help="File or directory path to check")
@@ -206,12 +226,22 @@ class ValidateCommand:
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
         parser.add_argument("--check-patterns", action="store_true", default=True, help="refs --scope inline: include pattern hazard checks (default: on)")
         parser.add_argument("--no-check-patterns", action="store_false", dest="check_patterns", help="refs --scope inline: skip pattern hazard checks")
+        parser.add_argument("--check-scope", action="store_true", default=False, help="refs --scope inline: detect bare variable refs in class bodies that need ClassName.attr")
+        parser.add_argument("--no-check-scope", action="store_false", dest="check_scope", help="refs --scope inline: skip scope analysis")
         parser.add_argument("--figures", action="store_true", help="labels: filter to figures")
         parser.add_argument("--tables", action="store_true", help="labels: filter to tables")
         parser.add_argument("--sections", action="store_true", help="labels: filter to sections")
         parser.add_argument("--equations", action="store_true", help="labels: filter to equations")
         parser.add_argument("--listings", action="store_true", help="labels: filter to listings")
         parser.add_argument("--all-types", action="store_true", help="labels: all label types")
+        parser.add_argument("-f", "--file", dest="refs_file", action="append", metavar="BIB", help="references: .bib file(s) to check")
+        parser.add_argument("-o", "--output", dest="refs_output", metavar="FILE", help="references: write report to FILE")
+        parser.add_argument("--limit", type=int, dest="refs_limit", metavar="N", help="references: check only first N refs (quick test)")
+        parser.add_argument("--skip-verified", dest="refs_skip_verified", action="store_true", help="references: skip refs already verified in cache")
+        parser.add_argument("--thorough", dest="refs_thorough", action="store_true", help="references: revalidate all refs (ignore cache)")
+        parser.add_argument("--refs-cache", dest="refs_cache", metavar="FILE", help="references: cache file (default: .references_verified.json in repo root)")
+        parser.add_argument("--only-from-report", dest="refs_only_from_report", metavar="FILE", help="references: validate only keys that had issues in this report file")
+        parser.add_argument("--only-keys", dest="refs_only_keys_file", metavar="FILE", help="references: validate only keys listed in FILE (one key per line)")
 
         try:
             ns = parser.parse_args(args)
@@ -282,9 +312,12 @@ class ValidateCommand:
                 checks_raw = ns.citations_in_raw or (not ns.citations_in_code and not ns.citations_in_raw)
                 results.append(method(root, citations_in_code=checks_code, citations_in_raw=checks_raw))
             elif method_name == "_run_inline_refs":
-                results.append(method(root, check_patterns=ns.check_patterns))
+                results.append(method(root, check_patterns=ns.check_patterns,
+                                      check_scope=getattr(ns, 'check_scope', False)))
             elif method_name in ("_run_duplicate_labels", "_run_unreferenced_labels"):
                 results.append(method(root, self._selected_label_types(ns)))
+            elif method_name == "_run_check_references":
+                results.append(method(root, ns))
             else:
                 results.append(method(root))
         return results
@@ -309,6 +342,8 @@ class ValidateCommand:
             "spelling": "Prose and TikZ spell checking (requires aspell)",
             "epub": "EPUB file validation",
             "sources": "Source citation analysis and validation",
+            "references": "Bibliography vs academic DBs (hallucinator)",
+            "content": "Content tree (shared/, frontmatter/ required)",
         }
         for group_name, checks in self.GROUPS.items():
             scopes = ", ".join(s for s, _ in checks)
@@ -589,36 +624,45 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
+        """Resolve the volume backmatter references.bib for a .qmd from its path."""
+        try:
+            rel = file.relative_to(self.config_manager.book_dir)
+        except ValueError:
+            return None
+        parts = rel.parts
+        if "vol1" in parts:
+            bib_file = self.config_manager.book_dir / "contents" / "vol1" / "backmatter" / "references.bib"
+        elif "vol2" in parts:
+            bib_file = self.config_manager.book_dir / "contents" / "vol2" / "backmatter" / "references.bib"
+        else:
+            return None
+        return bib_file if bib_file.exists() else None
+
     def _run_citations(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        bib_field_pattern = re.compile(r"^bibliography:\s*([^\s]+\.bib)\s*$", re.MULTILINE)
         bib_key_pattern = re.compile(r"@\w+\{([^,\s]+)")
 
         for file in files:
-            content = self._read_text(file)
-            bib_match = bib_field_pattern.search(content)
-            if not bib_match:
-                continue
-            bib_file = file.parent / bib_match.group(1)
-            if not bib_file.exists():
-                issues.append(ValidationIssue(
-                    file=self._relative_file(file),
-                    line=1,
-                    code="missing_bib_file",
-                    message=f"Bibliography file not found: {bib_match.group(1)}",
-                    severity="error",
-                ))
+            bib_file = self._bibliography_for_qmd(file)
+            if bib_file is None:
                 continue
 
+            content = self._read_text(file)
             bib_content = self._read_text(bib_file)
             bib_keys = set(bib_key_pattern.findall(bib_content))
-            qmd_content_no_code = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
+            # Strip YAML frontmatter (--- ... --- at file top) to avoid email false positives
+            qmd_content_no_code = re.sub(r"^---\n.*?\n---\n", "", content, flags=re.DOTALL)
+            # Strip HTML style/script blocks to avoid CSS @media false positives
+            qmd_content_no_code = re.sub(r"<style\b[^>]*>.*?</style>", "", qmd_content_no_code, flags=re.DOTALL)
+            qmd_content_no_code = re.sub(r"```.*?```", "", qmd_content_no_code, flags=re.DOTALL)
             qmd_content_no_code = re.sub(r"`[^`]+`", "", qmd_content_no_code)
             refs = set(CITATION_REF_PATTERN.findall(qmd_content_no_code))
             refs = {r.rstrip(".,;:") for r in refs if not r.startswith(EXCLUDED_CITATION_PREFIXES)}
+            refs = {r for r in refs if not re.match(r"^\d+\.\d+", r)}
             missing = sorted(refs - bib_keys)
             for key in missing:
                 line_no = self._line_for_token(content, f"@{key}")
@@ -739,7 +783,8 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
-    def _run_inline_refs(self, root: Path, check_patterns: bool) -> ValidationRunResult:
+    def _run_inline_refs(self, root: Path, check_patterns: bool,
+                         check_scope: bool = False) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -753,6 +798,7 @@ class ValidateCommand:
             lines = self._read_text(file).splitlines()
             refs: List[Tuple[int, str]] = []
             compute_vars: Set[str] = set()
+            compute_classes: Set[str] = set()
             in_cell = False
 
             for idx, line in enumerate(lines, 1):
@@ -763,22 +809,34 @@ class ValidateCommand:
                     in_cell = False
                     continue
                 if in_cell:
+                    cls_match = CLASS_DEF_PATTERN.match(line.strip())
+                    if cls_match:
+                        compute_classes.add(cls_match.group(1))
                     assign = ASSIGN_PATTERN.match(line.strip())
                     if assign:
                         compute_vars.add(assign.group(1))
+                    tuple_assign = TUPLE_ASSIGN_PATTERN.match(line.strip())
+                    if tuple_assign:
+                        for name in re.split(r'\s*,\s*', tuple_assign.group(1)):
+                            compute_vars.add(name.strip())
 
                 for match in INLINE_REF_PATTERN.finditer(line):
                     refs.append((idx, match.group(1)))
 
-            for line_no, var in refs:
-                if var not in compute_vars:
+            for line_no, ref in refs:
+                if "." in ref:
+                    cls_name = ref.split(".", 1)[0]
+                    resolved = cls_name in compute_classes or cls_name in compute_vars
+                else:
+                    resolved = ref in compute_vars
+                if not resolved:
                     issues.append(ValidationIssue(
                         file=self._relative_file(file),
                         line=line_no,
                         code="undefined_inline_ref",
-                        message=f"Inline reference `{var}` is not defined in python cells",
+                        message=f"Inline reference `{ref}` is not defined in python cells",
                         severity="error",
-                        context=f"`{{python}} {var}`",
+                        context=f"`{{python}} {ref}`",
                     ))
 
             if check_patterns:
@@ -852,6 +910,22 @@ class ValidateCommand:
                             severity="error",
                             context=stripped[:160],
                         ))
+
+            if check_scope:
+                from book.quarto.mlsys.validate_inline_refs import check_scope as _check_scope, BOOK_ROOT
+                try:
+                    scope_warnings = _check_scope(file, verbose=False)
+                    for filepath, lineno, check_type, msg in scope_warnings:
+                        issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=lineno,
+                            code=check_type.lower(),
+                            message=msg,
+                            severity="warning",
+                            context="",
+                        ))
+                except Exception:
+                    pass
 
         return ValidationRunResult(
             name="inline-refs",
@@ -1481,6 +1555,14 @@ class ValidateCommand:
             ("quad_asterisks", re.compile(r"\*{4,}"), "Quad asterisks — likely malformed bold/italic", "warning"),
             ("footnote_in_table", re.compile(r"^\|.*\[\^fn-[^\]]+\].*\|"), "Footnote in table cell — may break PDF", "warning"),
             ("double_dollar_python", re.compile(r"\$\$[^$]*`\{python\}"), "Inline Python in display math", "error"),
+            # Currency: unescaped $ before number can be parsed as math. Use \$ for currency (see book-prose.md).
+            # Match: $1,000 (comma), $4.00 (decimal), $50 million/billion/etc.
+            # Exclude: $1.5 \times (math), $0.5$ (inline math), $4.6 / (division).
+            ("unescaped_currency", re.compile(
+                r"(?<!\\)\$[0-9]{1,3}(?:,[0-9]{3})+(?=\s(?!\s*\\times)|,[0-9]|\)|$)"  # $1,000, exclude $25,000 \times
+                r"|(?<!\\)\$[0-9]+\.[0-9]+(?=\s(?!\s*\\times)(?!\s*/)(?!\s*-)(?!\s*\+)(?!\s*\\ll)|,[0-9]|\)|$|/)(?!\\$)"  # $4.00, exclude math
+                r"|(?<!\\)\$[0-9]+(?=\s+(?:million|billion|thousand|M|B|K|per|each|/))"  # $50 million
+            ), "Unescaped dollar before number — use \\$ for currency", "warning"),
         ]
 
         grid_sep_pat = re.compile(r"^\+[-:=+]+\+$")
@@ -1587,6 +1669,68 @@ class ValidateCommand:
         return ValidationRunResult(
             name="rendering",
             description="Check for problematic rendering patterns",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_python_echo(self, root: Path) -> ValidationRunResult:
+        """Ensure every ```{python} block has #| echo: false (code must not appear in output)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start_re = re.compile(r"^```\{python\}")
+        block_end_re = re.compile(r"^```\s*$")
+        # Quarto chunk option: #| echo: false (with optional whitespace)
+        echo_false_re = re.compile(r"#\|\s*echo\s*:\s*false", re.IGNORECASE)
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            i = 0
+            while i < len(lines):
+                line = lines[i]
+                if not block_start_re.match(line):
+                    i += 1
+                    continue
+                start_line = i + 1
+                found_echo_false = False
+                j = i + 1
+                # Scan option lines: #| key: value, or blank, until we hit code or closing ```
+                while j < len(lines):
+                    next_line = lines[j]
+                    if block_end_re.match(next_line):
+                        break
+                    stripped = next_line.strip()
+                    if echo_false_re.search(stripped):
+                        found_echo_false = True
+                        break
+                    # Option line or blank — keep scanning
+                    if stripped.startswith("#|") or not stripped:
+                        j += 1
+                        continue
+                    # Non-option line (actual code or comment) — options are done
+                    break
+                if not found_echo_false:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=start_line,
+                            code="python_missing_echo_false",
+                            message="Python block must include #| echo: false — code must not appear in rendered output",
+                            severity="error",
+                            context="Add #| echo: false as first line after ```{python}",
+                        )
+                    )
+                # Advance past this block to the line after closing ```
+                k = j
+                while k < len(lines) and not block_end_re.match(lines[k]):
+                    k += 1
+                i = k + 1
+
+        return ValidationRunResult(
+            name="python-echo",
+            description="Check Python blocks have echo: false",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -2227,6 +2371,276 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # Percent spacing  (no space between number/str and %)
+    # ------------------------------------------------------------------
+
+    PERCENT_SPACING_PATTERN = re.compile(r"`[^`]*`\s+%")
+
+    def _run_percent_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag space between inline expression and % (e.g. `{python} x` % → use `{python} x`%)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.PERCENT_SPACING_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 5) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="percent_spacing",
+                            message="Remove space between value and % (use e.g. `{python} x`% not `{python} x` %)",
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="percent-spacing",
+            description="No space between inline value and % in QMD prose",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Unit spacing  (style: "100 ms", "4 GB" — never "100ms" or "4GB")
+    # ------------------------------------------------------------------
+
+    # Number (optional decimal) immediately followed by unit with no space (invalid per book-prose.md).
+    UNIT_SPACING_PATTERN = re.compile(
+        r"\d+(?:\.\d+)?"
+        r"(?:ms|GB|TB|MB|KB|Gbps|Mbps|Tbps|TFLOPS|GFLOPS|W)\b"
+    )
+
+    def _run_unit_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag number+unit with no space (e.g. 100ms → 100 ms, 4GB → 4 GB)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.UNIT_SPACING_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 5)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="unit_spacing",
+                            message="Insert space between number and unit (e.g. 100 ms not 100ms, 4 GB not 4GB)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="unit-spacing",
+            description="Require space between number and unit (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Binary units  (style: "GB" and "TB", not "GiB" or "TiB" in prose)
+    # ------------------------------------------------------------------
+
+    BINARY_UNITS_PATTERN = re.compile(r"\b(GiB|TiB|MiB|KiB)\b")
+
+    def _run_binary_units(self, root: Path) -> ValidationRunResult:
+        """Flag GiB/TiB in prose — use GB/TB per book-prose.md."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.BINARY_UNITS_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 3) : min(len(line), m.end() + 3)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="binary_units",
+                            message="Use GB/TB not GiB/TiB in prose (book-prose.md)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="binary-units",
+            description="No GiB/TiB in prose — use GB/TB",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Contractions  (forbidden in body prose per book-prose.md)
+    # ------------------------------------------------------------------
+
+    CONTRACTIONS_PATTERN = re.compile(
+        r"\b(can't|don't|it's|we'll|won't|hasn't|haven't|isn't|aren't|wasn't|weren't|"
+        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's)\b",
+        re.IGNORECASE,
+    )
+
+    def _run_contractions(self, root: Path) -> ValidationRunResult:
+        """Flag contractions in prose — use full forms (cannot, do not, etc.)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("|") or stripped.startswith("<!--"):
+                    continue
+                for m in self.CONTRACTIONS_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 2)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="contractions",
+                            message="Contractions forbidden in body prose — use full form (e.g. cannot, do not)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="contractions",
+            description="No contractions in body prose (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Unblended prose  (paragraph split with leading space after period)
+    # ------------------------------------------------------------------
+
+    def _run_unblended_prose(self, root: Path) -> ValidationRunResult:
+        """Flag line starting with single space after previous line ended with period."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for i in range(1, len(lines)):
+                if lines[i - 1].strip().startswith("```"):
+                    in_code = not in_code
+                if in_code:
+                    continue
+                prev = lines[i - 1].strip()
+                curr = lines[i]
+                if not prev.endswith("."):
+                    continue
+                if not (len(curr) > 1 and curr[0] == " " and curr[1].isupper()):
+                    continue
+                context = (curr[:60] + "…") if len(curr) > 60 else curr
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=i + 1,
+                        code="unblended_prose",
+                        message="Paragraph likely split: line starts with space after period — merge into one paragraph",
+                        severity="warning",
+                        context=context.strip(),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="unblended-prose",
+            description="Detect wrongly split paragraphs (leading space after period)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Times spacing  (space after $\\times$ before word/unit per book-prose.md)
+    # ------------------------------------------------------------------
+
+    # $\times$ or $\times$ followed immediately by letter or ( with no space.
+    TIMES_SPACING_PATTERN = re.compile(r"\$\\times\s*\$\s*[a-zA-Z\(]")
+
+    def _run_times_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag $\\times$ immediately followed by word/paren with no space."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.TIMES_SPACING_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 10)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="times_spacing",
+                            message="Add space after $\\times$ before word or unit (e.g. $\\times$ speedup)",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="times-spacing",
+            description="Space after $\\times$ before word/unit (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Cross-chapter footnote duplicates  (ported from audit_footnotes_cross_chapter.py)
     # ------------------------------------------------------------------
 
@@ -2327,6 +2741,68 @@ class ValidateCommand:
         return self._delegate_script(script, ["--quick", str(epub_files[0])], "epub")
 
     # ------------------------------------------------------------------
+    # Content tree: require shared/ and frontmatter/ (not only vol1/vol2)
+    # ------------------------------------------------------------------
+
+    # Required paths under contents/ so that scripts don't assume only vol1/vol2 exist.
+    CONTENT_TREE_REQUIRED: List[tuple] = [
+        ("shared", True),           # (path relative to contents, is_dir)
+        ("shared/notation.qmd", False),
+        ("frontmatter", True),
+    ]
+
+    def _run_content_tree(self, root: Path) -> ValidationRunResult:
+        """Ensure contents/ has shared/ and frontmatter/; fail if they are missing."""
+        t0 = time.time()
+        # Resolve to contents dir: root may be contents, or contents/vol1, or contents/vol2
+        if root.name in ("vol1", "vol2") and root.parent.name == "contents":
+            contents_dir = root.parent
+        else:
+            contents_dir = root
+        if not (contents_dir / "vol1").is_dir() or not (contents_dir / "vol2").is_dir():
+            # Not the book contents root; skip (e.g. user passed a chapter path)
+            return ValidationRunResult(
+                name="content-tree",
+                description="Content tree (shared/frontmatter required)",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+        issues: List[ValidationIssue] = []
+        for rel, is_dir in self.CONTENT_TREE_REQUIRED:
+            path = contents_dir / rel
+            if is_dir:
+                if not path.is_dir():
+                    issues.append(
+                        ValidationIssue(
+                            file=str(path),
+                            line=0,
+                            code="content-tree",
+                            message=f"Required directory missing: contents/{rel} (shared content used by both volumes)",
+                            severity="error",
+                        )
+                    )
+            else:
+                if not path.is_file():
+                    issues.append(
+                        ValidationIssue(
+                            file=str(path),
+                            line=0,
+                            code="content-tree",
+                            message=f"Required file missing: contents/{rel}",
+                            severity="error",
+                        )
+                    )
+        elapsed = int((time.time() - t0) * 1000)
+        return ValidationRunResult(
+            name="content-tree",
+            description="Content tree (shared/frontmatter required)",
+            files_checked=len(self.CONTENT_TREE_REQUIRED),
+            issues=issues,
+            elapsed_ms=elapsed,
+        )
+
+    # ------------------------------------------------------------------
     # Source citation validation  (delegated to manage_sources.py)
     # ------------------------------------------------------------------
 
@@ -2369,6 +2845,71 @@ class ValidateCommand:
                     message=f"Script not found: {script}", severity="error",
                 )],
             )
+
+    def _run_check_references(self, root: Path, ns: Optional[argparse.Namespace] = None) -> ValidationRunResult:
+        """Validate .bib references against academic DBs (native implementation)."""
+        repo_root = self.config_manager.book_dir.parent.parent
+        if getattr(ns, "refs_file", None):
+            bib_paths = [Path(f) if Path(f).is_absolute() else repo_root / f for f in ns.refs_file]
+        else:
+            bib_paths = [repo_root / p for p in reference_check.DEFAULT_BIB_REL_PATHS]
+        output_path = Path(ns.refs_output) if getattr(ns, "refs_output", None) else None
+        limit = getattr(ns, "refs_limit", None)
+        skip_verified = getattr(ns, "refs_skip_verified", False)
+        thorough = getattr(ns, "refs_thorough", False)
+        cache_path = getattr(ns, "refs_cache", None)
+        if cache_path is not None:
+            cache_path = Path(cache_path) if Path(cache_path).is_absolute() else repo_root / cache_path
+        else:
+            cache_path = repo_root / ".references_verified.json"
+
+        only_keys: Optional[List[str]] = None
+        only_from_report = getattr(ns, "refs_only_from_report", None)
+        only_keys_file = getattr(ns, "refs_only_keys_file", None)
+        if only_from_report:
+            report_path = Path(only_from_report) if Path(only_from_report).is_absolute() else repo_root / only_from_report
+            if report_path.exists():
+                only_keys = reference_check.parse_report_keys(report_path)
+            else:
+                console.print(f"[red]Report not found: {report_path}[/red]")
+                return ValidationRunResult(name="references", description="Bibliography vs academic DBs (hallucinator)", files_checked=0, issues=[ValidationIssue(file=str(report_path), line=0, code="references", message=f"Report not found: {report_path}", severity="error")], elapsed_ms=0)
+        elif only_keys_file:
+            keys_path = Path(only_keys_file) if Path(only_keys_file).is_absolute() else repo_root / only_keys_file
+            if keys_path.exists():
+                only_keys = [line.strip() for line in keys_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+            else:
+                console.print(f"[red]Keys file not found: {keys_path}[/red]")
+                return ValidationRunResult(name="references", description="Bibliography vs academic DBs (hallucinator)", files_checked=0, issues=[ValidationIssue(file=str(keys_path), line=0, code="references", message=f"Keys file not found: {keys_path}", severity="error")], elapsed_ms=0)
+
+        passed, elapsed_ms, issue_dicts, files_checked = reference_check.run(
+            bib_paths,
+            output_path=output_path,
+            limit=limit,
+            dedupe=True,
+            resilient=True,
+            console=console,
+            cache_path=cache_path,
+            skip_verified=skip_verified,
+            thorough=thorough,
+            only_keys=only_keys,
+        )
+        issues = [
+            ValidationIssue(
+                file=d["file"],
+                line=d["line"],
+                code=d["code"],
+                message=d["message"],
+                severity=d.get("severity", "error"),
+            )
+            for d in issue_dicts
+        ]
+        return ValidationRunResult(
+            name="references",
+            description="Bibliography vs academic DBs (hallucinator)",
+            files_checked=files_checked,
+            issues=issues,
+            elapsed_ms=elapsed_ms,
+        )
 
     # ------------------------------------------------------------------
     # Shared helpers

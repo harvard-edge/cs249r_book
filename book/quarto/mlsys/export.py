@@ -1,6 +1,6 @@
 # export.py
 # Exports Python constants to JSON for use in Quarto OJS (Web) blocks.
-# Usage: python3 -m book.quarto.mlsys.export
+# Usage: python3 -m book.quarto.mlsysim.export
 
 import json
 import os

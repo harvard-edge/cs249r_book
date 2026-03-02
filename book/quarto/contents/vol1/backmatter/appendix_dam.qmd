@@ -8,7 +8,7 @@ engine: jupyter
 
 _When an ML system fails, where should you look first: the data path, the algorithm, or the machine?_
 
-In production, “it’s slow” and “it’s wrong” are rarely informative symptoms. A serving stack can miss its latency Service Level Objective (SLO) because the GPU is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). Without a taxonomy, teams often optimize the wrong thing—buying faster GPUs to fix a slow input pipeline, or rewriting kernels when the model is simply too large for the latency budget.
+In production, “it’s slow” and “it’s wrong” are rarely informative symptoms. A serving stack can miss its latency Service Level Objective (SLO) because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). Without a taxonomy, teams often optimize the wrong thing—buying faster accelerators to fix a slow input pipeline, or rewriting kernels when the model is simply too large for the latency budget.
 
 This appendix provides a compact diagnostic framework—**Data · Algorithm · Machine (D·A·M)**—and shows how to map symptoms and measurements to the term of the Iron Law that dominates. Use it as your “first response” checklist before you commit to deeper optimization.
 
@@ -16,18 +16,18 @@ This appendix provides a compact diagnostic framework—**Data · Algorithm · M
 
 This appendix is designed as a reference. Start with the scorecard-style metrics, form a hypothesis about which axis dominates, and then pick the tool that can confirm (or falsify) that hypothesis. Conventions used here follow the book-wide notation (for example, we reserve $B$ for batch size and use $\text{BW}$ for bandwidth).
 
-When training is slow, check GPU utilization, data wait time, and MFU, then map each to its Data, Algorithm, or Machine axis. When serving misses a Service Level Agreement (SLA), identify whether you are latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure you are improving the dominant term, not polishing a non-bottleneck.
+When training is slow, check accelerator utilization, data wait time, and MFU, then map each to its Data, Algorithm, or Machine axis. When serving misses a Service Level Agreement (SLA), identify whether you are latency-bound (overhead), memory-bound (weight/KV movement), or compute-bound. When cost is exploding, use the D·A·M rubric to ensure you are improving the dominant term, not polishing a non-bottleneck.
 
 ```{python}
 #| echo: false
 #| label: appendix-dam-setup
-from mlsys.constants import (
+from mlsysim.core.constants import (
     H100_FLOPS_FP16_TENSOR, TFLOPs, second, flop, GB, byte,
     BILLION, MILLION, THOUSAND, MS_PER_SEC
 )
-from mlsys.formatting import fmt, md, md_frac, md_math, sci_latex, check
+from mlsysim.fmt import fmt, md, md_frac, md_math, sci_latex, check
 
-# ┌── P.I.C.O. ISOLATED SCENARIO ───────────────────────────────────────────────
+# ┌── LEGO ───────────────────────────────────────────────
 # Scenarios: GPU Utilization, Iron Law Analysis, Scaling Discrepancy
 
 class DAMTaxonomy:
@@ -35,8 +35,8 @@ class DAMTaxonomy:
     Namespace for D·A·M Taxonomy diagnostic examples.
     """
 
-    # ┌── 1. PARAMETERS (Inputs) ───────────────────────────────────────────────
-    # Exercise 1: Starving GPU
+    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    # Exercise 1: Starving Accelerator
     ex1_gpu_util_pct = 25
     ex1_disk_sat_pct = 100
 
@@ -45,7 +45,7 @@ class DAMTaxonomy:
     ex2_latency_s = 0.050
     ex2_bytes_per_param = 2 # FP16
     ex2_flops_per_param = 2 # Fwd pass
-    h100_fp16_tflops_peak = H100_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude
+    h100_fp16_tflops_peak = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second)
 
     # Exercise 3: Scaling Law
     ex3_loss_start = 0.45
@@ -57,20 +57,20 @@ class DAMTaxonomy:
     ex4_gpu_new_n = 8
     ex4_cost_k = 200
 
-    # ┌── 2. CALCULATION (The Physics) ─────────────────────────────────────────
-    # Exercise 2 logic
-    ex2_flops_per_pass = (ex2_params * ex2_flops_per_param * flop).to(TFLOPs).magnitude
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # Step 1: Exercise 2 logic
+    ex2_flops_per_pass = (ex2_params * ex2_flops_per_param * flop).m_as(TFLOPs)
     ex2_achieved_tflops = ex2_flops_per_pass / ex2_latency_s
     ex2_util = (ex2_achieved_tflops / h100_fp16_tflops_peak) * 100
-    ex2_model_size_gb = (ex2_params * ex2_bytes_per_param * byte).to(GB).magnitude
+    ex2_model_size_gb = (ex2_params * ex2_bytes_per_param * byte).m_as(GB)
 
-    # Exercise 3 logic
+    # Step 2: Exercise 3 logic
     ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
 
-    # ┌── 3. INVARIANTS (Guardrails) ───────────────────────────────────────────
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
 
-    # ┌── 4. OUTPUTS (Formatting) ──────────────────────────────────────────────
+    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     ex1_gpu_util_str = f"{ex1_gpu_util_pct}"
     ex1_disk_sat_str = f"{ex1_disk_sat_pct}"
 
@@ -96,32 +96,9 @@ class DAMTaxonomy:
     ex3_imp_str = f"{ex3_imp_pct:.1f}"
     ex3_chin_pred_str = f"{ex3_chin_pred_pct}"
 
-    ex4_gpu_old_str = f"{ex4_gpu_old_n}× A100"
-    ex4_gpu_new_str = f"{ex4_gpu_new_n}× H100"
+    ex4_gpu_old_str = f"{ex4_gpu_old_n}$\\times$ A100"
+    ex4_gpu_new_str = f"{ex4_gpu_new_n}$\\times$ H100"
     ex4_cost_str = f"${ex4_cost_k}K"
-
-# ┌── EXPORTS (Bridge to Text) ─────────────────────────────────────────────────
-ex1_gpu_util_str = DAMTaxonomy.ex1_gpu_util_str
-ex1_disk_sat_str = DAMTaxonomy.ex1_disk_sat_str
-ex2_params_str = DAMTaxonomy.ex2_params_str
-ex2_flops_per_pass_str = DAMTaxonomy.ex2_flops_per_pass_str
-ex2_latency_ms_str = DAMTaxonomy.ex2_latency_ms_str
-ex2_achieved_str = DAMTaxonomy.ex2_achieved_str
-ex2_util_str = DAMTaxonomy.ex2_util_str
-h100_fp16_tflops_str = DAMTaxonomy.h100_fp16_tflops_str
-ex2_model_size_gb_str = DAMTaxonomy.ex2_model_size_gb_str
-ex2_achieved_eq = DAMTaxonomy.ex2_achieved_eq
-ex2_util_eq = DAMTaxonomy.ex2_util_eq
-ex3_params_start_str = DAMTaxonomy.ex3_params_start_str
-ex3_params_end_str = DAMTaxonomy.ex3_params_end_str
-ex3_scale_factor = DAMTaxonomy.ex3_scale_factor
-ex3_imp_str = DAMTaxonomy.ex3_imp_str
-ex3_chin_pred_str = DAMTaxonomy.ex3_chin_pred_str
-ex3_loss_start = DAMTaxonomy.ex3_loss_start
-ex3_loss_end = DAMTaxonomy.ex3_loss_end
-ex4_gpu_old_str = DAMTaxonomy.ex4_gpu_old_str
-ex4_gpu_new_str = DAMTaxonomy.ex4_gpu_new_str
-ex4_cost_str = DAMTaxonomy.ex4_cost_str
 ```
 
 ::: {.callout-tip title="Learning Objectives"}
@@ -157,7 +134,9 @@ This clean separation is useful as a first diagnostic step, but production syste
 
 Real systems engineering lives at the *boundaries* between axes. @fig-dam-venn maps the intersection landscape: what concepts and techniques emerge when two or three axes overlap.
 
-![**The D·A·M Intersection Landscape.** Each circle represents a pure domain: Data (information), Algorithm (logic), and Machine (physics). The pairwise intersections capture techniques that require reasoning about two domains simultaneously. The center---where all three converge---is ML Systems Engineering itself: the discipline of balancing data flow, algorithmic complexity, and hardware constraints within a single system.](images/dam_venn.svg){#fig-dam-venn fig-alt="Venn diagram with three overlapping circles labeled Data, Algorithm, and Machine. Pairwise intersections are labeled: D intersection A shows data selection and curriculum learning; D intersection M shows I/O bandwidth and data formats; A intersection M shows quantization and kernel fusion. The center intersection is labeled ML Systems Engineering with Iron Law and Roofline."}
+::: {#fig-dam-venn fig-env="figure" fig-pos="htb" fig-cap="**The D·A·M Intersection Landscape.** Each circle represents a pure domain: Data (information), Algorithm (logic), and Machine (physics). The pairwise intersections capture techniques that require reasoning about two domains simultaneously. The center---where all three converge---is ML Systems Engineering itself: the discipline of balancing data flow, algorithmic complexity, and hardware constraints within a single system." fig-alt="Venn diagram with three overlapping circles labeled Data, Algorithm, and Machine. Pairwise intersections are labeled: D intersection A shows data selection and curriculum learning; D intersection M shows I/O bandwidth and data formats; A intersection M shows quantization and kernel fusion. The center intersection is labeled ML Systems Engineering with Iron Law and Roofline."}
+![](images/dam_venn.svg)
+:::
 
 @tbl-dam-intersections provides a scannable reference for each zone.
 
@@ -189,7 +168,7 @@ $$ T = \underbrace{ \frac{D_{vol}}{BW} }_{\text{Data (D)}} + \underbrace{ \frac{
 
 Note that Algorithm and Machine share the compute term; they are separated by which variable you control. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{peak}$) or utilization ($\eta$) is a **Machine** lever.
 
-This equation transforms performance debugging from a qualitative guessing game into a quantitative engineering problem. Every bottleneck hides in one of these terms. If your system is slow, it is because you are moving too much data ($D_{vol}$), lacking bandwidth ($BW$), executing too many operations ($O$), or failing to utilize your hardware's peak capability ($\eta$). The levers below map specific optimizations to the variable they improve.
+This equation transforms performance debugging from a qualitative guessing game into a quantitative engineering problem. Every bottleneck hides in one of these terms. If your system is slow, it is because you are moving too much data ($D_{vol}$), lacking bandwidth ($BW$), executing too many operations ($O$), or failing to use your hardware's peak capability ($\eta$). The levers below map specific optimizations to the variable they improve.
 
 ### Component Levers {#sec-dam-taxonomy-component-levers-d441}
 
@@ -236,8 +215,8 @@ The Roofline Model provides exact answers when you have time to profile. But in 
 
 In the heat of a production outage, you rarely have time to solve the full Iron Law equation. Instead, veteran systems engineers rely on these quantitative heuristics to quickly narrow down the search space. Use these thresholds as your first line of defense.
 
-*   **If GPU Utilization $<$ 80%**: You are likely **Data Bound** (or CPU bound). The accelerator is starving.
-*   **If GPU Utilization $>$ 95%**: You are likely **Machine Bound**. The accelerator is fully saturated.
+*   **If Accelerator Utilization $<$ 80%**: You are likely **Data Bound** (or CPU bound). The accelerator is starving.
+*   **If Accelerator Utilization $>$ 95%**: You are likely **Machine Bound**. The accelerator is fully saturated.
 *   **If Batch Size is 1**: You are likely **Latency Bound** (Algorithm overhead dominates).
 *   **If Arithmetic Intensity $<$ 100 FLOPs/byte**: You are likely **Memory Bound** (Data/Machine boundary). This threshold is approximate for current-generation accelerators; compute your hardware's specific ridge point ($R_{peak}/BW$) for a precise boundary.
 *   **If System works in Dev but fails in Prod**: Suspect **Data Drift** (Data component).
@@ -248,15 +227,15 @@ Note that common industry labels map to DAM components as follows: **Memory Boun
 
 Once you identify the bottleneck, @tbl-bottleneck-actions tells you what to do—and what NOT to do:
 
-| **If You're...**  | **Dominant Term**         | **Optimization That Works**                               | **Optimization That's Wasted**                     |
-|:------------------|:--------------------------|:----------------------------------------------------------|:---------------------------------------------------|
-| **Memory-Bound**  | $D_{vol}/BW$              | Quantization, pruning, batching, kernel fusion            | Faster GPU (more FLOP/s won't help)                |
-| **Compute-Bound** | $O/(R_{peak} \cdot \eta)$ | Better kernels, Tensor Cores, faster GPU, lower precision | More memory bandwidth (already saturated)          |
-| **Latency-Bound** | $L_{lat}$                 | Batching requests, kernel fusion, async dispatch          | Neither compute nor bandwidth (overhead dominates) |
+| **If You're...**  | **Dominant Term**         | **Optimization That Works**                                       | **Optimization That's Wasted**                     |
+|:------------------|:--------------------------|:------------------------------------------------------------------|:---------------------------------------------------|
+| **Memory-Bound**  | $D_{vol}/BW$              | Quantization, pruning, batching, kernel fusion                    | Faster accelerator (more FLOP/s won't help)        |
+| **Compute-Bound** | $O/(R_{peak} \cdot \eta)$ | Better kernels, Tensor Cores, faster accelerator, lower precision | More memory bandwidth (already saturated)          |
+| **Latency-Bound** | $L_{lat}$                 | Batching requests, kernel fusion, async dispatch                  | Neither compute nor bandwidth (overhead dominates) |
 
-: **What Works vs. What's Wasted.** Optimizing the wrong term yields exactly zero improvement. A memory-bound LLM will not speed up from a faster GPU; the GPU will simply idle faster while waiting for memory. {#tbl-bottleneck-actions}
+: **What Works vs. What's Wasted.** Optimizing the wrong term yields exactly zero improvement. A memory-bound LLM will not speed up from a faster accelerator; the accelerator will simply idle faster while waiting for memory. {#tbl-bottleneck-actions}
 
-Knowing what works also means recognizing what doesn't. In practice, teams under deadline pressure repeatedly fall into the same traps—optimizing the wrong axis with confidence. These failure modes are common enough to deserve their own names.
+Knowing what works also means recognizing what does not. In practice, teams under deadline pressure repeatedly fall into the same traps—optimizing the wrong axis with confidence. These failure modes are common enough to deserve their own names.
 
 ## Anti-Patterns {#sec-dam-taxonomy-antipatterns-72e1}
 
@@ -272,7 +251,7 @@ Each anti-pattern follows the same root cause: acting before diagnosing. The cas
 
 Theoretical constraints often manifest as confusing symptoms in production. These real-world scenarios illustrate how to apply the taxonomy.
 
-### Case 1: The Starving GPU (Data) {#sec-dam-taxonomy-case-1-starving-gpu-data-9a56}
+### Case 1: The Starving Accelerator (Data) {#sec-dam-taxonomy-case-1-starving-accelerator-data-9a56}
 
 #### Symptom {.unnumbered}
 
@@ -290,7 +269,7 @@ This is not a model or hardware problem. You must optimize the Extract-Transform
 
 #### Symptom {.unnumbered}
 
-Your real-time recommendation system fails to meet the 20 ms latency SLA. The GPU utilization is low, and the batch size is 1.
+Your real-time recommendation system fails to meet the 20 ms latency SLA. The accelerator utilization is low, and the batch size is 1.
 
 #### Diagnosis {.unnumbered}
 
@@ -298,7 +277,7 @@ The **Algorithm** is too computationally deep for the sequential deadline. You a
 
 #### The Fix {.unnumbered}
 
-Throwing more hardware (Machine) won't help because latency is limited by the serial execution of layers. You must change the Algorithm:
+Throwing more hardware (Machine) will not help because latency is limited by the serial execution of layers. You must change the Algorithm:
 
 *   **Quantization**: Switch to INT8 to reduce memory fetch time.
 *   **Pruning**: Remove redundant heads or channels.
@@ -308,7 +287,7 @@ Throwing more hardware (Machine) won't help because latency is limited by the se
 
 #### Symptom {.unnumbered}
 
-GPU utilization is pinned at 99%. Memory bandwidth is unsaturated. Training is stable but takes 3 weeks.
+Accelerator utilization is pinned at 99%. Memory bandwidth is unsaturated. Training is stable but takes 3 weeks.
 
 #### Diagnosis {.unnumbered}
 
@@ -319,12 +298,12 @@ You have successfully fed the beast. The system is **Compute Bound**.
 You have hit the physical limits of the single chip.
 
 *   **Scale Up**: Move to a newer generation GPU (e.g., A100 to H100).
-*   **Scale Out**: Distribute training across multiple GPUs (Data Parallelism).
+*   **Scale Out**: Distribute training across multiple accelerators (Data Parallelism).
 *   **Lower Precision**: Switch from FP32 to BF16 (doubling theoretical TFLOPS).
 
 ::: {.callout-checkpoint title="D·A·M Diagnosis Check"}
 
-1. A training job shows 95% GPU utilization but loss has plateaued for 2 epochs. Which D·A·M axis should you investigate, and why?
+1. A training job shows 95% accelerator utilization but loss has plateaued for 2 epochs. Which D·A·M axis should you investigate, and why?
 2. Your colleague suggests adding more data loader workers to a job where `nvidia-smi` shows 98% GPU utilization. Using the Iron Law, explain why this will not help.
 3. An inference server meets its latency SLO at batch size 1 but fails at batch size 16. Which term in the Iron Law changed, and what does this tell you about the bottleneck regime?
 
@@ -336,13 +315,13 @@ These three cases illustrate clean, single-axis bottlenecks. Production incident
 
 Identifying the root cause of performance bottlenecks requires systematic elimination. @tbl-dam-troubleshooting provides a diagnostic matrix for common failure modes observed in production deployments.
 
-| **Symptom**               | **Likely D·A·M Culprit** | **Diagnostic Question**                                      | **Recommended Action**                                 |
-|:--------------------------|:-------------------------|:-------------------------------------------------------------|:-------------------------------------------------------|
-| **Low GPU Utilization**   | **Data**                 | Is the data loader keeping up with the accelerator?          | Implement prefetching and use binary formats.          |
-| **High Latency (P99)**    | **Algorithm**            | Is the model depth or width exceeding the latency budget?    | Apply quantization (INT8) or structured pruning.       |
-| **High Training Cost**    | **Machine**              | Is the hardware utilization ($\eta$) below 30%?              | Optimize CUDA kernels or use spot instances.           |
-| **Silent Accuracy Drift** | **Data**                 | Has the statistical distribution ($P_t$) shifted from $P_0$? | Trigger retraining and update active learning filters. |
-| **Out-of-Memory (OOM)**   | **Algorithm/Machine**    | Does the model state fit in available VRAM?                  | Use gradient checkpointing or reduce batch size.       |
+| **Symptom**                     | **Likely D·A·M Culprit** | **Diagnostic Question**                                      | **Recommended Action**                                 |
+|:--------------------------------|:-------------------------|:-------------------------------------------------------------|:-------------------------------------------------------|
+| **Low Accelerator Utilization** | **Data**                 | Is the data loader keeping up with the accelerator?          | Implement prefetching and use binary formats.          |
+| **High Latency (P99)**          | **Algorithm**            | Is the model depth or width exceeding the latency budget?    | Apply quantization (INT8) or structured pruning.       |
+| **High Training Cost**          | **Machine**              | Is the hardware utilization ($\eta$) below 30%?              | Optimize CUDA kernels or use spot instances.           |
+| **Silent Accuracy Drift**       | **Data**                 | Has the statistical distribution ($P_t$) shifted from $P_0$? | Trigger retraining and update active learning filters. |
+| **Out-of-Memory (OOM)**         | **Algorithm/Machine**    | Does the model state fit in available VRAM?                  | Use gradient checkpointing or reduce batch size.       |
 
 : **D·A·M Diagnostic Matrix.** Root cause identification and remediation strategies for common ML systems failures. Each row connects a user-visible symptom to the D·A·M axis most likely responsible, reducing the search space before you reach for a profiler. {#tbl-dam-troubleshooting}
 
@@ -352,11 +331,11 @@ The diagnostic matrix tells you *what* to suspect. The next question is *how* to
 
 Once you have a hypothesis (e.g., "I suspect I am Machine Bound"), you need evidence to prove it. Abstract concepts must be measured with concrete utilities. @tbl-dam-tooling connects the theoretical components to the specific Linux and Python profiling tools you should reach for.
 
-| **Axis**      | **Key Metric**                | **Primary Tool**        | **Secondary Tool**             |
-|:--------------|:------------------------------|:------------------------|:-------------------------------|
-| **Data**      | Batch Load Time               | `tqdm` (iterations/sec) | `iotop`, `dstat` (Disk I/O)    |
-| **Algorithm** | FLOPs, Model Depth            | PyTorch Profiler        | DeepSpeed Flops Profiler       |
-| **Machine**   | GPU Utilization, SM Occupancy | `nvidia-smi`            | Nsight Compute, Nsight Systems |
+| **Axis**      | **Key Metric**                        | **Primary Tool**        | **Secondary Tool**             |
+|:--------------|:--------------------------------------|:------------------------|:-------------------------------|
+| **Data**      | Batch Load Time                       | `tqdm` (iterations/sec) | `iotop`, `dstat` (Disk I/O)    |
+| **Algorithm** | FLOPs, Model Depth                    | PyTorch Profiler        | DeepSpeed Flops Profiler       |
+| **Machine**   | Accelerator Utilization, SM Occupancy | `nvidia-smi`            | Nsight Compute, Nsight Systems |
 
 : **D·A·M Tooling Map.** Profiling utilities for diagnosing bottlenecks along each D·A·M axis. Start with the primary tool for quick triage; use secondary tools for deep-dive analysis when the primary tool's output is inconclusive. {#tbl-dam-tooling}
 
@@ -366,7 +345,7 @@ Profiling tools generate raw numbers—utilization percentages, FLOP counts, ban
 
 To surpass qualitative guessing, use the efficiency ratios in @tbl-dam-scorecard to grade your system's performance against its theoretical limit. This "Report Card" standardizes what "good" looks like, anchored by **MFU**[^fn-mfu-scorecard]—the single most important metric for large-scale training.
 
-[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOPs to the hardware's theoretical peak FLOPs, introduced by Chowdhery et al. (2022) in the PaLM paper. Unlike raw GPU utilization (which counts any work the GPU performs), MFU measures only *useful* model computation, excluding overhead like gradient synchronization and memory management. @sec-benchmarking covers MFU in depth.
+[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOPs to the hardware's theoretical peak FLOPs, introduced by Chowdhery et al. (2022) in the PaLM paper. Unlike raw accelerator utilization (which counts any work the accelerator performs), MFU measures only *useful* model computation, excluding overhead like gradient synchronization and memory management. @sec-benchmarking covers MFU in depth.
 
 | **Axis**      | **Metric**        | **Definition**                                         | **Failing Grade** | **Passing Grade** |
 |:--------------|:------------------|:-------------------------------------------------------|------------------:|------------------:|
@@ -417,46 +396,46 @@ The D·A·M taxonomy provides a systematic framework for diagnosing ML systems b
 
 ##### Exercise 1: *Component Identification* {.unnumbered}
 
-A production image classification service runs on an A100 GPU. The `nvidia-smi` output shows `{python} ex1_gpu_util_str`% GPU utilization, while `iotop` reveals the disk is saturated at `{python} ex1_disk_sat_str`%. Which D·A·M axis is the bottleneck? What are two specific optimizations you would recommend?
+A production image classification service runs on an A100 GPU. The `nvidia-smi` output shows `{python} DAMTaxonomy.ex1_gpu_util_str`% GPU utilization, while `iotop` reveals the disk is saturated at `{python} DAMTaxonomy.ex1_disk_sat_str`%. Which D·A·M axis is the bottleneck? What are two specific optimizations you would recommend?
 
-*Answer*: The bottleneck is **Data**. The disk at `{python} ex1_disk_sat_str`% saturation while GPU sits at `{python} ex1_gpu_util_str`% utilization is the classic "starving GPU" pattern. The Machine (GPU) has capacity to spare, but the Data pipeline cannot feed it fast enough. Two optimizations: (1) Convert raw images (JPEG/PNG) to a sequential binary format like TFRecords or WebDataset to reduce CPU decoding overhead and enable sequential disk reads. (2) Increase DataLoader workers and implement prefetching to overlap I/O with computation, ensuring the next batch is ready before the GPU finishes the current one.
+*Answer*: The bottleneck is **Data**. The disk at `{python} DAMTaxonomy.ex1_disk_sat_str`% saturation while GPU sits at `{python} DAMTaxonomy.ex1_gpu_util_str`% utilization is the classic "starving GPU" pattern. The Machine (GPU) has capacity to spare, but the Data pipeline cannot feed it fast enough. Two optimizations: (1) Convert raw images (JPEG/PNG) to a sequential binary format like TFRecords or WebDataset to reduce CPU decoding overhead and enable sequential disk reads. (2) Increase DataLoader workers and implement prefetching to overlap I/O with computation, ensuring the next batch is ready before the GPU finishes the current one.
 
 ##### Exercise 2: *Iron Law Analysis* {.unnumbered}
 
-Consider a transformer model with `{python} ex2_params_str` parameters performing inference with batch size 1. The model requires `{python} ex2_flops_per_pass_str` TFLOPs per forward pass. On an H100 GPU (`{python} h100_fp16_tflops_str` TFLOPS peak FP16 Tensor Core), the measured latency is `{python} ex2_latency_ms_str` ms. Calculate the achieved utilization ($\eta$). Is this system Data-bound, Algorithm-bound, or Machine-bound? Justify your answer.
+Consider a transformer model with `{python} DAMTaxonomy.ex2_params_str` parameters performing inference with batch size 1. The model requires `{python} DAMTaxonomy.ex2_flops_per_pass_str` TFLOPs per forward pass. On an H100 GPU (`{python} DAMTaxonomy.h100_fp16_tflops_str` TFLOPS peak FP16 Tensor Core), the measured latency is `{python} DAMTaxonomy.ex2_latency_ms_str` ms. Calculate the achieved utilization ($\eta$). Is this system Data-bound, Algorithm-bound, or Machine-bound? Justify your answer.
 
 *Answer*: First, calculate achieved throughput:
 
-`{python} ex2_achieved_eq`
+`{python} DAMTaxonomy.ex2_achieved_eq`
 
 Then calculate utilization:
 
-`{python} ex2_util_eq`
+`{python} DAMTaxonomy.ex2_util_eq`
 
-Computed values: Achieved = `{python} ex2_achieved_str` TFLOP/s, Utilization = `{python} ex2_util_str`%.
+Computed values: Achieved = `{python} DAMTaxonomy.ex2_achieved_str` TFLOP/s, Utilization = `{python} DAMTaxonomy.ex2_util_str`%.
 
-This system is **Memory-bound** (a **Data** bottleneck). At batch size 1, each layer performs a matrix-vector multiply (GEMV) rather than a matrix-matrix multiply (GEMM). The model's `{python} ex2_params_str` parameters (~`{python} ex2_model_size_gb_str` GB in FP16) must be loaded from HBM for every forward pass, but each loaded weight is used for only a single input vector—yielding very low arithmetic intensity. The GPU's compute units sit idle waiting for memory transfers, which is why utilization is only `{python} ex2_util_str`%.
+This system is **Memory-bound** (a **Data** bottleneck). At batch size 1, each layer performs a matrix-vector multiply (GEMV) rather than a matrix-matrix multiply (GEMM). The model's `{python} DAMTaxonomy.ex2_params_str` parameters (~`{python} DAMTaxonomy.ex2_model_size_gb_str` GB in FP16) must be loaded from HBM for every forward pass, but each loaded weight is used for only a single input vector—yielding very low arithmetic intensity. The GPU's compute units sit idle waiting for memory transfers, which is why utilization is only `{python} DAMTaxonomy.ex2_util_str`%.
 
 The fix targets the **Data/Algorithm boundary**: increasing the batch size transforms GEMV into GEMM, dramatically raising arithmetic intensity and pushing the workload toward compute-bound. Other effective strategies include quantization (INT8 halves the bytes moved per parameter, directly reducing the $D_{vol}/BW$ term) or speculative decoding to amortize weight loads across multiple tokens.
 
 ##### Exercise 3: *Scaling Law vs. Information Roofline* {.unnumbered}
 
-Your team has been training a sentiment analysis model. After scaling from `{python} ex3_params_start_str` to `{python} ex3_params_end_str` parameters (`{python} ex3_scale_factor` $\times$ increase), validation loss improved from `{python} ex3_loss_start` to `{python} ex3_loss_end` (`{python} ex3_imp_str`% improvement). Chinchilla scaling would predict a ~`{python} ex3_chin_pred_str`% improvement for this compute increase. What does this discrepancy suggest? Which D·A·M axis should you investigate first, and why?
+Your team has been training a sentiment analysis model. After scaling from `{python} DAMTaxonomy.ex3_params_start_str` to `{python} DAMTaxonomy.ex3_params_end_str` parameters (`{python} DAMTaxonomy.ex3_scale_factor`$\times$ increase), validation loss improved from `{python} DAMTaxonomy.ex3_loss_start` to `{python} DAMTaxonomy.ex3_loss_end` (`{python} DAMTaxonomy.ex3_imp_str`% improvement). Chinchilla scaling would predict a ~`{python} DAMTaxonomy.ex3_chin_pred_str`% improvement for this compute increase. What does this discrepancy suggest? Which D·A·M axis should you investigate first, and why?
 
-*Answer*: The discrepancy suggests you have hit the **Information Roofline**—the ceiling imposed by data quality rather than model capacity. Scaling laws predict the *slope* of improvement assuming sufficient information in the data. When actual improvement (`{python} ex3_imp_str`%) falls well short of predicted improvement (`{python} ex3_chin_pred_str`%), the model has likely extracted most learnable signal from the training distribution.
+*Answer*: The discrepancy suggests you have hit the **Information Roofline**—the ceiling imposed by data quality rather than model capacity. Scaling laws predict the *slope* of improvement assuming sufficient information in the data. When actual improvement (`{python} DAMTaxonomy.ex3_imp_str`%) falls well short of predicted improvement (`{python} DAMTaxonomy.ex3_chin_pred_str`%), the model has likely extracted most learnable signal from the training distribution.
 
 Investigate the **Data** component first. Specifically: (1) Measure the noise level in your labels—sentiment is subjective and inter-annotator agreement may be low. (2) Check for class imbalance or distribution gaps. (3) Evaluate whether your dataset covers the linguistic patterns in your target domain. Adding more parameters (Algorithm) or faster hardware (Machine) will not help—you are hitting the Bayes error rate for this data. The path forward is better data: cleaner labels, more diverse examples, or domain-specific fine-tuning data.
 
 ##### Exercise 4: *Anti-Pattern Detection* {.unnumbered}
 
-A colleague proposes upgrading from `{python} ex4_gpu_old_str` GPUs to `{python} ex4_gpu_new_str` GPUs because training is "too slow." Before approving the `{python} ex4_cost_str` hardware purchase, what three diagnostic questions would you ask? Map each question to the D·A·M axis it investigates.
+A colleague proposes upgrading from `{python} DAMTaxonomy.ex4_gpu_old_str` GPUs to `{python} DAMTaxonomy.ex4_gpu_new_str` GPUs because training is "too slow." Before approving the `{python} DAMTaxonomy.ex4_cost_str` hardware purchase, what three diagnostic questions would you ask? Map each question to the D·A·M axis it investigates.
 
-*Answer*: Before spending `{python} ex4_cost_str`, ask:
+*Answer*: Before spending `{python} DAMTaxonomy.ex4_cost_str`, ask:
 
 1. **"What is the current GPU utilization during training?"** → *Machine*. If utilization is below 80%, faster GPUs will just idle faster. The bottleneck is elsewhere.
 
 2. **"What percentage of each training step is spent waiting for data?"** → *Data*. Run `torch.profiler` or check if `DataLoader` time exceeds 10% of step time. If data loading dominates, the fix is pipeline optimization (binary formats, more workers, prefetching), not new GPUs.
 
-3. **"Can the batch size scale with 2 $\times$ more GPUs without degrading convergence?"** → *Algorithm*. Doubling GPUs typically requires doubling batch size to maintain efficiency. If the model already uses the maximum stable batch size, or if larger batches hurt convergence, additional GPUs provide diminishing returns. Check the scaling efficiency: if 4 GPUs achieve only 3 $\times$ speedup over 1 GPU, the communication overhead suggests 8 GPUs might achieve only 4–5 $\times$ speedup.
+3. **"Can the batch size scale with 2$\times$ more GPUs without degrading convergence?"** → *Algorithm*. Doubling GPUs typically requires doubling batch size to maintain efficiency. If the model already uses the maximum stable batch size, or if larger batches hurt convergence, additional GPUs provide diminishing returns. Check the scaling efficiency: if 4 GPUs achieve only 3$\times$ speedup over 1 GPU, the communication overhead suggests 8 GPUs might achieve only 4--5$\times$ speedup.
 
 Only if all three answers are favorable—high utilization, minimal data wait, and batch size headroom—does the hardware upgrade make sense.

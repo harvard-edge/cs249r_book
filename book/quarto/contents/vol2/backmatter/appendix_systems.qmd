@@ -1,83 +1,122 @@
-# Appendix A: System Architectures & Foundations {#sec-appendix-systems}
+# Appendix A: Review of Machine Learning Systems Foundations {#sec-appendix-systems}
 
 ## Purpose {.unnumbered}
 
-_What “lineage” does a large-scale ML system inherit, and what does that imply for its architecture?_
+_What foundational mechanics govern the behavior of machine learning systems on individual nodes?_
 
-At scale, ML infrastructure looks like a hybrid: training resembles high-performance computing (tight coupling, bandwidth-hungry collectives), while inference resembles warehouse-scale computing (service reliability, tail latency, elastic fleets). When we treat ML as “just HPC” or “just web services,” we often inherit the wrong assumptions about scheduling, fault tolerance, and networking.
+Machine learning systems at scale do not operate in a vacuum; they are an extension of the physical and algorithmic constraints that govern single-machine computation. This appendix provides a rigorous review of those foundations—spanning the memory hierarchy, the mechanics of backpropagation, and the "Iron Law" of performance. We treat these not as introductory topics, but as the first-order constraints that determine which distributed architectures are viable and which are physically impossible.
 
-This appendix provides a compact reference for the three paradigms used throughout Volume II—HPC, WSC, and the ML Fleet—and a short recap of Volume I foundations that Volume II builds on.
+Machine learning systems at scale do not operate in a vacuum; they are an extension of the physical and algorithmic constraints that govern single-machine computation. This appendix provides a rigorous review of those foundations—spanning the memory hierarchy, the mechanics of backpropagation, and the "Iron Law" of performance. We treat these not as introductory topics, but as the first-order constraints that determine which distributed architectures are viable and which are physically impossible.
 
-## How to Use This Appendix {.unnumbered}
+::: {#fig-fleet-vs-single-stack fig-env="figure" fig-pos="htb" fig-cap="**The Evolution of the Stack**. Moving from a single machine to the fleet shifts the systems focus from local hierarchies to global networks. (A) The **Single-Machine Stack** optimizes for the local Memory Wall (SRAM/HBM/PCIe). (B) The **Fleet Stack** optimizes for the global Bisection Bandwidth Wall (NVLink/InfiniBand/Ethernet). This volume assumes mastery of (A) and focuses on the engineering of (B)." fig-alt="Side-by-side stack diagram. Single-machine stack shows HW, OS, Framework, Application. Fleet stack shows Infrastructure, Distribution, Serving, Governance."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
+  \tikzset{
+    layer/.style={
+      draw=black!60,
+      line width=0.75pt,
+      rounded corners=1pt,
+      minimum width=3.5cm,
+      minimum height=0.6cm,
+      align=center
+    },
+    stacklabel/.style={
+      font=\bfseries,
+      anchor=south
+    },
+    bottleneck/.style={
+      font=\tiny\itshape,
+      text=RedLine,
+      anchor=north
+    },
+    connection/.style={
+      ->,
+      line width=1.0pt,
+      color=GreenLine
+    }
+  }
 
-Use this appendix as a **reference** when you need to quickly map a workload to its closest paradigm and anticipate the corresponding design trade-offs (checkpointing vs. redundancy, gang scheduling vs. elasticity, latency vs. throughput).
+  % Single Machine
+  \begin{scope}[local bounding box=single]
+    \node[layer, fill=GreenL] (S1) {\textbf{Hardware (PCIe/HBM)}};
+    \node[layer, fill=BlueL, above=of S1] (S2) {Operating System};
+    \node[layer, fill=OrangeL, above=of S2] (S3) {ML Framework};
+    \node[layer, fill=RedL, above=of S3] (S4) {Application};
 
-Conventions used here follow the book-wide notation established earlier in the text (see “Notation and Conventions” in Volume I).
+    \node[stacklabel, above=0.2cm of S4] (S_title) {A. Single-Machine Stack};
+    \node[bottleneck, below=0.1cm of S1] (S_bot) {Bottleneck: Memory Wall};
+  \end{scope}
 
-This appendix provides a reference for the architectural paradigms and foundational concepts that underpin the distributed machine learning systems discussed in Volume II. It contrasts the emerging "ML Fleet" architecture with traditional High-Performance Computing (HPC) and Warehouse-Scale Computing (WSC) models, and recaps core ML systems concepts from Volume I.
+  % The Fleet
+  \begin{scope}[local bounding box=fleet]
+    \node[layer, fill=GreenL, right=2cm of S1] (F1) {\textbf{Infra (Fabric/RDMA)}};
+    \node[layer, fill=BlueL, above=of F1] (F2) {Distribution};
+    \node[layer, fill=OrangeL, above=of F2] (F3) {Serving};
+    \node[layer, fill=RedL, above=of F3] (F4) {Governance};
 
-## The Three System Paradigms {#sec-appendix-systems-three-paradigms}
+    \node[stacklabel, above=0.2cm of F4] (F_title) {B. Fleet Stack};
+    \node[bottleneck, below=0.1cm of F1] (F_bot) {Bottleneck: Bisection Wall};
+  \end{scope}
 
-Machine Learning Systems at scale represent a convergence of two distinct computing lineages: the raw computational power of HPC and the fault-tolerant scalability of WSC. Understanding how ML systems differ from their predecessors is crucial for designing infrastructure that meets the unique demands of large-scale training and inference.
+  \draw[connection] (single) -- (fleet) node[midway, above, font=\tiny, text=black] {Scaling};
 
-### 1. High-Performance Computing (HPC) {#sec-appendix-systems-hpc}
-*The lineage of Supercomputers.*
+\end{tikzpicture}
+```
+:::
 
-*   **Philosophy**: "Maximize FLOPs per second."
-*   **Workload**: Tightly coupled simulations (e.g., weather, nuclear physics).
-*   **Hardware**: Specialized interconnects (InfiniBand), low-latency fabrics, homogeneous nodes.
-*   **Fault Tolerance**: **Checkpoint/Restart**. If one node fails, the entire job stops, rolls back to the last checkpoint, and restarts.
-*   **Scheduling**: Batch scheduling (Slurm). Jobs request rigid resource shapes (e.g., "512 nodes for 24 hours").
-*   **The "Pets" Model**: Nodes are individually important. A specific node failure is a critical event.
+## A.1 The Three Computing Paradigms {#sec-appendix-systems-paradigms}
 
-### 2. Warehouse-Scale Computing (WSC) {#sec-appendix-systems-wsc}
-*The lineage of the Web.*
+Large-scale ML infrastructure represents a convergence of three distinct computing lineages. Understanding where ML inherits its assumptions is critical for diagnosing system failures.
 
-*   **Philosophy**: "Maximize Requests per second (QPS)."
-*   **Workload**: Loosely coupled services (e.g., Search, Gmail, Social Media).
-*   **Hardware**: Commodity Ethernet, varying generations of hardware, heterogeneous nodes.
-*   **Fault Tolerance**: **Redundancy**. If one node fails, the load balancer reroutes traffic to another replica. The user never notices.
-*   **Scheduling**: Service orchestration (Kubernetes, Borg). Jobs are dynamic, elastic, and bin-packed.
-*   **The "Cattle" Model**: Nodes are interchangeable and expendable. Failures are routine background noise.
+| **Feature**    | **HPC (Supercomputer)** | **WSC (Warehouse-Scale)** | **ML Fleet (AI Cluster)**      |
+|:---------------|:------------------------|:--------------------------|:-------------------------------|
+| **Lineage**    | Scientific Simulation   | Web Services (Search/Ads) | **Distributed Intelligence**   |
+| **Coupling**   | Tight (Synchronous)     | Loose (Asynchronous)      | **Hybrid (BSP + Elastic)**     |
+| **State**      | Stateful (In-Memory)    | Stateless (Database)      | **Semi-Stateful (Weights/KV)** |
+| **Faults**     | Stop-the-world          | Fail-over/Redundancy      | **Elastic Recovery**           |
+| **Bottleneck** | Compute (FLOPS)         | I/O (Network/Disk)        | **Memory Bandwidth (HBM)**     |
 
-### 3. The Machine Learning Fleet {#sec-appendix-systems-ml-fleet}
-*The Hybrid Architecture.*
+## A.2 Machine Learning as a Systems Workload {#sec-appendix-systems-workload}
 
-ML Systems require the **throughput** of HPC (to train massive models) but must operate on the **scale** and **unreliability** of WSC.
+At the systems level, deep learning is characterized by two distinct computational phases: the **Forward Pass** (Inference) and the **Backward Pass** (Training).
 
-*   **Philosophy**: "Maximize Model Quality per Dollar/Watt."
-*   **Workload**:
-    *   *Training*: Synchronous, bandwidth-heavy (like HPC) but long-running and resilient (like WSC).
-    *   *Inference*: Latency-sensitive (like WSC) but computationally heavy (like HPC).
-*   **Hardware**: A fusion. TCP/IP for control planes, InfiniBand/NVLink for data planes. GPU-centric nodes.
-*   **Fault Tolerance**: **Elasticity**. Training jobs can shrink/expand or pause/resume without full restarts. Inference serves degrade gracefully.
-*   **Scheduling**: Gang scheduling (all-or-nothing allocation) combined with dynamic preemption and replacement.
+### The Silicon Contract (GEMM)
+The fundamental unit of ML computation is the **General Matrix Multiplication (GEMM)**. Modern accelerators are designed around the "Silicon Contract": if the software can express its logic as large, dense matrix operations, the hardware guarantees near-peak utilization through specialized systolic arrays or tensor cores. Small, irregular, or sparse operations violate this contract, falling off the "Performance Cliff" into a regime dominated by instruction overhead rather than math.
 
-| **Feature**    | **HPC (Supercomputer)** | **WSC (Web Cloud)**   | **ML Fleet (AI Cluster)**              |
-|:---------------|:------------------------|:----------------------|:---------------------------------------|
-| **Coupling**   | Tight (MPI)             | Loose (RPC/HTTP)      | Hybrid (NCCL + RPC)                    |
-| **State**      | Stateful (RAM)          | Stateless (DB-backed) | Semi-Stateful (Checkpoints + KV Cache) |
-| **Network**    | Latency-optimized       | Bandwidth-optimized   | Bisection-Bandwidth critical           |
-| **Bottleneck** | Compute (FLOPs)         | I/O (Disk/Net)        | Memory Bandwidth (HBM)                 |
+### The Memory Wave of Backpropagation
+Training introduces a unique memory challenge known as the **Activation Wave**. During the forward pass, every intermediate activation must be stored in memory to be used later during the backward pass to compute gradients. This creates a memory footprint that scales linearly with model depth and batch size, often exceeding the storage available for model weights by 3--5$\times$. This "Memory Wall" is the primary driver for distributed strategies like **Activation Checkpointing** and **ZeRO**.
 
-## Foundations of ML Systems (Volume I Recap) {#sec-appendix-systems-vol1-recap}
+## A.3 The Single-Node Memory Hierarchy {#sec-appendix-systems-memory}
 
-This section provides a condensed reference of the foundational concepts covered in Volume I. These fundamentals—spanning the ML lifecycle, hardware foundations, and optimization techniques—form the building blocks upon which the scale-focused topics in Volume II are constructed.
+The most significant constraint in ML systems is the gap between logic speed and data delivery. We quantify this through the memory hierarchy.
 
-### The Machine Learning Lifecycle {#sec-appendix-systems-lifecycle}
-1.  **Data Engineering**: ETL pipelines, Feature Stores, Validation.
-2.  **Model Development**: Architecture search, Hyperparameter tuning.
-3.  **Deployment**: Serving, Monitoring, Incident Response.
-4.  **Operations (MLOps)**: CI/CD for data/models, Drift detection.
+| **Tier**      | **Technology** | **Typical Capacity** | **Typical Bandwidth** | **Latency (approx)** |
+|:--------------|:---------------|:---------------------|:----------------------|:---------------------|
+| **Compute**   | Registers      | ~20 MB               | ~300 TB/s             | < 1 ns               |
+| **Buffer**    | L1/SRAM        | ~40 MB               | ~20 TB/s              | ~10 ns               |
+| **Primary**   | HBM3/DRAM      | ~80 GB               | ~3 TB/s               | ~100 ns              |
+| **Secondary** | NVMe/Flash     | ~4 TB                | ~10 GB/s              | ~10,000 ns           |
 
-### Hardware Foundations {#sec-appendix-systems-hardware}
-*   **CPUs**: Sequential logic, preprocessing, orchestration.
-*   **GPUs**: Parallel tensor arithmetic (Matrix Multiply), HBM.
-*   **TPUs/NPUs**: Systolic arrays for dense matrix ops, low power.
-*   **Memory Hierarchy**: HBM (Fast/Small) $\to$ SRAM (Faster/Tiny) $\to$ NVMe (Slow/Huge).
+: **The Single-Node Memory Hierarchy**. The 1,000$\times$ bandwidth gap between SRAM and HBM, and the 300$\times$ gap between HBM and NVMe, dictate the "Arithmetic Intensity" required to saturate an accelerator. {#tbl-appendix-memory-hierarchy}
 
-### Optimization Fundamentals {#sec-appendix-systems-optimization}
-*   **Precision**: FP32 (Training) vs. BF16 (Mixed) vs. INT8 (Inference).
-*   **Sparsity**: Structured (N:M) vs. Unstructured pruning.
-*   **Distillation**: Teacher $\to$ Student knowledge transfer.
-*   **The Iron Law**: $L = \frac{D}{B} + \frac{Ops}{P} + L_{lat}$. Performance is bounded by Data movement or Compute.
+## A.4 The Iron Law of ML Systems {#sec-appendix-systems-iron-law}
+
+To reason quantitatively about any ML system, we use the **Iron Law**\index{Iron Law!definition}, which decomposes the time $T$ required for an operation into three physical terms:
+
+$$T = \underbrace{\frac{D_{\text{vol}}}{BW}}_{\text{Data Movement}} + \underbrace{\frac{O}{R_{\text{peak}}}}_{\text{Calculation}} + \underbrace{L_{\text{lat}}}_{\text{Fixed Latency}}$$
+
+Every optimization technique in this book targets one of these terms:
+
+1.  **Quantization** (FP16 $\to$ INT8) reduces $D_{\text{vol}}$ to unblock the Bandwidth wall.
+2.  **Operator Fusion** keeps data in SRAM to eliminate $D_{\text{vol}}$ trips to HBM.
+3.  **Distributed Parallelism** divides $O$ across $N$ processors to increase effective $R_{\text{peak}}$.
+
+## A.5 The D·A·M Taxonomy {#sec-appendix-systems-dam}
+
+We organize all system design decisions into the **Data · Algorithm · Machine (D·A·M)** taxonomy\index{D·A·M Taxonomy}.
+
+*   **Data (D)**: The volume, velocity, and quality of information.
+*   **Algorithm (A)**: The mathematical structure (e.g., Transformers, CNNs) and the optimization logic.
+*   **Machine (M)**: The physical substrate (Accelerators, Interconnects, Storage).
+
+The central thesis of ML systems engineering is that these three vertices are **inseparable**. A change in the Machine (e.g., switching from HBM2 to HBM3) reshapes which Algorithms are efficient, which in turn determines how much Data can be processed within a given power budget.
