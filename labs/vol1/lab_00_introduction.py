@@ -213,23 +213,12 @@ def _(mo, check1):
         ),
     }
 
-    _color = "#f0fdf4" if _correct else "#fef2f2"
-    _border = "#16a34a" if _correct else "#ef4444"
-    _icon = "✅" if _correct else "⚠️"
-
     mo.vstack([
         check1,
-        mo.Html(f"""
-        <div style="background: {_color}; border: 1.5px solid {_border};
-                    border-radius: 10px; padding: 18px 20px; margin-top: 8px;">
-            <div style="font-weight: 700; color: {_border}; margin-bottom: 6px;">
-                {_icon} {"Correct" if _correct else "Not quite"}
-            </div>
-            <div style="color: #1e293b; font-size: 0.92rem; line-height: 1.6;">
-                {_feedback[check1.value]}
-            </div>
-        </div>
-        """),
+        mo.callout(
+            mo.md(_feedback[check1.value]),
+            kind="success" if _correct else "warn",
+        ),
     ])
     return
 
@@ -393,8 +382,8 @@ def _(mo, check1, check2):
     """
 
     _title = "✅ Exactly right." if _exactly_right else (
-        "Partially right — review the highlighted options." if not _has_wrong else
-        "Not quite — some selections add compute speed, not reduce propagation delay."
+        "⚠️ Partially right — review the highlighted options." if not _has_wrong else
+        "⚠️ Not quite — some selections add compute speed, not reduce propagation delay."
     )
     _border = "#16a34a" if _exactly_right else ("#f59e0b" if not _has_wrong else "#ef4444")
     _bg_outer = "#f0fdf4" if _exactly_right else ("#fffbeb" if not _has_wrong else "#fef2f2")
@@ -404,7 +393,7 @@ def _(mo, check1, check2):
         mo.Html(f"""
         <div style="background:{_bg_outer}; border:1.5px solid {_border};
                     border-radius:10px; padding:18px 20px; margin-top:8px;">
-            <div style="font-weight:700; color:{_border}; margin-bottom:10px;">{_title}</div>
+            <div style="font-weight:700; font-size:0.95rem; color:{_border}; margin-bottom:10px;">{_title}</div>
             {_rows}
             {_explanation}
         </div>
@@ -596,23 +585,12 @@ def _(mo, check1, check2, check3):
         ),
     }
 
-    _color  = "#f0fdf4" if _correct else "#fef2f2"
-    _border = "#16a34a" if _correct else "#ef4444"
-    _icon   = "✅" if _correct else "⚠️"
-
     mo.vstack([
         check3,
-        mo.Html(f"""
-        <div style="background:{_color}; border:1.5px solid {_border};
-                    border-radius:10px; padding:18px 20px; margin-top:8px;">
-            <div style="font-weight:700; color:{_border}; margin-bottom:6px;">
-                {_icon} {"Correct" if _correct else "Not quite"}
-            </div>
-            <div style="color:#1e293b; font-size:0.92rem; line-height:1.6;">
-                {_feedback[check3.value]}
-            </div>
-        </div>
-        """),
+        mo.callout(
+            mo.md(_feedback[check3.value]),
+            kind="success" if _correct else "warn",
+        ),
     ])
     return
 
