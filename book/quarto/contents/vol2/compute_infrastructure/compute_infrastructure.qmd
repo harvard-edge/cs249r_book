@@ -148,63 +148,7 @@ class InfraSetup:
 ```
 
 ::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows how the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows why the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape, node distance=0.9cm and 0.6cm]
-  \usetikzlibrary{positioning, decorations.pathreplacing}
-  \tikzset{
-    cell/.style 2 args={draw=#1, fill=#2, rounded corners=2pt, minimum width=3.4cm,
-                 minimum height=1.1cm, align=center, font=\scriptsize, line width=0.75pt},
-    levelbox/.style={draw=BrownLine, fill=BrownL!40, rounded corners=2pt,
-                     minimum width=1.8cm, minimum height=1.1cm, align=center,
-                     font=\small\bfseries, line width=0.75pt},
-    wallhdr/.style={font=\small\bfseries, align=center},
-    cascade/.style={-{Triangle[width=5pt,length=4pt]}, line width=1.0pt, black!40}
-  }
-
-  % Row 1: Accelerator
-  \node[levelbox] (L1) {Accelerator};
-  \node[cell={BlueLine}{BlueL}, right=of L1] (m1) {HBM bandwidth\\bottleneck\\(3.35 TB/s)};
-  \node[cell={OrangeLine}{OrangeL}, right=of m1] (p1) {700 W TDP\\per chip};
-  \node[cell={GreenLine}{GreenL}, right=of p1] (c1) {On-die SRAM\\capacity limit};
-
-  % Column headers
-  \node[wallhdr, text=BlueLine, above=0.3cm of m1] {Memory Wall};
-  \node[wallhdr, text=OrangeLine, above=0.3cm of p1] {Power Wall};
-  \node[wallhdr, text=GreenLine, above=0.3cm of c1] {Communication Wall};
-
-  % Row 2: Node
-  \node[levelbox, below=of L1] (L2) {Node\\(8 GPUs)};
-  \node[cell={BlueLine}{BlueL}, below=of m1] (m2) {640 GB aggregate\\HBM capacity\\$<$ model size};
-  \node[cell={OrangeLine}{OrangeL}, below=of p1] (p2) {5.6 kW compute\\forces liquid\\cooling};
-  \node[cell={GreenLine}{GreenL}, below=of c1] (c2) {NVLink 900 GB/s\\intra-node only};
-
-  % Row 3: Rack
-  \node[levelbox, below=of L2] (L3) {Rack\\(4 nodes)};
-  \node[cell={BlueLine}{BlueL}, below=of m2] (m3) {Host DRAM\\needed for\\optimizer state};
-  \node[cell={OrangeLine}{OrangeL}, below=of p2] (p3) {40+ kW rack\\power delivery\\and cooling};
-  \node[cell={GreenLine}{GreenL}, below=of c2] (c3) {PCIe between\\nodes: 64 GB/s};
-
-  % Row 4: Pod
-  \node[levelbox, below=of L3] (L4) {Pod\\(1000+ GPUs)};
-  \node[cell={BlueLine}{BlueL}, below=of m3] (m4) {Distributed\\storage: PFS\\and object};
-  \node[cell={OrangeLine}{OrangeL}, below=of p3] (p4) {Megawatt facility\\PUE $\approx$ 1.1--1.3};
-  \node[cell={GreenLine}{GreenL}, below=of c3] (c4) {InfiniBand\\50 GB/s per link\\dominates cost};
-
-  % Cascade arrows
-  \foreach \i/\j in {1/2, 2/3, 3/4} {
-    \draw[cascade] (m\i.south) -- (m\j.north);
-    \draw[cascade] (p\i.south) -- (p\j.north);
-    \draw[cascade] (c\i.south) -- (c\j.north);
-  }
-
-  % Emphasis bracket on Communication Wall
-  \draw[RedLine, line width=1.2pt, decorate, decoration={brace, amplitude=6pt, mirror}]
-    ([xshift=0.3cm, yshift=-0.2cm]c4.south east) -- ([xshift=0.3cm, yshift=0.2cm]c1.north east)
-    node[midway, right=8pt, align=left, font=\scriptsize\bfseries, text=RedLine]
-    {Dominates\\at scale};
-
-\end{tikzpicture}
-```
+![](images/svg/infra-walls.svg)
 :::
 
 This chapter begins at the silicon die and expands outward through four physical levels. At each level, we encounter the same engineering pattern: a constraint becomes intolerable, and the solution creates the next level of infrastructure. The Node aggregates accelerators to overcome memory capacity limits. The Rack concentrates nodes and confronts power delivery and cooling. The Pod wires racks into a warehouse-scale computer and faces the communication wall at full force. By the end, we will have mapped the complete physical stack from transistor to datacenter, with our `{python} InfraSetup.frontier_params_b`B model serving as the thread that connects each level.
@@ -288,59 +232,7 @@ The challenge of wafer-scale integration is physical: manufacturing yield, power
 Wafer-scale engines sit at a unique point on the spectrum: they are highly specialized in their *physical* architecture but flexible in their *computational* model, as the underlying cores are often general-purpose enough to execute diverse ML kernels. They represent a "Scale Up" philosophy that attempts to eliminate the Communication Wall by making the cluster the chip.
 
 ::: {#fig-wafer-scale-engine fig-env="figure" fig-pos="htb" fig-cap="**Wafer-Scale Engine (WSE) Architecture**: Unlike traditional processors, a WSE uses the entire 300mm silicon wafer as a single continuous compute fabric. This eliminates the 'Dicing' process and replaces PCB-level interconnects with a high-bandwidth on-chip mesh. The software must be defect-aware, routing data through a unified fabric that treats the entire wafer as a single logical processor with uniform memory access (UMA) characteristics across 900,000 cores." fig-alt="Diagram showing a large circular silicon wafer covered in a grid of hundreds of thousands of small compute cores. A red line shows a data path routing around a black 'defect' node in the grid. Inset shows a magnifying glass over a 4x4 grid of cores connected by high-speed local links."}
-```{.tikz}
-\begin{tikzpicture}[line join=round, font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
-\tikzset{
-  core/.style={rectangle, draw=BlueLine, fill=BlueL, minimum size=3.5mm, line width=0.75pt, rounded corners=0.5pt},
-  defect/.style={rectangle, draw=RedLine, fill=RedL, minimum size=3.5mm, line width=0.75pt, rounded corners=0.5pt},
-  link/.style={line width=1.0pt, black!30},
-  route/.style={line width=1.2pt, OrangeLine, -{Triangle[length=3pt, width=4pt]}}
-}
-
-% Draw the Wafer (circular boundary)
-\node[circle, draw=black!10, fill=black!2, line width=1.5pt, minimum size=8.4cm, inner sep=0] (wafer) {};
-\node[circle, draw=black!20, line width=0.8pt, minimum size=8.3cm, inner sep=0] at (wafer.center) {};
-
-% Draw Grid of Cores (subset for visualization)
-\foreach \x in {-8,-7,...,8} {
-  \foreach \y in {-8,-7,...,8} {
-    \pgfmathsetmacro{\dist}{sqrt(\x*\x + \y*\y)*0.45}
-    \ifdim \dist pt < 4.0pt
-      \node[core] (c\x\y) at (\x*0.45, \y*0.45) {};
-    \fi
-  }
-}
-
-% Simulate a couple of defects
-\node[defect, right=of c21] {};
-\node[defect, below=of c3-3] {};
-
-% Example routing path
-\draw[route] (c-2-2) -- (c-2-1) -- (c-1-1) -- (c0-1) -- (c1-1) -- (c1-2) -- (c2-2) -- (c3-2);
-
-% Zoom inset
-\coordinate[right=1.3cm of wafer.east] (zoomcenter);
-\begin{scope}[shift={(zoomcenter)}, yshift=1.5cm, scale=1.2]
-  \node[draw=black!20, fill=white, rounded corners=3pt, minimum size=2.4cm, line width=0.75pt] (zoombox) {};
-  \foreach \x in {-1,0,1} {
-    \foreach \y in {-1,0,1} {
-      \node[core, minimum size=6mm] (z\x\y) at (\x*0.7, \y*0.7) {};
-    }
-  }
-  % Links in zoom
-  \foreach \x in {-1,0,1} {
-    \draw[link] (\x*0.7, -0.9) -- (\x*0.7, 0.9);
-    \draw[link] (-0.9, \x*0.7) -- (0.9, \x*0.7);
-  }
-  \node[font=\fontsize{6pt}{6}\selectfont, below=0.05cm of z0-1] {Inter-core Links (PB/s)};
-\end{scope}
-
-% Labels
-\node[below=0.2cm of wafer.south] {\textbf{300mm Silicon Wafer}};
-\node[above=0.2cm of zoombox.north] {\textbf{Unified Compute Fabric}};
-
-\end{tikzpicture}
-```
+![](images/svg/wse-architecture.svg)
 :::
 
 | **Feature**         |    **CPU**    | **GPU** (H100) | **TPU** (v5p)  | **Wafer-Scale** | **Custom ASIC** |
@@ -1100,36 +992,7 @@ For capacity planning, the sustained throughput rate, not the peak rate, should 
 The Memory Wall constrains how fast data reaches the compute units; the Roofline Model diagnoses whether compute or memory is the binding constraint; and Tensor Cores maximize the arithmetic value of every byte fetched. A third physical constraint also limits the accelerator's performance: the heat generated by all this computation. Every FLOP dissipates energy, and the faster we compute, the more heat we must remove. This is the Power Wall.
 
 ::: {#fig-power-path fig-env="figure" fig-pos="htb" fig-cap="**The Power Delivery Path**. The journey of energy from the high-voltage grid to the low-voltage transistor. Each stage involves conversion losses (quantified by PUE) and requires stabilizing infrastructure to handle the massive current ramps of ML training. The critical engineering challenge is the Rack PDU to VRM transition, where 10--40 kW of power must be delivered within a single cabinet." fig-alt="Flowchart showing power journey from Grid Substation to Datacenter UPS, to Rack PDU, to Server PSU, to Voltage Regulator Module, finally to GPU Die. Arrows show power flow."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.2cm]
-  \tikzset{
-    stage/.style 2 args={draw=#1, fill=#2, line width=0.75pt, rounded corners=2pt, align=center, minimum width=2.8cm, minimum height=1.0cm},
-    flow/.style={-{Triangle[width=5pt,length=4pt]}, line width=1.2pt, black!60},
-    annotation/.style={anchor=west, text=#1}
-  }
-
-  % Nodes
-  \node[stage={BrownLine}{BrownL}] (Sub) {Grid\\Substation\\(115 kV+)};
-  \node[stage={BlueLine}{BlueL}, below=of Sub] (UPS) {Facility UPS\\\& Transformer\\(480 V)};
-  \node[stage={OrangeLine}{OrangeL}, below=of UPS] (PDU) {Rack PDU\\(208--415 V)};
-  \node[stage={OrangeLine}{OrangeL}, below=of PDU] (PSU) {Server PSU\\(12 V / 48 V)};
-  \node[stage={RedLine}{RedL}, below=of PSU] (VRM) {On-Board VRM\\(0.8--1.2 V)};
-  \node[stage={RedLine}{RedL}, below=of VRM] (Die) {\textbf{GPU Die}\\{(1,000+ Amps)}};
-
-  % Flows
-  \draw[flow] (Sub) -- (UPS);
-  \draw[flow] (UPS) -- (PDU);
-  \draw[flow] (PDU) -- (PSU);
-  \draw[flow] (PSU) -- (VRM);
-  \draw[flow] (VRM) -- (Die);
-
-  % Annotations
-  \node[annotation=BlueLine, right=0.5cm of UPS] {\textbf{Facility Level}};
-  \node[annotation=OrangeLine, right=0.5cm of PSU] {\textbf{Rack Level}};
-  \node[annotation=RedLine, right=0.5cm of Die] {\textbf{Silicon Level}};
-
-\end{tikzpicture}
-```
+![](images/svg/power-path.svg)
 :::
 
 ## Thermal Design Power {#sec-compute-tdp}

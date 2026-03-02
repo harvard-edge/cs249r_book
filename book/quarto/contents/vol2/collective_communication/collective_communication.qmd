@@ -786,41 +786,10 @@ The algorithm splits the vector of size $M$ into $N$ chunks and proceeds in two 
 1.  **Scatter-Reduce Phase**: In $N-1$ steps, chunks flow around the ring, accumulating sums. At the end, each node holds the complete sum for *one* chunk ($1/N$ of the total result).
 2.  **AllGather Phase**: In $N-1$ steps, the partial sums circulate the ring until every node has all chunks.
 
-The data flow during Step 1 proceeds as follows:
+The data flow during Step 1 is illustrated in @fig-ring-allreduce.
 
-::: {.callout-note title="Figure: Ring AllReduce Data Flow"}
-```{.tikz fig-alt="Three GPUs arranged in ring topology. Each GPU holds three colored data chunks. Blue arrows show Step 1 clockwise transfers between neighbors."}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \definecolor{GreenLine}{RGB}{34,139,34}
-  \definecolor{BlueLine}{RGB}{0,80,180}
-  \definecolor{RedLine}{RGB}{200,30,30}
-
-  \tikzset{
-    gpu/.style={draw=black!70, fill=gray!10, thick, rounded corners=2pt, minimum width=1.5cm, minimum height=1.2cm, align=center},
-    chunk/.style={draw=black!40, fill=white, minimum width=0.3cm, minimum height=0.2cm},
-    arrow/.style={->, >=stealth, thick, color=BlueLine}
-  }
-
-  % GPUs in a circle
-  \node[gpu] (g0) at (90:2.5) {GPU 0};
-  \node[gpu] (g1) at (210:2.5) {GPU 1};
-  \node[gpu] (g2) at (330:2.5) {GPU 2};
-
-  % Chunks inside GPUs
-  \foreach \g/\angle in {0/90, 1/210, 2/330} {
-    \node[chunk, fill=red!20] at (\angle:2.5) [xshift=-0.4cm, yshift=0.1cm] {};
-    \node[chunk, fill=blue!20] at (\angle:2.5) [xshift=0cm, yshift=0.1cm] {};
-    \node[chunk, fill=green!20] at (\angle:2.5) [xshift=0.4cm, yshift=0.1cm] {};
-  }
-
-  % Ring connections
-  \draw[arrow] (g0) to[bend right=30] node[midway, left] {Step 1} (g1);
-  \draw[arrow] (g1) to[bend right=30] node[midway, below] {Step 1} (g2);
-  \draw[arrow] (g2) to[bend right=30] node[midway, right] {Step 1} (g0);
-
-  \node[anchor=north, font=\footnotesize, text=gray] at (0,-3.2) {Message divided into $N$ chunks; each step $N-1$ transfers data to neighbor.};
-\end{tikzpicture}
-```
+::: {#fig-ring-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Ring AllReduce Data Flow**. Nodes arranged in a logical ring exchange chunks in two phases: a Scatter-Reduce phase (each node accumulates one chunk's partial sum) followed by an AllGather phase (complete sums circulate to all nodes). Every link is used simultaneously, achieving bandwidth optimality." fig-alt="Circular diagram of N GPUs connected in a ring. Arrows show clockwise data flow. Each GPU holds color-coded chunks representing partial gradient sums."}
+![](images/svg/ring-allreduce.svg)
 :::
 
 To make the ring algorithm concrete, consider a step-by-step trace with 4 GPUs reducing a vector of 4 elements by summation. Each GPU $i$ starts with a local gradient vector $g_i = [a_i, b_i, c_i, d_i]$. The vector is split into 4 chunks (one per GPU), and the algorithm proceeds through two phases.
@@ -1206,7 +1175,11 @@ The algorithms above (Ring, Tree, Butterfly, Double Binary Tree) all assume a **
 
 : **The Bandwidth Hierarchy**: Modern GPU clusters exhibit an order-of-magnitude bandwidth gap between intra-node and inter-node communication. Hierarchical algorithms exploit this gap. {#tbl-bandwidth-hierarchy}
 
-A naive flat Ring AllReduce ignores this structure—it might route data across InfiniBand when NVLink would suffice, wasting the scarce inter-node bandwidth. **Hierarchical AllReduce** decomposes the global operation into three phases that respect the bandwidth hierarchy:
+A naive flat Ring AllReduce ignores this structure—it might route data across InfiniBand when NVLink would suffice, wasting the scarce inter-node bandwidth. **Hierarchical AllReduce** decomposes the global operation into three phases that respect the bandwidth hierarchy, as shown in @fig-hierarchical-allreduce.
+
+::: {#fig-hierarchical-allreduce fig-env="figure" fig-pos="htb" fig-cap="**Hierarchical AllReduce**. Three-phase decomposition that exploits the intra-node/inter-node bandwidth gap. Phase 1 performs a ReduceScatter within each node over NVLink, reducing inter-node traffic by a factor of $G$ (GPUs per node). Phase 2 runs an AllReduce across corresponding GPUs using InfiniBand. Phase 3 completes an AllGather within each node over NVLink." fig-alt="Diagram showing two server nodes, each with multiple GPUs. Intra-node NVLink arrows for ReduceScatter and AllGather phases. Inter-node InfiniBand arrows for the cross-node AllReduce phase."}
+![](images/svg/hierarchical-allreduce.svg)
+:::
 
 #### Step 1: Intra-Node ReduceScatter (NVLink) {.unnumbered}
 

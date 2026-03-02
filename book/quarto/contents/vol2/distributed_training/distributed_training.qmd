@@ -158,54 +158,7 @@ Distributed training introduces three primary complexity dimensions not present 
 The systematic optimization methodology established for single-machine training extends to distributed environments with important adaptations. Profiling must now capture inter-device communication patterns and synchronization overhead in addition to computation and memory metrics. The solution space expands to include data parallelism, model parallelism, pipeline parallelism, and hybrid approaches. @fig-3d-parallelism-cube visualizes this three-dimensional configuration space.
 
 ::: {#fig-3d-parallelism-cube fig-env="figure" fig-pos="htb" fig-cap="**The 3D Parallelism Cube**. A conceptual visualization of the three orthogonal scaling axes: Data Parallelism (replicating the model), Tensor Parallelism (splitting layers), and Pipeline Parallelism (splitting depth). Production training for models like GPT-4 occupies a specific point $(d, t, p)$ within this cube to balance memory usage, compute efficiency, and communication overhead." fig-alt="3D coordinate system with three axes: Data Parallelism (replica count d), Pipeline Parallelism (depth p), and Tensor Parallelism (width t). Dashed cube marks a configuration point with Total Accelerators equals d times p times t."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, z={(0.6,0.5)}, x={(1,0)}, y={(0,1)}, scale=1.3]
-  \tikzset{
-    axis/.style={->, ultra thick},
-    cube/.style={thick, gray!50, dashed},
-    volume/.style={gray!10, opacity=0.5},
-    label/.style={font=\bfseries, align=center},
-    constraint/.style={align=center, font=\footnotesize},
-    point/.style={circle, fill=black, inner sep=1.5pt},
-    textBlue/.style={text=BlueLine},
-    textRed/.style={text=RedLine},
-    textGreen/.style={text=GreenLine}
-  }
-
-  % Origin
-  \coordinate (O) at (0,0,0);
-
-  % Axes Arrows
-  \node[axis, BlueLine, label={[anchor=north east]Data Parallelism\\(Replica Count $d$)}] (xaxis) at (4.5,0,0) {};
-  \node[axis, RedLine, label={[anchor=east]Pipeline Parallelism\\(Depth/Stages $p$)}] (yaxis) at (0,3.5,0) {};
-  \node[axis, GreenLine, label={[anchor=south west]Tensor Parallelism\\(Layer Width $t$)}] (zaxis) at (0,0,3.5) {};
-
-  % The "Cube" of a specific training configuration
-  \begin{scope}[shift={(O)}]
-    \draw[cube] (2,0,0) -- (2,2,0) -- (0,2,0);
-    \draw[cube] (2,0,0) -- (2,0,2) -- (0,0,2);
-    \draw[cube] (0,2,0) -- (0,2,2) -- (0,0,2);
-    \draw[cube] (2,2,0) -- (2,2,2) -- (0,2,2);
-    \draw[cube] (2,0,2) -- (2,2,2);
-    \draw[cube] (0,2,2) -- (2,2,2);
-
-    % Highlight the volume
-    \fill[volume] (O) -- (2,0,0) -- (2,0,2) -- (0,0,2) -- cycle; % Bottom
-    \fill[volume] (O) -- (0,2,0) -- (0,2,2) -- (0,0,2) -- cycle; % Side
-    \fill[volume] (O) -- (2,0,0) -- (2,2,0) -- (0,2,0) -- cycle; % Back
-  \end{scope}
-
-  % Label the point
-  \node[point, label={[anchor=west, xshift=2mm]Training Config $(d, p, t)$}] at (2,2,2) {};
-  \node[anchor=north west, gray, font=\footnotesize] at (2,2,2) {Total Accelerators = $d \times p \times t$};
-
-  % Contextual Constraints
-  \node[constraint, textBlue] at (2.5, -0.5, 0) {constraint: Global Batch Size};
-  \node[constraint, textRed] at (-0.5, 2.5, 0) {constraint: Latency/Bubbles};
-  \node[constraint, textGreen] at (-0.5, 0, 2.5) {constraint: Memory/NVLink};
-
-\end{tikzpicture}
-```
+![](images/svg/3d-parallelism-cube.svg)
 :::
 
 ### Engineering Trade-offs: Selecting a Parallelism Strategy {#sec-distributed-training-systems-systems-engineering-tradeoffs-selecting-parallelism-strategy-b344}
@@ -229,65 +182,7 @@ If you attempt **Tensor Parallelism** across server racks connected by standard 
 @fig-parallelism-decision-tree formalizes this constraint satisfaction process as a decision tree, showing how model size and hardware topology determine the viable parallelism strategies.
 
 ::: {#fig-parallelism-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. Starting from the model's memory requirements, the tree guides practitioners through the constraint satisfaction process that determines which parallelism strategies are physically feasible. The critical branching points are model memory versus single-GPU capacity and communication bandwidth versus parallelism demands. Leaf nodes are annotated with the dominant hardware constraint." fig-alt="Decision tree flowchart. Root asks if model fits in one GPU. Yes branch leads to data parallelism. No branch asks if model fits in one node, leading to tensor or pipeline parallelism with hardware annotations."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \usetikzlibrary{positioning}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{OrangeL}{HTML}{FCE4CC}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{VioletLine}{HTML}{7E317B}
-  \definecolor{VioletL}{HTML}{E6D4E5}
-
-  \tikzset{
-    decision/.style={diamond, draw=#1, fill=#1!12, thick, aspect=2.2,
-                     inner sep=1pt, align=center, font=\scriptsize},
-    leaf/.style={draw=#1, fill=#1!20, rounded corners=3pt, thick,
-                 minimum width=2.4cm, minimum height=0.9cm, align=center, font=\scriptsize},
-    hw/.style={font=\tiny\itshape, text=black!60, align=center},
-    yes/.style={font=\scriptsize\bfseries, text=GreenLine},
-    no/.style={font=\scriptsize\bfseries, text=RedLine},
-    arrow/.style={-{Triangle[width=5pt,length=4pt]}, thick, black!50},
-    shift/.style n args={2}{shift={(#1,#2)}}
-  }
-
-  % Root decision
-  \node[decision=BlueLine] (d1) {Model fits in\\single GPU\\memory?};
-
-  % YES branch
-  \node[leaf=GreenLine, below left=of d1, shift={(-1.5,-0.5)}] (dp) {\textbf{Data Parallelism}\\Scale batch size};
-  \node[hw, below=of dp, yshift=-2pt] {InfiniBand sufficient};
-  \draw[arrow] (d1) -- node[yes, left, pos=0.3] {Yes} (dp);
-
-  % NO branch -> second decision
-  \node[decision=OrangeLine, below right=of d1, shift={(1.5,-0.5)}] (d2) {Model fits in\\single node\\(8 GPUs)?};
-  \draw[arrow] (d1) -- node[no, right, pos=0.3] {No} (d2);
-
-  % YES from d2: Tensor Parallel
-  \node[leaf=BlueLine, below=of d2, shift={(0,-0.5)}] (tp) {\textbf{Tensor Parallelism}\\Split layers across GPUs};
-  \node[hw, below=of tp, yshift=-2pt] {Requires NVLink};
-  \draw[arrow] (d2) -- node[yes, left, pos=0.3] {Yes} (tp);
-
-  % NO from d2 -> third decision
-  \node[decision=RedLine, below=of d2, shift={(2,-0.5)}] (d3) {Sequential\\dependencies\\dominate?};
-  \draw[arrow] (d2) -- node[no, right, pos=0.3] {No} (d3);
-
-  % YES from d3: Pipeline Parallel
-  \node[leaf=OrangeLine, below=of d3, shift={(0,-0.5)}] (pp) {\textbf{Pipeline Parallelism}\\Stage layers across nodes};
-  \node[hw, below=of pp, yshift=-2pt] {Low BW (Ethernet OK)};
-  \draw[arrow] (d3) -- node[yes, left, pos=0.3] {Yes} (pp);
-
-  % NO from d3: 3D Hybrid
-  \node[leaf=VioletLine, below=of d3, shift={(2,-0.5)}] (hybrid) {\textbf{3D Hybrid}\\TP + PP + DP};
-  \node[hw, below=of hybrid, yshift=-2pt] {NVLink + IB + Ethernet};
-  \draw[arrow] (d3) -- node[no, right, pos=0.3] {No} (hybrid);
-
-\end{tikzpicture}
-```
+![](images/svg/parallelism-decision-tree.svg)
 :::
 
 The decision tree reveals that parallelism strategy selection is not a preference but a consequence of physical constraints. The next question is how these constraints shape the mechanics of a distributed training step on a real cluster.
@@ -629,60 +524,7 @@ The mathematical foundation above—gradient averaging preserves the statistical
 The process of data parallelism can be broken into a series of distinct steps, each with its role in ensuring the system operates efficiently. Consider @fig-dist-train-data-parallelism: it traces the complete workflow from dataset splitting through gradient aggregation, showing how each GPU processes its assigned batch before synchronization brings all gradients together for parameter updates.
 
 ::: {#fig-dist-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism Implementation Pipeline**. The five-stage workflow for data parallel training: (1) split input data into non-overlapping subsets, (2) assign batches to GPUs, (3) compute forward and backward passes independently, (4) synchronize gradients via AllReduce, and (5) update parameters uniformly across all devices. This approach contrasts with model parallelism, where the model itself is partitioned rather than replicated." fig-alt="Flowchart showing 5-stage data parallelism: Input Data splits into 4 batches assigned to GPUs 1-4, each performs forward and backward pass, gradients synchronize and aggregate, then model updates."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.2cm, positioning]
-
-\tikzset{
-  Line/.style={line width=0.75pt, black!50, text=black},
-  Box/.style={inner xsep=2pt, line width=0.75pt, fill=VioletL2, draw=VioletLine2, text width=27mm, align=center, minimum height=9mm},
-  Box2/.style={Box, draw=BlueLine, fill=BlueL, text width=21mm, minimum width=22mm},
-  Text/.style={inner xsep=6pt, inner ysep=4pt, draw=none, fill=TextColor!80, font=\usefont{T1}{phv}{m}{n}\footnotesize, align=center, minimum width=22mm, minimum height=5mm},
-  GradientBox/.style={Box, fill=GreenL, draw=GreenLine}
-}
-
-% GPU Nodes
-\node[Box] (B1) {GPU 1\\Forward \& Backward Pass};
-\node[Box, right=of B1] (B2) {GPU 2\\Forward \& Backward Pass};
-\node[Box, right=of B2] (B3) {GPU 3\\Forward \& Backward Pass};
-\node[Box, right=of B3] (B4) {GPU 4\\Forward \& Backward Pass};
-
-% Batch Nodes
-\node[Box2, above=of B1] (GB1) {Batch 1};
-\node[Box2, above=of B2] (GB2) {Batch 2};
-\node[Box2, above=of B3] (GB3) {Batch 3};
-\node[Box2, above=of B4] (GB4) {Batch 4};
-
-% Input Data Node
-\node[Box2, above=of $(GB2)!0.5!(GB3)$, fill=RedL, draw=RedLine] (GGB1) {Input Data};
-
-% Gradient Nodes
-\node[GradientBox, below=of $(B2)!0.5!(B3)$] (DB1) {Gradients GPU N};
-\node[GradientBox, below=of DB1] (DB2) {Gradient Aggregation};
-\node[GradientBox, below=of DB2] (DB3) {Model Update};
-
-% Draw Arrows
-\draw[Line, -latex] (GGB1) -- ++(270:1.4cm) -| (GB2);
-\draw[Line, -latex] (GGB1) -- ++(270:1.4cm) -| (GB3);
-\draw[Line, -latex] (GGB1) -- ++(270:1.4cm) -| (GB4);
-\draw[Line, -latex] (GGB1) -- node[Text, pos=0.5, anchor=center] {Split into Non-Overlapping Subsets} ++(270:1.4cm) -| (GB1);
-
-\draw[Line, -latex] (GB1) -- node[Text, pos=0.45] {Assigned to GPU 1} (B1);
-\draw[Line, -latex] (GB2) -- node[Text, pos=0.45] {Assigned to GPU 2} (B2);
-\draw[Line, -latex] (GB3) -- node[Text, pos=0.45] {Assigned to GPU 3} (B3);
-\draw[Line, -latex] (GB4) -- node[Text, pos=0.45] {Assigned to GPU 4} (B4);
-
-\draw[Line, -latex] (B3) -- ++(270:0.9cm) -| (DB1);
-\draw[Line, -latex] (B2) -- ++(270:0.9cm) -| (DB1);
-\draw[Line, -latex] (B1) -- ++(270:0.9cm) -| (DB1);
-\draw[Line, -latex] (B4) -- ++(270:0.9cm) -| node[Text, pos=0.72] {Compute Gradients} (DB1);
-
-\draw[Line, -latex] (DB1) -- node[Text, pos=0.45]{Synchronize Gradients} (DB2);
-\draw[Line, -latex] (DB2) -- node[Text, pos=0.45]{Aggregate Gradients and Update Parameters} (DB3);
-
-\draw[Line, -latex] (GGB1.east) -- ++(0:6.8cm) |- node[Text, pos=0.8]{Next Mini-Batch} (DB3.east);
-
-\end{tikzpicture}
-```
+![](images/svg/data-parallel-flow.svg)
 :::
 
 #### Dataset Splitting {#sec-distributed-training-systems-systems-dataset-splitting-1edf}
@@ -776,74 +618,7 @@ This analysis demonstrates how the Fleet Stack layers interact: Physical constra
 @fig-coll-comm contrasts three high-level synchronization topologies: the centralized **Parameter Server**, the bandwidth-optimal **Ring AllReduce**, and the low-latency **Tree AllReduce**. While Parameter Servers were common in early distributed systems, modern synchronous training relies almost exclusively on AllReduce variants to maximize bandwidth utilization across dense GPU clusters.
 
 ::: {#fig-coll-comm fig-env="figure" fig-pos="htb" fig-cap="**Gradient Synchronization Topologies**. Visual comparison of communication patterns. (A) **Parameter Server** uses a central node, creating bandwidth bottlenecks at the server. (B) **Ring AllReduce** distributes bandwidth evenly across all links but has linear latency scaling. (C) **Tree AllReduce** reduces latency to logarithmic time but may congest links near the root." fig-alt="Three communication topology diagrams. A: Parameter Server with central PS node connected to 4 workers creating bottleneck. B: Ring AllReduce with 4 GPUs in circular topology. C: Tree AllReduce with root R and hierarchical structure."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \definecolor{NodeColor}{RGB}{230,230,230}
-  \definecolor{PSColor}{RGB}{176,196,222} % LightSteelBlue
-  \definecolor{ArrowColor}{RGB}{80,80,80}
-
-  \tikzset{
-     node_style/.style={circle, draw=black!50, fill=NodeColor, minimum size=0.9cm, font=\bfseries},
-     ps_style/.style={circle, draw=black!50, fill=PSColor, minimum size=1.1cm, font=\bfseries},
-     arrow_style/.style={->, >=stealth, thick, color=ArrowColor},
-     title_style/.style={anchor=south, font=\bfseries},
-     note_style/.style={align=center, font=\footnotesize}
-  }
-
-  % A. Parameter Server
-  \begin{scope}
-    \node[title_style] (labelA) {A. Parameter Server};
-    \node[ps_style, below=0.7cm of labelA] (ps) {PS};
-    \node[node_style, below left=1.3cm and 0.5cm of ps] (w1) {W1};
-    \node[node_style, right=0.6cm of w1] (w2) {W2};
-    \node[node_style, right=0.6cm of w2] (w3) {W3};
-    \node[node_style, right=0.6cm of w3] (w4) {W4};
-
-    \draw[arrow_style, <->] (ps) -- (w1);
-    \draw[arrow_style, <->] (ps) -- (w2);
-    \draw[arrow_style, <->] (ps) -- (w3);
-    \draw[arrow_style, <->] (ps) -- (w4);
-
-    \node[note_style, below=0.8cm of ps] {Bottleneck at Central Node};
-  \end{scope}
-
-  % B. Ring AllReduce
-  \begin{scope}[xshift=6.5cm]
-    \node[title_style] (labelB) {B. Ring AllReduce};
-    \foreach \i/\angle in {1/90, 2/0, 3/270, 4/180} {
-        \node[node_style] (r\i) at (\angle:1.6) {G\i};
-    }
-    \draw[arrow_style] (r1) to[bend left=20] (r2);
-    \draw[arrow_style] (r2) to[bend left=20] (r3);
-    \draw[arrow_style] (r3) to[bend left=20] (r4);
-    \draw[arrow_style] (r4) to[bend left=20] (r1);
-
-    \node[note_style, below=2.2cm of labelB] {Bandwidth\\Optimal};
-  \end{scope}
-
-  % C. Tree AllReduce
-  \begin{scope}[xshift=12.5cm]
-    \node[title_style] (labelC) {C. Tree AllReduce};
-    \node[node_style, below=0.7cm of labelC] (root) {R};
-    \node[node_style, below left=1.2cm and 0.5cm of root] (l1) {L1};
-    \node[node_style, below right=1.2cm and 0.5cm of root] (l2) {L2};
-    \node[node_style, below left=1.1cm and 0.3cm of l1] (ll1) {1};
-    \node[node_style, right=0.8cm of ll1] (ll2) {2};
-    \node[node_style, right=0.8cm of l2] (lr1) {3};
-    \node[node_style, right=0.8cm of lr1] (lr2) {4};
-
-    \draw[arrow_style] (root) -- (l1);
-    \draw[arrow_style] (root) -- (l2);
-    \draw[arrow_style] (l1) -- (ll1);
-    \draw[arrow_style] (l1) -- (ll2);
-    \draw[arrow_style] (l2) -- (lr1);
-    \draw[arrow_style] (l2) -- (lr2);
-
-    \node[note_style, right=0.3cm of l2] {Low Latency\\$O(\log N)$};
-  \end{scope}
-
-\end{tikzpicture}
-```
+![](images/svg/gradient-sync-topologies.svg)
 :::
 
 #### Synchronization Models {#sec-distributed-training-systems-systems-synchronization-models-396f}
@@ -1973,60 +1748,7 @@ To address these latency and balancing challenges, the choice of partitioning st
 Layer-wise partitioning assigns distinct model layers to separate computing devices. In transformer architectures, this translates to specific devices managing defined sets of attention and feed-forward blocks. @fig-dist-layers-blocks demonstrates this partitioning for a 24-layer transformer: six consecutive blocks reside on each of four devices, with forward activations flowing left-to-right and backward gradients propagating right-to-left across the device boundaries.
 
 ::: {#fig-dist-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Parallelism**. A 24-layer transformer distributed across four GPUs, with six consecutive transformer blocks assigned to each device. Forward activations (black arrows) flow left-to-right through device boundaries, while backward gradients (red arrows) propagate right-to-left during parameter updates. This partitioning reduces per-GPU memory from the full model size to 1/4, but introduces sequential dependencies where downstream devices wait for upstream computation to complete." fig-alt="24-layer transformer split across 4 devices: Blocks 1-6 on GPU 1, 7-12 on GPU 2, 13-18 on GPU 3, 19-24 on GPU 4. Black arrows show forward activation flow; red arrows show backward gradient propagation."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=1.8cm and 1.3cm, on grid, auto]
-\tikzset{
-  Block/.style={
-    draw, line width=0.75pt, rounded corners, align=center, text width=19mm, minimum height=8mm,
-    inner sep=2pt
-  },
-  BoxRed/.style={Block, fill=RedL, draw=RedLine},
-  BoxOrange/.style={Block, fill=OrangeL, draw=OrangeLine},
-  BoxGreen/.style={Block, fill=GreenL, draw=GreenLine},
-  BoxBlue/.style={Block, fill=BlueL, draw=BlueLine},
-  BoxViolet/.style={Block, fill=VioletL2, draw=VioletLine2},
-  Line/.style={line width=1.0pt, black!50, -latex},
-  BackBox/.style={
-    draw=BackLine, fill=BackColor, line width=0.75pt, inner xsep=13pt, inner ysep=18pt
-  }
-}
-
-\begin{scope}[start chain=going right, node distance=1.8cm]
-  \node[BoxRed] (B1) {Blocks 1-6};
-  \node[BoxOrange, right=of B1] (B2) {Blocks 7-12};
-  \node[BoxGreen, right=of B2] (B3) {Blocks 13-18};
-  \node[BoxBlue, right=of B3] (B4) {Blocks 19-24};
-\end{scope}
-
-\begin{scope}[node distance=1.3cm]
-  \node[BoxViolet, below=of B1] (G1) {GPU 1};
-  \node[BoxViolet, below=of B2] (G2) {GPU 2};
-  \node[BoxViolet, below=of B3] (G3) {GPU 3};
-  \node[BoxViolet, below=of B4] (G4) {GPU 4};
-\end{scope}
-
-\begin{scope}[on background layer, node distance=1mm]
-  \node[BackBox, fit=(B1)(G1), yshift=6pt] (BB1) {};
-  \node[below=of BB1.north, anchor=north] {Device 1};
-  \node[BackBox, fit=(B2)(G2), yshift=6pt] (BB2) {};
-  \node[below=of BB2.north, anchor=north] {Device 2};
-  \node[BackBox, fit=(B3)(G3), yshift=6pt] (BB3) {};
-  \node[below=of BB3.north, anchor=north] {Device 3};
-  \node[BackBox, fit=(B4)(G4), yshift=6pt] (BB4) {};
-  \node[below=of BB4.north, anchor=north] {Device 4};
-\end{scope}
-
-\foreach \i in {1,2,3} {
-  \pgfmathtruncatemacro{\j}{\i + 1}
-  \draw[Line] (B\i) -- (B\j);
-}
-
-\foreach \i in {4,3,2} {
-  \pgfmathtruncatemacro{\j}{\i - 1}
-  \draw[red, Line] (B\i.230) to[out=230, in=300] (B\j.300);
-}
-\end{tikzpicture}
-```
+![](images/svg/layer-wise-partitioning.svg)
 :::
 
 This sequential processing introduces device idle time, as each device must wait for the previous device to complete its computation before beginning work. While device 1 processes the initial blocks, devices 2, 3, and 4 remain inactive. Similarly, when device 2 begins its computation, device 1 sits idle. This pattern of waiting and idle time reduces hardware utilization efficiency compared to other parallelization strategies.
@@ -2103,86 +1825,7 @@ GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with m
 Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. The forward pass involves devices passing activations to the next stage, such as $F_{0,0}$ to $F_{1,0}$. The backward pass transfers gradients back through the pipeline, such as $B_{3,3}$ to $B_{2,3}$. This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
 ::: {#fig-pipline-parallelism fig-cap="**Pipeline Parallelism Schedule**. A 4-stage pipeline processing 4 microbatches, showing forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) across time. Rows represent pipeline stages (GPUs), columns represent time steps. The staggered execution keeps all devices active: while stage 0 computes $F_{0,1}$, stage 1 processes $F_{1,0}$ from the previous microbatch. After all forward passes complete, backward passes propagate in reverse order. The \"Update\" column shows synchronized parameter updates after gradient accumulation across all microbatches." fig-alt="Pipeline schedule grid showing 4 stages processing 4 microbatches. Forward passes F stagger diagonally across time, backward passes B follow in reverse order, ending with synchronized Update column."}
-```{.tikz}
-\begin{tikzpicture}[
-    every node/.style={font=\small\usefont{T1}{phv}{m}{n}, draw, minimum width=1cm, minimum height=0.7cm, align=center, outer sep=0, line width=0.75pt},
-    fill0/.style={fill=RedL},
-    fill1/.style={fill=BlueL},
-    fill2/.style={fill=OrangeL},
-    fill3/.style={fill=GreenL},
-    update/.style={fill=Yellow!50},
-    node distance=0.2cm and 0.5cm,
-    on grid
-]
-
-% Forward Pass Layers
-\begin{scope}[start chain=going right, node distance=0.5cm]
-    \node[fill0, on chain] (F0_0) {$F_{0,0}$};
-    \foreach \x in {1, 2, 3} {
-        \node[fill0, on chain] (F0_\x) {$F_{0,\x}$};
-    }
-\end{scope}
-
-\begin{scope}[start chain=going right, node distance=0.5cm, above=of F0_0]
-    \node[fill1, on chain] (F1_0) {$F_{1,0}$};
-    \foreach \x in {1, 2, 3} {
-        \node[fill1, on chain] (F1_\x) {$F_{1,\x}$};
-    }
-\end{scope}
-
-\begin{scope}[start chain=going right, node distance=0.5cm, above=of F1_0]
-    \node[fill2, on chain] (F2_0) {$F_{2,0}$};
-    \foreach \x in {1, 2, 3} {
-        \node[fill2, on chain] (F2_\x) {$F_{2,\x}$};
-    }
-\end{scope}
-
-\begin{scope}[start chain=going right, node distance=0.5cm, above=of F2_0]
-    \node[fill3, on chain] (F3_0) {$F_{3,0}$};
-    \foreach \x in {1, 2, 3} {
-        \node[fill3, on chain] (F3_\x) {$F_{3,\x}$};
-    }
-\end{scope}
-
-% Backward Pass Layers
-\begin{scope}[start chain=going left, node distance=0.5cm, right=of F3_3]
-    \node[fill3, on chain] (B3_3) {$B_{3,3}$};
-    \foreach \x in {2, 1, 0} {
-        \node[fill3, on chain] (B3_\x) {$B_{3,\x}$};
-    }
-\end{scope}
-
-\begin{scope}[start chain=going left, node distance=0.5cm, below=of B3_2]
-    \node[fill2, on chain] (B2_3) {$B_{2,3}$};
-    \foreach \x in {2, 1, 0} {
-        \node[fill2, on chain] (B2_\x) {$B_{2,\x}$};
-    }
-\end{scope}
-
-\begin{scope}[start chain=going left, node distance=0.5cm, below=of B2_2]
-    \node[fill1, on chain] (B1_3) {$B_{1,3}$};
-    \foreach \x in {2, 1, 0} {
-        \node[fill1, on chain] (B1_\x) {$B_{1,\x}$};
-    }
-\end{scope}
-
-\begin{scope}[start chain=going left, node distance=0.5cm, below=of B1_2]
-    \node[fill0, on chain] (B0_3) {$B_{0,3}$};
-    \foreach \x in {2, 1, 0} {
-        \node[fill0, on chain] (B0_\x) {$B_{0,\x}$};
-    }
-\end{scope}
-
-% Update Nodes
-\begin{scope}[start chain=going up, node distance=0.2cm, right=of B0_0]
-    \node[update, on chain] (U0_0) {Update};
-    \foreach \x in {1, 2, 3} {
-        \node[update, on chain] (U0_\x) {Update};
-    }
-\end{scope}
-
-\end{tikzpicture}
-```
+![](images/svg/pipeline-parallelism.svg)
 :::
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $N+1$ while device 2 computes blocks 7-12 for microbatch $N$. Simultaneously, device 3 executes blocks 13-18 for microbatch $N-1$, and device 4 processes blocks 19-24 for microbatch $N-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
@@ -2236,70 +1879,7 @@ $$Y = XW = X[W_1 | W_2] = [XW_1 | XW_2]$$
 Each GPU computes its partition independently. Outputs are concatenated (no communication needed if followed by row-parallel layer).
 
 ::: {#fig-tensor-parallel-split fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism - Matrix Partitioning**. Illustration of Megatron-LM style tensor parallelism. The first linear layer (e.g., QKV) is split column-wise $[W_1 | W_2]$. The second layer (e.g., Output) is split row-wise $[W_1 ; W_2]$. This arrangement allows the output of the first layer to flow directly into the second without synchronization, requiring using only one AllReduce after the second layer to sum the partial results." fig-alt="Two-panel diagram of tensor parallelism. Left: Column Parallel splits weight matrix into columns, GPUs compute independently. Right: Row Parallel splits by rows, requires AllReduce to sum partial results."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, node distance=0.5cm and 1cm]
-  \definecolor{MatrixColor}{RGB}{200,220,255}
-  \definecolor{SplitColor}{RGB}{100,149,237} % CornflowerBlue
-
-  \tikzset{
-    matrix_box/.style={draw=black!70, fill=MatrixColor, thick, minimum width=2cm, minimum height=2cm},
-    split_v/.style={draw=black!70, fill=SplitColor, minimum width=1cm, minimum height=2cm},
-    split_h/.style={draw=black!70, fill=SplitColor, minimum width=2cm, minimum height=1cm},
-    arrow/.style={->, >=stealth, thick},
-    input_box/.style={draw, fill=gray!10, minimum width=2cm, minimum height=0.5cm, anchor=center},
-    gpu_text/.style={below=0.2cm of X, text width=3cm, align=center}
-  }
-
-  % Column Parallel (Layer 1)
-  \begin{scope}
-    \node[anchor=south] at (0, 3.5) {\textbf{Column Parallel (e.g., QKV)}};
-    \node[anchor=south] at (0, 3.2) {$W_A = [W_{A1} | W_{A2}]$};
-
-    % Input X
-    \node[input_box] (X) {$X$};
-
-    % Split Matrix
-    \node[split_v, below=of X, anchor=center] (W1) {$W_{A1}$};
-    \node[split_v, right=0cm of W1] (W2) {$W_{A2}$};
-
-    % GPUs Processing
-    \node[gpu_text, below=0.7cm of W1] (GPU) {GPUs compute $Y_i = X W_{Ai}$};
-
-    \draw[arrow] (X.south) -- (W1.north);
-    \draw[arrow] (X.south) -- (W2.north);
-  \end{scope}
-
-  % Symbol
-  \node[above=of X] (arrowSymbol) {\Huge $\rightarrow$};
-  \node[align=center, font=\footnotesize] at (0, -3.5) {Activation\\Pass};
-
-  % Row Parallel (Layer 2)
-  \begin{scope}[xshift=5.5cm]
-    \node[anchor=south] at (0, 3.5) {\textbf{Row Parallel (e.g., Output)}};
-    \node[anchor=south] at (0, 3.2) {$W_B = [W_{B1} ; W_{B2}]$};
-
-    % Inputs
-    \node[draw, fill=SplitColor, minimum width=1cm, minimum height=0.5cm, anchor=center] (Y1) at (0, -1) {$Y_1$};
-    \node[draw, fill=MatrixColor, minimum width=1cm, minimum height=0.5cm, right=1cm of Y1] (Y2) {$Y_2$};
-
-    % Split Matrix
-    \node[split_h, above=of Y1, anchor=center] (WB1) {$W_{B1}$};
-    \node[split_h, below=0cm of WB1, fill=MatrixColor] (WB2) {$W_{B2}$};
-
-    % Output
-    \node[draw, minimum width=2cm, minimum height=0.5cm, above=2cm of WB1] (Z) {$Z = Y_1 W_{B1} + Y_2 W_{B2}$};
-
-    \draw[arrow] (Y1.west) -- (WB1.south|-Y1.west);
-    \draw[arrow] (Y2.east) -- (WB2.south|-Y2.east);
-
-    \draw[arrow] (WB1) -- (Z);
-    \draw[arrow] (WB2) -- (Z);
-
-    \node[right=0.2cm of Z, font=\bfseries, text=red] {AllReduce needed here};
-  \end{scope}
-
-\end{tikzpicture}
-```
+![](images/svg/tensor-parallel-split.svg)
 :::
 
 Row-parallel linear layers split weights along rows. For $W = \begin{bmatrix} W_1 \\ W_2 \end{bmatrix}$:
@@ -2823,63 +2403,7 @@ To systematically weigh the architectural and hardware trade-offs for a new 50-b
 @fig-parallelism-flowchart provides a decision tree for selecting parallelism strategies based on model size, dataset size, and scaling constraints. While intentionally simplified, real-world scenarios often involve additional complexities such as hardware heterogeneity, communication bandwidth, and workload imbalance that may influence the choice of parallelism techniques. Practitioners should view this as a foundational tool for understanding trade-offs and decision points, then adapt it to the specific requirements and constraints of their systems.
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model and dataset fit on single device. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-\tikzset{
-  Line/.style={line width=1.0pt,black!50,text=black},
-  Box/.style={inner xsep=2pt,node distance=16mm,
-    draw=GreenLine, line width=0.75pt,
-    fill=GreenL, text width=27mm, align=flush center,
-    minimum width=27mm, minimum height=9mm, anchor=center},
-  Box1/.style={Box,
-    draw=RedLine, fill=RedL,
-    text width=31mm, minimum width=32mm, minimum height=10mm},
-  decision/.style={align=flush center, text width=42mm, diamond, aspect=2.2,
-    node distance=18mm, inner xsep=-3pt, inner ysep=-2.95ex,
-    fill=VioletL2, draw=VioletLine, anchor=center},
-  startbox/.style={Box,fill=BlueL, draw=BlueLine},
-  endbox/.style={Box,fill=BlueL, draw=BlueLine, node distance=15mm}
-}
-
-\node[startbox](G5B3){Start};
-\node[decision,below=of G5B3](G4B3){Does\\ the model fit in a\\ single device?};
-\node[decision,below=of G4B3](G3B3){Does\\ the dataset fit in a\\ single device?};
-\node[decision,below=of G3B3](G2B3){Are\\ both constraints\\ significant?};
-\node[Box1,below=of G2B3](G1B3){Is scaling the model\\ or data more critical?};
-\node[decision,right=of G1B3](G1B4){Is\\ the dataset\\ very large?};
-
-\node[Box,below=of G1B3](B1){Hybrid\\ Parallelism};
-\node[Box,right=of B1](B2){Model\\ Parallelism};
-\node[Box,right=of B2](B3){Data\\ Parallelism};
-\node[Box,right=of B3,fill=RedL, draw=RedLine](B4){Single Device Optimization};
-
-\node[endbox,below=of B2](DB2){End};
-
-\begin{scope}[on background layer]
-  \node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,
-    yshift=-1mm, fill=BackColor, fit=(B1)(B3), line width=0.75pt](BB){};
-  \node[above=2pt of BB.204,inner sep=0pt,anchor=south,fill=BackColor]{Parallelism Opportunities};
-\end{scope}
-
-\draw[Line,-latex](G5B3)--(G4B3);
-\draw[Line,-latex](G4B3)--node[right,pos=0.35]{No}(G3B3);
-\draw[Line,-latex](G3B3)--node[right,pos=0.35]{No}(G2B3);
-\draw[Line,-latex](G2B3)--node[right,pos=0.35]{No}(G1B3);
-
-\draw[Line,-latex](G4B3)-|node[above,pos=0.05]{Yes}(G1B4);
-\draw[Line,-latex](G1B4)--node[right,pos=0.15]{No}(B4);
-\draw[Line,-latex](G3B3.west)-|node[above,pos=0.25]{Yes}(B2.west);
-\draw[Line,-latex](G2B3)-|node[above,pos=0.05]{Yes}(B1);
-\draw[Line,-latex](G1B3.south)--node[left,align=center,pos=0.45]{Scaling Model}++(270:8mm)-|(B2);
-\draw[Line,-latex](G1B3.south)--++(270:8mm)-|(B3);
-\draw[Line,-latex](G1B4)-|node[above,pos=0.22,text=black]{Yes}(B3.40);
-
-\draw[Line,-latex](B1)|-(DB2);
-\draw[Line,-latex](B3)|-(DB2);
-\draw[Line,-latex](B2)--(DB2);
-
-\end{tikzpicture}
-```
+![](images/svg/parallelism-flowchart.svg)
 :::
 
 ## From Principles to Systems {#sec-distributed-training-systems-systems-framework-integration-cf71}
@@ -2908,7 +2432,7 @@ These primitives compose into the communication patterns that define each parall
 
 ## Fallacies and Pitfalls {#sec-distributed-training-systems-systems-fallacies-pitfalls-e2bc}
 
-Many engineering teams who scale cluster capacity by 4x find that their training iterations take longer to complete, reflecting a fundamental misunderstanding of distributed training physics. The following misconceptions capture errors that waste compute resources and delay research.
+Many engineering teams who scale cluster capacity by $4\times$ find that their training iterations take longer to complete, reflecting a fundamental misunderstanding of distributed training physics. The following misconceptions capture errors that waste compute resources and delay research.
 
 Fallacy: ***Linear speedup is achievable with sufficient engineering effort.***
 
@@ -3107,56 +2631,7 @@ The "optimal point" in the 3D Parallelism Cube shifts depending on the system's 
 :::
 
 ::: {#fig-3d-parallelism-cube-summary fig-env="figure" fig-pos="htb" fig-cap="**3D Parallelism Strategy Space**: The three independent axes of distributed training parallelism. Data Parallelism (d) replicates models across workers. Pipeline Parallelism (p) partitions model layers vertically. Tensor Parallelism (t) splits individual operations horizontally. Real systems combine all three dimensions." fig-alt="Three-dimensional cube diagram with axes labeled Data Parallel, Pipeline Parallel, and Tensor Parallel. Colored planes show Model Replicas, Intra-layer partitioning, and pipeline stages."}
-```{.tikz}
-\begin{tikzpicture}[scale=1.2, font=\small\usefont{T1}{phv}{m}{n}]
-  \definecolor{DataColor}{RGB}{200,220,255}
-  \definecolor{TensorColor}{RGB}{255,220,200}
-  \definecolor{PipeColor}{RGB}{220,255,200}
-  \definecolor{BlueLine}{RGB}{0,0,255}
-  \definecolor{BlueL}{RGB}{173,216,230}
-  \definecolor{RedLine}{RGB}{255,0,0}
-  \definecolor{RedL}{RGB}{240,128,128}
-  \definecolor{GreenLine}{RGB}{0,128,0}
-  \definecolor{GreenL}{RGB}{144,238,144}
-  \definecolor{OrangeLine}{RGB}{255,165,0}
-  \definecolor{OrangeL}{RGB}{255,222,173}
-
-  \tikzset{
-    cube/.style={thick,fill opacity=0.7},
-    datalayer/.style={fill=DataColor!30},
-    tensorlayer/.style={fill=TensorColor!30},
-    pipelayer/.style={fill=PipeColor!30},
-    axis/.style={->, thick},
-    textnode/.style={font=\small\usefont{T1}{phv}{m}{n}, anchor=center},
-  }
-
-  % Axes
-  \draw[axis] (0,0,0) -- (3,0,0) node[right] {Data Parallel ($d$)};
-  \draw[axis] (0,0,0) -- (0,3,0) node[above] {Pipeline Parallel ($p$)};
-  \draw[axis] (0,0,0) -- (0,0,3) node[below left] {Tensor Parallel ($t$)};
-
-  % Create the cuboids
-  % Data Parallel Cuboid
-  \begin{scope}[canvas is zy plane at x=0]
-    \node[cube, datalayer] (data) at (1, 1) [minimum width=2cm, minimum height=2cm] {};
-  \end{scope}
-
-  % Tensor Parallel Cuboid
-  \begin{scope}[canvas is zx plane at y=2]
-    \node[cube, tensorlayer] (tensor) at (1, 1) [minimum width=2cm, minimum height=2cm] {};
-  \end{scope}
-
-  % Pipeline Parallel Cuboid
-  \begin{scope}[canvas is xy plane at z=2]
-    \node[cube, pipelayer] (pipe) at (1, 1) [minimum width=2cm, minimum height=2cm] {};
-  \end{scope}
-
-  % Text nodes
-  \node[textnode] at (1,1,2) {Model Replicas};
-  \node[textnode, rotate=90] at (2.2,1,1) {Intra-layer};
-  \node[textnode] at (1,2.2,1) {Inter-layer};
-\end{tikzpicture}
-```
+![](images/svg/3d-parallelism.svg)
 **The 3D Parallelism Space**. Archetype A occupies a coordinate $(d, t, p)$ inside this cube to balance memory and bandwidth.
 :::
 

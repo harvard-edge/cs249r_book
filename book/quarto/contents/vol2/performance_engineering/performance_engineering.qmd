@@ -114,76 +114,7 @@ Verify your understanding of system-level performance diagnosis:
 :::
 
 ::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**. The optimization process begins with profiling to determine which term in @eq-iron-law-perf dominates. If the workload is compute-bound, precision engineering or algorithmic changes reduce the numerator. If memory-bound, operator fusion and tiling reduce HBM traffic. If overhead-bound, graph compilation and communication overlap attack the residual term. Applying the wrong technique yields zero improvement." fig-alt="Flowchart starting with Profile Workload, branching to Compute Bound, Memory Bound, or Overhead Bound, each leading to specific optimization techniques."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape, >=latex]
-  \usetikzlibrary{positioning, arrows.meta, shapes.geometric}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{OrangeL}{HTML}{FCE4CC}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{VioletLine}{HTML}{7E317B}
-  \definecolor{VioletL}{HTML}{E6D4E5}
-
-  \tikzset{
-    start/.style={draw=black!70, fill=black!10, rounded corners=3pt, thick,
-                  minimum width=3cm, minimum height=0.8cm, align=center, font=\small\bfseries},
-    diag/.style={diamond, draw=#1, fill=#1!12, thick, aspect=2.5,
-                 inner sep=1pt, align=center, font=\scriptsize},
-    action/.style={draw=#1, fill=#1!15, rounded corners=3pt, thick,
-                   minimum width=2.6cm, minimum height=0.7cm, align=center, font=\scriptsize},
-    arrow/.style={-{Triangle[width=5pt,length=4pt]}, thick, black!50}
-  }
-
-  % Start
-  \node[start] (profile) {Profile Workload\\(Roofline Analysis)};
-
-  % Three branches
-  \node[diag=OrangeLine, below=1.5cm of profile] (mb) {Memory\\Bound?};
-  \node[diag=BlueLine, left=1.5cm of mb] (cb) {Compute\\Bound?};
-  \node[diag=VioletLine, right=1.5cm of mb] (ob) {Overhead\\Bound?};
-
-  \draw[arrow] (profile) -- (cb);
-  \draw[arrow] (profile) -- (mb);
-  \draw[arrow] (profile) -- (ob);
-
-  % Compute-bound actions
-  \node[action=BlueLine, below left=1cm and -0.5cm of cb] (a1) {Precision Eng.\\(FP8, INT4)};
-  \node[action=BlueLine, below right=1cm and -0.5cm of cb] (a2) {Algorithmic\\(MoE, Speculative)};
-  \draw[arrow] (cb) -- (a1);
-  \draw[arrow] (cb) -- (a2);
-
-  % Memory-bound actions
-  \node[action=OrangeLine, below left=1cm and -0.5cm of mb] (a3) {Operator Fusion\\(FlashAttention)};
-  \node[action=OrangeLine, below right=1cm and -0.5cm of mb] (a4) {Tiling \&\\KV Cache Opt.};
-  \draw[arrow] (mb) -- (a3);
-  \draw[arrow] (mb) -- (a4);
-
-  % Overhead-bound actions
-  \node[action=VioletLine, below left=1cm and -0.5cm of ob] (a5) {Graph Compile\\(torch.compile)};
-  \node[action=VioletLine, below right=1cm and -0.5cm of ob] (a6) {Comm. Overlap\\(CUDA Graphs)};
-  \draw[arrow] (ob) -- (a5);
-  \draw[arrow] (ob) -- (a6);
-
-  % Re-profile loop
-  \node[start, minimum width=2.2cm, font=\scriptsize\bfseries, below=4cm of mb] (re) {Re-profile};
-  \draw[arrow] (a1.south) |- (re);
-  \draw[arrow] (a2.south) |- (re);
-  \draw[arrow] (a3.south) |- (re);
-  \draw[arrow] (a4.south) |- (re);
-  \draw[arrow] (a5.south) |- (re);
-  \draw[arrow] (a6.south) |- (re);
-
-  % Loop back
-  \draw[arrow, dashed] (re.east) -- ++(2.5,0) |- (profile.east);
-  \node[font=\tiny\itshape, text=black!50, right=2.6cm of mb, yshift=-0.8cm] {iterate until};
-  \node[font=\tiny\itshape, text=black!50, right=2.6cm of mb, yshift=-1.1cm] {target met};
-
-\end{tikzpicture}
-```
+![](images/svg/diagnostic-flow.svg)
 :::
 
 The **efficiency frontier** is the Pareto-optimal curve of model quality versus system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
@@ -788,91 +719,7 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 @fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
 ::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**. Left: three separate kernels each read from and write to HBM, materializing intermediate tensors $Z_1$ and $Z_2$ (5 HBM transfers total). Right: a single fused kernel reads $X$ and $W$ once, performs all three operations with intermediates held in SRAM, and writes only the final output $Y$ (2 HBM transfers). The fused path eliminates 32 MB of redundant HBM traffic per layer." fig-alt="Two side-by-side dataflow diagrams. Left unfused path shows 5 arrows between operations and HBM. Right fused path shows 2 arrows with intermediates staying in SRAM."}
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \usetikzlibrary{positioning, fit, backgrounds, arrows.meta}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{OrangeL}{HTML}{FCE4CC}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-
-  \tikzset{
-    op/.style={draw=BlueLine, fill=BlueL, rounded corners=2pt, thick,
-               minimum width=2.0cm, minimum height=0.6cm, align=center, font=\scriptsize\bfseries},
-    mem/.style={draw=RedLine, fill=RedL!40, rounded corners=2pt, thick,
-                minimum width=3.0cm, minimum height=0.5cm, align=center, font=\scriptsize},
-    sram/.style={draw=GreenLine, fill=GreenL, rounded corners=2pt, thick,
-                 minimum width=2.0cm, minimum height=0.5cm, align=center, font=\scriptsize},
-    fusedbox/.style={draw=GreenLine, fill=GreenL!20, rounded corners=6pt, thick,
-                     inner sep=10pt},
-    hbmio/.style={-{Triangle[width=4pt,length=3pt]}, thick, RedLine},
-    sramio/.style={-{Triangle[width=4pt,length=3pt]}, thick, GreenLine}
-  }
-
-  % === LEFT: Unfused ===
-  \begin{scope}[local bounding box=leftScope]
-    \node[mem] (hbm_l) {HBM (Off-Chip)};
-    \node[font=\small\bfseries, text=RedLine, above=0.5cm of hbm_l] {Unfused (3 Kernels)};
-
-    % Operations
-    \node[op, below=0.8cm of hbm_l] (gemm) {GEMM};
-    \node[op, below=0.8cm of gemm] (gelu) {GELU};
-    \node[op, below=0.8cm of gelu] (ln) {LayerNorm};
-
-    % HBM read/write arrows (5 total round trips)
-    \draw[hbmio] (hbm_l.south) -- node[left, font=\tiny, text=RedLine] {read} (gemm.north);
-    \draw[hbmio] (gemm.east) -- ++(0.6,0) |- node[right, font=\tiny, text=RedLine, pos=0.2] {$Z_1$} (hbm_l.east);
-    \draw[hbmio] (hbm_l.south west) ++(0.3,0) -- ++(0,-2.1) -- (gelu.west);
-    \draw[hbmio] (gelu.east) -- ++(0.6,0) |- node[right, font=\tiny, text=RedLine, pos=0.2] {$Z_2$} ++(0,2.7);
-    \draw[hbmio] ([xshift=-5pt]hbm_l.south) -- ++(0,-3.5) -- (ln.west);
-    \draw[hbmio] (ln.south) -- ++(0,-0.4) node[below, font=\tiny] {$Y$ to HBM};
-
-    % Count annotation
-    \node[font=\scriptsize\bfseries, text=RedLine, below=0.8cm of ln] (count_l) {5 HBM transfers};
-    \node[font=\tiny, text=RedLine, below=0.1cm of count_l] {32 MB intermediate traffic};
-  \end{scope}
-
-  % === RIGHT: Fused ===
-  \begin{scope}[shift={(6.5,0)}, local bounding box=rightScope]
-    \node[mem] (hbm_r) {HBM (Off-Chip)};
-    \node[font=\small\bfseries, text=GreenLine, above=0.5cm of hbm_r] {Fused (1 Kernel)};
-
-    % Operations inside fused box
-    \node[op, below=1.0cm of hbm_r] (f_gemm) {GEMM};
-    \node[op, below=0.6cm of f_gemm] (f_gelu) {GELU};
-    \node[op, below=0.6cm of f_gelu] (f_ln) {LayerNorm};
-
-    % Fused kernel box
-    \begin{scope}[on background layer]
-      \node[fusedbox, fit=(f_gemm) (f_ln)] (fbox) {};
-    \end{scope}
-
-    % SRAM label
-    \node[sram, minimum width=1.0cm, right=0.5cm of f_gelu] {SRAM};
-
-    % Internal SRAM arrows
-    \draw[sramio] (f_gemm) -- node[right, font=\tiny, text=GreenLine] {$Z_1$} (f_gelu);
-    \draw[sramio] (f_gelu) -- node[right, font=\tiny, text=GreenLine] {$Z_2$} (f_ln);
-
-    % Only 2 HBM transfers
-    \draw[hbmio] (hbm_r.south) -- node[left, font=\tiny, text=RedLine] {read $X$,$W$} (fbox.north);
-    \draw[hbmio] (fbox.south) -- ++(0,-0.4) node[below, font=\tiny] {$Y$ to HBM};
-
-    % Count annotation
-    \node[font=\scriptsize\bfseries, text=GreenLine] at (count_l -| hbm_r) (count_r) {2 HBM transfers};
-    \node[font=\tiny, text=GreenLine, below=0.1cm of count_r] {0 MB intermediate traffic};
-  \end{scope}
-
-  % Speedup annotation
-  \draw[OrangeLine, ultra thick, -{Triangle[width=6pt,length=5pt]}] (leftScope.east) -- (rightScope.west)
-    node[midway, above, font=\scriptsize\bfseries, text=OrangeLine] {2.5$\times$ faster};
-
-\end{tikzpicture}
-```
+![](images/svg/operator-fusion.svg)
 :::
 
 In a naive implementation without operator fusion, executing one Transformer layer requires roughly 50 separate kernel launches. If each launch incurs a 10-microsecond overhead, the system spends 500 microseconds purely on dispatch latency. If the actual arithmetic execution of the layer takes only 2 milliseconds, the launch overhead consumes 20% of the total wall-clock time, leaving the GPU compute units idle for one-fifth of the inference cycle. This "launch-bound" regime limits the benefits of faster hardware; doubling the GPU's FLOPs does nothing to reduce the 500-microsecond fixed cost. Operator fusion addresses this by compiling these 50 discrete operations into a small handful of fused kernels—often reducing the count to 5–10 launches—thereby reclaiming the lost cycles and shifting the workload back towards a compute-bound profile.
@@ -1721,7 +1568,7 @@ The techniques covered so far -- fusion, precision, compilation, speculative dec
 
 ## System Profiling {#sec-performance-engineering-profiling}
 
-An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it 5x faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
+An engineer spends two weeks rewriting a PyTorch module into a custom CUDA kernel to make it $5\times$ faster, only to discover the overall model latency did not budge because the system was entirely I/O bound. Performance engineering without measurement is expensive guesswork. System profiling provides the surgical diagnostics required to identify exactly where the GPU is waiting, allowing us to apply our optimizations with precision.
 
 ### The Profiling Hierarchy {#sec-performance-engineering-profiling-hierarchy}
 
@@ -2158,7 +2005,7 @@ This case study demonstrates how these disparate optimizations compound sequenti
 
 ## Fallacies and Pitfalls {#sec-performance-engineering-fallacies}
 
-A team upgrades their inference cluster from A100s to H100s, expecting a massive 3x latency reduction based on the new spec sheet's teraFLOPS rating, only to find their generative model barely runs 15% faster. This leads us to one of the most pervasive traps in performance engineering: assuming that raw compute capacity dictates inference speed when the workload is entirely bound by memory bandwidth.
+A team upgrades their inference cluster from A100s to H100s, expecting a massive $3\times$ latency reduction based on the new spec sheet's teraFLOPS rating, only to find their generative model barely runs 15% faster. This leads us to one of the most pervasive traps in performance engineering: assuming that raw compute capacity dictates inference speed when the workload is entirely bound by memory bandwidth.
 
 Fallacy: *More FLOPS means faster inference.*
 
