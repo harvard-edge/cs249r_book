@@ -37,7 +37,7 @@
 
 ### Act I: The Physics of Data Gravity (15m)
 *   **Scenario:** You have 1 Petabyte of raw video in a warehouse. Your cluster is 3,000 miles away.
-*   **Crisis:** Project deadline is in 10 days. 
+*   **Crisis:** Project deadline is in 10 days.
 *   **Task:** Calculate the transfer time over 1Gbps fiber. Realize it will take weeks. Toggle to "Snowball" (Sneakernet) and see the physical delivery time beat the fiber.
 
 ### Act II: The Feeding Tax (15m)

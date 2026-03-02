@@ -36,7 +36,7 @@
 ## 3. The 3-Act Narrative (The Lab Journey)
 
 ### Act I: Proving the Iron Law (15m)
-*   **Scenario:** You have a fixed model ($AI = 50$). 
+*   **Scenario:** You have a fixed model ($AI = 50$).
 *   **Crisis:** It runs too slow on the CPU.
 *   **Task:** Upgrade to a GPU. Observe that the latency *barely moves* because the data term ($D/BW$) is the bottleneck. Find the "Ridge Point" where the GPU actually becomes useful.
 
