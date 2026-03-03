@@ -67,7 +67,7 @@ Choose a path based on your goal.
 
 **READ** Start with the [textbook](https://mlsysbook.ai/book/):
 - [📘 Volume I: Introduction to Machine Learning Systems](https://mlsysbook.ai/vol1/) covers ML basics, development, optimization, and operations. Available now.
-- [📙 Volume II: Machine Learning Systems at Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production infrastructure, and responsible AI at scale. Chapters are written and under active review. Coming Summer 2026.
+- [📙 Volume II: Machine Learning Systems at Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production infrastructure, and responsible AI at scale. Coming Summer 2026.
 
 **BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
@@ -165,7 +165,7 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
-This textbook started as a single volume. As the scope grew to cover both foundational principles and large-scale distributed systems, we split it into two focused volumes. Volume I is complete and available now. Volume II covers the material on distributed systems and production scale that we have been teaching and developing. The chapters are written and under active review.
+This textbook started as a single volume. As the scope grew to cover both foundational principles and large-scale distributed systems, we split it into two focused volumes. Volume I is complete and available now. Volume II covers distributed systems, production infrastructure, and responsible AI at scale. It is complete and will be published Summer 2026.
 
 | Volume | Title | Focus | Status |
 |--------|-------|-------|--------|
@@ -185,14 +185,14 @@ The [full textbook](https://mlsysbook.ai/book/) combines both volumes for compre
 
 ### Volume II: Machine Learning Systems at Scale *(Coming Summer 2026)*
 
-Volume II picks up where Volume I ends, moving from a single machine to fleets of machines, and from model training to running AI reliably at global scale. All chapters are written and currently under review.
+Volume II picks up where Volume I ends, moving from a single machine to fleets of machines. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
 
 | Part | Focus | Chapters |
 |------|-------|----------|
-| **V. The Fleet** | Physical infrastructure | Introduction, Compute Infrastructure, Network Fabrics, Data Storage |
-| **VI. Distributed ML** | Algorithms of scale | Distributed Training, Communication, Fault Tolerance, Orchestration |
-| **VII. Deployment at Scale** | Global serving | Performance Engineering, Inference, Edge Intelligence, Ops at Scale |
-| **VIII. The Responsible Fleet** | Safety and governance | Security & Privacy, Robust AI, Sustainable AI, Responsible AI |
+| **I. Foundations of Scale** | The logic of distributed systems | Introduction to Scale, Distributed Training, Collective Communication, Fault Tolerance |
+| **II. Building the Fleet** | Physical infrastructure | Compute Infrastructure, Network Fabrics, Data Storage, Fleet Orchestration |
+| **III. Deployment at Scale** | Serving at global scale | Inference at Scale, Performance Engineering, Edge Intelligence, Ops at Scale |
+| **IV. Production Concerns** | Safety and governance | Security & Privacy, Robust AI, Sustainable AI, Responsible AI |
 
 ---
 
@@ -200,9 +200,7 @@ Volume II picks up where Volume I ends, moving from a single machine to fleets o
 
 This is a living textbook. We keep it updated as the field grows, with community input along the way.
 
-AI may feel like it is moving at lightning speed, but the engineering building blocks that make it work do not change as quickly as the headlines. This project is built around those stable foundations.
-
-Think of it like LEGO. New sets arrive all the time, but the bricks themselves stay the same. Once you learn how the bricks fit together, you can build anything. Here, those "AI bricks" are the solid systems principles that make AI work.
+AI headlines move fast. The engineering principles underneath move much more slowly. Parallelism, memory hierarchies, reliability mathematics, and quantization theory are as relevant today as they were a decade ago and will remain so a decade from now. This textbook is built around those enduring foundations.
 
 Whether you are reading a chapter, running a lab, or sharing feedback, you are helping make these ideas more accessible to the next learner.
 
