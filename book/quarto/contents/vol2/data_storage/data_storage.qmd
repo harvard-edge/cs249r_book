@@ -2,6 +2,47 @@
 engine: jupyter
 ---
 
+# Data Storage {#sec-data-storage}
+
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+\noindent
+![](images/png/cover_storage.png){fig-alt="Distributed data storage and scalable storage systems for ML workloads." width=100%}
+
+:::
+
+## Purpose {.unnumbered}
+
+\begin{marginfigure}
+\mlfleetstack{100}{35}{15}{10}
+\end{marginfigure}
+
+_Why does storage become the invisible bottleneck that prevents accelerators from reaching their potential?_
+
+Accelerators can compute faster than storage can feed them. A modern GPU processes data at terabytes per second internally, but even the fastest NVMe drives deliver single-digit gigabytes per second, and distributed storage systems add latency that compounds into idle accelerators waiting for data to arrive. This mismatch is invisible in benchmarks that measure accelerator performance in isolation but dominates real workloads where training data must stream continuously, checkpoints must be saved reliably, and model weights must be loaded at serving time. The gap between what accelerators *can* consume and what storage *can* deliver shapes system architecture at every level: it forces careful attention to data formats, caching strategies, and pipeline design that would be unnecessary if storage kept pace with compute. Organizations that optimize accelerator utilization without addressing storage discover that their expensive hardware runs at a fraction of capacity because nobody planned for the data path.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Analyze how ML workloads invert traditional storage assumptions and apply the **data pipeline throughput equation** to calculate required bandwidth for different training scenarios.
+- Compare the six tiers of the **ML storage hierarchy** (HBM through Archive) in terms of bandwidth, latency, capacity, and cost per gigabyte.
+- Design data pipeline architectures that use **prefetching** and **pipelining** to hide storage latency and prevent accelerator starvation.
+- Explain how **GPU Direct Storage** bypasses the CPU to reduce data loading latency for accelerator-bound workloads.
+- Evaluate storage cost tradeoffs across tiers, including hidden costs such as egress fees and IOPS charges, to design tiering strategies for training and inference workloads.
+- Explain how checkpoint storage requirements (tiered staging from NVMe to shared storage) interact with cluster **fault tolerance** strategies.
+
+:::
+
 ```{python}
 #| echo: false
 #| label: chapter-start
@@ -33,42 +74,6 @@ from mlsysim.fmt import fmt, sci, check, md
 
 ```
 
-# Data Storage {#sec-data-storage}
-
-::: {layout-narrow}
-::: {.column-margin}
-\chapterminitoc
-:::
-
-\noindent
-![](images/png/cover_storage.png){fig-alt="Distributed data storage and scalable storage systems for ML workloads." width=100%}
-
-:::
-
-## Purpose {.unnumbered}
-
-\begin{marginfigure}
-\mlfleetstack{100}{35}{15}{10}
-\end{marginfigure}
-
-_Why does storage become the invisible bottleneck that prevents accelerators from reaching their potential?_
-
-Accelerators can compute faster than storage can feed them. A modern GPU processes data at terabytes per second internally, but even the fastest NVMe drives deliver single-digit gigabytes per second, and distributed storage systems add latency that compounds into idle accelerators waiting for data to arrive. This mismatch is invisible in benchmarks that measure accelerator performance in isolation but dominates real workloads where training data must stream continuously, checkpoints must be saved reliably, and model weights must be loaded at serving time. The gap between what accelerators *can* consume and what storage *can* deliver shapes system architecture at every level: it forces careful attention to data formats, caching strategies, and pipeline design that would be unnecessary if storage kept pace with compute. Organizations that optimize accelerator utilization without addressing storage discover that their expensive hardware runs at a fraction of capacity because nobody planned for the data path.
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
-::: {.callout-tip title="Learning Objectives"}
-
-- Analyze how ML workloads invert traditional storage assumptions and apply the **data pipeline throughput equation** to calculate required bandwidth for different training scenarios.
-- Compare the six tiers of the **ML storage hierarchy** (HBM through Archive) in terms of bandwidth, latency, capacity, and cost per gigabyte.
-- Design data pipeline architectures that use **prefetching** and **pipelining** to hide storage latency and prevent accelerator starvation.
-- Explain how **GPU Direct Storage** bypasses the CPU to reduce data loading latency for accelerator-bound workloads.
-- Evaluate storage cost tradeoffs across tiers, including hidden costs such as egress fees and IOPS charges, to design tiering strategies for training and inference workloads.
-- Explain how checkpoint storage requirements (tiered staging from NVMe to shared storage) interact with cluster **fault tolerance** strategies.
-
-:::
 
 ```{python}
 #| label: storage-fuel-line-calc
@@ -157,10 +162,12 @@ Traditional storage systems evolved to serve transactional databases, workloads 
 ML workloads systematically invert these assumptions. Training data access is predominantly sequential, streaming through datasets that span hundreds of terabytes. Individual accesses are large (megabytes rather than kilobytes) because models consume batches of images or text sequences. Consistency requirements are relaxed; slightly stale features rarely affect model quality. But bandwidth demands are extreme: hundreds of gigabytes per second, sustained for days or weeks. The mismatch between what storage was optimized for and what ML actually needs creates what we call the **I/O Wall**.
 
 ::: {#nte-io-wall .callout-principle icon=false title="The I/O Wall"}
+
 **The Invariant**: When storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power.
 $$ \text{Utilization} = \min\!\left(1,\;\frac{BW_{\text{storage}}}{N_{GPU} \times R_{consumption}}\right) $$
 
 **The Implication**: A storage system that was adequate for 8 GPUs becomes the bottleneck at 64. **The I/O Wall** scales with the number of accelerators: every GPU added to the cluster raises the throughput floor that storage must sustain, making the data pipeline — not the model — the limiting factor.
+
 :::
 
 ```{python}
@@ -214,12 +221,15 @@ This is a variant of the "Birthday Problem" in probability.
 :::
 
 ::: {.callout-perspective title="The Widening I/O Wall"}
+
 The I/O Wall is not static -- it is widening. Between 2018 and 2025, accelerator compute throughput grew by roughly 10$\times$ (V100 at 125 TFLOPS to B200 at 2,250 TFLOPS in FP8). Over the same period, NVMe sequential bandwidth grew by roughly 2$\times$ (3.5 GB/s to 7 GB/s per drive). The compute-to-storage bandwidth ratio has therefore worsened by 5$\times$ in seven years. If this trend continues, the storage hierarchy must add new tiers (persistent memory, CXL-attached storage) or fundamentally change the data pipeline architecture (compute-near-storage, in-storage processing) to prevent the I/O Wall from becoming the dominant constraint on training throughput. The history of computing suggests that the gap will continue to widen, because the economic incentives favor investing in faster compute (which directly reduces training time) over faster storage (which only indirectly improves utilization).
+
 :::
 
 @fig-storage-compute-chasm makes this widening gap visually precise by tracking GPU throughput and storage bandwidth side by side on the same timescale.
 
 ::: {#fig-storage-compute-chasm fig-env="figure" fig-pos="htb" fig-cap="**The Storage-Compute Chasm**. GPU peak FP16 throughput (blue, left axis) and NVMe sequential read bandwidth (orange, right axis) from 2016 to 2024, both on logarithmic scales. GPU throughput has grown 236$\\times$ while storage bandwidth has grown only 4$\\times$ over the same period. The shaded region highlights the widening gap that data pipeline engineering must bridge through prefetching, caching, and format optimization." fig-alt="Dual-line log-scale plot showing GPU TFLOPS growing from 21 to 5000 and storage bandwidth growing from 3.5 to 14 GB/s between 2016 and 2024."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -309,6 +319,7 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left",
 ax1.set_title("")
 plt.show()
 ```
+
 :::
 
 @fig-storage-compute-chasm illustrates why the I/O Wall is the defining constraint of this chapter. The nearly 60$\times$ ratio between GPU throughput growth (236$\times$) and storage bandwidth growth (4$\times$) means that every new GPU generation increases the pressure on the data pipeline. Without a multi-tier storage hierarchy, prefetching, and format optimization, the expensive accelerators at the top of the stack would spend more time waiting for data than computing on it. The remainder of this chapter examines how each tier of the storage hierarchy addresses a different facet of this chasm.
@@ -353,6 +364,7 @@ You are designing the storage subsystem for a new ML training cluster with 512 G
 2. If each training epoch reads the full 10 TB dataset once and the cluster trains for 100 epochs, what is the total data volume read? How does this compare to a typical database workload?
 3. The model saves a 500 GB checkpoint every 15 minutes. If checkpoint saves must complete within 30 seconds to minimize training disruption, what minimum write bandwidth is required?
 4. Given the write pattern (bursty checkpoints every 15 minutes), what percentage of time is the storage system in "write mode" versus "read mode"?
+
 :::
 
 The storage hierarchy described in the next section is the engineering response to these inverted requirements.
@@ -360,7 +372,9 @@ The storage hierarchy described in the next section is the engineering response 
 Understanding *how* data is accessed across storage tiers is essential for choosing the right storage system. @fig-access-patterns-vol2 compares throughput for sequential versus random access, showing how storage performance degrades dramatically when workloads deviate from sequential streaming.
 
 ::: {#fig-access-patterns-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Access Pattern Throughput Comparison**. High-performance storage delivers dramatically different throughput depending on access patterns. Sequential reads (blue) saturate bandwidth quickly as request size increases. Random reads (red), typical of databases or poorly shuffled datasets, suffer from seek latency and protocol overhead." fig-alt="Line graph comparing sequential vs random read throughput across I/O request sizes."}
+
 ![](images/svg/storage-throughput.svg)
+
 :::
 
 The gap labeled "The I/O Wall" in @fig-access-patterns-vol2 widens as request sizes shrink: at 4 KB, sequential reads outperform random reads by 10$\times$. This is why datasets stored as millions of small files (the "small file problem") perform catastrophically on ML workloads, even on high-bandwidth storage. The solution, as we will see in the parallel file system and object storage tiers, is to aggregate small samples into large sequential shards.
@@ -389,10 +403,13 @@ To resolve the tensions between bandwidth, latency, capacity, and cost, ML syste
 ::: {.callout-principle #nte-storage-hierarchy title="The Storage Hierarchy Principle"}
 
 Storage performance decreases and capacity increases as data moves further from the accelerator. Each tier in @tbl-storage-hierarchy-merged drops bandwidth by 10--100$\times$ while increasing capacity by 10--100$\times$. The systems engineer's task is to ensure that the *right data* is on the *right tier* at the *right time*. This principle governs every design decision in this chapter: data format choices, caching strategies, prefetch buffer sizing, and tiering policies all exist to manage the movement of data upward through the hierarchy so that the accelerator never starves.
+
 :::
 
 ::: {#fig-storage-pyramid fig-env="figure" fig-pos="htb" fig-cap="**ML Storage Hierarchy**. A pyramid visualization extending the classic memory hierarchy from GPU HBM down to Object Storage. The bandwidth gap between levels drives the need for sophisticated caching and prefetching." fig-alt="Five-tier pyramid: GPU HBM, Host DRAM, Local NVMe, Parallel File System, Object Storage from top to base."}
+
 ![](images/svg/storage-hierarchy.svg)
+
 :::
 
 The pyramid in @fig-storage-pyramid encodes a fundamental tradeoff: every step down the hierarchy trades bandwidth for capacity and cost. This tradeoff is not arbitrary; it reflects the physics of data proximity. HBM sits on the same silicon interposer as the accelerator, connected by thousands of parallel traces measured in millimeters. Host DRAM communicates over PCIe lanes spanning centimeters. NVMe reaches across a circuit board via a PCIe connector. The parallel file system traverses meters of cable and network switches. Object storage may span kilometers of fiber between data centers. At each level, the increasing physical distance translates directly into increased latency, decreased bandwidth per connection, and decreased cost per byte (because the same medium can store more data at lower density).
@@ -422,6 +439,7 @@ For **image training**, the picture changes dramatically. Using a common batch s
 $$2{,}048 \text{ GPUs} \times 256 \text{ images/GPU} \times 150 \text{ KB/image} \div 0.2\text{s} \approx \mathbf{393 \text{ GB/s}}$$
 
 This is over 2,400$\times$ higher than the text workload and requires a high-performance parallel file system. This fundamental difference drives hierarchy design: text training is **volume-heavy** but **bandwidth-light**, bottlenecked by total dataset size and checkpointing; image training is **bandwidth-heavy**, bottlenecked by the storage system's ability to feed the accelerators.
+
 :::
 
 The bandwidth cliff between tiers also has implications for the data format at each level. At the HBM tier, data must be in the format the accelerator can directly compute on: float16 tensors, packed token IDs, or pre-processed feature vectors. At the NVMe tier, data can be in a more compact format (compressed JPEG, tokenized text with dictionary encoding) because the CPU has time to decode it while the accelerator processes the previous batch. At the object storage tier, maximum compression is desirable to minimize both storage cost and transfer time, even if decompression adds CPU overhead. The format transition from compressed storage to compute-ready tensors is part of the pipeline's "value-added" work, transforming raw bytes into the representation that the accelerator needs. This transformation happens in host DRAM, which is why host DRAM serves as the critical staging area for the pipeline.
@@ -592,6 +610,7 @@ At the NVMe tier, compression represents a critical tradeoff between I/O bandwid
 3.  **The Result**: Shuffling individual files on an HDD will starve the GPU, reducing utilization to <5%.
 
 **The Systems Conclusion**: You must either use NVMe (sub-10 μs random access) or convert the dataset to a sequential format (TFRecord/WebDataset) to achieve sequential throughput.
+
 :::
 
 The central challenge at this tier is the I/O Wall: even the fastest NVMe RAID configuration is roughly 500$\times$ slower than HBM. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPU Direct Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O Wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 14 GB/s as superabundant. But relative to the accelerator's appetite, 14 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
@@ -700,6 +719,7 @@ The severity of this problem in practice is illustrated by a well-known producti
 ::: {.callout-warning title="The Metadata Meltdown"}
 
 A well-known large-scale training cluster experienced a catastrophic slowdown when migrating from a pre-processed sequential dataset to raw images stored as individual files. The parallel file system, provisioned with 500 TB of data bandwidth, delivered less than 1% of its rated throughput. The metadata servers, designed for scientific workloads with thousands of large files, could not sustain the millions of `stat()` and `open()` calls per second that the ML data loaders generated. The fix required converting the entire 200-million-image dataset into 50,000 large tar files (4 GB each), reducing metadata operations by four orders of magnitude. The lesson: **at scale, metadata operations, not data bandwidth, are the first bottleneck to hit.**
+
 :::
 
 The design response to the small file problem is **striping** and **aggregation**. Striping distributes a single large file across multiple OSS nodes so that a client can read from all of them in parallel. The **stripe size** (typically 1 to 4 MB per OSS) determines the granularity: a 4 GB file striped at 1 MB across 100 OSS nodes places 40 MB on each node, and a sequential read saturates all 100 data paths simultaneously. The stripe count (how many OSS nodes participate) can be configured per-file or per-directory, allowing administrators to tune bandwidth for different access patterns. Training data shards benefit from maximum striping; small configuration files benefit from minimal striping to avoid the overhead of coordinating across many nodes.
@@ -733,6 +753,7 @@ Consider a training cluster with 512 nodes, each running 8 GPUs. The training jo
 1. If each Lustre OSS delivers 10 GB/s, how many OSS nodes are required?
 2. If the dataset consists of 200 million images at 150 KB each, and each `open()` call takes 50 μs on the MDS, how long would it take to open all files sequentially? What is the practical implication?
 3. If images are bundled into 4 GB tar files, how many metadata operations are needed to read the full dataset?
+
 :::
 
 Parallel file systems solve the shared-namespace problem for active training clusters, but their cost per byte is too high for the organization's complete data holdings. The petabytes of raw training data, historical checkpoints, and preprocessed datasets that an ML organization accumulates over years require a tier optimized for capacity and durability rather than bandwidth.
@@ -975,6 +996,7 @@ $$T_{\text{step}} = \max(200, 250) = 250 \text{ ms}$$
 `{python} PipelineCalcs.stall_pct_display_math`
 
 **The Systems Conclusion**: Even with pipelining, the accelerator is idle `{python} PipelineCalcs.data_stall_pct_str`% of the time. To eliminate the stall entirely, storage throughput must be reduced below 200 ms, either by using faster storage, deeper prefetch buffers, or more parallel I/O streams.
+
 :::
 
 The data stall ratio provides a diagnostic metric that storage engineers can use to identify whether a training job is compute-bound or I/O-bound. A stall ratio below 2% indicates that the storage pipeline is healthy: the accelerator spends virtually all its time computing. A stall ratio between 2% and 10% suggests that the pipeline is marginally adequate but will degrade if the training configuration changes (more GPUs, smaller batches, faster model). A stall ratio above 10% indicates a clear storage bottleneck that wastes significant compute budget. Profiling tools like PyTorch's DataLoader profiler and NVIDIA Nsight Systems can measure data stall ratio directly by comparing the time the accelerator spends waiting for data versus computing.
@@ -990,6 +1012,7 @@ Different ML workloads have dramatically different bandwidth profiles, even when
 @fig-data-stall-frontier visualizes this relationship between storage bandwidth and GPU utilization. The S-curve reveals a sharp transition: below the stall threshold, even modest bandwidth shortfalls cause dramatic utilization drops, while above it, additional bandwidth yields diminishing returns. The position of common storage technologies on this curve explains why tiered storage architectures are essential -- no single tier provides both the capacity and bandwidth needed to keep a large cluster saturated.
 
 ::: {#fig-data-stall-frontier fig-env="figure" fig-pos="htb" fig-cap="**The Data Stall Frontier**. GPU utilization follows a steep S-curve as a function of storage bandwidth. Below the stall threshold (~10 GB/s for a typical 8-GPU node), accelerators spend more time waiting for data than computing. The position of common storage technologies on this curve explains why tiered architectures are essential." fig-alt="S-curve plot showing GPU utilization versus storage bandwidth with labeled storage technologies from HDD at 0.5 GB/s to NVMe RAID at 25 GB/s, with a stall threshold at 10 GB/s."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -1052,12 +1075,15 @@ plt.xticks([0.1, 0.5, 1, 2, 5, 10, 25, 50, 100],
 plt.tight_layout()
 plt.show()
 ```
+
 :::
 
 The pipeline equation also reveals a scaling challenge that worsens with cluster size. As $N_{GPUs}$ increases, the required bandwidth $BW_{\text{required}}$ increases linearly, but the storage system's aggregate bandwidth does not automatically scale to match. Adding more compute nodes to a cluster that shares a parallel file system increases the demand on a fixed storage resource. Eventually, the storage system saturates and every additional GPU beyond the saturation point contributes zero additional training throughput while increasing cost. This saturation point is the practical upper limit on cluster scaling for a given storage configuration, and identifying it quantitatively requires applying @eq-pipeline-throughput to the specific storage system's measured bandwidth.
 
 ::: {.callout-war-story title="The Invisible Tax"}
+
 A major cloud provider invested heavily in a 4,096-GPU cluster for a flagship LLM training service. Despite top-tier hardware, the team struggled to exceed 68% Model FLOPS Utilization (MFU), far below their target of 85%. Profiling revealed the GPUs were frequently idle, but network and storage I/O metrics looked healthy. The root cause was insidious: the default data loader behavior issued a `stat()` system call for each file before opening it, a defensive check inherited from a database-era storage library. Across thousands of workers, this generated millions of metadata requests per minute, overwhelming the parallel file system's metadata server. The GPUs were stalling on file-open operations, a delay invisible to standard I/O bandwidth counters. The fix was to pre-compute a file manifest at job start and have loaders read it once, eliminating the per-file `stat()` calls. MFU immediately rose to 83%, recovering an estimated \$2.4 million per month in wasted compute.
+
 :::
 
 ### Pipelining and Prefetching {#sec-storage-pipelining}
@@ -1065,7 +1091,9 @@ A major cloud provider invested heavily in a 4,096-GPU cluster for a flagship LL
 The primary weapon against data stalls is **pipelining**: the CPU prepares batch $N+1$ while the GPU processes batch $N$. @fig-data-pipeline-vol2 illustrates this overlap. When I/O time is less than compute time, pipelining hides the storage latency entirely, and the accelerator never stalls.
 
 ::: {#fig-data-pipeline-vol2 fig-env="figure" fig-pos="htb" fig-cap="**Pipelined Data Loading**. The CPU prepares Batch $N+1$ while the GPU processes Batch $N$. Pipelining hides storage latency, but only if the prefetch buffer is deep enough to absorb variance." fig-alt="Pipelining diagram showing CPU loading batches while GPU trains on previous batches."}
+
 ![](images/svg/data-pipelining.svg)
+
 :::
 
 Pipelining works perfectly when I/O times are consistent. In practice, they are not. Storage systems exhibit **I/O jitter**: variation in read latency caused by a multitude of factors. NVMe drives experience occasional latency spikes during internal garbage collection (when the controller reorganizes NAND flash blocks) or wear-leveling operations. Parallel file systems exhibit latency spikes when multiple training jobs contend for the same OSS nodes, when the MDS processes a burst of metadata operations, or when background scrubbing detects and repairs bit errors. Object storage latency can spike during cross-region replication, garbage collection of versioned objects, or load-balancer rebalancing.
@@ -1094,6 +1122,7 @@ A training cluster runs 1,024 GPUs with 128-image batches (150 KB per image afte
 2. If the parallel file system delivers 800 GB/s aggregate, is it sufficient? What if 20% of bandwidth is consumed by checkpoint writes?
 3. The object storage backend has P99 latency of 300 ms. What minimum prefetch buffer depth (in batches) would absorb this variance?
 4. Each decoded batch occupies 10 MB in host DRAM. What is the total prefetch buffer memory for the depth calculated in (3)?
+
 :::
 
 ### Multi-Worker Data Loading {#sec-storage-multi-worker}
@@ -1129,7 +1158,9 @@ For our 3 TB dataset distributed across 256 nodes, each node is responsible for 
 Knowing where data lives is only half the story; at scale we must also pin *which* version of the data each run uses and how it flows through the pipeline.
 
 ::: {.callout-lighthouse title="Archetype B (DLRM at Scale): Feature Store Latency"}
+
 While **Archetype A (GPT-4)** deals with static, versioned datasets of trillions of tokens, **Archetype B (DLRM at Scale)** deals with dynamic, high-velocity feature streams. For a recommendation system, the "ground truth" changes every second as users click and interact. This forces a move from simple file-based storage to a **Feature Store** architecture that must solve the **Point-in-Time Correctness** problem: ensuring that the features retrieved for training exactly match what the model would have seen at the moment of inference, without "leaking" future information.
+
 :::
 
 Feature store architectures address **Point-in-Time Correctness**[^fn-point-in-time] by maintaining an immutable feature ledger or a "time-travel" query engine, significantly increasing storage complexity.
@@ -1208,7 +1239,9 @@ GDS eliminates these software layers for the data path. The cuFile API registers
 The latency reduction from GDS matters most when the training pipeline is already optimized and the remaining bottleneck is the CPU's ability to mediate transfers. In a node with 8 GPUs, each running a data loader with 4 workers, the CPU must manage 32 concurrent I/O streams. At `{python} GDSLatency.gds_trad_us_str` μs per transfer, the CPU spends significant time in interrupt handling and buffer management. GDS offloads this work to hardware DMA engines, freeing CPU cores for data augmentation and other preprocessing tasks.
 
 ::: {#fig-gds-path fig-env="figure" fig-pos="htb" fig-cap="**Traditional vs. GPU Direct Storage Path**. The traditional path (top) requires two copies and CPU involvement. The GDS path (bottom) uses DMA to transfer data directly from NVMe to GPU memory, eliminating the CPU as a bottleneck." fig-alt="Diagram comparing traditional three-hop storage path with GDS direct DMA path from NVMe to GPU."}
+
 ![](images/svg/gds-path.svg)
+
 :::
 
 As @fig-gds-path illustrates, the throughput improvement from GDS is most pronounced for workloads that read many small objects (such as decoded image patches) where per-transfer overhead dominates. For large sequential reads (such as streaming a multi-gigabyte training shard), the throughput improvement is more modest because the transfer time dominates the setup overhead. The general principle is that GDS removes a constant overhead per transfer, so workloads with many transfers per second benefit most.
@@ -1222,6 +1255,7 @@ As @fig-gds-path illustrates, the throughput improvement from GDS is most pronou
 **GDS path**: Each image is DMA'd directly from NVMe to GPU. At `{python} GDSLatency.gds_bypass_us_str` μs of CPU time per image (for initiating the DMA), the CPU spends 1.92 seconds of CPU time per wall-clock second, freeing 6 cores for data augmentation.
 
 **The Systems Conclusion**: GDS does not just reduce latency. It shifts CPU utilization from data copying (which adds no value) to data augmentation (which improves model quality).
+
 :::
 
 GDS has practical limitations. Not all NVMe controllers support peer-to-peer PCIe transfers. The data must be in a format that the GPU can consume directly, which means it must already be decoded (raw pixel values or token IDs, not compressed JPEG or gzip). In practice, many pipelines use a hybrid approach: GDS for the bulk data transfer, with CPU-side decoding of compressed formats into a staging buffer that GDS then transfers to the GPU.
@@ -1307,6 +1341,7 @@ The visible cost of storage ($/GB/month) is the tip of the iceberg. Below the su
 - **Retrieval fees**: Archive storage charges retrieval fees (\$0.02/GB for Glacier) in addition to egress. Restoring a 100 TB dataset from Glacier costs \$2,000 in retrieval fees plus \$9,000 in egress.
 
 The economically rational strategy often invests more in storage (local NVMe caching, parallel file system capacity) to reduce transfer costs and prevent accelerator stalls.
+
 :::
 
 ::: {.callout-notebook title="The Egress Tax"}
@@ -1327,6 +1362,7 @@ The economically rational strategy often invests more in storage (local NVMe cac
 - Total: \$13,800 + \$60,000 + \$18,000 = **\$91,800/year**
 
 **The Systems Conclusion**: Local NVMe caching saves \$282,000/year -- enough to fund 3 additional H100 GPUs. The break-even point is just 2 epochs: if you read the data more than twice, local caching pays for itself.
+
 :::
 
 The storage cost iceberg reveals a counterintuitive principle: *the cheapest storage tier is not always the cheapest choice.* Object storage at \$0.02/GB/month appears to be the optimal location for all data. But when the total cost of data delivery (storage + egress + IOPS + opportunity cost of idle accelerators) is calculated, the cheapest total cost often comes from staging data on more expensive local NVMe and reading from there. The additional \$0.08/GB/month for local NVMe is a bargain compared to \$0.09/GB in egress fees that would be incurred every time the data is read from object storage. This analysis must be performed for each workload, because the economics depend on how many times the data is read (multi-epoch training reads the data many times, while single-epoch language model training reads it once) and how latency-sensitive the training pipeline is.
@@ -1416,6 +1452,7 @@ A `{python} StorageHierarchyAnalysis.gpt3_params_b`B parameter model with Adam o
 5. **Overhead**: 0.29 s pause every 600 s = **0.05%** training time lost to checkpointing.
 
 **The Systems Conclusion**: Tiered staging reduces checkpoint overhead from a potential 10+ second PFS-direct write to a sub-second local write. The key insight is that $T_{save}$ for the training pipeline is the *local* write time, not the *durable* write time.
+
 :::
 
 The **tiered staging** strategy minimizes $T_{save}$ by writing in two phases. In the first phase, each node writes its checkpoint shard to local NVMe at full bandwidth. With four NVMe drives providing 14 GB/s aggregate, a per-node shard of `{python} StorageHierarchyAnalysis.ckpt_total_gb_str` GB (for a 256-node cluster, each node saves roughly 4 GB) completes in under a second. The training pipeline can resume immediately after the local write completes.
@@ -1436,6 +1473,7 @@ A training cluster of 1,024 nodes saves a 175B-parameter model checkpoint every 
 2. If each node writes to local NVMe at 14 GB/s, what is $T_{save}$ for the local write?
 3. If the parallel file system provides 1 TB/s aggregate and all 1,024 nodes write simultaneously, what is the per-node write bandwidth, and how long does the async copy take?
 4. Why is tiered staging (local NVMe first, then async PFS copy) faster than writing directly to PFS?
+
 :::
 
 ### Distributed Checkpoint Coordination {#sec-storage-distributed-checkpoint}
@@ -1511,6 +1549,7 @@ The complete storage picture for our running example -- a 30-day training run of
 | Archive (retained checkpoints + dataset)   |                                                     ~50 TB | Glacier                                                    |
 
 **Total data moved through the hierarchy**: approximately `{python} StorageHierarchyAnalysis.ckpt_fleet_total_pb` PB of checkpoint data plus 3 TB$\times$ epochs of training data reads. For a single-epoch language model training run, checkpoint I/O dominates data loading I/O by a factor of over 1,000.
+
 :::
 
 ## Summary {#sec-storage-summary}
@@ -1522,6 +1561,7 @@ What makes ML storage particularly challenging is that these workloads invert ne
 The economics of the hierarchy are equally consequential. The orders-of-magnitude cost difference between HBM and archive storage mandates a tiering strategy, but the true cost of data delivery extends well beyond per-gigabyte storage prices. Egress fees for moving data out of object storage, IOPS charges for metadata-heavy access patterns, and the opportunity cost of idle accelerators waiting on slow checkpoints all factor into the total cost of ownership. Checkpoint staging, where models write first to fast local NVMe and replicate asynchronously to shared storage, exemplifies how careful pipeline design can decouple training pause time from the performance limitations of the underlying file system.
 
 ::: {.callout-takeaways title="Feed the Accelerators or Waste Them"}
+
 *   **HBM is the destination**: Every lower tier exists to keep GPU HBM populated. The 300,000$\times$ bandwidth gap between HBM and object storage drives every design decision in the ML storage hierarchy.
 *   **ML workloads invert storage assumptions**: Traditional caching, IOPS optimization, and small-write durability patterns all produce the wrong answer for ML training. Throughput (GB/s) matters more than IOPS. Small files are the enemy; aggregated shards are the solution.
 *   **The pipeline equation governs design**: Required bandwidth scales linearly with GPU count and inversely with iteration time. Use $BW_{\text{required}} = N_{GPUs} \times U_{target} \times S_{batch} / T_{iteration}$ to size every tier.
@@ -1530,6 +1570,7 @@ The economics of the hierarchy are equally consequential. The orders-of-magnitud
 *   **Metadata, not bandwidth, is the first bottleneck**: The small file problem collapses parallel file system throughput to a fraction of rated capacity. Aggregate samples into large shards to reduce metadata operations by 10,000$\times$ or more.
 *   **Checkpoint staging minimizes $T_{save}$**: Write to local NVMe first, then replicate asynchronously to shared storage. This decouples checkpoint pause time from parallel file system performance.
 *   **Economics drive tiering**: The `{python} EconRatios.tier_cost_ratio_str`$\times$ cost difference between HBM and archive storage mandates a tiering strategy. Egress fees often exceed storage fees; design for total cost of data delivery, not storage cost alone.
+
 :::
 
 Engineers who internalize the storage hierarchy gain a systematic diagnostic framework for training performance. When a cluster reports low accelerator utilization, the instinct is often to suspect the compute configuration or the model itself. In practice, the root cause is frequently buried in the data path: a data loader reading individual files instead of shards, a prefetch buffer sized for average latency rather than tail latency, a checkpoint strategy that blocks training while writing to a slow parallel file system, or a NUMA-unaware memory allocation that halves effective DRAM bandwidth. Diagnosing these failures requires understanding which tier is the bottleneck and why, a question that the pipeline equation and the storage hierarchy framework make answerable.
@@ -1539,8 +1580,10 @@ This diagnostic perspective connects directly to the choice of distributed train
 ::: {.callout-chapter-connection title="From Storage to Splitting"}
 
 Infrastructure is complete. We have built accelerators that compute at petaFLOPS (@sec-compute-infrastructure), wired them with fabrics that move gradients at TB/s (@sec-network-fabrics), and now established the storage hierarchy that feeds them data. The next challenge is not a hardware problem but an algorithmic one: how do you take a single training job and partition it across these thousands of resources? @sec-distributed-training-systems explores the parallelism strategies (data, tensor, pipeline, and expert parallelism) that split computation across the fleet.
+
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
+
 ::: { .quiz-end }
 :::

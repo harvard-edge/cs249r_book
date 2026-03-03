@@ -4,6 +4,45 @@ engine: jupyter
 
 # Compute Infrastructure {#sec-compute-infrastructure}
 
+::: {layout-narrow}
+::: {.column-margin}
+
+\chapterminitoc
+
+:::
+
+\noindent
+![](images/png/cover_infrastructure.png){fig-alt="Isometric datacenter visualization with rows of server racks connected by glowing blue network paths, cooling infrastructure below, and monitoring dashboards displaying utilization graphs above." width=100%}
+
+:::
+
+## Purpose {.unnumbered}
+
+\begin{marginfigure}
+\mlfleetstack{100}{30}{15}{10}
+\end{marginfigure}
+
+_Why does infrastructure—not algorithms—increasingly determine who can participate in advancing machine learning?_
+
+Machine learning systems have a physical reality that transcends code. While the algorithms for training large models are open, the ability to execute them at scale is gated by the **physics of infrastructure**. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms were the primary bottleneck, progress could happen anywhere. Now that scale dominates, the constraint is who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator** (silicon physics), the **Node** (interconnect density), the **Rack** (thermal management), and the **Pod** (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a 10,000-GPU cluster represents hundreds of millions in capital and megawatts of continuous power. Infrastructure has become the moat that separates organizations that can define the frontier from those that can only follow it. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps.
+
+::: {.content-visible when-format="pdf"}
+
+\newpage
+
+:::
+
+::: {.callout-tip title="Learning Objectives"}
+
+- Explain the **Accelerator Spectrum** (GPU vs. TPU vs. ASIC) and how workload dataflows drive architectural specialization
+- Quantify the **Memory Wall** by comparing HBM generations and calculating token generation latency
+- Apply the **Roofline Model** to diagnose whether a cluster is throttled by arithmetic units or memory bandwidth
+- Analyze the **Bandwidth Hierarchy** (HBM $\to$ NVLink $\to$ InfiniBand) and its impact on parallel strategy selection
+- Evaluate **Cooling Architectures** (Air vs Liquid) and calculate datacenter power requirements using **PUE**
+- Perform a **Total Cost of Ownership (TCO)** analysis to determine the break-even point for build-vs-buy decisions
+
+:::
+
 ```{python}
 #| echo: false
 #| label: chapter-start
@@ -41,40 +80,6 @@ from mlsysim.fmt import fmt, sci, check, md, md_math
 
 ```
 
-::: {layout-narrow}
-::: {.column-margin}
-\chapterminitoc
-:::
-
-\noindent
-![](images/png/cover_infrastructure.png){fig-alt="Isometric datacenter visualization with rows of server racks connected by glowing blue network paths, cooling infrastructure below, and monitoring dashboards displaying utilization graphs above." width=100%}
-
-:::
-
-## Purpose {.unnumbered}
-
-\begin{marginfigure}
-\mlfleetstack{100}{30}{15}{10}
-\end{marginfigure}
-
-_Why does infrastructure—not algorithms—increasingly determine who can participate in advancing machine learning?_
-
-Machine learning systems have a physical reality that transcends code. While the algorithms for training large models are open, the ability to execute them at scale is gated by the **physics of infrastructure**. Every training run is a race against thermal limits, power delivery stability, and the crushing cost of data movement. When algorithms were the primary bottleneck, progress could happen anywhere. Now that scale dominates, the constraint is who can build and operate the physical systems that make scale possible. Building an ML fleet requires engineering across four physical levels: the **Accelerator** (silicon physics), the **Node** (interconnect density), the **Rack** (thermal management), and the **Pod** (warehouse-scale networking). At each level, the goal is the same: to minimize the time data spends in transit and maximize the time it spends in computation. The economics are equally unforgiving: a 10,000-GPU cluster represents hundreds of millions in capital and megawatts of continuous power. Infrastructure has become the moat that separates organizations that can define the frontier from those that can only follow it. This chapter maps that physical stack, from the stacking of memory dies to the stabilization of grid-scale power ramps.
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
-::: {.callout-tip title="Learning Objectives"}
-
-- Explain the **Accelerator Spectrum** (GPU vs. TPU vs. ASIC) and how workload dataflows drive architectural specialization
-- Quantify the **Memory Wall** by comparing HBM generations and calculating token generation latency
-- Apply the **Roofline Model** to diagnose whether a cluster is throttled by arithmetic units or memory bandwidth
-- Analyze the **Bandwidth Hierarchy** (HBM $\to$ NVLink $\to$ InfiniBand) and its impact on parallel strategy selection
-- Evaluate **Cooling Architectures** (Air vs Liquid) and calculate datacenter power requirements using **PUE**
-- Perform a **Total Cost of Ownership (TCO)** analysis to determine the break-even point for build-vs-buy decisions
-
-:::
 
 ```{python}
 #| label: infra-running-example
@@ -148,7 +153,9 @@ class InfraSetup:
 ```
 
 ::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Three Walls Across Infrastructure Levels**. The Memory Wall, Power Wall, and Communication Wall are not independent problems; they interact at every level of the physical stack. Each row shows how the three constraints manifest at a given scale, and the downward arrows indicate that solving the constraint at one level creates the dominant constraint at the next. The rightmost column shows why the Communication Wall ultimately dominates at cluster scale." fig-alt="Grid with four rows for Accelerator, Node, Rack, and Pod levels and three columns for Memory, Power, and Communication walls. Downward arrows connect rows showing constraint cascade."}
+
 ![](images/svg/infra-walls.svg)
+
 :::
 
 As @fig-three-walls-grid illustrates, this chapter begins at the silicon die and expands outward through four physical levels. At each level, we encounter the same engineering pattern: a constraint becomes intolerable, and the solution creates the next level of infrastructure. The Node aggregates accelerators to overcome memory capacity limits. The Rack concentrates nodes and confronts power delivery and cooling. The Pod wires racks into a warehouse-scale computer and faces the communication wall at full force. By the end, we will have mapped the complete physical stack from transistor to datacenter, with our `{python} InfraSetup.frontier_params_b`B model serving as the thread that connects each level.
@@ -230,7 +237,9 @@ As @fig-wafer-scale-engine shows, the challenge of wafer-scale integration is ph
 Wafer-scale engines sit at a unique point on the spectrum: they are highly specialized in their *physical* architecture but flexible in their *computational* model, as the underlying cores are often general-purpose enough to execute diverse ML kernels. They represent a "Scale Up" philosophy that attempts to eliminate the Communication Wall by making the cluster the chip.
 
 ::: {#fig-wafer-scale-engine fig-env="figure" fig-pos="htb" fig-cap="**Wafer-Scale Engine (WSE) Architecture**: Unlike traditional processors, a WSE uses the entire 300mm silicon wafer as a single continuous compute fabric. This eliminates the 'Dicing' process and replaces PCB-level interconnects with a high-bandwidth on-chip mesh. The software must be defect-aware, routing data through a unified fabric that treats the entire wafer as a single logical processor with uniform memory access (UMA) characteristics across 900,000 cores." fig-alt="Diagram showing a large circular silicon wafer covered in a grid of hundreds of thousands of small compute cores. A red line shows a data path routing around a black 'defect' node in the grid. Inset shows a magnifying glass over a 4x4 grid of cores connected by high-speed local links."}
+
 ![](images/svg/wse-architecture.svg)
+
 :::
 
 | **Feature**         |    **CPU**    | **GPU** (H100) | **TPU** (v5p)  | **Wafer-Scale** | **Custom ASIC** |
@@ -320,6 +329,7 @@ A subtlety that affects fleet consistency is the **silicon lottery** -- the manu
 @tbl-gpu-evolution compresses four hardware generations into a few columns. @fig-accelerator-efficiency-wall unpacks two of those columns, raw throughput and power efficiency, to reveal a divergence that shapes every infrastructure decision in this volume.
 
 ::: {#fig-accelerator-efficiency-wall fig-env="figure" fig-pos="htb" fig-cap="**The Accelerator Efficiency Wall**. FP16 throughput (blue, left axis) and power efficiency (green, right axis) for six generations of NVIDIA datacenter GPUs, both on logarithmic scales. Raw throughput has grown 236$\\times$ from the P100 to the B200, but efficiency (TFLOPS per watt) has grown only 70$\\times$ over the same period. The shaded region highlights the widening gap that the power grid, cooling systems, and datacenter infrastructure must absorb." fig-alt="Dual-axis log-scale plot showing GPU FP16 TFLOPS and TFLOPS per watt from 2016 to 2024 across six NVIDIA GPU generations."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -396,6 +406,7 @@ ax1.legend(lines1 + lines2, labels1 + labels2, loc="upper left",
 ax1.set_title("")
 plt.show()
 ```
+
 :::
 
 @fig-accelerator-efficiency-wall quantifies a critical asymmetry: while each GPU generation delivers dramatically more raw throughput, the power required to sustain that throughput grows nearly as fast. The 236$\times$ increase in FP16 TFLOPS from P100 to B200 is accompanied by only a 70$\times$ increase in TFLOPS per watt, which means that the datacenter's power grid and cooling infrastructure must absorb the difference. This divergence is the physical root of the Power Wall discussed in the next sections and explains why liquid cooling, megawatt-scale power delivery, and thermal management dominate modern datacenter design.
@@ -451,7 +462,9 @@ The memory hierarchy within a single accelerator spans orders of magnitude in bo
  Further down is the 50 MB L2 cache (~12 TB/s), and finally the 80 GB of HBM3 at 3.35 TB/s.
 
 ::: {.callout-lighthouse title="Archetype B (DLRM at Scale): The Capacity Wall"}
+
 While **Archetype A (GPT-4)** is primarily throughput-bound (demanding more TFLOPS), **Archetype B (DLRM at Scale)** is primarily capacity-bound. A 10 TB embedding table cannot fit into the 80 GB HBM of a single H100, nor can it fit into the aggregate HBM of a single 8-GPU node (640 GB). This physical limit forces Archetype B to shard its state across hundreds of nodes, transforming a memory-access problem into a massive **All-to-All** network coordination problem.
+
 :::
 
 The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling. High Model FLOPS Utilization (MFU) is only possible through aggressive **tiling**: breaking the massive weight matrices into small tiles that fit entirely within shared memory and registers, then performing as many multiply-accumulate operations on each tile as possible before evicting it. Despite the `{python} InfraSetup.frontier_params_b`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
@@ -607,6 +620,7 @@ The practical implication is that accelerator selection for inference workloads 
 @fig-compute-memory-divergence makes this divergence visible across four GPU generations. While compute throughput has grown 36$\times$ from V100 to B200, memory bandwidth has grown only 9$\times$ over the same period. The widening gap between these two curves *is* the Memory Wall: each generation of accelerator becomes more powerful in arithmetic but proportionally more starved for data.
 
 ::: {#fig-compute-memory-divergence fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Memory Divergence**. GPU compute throughput (FP16 Tensor TFLOPS) has grown approximately 36x from V100 to B200, while HBM bandwidth has grown only 9x over the same period. The widening gap between these curves is the Memory Wall: each generation of accelerator becomes proportionally more starved for data." fig-alt="Dual-axis log-scale plot showing GPU compute growth at 36x versus memory bandwidth growth at 9x from 2017 to 2024, with diverging slopes illustrating the Memory Wall."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -678,6 +692,7 @@ ax2.annotate(
 plt.tight_layout()
 plt.show()
 ```
+
 :::
 
 For training workloads, where large batch sizes increase arithmetic intensity, the calculus shifts toward compute: peak TFLOPS per dollar becomes the relevant metric because the weight data loaded from HBM is amortized across many tokens in the batch. The Roofline Model, which we examine next, provides the formal framework for making this trade-off precise and for determining which metric matters for any given workload.
@@ -692,7 +707,9 @@ The token latency calculation above demonstrated that a 70B model on an H100 is 
 [^fn-roofline-origin-ci]: **Roofline Model**: Introduced by Williams, Waterman, and Patterson at UC Berkeley in 2009, the model plots attainable FLOPS against arithmetic intensity on a log-log scale, producing two intersecting lines whose crossover point -- the *ridge point* -- separates memory-bound from compute-bound regimes. For an H100 (989 TFLOPS FP16, 3.35 TB/s HBM), the ridge point is ~295 FLOP/byte; most LLM inference operators fall well below this threshold, which is why the Roofline remains the first diagnostic tool for identifying whether more compute or more bandwidth will improve performance. \index{Roofline Model!origin}
 
 ::: {.callout-note title="Arithmetic Intensity"}
+
 **Arithmetic Intensity** ($I$) is applied to fleet-scale performance analysis at @sec-performance-engineering-roofline. Briefly: $I = \text{FLOP}/\text{byte}$ — the ratio of computation to memory traffic that determines whether a workload is bandwidth-bound or compute-bound on the Roofline Model.
+
 :::
 
 The Roofline Model expresses the maximum achievable performance of a workload as the lesser of two ceilings:
@@ -729,6 +746,7 @@ The Roofline's diagnostic power extends beyond individual kernels to entire trai
 @fig-roofline-landscape makes these relationships visible for the H100. Notice how LLM decode at batch size 1 sits deep in the memory-bound region, achieving less than 1% of peak compute, while LLM training at large batch sizes crosses the ridge point into the compute-bound regime. The 591$\times$ gap between these two workloads' arithmetic intensities explains why the same hardware that delivers excellent training throughput can appear woefully underutilized during inference.
 
 ::: {#fig-roofline-landscape fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Landscape: NVIDIA H100**. The roofline is defined by two ceilings: memory bandwidth (diagonal) and peak compute (horizontal), meeting at the ridge point (~591 FLOP/byte). ML workloads span the full range: LLM decode at batch size 1 is deeply memory-bound, while LLM training at large batch sizes is compute-bound. The position of each workload determines whether faster memory or faster compute would improve performance." fig-alt="Log-log roofline plot for H100 showing memory-bound and compute-bound regions with five ML workloads plotted from LLM decode at 1 FLOP per byte to LLM training at 2000 FLOP per byte."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -805,6 +823,7 @@ plt.text(3000, P_PEAK_TFLOPS * 1.1, r'$R_{\text{peak}}$' + f'\n{int(P_PEAK_TFLOP
 plt.tight_layout()
 plt.show()
 ```
+
 :::
 
 The Roofline Model also reveals a subtle but important insight about the interaction between batch size and hardware utilization. Increasing the batch size for a given model raises the arithmetic intensity because the weight matrix is loaded once but multiplied against a larger activation matrix (more FLOPs for the same bytes transferred). This shifts the workload point rightward on the plot, potentially crossing the ridge point from memory-bound to compute-bound territory. The arithmetic intensity grows linearly with batch size (doubling the batch size doubles the FLOPs while keeping the weight loading unchanged), creating a simple and predictable relationship between batch size and hardware utilization.
@@ -989,7 +1008,9 @@ For capacity planning, the sustained throughput rate, not the peak rate, should 
 The Memory Wall constrains how fast data reaches the compute units; the Roofline Model diagnoses whether compute or memory is the binding constraint; and Tensor Cores maximize the arithmetic value of every byte fetched. A third physical constraint also limits the accelerator's performance: the heat generated by all this computation. Every FLOP dissipates energy, and the faster we compute, the more heat we must remove. This is the Power Wall. @fig-power-path traces the journey of energy from grid to transistor.
 
 ::: {#fig-power-path fig-env="figure" fig-pos="htb" fig-cap="**The Power Delivery Path**. The journey of energy from the high-voltage grid to the low-voltage transistor. Each stage involves conversion losses (quantified by PUE) and requires stabilizing infrastructure to handle the massive current ramps of ML training. The critical engineering challenge is the Rack PDU to VRM transition, where 10--40 kW of power must be delivered within a single cabinet." fig-alt="Flowchart showing power journey from Grid Substation to Datacenter UPS, to Rack PDU, to Server PSU, to Voltage Regulator Module, finally to GPU Die. Arrows show power flow."}
+
 ![](images/svg/power-path.svg)
+
 :::
 
 ## Thermal Design Power {#sec-compute-tdp}
@@ -1000,16 +1021,20 @@ The Memory Wall constrains how fast data reaches the compute units; the Roofline
 Every floating-point operation dissipates energy as heat. A Tensor Core performing 4,096 MACs per cycle at 2 GHz generates heat proportional to the switching activity of billions of transistors. The **Thermal Design Power (TDP)**[^fn-tdp-thermal] of an accelerator is the maximum sustained heat dissipation that the cooling system must handle, and it has become the single most consequential specification in fleet design.
 
 ::: {#nte-thermodynamic-limit .callout-principle icon=false title="The Thermodynamic Limit"}
+
 **The Invariant**: Computation is physically the conversion of ordered energy (electricity) into disordered energy (heat) to produce information (reduced entropy).
 $$ P_{limit} = \frac{\Delta Q}{\Delta t} $$
 
 **The Implication**: The bottleneck of the modern AI datacenter is not FLOPS, but **Watts per square foot**. When a rack generates 100kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon.
+
 :::
 
 ::: {#nte-power-density-wall .callout-principle icon=false title="The Power Density Wall"}
+
 **The Invariant**: Cluster scaling is constrained by thermal dissipation limits (Watts per rack) and cooling capacity, not just silicon area or floor space.
 
 **The Implication**: Modern AI accelerators generate heat densities that exceed air cooling capabilities. **Liquid cooling** becomes a facility requirement, not an option, for large-scale training clusters.
+
 :::
 
 [^fn-tdp-thermal]: **TDP (Thermal Design Power)**: Often misunderstood as "power consumption," TDP specifies the maximum sustained thermal load (in watts) that the cooling solution must remove. Accelerators routinely exceed their TDP during transient power spikes -- an H100 can spike to 900 W during a large GEMM before firmware throttles back to 700 W -- which forces rack-level VRM and cooling designs to provision for worst-case, not average, power draw. \index{TDP!thermal constraint}
@@ -2242,10 +2267,12 @@ A pod optimized for Transformer training, where the dominant communication patte
 Both specialized designs outperform a general-purpose topology for their target workload, illustrating the same generality-efficiency trade-off we observed at the accelerator level. The Generality Tax applies not only to silicon but to every layer of the infrastructure stack: network topologies, cooling systems, and even building designs become more efficient when optimized for a known workload pattern.
 
 ::: {#nte-generality-tax .callout-principle icon=false title="The Generality Tax"}
+
 **The Invariant**: Hardware efficiency is inversely proportional to programmability. A general-purpose processor pays an area and power overhead for flexibility that a domain-specific accelerator avoids.
 $$ \eta_{specific} \gg \eta_{general} \quad \text{for a fixed power budget} $$
 
 **The Implication**: The trajectory from CPU to GPU to TPU to fixed-function ASIC is not a technology trend — it is a physical law. Each step trades programmability for efficiency.
+
 :::
 
 These principles (that the network is the bottleneck, failure is routine, and homogeneity enables efficiency) are not just qualitative observations. They can be quantified by a single metric: **scaling efficiency**, which determines whether adding more nodes to a pod produces proportional returns or diminishing waste.
@@ -3053,5 +3080,6 @@ Throughout this chapter, we have repeatedly encountered the same constraint: com
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
+
 ::: { .quiz-end }
 :::

@@ -6,7 +6,9 @@ engine: jupyter
 
 ::: {layout-narrow}
 ::: {.column-margin}
+
 \chapterminitoc
+
 :::
 
 \noindent
@@ -25,7 +27,9 @@ _Why does the network connecting accelerators matter more than the accelerators 
 A single GPU can perform trillions of operations per second, but distributed training requires those operations to coordinate across thousands of devices. Every synchronization point, whether gradient averaging, activation exchange, or parameter update, depends on network bandwidth and latency. When network capacity cannot keep pace with accelerator throughput, GPUs sit idle waiting for data to arrive, and adding more GPUs makes the problem worse rather than better. At sufficient scale, network design dominates system performance: the topology determines which communication patterns are efficient, the bandwidth determines how large models can be partitioned, and the latency determines how tightly coupled training can be. Organizations that treat networking as an afterthought discover that their expensive accelerators deliver a fraction of theoretical performance because the network became the bottleneck nobody planned for.
 
 ::: {.content-visible when-format="pdf"}
+
 \newpage
+
 :::
 
 ::: {.callout-tip title="Learning Objectives"}
@@ -180,6 +184,7 @@ The concrete bandwidth cliff that separates intra-node from inter-node communica
 @fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
 
 ::: {#fig-bandwidth-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Hierarchy**. Bandwidth at four levels of the communication hierarchy across four GPU generations, on a logarithmic scale. While HBM and NVLink bandwidth have grown roughly 9$\\times$ and 6$\\times$ respectively from V100 to B200, InfiniBand has grown only 4$\\times$. The annotations show the NVLink-to-InfiniBand ratio for each generation, quantifying the cliff that distributed training must cross at every synchronization point." fig-alt="Grouped bar chart with log-scale y-axis showing bandwidth in GB per second at four hierarchy levels across four GPU generations from V100 to B200."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +247,7 @@ ax.legend(loc="upper left", frameon=True, fancybox=True, framealpha=0.9, ncol=2)
 ax.set_title("")
 plt.show()
 ```
+
 :::
 
 @fig-bandwidth-hierarchy reveals that the NVLink-to-InfiniBand ratio has remained between 12$\times$ and 25$\times$ across four GPU generations, despite absolute bandwidth improvements at every tier. This persistent cliff is not a temporary engineering shortcoming; it reflects the fundamental physics that on-package interconnects (NVLink) operate over millimeters of copper, while inter-node links (InfiniBand) span meters of cable and must traverse switches. The ratio determines which parallelism strategies are efficient: tensor parallelism, which requires continuous high-bandwidth exchange of activations, is viable within a node but impractical across nodes. Pipeline and data parallelism, which tolerate the lower inter-node bandwidth, must carry the burden of cross-node communication. Every topology and protocol decision in the remainder of this chapter is an attempt to minimize the impact of this hierarchy on collective communication performance.
@@ -249,6 +255,7 @@ plt.show()
 To see why this ratio matters so viscerally, consider what happens during a single training step. @fig-bandwidth-cliff-gantt contrasts the timeline for an 8-GPU job communicating within a node versus a 64-GPU job communicating across nodes.
 
 ::: {#fig-bandwidth-cliff-gantt fig-env="figure" fig-pos="htb" fig-cap="**The Bandwidth Cliff in a Training Step**. Two timelines for the same model: an 8-GPU intra-node job (top) using NVLink at 900 GB/s, and a 64-GPU inter-node job (bottom) using InfiniBand at 50 GB/s. The AllReduce phase (red) grows from a thin sliver to a dominant fraction of the step. Without communication--computation overlap, GPUs sit idle during the entire AllReduce, and the utilization gap between the two scenarios exceeds 10 percentage points." fig-alt="Two horizontal Gantt bars. Top bar shows forward pass, backward pass, and thin AllReduce sliver at 99 percent utilization. Bottom bar shows same compute phases but a wide AllReduce block dropping utilization to 87 percent."}
+
 ```{.tikz}
 \usetikzlibrary{positioning, decorations.pathreplacing}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -310,6 +317,7 @@ To see why this ratio matters so viscerally, consider what happens during a sing
 
 \end{tikzpicture}
 ```
+
 :::
 
 The 12 percentage-point utilization gap in @fig-bandwidth-cliff-gantt represents millions of dollars in wasted compute over a months-long training run. This is why network fabric design is not an afterthought but the central engineering challenge of distributed training.
@@ -390,7 +398,9 @@ The choice of physical medium determines the reach and economics of each link. T
 - **Pluggable Optics**: Separate transceivers and fiber cords, used for runs exceeding 30 meters to the network core.
 
 ::: {.callout-perspective title="The Cost of Distance"}
+
 In an ML fleet, distance is money. A 10,000-GPU cluster requires ~20,000 optical links at the spine layer alone. At \$500 each with 10 W per link, that represents \$10 million in cabling and 200 kW of continuous power just for transceivers. This physics dictates **cluster geometry**: we pack accelerators as densely as possible (70–100 kW per rack) to maximize cheap copper and minimize expensive optics.
+
 :::
 
 ### SerDes, Link Budget, and Power {#sec-network-fabrics-serdes}
@@ -441,7 +451,9 @@ Two transport protocols dominate modern GPU clusters:
 @fig-ib-roce-stack compares the two stacks, showing how both expose the same **Verbs API** to applications despite their different transport foundations.
 
 ::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**High-Performance Networking Stacks**. Comparison of InfiniBand and RoCE protocol stacks. Both expose the same Verbs API, but RoCE relies on Priority Flow Control (PFC) in the Ethernet layer to approximate InfiniBand's native lossless guarantees." fig-alt="Side-by-side diagram comparing InfiniBand and RoCE protocol stacks from application layer down to physical layer, showing Verbs API at top and transport differences."}
+
 ![](images/svg/networking-stacks.svg)
+
 :::
 
 ### Losslessness and the Go-Back-N Problem {#sec-network-fabrics-losslessness}
@@ -563,6 +575,7 @@ The second message is a 350 MB gradient shard for one layer's AllReduce. Now: $T
 @fig-alpha-beta-crossover makes these two regimes visible across the full range of message sizes. For InfiniBand, the crossover occurs at approximately `{python} NetworkAlphaBeta.n_cross_ib_kb_str` KB: messages smaller than this are latency-dominated (the flat region on the left), while larger messages are bandwidth-dominated (the linear region on the right). The 5$\times$ latency gap between InfiniBand and Ethernet RoCE dominates for small messages but becomes irrelevant for the multi-megabyte gradient transfers that dominate training communication.
 
 ::: {#fig-alpha-beta-crossover fig-env="figure" fig-pos="htb" fig-cap="**The Alpha-Beta Crossover**. Transfer time as a function of message size for InfiniBand NDR and Ethernet RoCE. Small messages are latency-dominated (flat region), while large messages are bandwidth-dominated (linear region). The crossover point marks where investing in bandwidth begins to pay off more than reducing latency." fig-alt="Log-log plot showing transfer time versus message size for InfiniBand and Ethernet, with latency-dominated and bandwidth-dominated regions labeled."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -637,6 +650,7 @@ ax.xaxis.set_major_locator(ticker.LogLocator(base=10.0, numticks=12))
 plt.tight_layout()
 plt.show()
 ```
+
 :::
 
 ::: {#nb-allreduce-bottleneck .callout-notebook title="When Does AllReduce Become the Bottleneck?"}
@@ -773,7 +787,9 @@ For ML training, where all-to-all communication is standard, full bisection band
 As @fig-topology-bisection illustrates, these definitions shape every topology choice that follows: fat-trees achieve non-blocking behavior through redundant switch tiers, rail-optimized networks exploit workload structure to approximate it at lower cost, and dragonflies trade bisection bandwidth for reduced cabling.
 
 ::: {#fig-topology-bisection fig-env="figure" fig-pos="htb" fig-cap="**Topology Bisection Bandwidth Comparison**. Fat-Tree architectures provide full bisection bandwidth, while other topologies trade this off for cost or latency." fig-alt="Bar chart or comparison diagram showing bisection bandwidth across Fat-Tree, Torus, and other network topologies."}
+
 ![](images/svg/topology-bandwidth.svg)
+
 :::
 
 ### Top-of-Rack (ToR) and the Failure Domain {#sec-network-fabrics-tor}
@@ -915,7 +931,9 @@ However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod
 As @fig-rail-optimized-cabling shows, in modern ML nodes GPUs are partitioned into "Rails" corresponding to their PCIe slot position.
 
 ::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**. In modern ML nodes (e.g., DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that **Tensor Parallelism**—which synchronizes between corresponding GPUs—never competes for bisection bandwidth with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, etc."}
+
 ![](images/svg/rail-optimized.svg)
+
 :::
 
 \index{rail-optimized topology}
@@ -972,7 +990,9 @@ Communication latency ($\alpha$) is proportional to the number of switch hops.
 :::
 
 ::: {.callout-lighthouse title="Archetype A (GPT-4 / Llama-3): The Rail-Optimized Fleet"}
+
 **Archetype A (GPT-4)** is the primary driver for rail-optimized fabrics. Because it uses **3D Parallelism**, it generates two distinct traffic patterns: (1) high-frequency, latency-sensitive activation exchanges for tensor parallelism, and (2) massive, bandwidth-hungry gradient averaging for data parallelism. The rail-optimized design ensures that tensor-parallel traffic traverses only a single switch hop between nodes, minimizing the latency that would otherwise stall the synchronous training loop.
+
 :::
 
 For our 1,000-GPU cluster spanning 125 nodes, this creates 8 parallel networks of 125 GPUs each, allowing tensor-parallel traffic to traverse a single switch hop rather than the multi-hop leaf-spine-leaf path required by a standard fat-tree. The latency benefit is significant for the frequent, small activation exchanges that tensor parallelism demands. However, this architecture introduces a sharp trade-off: data parallelism requires global synchronization across *all* GPUs, crossing all rails. Modern clusters therefore employ a hybrid approach, using rail-optimized leaves for tensor-parallel traffic while bridging the rails with a full fat-tree spine to support the global AllReduce patterns of data parallelism.
@@ -1003,6 +1023,7 @@ The trade-offs between these topologies become stark when quantified for a large
 @fig-network-topologies illustrates the structural differences between these common families.
 
 ::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network Topologies for ML**. (A) Fat-Tree provides full bisection bandwidth through hierarchical switch layers. (B) Torus connects neighbors, optimizing for local communication patterns such as those in TPU pods. (C) Rail-Optimized designs dedicate switch infrastructure to corresponding accelerator positions across nodes, minimizing hop count for tensor parallelism." fig-alt="Three-panel diagram: Fat-Tree with hierarchical switches, Torus with neighbor connections, Rail-Optimized with dedicated switch rails."}
+
 ```{.tikz}
 \usetikzlibrary{positioning}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
@@ -1094,11 +1115,14 @@ The trade-offs between these topologies become stark when quantified for a large
   \end{scope}
 \end{tikzpicture}
 ```
+
 :::
 
 ::: {.callout-checkpoint}
+
 ## Topology Selection
 Your choice of network topology dictates the upper bound of training efficiency. For a standard data-parallel job (1), bandwidth is dominated by AllReduce; a non-blocking Fat Tree (Clos) is ideal to maximize bisection bandwidth. For the Mixture-of-Experts model (2), the workload is AllToAll-dominant with bursty, sparse communication; a Dragonfly or high-radix topology might be preferred to minimize hop count, though congestion control becomes critical. For the 2D mesh computation (3), likely a physics simulation or a specific parallel strategy, a Torus topology offers the best locality, mapping the physical neighbor links directly to the hardware and avoiding the core switch bottlenecks entirely.
+
 :::
 
 ::: {#nb-bisection-bottleneck .callout-notebook title="The Bisection Bottleneck"}
@@ -1223,6 +1247,7 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. As @fig-congestion-cascade illustrates, this cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet.
 
 ::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**PFC Pause Frame Propagation**. Congestion at a tail switch (S4) triggers a backpressure cascade, freezing the entire communication path upstream." fig-alt="Diagram showing PFC pause frame propagation from congested switch S4 upstream through the network path."}
+
 ```{=latex}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
   \usetikzlibrary{positioning, shapes.geometric}
@@ -1290,6 +1315,7 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
 
 \end{tikzpicture}
 ```
+
 :::
 
 ::: {.callout-perspective title="War Story: The PFC Storm That Froze a Cluster"}
@@ -1415,6 +1441,7 @@ In a well-designed cluster, the network fabric acts not just as a pipe but as a 
 The bandwidth staircase shown in @fig-hierarchical-staircase dictates the parallelism strategy to mitigate this cliff. **Tensor Parallelism**, requiring massive bandwidth for frequent activation exchanges, is confined to the NVLink domain within a node. **Pipeline Parallelism**, involving point-to-point transfers of activations between pipeline stages, spans the InfiniBand links between nodes. **Data Parallelism**, tolerant of lower bandwidth through gradient accumulation and overlap, stretches across the full fabric.
 
 ::: {#fig-hierarchical-staircase fig-env="figure" fig-pos="htb" fig-cap="**The Hierarchical Bandwidth Staircase**. Communication bandwidth drops by orders of magnitude as the distance from the chip increases, dictating parallelism strategies." fig-alt="Staircase or stepped diagram showing bandwidth decreasing from on-chip through NVLink, PCIe, and network levels."}
+
 ```{=latex}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \usetikzlibrary{positioning, fit}
@@ -1461,6 +1488,7 @@ The bandwidth staircase shown in @fig-hierarchical-staircase dictates the parall
 
 \end{tikzpicture}
 ```
+
 :::
 
 ### Case Study: NVIDIA DGX SuperPOD {#sec-network-fabrics-dgx-superpod}

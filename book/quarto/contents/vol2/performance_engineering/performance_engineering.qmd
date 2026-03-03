@@ -2,31 +2,13 @@
 engine: jupyter
 ---
 
-```{python}
-#| echo: false
-#| label: chapter-start
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CHAPTER START
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Chapter initialization and global imports
-# │
-# │ Why: Registers this chapter with the mlsys registry and provides shared
-# │      imports for all subsequent calculation cells.
-# │
-# │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
-# │ Exports: (none)
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import *
-from mlsysim.fmt import fmt, sci, check
-from mlsysim.core.formulas import calc_bottleneck, model_memory
-
-```
-
 # Performance Engineering {#sec-performance-engineering}
 
 ::: {layout-narrow}
 ::: {.column-margin}
+
 \chapterminitoc
+
 :::
 
 \noindent
@@ -47,7 +29,9 @@ Model compression, covered in earlier chapters, reduces the size of what we comp
 [^fn-speculative-decoding-pe]: **Speculative Decoding**: A technique that uses a small, fast "draft" model to predict multiple tokens in parallel, which are then verified by the large "target" model in a single forward pass. This trades "wasted" compute (to process rejected tokens) for reduced memory bandwidth pressure: the target model's massive weights are loaded from HBM once to process $k$ tokens, effectively increasing the arithmetic intensity of the decode phase by $k\times$. \index{Speculative Decoding!bandwidth optimization}
 
 ::: {.content-visible when-format="pdf"}
+
 \newpage
+
 :::
 
 ::: {.callout-tip title="Learning Objectives"}
@@ -61,6 +45,27 @@ Model compression, covered in earlier chapters, reduces the size of what we comp
 - Diagnose performance bottlenecks using **System Profiling** tools (Nsight Systems, PyTorch Profiler) and roofline plots.
 
 :::
+
+```{python}
+#| echo: false
+#| label: chapter-start
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CHAPTER START
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: Chapter initialization and global imports
+# │
+# │ Why: Registers this chapter with the mlsys registry and provides shared
+# │      imports for all subsequent calculation cells.
+# │
+# │ Imports: mlsysim.registry, mlsysim.constants, mlsysim.book
+# │ Exports: (none)
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import *
+from mlsysim.fmt import fmt, sci, check
+from mlsysim.core.formulas import calc_bottleneck, model_memory
+
+```
+
 
 ::: {.callout-perspective title="Connection: The Fleet Stack"}
 
@@ -114,7 +119,9 @@ Verify your understanding of system-level performance diagnosis:
 :::
 
 ::: {#fig-iron-law-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Iron Law Diagnostic Flowchart**. The optimization process begins with profiling to determine which term in @eq-iron-law-perf dominates. If the workload is compute-bound, precision engineering or algorithmic changes reduce the numerator. If memory-bound, operator fusion and tiling reduce HBM traffic. If overhead-bound, graph compilation and communication overlap attack the residual term. Applying the wrong technique yields zero improvement." fig-alt="Flowchart starting with Profile Workload, branching to Compute Bound, Memory Bound, or Overhead Bound, each leading to specific optimization techniques."}
+
 ![](images/svg/diagnostic-flow.svg)
+
 :::
 
 The **efficiency frontier** is the Pareto-optimal curve of model quality versus system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. The techniques in this chapter push the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
@@ -415,6 +422,7 @@ This means that any operation performing fewer than `{python} RooflineRidgeCalc.
 @fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational shift visible at a glance. The ridge point has grown from 139 FLOP/byte on the V100 to 625 FLOP/byte on the B200, a 4.5$\times$ increase in seven years. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, was memory-bound on every generation but falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as large matrix multiplications, transition from compute-bound on V100 to memory-bound on B200. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
 
 ::: {#fig-shifting-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Shifting Roofline Across GPU Generations**. Overlaid roofline models for V100 through B200 show the ridge point growing from 139 to 625 FLOP/byte. Operations like naive attention, which were compute-bound on V100, become memory-bound on B200 as the roofline shifts. The same kernel can change performance regime across hardware generations." fig-alt="Log-log roofline plot for V100, A100, H100, B200 with ridge points and example ML operations marked"}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -506,6 +514,7 @@ ax.legend(loc="lower right", fontsize=9, title="GPU Generation")
 plt.tight_layout()
 plt.show()
 ```
+
 :::
 
 ### Where ML Workloads Fall {#sec-performance-engineering-workload-placement}
@@ -716,7 +725,9 @@ Intermediate tensors $Z_1$ and $Z_2$ each occupy the same memory as the output $
 @fig-fusion-before-after contrasts these two execution paths, making the HBM traffic savings visible.
 
 ::: {#fig-fusion-before-after fig-env="figure" fig-pos="htb" fig-cap="**Operator Fusion: Before and After**. Left: three separate kernels each read from and write to HBM, materializing intermediate tensors $Z_1$ and $Z_2$ (5 HBM transfers total). Right: a single fused kernel reads $X$ and $W$ once, performs all three operations with intermediates held in SRAM, and writes only the final output $Y$ (2 HBM transfers). The fused path eliminates 32 MB of redundant HBM traffic per layer." fig-alt="Two side-by-side dataflow diagrams. Left unfused path shows 5 arrows between operations and HBM. Right fused path shows 2 arrows with intermediates staying in SRAM."}
+
 ![](images/svg/operator-fusion.svg)
+
 :::
 
 In a naive implementation without operator fusion, executing one Transformer layer requires roughly 50 separate kernel launches. If each launch incurs a 10-microsecond overhead, the system spends 500 microseconds purely on dispatch latency. If the actual arithmetic execution of the layer takes only 2 milliseconds, the launch overhead consumes 20% of the total wall-clock time, leaving the GPU compute units idle for one-fifth of the inference cycle. This "launch-bound" regime limits the benefits of faster hardware; doubling the GPU's FLOPs does nothing to reduce the 500-microsecond fixed cost. Operator fusion addresses this by compiling these 50 discrete operations into a small handful of fused kernels—often reducing the count to 5–10 launches—thereby reclaiming the lost cycles and shifting the workload back towards a compute-bound profile.
@@ -850,7 +861,9 @@ FlashAttention-2 (Dao, 2023) further optimizes the algorithm for modern GPU arch
 FlashAttention-3 (Dao et al., 2024) targets the H100's new hardware features: FP8 Tensor Cores and the Tensor Memory Accelerator (TMA). By computing attention in FP8 with selective FP16 accumulation, FlashAttention-3 achieves near-peak FP8 utilization for the attention operation, further closing the gap between achieved and theoretical performance.
 
 ::: {.callout-war-story title="The FlashAttention Breakthrough"}
+
 In 2022, Tri Dao challenged the prevailing wisdom that the attention mechanism's $O(N^2)$ complexity required better matrix multiplication kernels. His insight was that the bottleneck was not compute, but memory hierarchy. Standard attention materialized the massive $N \times N$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $O(N)$ and wall-clock time by 2--4x. Within six months, it was integrated into PyTorch, TensorFlow, and JAX, becoming the default attention implementation for the industry.
+
 :::
 
 @fig-flashattention-memory-savings quantifies the memory advantage across sequence lengths. Standard attention allocates the full $N \times N$ score matrix in HBM, while FlashAttention maintains only $O(N)$ running statistics. The gap widens quadratically: at a typical 8K context, FlashAttention uses 4,096$\times$ less attention memory; at 64K long-context, the savings reach 32,768$\times$.
@@ -867,6 +880,7 @@ Verify your understanding of memory-aware attention:
 :::
 
 ::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention Memory Savings**. $O(N^2) \rightarrow O(N)$. Standard attention allocates the full $N \times N$ score matrix in HBM, while FlashAttention maintains only $O(N)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. At long-context lengths (64K+), the savings exceed four orders of magnitude." fig-alt="Log-log plot of attention memory versus sequence length. Standard O(N²) curve rises steeply; FlashAttention O(N) stays flat. Shaded region shows savings, with annotations at 8K and 65K."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -934,6 +948,7 @@ plt.grid(True, which="both", ls="-", alpha=0.7)
 plt.tight_layout()
 fig = plt.gcf()
 ```
+
 :::
 
 FlashAttention eliminates the memory wall within a single GPU by tiling across the SRAM-HBM boundary. For sequence lengths that exceed the memory capacity of a single GPU, the same tiling principle extends across multiple GPUs via **Ring Attention**\index{Ring Attention}. By distributing the KV cache across a ring of accelerators and overlapping communication with computation, Ring Attention enables million-token context windows that would be impossible on single-GPU configurations. We examine the distributed mechanics of Ring Attention in @sec-distributed-training-systems-systems-tensor-parallelism-d76e.
@@ -974,7 +989,9 @@ The choice among these techniques also depends on the deployment target. For GPU
 The storage cost for block-wise quantization is minimal. Storing one FP32 scale (32 bits) for every block of 128 INT8 weights (1024 bits) increases total model size by only 3%. This small overhead allows block-wise quantization to isolate the destructive impact of outliers, preserving the effective dynamic range for the 99% of normal weights, without the bandwidth penalty of higher-precision formats.
 
 ::: {.callout-lighthouse title="Archetype C (Federated MobileNet): TinyML Survival"}
+
 For **Archetype C (Federated MobileNet)**, quantization is not just an optimization; it is a prerequisite for survival. On a microcontroller with only 512 KB of SRAM, an FP16 model is physically impossible to load. **Binary Neural Networks (BNN)** and **1-bit Quantization** push this to the extreme, representing weights as single bits (+1/-1). While this trades significant accuracy, it reduces the memory footprint by 32$\times$ and the energy per operation by up to 100$\times$, enabling intelligence on devices that operate on harvested energy (microwatts).
+
 :::
 
 ### Post-Training vs Quantization-Aware Training {#sec-performance-engineering-ptq-qat}
@@ -1469,6 +1486,7 @@ Consider a 7B parameter model trained on 8 H100 GPUs within a single node connec
 Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` ms (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` ms, a `{python} OverlapCalc.overlap_speedup_str`$\times$ improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90% to ~40% because communication overhead eventually exceeds the computation budget. For smaller models or slower interconnects (e.g., PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
 ::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**. As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90% to ~40% due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution versus GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from 90% to 40%."}
+
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -1540,6 +1558,7 @@ ax1.text(7, compute_budget + 130, 'InfiniBand\nInter-node', ha='center', fontsiz
 plt.tight_layout()
 fig = plt.gcf()
 ```
+
 :::
 
 ### CUDA Streams and Asynchronous Execution {#sec-performance-engineering-cuda-streams}
@@ -1828,12 +1847,14 @@ class FleetEfficiencyCalc:
 ```
 
 ::: {.callout-notebook title="The Scaling Tax"}
+
 **Scenario**: Training a **`{python} FleetEfficiencyCalc.fleet_params_b_str`** parameter model across a cluster of **`{python} FleetEfficiencyCalc.fleet_nodes_str` H100 GPUs**.
 
 *   **Local Node Baseline**: A single 8-GPU node achieves **`{python} FleetEfficiencyCalc.fleet_local_mfu_str`% MFU**.
 *   **Fleet Performance**: At 128 GPUs, the step time increases to **`{python} FleetEfficiencyCalc.fleet_t_step_ms_str` ms**, dropping MFU to **`{python} FleetEfficiencyCalc.fleet_global_mfu_str`%**.
 
 **The Diagnosis**: The **`{python} FleetEfficiencyCalc.fleet_scaling_tax_str`% Scaling Tax** represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a **Scaling Regression**—typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
+
 :::
 
 ### Detecting Scaling Regressions
@@ -1845,6 +1866,7 @@ At scale, the system is non-linear. A code change that introduces a minor memory
 3.  **Gray Failure Detection**: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10% slower due to thermal throttling can reduce the entire cluster's MFU by 10% in a synchronous data-parallel workload.
 
 ::: {.callout-war-story title="Benchmark vs. Reality: The Hero Run Tax"}
+
 Industry benchmarks like **MLPerf** are often "Hero Runs"—highly tuned configurations where logging is disabled, safety checks are bypassed, and the hardware is freshly rebooted.
 
 In production, your achieved MFU will typically sit **10–20% lower** than these hero numbers. This "Reality Tax" is consumed by essential operational overhead:
@@ -1854,6 +1876,7 @@ In production, your achieved MFU will typically sit **10–20% lower** than thes
 *   **Entropy**: Thermal throttling, memory fragmentation, and multi-tenant network noise.
 
 When planning capacity, engineers must budget for the Reality Tax. If a benchmark says you can train in 30 days, your production plan should assume 35–40 days.
+
 :::
 
 Measurement without action is overhead. The optimization playbook translates node-level traces and fleet-wide MFU into a surgical sequence of interventions, each targeting the specific bottleneck that the measurement hierarchy identified.
@@ -2155,5 +2178,6 @@ In **Inference at Scale** (@sec-inference-scale), we transition from the mechani
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
+
 ::: { .quiz-end }
 :::
