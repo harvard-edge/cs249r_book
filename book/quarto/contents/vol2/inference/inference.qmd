@@ -764,15 +764,15 @@ class BatchingEfficiency:
 **The Math**:
 The knee occurs where the variable compute cost ($B \times T_{var}$) starts to exceed the fixed overhead ($T_{fixed}$).
 
-1. **Vision Model** ($T_{fixed}=2ms$, $T_{var}=1ms$):
-   - Knee: $B \approx 2ms / 1ms =$ **`{python} BatchingEfficiency.bec_vision_knee_str`**.
+1. **Vision Model** ($T_{fixed}=2 ms$, $T_{var}=1 ms$):
+   - Knee: $B \approx 2 ms / 1 ms =$ **`{python} BatchingEfficiency.bec_vision_knee_str`**.
    - *Result*: Vision models saturate at very small batches because the compute per sample is high.
 
-2. **LLM Decode** ($T_{fixed}=40ms$, $T_{var}=0.5ms$):
-   - Knee: $B \approx 40ms / 0.5ms =$ **`{python} BatchingEfficiency.bec_llm_knee_str`**.
+2. **LLM Decode** ($T_{fixed}=40 ms$, $T_{var}=0.5 ms$):
+   - Knee: $B \approx 40 ms / 0.5 ms =$ **`{python} BatchingEfficiency.bec_llm_knee_str`**.
    - *Result*: LLMs require massive batches to amortize the expensive weight-loading overhead.
 
-**The Systems Insight**: Because the LLM's "Fixed Overhead" (loading 140 GB of weights from HBM) is so large, you haven't reached the efficiency knee until batch size **`{python} BatchingEfficiency.bec_llm_knee_str`**. This is why LLM serving requires **Continuous Batching** and **Paged Memory**—you must pack hundreds of concurrent users into a single batch just to overcome the memory bandwidth bottleneck.
+**The Systems Insight**: Because the LLM's "Fixed Overhead" (loading 140 GB of weights from HBM) is so large, you have not reached the efficiency knee until batch size **`{python} BatchingEfficiency.bec_llm_knee_str`**. This is why LLM serving requires **Continuous Batching** and **Paged Memory**—you must pack hundreds of concurrent users into a single batch just to overcome the memory bandwidth bottleneck.
 
 :::
 
@@ -1248,7 +1248,7 @@ Continuous batching (also called iteration-level batching) decouples batch membe
 **Archetype A (GPT-4 / Llama-3)** (@sec-vol2-introduction-archetypes) relies on continuous batching to solve its primary efficiency paradox. The decode phase is memory-bandwidth bound, meaning the GPU compute cores are idle waiting for weights to load. Continuous batching saturates this bandwidth by processing unrelated requests together. Without this technique, serving Archetype A (GPT-4 / Llama-3) models would be economically unviable due to low GPU utilization.
 :::
 
-Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle.
+Unlike static or dynamic batching, which group requests at the *request* level, continuous batching operates at the *iteration* level, dynamically reshaping the compute tensor at each clock cycle. As @fig-continuous-batching-comparison illustrates, static batching leaves the GPU idle while waiting for the longest request, whereas continuous batching keeps it saturated.
 
 ::: {#fig-continuous-batching-comparison fig-env="figure" fig-pos="htb" fig-cap="**Static vs. Continuous Batching**. In Static Batching (A), all requests in a batch must wait for the longest request to complete before the GPU can begin the next batch, leading to significant idle compute time (shaded gray). Continuous Batching (B) allows new requests to enter the batch as soon as any request finishes, keeping the GPU saturated and dramatically improving throughput." fig-alt="Two-panel timeline comparison. Left: Static batching shows requests of different lengths with large white space representing idle time. Right: Continuous batching shows requests filling the gaps as soon as one ends."}
 ![](images/svg/continuous-batching.svg)
@@ -1937,7 +1937,7 @@ $$\text{KV cache size} = 2 \times L \times H \times S \times B \times P$$ {#eq-k
 
 ### The KV Cache Wall: Memory-Bound Capacity {#sec-inference-scale-kv-cache-wall}
 
-*Why* can we not simply increase the batch size to maximize throughput in LLM serving? We hit the **KV Cache Wall**. Model weights represent a fixed "Static Tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
+*Why* can we not simply increase the batch size to maximize throughput in LLM serving? We hit the **KV Cache Wall**. As @fig-kv-cache-wall shows, model weights represent a fixed "Static Tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length.
 
 ::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**. Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU ($35 \text{GB} + 82 \text{GB} > 80 \text{GB}$), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 4, 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
 ```{python}
@@ -2532,7 +2532,7 @@ The speculative decoding algorithm proceeds in three phases:
 
 1.  **Draft phase**: A small, fast model (the "draft model") generates $K$ candidate tokens autoregressively. Because the draft model is much smaller (e.g., 1B parameters versus 70B for the target), each draft step is fast. Generating $K$ draft tokens typically takes roughly the time of one or two target model decode steps.
 2.  **Verification phase**: The target model processes all $K$ draft tokens *in parallel* in a single forward pass. Because this is a forward pass over $K$ known tokens (not autoregressive generation), the operation is a standard GEMM with much higher arithmetic intensity than batch-1 decode.
-3.  **Acceptance phase**: Starting from the first draft token, the system compares the draft model's probability distribution with the target model's distribution. Continue accepting tokens until a draft token is rejected or all $K$ are accepted. On rejection, sample a corrected token from a modified distribution that accounts for the draft model's error.
+3.  **Acceptance phase**: Starting from the first draft token, the system compares the draft model's probability distribution with the target model's distribution. Continue accepting tokens until a draft token is rejected or all $K$ are accepted. On rejection, sample a corrected token from a modified distribution that accounts for the draft model's error. @fig-speculative-decoding-inf illustrates this three-phase process.
 
 ::: {#fig-speculative-decoding-inf fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**. Instead of generating tokens sequentially with the large target model (slow), a small draft model quickly proposes a sequence of $K$ tokens. The target model then verifies all $K$ tokens in a single parallel forward pass (similar to prefill). If the draft tokens match the target's output, they are accepted, effectively generating multiple tokens per target model step. If a mismatch occurs, the sequence is rolled back to the first error." fig-alt="Timeline comparison of two decoding methods. Top: standard decoding with 4 sequential generation steps. Bottom: speculative decoding with fast draft, parallel verify, then 3 accepted tokens (green) and 1 rejected (pink). Braces show time savings."}
 ```{.tikz}
@@ -2792,8 +2792,7 @@ The decode phase, by contrast, generates output tokens one at a time. Each token
 The **Blackwell (B200)** architecture introduces native **FP4 support**, which doubles the effective memory bandwidth for the **Decode Phase**. Because the decode phase is strictly bandwidth-bound, shrinking the weights from 8 bits to 4 bits doubles the token-per-second throughput without increasing the clock speed. Furthermore, FP4's 2$\times$ reduction in the **KV Cache** footprint allows a single B200 to handle twice the concurrent sequences (batch size) compared to Hopper (H100), effectively halving the cost-per-token for interactive serving.
 :::
 
-This dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited.
- Mixing them in the same batch can cause interference. This creates the **Static Power Waste** problem analyzed in @sec-sustainable-ai, where low-utilization decode steps dominate energy consumption.
+This dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference. This creates the **Static Power Waste** problem analyzed in @sec-sustainable-ai, where low-utilization decode steps dominate energy consumption.
 
 **Chunked prefill**[^fn-chunked-prefill-latency] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
 

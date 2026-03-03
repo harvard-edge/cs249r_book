@@ -221,7 +221,8 @@ class ValidateCommand:
         parser.add_argument("--vol1", action="store_true", help="Scope to Volume I")
         parser.add_argument("--vol2", action="store_true", help="Scope to Volume II")
         parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output")
-        parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+        parser.add_argument("--verbose", "-v", action="store_true", default=True, help="Show context for each issue (default)")
+        parser.add_argument("--quiet", "-q", action="store_true", dest="quiet", help="Suppress verbose output")
         parser.add_argument("--citations-in-code", action="store_true", help="refs: check citations in code fences")
         parser.add_argument("--citations-in-raw", action="store_true", help="refs: check citations in raw blocks")
         parser.add_argument("--check-patterns", action="store_true", default=True, help="refs --scope inline: include pattern hazard checks (default: on)")
@@ -285,7 +286,8 @@ class ValidateCommand:
         if ns.json:
             print(json.dumps(summary, indent=2))
         else:
-            self._print_human_summary(summary, verbose=ns.verbose)
+            verbose = not getattr(ns, "quiet", False)
+            self._print_human_summary(summary, verbose=verbose)
 
         return not any_failed
 
@@ -2608,8 +2610,8 @@ class ValidateCommand:
     # Times spacing  (space after $\\times$ before word/unit per book-prose.md)
     # ------------------------------------------------------------------
 
-    # $\times$ or $\times$ followed immediately by letter or ( with no space.
-    TIMES_SPACING_PATTERN = re.compile(r"\$\\times\s*\$\s*[a-zA-Z\(]")
+    # $\times$ followed immediately by letter or ( with no separating space.
+    TIMES_SPACING_PATTERN = re.compile(r"\$\\times\s*\$(?=[a-zA-Z\(])")
 
     def _run_times_spacing(self, root: Path) -> ValidationRunResult:
         """Flag $\\times$ immediately followed by word/paren with no space."""
@@ -2929,7 +2931,7 @@ class ValidateCommand:
             return 1
         return content[:index].count("\n") + 1
 
-    def _print_human_summary(self, summary: Dict[str, Any], verbose: bool = False) -> None:
+    def _print_human_summary(self, summary: Dict[str, Any], verbose: bool = True) -> None:
         runs = summary["runs"]
         total = summary["total_issues"]
         status = summary["status"]

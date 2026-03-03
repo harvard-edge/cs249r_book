@@ -330,7 +330,7 @@ ML training workloads are the complete opposite. They are synchronous, periodic,
 
 : **ML Networking Inverts Traditional Datacenter Assumptions**: Where web services require fairness for millions of independent flows, ML training requires a globally synchronized, lossless fabric optimized for a handful of massive collective operations. {#tbl-network-assumptions}
 
-The synchronicity inversion is the most fundamental. Web traffic is asynchronous; one user's slow connection does not affect another's. The Bulk Synchronous Parallel (BSP)[^fn-bsp-valiant] model governs distributed training: all 1,024 GPUs in a training job must complete their gradient exchange before *any* of them can proceed to the next step. The slowest link therefore dictates the performance of the entire cluster. A single congested switch port that delays one GPU's packets by 100 ms effectively wastes 100 ms of compute time for all 1,024 GPUs. Tail latency is not an outlier; it is the bottleneck.
+As @tbl-network-assumptions summarizes, the synchronicity inversion is the most fundamental. Web traffic is asynchronous; one user's slow connection does not affect another's. The Bulk Synchronous Parallel (BSP)[^fn-bsp-valiant] model governs distributed training: all 1,024 GPUs in a training job must complete their gradient exchange before *any* of them can proceed to the next step. The slowest link therefore dictates the performance of the entire cluster. A single congested switch port that delays one GPU's packets by 100 ms effectively wastes 100 ms of compute time for all 1,024 GPUs. Tail latency is not an outlier; it is the bottleneck.
 
 [^fn-bsp-valiant]: **BSP (Bulk Synchronous Parallel)**: Proposed by Leslie Valiant in 1990 as a "bridging model" between parallel hardware and software, analogous to von Neumann's model for sequential machines. ML training adopted BSP because it guarantees mathematical equivalence to single-device training at the cost of a global barrier per step, making the network fabric's tail latency the binding constraint on cluster throughput. \index{BSP!Valiant}
 
@@ -543,13 +543,13 @@ For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_
 Apply $T(n) = \alpha + n/\beta$ for a 4 KB control message and a 100 MB gradient shard.
 
 1. **Small Message (4 KB)**:
-   - InfiniBand: $1.5\mu s + 4KB/50GB/s = 1.5 + 0.08 = \mathbf{1.58 \mu s}$
-   - Ethernet: $5.0\mu s + 4KB/12.5GB/s = 5.0 + 0.32 = \mathbf{5.32 \mu s}$
+   - InfiniBand: $1.5\mu s + 4 KB/50 GB/s = 1.5 + 0.08 = \mathbf{1.58 \mu s}$
+   - Ethernet: $5.0\mu s + 4 KB/12.5 GB/s = 5.0 + 0.32 = \mathbf{5.32 \mu s}$
    - *Verdict*: InfiniBand is $3.4\times$ faster purely due to lower $\alpha$.
 
 2. **Large Message (100 MB)**:
-   - InfiniBand: $1.5\mu s + 100MB/50GB/s = 0.0015 + 2.0 = \mathbf{2.00 ms}$
-   - Ethernet: $5.0\mu s + 100MB/12.5GB/s = 0.005 + 8.0 = \mathbf{8.01 ms}$
+   - InfiniBand: $1.5\mu s + 100 MB/50 GB/s = 0.0015 + 2.0 = \mathbf{2.00 ms}$
+   - Ethernet: $5.0\mu s + 100 MB/12.5 GB/s = 0.005 + 8.0 = \mathbf{8.01 ms}$
    - *Verdict*: InfiniBand is $4\times$ faster purely due to higher $\beta$.
 
 **The Systems Insight**: For large-scale training, the "Crossover Point" ($n^* = \alpha\beta$) is typically around **`{python} NetworkAlphaBeta.n_cross_ib_kb_str` KB**. Since gradients are megabytes to gigabytes, we are almost always in the **bandwidth-dominated regime**. However, pipeline parallelism and distributed coordination rely on small messages in the **latency-dominated regime**, where wire-speed upgrades provide zero benefit—only topology and hop-count reductions matter.
@@ -770,7 +770,7 @@ For ML training, where all-to-all communication is standard, full bisection band
 
 :::
 
-These definitions shape every topology choice that follows: fat-trees achieve non-blocking behavior through redundant switch tiers, rail-optimized networks exploit workload structure to approximate it at lower cost, and dragonflies trade bisection bandwidth for reduced cabling.
+As @fig-topology-bisection illustrates, these definitions shape every topology choice that follows: fat-trees achieve non-blocking behavior through redundant switch tiers, rail-optimized networks exploit workload structure to approximate it at lower cost, and dragonflies trade bisection bandwidth for reduced cabling.
 
 ::: {#fig-topology-bisection fig-env="figure" fig-pos="htb" fig-cap="**Topology Bisection Bandwidth Comparison**. Fat-Tree architectures provide full bisection bandwidth, while other topologies trade this off for cost or latency." fig-alt="Bar chart or comparison diagram showing bisection bandwidth across Fat-Tree, Torus, and other network topologies."}
 ![](images/svg/topology-bandwidth.svg)
@@ -912,6 +912,8 @@ However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod
 
 ### Rail-Optimized Topology {#sec-network-fabrics-rail-optimized}
 
+As @fig-rail-optimized-cabling shows, in modern ML nodes GPUs are partitioned into "Rails" corresponding to their PCIe slot position.
+
 ::: {#fig-rail-optimized-cabling fig-env="figure" fig-pos="htb" fig-cap="**Rail-Optimized Physical Wiring**. In modern ML nodes (e.g., DGX H100), GPUs are partitioned into 'Rails' corresponding to their PCIe slot position. GPU 0 in every node connects to Switch Rail 0, GPU 1 to Switch Rail 1, and so on. This architecture ensures that **Tensor Parallelism**—which synchronizes between corresponding GPUs—never competes for bisection bandwidth with other parallel groups, minimizing hop count and congestion for the most latency-sensitive traffic." fig-alt="Physical cabling diagram showing two server nodes, each with 4 GPUs. Cables connect GPU 0s to Rail Switch 0, GPU 1s to Rail Switch 1, etc."}
 ![](images/svg/rail-optimized.svg)
 :::
@@ -973,8 +975,7 @@ Communication latency ($\alpha$) is proportional to the number of switch hops.
 **Archetype A (GPT-4)** is the primary driver for rail-optimized fabrics. Because it uses **3D Parallelism**, it generates two distinct traffic patterns: (1) high-frequency, latency-sensitive activation exchanges for tensor parallelism, and (2) massive, bandwidth-hungry gradient averaging for data parallelism. The rail-optimized design ensures that tensor-parallel traffic traverses only a single switch hop between nodes, minimizing the latency that would otherwise stall the synchronous training loop.
 :::
 
-For our 1,000-GPU cluster spanning 125 nodes, this creates 8 parallel networks of 125 GPUs each, allowing tensor-parallel traffic to traverse a single switch hop rather than the multi-hop leaf-spine-leaf path required by a standard fat-tree.
- The latency benefit is significant for the frequent, small activation exchanges that tensor parallelism demands. However, this architecture introduces a sharp trade-off: data parallelism requires global synchronization across *all* GPUs, crossing all rails. Modern clusters therefore employ a hybrid approach, using rail-optimized leaves for tensor-parallel traffic while bridging the rails with a full fat-tree spine to support the global AllReduce patterns of data parallelism.
+For our 1,000-GPU cluster spanning 125 nodes, this creates 8 parallel networks of 125 GPUs each, allowing tensor-parallel traffic to traverse a single switch hop rather than the multi-hop leaf-spine-leaf path required by a standard fat-tree. The latency benefit is significant for the frequent, small activation exchanges that tensor parallelism demands. However, this architecture introduces a sharp trade-off: data parallelism requires global synchronization across *all* GPUs, crossing all rails. Modern clusters therefore employ a hybrid approach, using rail-optimized leaves for tensor-parallel traffic while bridging the rails with a full fat-tree spine to support the global AllReduce patterns of data parallelism.
 
 ::: {.callout-checkpoint title="Rail-Optimized Networks"}
 
@@ -1219,7 +1220,7 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 
 :::
 
-The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. This cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet.
+The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. As @fig-congestion-cascade illustrates, this cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet.
 
 ::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**PFC Pause Frame Propagation**. Congestion at a tail switch (S4) triggers a backpressure cascade, freezing the entire communication path upstream." fig-alt="Diagram showing PFC pause frame propagation from congested switch S4 upstream through the network path."}
 ```{=latex}

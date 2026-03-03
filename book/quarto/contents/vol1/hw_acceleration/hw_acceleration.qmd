@@ -913,9 +913,9 @@ output = activation(output)  # Element-wise: O(output_dim$\times$batch)
 ```
 :::
 
-The matrix multiplication dominates computation time, but this abstraction still hides the underlying loop structure. At the processor level, @lst-loop_level_dense reveals how nested loops multiply inputs and weights, sum the results, and apply a nonlinear function, exposing the O(batch$\times$input$\times$output) complexity that accelerators must handle efficiently.
+The matrix multiplication dominates computation time, but this abstraction still hides the underlying loop structure. At the processor level, @lst-loop_level_dense reveals how nested loops multiply inputs and weights, sum the results, and apply a nonlinear function, exposing the O(batch$\times$ input$\times$ output) complexity that accelerators must handle efficiently.
 
-::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the O(batch$\times$input$\times$output) multiply-accumulate operations that accelerators must execute, with 4 million MACs for typical batch=32, input=256, output=512 configurations."}
+::: {#lst-loop_level_dense lst-cap="**Processor-Level Execution**: Nested loops reveal the O(batch$\times$ input$\times$ output) multiply-accumulate operations that accelerators must execute, with 4 million MACs for typical batch=32, input=256, output=512 configurations."}
 ```{.python}
 # Total operations: batch_size$\times$output_size$\times$
 # input_size MACs
@@ -1824,7 +1824,7 @@ Because systolic arrays physically fix how data flows through the grid, designer
 There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs where filters are small and heavily reused, but faces challenges with LLM inference at small batch sizes, where the weight matrix is read once per token with minimal reuse, pushing architectures toward output-stationary or hybrid dataflow patterns.
 :::
 
-The synchronized data flow ensures that matrix element A[i,k] encounters corresponding B[k,j] elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication C[i,j] = Σ A[i,k]$\times$B[k,j]. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
+The synchronized data flow ensures that matrix element A[i,k] encounters corresponding B[k,j] elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication C[i,j] = Σ A[i,k]$\times$ B[k,j]. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
 
 Consider the multiplication of $2\times2$ matrices A and B within a systolic array. During the first computational cycle, element A[0,0]=2 propagates horizontally while B[0,0]=1 moves vertically, converging at processing element PE(0,0) to execute the multiplication $2\times1$=2. In the subsequent cycle, the same A[0,0]=2 advances to PE(0,1) where it encounters B[0,1]=3, computing $2\times3$=6. Concurrently, A[0,1]=4 enters PE(0,0) to engage with the next B matrix element. This coordinated data movement enables systematic operand reuse across multiple computational operations, eliminating redundant memory accesses and exemplifying the efficiency principle underlying systolic array architectures.
 
@@ -2168,6 +2168,8 @@ Unlike conventional workloads, ML models require frequent access to large volume
 
 [^fn-von-neumann-bottleneck]: **Von Neumann Bottleneck**: The physical separation of the processor from its memory forces all instructions and data to traverse an energy-intensive bus. This distance is the direct cause of the high energy cost of data movement; every byte must be fetched, paying a physical tax. Accessing a value from external DRAM can cost over 20,000× more energy than performing an 8-bit integer operation on that value [@horowitz2014computing]. \index{Von Neumann Bottleneck!ML accelerator constraint}
 
+As @fig-energy-hierarchy illustrates, this energy disparity dictates that AI accelerators must prioritize data locality over raw arithmetic throughput.
+
 ::: {#fig-energy-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Energy Hierarchy**: Energy cost per operation (Log Scale) based on the 'Horowitz Numbers.' Fetching data from off-chip DRAM costs ~128× more energy than an SRAM access and ~20,000× more than an INT8 addition. This stark physical disparity dictates that AI accelerators must prioritize data locality (keeping weights in SRAM/Registers) over raw arithmetic throughput to remain within power budgets." fig-alt="Horizontal bar chart of Energy (pJ) per operation on log scale. INT8 Add is tiny (0.03). DRAM Read is huge (640). An arrow highlights the massive gap between computation and memory access."}
 ```{python}
 #| echo: false
@@ -2227,7 +2229,7 @@ plt.show()
 #### Quantifying the Compute-Memory Performance Gap {#sec-hardware-acceleration-quantifying-computememory-performance-gap-1526}
 
 \index{Memory Bandwidth!scaling trends}
-The severity of this constraint becomes apparent when examining scaling trends. Over the past two decades, peak computational capabilities have grown substantially faster than DRAM bandwidth [@gholami2024ai]. This divergence creates a widening gap where accelerators possess massive computational power but cannot access data quickly enough to use it. Representative high-end accelerators can deliver on the order of \(10^3\) TFLOPS of peak tensor throughput (e.g., NVIDIA H100 delivering 989 TFLOPS in FP16 or nearly 2,000 TFLOPS in FP8) while providing approximately 3.35 TB/s of memory bandwidth. This implies a ridge point on the order of \(10^2\) operations per byte to fully use compute, which can exceed the arithmetic intensity of many practical neural network workloads.
+As @fig-energy-hierarchy illustrates, the severity of this constraint becomes apparent when examining scaling trends. Over the past two decades, peak computational capabilities have grown substantially faster than DRAM bandwidth [@gholami2024ai]. This divergence creates a widening gap where accelerators possess massive computational power but cannot access data quickly enough to use it. Representative high-end accelerators can deliver on the order of \(10^3\) TFLOPS of peak tensor throughput (e.g., NVIDIA H100 delivering 989 TFLOPS in FP16 or nearly 2,000 TFLOPS in FP8) while providing approximately 3.35 TB/s of memory bandwidth. This implies a ridge point on the order of \(10^2\) operations per byte to fully use compute, which can exceed the arithmetic intensity of many practical neural network workloads.
 
 The memory wall manifests through three critical constraints. First, the energy disparity: accessing DRAM can consume orders of magnitude more energy than a multiply-accumulate operation [@horowitz2014computing; @sze2020efficient], which often shifts bottlenecks from raw compute to power and data movement. Second, the bandwidth limitation: even TB/s memory systems may not feed large parallel compute arrays continuously on memory-bound workloads, leaving compute underutilized. Third, the latency hierarchy: off-chip memory access can require hundreds of cycles, creating pipeline stalls that cascade through parallel execution units.
 
@@ -2235,7 +2237,7 @@ The memory wall manifests through three critical constraints. First, the energy 
 
 Different paradigms inhabit different regions of this "Memory Wall." We quantify this using the **Hardware Balance ($B$)\index{Hardware Balance ($B$)}**, defined as the number of operations required to hide the cost of fetching one byte of data:
 
-$$ B = \frac{R_{peak}}{BW} $$ {#eq-hardware-balance}
+$$ B = \frac{R_{peak}}{BW} $$
 
 This ratio partitions the deployment spectrum into two distinct regimes. High-end accelerators like the NVIDIA H100 have a balance of $\approx 150$--$300$, making them "Bandwidth-Hungry" giants where the challenge is moving data fast enough to saturate the ALUs. In contrast, TinyML microcontrollers often have a balance of $< 10$, making them "Compute-Starved" but relatively bandwidth-efficient. This explains why an architecture that is efficient in the cloud (where we optimize for $BW$ limits) can be a disaster at the edge: the hardware balance has shifted under the model, transforming a memory-bound success into a compute-bound failure.
 
@@ -2436,9 +2438,9 @@ As models increase in size and complexity, improvements in memory capacity and b
 One way to quantify this challenge is by comparing the data transfer time with the time required for computations. To do this, we define the variables: $D_{\text{vol}}$ is the total data volume (bytes), $BW$ is the available memory bandwidth (bytes/second), $\text{FLOPs}$ is the number of floating-point operations, and $R_{\text{peak}}$ is the peak hardware throughput (FLOPs/second).
 
 We can express the memory transfer time $T_{\text{mem}}$ and compute time $T_{\text{compute}}$ as:
-$$T_{\text{mem}} = \frac{D_{\text{vol}}}{BW}$$ {#eq-t-mem}
+$$T_{\text{mem}} = \frac{D_{\text{vol}}}{BW}$$
 
-$$T_{\text{compute}} = \frac{\text{FLOPs}}{R_{\text{peak}}}$$ {#eq-t-compute}
+$$T_{\text{compute}} = \frac{\text{FLOPs}}{R_{\text{peak}}}$$
 
 When $T_{\text{mem}} > T_{\text{compute}}$, the system becomes memory-bound. This imbalance means that the processing elements spend more time waiting for data than performing computations, demonstrating the need for memory-optimized architectures and efficient data movement strategies to sustain high performance.
 
@@ -3291,7 +3293,7 @@ Consider a fully connected layer: input (batch=32, features=2048) → output (ba
 
 *Computational Requirements*:
 
-- Matrix multiply: ($32\times2048$)$\times$($2048\times2048$)
+- Matrix multiply: ($32\times2048$)$\times$ ($2048\times2048$)
 - Total FLOPs: $2\times32$$\times$$2048\times2048$ = `{python} DenseLayerAnalysisCalc.dense_total_mflops_str` million FLOPs
 
 *Memory Traffic Analysis*:
@@ -3632,7 +3634,7 @@ Each of these dimensions requires balancing trade-offs between placement and all
 
 These interacting factors define a vast combinatorial design space where small variations in mapping decisions lead to large differences in performance and energy efficiency. Unlike traditional workloads with predictable execution patterns, machine learning models introduce diverse computational structures that require flexible mappings adapted to data reuse, parallelization opportunities, and memory constraints. The search space grows combinatorially, making exhaustive search infeasible. Three sources of variation contribute to this complexity:
 
-##### Ordering Computation and Execution {#sec-hardware-acceleration-ordering-computation-execution-59e5}
+#### Ordering Computation and Execution {#sec-hardware-acceleration-ordering-computation-execution-59e5}
 
 \index{Loop Ordering!computational efficiency}
 Machine learning workloads are often structured as nested loops that iterate over various dimensions of computation. For instance, a matrix multiplication kernel may loop over batch size ($N$), input features ($C$), and output features ($K$). The order in which these loops execute has a profound effect on data locality, reuse patterns, and computational efficiency.
@@ -4156,7 +4158,7 @@ Tiling[^fn-tiling-cache-reuse] is a technique used to mitigate this issue by res
 
 Matrix multiplication, widely used in AI models, demonstrates inefficient memory access when implemented naively. @lst-naive_matmul shows how, without tiling, repeated memory accesses for the same data lead to unnecessary bandwidth consumption.
 
-::: {#lst-naive_matmul lst-cap="**Naïve Matrix Multiplication**: Direct implementation without tiling requires O(N^3) memory accesses for N$\times$N matrices, repeatedly fetching the same elements from slow DRAM memory and limiting performance to a fraction of theoretical peak throughput."}
+::: {#lst-naive_matmul lst-cap="**Naïve Matrix Multiplication**: Direct implementation without tiling requires O(N^3) memory accesses for N$\times$ N matrices, repeatedly fetching the same elements from slow DRAM memory and limiting performance to a fraction of theoretical peak throughput."}
 ```{.python}
 for i in range(N):
     for j in range(N):
@@ -4666,7 +4668,7 @@ Long-running inference servers gradually fragment GPU memory. Runtimes implement
 
 Cloud accelerators are often shared, leading to multi-tenant interference. A model might run 20% slower when a neighbor workload competes for memory bandwidth. Production systems need monitoring to detect and respond to this interference.
 
-Sustained workloads may trigger thermal throttling that was not observed in short benchmarks. The A100 SXM operates at `{python} RuntimeProductionTdp.a100_tdp` W TDP while the A100 PCIe operates at 300W TDP; these represent different form factors with different cooling requirements, not boost versus sustained states. Production performance depends on which variant is deployed and whether thermal limits are approached.
+Sustained workloads may trigger thermal throttling that was not observed in short benchmarks. The A100 SXM operates at `{python} RuntimeProductionTdp.a100_tdp` W TDP while the A100 PCIe operates at 300 W TDP; these represent different form factors with different cooling requirements, not boost versus sustained states. Production performance depends on which variant is deployed and whether thermal limits are approached.
 
 Understanding runtime adaptation mechanisms helps engineers design systems that degrade gracefully rather than fail unexpectedly.
 
@@ -5072,13 +5074,13 @@ Before procuring hardware, validate feasibility by calculating these hard constr
 
 *   **Formula**: $M_{req} = \text{Weights} + \text{KV Cache} + \text{Activation Buffer}$
 *   **Constraint**: $M_{req} < M_{device}$
-*   **Example**: Running Llama-7B (14GB weights @ FP16) on a 16GB GPU leaves only `{python} FeasibilityAssessment.headroom_str` GB for context. Long prompts will OOM (Out of Memory).
+*   **Example**: Running Llama-7B (14 GB weights @ FP16) on a 16 GB GPU leaves only `{python} FeasibilityAssessment.headroom_str` GB for context. Long prompts will OOM (Out of Memory).
 
 **2. Bandwidth Check**
 
 *   **Formula**: $T_{token} = \frac{\text{Model Size}}{\text{Memory Bandwidth}}$
 *   **Constraint**: $T_{token} < \text{Latency Target}$
-*   **Example**: Serving a 70B model (140GB) on a GPU with 1TB/s bandwidth yields ≈ `{python} FeasibilityAssessment.token_latency_ms_str` ms per token. If you need 50ms latency, this hardware fails regardless of compute power.
+*   **Example**: Serving a 70B model (140 GB) on a GPU with 1 TB/s bandwidth yields ≈ `{python} FeasibilityAssessment.token_latency_ms_str` ms per token. If you need 50 ms latency, this hardware fails regardless of compute power.
 
 **3. Compute Check**
 

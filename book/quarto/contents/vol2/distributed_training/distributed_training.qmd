@@ -922,7 +922,7 @@ Better Approach: 8 GPUs with Gradient Accumulation
 3. **Training Duration**: Total time reduces to **`{python} GradAccumScenario.ga_training_hours_str` hours**.
 4. **Total Cost**: `{python} GradAccumScenario.ga_training_hours_str` hrs $\times$ \$128/hr = **\$`{python} GradAccumScenario.ga_cost_str`**.
 
-**The Systems Insight**: Gradient accumulation saves **\$`{python} GradAccumScenario.ga_savings_str`** (`{python} GradAccumScenario.ga_savings_pct_str`%) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When your network is slow, don't scale out—scale the batch size locally.
+**The Systems Insight**: Gradient accumulation saves **\$`{python} GradAccumScenario.ga_savings_str`** (`{python} GradAccumScenario.ga_savings_pct_str`%) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When your network is slow, do not scale out—scale the batch size locally.
 
 :::
 
@@ -1777,72 +1777,7 @@ This sequential processing introduces device idle time, as each device must wait
 
 Pipeline parallelism extends layer-wise partitioning by introducing microbatching to minimize device idle time. Instead of waiting for an entire batch to sequentially pass through all devices, the computation is divided into smaller segments called microbatches, with overlapping execution across pipeline stages. @fig-pipline-parallelism shows how this overlapping works: while device 1 processes microbatch $N+1$, device 2 computes microbatch $N$, device 3 handles $N-1$, and device 4 executes $N-2$, creating a continuous flow that keeps all devices active simultaneously.
 
-::: {.callout-definition title="Pipeline Parallelism"}
-
-***Pipeline Parallelism***\index{Pipeline Parallelism!definition} is a model parallelism technique that partitions a neural network's layers into sequential stages assigned to different devices, passing activations forward and gradients backward between stages while overlapping computation across stages using micro-batches to maintain throughput.
-
-1.  **Significance (Quantitative):** Inter-stage communication transmits only the activation tensor at each stage boundary — for a hidden dimension of 8,192 at BF16 with micro-batch size 1, this is $8192 \times 2 = 16$ KB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes $(p-1)/m$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches — with $p=8$ stages and $m=32$ micro-batches, bubble overhead is 22%.
-2.  **Distinction (Durable):** Unlike tensor parallelism, which shards individual matrix multiplications within a single layer and requires AllReduce on every layer's output (demanding NVLink-class bandwidth within each stage), pipeline parallelism shards at layer boundaries and requires only point-to-point activation transfers between stages — tolerating InfiniBand bandwidth between nodes.
-3.  **Common Pitfall:** A frequent misconception is that adding more pipeline stages always improves throughput. The pipeline bubble fraction grows as $(p-1)/(m+p-1)$: with $p=16$ stages and $m=16$ micro-batches, 48% of compute is wasted idle — requiring large micro-batch counts ($m \gg p$) to keep the bubble below 10%, which in turn increases peak activation memory and the memory pressure on each stage.
-
-:::
-
-```{python}
-#| label: pipeline-bubble-notebook
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ PIPELINE BUBBLE TAX (NOTEBOOK)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Cost of the Pipeline Bubble" .callout-notebook
-# │
-# │ Goal: Quantify the GPU idle time (bubble) in pipeline parallelism.
-# │ Show: bubble_fraction_pct ≈ 18% — inline in notebook result.
-# │ How: Bubble_Fraction = (P - 1) / (P - 1 + M).
-# │
-# │ Imports: mlsysim.book (check)
-# │ Exports: pb_stages_str, pb_microbatches_str, pb_bubble_pct_str
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import check
-
-class PipelineBubble:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    p_stages = 8 # Number of nodes/stages
-    m_microbatches = 32 # Microbatches per global batch
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    # Bubble overhead is the time GPUs spend waiting for the first/last samples
-    bubble_fraction = (p_stages - 1) / (p_stages - 1 + m_microbatches)
-    bubble_pct = bubble_fraction * 100
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(17 < bubble_pct < 19, f"Bubble {bubble_pct:.1f}% unexpected")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    pb_stages_str = f"{p_stages}"
-    pb_microbatches_str = f"{m_microbatches}"
-    pb_bubble_pct_str = f"{bubble_pct:.1f}"
-
-```
-
-::: {.callout-notebook title="The Cost of the Pipeline Bubble"}
-
-**Problem**: You are training a frontier model using **Pipeline Parallelism** across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, you split your batch into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is your "Bubble Tax"—the fraction of GPU cycles lost to idle waiting?
-
-**The Math**:
-In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio of stages to microbatches.
-
-1. **Wait time**: At the start and end of each batch, GPUs sit idle for $P-1$ steps.
-2. **Productive time**: GPUs compute for $M$ steps.
-3. **Bubble Fraction**: $(P-1) / (P-1+M) = 7 / (7+32) \approx$ **`{python} PipelineBubble.pb_bubble_pct_str`%**.
-
-**The Systems Insight**: Pipeline parallelism is a **Utilization-Memory Trade-off**. To reduce the bubble from 18% to 5%, you must increase the number of microbatches ($M$), which consumes more **Activation Memory** on each GPU. In the Machine Learning Fleet, you don't scale depth for free—you pay a **`{python} PipelineBubble.pb_bubble_pct_str`%** capacity tax just to keep the stages coordinated. This is why techniques like **Interleaved Pipelining** are essential: they chop the bubble into smaller pieces to recover that lost 18% of your fleet.
-
-:::
-
-GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing. To reduce the bubble overhead, modern systems employ **1F1B (One-Forward-One-Backward)**[^fn-1f1b-memory] scheduling, which interleaves the passes to reclaim memory earlier.
-
-[^fn-1f1b-memory]: **1F1B Scheduling**: "One-Forward-One-Backward." Unlike GPipe (which processes all forward passes before any backward passes), 1F1B interleaves them. This reduces the peak activation memory footprint from $O(M \times P)$ to $O(P)$, where $M$ is the number of micro-batches and $P$ is the number of pipeline stages. This memory reclamation is what enables the massive micro-batch counts ($M \gg P$) required to keep the pipeline bubble small. \index{1F1B Scheduling!memory efficiency}
-
-[^fn-gpipe]: **GPipe**: Published by Google in 2019, GPipe introduced synchronous micro-batch pipelining that trained a 557M-parameter AmoebaNet across 8 TPUs with near-linear scaling. The key trade-off GPipe exposed: the pipeline bubble fraction $(P-1)/(M+P-1)$ means that with $P=4$ stages and $M=4$ micro-batches, 43% of compute is wasted in idle time -- driving the field toward 1F1B schedules that interleave forward and backward passes to shrink this overhead below 15%. \index{GPipe!pipeline parallelism}
-
-Each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. The forward pass involves devices passing activations to the next stage, such as $F_{0,0}$ to $F_{1,0}$. The backward pass transfers gradients back through the pipeline, such as $B_{3,3}$ to $B_{2,3}$. This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
+As @fig-pipline-parallelism shows, each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. The forward pass involves devices passing activations to the next stage, such as $F_{0,0}$ to $F_{1,0}$. The backward pass transfers gradients back through the pipeline, such as $B_{3,3}$ to $B_{2,3}$. This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
 ::: {#fig-pipline-parallelism fig-cap="**Pipeline Parallelism Schedule**. A 4-stage pipeline processing 4 microbatches, showing forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) across time. Rows represent pipeline stages (GPUs), columns represent time steps. The staggered execution keeps all devices active: while stage 0 computes $F_{0,1}$, stage 1 processes $F_{1,0}$ from the previous microbatch. After all forward passes complete, backward passes propagate in reverse order. The \"Update\" column shows synchronized parameter updates after gradient accumulation across all microbatches." fig-alt="Pipeline schedule grid showing 4 stages processing 4 microbatches. Forward passes F stagger diagonally across time, backward passes B follow in reverse order, ending with synchronized Update column."}
 ```{.tikz}
@@ -1913,6 +1848,71 @@ Each device, as represented by the rows in the drawing, processes its assigned m
 \end{tikzpicture}
 ```
 :::
+
+::: {.callout-definition title="Pipeline Parallelism"}
+
+***Pipeline Parallelism***\index{Pipeline Parallelism!definition} is a model parallelism technique that partitions a neural network's layers into sequential stages assigned to different devices, passing activations forward and gradients backward between stages while overlapping computation across stages using micro-batches to maintain throughput.
+
+1.  **Significance (Quantitative):** Inter-stage communication transmits only the activation tensor at each stage boundary — for a hidden dimension of 8,192 at BF16 with micro-batch size 1, this is $8192 \times 2 = 16$ KB per boundary, compared to the gigabytes required for gradient AllReduce in data parallelism. This low communication volume makes pipeline parallelism the primary technique for scaling model depth across nodes connected by 50 GB/s InfiniBand. The pipeline bubble wastes $(p-1)/m$ of total compute, where $p$ is the number of stages and $m$ is the number of micro-batches — with $p=8$ stages and $m=32$ micro-batches, bubble overhead is 22%.
+2.  **Distinction (Durable):** Unlike tensor parallelism, which shards individual matrix multiplications within a single layer and requires AllReduce on every layer's output (demanding NVLink-class bandwidth within each stage), pipeline parallelism shards at layer boundaries and requires only point-to-point activation transfers between stages — tolerating InfiniBand bandwidth between nodes.
+3.  **Common Pitfall:** A frequent misconception is that adding more pipeline stages always improves throughput. The pipeline bubble fraction grows as $(p-1)/(m+p-1)$: with $p=16$ stages and $m=16$ micro-batches, 48% of compute is wasted idle — requiring large micro-batch counts ($m \gg p$) to keep the bubble below 10%, which in turn increases peak activation memory and the memory pressure on each stage.
+
+:::
+
+```{python}
+#| label: pipeline-bubble-notebook
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ PIPELINE BUBBLE TAX (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Cost of the Pipeline Bubble" .callout-notebook
+# │
+# │ Goal: Quantify the GPU idle time (bubble) in pipeline parallelism.
+# │ Show: bubble_fraction_pct ≈ 18% — inline in notebook result.
+# │ How: Bubble_Fraction = (P - 1) / (P - 1 + M).
+# │
+# │ Imports: mlsysim.book (check)
+# │ Exports: pb_stages_str, pb_microbatches_str, pb_bubble_pct_str
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import check
+
+class PipelineBubble:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    p_stages = 8 # Number of nodes/stages
+    m_microbatches = 32 # Microbatches per global batch
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # Bubble overhead is the time GPUs spend waiting for the first/last samples
+    bubble_fraction = (p_stages - 1) / (p_stages - 1 + m_microbatches)
+    bubble_pct = bubble_fraction * 100
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(17 < bubble_pct < 19, f"Bubble {bubble_pct:.1f}% unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    pb_stages_str = f"{p_stages}"
+    pb_microbatches_str = f"{m_microbatches}"
+    pb_bubble_pct_str = f"{bubble_pct:.1f}"
+
+```
+
+::: {.callout-notebook title="The Cost of the Pipeline Bubble"}
+
+**Problem**: You are training a frontier model using **Pipeline Parallelism** across `{python} PipelineBubble.pb_stages_str` nodes. To hide the sequential delay, you split your batch into `{python} PipelineBubble.pb_microbatches_str` microbatches. What is your "Bubble Tax"—the fraction of GPU cycles lost to idle waiting?
+
+**The Math**:
+In a synchronous pipeline (1F1B), the bubble fraction is determined by the ratio of stages to microbatches.
+
+1. **Wait time**: At the start and end of each batch, GPUs sit idle for $P-1$ steps.
+2. **Productive time**: GPUs compute for $M$ steps.
+3. **Bubble Fraction**: $(P-1) / (P-1+M) = 7 / (7+32) \approx$ **`{python} PipelineBubble.pb_bubble_pct_str`%**.
+
+**The Systems Insight**: Pipeline parallelism is a **Utilization-Memory Trade-off**. To reduce the bubble from 18% to 5%, you must increase the number of microbatches ($M$), which consumes more **Activation Memory** on each GPU. In the Machine Learning Fleet, you do not scale depth for free—you pay a **`{python} PipelineBubble.pb_bubble_pct_str`%** capacity tax just to keep the stages coordinated. This is why techniques like **Interleaved Pipelining** are essential: they chop the bubble into smaller pieces to recover that lost 18% of your fleet.
+
+:::
+
+GPipe[^fn-gpipe] [@gpipe2019] introduced synchronous pipeline parallelism with micro-batch accumulation, while PipeDream [@harlap2018pipedream] developed asynchronous approaches with weight stashing. To reduce the bubble overhead, modern systems employ **1F1B (One-Forward-One-Backward)**[^fn-1f1b-memory] scheduling, which interleaves the passes to reclaim memory earlier.
+
+[^fn-1f1b-memory]: **1F1B Scheduling**: "One-Forward-One-Backward." Unlike GPipe (which processes all forward passes before any backward passes), 1F1B interleaves them. This reduces the peak activation memory footprint from $O(M \times P)$ to $O(P)$, where $M$ is the number of micro-batches and $P$ is the number of pipeline stages. This memory reclamation is what enables the massive micro-batch counts ($M \gg P$) required to keep the pipeline bubble small. \index{1F1B Scheduling!memory efficiency}
+
+[^fn-gpipe]: **GPipe**: Published by Google in 2019, GPipe introduced synchronous micro-batch pipelining that trained a 557M-parameter AmoebaNet across 8 TPUs with near-linear scaling. The key trade-off GPipe exposed: the pipeline bubble fraction $(P-1)/(M+P-1)$ means that with $P=4$ stages and $M=4$ micro-batches, 43% of compute is wasted in idle time -- driving the field toward 1F1B schedules that interleave forward and backward passes to shrink this overhead below 15%. \index{GPipe!pipeline parallelism}
 
 In a transformer model distributed across four devices, device 1 would process blocks 1-6 for microbatch $N+1$ while device 2 computes blocks 7-12 for microbatch $N$. Simultaneously, device 3 executes blocks 13-18 for microbatch $N-1$, and device 4 processes blocks 19-24 for microbatch $N-2$. Each device maintains its assigned transformer blocks but operates on a different microbatch, creating a continuous flow of computation.
 
@@ -2115,7 +2115,7 @@ The E5M2 format (5-bit exponent, 2-bit mantissa) provides a much larger range of
 
 : **Numerical Precision Formats for ML**. Each row represents a different precision format. FP8 formats (E4M3, E5M2) occupy the sweet spot between the bandwidth of INT8 and the trainability of FP16. {#tbl-precision-formats}
 
-The critical engineering challenge in FP8 training is **dynamic scaling**. FP8's narrow dynamic range means that a fixed scale factor will cause either overflow or underflow. Per-tensor scaling multiplies each tensor by a scale factor before casting to FP8, then divides by that factor after the FP8 computation. The scale factor is adjusted dynamically, typically by tracking the running maximum absolute value of each tensor and choosing a scale that maps this maximum to near the FP8 maximum representable value.
+As @tbl-precision-formats summarizes, the critical engineering challenge in FP8 training is **dynamic scaling**. FP8's narrow dynamic range means that a fixed scale factor will cause either overflow or underflow. Per-tensor scaling multiplies each tensor by a scale factor before casting to FP8, then divides by that factor after the FP8 computation. The scale factor is adjusted dynamically, typically by tracking the running maximum absolute value of each tensor and choosing a scale that maps this maximum to near the FP8 maximum representable value.
 
 This three-precision approach (FP32 master weights, FP8 GEMMs, FP16 accumulation) achieves near-FP16 training quality while doubling effective throughput on FP8-capable hardware. The energy implications are equally significant: FP8 operations deliver twice the throughput at roughly half the energy per operation, resulting in approximately 4$\times$ improvement in energy efficiency for compute-bound workloads.
 
@@ -2694,7 +2694,7 @@ This chapter opened with a "Scaling Wall": the point where adding more GPUs even
 
 We explored the **3D Parallelism Cube** (@fig-3d-parallelism-cube-summary), the foundational framework for scaling frontier models. **Data Parallelism** unrolls the outer loop of training to scale throughput; **Tensor Parallelism** vectorizes the inner loops of matrix multiplication to fit memory; and **Pipeline Parallelism** stages sequential layers to reduce communication frequency. Together, these strategies allow us to map models larger than any single memory bank onto a fleet of accelerators with finite bandwidth.
 
-Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer.
+Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer. @fig-3d-parallelism-sliced visualizes how a single Transformer layer is partitioned across the fleet.
 
 ::: {#fig-3d-parallelism-sliced fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Hybrid 3D Parallel Step**. Visualization of how a single Transformer layer is partitioned across the fleet. **Pipeline Parallelism ($p$)** slices the model vertically by depth (assigning layers to different stages). **Tensor Parallelism ($t$)** slices the weight matrices horizontally within each layer (assigning shards to different GPUs). **Data Parallelism ($d$)** replicates this sliced block $d$ times to process independent data samples. A single training step coordinates $d \times p \times t$ GPUs, where $t$ synchronizes at kilohertz frequency, $p$ at megahertz, and $d$ at hertz." fig-alt="Volumetric diagram showing a model block sliced by three orthogonal planes: depth (green), width (orange), and replicas (blue). Labels show p, t, and d dimensions."}
 ```{.tikz}
