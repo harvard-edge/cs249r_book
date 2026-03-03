@@ -109,45 +109,80 @@ RUN Write-Host '✅ Dependency file copy complete'
 
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
+# Direct install-tl approach: bypasses Chocolatey's ErrorActionPreference=Stop
+# wrapper and lets us pin a reliable mirror in the profile file.
+# Mirrors tried in order: tug.org (canonical) → Illinois CTAN → MIT CTAN
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
-    Write-Host "📦 Installing TeX Live via Chocolatey (version: $env:TEXLIVE_VERSION)..." ; `
-    $texLiveVersion = $env:TEXLIVE_VERSION ; `
-    if ($texLiveVersion -eq 'latest') { `
-        choco install texlive -y ; `
-    } else { `
-        choco install texlive --version=$texLiveVersion -y ; `
+    $ErrorActionPreference = 'Continue' ; `
+    $texInstallDir = 'C:\texlive-install' ; `
+    $texLiveRoot   = 'C:\texlive' ; `
+    $mirrors = @( `
+        'https://ctan.math.illinois.edu/systems/texlive/tlnet', `
+        'https://mirrors.mit.edu/CTAN/systems/texlive/tlnet', `
+        'https://mirror.ctan.org/systems/texlive/tlnet' `
+    ) ; `
+    `
+    Write-Host '📥 Downloading install-tl from tug.org (canonical source)...' ; `
+    $installTlZip = 'C:\temp\install-tl.zip' ; `
+    Invoke-WebRequest -Uri 'https://mirror.ctan.org/systems/texlive/tlnet/install-tl.zip' `
+        -OutFile $installTlZip -UseBasicParsing ; `
+    Write-Host '📦 Extracting install-tl...' ; `
+    Expand-Archive -Path $installTlZip -DestinationPath $texInstallDir -Force ; `
+    Remove-Item $installTlZip -Force ; `
+    $installTlDir = Get-ChildItem $texInstallDir -Directory | `
+        Where-Object { $_.Name -match '^install-tl' } | `
+        Select-Object -First 1 ; `
+    Write-Host "📁 install-tl directory: $($installTlDir.FullName)" ; `
+    `
+    $installed = $false ; `
+    foreach ($mirror in $mirrors) { `
+        Write-Host "🔄 Trying mirror: $mirror" ; `
+        $profile = "C:\temp\texlive.profile" ; `
+        @( `
+            "selected_scheme scheme-basic", `
+            "TEXDIR $texLiveRoot", `
+            "TEXMFLOCAL $texLiveRoot/texmf-local", `
+            "TEXMFSYSCONFIG $texLiveRoot/texmf-config", `
+            "TEXMFSYSVAR $texLiveRoot/texmf-var", `
+            "instopt_adjustrepo 0" `
+        ) | Set-Content $profile ; `
+        $env:TEXLIVE_INSTALL_NO_WELCOME = '1' ; `
+        & "$($installTlDir.FullName)\install-tl-windows.bat" `
+            -no-gui `
+            -profile $profile `
+            -repository $mirror ; `
+        if ($LASTEXITCODE -eq 0) { `
+            $installed = $true ; `
+            Write-Host "✅ TeX Live installed from $mirror" ; `
+            break ; `
+        } ; `
+        Write-Host "⚠️ Mirror $mirror failed (exit $LASTEXITCODE), trying next..." ; `
     } ; `
-    if ($LASTEXITCODE -ne 0) { `
-        Write-Host '❌ TeX Live installation failed' ; `
+    if (-not $installed) { `
+        Write-Host '❌ TeX Live installation failed on all mirrors' ; `
         exit 1 ; `
     } ; `
-    Write-Host '✅ TeX Live installed via Chocolatey' ; `
+    Remove-Item $texInstallDir -Recurse -Force -ErrorAction SilentlyContinue ; `
     `
-    Write-Host '🔍 Finding TeX Live installation directory...' ; `
-    $texRoot = Join-Path $env:SystemDrive 'texlive' ; `
-    Write-Host "📁 TeX Live root: $texRoot" ; `
-    `
-    Write-Host '🔍 Looking for year-based directories...' ; `
-    $texYearDir = Get-ChildItem $texRoot -Directory | `
+    Write-Host '🔍 Finding TeX Live bin directory...' ; `
+    $texYearDir = Get-ChildItem $texLiveRoot -Directory | `
         Where-Object { $_.Name -match '^\d{4}$' } | `
         Sort-Object Name -Descending | `
         Select-Object -First 1 ; `
-    Write-Host "📁 Found year directory: $($texYearDir.FullName)" ; `
-    `
     $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
-    Write-Host "📁 TeX Live bin directory: $texLiveBin" ; `
-    `
-    Write-Host '🔧 Adding TeX Live to PATH...' ; `
+    Write-Host "📁 TeX Live bin: $texLiveBin" ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
-    Write-Host "✅ PATH updated with: $texLiveBin" ; `
-    Write-Host '🔧 Updating tlmgr mirror to stable CTAN mirror...' ; `
+    [Environment]::SetEnvironmentVariable('PATH', "$texLiveBin;$([Environment]::GetEnvironmentVariable('PATH','Machine'))", 'Machine') ; `
+    Write-Host "✅ PATH updated" ; `
+    `
+    Write-Host '🔧 Pinning tlmgr repository to stable mirror...' ; `
     $tlmgrMirror = 'https://ctan.math.illinois.edu/systems/texlive/tlnet' ; `
     & "$texLiveBin\tlmgr.bat" option repository $tlmgrMirror ; `
     if ($LASTEXITCODE -eq 0) { `
-        Write-Host "✅ tlmgr repository set to: $tlmgrMirror" ; `
+        Write-Host "✅ tlmgr repository: $tlmgrMirror" ; `
     } else { `
-        Write-Host '⚠️ Could not set tlmgr repository, continuing with TeX Live defaults' ; `
+        Write-Host '⚠️ Could not pin tlmgr repository, continuing with defaults' ; `
     } ; `
     `
     Write-Host '📋 Reading collections from tl_packages...' ; `
