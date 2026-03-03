@@ -4,11 +4,13 @@
 # - Quarto 1.9.27 via Scoop
 # - Python 3.13.1 + requirements
 # - Ghostscript + Inkscape (Chocolatey)
-# - TeX Live 2025.20251008.0+ (pinned version fixes install-tl.zip issue) + packages from tl_packages
+# - TeX Live (latest by default; overridable via TEXLIVE_VERSION build arg) + packages from tl_packages
 # - R 4.5.2 + packages via install_packages.R
 # - Verifications: versions, kpsewhich font files, TikZ smoke test
 
 FROM mcr.microsoft.com/windows/server:ltsc2022
+ARG TEXLIVE_VERSION=latest
+ENV TEXLIVE_VERSION=${TEXLIVE_VERSION}
 
 # Use Windows PowerShell initially
 SHELL ["powershell.exe", "-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
@@ -87,6 +89,10 @@ RUN Write-Host '=== STARTING CHOCOLATEY INSTALLATION ===' ; `
     Write-Host '📦 Chocolatey install script executed' ; `
     Write-Host 'Verifying Chocolatey installation...' ; `
     choco --version ; `
+    Write-Host '🔧 Configuring Chocolatey for CI stability...' ; `
+    choco config set --name commandExecutionTimeoutSeconds --value 14400 ; `
+    choco feature disable --name showDownloadProgress ; `
+    Write-Host '✅ Chocolatey timeout/progress settings applied' ; `
     Write-Host '✅ Chocolatey installation complete'
 
 # ------------------------------------------------------------
@@ -101,12 +107,30 @@ RUN Write-Host '✅ Dependency file copy complete'
 # ------------------------------------------------------------
 # PHASE 4: Install TeX Live FIRST (Most complex, fail fast)
 # ------------------------------------------------------------
-RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
-    Write-Host '📦 Installing TeX Live via Chocolatey (pinned to 2025.20251008.0+)...' ; `
-    choco install texlive --version=2025.20251008.0 -y ; `
+RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
+    Write-Host "📦 Installing TeX Live via Chocolatey (version: $env:TEXLIVE_VERSION)..." ; `
+    $texLiveVersion = $env:TEXLIVE_VERSION ; `
+    $primaryMirror = 'https://ctan.math.illinois.edu/systems/texlive/tlnet' ; `
+    $fallbackMirror = 'https://mirror.clarkson.edu/ctan/systems/texlive/tlnet' ; `
+    $primaryParams = "'/InstallerParameters:-repository=$primaryMirror'" ; `
+    $fallbackParams = "'/InstallerParameters:-repository=$fallbackMirror'" ; `
+    Write-Host "🌐 Primary TeX Live mirror: $primaryMirror" ; `
+    if ($texLiveVersion -eq 'latest') { `
+        choco install texlive -y --params $primaryParams ; `
+    } else { `
+        choco install texlive --version=$texLiveVersion -y --params $primaryParams ; `
+    } ; `
     if ($LASTEXITCODE -ne 0) { `
-        Write-Host '❌ TeX Live installation failed' ; `
-        exit 1 ; `
+        Write-Host "⚠️ TeX Live install failed with primary mirror, retrying with fallback: $fallbackMirror" ; `
+        if ($texLiveVersion -eq 'latest') { `
+            choco install texlive -y --params $fallbackParams ; `
+        } else { `
+            choco install texlive --version=$texLiveVersion -y --params $fallbackParams ; `
+        } ; `
+        if ($LASTEXITCODE -ne 0) { `
+            Write-Host '❌ TeX Live installation failed after mirror fallback' ; `
+            exit 1 ; `
+        } ; `
     } ; `
     Write-Host '✅ TeX Live installed via Chocolatey' ; `
     `
@@ -127,6 +151,19 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION (2025) ===' ; `
     Write-Host '🔧 Adding TeX Live to PATH...' ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
     Write-Host "✅ PATH updated with: $texLiveBin" ; `
+    Write-Host '🔧 Pinning tlmgr repository to stable mirror...' ; `
+    & "$texLiveBin\tlmgr.bat" option repository $primaryMirror ; `
+    if ($LASTEXITCODE -eq 0) { `
+        Write-Host "✅ tlmgr repository set to: $primaryMirror" ; `
+    } else { `
+        Write-Host "⚠️ Failed to set primary tlmgr mirror; attempting fallback: $fallbackMirror" ; `
+        & "$texLiveBin\tlmgr.bat" option repository $fallbackMirror ; `
+        if ($LASTEXITCODE -eq 0) { `
+            Write-Host "✅ tlmgr repository set to fallback: $fallbackMirror" ; `
+        } else { `
+            Write-Host '⚠️ Could not pin tlmgr repository, continuing with TeX Live defaults' ; `
+        } ; `
+    } ; `
     `
     Write-Host '📋 Reading collections from tl_packages...' ; `
     if (Test-Path 'C:\temp\tl_packages') { `
