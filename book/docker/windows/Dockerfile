@@ -148,10 +148,8 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
             "instopt_adjustrepo 0" `
         ) | Set-Content $profile ; `
         $env:TEXLIVE_INSTALL_NO_WELCOME = '1' ; `
-        & "$($installTlDir.FullName)\install-tl-windows.bat" `
-            -no-gui `
-            -profile $profile `
-            -repository $mirror ; `
+        $batPath = "$($installTlDir.FullName)\install-tl-windows.bat" ; `
+        cmd /c `"`"$batPath`" -no-gui -profile `"$profile`" -repository $mirror`" ; `
         if ($LASTEXITCODE -eq 0) { `
             $installed = $true ; `
             Write-Host "✅ TeX Live installed from $mirror" ; `
@@ -161,7 +159,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     } ; `
     if (-not $installed) { `
         Write-Host '❌ TeX Live installation failed on all mirrors' ; `
-        exit 1 ; `
+        [System.Environment]::Exit(1) ; `
     } ; `
     Remove-Item $texInstallDir -Recurse -Force -ErrorAction SilentlyContinue ; `
     `
