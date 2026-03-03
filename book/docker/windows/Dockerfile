@@ -26,6 +26,9 @@ ENV QUARTO_LOG_LEVEL="INFO"
 ENV PYTHONIOENCODING="utf-8"
 ENV LANG="en_US.UTF-8"
 ENV LC_ALL="en_US.UTF-8"
+# Explicitly set TMP/TEMP so the TeX Live Perl installer always has a valid temp dir
+ENV TMP="C:/temp"
+ENV TEMP="C:/temp"
 
 RUN Write-Host '=== STARTING BASE SETUP ===' ; `
     Write-Host 'Creating base directories...' ; `
@@ -110,27 +113,14 @@ RUN Write-Host '✅ Dependency file copy complete'
 RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host "📦 Installing TeX Live via Chocolatey (version: $env:TEXLIVE_VERSION)..." ; `
     $texLiveVersion = $env:TEXLIVE_VERSION ; `
-    $primaryMirror = 'https://ctan.math.illinois.edu/systems/texlive/tlnet' ; `
-    $fallbackMirror = 'https://mirror.clarkson.edu/ctan/systems/texlive/tlnet' ; `
-    $primaryParams = "'/InstallerParameters:-repository=$primaryMirror'" ; `
-    $fallbackParams = "'/InstallerParameters:-repository=$fallbackMirror'" ; `
-    Write-Host "🌐 Primary TeX Live mirror: $primaryMirror" ; `
     if ($texLiveVersion -eq 'latest') { `
-        choco install texlive -y --params $primaryParams ; `
+        choco install texlive -y ; `
     } else { `
-        choco install texlive --version=$texLiveVersion -y --params $primaryParams ; `
+        choco install texlive --version=$texLiveVersion -y ; `
     } ; `
     if ($LASTEXITCODE -ne 0) { `
-        Write-Host "⚠️ TeX Live install failed with primary mirror, retrying with fallback: $fallbackMirror" ; `
-        if ($texLiveVersion -eq 'latest') { `
-            choco install texlive -y --params $fallbackParams ; `
-        } else { `
-            choco install texlive --version=$texLiveVersion -y --params $fallbackParams ; `
-        } ; `
-        if ($LASTEXITCODE -ne 0) { `
-            Write-Host '❌ TeX Live installation failed after mirror fallback' ; `
-            exit 1 ; `
-        } ; `
+        Write-Host '❌ TeX Live installation failed' ; `
+        exit 1 ; `
     } ; `
     Write-Host '✅ TeX Live installed via Chocolatey' ; `
     `
@@ -151,18 +141,13 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     Write-Host '🔧 Adding TeX Live to PATH...' ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
     Write-Host "✅ PATH updated with: $texLiveBin" ; `
-    Write-Host '🔧 Pinning tlmgr repository to stable mirror...' ; `
-    & "$texLiveBin\tlmgr.bat" option repository $primaryMirror ; `
+    Write-Host '🔧 Updating tlmgr mirror to stable CTAN mirror...' ; `
+    $tlmgrMirror = 'https://ctan.math.illinois.edu/systems/texlive/tlnet' ; `
+    & "$texLiveBin\tlmgr.bat" option repository $tlmgrMirror ; `
     if ($LASTEXITCODE -eq 0) { `
-        Write-Host "✅ tlmgr repository set to: $primaryMirror" ; `
+        Write-Host "✅ tlmgr repository set to: $tlmgrMirror" ; `
     } else { `
-        Write-Host "⚠️ Failed to set primary tlmgr mirror; attempting fallback: $fallbackMirror" ; `
-        & "$texLiveBin\tlmgr.bat" option repository $fallbackMirror ; `
-        if ($LASTEXITCODE -eq 0) { `
-            Write-Host "✅ tlmgr repository set to fallback: $fallbackMirror" ; `
-        } else { `
-            Write-Host '⚠️ Could not pin tlmgr repository, continuing with TeX Live defaults' ; `
-        } ; `
+        Write-Host '⚠️ Could not set tlmgr repository, continuing with TeX Live defaults' ; `
     } ; `
     `
     Write-Host '📋 Reading collections from tl_packages...' ; `
