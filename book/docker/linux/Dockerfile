@@ -82,6 +82,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     echo "  - libharfbuzz-dev" && \
     echo "  - libfribidi-dev" && \
     echo "  - librsvg2-dev" && \
+    echo "  - librsvg2-bin" && \
     echo "  - libgdal-dev" && \
     echo "  - libudunits2-dev" && \
     echo "  - wget" && \
@@ -107,6 +108,7 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
     libharfbuzz-dev \
     libfribidi-dev \
     librsvg2-dev \
+    librsvg2-bin \
     libgdal-dev \
     libudunits2-dev \
     wget \
@@ -131,6 +133,12 @@ RUN echo "🚀 === STARTING SYSTEM DEPENDENCIES INSTALLATION ===" && \
         echo "📦 git available"; \
     else \
         echo "❌ git not found"; \
+        exit 1; \
+    fi && \
+    if command -v rsvg-convert >/dev/null 2>&1; then \
+        echo "📦 rsvg-convert available"; \
+    else \
+        echo "❌ rsvg-convert not found"; \
         exit 1; \
     fi && \
     \
