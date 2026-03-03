@@ -1,5 +1,3 @@
-> **Development branch.** This branch (`dev`) reflects active work in progress, including Volume II. For the current stable release, see [`main`](https://github.com/harvard-edge/cs249r_book/tree/main).
-
 # Machine Learning Systems
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
