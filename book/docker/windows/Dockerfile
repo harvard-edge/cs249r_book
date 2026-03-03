@@ -173,7 +173,7 @@ RUN Write-Host '=== STARTING TEX LIVE INSTALLATION ===' ; `
     $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows' ; `
     Write-Host "📁 TeX Live bin: $texLiveBin" ; `
     $env:PATH = "$texLiveBin;$env:PATH" ; `
-    [Environment]::SetEnvironmentVariable('PATH', "$texLiveBin;$([Environment]::GetEnvironmentVariable('PATH','Machine'))", 'Machine') ; `
+    [Environment]::SetEnvironmentVariable('PATH', ($texLiveBin + ';' + [Environment]::GetEnvironmentVariable('PATH','Machine')), 'Machine') ; `
     Write-Host "✅ PATH updated" ; `
     `
     Write-Host '🔧 Pinning tlmgr repository to stable mirror...' ; `
