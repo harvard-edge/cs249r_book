@@ -28,11 +28,16 @@ COLORS = {
 
 def set_book_style():
     """Applies the global matplotlib style configuration.
-    
+
     Font priority mirrors TikZ's \\usefont{T1}{phv}{m}{n} (Helvetica).
     The fallback chain covers macOS (Helvetica), Linux TeX installs
     (Nimbus Sans L, TeX Gyre Heros), and generic Linux (DejaVu Sans).
     """
+    if not _matplotlib_available:
+        raise ImportError(
+            "matplotlib is required for plot generation. "
+            "Install it with: pip install matplotlib"
+        )
     plt.rcParams.update({
         'font.family': 'sans-serif',
         'font.sans-serif': [
