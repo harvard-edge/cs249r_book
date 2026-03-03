@@ -1,3 +1,5 @@
+> **Development branch.** This branch (`dev`) reflects active work in progress, including Volume II. For the current stable release, see [`main`](https://github.com/harvard-edge/cs249r_book/tree/main).
+
 # Machine Learning Systems
 *Principles and Practices of Engineering Artificially Intelligent Systems*
 
@@ -27,7 +29,7 @@
   <!-- Reader Navigation -->
   **[📖 Read Online](https://mlsysbook.ai/book/)** •
   **[📘 Volume I](https://mlsysbook.ai/vol1/)** •
-  **[📙 Volume II](https://mlsysbook.ai/vol2/)** •
+  **[📙 Volume II *(Summer 2026)*](https://mlsysbook.ai/vol2/)** •
   **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch/)** •
   **[📄 Download PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)** •
   **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
@@ -66,8 +68,8 @@ It includes the textbook source, TinyTorch, hardware kits, and upcoming co-labs 
 Choose a path based on your goal.
 
 **READ** Start with the [textbook](https://mlsysbook.ai/book/):
-- [📘 Volume I: Introduction to Machine Learning Systems](https://mlsysbook.ai/vol1/) covers ML basics, development, optimization, and operations
-- [📙 Volume II: Machine Learning Systems at Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production deployment, and responsible AI
+- [📘 Volume I: Introduction to Machine Learning Systems](https://mlsysbook.ai/vol1/) covers ML basics, development, optimization, and operations. Available now.
+- [📙 Volume II: Machine Learning Systems at Scale](https://mlsysbook.ai/vol2/) covers distributed systems, production infrastructure, and responsible AI at scale. Chapters are written and under active review. Coming Summer 2026.
 
 **BUILD** Start TinyTorch with the [getting started guide](https://mlsysbook.ai/tinytorch/getting-started.html). Begin with Module 01 and work up from CNNs to transformers and the MLPerf benchmarks.
 
@@ -134,7 +136,7 @@ The learning stack below shows how the textbook connects to hands on work and de
 |--|-----------|-------------|------|
 | **READ** | [📖 Textbook](https://mlsysbook.ai/book/) | Understand ML systems concepts | [book/](book/README.md) |
 | | [📘 Volume I](https://mlsysbook.ai/vol1/) | Build, Optimize, Deploy | |
-| | [📙 Volume II](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern | |
+| | [📙 Volume II](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern | *(Summer 2026)* |
 | **EXPLORE** | 🔮 Software Co-Labs | Run controlled experiments on latency, memory, energy, cost | *Coming 2026* |
 | **BUILD** | [🔥 TinyTorch](https://mlsysbook.ai/tinytorch/) | Understand frameworks by implementing them | [tinytorch/](tinytorch/README.md) |
 | **DEPLOY** | [🔧 Hardware Kits](https://mlsysbook.ai/kits/) | Engineer under real constraints: memory, power, timing, safety | [kits/](kits/README.md) |
@@ -165,15 +167,12 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
-This textbook is organized into **two volumes** following the Hennessy & Patterson pedagogical model:
+This textbook started as a single volume. As the scope grew to cover both foundational principles and large-scale distributed systems, we split it into two focused volumes. Volume I is complete and available now. Volume II covers the material on distributed systems and production scale that we have been teaching and developing. The chapters are written and under active review.
 
-| Volume | Title | Focus | Link |
-|--------|-------|-------|------|
-| **Volume I** | Introduction to Machine Learning Systems | Single-machine ML systems, foundational principles | [mlsysbook.ai/vol1](https://mlsysbook.ai/vol1/) |
-| **Volume II** | Machine Learning Systems at Scale | Distributed systems at production scale | [mlsysbook.ai/vol2](https://mlsysbook.ai/vol2/) |
-
-**Volume I** teaches you to *understand* ML systems (like "Computer Organization and Design").
-**Volume II** teaches you to *build* ML systems at scale (like "Computer Architecture").
+| Volume | Title | Focus | Status |
+|--------|-------|-------|--------|
+| **[Volume I](https://mlsysbook.ai/vol1/)** | Introduction to Machine Learning Systems | Single-machine ML systems, foundations through deployment | Available now |
+| **[Volume II](https://mlsysbook.ai/vol2/)** | Machine Learning Systems at Scale | Distributed infrastructure, training at scale, and responsible AI | Coming Summer 2026 |
 
 The [full textbook](https://mlsysbook.ai/book/) combines both volumes for comprehensive coverage.
 
@@ -186,7 +185,9 @@ The [full textbook](https://mlsysbook.ai/book/) combines both volumes for compre
 | **III. Optimization** | Making it fast | Data Selection, Model Compression, HW Acceleration, Benchmarking |
 | **IV. Deployment** | Making it work | Model Serving, MLOps, Responsible Engineering |
 
-### Volume II: Machine Learning Systems at Scale
+### Volume II: Machine Learning Systems at Scale *(Coming Summer 2026)*
+
+Volume II picks up where Volume I ends, moving from a single machine to fleets of machines, and from model training to running AI reliably at global scale. All chapters are written and currently under review.
 
 | Part | Focus | Chapters |
 |------|-------|----------|
@@ -265,7 +266,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 |---|---|
 | [📖 **Full Textbook**](https://mlsysbook.ai/book/) | Complete interactive online textbook (both volumes) |
 | [📘 **Volume I**](https://mlsysbook.ai/vol1/) | Build, Optimize, Deploy |
-| [📙 **Volume II**](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern |
+| [📙 **Volume II**](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern *(Summer 2026)* |
 | [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch/) | Build ML frameworks from scratch |
 | [🔧 **Hardware Kits**](https://mlsysbook.ai/kits/) | Deploy to Arduino, Raspberry Pi, edge devices |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
