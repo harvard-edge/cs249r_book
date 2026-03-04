@@ -499,7 +499,18 @@ jobs:
           # Also add to current session
           $env:PATH = "$pythonPath;$pythonPath\Scripts;$env:PATH"
 
+          $pyCmd = Get-Command python -ErrorAction SilentlyContinue
+          if (-not $pyCmd) {
+            Write-Error "❌ Python executable not found after install"
+            exit 1
+          }
+          Write-Output "Resolved Python: $($pyCmd.Source)"
+
           $pythonVersion = python --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ python --version failed with exit code $LASTEXITCODE"
+            exit 1
+          }
           Write-Output "📊 Python version: $pythonVersion"
 
           # Verify we got Python 3.13
@@ -519,10 +530,23 @@ jobs:
 
           Write-Output "📦 Installing R ${{ inputs.r-version }} from main bucket..."
           scoop install main/r@${{ inputs.r-version }}
-          Write-Output "✅ R installed"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ R install command failed with exit code $LASTEXITCODE"
+            exit 1
+          }
 
           Write-Output "📊 Verifying R installation..."
+          $rCmd = Get-Command Rscript -ErrorAction SilentlyContinue
+          if (-not $rCmd) {
+            Write-Error "❌ Rscript not found after install"
+            exit 1
+          }
+          Write-Output "Resolved Rscript: $($rCmd.Source)"
           Rscript --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ R verification failed with exit code $LASTEXITCODE"
+            exit 1
+          }
           Write-Output "✅ R installation complete"
 
       - name: 🎨 Install Inkscape via Scoop (Windows)
@@ -534,10 +558,23 @@ jobs:
 
           Write-Output "📦 Installing Inkscape..."
           scoop install inkscape
-          Write-Output "✅ Inkscape installed"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Inkscape install command failed with exit code $LASTEXITCODE"
+            exit 1
+          }
 
           Write-Output "📊 Inkscape version:"
+          $inkCmd = Get-Command inkscape -ErrorAction SilentlyContinue
+          if (-not $inkCmd) {
+            Write-Error "❌ Inkscape executable not found after install"
+            exit 1
+          }
+          Write-Output "Resolved Inkscape: $($inkCmd.Source)"
           inkscape --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Inkscape verification failed with exit code $LASTEXITCODE"
+            exit 1
+          }
           Write-Output "✅ Inkscape installation complete"
 
       - name: 🧩 Install rsvg-convert (Windows)
@@ -560,6 +597,10 @@ jobs:
 
           Write-Output "📊 rsvg-convert version:"
           rsvg-convert --version
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ rsvg-convert verification failed with exit code $LASTEXITCODE"
+            exit 1
+          }
           Write-Output "✅ rsvg-convert installation complete"
 
       - name: 📦 Install Ghostscript via Scoop (Windows)
@@ -575,11 +616,17 @@ jobs:
 
           Write-Output "📊 Ghostscript version:"
           if (Get-Command gswin64c -ErrorAction SilentlyContinue) {
+            Write-Output "Resolved Ghostscript: $((Get-Command gswin64c).Source)"
             gswin64c --version
           } elseif (Get-Command gs -ErrorAction SilentlyContinue) {
+            Write-Output "Resolved Ghostscript: $((Get-Command gs).Source)"
             gs --version
           } else {
             Write-Error "❌ Ghostscript executable not found (expected gswin64c or gs)"
+            exit 1
+          }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Ghostscript verification failed with exit code $LASTEXITCODE"
             exit 1
           }
           Write-Output "✅ Ghostscript installation complete"
@@ -1032,13 +1079,12 @@ jobs:
           print(head(ip, 10))
           cat(paste("Total packages installed:", length(ip), "\n"))
 
-      # === WINDOWS: Comprehensive Verification (matches container FINAL CHECKS) ===
-      - name: 🔍 Comprehensive Windows Environment Verification
+      # === WINDOWS: Diagnostics + per-tool verification (separate reporting) ===
+      - name: 🔍 Windows Environment Diagnostics
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Output "=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ==="
-          Write-Output "This matches the Windows container FINAL CHECKS phase"
+          Write-Output "=== WINDOWS ENVIRONMENT DIAGNOSTICS ==="
           Write-Output ""
 
           Write-Output "🔍 SYSTEM DIAGNOSTICS:"
@@ -1051,64 +1097,76 @@ jobs:
           Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' -ErrorAction SilentlyContinue | Select-Object Name, Length, LastWriteTime
           Write-Output ""
 
-          Write-Output "📊 TOOL VERIFICATION:"
-          Write-Output "---------------------"
-          $failures = @()
-          function Test-Tool {
-            param(
-              [string]$Name,
-              [string[]]$Candidates,
-              [string[]]$Args
-            )
+      - name: ✅ Verify Quarto (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command quarto -ErrorAction SilentlyContinue
+          if (-not $cmd) { Write-Error "❌ Quarto not found"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          quarto --version
+          Write-Output "✅ Quarto verified"
 
-            Write-Output "Checking $Name..."
-            $resolved = $null
-            $cmdToRun = $null
-            foreach ($candidate in $Candidates) {
-              $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
-              if ($cmd) {
-                $resolved = $cmd
-                $cmdToRun = $candidate
-                break
-              }
-            }
+      - name: ✅ Verify Python (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command python -ErrorAction SilentlyContinue
+          if (-not $cmd) { Write-Error "❌ Python not found"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          python --version
+          Write-Output "✅ Python verified"
 
-            if (-not $resolved) {
-              Write-Output "❌ $Name verification FAILED: command not found ($($Candidates -join ', '))"
-              return $false
-            }
+      - name: ✅ Verify R (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command Rscript -ErrorAction SilentlyContinue
+          if (-not $cmd) { Write-Error "❌ Rscript not found"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          Rscript --version
+          Write-Output "✅ R verified"
 
-            Write-Output "  Resolved: $($resolved.Source)"
-            $out = & $cmdToRun @Args 2>&1 | Select-Object -First 1
-            $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE }
-            if ($exitCode -ne 0) {
-              Write-Output "❌ $Name verification FAILED: $cmdToRun exited with $exitCode"
-              return $false
-            }
+      - name: ✅ Verify LaTeX (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command lualatex -ErrorAction SilentlyContinue
+          if (-not $cmd) { Write-Error "❌ lualatex not found"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          lualatex --version | Select-Object -First 1
+          Write-Output "✅ LaTeX verified"
 
-            Write-Output "  $out"
-            Write-Output "✅ $Name verified"
-            return $true
-          }
+      - name: ✅ Verify Ghostscript (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command gswin64c -ErrorAction SilentlyContinue
+          if (-not $cmd) { $cmd = Get-Command gs -ErrorAction SilentlyContinue }
+          if (-not $cmd) { Write-Error "❌ Ghostscript executable not found (gswin64c/gs)"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          & $cmd.Source --version
+          Write-Output "✅ Ghostscript verified"
 
-          if (-not (Test-Tool -Name "Quarto"       -Candidates @("quarto")      -Args @("--version"))) { $failures += "Quarto" }
-          if (-not (Test-Tool -Name "Python"       -Candidates @("python")      -Args @("--version"))) { $failures += "Python" }
-          if (-not (Test-Tool -Name "R"            -Candidates @("Rscript")     -Args @("--version"))) { $failures += "R" }
-          if (-not (Test-Tool -Name "LaTeX"        -Candidates @("lualatex")    -Args @("--version"))) { $failures += "LaTeX" }
-          if (-not (Test-Tool -Name "Ghostscript"  -Candidates @("gswin64c","gs") -Args @("--version"))) { $failures += "Ghostscript" }
-          if (-not (Test-Tool -Name "Inkscape"     -Candidates @("inkscape")    -Args @("--version"))) { $failures += "Inkscape" }
-          if (-not (Test-Tool -Name "rsvg-convert" -Candidates @("rsvg-convert") -Args @("--version"))) { $failures += "rsvg-convert" }
+      - name: ✅ Verify Inkscape (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command inkscape -ErrorAction SilentlyContinue
+          if (-not $cmd) { Write-Error "❌ Inkscape not found"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          inkscape --version
+          Write-Output "✅ Inkscape verified"
 
-          # -- Final verdict --
-          Write-Output ""
-          Write-Output "🎯 VERIFICATION STATUS:"
-          Write-Output "------------------------"
-          if ($failures.Count -gt 0) {
-            Write-Output "❌ FAILED: $($failures -join ', ')"
-            exit 1
-          }
-          Write-Output "✅ All tools verified successfully"
-          Write-Output "Ready to proceed with build"
+      - name: ✅ Verify rsvg-convert (Windows)
+        if: matrix.enabled && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cmd = Get-Command rsvg-convert -ErrorAction SilentlyContinue
+          if (-not $cmd) { Write-Error "❌ rsvg-convert not found"; exit 1 }
+          Write-Output "Resolved: $($cmd.Source)"
+          rsvg-convert --version
+          Write-Output "✅ rsvg-convert verified"
 
       - name: 🔨 Build ${{ matrix.format }}
         if: matrix.enabled

@@ -147,8 +147,16 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Installing Quarto via Scoop (extras bucket)...' ; `
     scoop install extras/quarto ; `
-    Write-Host '📦 Quarto installed' ; `
-    quarto --version ; `
+    if (-not (Get-Command quarto -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Quarto install failed: executable not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $qv = quarto --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Quarto install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Quarto installed: $qv" ; `
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
@@ -157,9 +165,16 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host 'Installing Ghostscript via Scoop...' ; `
     scoop install main/ghostscript ; `
-    Write-Host '📦 Ghostscript installed' ; `
-    Write-Host 'Verifying Ghostscript installation...' ; `
-    gswin64c --version ; `
+    if (-not (Get-Command gswin64c -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Ghostscript install failed: gswin64c not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $gsv = gswin64c --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Ghostscript install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Ghostscript installed: $gsv" ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
@@ -168,9 +183,16 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Installing Inkscape via Scoop...' ; `
     scoop install inkscape ; `
-    Write-Host '📦 Inkscape installed' ; `
-    Write-Host 'Verifying Inkscape installation...' ; `
-    inkscape --version ; `
+    if (-not (Get-Command inkscape -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Inkscape install failed: executable not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $iv = inkscape --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Inkscape install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Inkscape installed: $iv" ; `
     Write-Host '✅ Inkscape installation complete'
 
 RUN Write-Host '=== STARTING RSVG-CONVERT INSTALLATION ===' ; `
@@ -184,9 +206,12 @@ RUN Write-Host '=== STARTING RSVG-CONVERT INSTALLATION ===' ; `
         Write-Host '❌ rsvg-convert install failed via both Scoop and Chocolatey' ; `
         exit 1 ; `
     } ; `
-    Write-Host '📦 rsvg-convert installed' ; `
-    Write-Host 'Verifying rsvg-convert installation...' ; `
-    rsvg-convert --version ; `
+    $rv = rsvg-convert --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ rsvg-convert install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 rsvg-convert installed: $rv" ; `
     Write-Host '✅ rsvg-convert installation complete'
 
 # ------------------------------------------------------------
@@ -196,9 +221,16 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
     Write-Host 'Installing Python via Scoop (same as quarto-build workflow)...' ; `
     Write-Host 'Installing Python from main bucket...' ; `
     scoop install main/python ; `
-    Write-Host '📦 Python installed' ; `
-    Write-Host 'Verifying Python installation...' ; `
-    python --version ; `
+    if (-not (Get-Command python -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ Python install failed: executable not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $pv = python --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Python install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 Python installed: $pv" ; `
     Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
@@ -229,9 +261,16 @@ RUN Write-Host '=== STARTING VISUAL C++ REDISTRIBUTABLE INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING R INSTALLATION ===' ; `
     Write-Host 'Installing R 4.5.2 via Scoop (main bucket)...' ; `
     scoop install main/r@4.5.2 ; `
-    Write-Host '📦 R installed' ; `
-    Write-Host 'Verifying R installation...' ; `
-    R --version ; `
+    if (-not (Get-Command Rscript -ErrorAction SilentlyContinue)) { `
+        Write-Host '❌ R install failed: Rscript not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    $rv = Rscript --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ R install failed: version check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 R installed: $rv" ; `
     Write-Host '✅ R installation complete'
 
 # ------------------------------------------------------------
@@ -266,6 +305,21 @@ RUN Write-Host '=== INSTALLING R PACKAGES ===' ; `
 # - Pins mirror in profile, tries 3 mirrors in order
 # ------------------------------------------------------------
 RUN & 'C:\temp\install_texlive.ps1'
+
+RUN Write-Host '=== VERIFY TEX LIVE INSTALLATION ===' ; `
+    $cmd = Get-Command lualatex -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { `
+        Write-Host '❌ TeX Live verification failed: lualatex not found in PATH' ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $lv = lualatex --version | Select-Object -First 1 ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ TeX Live verification failed: lualatex --version exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host "📦 LaTeX verified: $lv" ; `
+    Write-Host '✅ TeX Live verification complete'
 
 # ------------------------------------------------------------
 # PHASE 14: Cleanup and Environment Setup
@@ -320,40 +374,53 @@ RUN Write-Host '=== FINAL VERIFICATION ===' ; `
     Write-Host 'PATH environment variable:' ; `
     Write-Host $env:PATH ; `
     Write-Host '' ; `
-    Write-Host '📊 TOOL VERIFICATION:' ; `
-    Write-Host '---------------------' ; `
-    $failures = @() ; `
-    function Test-Tool { `
-        param([string]$Name, [string]$Cmd, [string[]]$Args, [switch]$IgnoreExitCode) `
-        Write-Host "Checking $Name..." ; `
-        $resolved = Get-Command $Cmd -ErrorAction SilentlyContinue ; `
-        if (-not $resolved) { `
-            Write-Host "❌ $Name FAILED: '$Cmd' not found in PATH" ; `
-            return $false ; `
-        } ; `
-        Write-Host "  Resolved: $($resolved.Source)" ; `
-        $out = & $Cmd @Args 2>&1 | Select-Object -First 1 ; `
-        $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
-        if (-not $IgnoreExitCode -and $exitCode -ne 0) { `
-            Write-Host "❌ $Name FAILED: exited $exitCode" ; `
-            return $false ; `
-        } ; `
-        Write-Host "  $out" ; `
-        Write-Host "✅ $Name verified" ; `
-        return $true ; `
-    } ; `
-    if (-not (Test-Tool 'Quarto'      'quarto'        '--version'))              { $failures += 'Quarto' } ; `
-    if (-not (Test-Tool 'Python'      'python'        '--version'))              { $failures += 'Python' } ; `
-    if (-not (Test-Tool 'R'           'Rscript'       '--version'))              { $failures += 'R' } ; `
-    if (-not (Test-Tool 'LaTeX'       'lualatex'      '--version' -IgnoreExitCode)) { $failures += 'LaTeX' } ; `
-    if (-not (Test-Tool 'Ghostscript' 'gswin64c'      '--version'))              { $failures += 'Ghostscript' } ; `
-    if (-not (Test-Tool 'Inkscape'    'inkscape'      '--version'))              { $failures += 'Inkscape' } ; `
-    if (-not (Test-Tool 'rsvg-convert' 'rsvg-convert' '--version'))              { $failures += 'rsvg-convert' } ; `
-    Write-Host '' ; `
-    Write-Host '🎯 FINAL STATUS:' ; `
-    Write-Host '----------------' ; `
-    if ($failures.Count -gt 0) { `
-        Write-Host "❌ FAILED: $($failures -join ', ')" ; `
-        exit 1 ; `
-    } ; `
-    Write-Host '✅ All tools verified — container ready for builds'
+    Write-Host 'Tool checks run in separate Docker steps below for isolated reporting'
+
+RUN Write-Host '=== VERIFY: Quarto ===' ; `
+    $cmd = Get-Command quarto -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Quarto FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    quarto --version ; `
+    Write-Host '✅ Quarto verified'
+
+RUN Write-Host '=== VERIFY: Python ===' ; `
+    $cmd = Get-Command python -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Python FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    python --version ; `
+    Write-Host '✅ Python verified'
+
+RUN Write-Host '=== VERIFY: R ===' ; `
+    $cmd = Get-Command Rscript -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ R FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    Rscript --version ; `
+    Write-Host '✅ R verified'
+
+RUN Write-Host '=== VERIFY: LaTeX ===' ; `
+    $cmd = Get-Command lualatex -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ LaTeX FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    lualatex --version | Select-Object -First 1 ; `
+    Write-Host '✅ LaTeX verified'
+
+RUN Write-Host '=== VERIFY: Ghostscript ===' ; `
+    $cmd = Get-Command gswin64c -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Ghostscript FAILED: gswin64c not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    gswin64c --version ; `
+    Write-Host '✅ Ghostscript verified'
+
+RUN Write-Host '=== VERIFY: Inkscape ===' ; `
+    $cmd = Get-Command inkscape -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Inkscape FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    inkscape --version ; `
+    Write-Host '✅ Inkscape verified'
+
+RUN Write-Host '=== VERIFY: rsvg-convert ===' ; `
+    $cmd = Get-Command rsvg-convert -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ rsvg-convert FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    rsvg-convert --version ; `
+    Write-Host '✅ rsvg-convert verified'
