@@ -86,7 +86,20 @@ if (-not (Test-Path $texLiveBin)) {
 }
 Write-Host "📁 TeX Live bin: $texLiveBin"
 
-[Environment]::SetEnvironmentVariable('PATH', ($texLiveBin + ';' + [Environment]::GetEnvironmentVariable('PATH', 'Machine')), 'Machine')
+# Create a stable symlink so ENV PATH in Docker can use C:\texlive\bin\windows
+$stableBin = Join-Path $TexLiveRoot 'bin\windows'
+if ($texLiveBin -ne $stableBin -and -not (Test-Path $stableBin)) {
+    Write-Host "🔗 Creating stable path: $stableBin -> $texLiveBin"
+    New-Item -ItemType Directory -Force -Path (Join-Path $TexLiveRoot 'bin') | Out-Null
+    cmd /c mklink /J "$stableBin" "$texLiveBin"
+    if (Test-Path $stableBin) {
+        Write-Host "✅ Stable symlink created"
+    } else {
+        Write-Host "⚠️ Symlink failed, using discovered path directly"
+    }
+}
+
+[Environment]::SetEnvironmentVariable('PATH', ($stableBin + ';' + [Environment]::GetEnvironmentVariable('PATH', 'Machine')), 'Machine')
 Write-Host '✅ PATH updated'
 
 Write-Host '🔧 Pinning tlmgr repository to stable mirror...'
