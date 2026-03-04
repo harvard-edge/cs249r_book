@@ -4027,46 +4027,37 @@ The sharding strategies examined in @sec-inference-scale-model-sharding-inferenc
 
 The routing pattern depends on the sharding strategy.
 
-Under tensor parallelism, each request is broadcast to all devices in the shard group. Each device processes its portion of each layer, and results are synchronized via all-reduce.
+Under tensor parallelism, each request is broadcast to all devices in the shard group. Each device processes its portion of each layer, and results are synchronized via AllReduce. @fig-tensor-parallel-routing shows this fan-out, compute, and gather pattern.
 
-```
-Request → Load Balancer → Shard Group
-                              │
-            ┌────────────────┼────────────────┐
-            ▼                ▼                ▼
-         GPU 0            GPU 1            GPU 2
-      (heads 0-7)      (heads 8-15)    (heads 16-23)
-            │                │                │
-            └────────AllReduce────────────────┘
-                              │
-                              ▼
-                          Response
-```
+::: {#fig-tensor-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism Request Routing**. A request is broadcast from the load balancer to all devices in the shard group. Each GPU computes its assigned attention head partition, then a single AllReduce synchronizes results before the response is returned. Interconnect bandwidth—not model size—determines latency." fig-alt="Flow diagram: Request box to Load Balancer to Shard Group containing three GPU boxes labeled by head ranges, all feeding into AllReduce box, then Response. Annotations show NVLink vs PCIe bandwidth requirements."}
 
-Under pipeline parallelism, each request flows through stages sequentially, with each stage forwarding to the next.
+![](images/svg/tensor-parallel-routing.svg)
 
-```
-Request → Stage 0 → Stage 1 → Stage 2 → Stage 3 → Response
-         (L1-20)   (L21-40)  (L41-60)  (L61-80)
-```
+:::
 
-Under expert parallelism, each request is dispatched to devices hosting the selected experts based on the gating decision.
+Under pipeline parallelism, each request traverses stages sequentially, with each stage forwarding activations to the next. @fig-pipeline-parallel-routing illustrates how pipelining multiple requests achieves throughput scaling even though single-request latency equals the sum of all stage times.
 
-```
-Request → Gating → AllToAll dispatch → Expert compute → AllToAll gather → Response
-                   (to selected experts)              (results back)
-```
+::: {#fig-pipeline-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Request Flow**. (a) A single request flows sequentially through four stages—no latency benefit from parallelism. (b) Multiple requests fill the pipeline: once steady state is reached, throughput scales with the number of stages P, while per-request latency remains approximately constant." fig-alt="Two-part diagram. Top: single request through four stage boxes labeled by layer ranges with GPU labels below. Bottom: Gantt-style grid showing four GPU rows with requests offset by one stage, illustrating pipeline fill and steady-state throughput."}
 
-When multiple shard groups provide horizontal scaling, the load balancer routes to groups rather than individual devices:
+![](images/svg/pipeline-parallel-routing.svg)
 
-```
-                    Load Balancer
-                         │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-     Shard Group 0  Shard Group 1  Shard Group 2
-      (8 GPUs)       (8 GPUs)       (8 GPUs)
-```
+:::
+
+Under expert parallelism, each request is dispatched to the devices hosting its selected experts based on the gating decision. Two AllToAll communication steps bookend the expert compute, as shown in @fig-expert-parallel-routing. Load imbalance—where the gating function routes disproportionately to some experts—is the critical challenge: it turns communication overhead into a bottleneck.
+
+::: {#fig-expert-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Expert Parallelism (MoE) Request Flow**. Gating selects the top-k experts; an AllToAll dispatch sends tokens to the GPUs hosting those experts; experts compute in parallel; a second AllToAll gathers results. The lower panel contrasts unbalanced routing (one expert bottlenecks) against balanced routing (uniform utilization via auxiliary loss)." fig-alt="Five-stage horizontal pipeline: Request, Gating, AllToAll dispatch (dashed orange), Expert Compute (three GPU boxes), AllToAll gather (dashed orange), Response. Lower panel shows two sets of three capacity bars: unbalanced with one overloaded, balanced with equal tokens."}
+
+![](images/svg/expert-parallel-routing.svg)
+
+:::
+
+When multiple shard groups provide horizontal scaling, the load balancer routes to groups rather than individual devices. @fig-shard-group-scaling shows this two-level hierarchy: standard load-balancing algorithms (round-robin, two-choices, consistent hashing) operate at the group level, while each group handles its own internal AllReduce locally.
+
+::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal Scaling with Shard Groups**. The load balancer treats each shard group as a single logical inference server. Within each group, 8 GPUs coordinate via tensor parallelism. Adding groups scales throughput linearly; adding GPUs per group reduces per-request latency." fig-alt="Hub-and-spoke diagram: incoming request boxes converge to a Load Balancer, which fans out to three Shard Group boxes each containing an 8-GPU grid and a summary label. Green annotation below states the logical server abstraction."}
+
+![](images/svg/shard-group-scaling.svg)
+
+:::
 
 The load balancer treats each shard group as a single logical server, applying standard algorithms (round-robin, two-choices, consistent hashing) at the group level.
 
@@ -4832,22 +4823,13 @@ def handle_spot_termination():
 
 :::
 
-Spot-aware architecture
+A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class, as shown in @fig-spot-aware-routing. SLO-critical requests always route to on-demand capacity; best-effort requests absorb the cost savings—and interruption risk—of spot instances.
 
-```
-Traffic distribution:
+::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-Aware Traffic Distribution**. The load balancer routes 70% of traffic to on-demand replicas (guaranteed availability) and 30% to spot replicas (cost savings, preemption risk). SLO-critical requests always use on-demand; best-effort requests tolerate occasional retries on eviction. The mixed fleet achieves ~50% cost reduction vs. 100% on-demand." fig-alt="Load Balancer box with two fan-out arrows: a solid green arrow labeled 70 percent to On-Demand Replicas box containing three active GPU workers, and a dashed orange arrow labeled 30 percent to Spot Replicas box containing two spot workers and one preempted worker."}
 
-Request arrives
-    │
-    ▼
-Load balancer
-    │
-    ├── 70% → On-demand replicas (guaranteed capacity)
-    │
-    └── 30% → Spot replicas (cost savings, may be interrupted)
-```
+![](images/svg/spot-aware-routing.svg)
 
-Best-effort requests route to spot instances; SLO-critical requests use on-demand.
+:::
 
 ### Global Inference Infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
@@ -4870,25 +4852,13 @@ For interactive applications (chatbots, autocomplete), these delays compound acr
 
 #### Pattern 1: Global load balancing with regional replicas
 
-```
-                    Global Load Balancer
-                    (Latency-based routing)
-                           │
-         ┌─────────────────┼─────────────────┐
-         ▼                 ▼                 ▼
-    US-East           EU-West           Asia-Pacific
-    ┌─────────┐       ┌─────────┐       ┌─────────┐
-    │ vLLM    │       │ vLLM    │       │ vLLM    │
-    │ Replicas│       │ Replicas│       │ Replicas│
-    └─────────┘       └─────────┘       └─────────┘
-         │                 │                 │
-         └─────────────────┼─────────────────┘
-                           ▼
-                    Model Registry
-                    (Synchronized)
-```
+Each region runs independent inference replicas with identical models. A global load balancer routes each user to the nearest region based on measured round-trip latency, as shown in @fig-global-inference-multiregion. A shared model registry synchronizes weights across regions during rollouts.
 
-Each region runs independent inference replicas with identical models. The global load balancer routes users to the nearest region based on latency.
+::: {#fig-global-inference-multiregion fig-env="figure" fig-pos="htb" fig-cap="**Multi-Region Inference: Global Load Balancing**. A global load balancer routes requests to three independent regional deployments (US-East, EU-West, Asia-Pacific) based on latency. Each region operates independently; a shared model registry synchronizes weights. During regional failure, the LB reroutes to the next nearest healthy region." fig-alt="Diagram with Global Load Balancer box at top fanning out to three region boxes each containing two replica boxes. Lines connect all regions to a shared Model Registry at the bottom. RTT annotations and failover note shown."}
+
+![](images/svg/global-inference-multiregion.svg)
+
+:::
 
 Key considerations
 
@@ -4901,17 +4871,13 @@ Key considerations
 
 #### Pattern 2: Edge caching with central inference
 
-For models too large to replicate globally, cache responses at the edge:
+For models too large to replicate globally, caching responses at the edge eliminates redundant inference for repeated queries. @fig-edge-cache-routing shows the two paths: a cache hit returns in under 10 ms from the nearest edge node; a cache miss traverses the full backend and populates the cache on return.
 
-```
-User → Edge Cache (CDN) → Regional Proxy → Central Inference
-           │                    │
-           └── Cache hit ───────┘
-               (< 10 ms)
+::: {#fig-edge-cache-routing fig-env="figure" fig-pos="htb" fig-cap="**Edge Caching: Cache Hit vs. Cache Miss Paths**. A cache hit returns immediately from the CDN edge node (\<10 ms). A cache miss flows through to central inference and populates the cache on return. Hit rate determines the effective cost saving; open-ended generative workloads have low repeatability and benefit little from this pattern." fig-alt="Left column shows User, Edge Cache, Regional Proxy, Central Inference stacked vertically. Right shows two annotated paths: green Cache Hit box returning early, and red Cache Miss box traversing to the backend. A hit-rate table by workload type is shown on the right."}
 
-           └── Cache miss ──────────────────→
-               (Full latency, populate cache)
-```
+![](images/svg/edge-cache-routing.svg)
+
+:::
 
 Effectiveness depends on request repeatability
 
@@ -4928,22 +4894,7 @@ Semantic caching[^fn-semantic-cache-tradeoff] (caching based on embedding simila
 
 #### Pattern 3: Federated inference with model sharding
 
-For the largest models, shard across regions:
-
-```
-User request
-    │
-    ▼
-Request Router
-    │
-    ├── Layers 1-40  → US-East GPUs
-    │
-    └── Layers 41-80 → EU-West GPUs
-
-    Pipeline parallelism across regions
-```
-
-This pattern is rarely practical due to inter-region latency dominating compute time, but may apply for extremely large models where no single region has sufficient GPU capacity.
+For the largest models, pipeline parallelism can theoretically span regions: a router assigns early layers to one region and later layers to another. This pattern is rarely practical because inter-region network latency (75–150 ms) dominates compute time per stage (1–5 ms), making cross-region pipeline parallelism 10–100$\times$ slower than co-located deployment. It applies only when no single region has sufficient GPU capacity for the full model.
 
 #### Cross-Region Failover {#sec-inference-scale-crossregion-failover-0d67}
 
