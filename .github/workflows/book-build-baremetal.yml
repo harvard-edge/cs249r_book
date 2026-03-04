@@ -839,92 +839,140 @@ jobs:
       # Install TeX Live packages - ALWAYS install for consistency
       # Required for TikZ diagrams in HTML (PDF->SVG), PDF output, and potential future needs
 
-      # === WINDOWS: Install TeX Live via Chocolatey (same as container) ===
-      - name: 📦 Install TeX Live via Chocolatey (Windows)
+      # === WINDOWS: Install TeX Live via direct installer (same as container) ===
+      - name: 📦 Install TeX Live (Windows, mirror fallback)
         if: matrix.enabled && runner.os == 'Windows'
         shell: pwsh
         run: |
-          Write-Output "=== INSTALLING TEX LIVE VIA CHOCOLATEY ==="
-          Write-Output "This matches the Windows container setup (Phase 4)"
+          Write-Output "=== INSTALLING TEX LIVE VIA DIRECT INSTALL-TL ==="
+          Write-Output "This matches the Windows container strategy (mirror fallback + retries)"
 
-          Write-Output "📦 Installing TeX Live via Chocolatey (pinned to 2025.20251008.0)..."
-          # Temporarily relax ErrorActionPreference — Chocolatey's TeX Live
-          # installer emits non-fatal RemoteException messages that PowerShell's
-          # strict mode would otherwise terminate on.
-          $prevPref = $ErrorActionPreference
-          $ErrorActionPreference = 'Continue'
-          choco install texlive --version=2025.20251008.0 -y --no-progress
-          $chocoExit = $LASTEXITCODE
-          $ErrorActionPreference = $prevPref
+          New-Item -ItemType Directory -Path 'C:\temp' -Force | Out-Null
+          Remove-Item -Path 'C:\texlive-install' -Recurse -Force -ErrorAction SilentlyContinue
 
-          if ($chocoExit -ne 0) {
-            Write-Error "❌ TeX Live installation failed (exit code: $chocoExit)"
+          if (Test-Path '${{ vars.BOOK_DEPS }}/tl_packages') {
+            Copy-Item '${{ vars.BOOK_DEPS }}/tl_packages' 'C:\temp\tl_packages' -Force
+            Write-Output "✅ Copied tl_packages to C:\\temp\\tl_packages"
+          } else {
+            Write-Output "⚠️ tl_packages not found at ${{ vars.BOOK_DEPS }}/tl_packages"
+          }
+
+          & "${{ vars.BOOK_DOCKER }}/windows/install_texlive.ps1" `
+            -TexLiveRoot 'C:\texlive' `
+            -TexInstallDir 'C:\texlive-install'
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Direct TeX Live installation failed"
             exit 1
           }
-          Write-Output "✅ TeX Live installed via Chocolatey"
 
-          Write-Output "🔍 Finding TeX Live installation directory..."
-          $texRoot = Join-Path $env:SystemDrive 'texlive'
-          Write-Output "📁 TeX Live root: $texRoot"
-
-          Write-Output "🔍 Looking for year-based directories..."
-          $texYearDir = Get-ChildItem $texRoot -Directory |
-              Where-Object { $_.Name -match '^\d{4}$' } |
-              Sort-Object Name -Descending |
-              Select-Object -First 1
-          Write-Output "📁 Found year directory: $($texYearDir.FullName)"
-
-          $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows'
-          Write-Output "📁 TeX Live bin directory: $texLiveBin"
-
-          Write-Output "🔧 Adding TeX Live to PATH..."
-          echo "$texLiveBin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
-          $env:PATH = "$texLiveBin;$env:PATH"
-          Write-Output "✅ PATH updated with: $texLiveBin"
-
-          Write-Output "📋 Reading collections from tl_packages..."
-          if (Test-Path '${{ vars.BOOK_DEPS }}/tl_packages') {
-            $collections = Get-Content '${{ vars.BOOK_DEPS }}/tl_packages' |
-                Where-Object { $_.Trim() -ne '' -and -not $_.Trim().StartsWith('#') }
-            Write-Output "📦 Found $($collections.Count) collections to install"
-            Write-Output "📋 Collections:"
-            $collections | ForEach-Object { Write-Output "  - $_" }
-
-            Write-Output "🔄 Installing collections..."
-            $i = 1
-            foreach ($collection in $collections) {
-              Write-Output "📦 [$i/$($collections.Count)] Installing $collection..."
-              & "$texLiveBin\tlmgr.bat" install $collection
-              if ($LASTEXITCODE -eq 0) {
-                Write-Output "✅ $collection installed successfully"
-              } else {
-                Write-Output "⚠️ Failed to install $collection, continuing..."
-              }
-              $i++
-            }
-            Write-Output "✅ Collection installation complete"
+          $stableBin = 'C:\texlive\bin\windows'
+          if (Test-Path $stableBin) {
+            echo "$stableBin" | Out-File -Append -Encoding UTF8 $env:GITHUB_PATH
+            $env:PATH = "$stableBin;$env:PATH"
+            Write-Output "✅ Added TeX Live stable path to PATH: $stableBin"
           } else {
-            Write-Output "⚠️ No tl_packages file found, skipping collection installation"
+            Write-Error "❌ TeX Live stable bin path not found: $stableBin"
+            exit 1
           }
 
-          Write-Output "🔄 Updating tlmgr..."
-          & "$texLiveBin\tlmgr.bat" update --self --all
-          Write-Output "✅ tlmgr updated"
-
           Write-Output "🔍 Verifying lualatex installation..."
-          & "$texLiveBin\lualatex.exe" --version
+          lualatex --version | Select-Object -First 1
           Write-Output "✅ TeX Live installation verified"
 
-      # === LINUX: Install TeX Live via GitHub Action ===
+      # === LINUX: Install TeX Live via direct installer (same as container) ===
       - name: 📦 Install TeX Live packages (Linux)
         if: matrix.enabled && runner.os == 'Linux'
-        uses: zauguin/install-texlive@v4
-        with:
-          package_file: ${{ vars.BOOK_DEPS }}/tl_packages
-          texlive_version: 2025
-          cache_version: 1
-        env:
-          CTAN_MIRROR: https://ctan.math.illinois.edu/systems/texlive/tlnet
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "=== INSTALLING TEX LIVE VIA DIRECT INSTALL-TL ==="
+          echo "Using mirror fallback strategy from Linux container build"
+
+          sudo apt-get update
+          sudo apt-get install -y perl wget xz-utils
+
+          MIRRORS=(
+            "https://ctan.math.illinois.edu/systems/texlive/tlnet"
+            "https://mirrors.mit.edu/CTAN/systems/texlive/tlnet"
+            "https://mirror.ctan.org/systems/texlive/tlnet"
+            "https://ctan.math.washington.edu/tex-archive/systems/texlive/tlnet"
+          )
+
+          INSTALLER_OK=0
+          for mirror in "${MIRRORS[@]}"; do
+            installer_url="${mirror}/install-tl-unx.tar.gz"
+            echo "🔄 Trying installer mirror: ${installer_url}"
+            if wget --timeout=30 --tries=2 -O /tmp/install-tl-unx.tar.gz "${installer_url}"; then
+              INSTALLER_OK=1
+              break
+            fi
+          done
+
+          if [ "${INSTALLER_OK}" -ne 1 ]; then
+            echo "❌ Failed to download TeX Live installer from all mirrors"
+            exit 1
+          fi
+
+          rm -rf /tmp/install-tl-*
+          tar -xzf /tmp/install-tl-unx.tar.gz -C /tmp
+
+          cat > /tmp/texlive.profile <<'EOF'
+          selected_scheme scheme-basic
+          tlpdbopt_install_docfiles 0
+          tlpdbopt_install_srcfiles 0
+          TEXDIR /usr/local/texlive
+          TEXMFCONFIG /usr/local/texlive/texmf-config
+          TEXMFHOME /usr/local/texlive/texmf-home
+          TEXMFLOCAL /usr/local/texlive/texmf-local
+          TEXMFSYSCONFIG /usr/local/texlive/texmf-config
+          TEXMFSYSVAR /usr/local/texlive/texmf-var
+          TEXMFVAR /usr/local/texlive/texmf-var
+          instopt_adjustrepo 0
+          EOF
+
+          INSTALL_OK=0
+          for mirror in "${MIRRORS[@]}"; do
+            echo "🔄 Installing TeX Live from mirror: ${mirror}"
+            if /tmp/install-tl-*/install-tl --profile=/tmp/texlive.profile --repository="${mirror}"; then
+              INSTALL_OK=1
+              break
+            fi
+            echo "⚠️ Install attempt failed for mirror: ${mirror}"
+          done
+
+          if [ "${INSTALL_OK}" -ne 1 ]; then
+            echo "❌ TeX Live installation failed across all mirrors"
+            exit 1
+          fi
+
+          TEXLIVE_BIN="$(dirname "$(command -v tlmgr)")"
+          if [ -z "${TEXLIVE_BIN}" ]; then
+            echo "❌ tlmgr not found after TeX Live install"
+            exit 1
+          fi
+          echo "${TEXLIVE_BIN}" >> "${GITHUB_PATH}"
+          export PATH="${TEXLIVE_BIN}:${PATH}"
+          echo "✅ TeX Live bin path: ${TEXLIVE_BIN}"
+
+          # Pin repository for subsequent tlmgr operations
+          tlmgr option repository "${MIRRORS[0]}" || true
+
+          if [ -f "${{ vars.BOOK_DEPS }}/tl_packages" ]; then
+            mapfile -t collections < <(awk '!/^[[:space:]]*#/ && NF' "${{ vars.BOOK_DEPS }}/tl_packages")
+            echo "📦 Installing ${#collections[@]} TeX Live collections from tl_packages"
+            for collection in "${collections[@]}"; do
+              echo "📦 Installing ${collection}"
+              tlmgr install "${collection}" || echo "⚠️ Failed: ${collection} (continuing)"
+            done
+          else
+            echo "⚠️ tl_packages file not found, skipping collection install"
+          fi
+
+          tlmgr update --self --all || true
+          lualatex --version | head -2
+          echo "✅ TeX Live installation complete"
 
       - name: 🔍 Verify TeX Live Installation
         if: matrix.enabled
@@ -1456,7 +1504,7 @@ jobs:
           [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 
           # TeX Live is now always installed for consistent environment across all builds
-          $texLiveStatus = "✅ Always installed (zauguin/install-texlive@v4)"
+          $texLiveStatus = "✅ Always installed (direct install-tl with mirror fallback)"
 
           @"
           ## 📊 Build Status Summary for ${{ matrix.os_name }} ${{ matrix.format }}
