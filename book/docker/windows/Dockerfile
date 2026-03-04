@@ -171,12 +171,7 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
         exit 1 ; `
     } ; `
     Write-Host "Resolved Ghostscript: $($gsCmd.Source)" ; `
-    $gsv = gs --version ; `
-    if ($LASTEXITCODE -ne 0) { `
-        Write-Host "❌ Ghostscript install failed: version check exited $LASTEXITCODE" ; `
-        exit 1 ; `
-    } ; `
-    Write-Host "📦 Ghostscript installed: $gsv" ; `
+    Write-Host '📦 Ghostscript installed (runtime check deferred to final verification)' ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
