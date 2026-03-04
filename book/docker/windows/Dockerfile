@@ -179,7 +179,7 @@ RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host '✅ Ghostscript installation complete'
 
 # ------------------------------------------------------------
-# PHASE 8: Install Inkscape (required for SVG processing)
+# PHASE 8: Install Inkscape and rsvg-convert (required for SVG processing)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Installing Inkscape via Scoop...' ; `
@@ -188,6 +188,14 @@ RUN Write-Host '=== STARTING INKSCAPE INSTALLATION ===' ; `
     Write-Host 'Verifying Inkscape installation...' ; `
     inkscape --version ; `
     Write-Host '✅ Inkscape installation complete'
+
+RUN Write-Host '=== STARTING RSVG-CONVERT INSTALLATION ===' ; `
+    Write-Host 'Installing rsvg-convert via Scoop (required by Quarto for SVG-to-PDF)...' ; `
+    scoop install main/rsvg-convert ; `
+    Write-Host '📦 rsvg-convert installed' ; `
+    Write-Host 'Verifying rsvg-convert installation...' ; `
+    rsvg-convert --version ; `
+    Write-Host '✅ rsvg-convert installation complete'
 
 # ------------------------------------------------------------
 # PHASE 9: Install Python (Medium complexity)
@@ -331,6 +339,9 @@ RUN Write-Host '=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ===' ; `
     Write-Host 'Checking Inkscape...' ; `
     inkscape --version ; `
     Write-Host '✅ Inkscape verified' ; `
+    Write-Host 'Checking rsvg-convert...' ; `
+    rsvg-convert --version ; `
+    Write-Host '✅ rsvg-convert verified' ; `
     Write-Host '' ; `
     Write-Host '🎯 FINAL STATUS:' ; `
     Write-Host '----------------' ; `
