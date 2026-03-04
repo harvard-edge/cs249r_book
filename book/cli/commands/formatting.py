@@ -444,7 +444,6 @@ class FormatCommand:
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode == 0:
-            console.print("[green]prettify: All tables aligned[/green]")
             return True
         else:
             if result.stdout:

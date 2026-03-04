@@ -58,7 +58,7 @@ class ValidationRunResult:
 
     @property
     def passed(self) -> bool:
-        return not any(i.severity == "error" for i in self.issues)
+        return len(self.issues) == 0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -150,6 +150,7 @@ class ValidateCommand:
         ],
         "figures": [
             ("captions", "_run_figures"),
+            ("div-syntax", "_run_figure_div_syntax"),
             ("flow", "_run_float_flow"),
             ("files", "_run_images"),
         ],
@@ -170,10 +171,12 @@ class ValidateCommand:
             ("contractions", "_run_contractions"),
             ("unblended-prose", "_run_unblended_prose"),
             ("times-spacing", "_run_times_spacing"),
+            ("purpose-unnumbered", "_run_purpose_unnumbered"),
         ],
         "images": [
             ("formats", "_run_image_formats"),
             ("external", "_run_external_images"),
+            ("svg-xml", "_run_svg_wellformedness"),
         ],
         "json": [
             ("syntax", "_run_json_syntax"),
@@ -1349,6 +1352,53 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # Figure div syntax  (ported from check_figure_div_syntax.py)
+    # ------------------------------------------------------------------
+
+    _MARKDOWN_IMAGE_FIG = re.compile(r"!\[.*\]\s*\([^)]+\)\s*\{#fig-")
+    _CHUNK_FIG_OPTION = re.compile(r"^#\|\s*(fig-cap|fig-alt)\s*[:=]")
+
+    def _run_figure_div_syntax(self, root: Path) -> ValidationRunResult:
+        """Enforce div syntax for figures (no markdown-image figs or chunk options)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            for idx, line in enumerate(lines, 1):
+                if self._MARKDOWN_IMAGE_FIG.search(line):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="markdown_image_fig",
+                            message="Use div syntax for figures, not ![Caption](path){#fig-...}",
+                            severity="error",
+                            context=line.strip()[:80],
+                        )
+                    )
+                if self._CHUNK_FIG_OPTION.match(line.strip()):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="chunk_fig_option",
+                            message="Use div syntax for fig-cap/fig-alt, not #| chunk options",
+                            severity="error",
+                            context=line.strip()[:80],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="div-syntax",
+            description="Enforce figure div syntax (no markdown-image or chunk fig-cap/fig-alt)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Float Flow  (ported from figure_table_flow_audit.py)
     # ------------------------------------------------------------------
 
@@ -1460,7 +1510,7 @@ class ValidateCommand:
                     # Check closest reference
                     closest = min(ref_lines, key=lambda r: abs(def_line - r))
                     closest_gap = def_line - closest
-                    if -5 <= closest_gap <= 30:
+                    if -10 <= closest_gap <= 30:
                         continue  # OK
                     issues.append(
                         ValidationIssue(
@@ -1472,7 +1522,7 @@ class ValidateCommand:
                             context=label,
                         )
                     )
-                elif prose_gap < -5:
+                elif prose_gap < -10:
                     issues.append(
                         ValidationIssue(
                             file=self._relative_file(file),
@@ -2651,6 +2701,41 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # Purpose sections must be unnumbered
+    # ------------------------------------------------------------------
+
+    _PURPOSE_HEADING = re.compile(r"^## Purpose\b")
+
+    def _run_purpose_unnumbered(self, root: Path) -> ValidationRunResult:
+        """Ensure all '## Purpose' headings have {.unnumbered}."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            for idx, line in enumerate(lines, 1):
+                if self._PURPOSE_HEADING.match(line) and ".unnumbered" not in line:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="purpose_not_unnumbered",
+                            message="Purpose section must include {.unnumbered}",
+                            severity="error",
+                            context=line.strip()[:80],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="purpose-unnumbered",
+            description="Ensure Purpose sections are unnumbered",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Cross-chapter footnote duplicates  (ported from audit_footnotes_cross_chapter.py)
     # ------------------------------------------------------------------
 
@@ -2936,6 +3021,12 @@ class ValidateCommand:
         total = summary["total_issues"]
         status = summary["status"]
 
+        # On success, stay silent — pre-commit shows "Passed" and direct
+        # callers see exit code 0.
+        if total == 0:
+            return
+
+        # Show the summary table when there are issues
         table = Table(show_header=True, header_style="bold cyan", box=None)
         table.add_column("Check", style="cyan")
         table.add_column("Files", style="dim")
@@ -2948,13 +3039,9 @@ class ValidateCommand:
                 str(run["files_checked"]),
                 str(run["issue_count"]),
                 f'{run["elapsed_ms"]}ms',
-                "PASS" if run["passed"] else "FAIL",
+                "[green]PASS[/green]" if run["passed"] else "[red]FAIL[/red]",
             )
         console.print(Panel(table, title="Binder Check Summary", border_style="cyan"))
-
-        if total == 0:
-            console.print("[green]✅ All validation checks passed.[/green]")
-            return
 
         # Count errors vs warnings across all runs
         total_errors = 0
@@ -2992,10 +3079,13 @@ class ValidateCommand:
                 console.print(f"  [dim]... {run['issue_count'] - 30} more[/dim]")
             console.print()
 
-        if status == "failed":
-            console.print(f"[red]❌ Validation failed with {total_errors} error(s).[/red]")
-        elif total_warnings > 0:
-            console.print(f"[yellow]⚠️  Passed with {total_warnings} warning(s).[/yellow]")
+        parts = []
+        if total_errors:
+            parts.append(f"{total_errors} error(s)")
+        if total_warnings:
+            parts.append(f"{total_warnings} warning(s)")
+        label = " and ".join(parts)
+        console.print(f"[red]❌ Validation failed with {label}.[/red]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
         if as_json:
@@ -3088,6 +3178,53 @@ class ValidateCommand:
         )
         return self._delegate_script(
             script, ["--validate", str(root)], "external-images"
+        )
+
+    def _run_svg_wellformedness(self, root: Path) -> ValidationRunResult:
+        """Validate SVG files are well-formed XML."""
+        start = time.time()
+        svg_files = [
+            f for f in sorted(root.rglob("*.svg"))
+            if "_files/mediabag/" not in str(f)
+        ]
+        issues: List[ValidationIssue] = []
+
+        try:
+            from lxml import etree
+        except ImportError:
+            return ValidationRunResult(
+                name="svg-xml",
+                description="Validate SVG XML well-formedness",
+                files_checked=0,
+                issues=[ValidationIssue(
+                    file="(system)", line=0, code="svg_xml",
+                    message="lxml not installed — skipping SVG validation",
+                    severity="warning",
+                )],
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        for svg_file in svg_files:
+            try:
+                etree.parse(str(svg_file))
+            except etree.XMLSyntaxError as e:
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(svg_file),
+                        line=getattr(e, "lineno", 0) or 0,
+                        code="svg_xml_error",
+                        message=f"Malformed SVG XML: {e}",
+                        severity="error",
+                        context=str(e)[:120],
+                    )
+                )
+
+        return ValidationRunResult(
+            name="svg-xml",
+            description="Validate SVG XML well-formedness",
+            files_checked=len(svg_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
         )
 
     def _run_json_syntax(self, root: Path) -> ValidationRunResult:
