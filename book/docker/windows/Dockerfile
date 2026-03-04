@@ -165,11 +165,13 @@ RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING GHOSTSCRIPT INSTALLATION ===' ; `
     Write-Host 'Installing Ghostscript via Scoop...' ; `
     scoop install main/ghostscript ; `
-    if (-not (Get-Command gswin64c -ErrorAction SilentlyContinue)) { `
-        Write-Host '❌ Ghostscript install failed: gswin64c not found in PATH' ; `
+    $gsCmd = Get-Command gs -ErrorAction SilentlyContinue ; `
+    if (-not $gsCmd) { `
+        Write-Host '❌ Ghostscript install failed: gs shim not found in PATH' ; `
         exit 1 ; `
     } ; `
-    $gsv = gswin64c --version ; `
+    Write-Host "Resolved Ghostscript: $($gsCmd.Source)" ; `
+    $gsv = gs --version ; `
     if ($LASTEXITCODE -ne 0) { `
         Write-Host "❌ Ghostscript install failed: version check exited $LASTEXITCODE" ; `
         exit 1 ; `
@@ -351,7 +353,7 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
 # ENV directive here guarantees these paths are committed into the image and
 # visible to every subsequent RUN step and to containers at runtime.
 # ------------------------------------------------------------
-ENV PATH="C:\\Users\\ContainerAdministrator\\scoop\\shims;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current\\Scripts;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current;C:\\Users\\ContainerAdministrator\\scoop\\apps\\ghostscript\\current\\bin;C:\\Users\\ContainerAdministrator\\scoop\\apps\\r\\current\\bin;C:\\Users\\ContainerAdministrator\\scoop\\apps\\git\\current\\cmd;C:\\texlive\\bin\\windows;C:\\Program Files\\PowerShell\\7;C:\\ProgramData\\chocolatey\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\"
+ENV PATH="C:\\Users\\ContainerAdministrator\\scoop\\shims;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current\\Scripts;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current;C:\\Users\\ContainerAdministrator\\scoop\\apps\\ghostscript\\current\\lib;C:\\Users\\ContainerAdministrator\\scoop\\apps\\r\\current\\bin;C:\\Users\\ContainerAdministrator\\scoop\\apps\\git\\current\\cmd;C:\\texlive\\bin\\windows;C:\\Program Files\\PowerShell\\7;C:\\ProgramData\\chocolatey\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\"
 
 # ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics
@@ -392,10 +394,11 @@ RUN Write-Host '=== VERIFY: LaTeX ===' ; `
     Write-Host '✅ LaTeX verified'
 
 RUN Write-Host '=== VERIFY: Ghostscript ===' ; `
-    $cmd = Get-Command gswin64c -ErrorAction SilentlyContinue ; `
-    if (-not $cmd) { Write-Host "❌ Ghostscript FAILED: gswin64c not found"; exit 1 } ; `
+    $cmd = Get-Command gs -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { $cmd = Get-Command gswin64c -ErrorAction SilentlyContinue } ; `
+    if (-not $cmd) { Write-Host "❌ Ghostscript FAILED: gs/gswin64c not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    gswin64c --version ; `
+    & $cmd.Source --version ; `
     Write-Host '✅ Ghostscript verified'
 
 RUN Write-Host '=== VERIFY: Inkscape ===' ; `
