@@ -142,7 +142,7 @@ class ScalingAsymmetry:
 | **Labeled Data**        | ~`{python} ScalingAsymmetry.label_data_growth_str` / `{python} ScalingAsymmetry.label_data_period_str` | Human annotation throughput is inherently bounded     |
 | **Synthetic Data**      |                                                                                              Unbounded | Bounded by generator quality (risk of model collapse) |
 
-: **Scaling Asymmetry in ML Resources.** Compute grows exponentially while high-quality data grows linearly or sub-linearly, creating an increasing compute-to-data imbalance that makes data selection essential. {#tbl-scaling-asymmetry .striped .hover}
+: **Scaling Asymmetry in ML Resources.** Compute grows exponentially while high-quality data grows linearly or sub-linearly, creating an increasing compute-to-data imbalance that makes data selection essential. {#tbl-scaling-asymmetry .striped .hover tbl-colwidths="[20,20,60]"}
 
 [^fn-data-wall-scaling]: **Data Wall**: Unlike compute (which scales with capital expenditure) or algorithms (which improve through research), the stock of high-quality human-generated text grows at roughly 2$\times$ per five years. Projections from Epoch AI estimated that high-quality language data could be exhausted within one to two decades at then-current consumption rates, making data the first ML resource to face a hard physical supply ceiling rather than merely an economic one. This ceiling directly constrains the Total Operations ($O$) term: when quality data runs out, additional compute yields diminishing returns regardless of hardware throughput. \index{Data Wall!scaling constraint}
 
@@ -173,6 +173,7 @@ The engineering toolkit for intelligent data selection follows Part III's **D·A
 \index{Static Pruning!definition}
 \index{Dynamic Selection!definition}
 \index{Synthetic Data Generation!definition}
+
 1. **Static Pruning**: Removing low-value samples before training begins (coresets, deduplication).
 2. **Dynamic Selection**: Selecting high-value samples during training (curriculum learning, active learning).
 3. **Synthetic Generation**: Creating high-value samples on demand (augmentation, distillation).
@@ -320,8 +321,7 @@ class IronLawSavings:
 ```
 
 ::: {.callout-perspective title="Data Selection and the Iron Law"}
-
-In the **Iron Law of ML Systems** ($T = \frac{D_{vol}}{BW} + \frac{O}{R_{peak} \cdot \eta} + L_{lat}$), data selection is the only technique that reduces the *Total Operations* term at its source. Model compression reduces operations per sample; hardware acceleration increases throughput per operation. Data selection, by contrast, reduces the number of samples processed entirely.
+In the **Iron Law of ML Systems** ($T = \frac{D_{\text{vol}}}{BW} + \frac{O}{R_{\text{peak}} \cdot \eta} + L_{\text{lat}}$), data selection is the only technique that reduces the *Total Operations* term at its source. Model compression reduces operations per sample; hardware acceleration increases throughput per operation. Data selection, by contrast, reduces the number of samples processed entirely.
 
 - **Model compression**: Reduces $O$ per forward/backward pass
 - **Hardware acceleration**: Increases $R_{peak}$ (peak throughput) and $\eta$ (utilization)
@@ -351,76 +351,250 @@ The systems framing established above calls for a quantitative metric. The Optim
 In the optimization triad (@fig-optimization-triad), data selection plays the role of *Input Optimization*, reducing total workload before it enters the model or hardware. Model compression minimizes the math per parameter; hardware acceleration maximizes the math per second; data selection minimizes the total math required to reach convergence. The three edges of the triad capture the dominant bottlenecks: *Compute Bound* describes systems limited by arithmetic throughput, *I/O Bound* describes systems limited by data movement, and *Sample Efficiency* describes systems limited by the information content of training data.
 
 ::: {#fig-optimization-triad fig-env="figure" fig-pos="htb" fig-cap="**The Optimization Triad**: Machine learning performance relies on three pillars: Algorithms (models), Machine (hardware/software), and Data Selection. While algorithms and machines have traditionally received the most attention, optimizing data selection (Input Optimization) offers a third, independent lever for scaling performance." fig-alt="A triangular diagram with three nodes: Algorithms (Model), Machine (Hardware), and Data Selection. Bidirectional arrows connect all three with edge labels: Compute Bound between Algorithms and Machine, I/O Bound between Machine and Data Selection, and Sample Efficiency between Data Selection and Algorithms. Data Selection is highlighted with a bold border. ML Performance appears at the center."}
+```{.tikz}
+\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\footnotesize]
 
-```{python}
-#| echo: false
-#| out-width: "70%"
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ OPTIMIZATION TRIAD (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-optimization-triad — Information-Compute Ratio section
-# │
-# │ Goal: Diagram the three pillars of ML performance: Algorithms, Machine,
-# │       Data Selection; show Compute Bound, I/O Bound, Sample Efficiency edges.
-# │ Show: Triangular layout with three nodes, bidirectional arrows, center label.
-# │ How: matplotlib Circle patches, annotate arrows; viz.setup_plot().
-# │
-# │ Imports: numpy (np), matplotlib.patches (mpatches), mlsysim.core.viz (viz)
-# │ Exports: (figure only, no prose variables)
-# └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-import matplotlib.patches as mpatches
-from mlsysim import viz
+\tikzset{%
+Box2/.style={align=flush center, inner sep=0pt,draw=none,fill=none,minimum height=8mm },
+planet/.style = {circle, draw=none,semithick, fill=yellow!10,line width=1.5pt,
+                    font=\usefont{T1}{phv}{m}{n}\bfseries,
+                    minimum size=27mm, inner sep=1mm,align=flush center},
+satellite/.style = {circle, draw=#1, dashed, thick, fill=none,%#1!10,
+                    text width=26mm, inner sep=1pt, align=flush center,minimum size=28mm,minimum height=12mm},
+TxtC/.style = {font=\footnotesize\usefont{T1}{phv}{m}{n},text width=50mm,align=flush center},
+LineA/.style = {violet!60,{Kite[line width=1.1pt,fill=white,round,length=9pt,width=7pt]}-,line width=1.5pt,shorten <=-3pt},
+ALineA/.style={{Triangle[width=14pt,length=10pt]}-{Triangle[width=14pt,length=10pt]}, line width=7pt,cyan!40}
+}
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(5, 4.5))
-ax.set_xlim(-2.75, 2.75)
-ax.set_ylim(-2.45, 2.8)
-ax.set_aspect('equal')
-ax.axis('off')
-ax.grid(False)
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\filllcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\filllcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
+\fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(A.west)!0.12!(A.east)$)circle(3pt);
+ \end{scope}
+     }
+  }
+}
 
-# Triangle vertices (top, bottom-left, bottom-right)
-r = 2.0
-top = (0, r)
-bl = (r * np.cos(7*np.pi/6), r * np.sin(7*np.pi/6))
-br = (r * np.cos(11*np.pi/6), r * np.sin(11*np.pi/6))
+%funnel
+\tikzset{%
+ pics/funnel/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
+%
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,inner sep=1pt,
+rectangle,rounded corners=0.5pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
+%
+\foreach \i in{-0.5,0,0.5}{
+\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =9pt, single arrow head extend=2pt,
+      minimum height=5mm]at(\i,0.9) {}; % length of arrow
+   }
+\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =11pt, single arrow head extend=2pt,
+      minimum height=5mm]at(0,-1.1) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+%CPU
+\tikzset{%
+ pics/cpu/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\node[fill=\filllcolor,minimum width=66, minimum height=66,
+            rounded corners=2,outer sep=2pt] (C1) {};
+\node[fill=white,minimum width=54, minimum height=54] (C2) {};
+\node[fill=\filllcolor!40,minimum width=44, minimum height=44] (C3) {\large CPU};
 
-# Draw circles
-for center, color, lw, label in [
-    (top, '#D6EAF8', 1.0, 'Algorithms\n(Model)'),
-    (bl, '#D5F5E3', 1.0, 'Machine\n(Hardware)'),
-    (br, '#FCE4CC', 2.0, 'Data\nSelection'),
-]:
-    circle = plt.Circle(center, 0.85, facecolor=color, edgecolor=COLORS['primary'], linewidth=lw, zorder=2)
-    ax.add_patch(circle)
-    fw = 'bold' if 'Data' in label else 'normal'
-    ax.text(center[0], center[1], label, ha='center', va='center', fontsize=9, fontweight=fw, zorder=3)
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
+}
+ \end{scope}
+     }
+  }
+}
+\tikzset{
+pics/algorithm/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[fill=\filllcolor!60,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt](B2)at(0,-0.47){};
+\node[fill=\filllcolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt](B3)at(-0.6,-0.47){};
+\node[fill=\filllcolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt](B1)at(0.6,-0.47){};
+%
+\node[fill=\filllcolor!99!violet!80,draw=\drawcolor,line width=\Linewidth,rectangle,
+minimum width=8.5mm,minimum height=3mm,
+rounded corners=2pt,inner sep=1pt](B0)at(0,0.53){};
+\draw[draw=\drawcolor,shorten >=4pt,shorten <=4pt,line width=1.5*\Linewidth]
+($(B0.north west)!0.33!(B0.south west)$)--($(B0.north east)!0.33!(B0.south east)$);
+\draw[draw=\drawcolor,shorten >=4pt,shorten <=4pt,line width=1.5*\Linewidth]
+($(B0.north west)!0.66!(B0.south west)$)--($(B0.north east)!0.66!(B0.south east)$);
+\draw[draw=\drawcolor,rounded corners](B1)|-(B0);
+\draw[draw=\drawcolor,rounded corners](B3)|-(B0);
+\draw[draw=\drawcolor,rounded corners](B2)--(B0);
+\node[fill=\filllcirclecolor!60,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt,rotate=45](R2){};
+\node[fill=\filllcirclecolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt,rotate=45](R1) at (-0.6,0){};
+\node[fill=\filllcirclecolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt,rotate=45](R3) at (0.6,0){};
+\end{scope}
+    }
+  }
+}
+%vaga
+\tikzset{
+pics/vaga/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[rectangle,minimum width=2mm,minimum height=22mm,
+draw=none, fill=\filllcolor,line width=\Linewidth](1R) at (0,-0.95){};
+\fill[fill=\filllcolor!60!black](230:2.8)arc(230:310:2.8)--cycle;%circle(2.9);
+%LT
+\node [semicircle, shape border rotate=180,  anchor=chord center,
+      minimum size=11mm, draw=none, fill=\filllcirclecolor](LT) at (-2,-0.5) {};
+\node [circle,  minimum size=4mm, draw=none, fill=\filllcirclecolor](T1) at (-2,1.25) {};
+\draw[draw=\drawcolor,,line width=1.2*\Linewidth,shorten <=3pt,shorten >=3pt](T1)--(LT);
+\draw[draw=\drawcolor,,line width=1.2*\Linewidth,shorten <=3pt,shorten >=3pt](T1)--(LT.30);
+\draw[draw=\drawcolor,,line width=1.2*\Linewidth,shorten <=3pt,shorten >=3pt](T1)--(LT.150);
+%DT
+\node [semicircle, shape border rotate=180,  anchor=chord center,
+      minimum size=11mm, draw=none, fill=\filllcirclecolor!70!black](DT) at (2,-0.5) {};
+\node [circle,  minimum size=4mm, draw=none, fill=\filllcirclecolor!70!black](T2) at (2,1.25) {};
+\draw[draw=\drawcolor,line width=1.2*\Linewidth,shorten <=3pt,shorten >=3pt](T2)--(DT);
+\draw[draw=\drawcolor,,line width=1.2*\Linewidth,shorten <=3pt,shorten >=3pt](T2)--(DT.30);
+\draw[draw=\drawcolor,,line width=1.2*\Linewidth,shorten <=3pt,shorten >=3pt](T2)--(DT.150);
+%
+\node[draw=none,rectangle,minimum width=32mm,minimum height=1.5mm,inner sep=0pt,
+fill=\filllcolor!60!black]at(0,1.25){};
+\node[draw=white,fill=\filllcolor,line width=2*\Linewidth,ellipse,minimum width=9mm,  minimum height=15mm](EL)at(0,0.85){};
+\node[draw=white,fill=\filllcolor!60!black,line width=2*\Linewidth,,circle,minimum size=10mm](2C)at(0,2.05){};
+\end{scope}
+    }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+\definecolor{Siva}{RGB}{161,152,130}
+\def\radius{3.5}
+%planet
+\node (p)   [planet]    {};
+\node[TxtC,below=0pt of p]{ML\\ Performance};
+%satellites
 
-# Draw bidirectional arrows between circle edges
-def draw_arrow(p1, p2, label, label_side, offset=(0, 0)):
-    d = np.array(p2) - np.array(p1)
-    d_norm = d / np.linalg.norm(d)
-    start = np.array(p1) + d_norm * 0.9
-    end = np.array(p2) - d_norm * 0.9
-    ax.annotate("", xy=end, xytext=start, arrowprops=dict(arrowstyle="<->", color=COLORS['primary'], lw=1.5), zorder=1)
-    mid = (start + end) / 2 + np.array(offset)
-    ax.text(mid[0], mid[1], label, ha='center', va='center', fontsize=8, color=COLORS['primary'],
-            bbox=dict(facecolor='white', edgecolor='none', alpha=0.9, pad=2))
+\foreach \i/\j/\sho [count=\k from 0] in {
+magenta!70!/{Algorithms (Model)}/105pt,
+Siva/{Data Selection}/105pt,
+cyan/{Machine (Hardware)}/105pt
+%violet!75!/{\textbf{Embodiment}\\{\footnotesize No grounding}}/11pt%,
+%orange/\textbf{Alignment}\\ {\footnotesize Value loading}/11pt
+}
+{
+\def\startangle{90}
+%Satelit
+\pgfmathsetmacro{\angle}{\startangle - \k * (360/3)}
+\node (s\k) [satellite=\i, font=\footnotesize\usefont{T1}{phv}{m}{n}] at (\angle:\radius+\sho) {};
+\node[TxtC,below=0pt of s\k]{\j};
+%Arrows
+%\draw[arr=\i,shorten >=\sho] (p) --coordinate[pos=0.35](AR\k) (s\k);
+}
 
-draw_arrow(top, bl, 'Compute\nBound', 'left', offset=(-0.45, 0.05))
-draw_arrow(bl, br, 'I/O Bound', 'below', offset=(0, -0.3))
-draw_arrow(br, top, 'Sample\nEfficiency', 'right', offset=(0.45, 0.05))
+ \pic[shift={(0,0)}] at  (0,0){vaga={scalefac=0.35,picname=1,filllcolor=BlueLine,  Linewidth=1.0pt,filllcirclecolor=orange}};
+ %algoithm
+ \pic[shift={(0,0)}] at  (s0){algorithm={scalefac=1.2,picname=1,
+drawcolor=black,filllcolor=orange!80!, Linewidth=0.75pt,filllcirclecolor=green}};
+%data
+\begin{scope}[local bounding box=DATA1,shift={($(0,-0.66)+(s1)$)},
+scale=0.6, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=1,picname=1,filllcolor=BlueLine, Linewidth=0.7pt}};
+\node[draw=black!70,line width=1pt,yshift=-3mm,fill=white,circle,minimum size=18mm](CIR)at(A.north east){};
+\pic[shift={(0,0)}] at  (CIR){funnel={scalefac=0.6,picname=1,Linewidth=0.5pt,
+ filllcolor=BrownL,drawcolor=black,filllcirclecolor=green}};
+ \end{scope}
+  %machine - CPU
+ \pic[shift={(0,0)}] at  (s2){cpu={scalefac=0.55,picname=1,filllcolor=BrownLine, Linewidth=0.7pt}};
+ %Arrows
+ \draw[ALineA] (60:\radius) arc[radius=\radius, start angle=60, end angle= 0];
+\coordinate (AR1) at (30:\radius);
 
-# Center label
-ax.text(0, -0.15, 'ML\nPerformance', ha='center', va='center', fontsize=10, fontweight='bold', color=COLORS['primary'])
-fig.tight_layout(pad=0.1)
-plt.show()
+\draw[ALineA] (300:\radius) arc[radius=\radius, start angle=300, end angle= 240];
+\coordinate (AR2) at (270:\radius);
+
+\draw[ALineA] (180:\radius) arc[radius=\radius, start angle=180, end angle= 120];
+\coordinate (AR3) at (150:\radius);
+%%%%%%%%%
+ \path[LineA](AR1)--++(0:1.0)coordinate(MA);
+ \node[Box2,anchor=west](T1)at(MA){Sample Efficiency};
+ \draw[violet!50,line width=2pt](T1.north west)to[bend right=25]coordinate(AR11)(T1.south west);
+ \draw[LineA](AR1)--(AR11);
+
+ \path[LineA](AR2)--++(270:0.65)coordinate(MA2);
+ \node[Box2,anchor=west,rotate=90](T2)at(MA2){};%Sample Efficiency
+  \node[anchor=north](T222)at(MA2){Sample Efficiency};
+ \draw[violet!50,line width=2pt](T2.north west)to[bend left=25]coordinate(AR22)(T2.south west);
+ \draw[LineA](AR2)--(AR22);
+
+ \path[LineA](AR3)--++(0:-1.0)coordinate(MA1);
+ \node[Box2,anchor=east,align=right](T3)at(MA1){Compute Bound};
+ \draw[violet!50,line width=2pt](T3.north east)to[bend left=25]coordinate(AR33)(T3.south east);
+ \draw[LineA](AR3)--(AR33);
+ \end{tikzpicture}
 ```
 
 :::
 
 We can formalize this as the ICR:
-
 $$\text{ICR} = \frac{\Delta \text{Model Performance}}{\Delta \text{FLOPs}}$$
 
 ### The ICR Frontier: When Data Becomes a Tax {#sec-data-selection-icr-frontier}
@@ -428,7 +602,6 @@ $$\text{ICR} = \frac{\Delta \text{Model Performance}}{\Delta \text{FLOPs}}$$
 The Information-Compute Ratio is not constant; it follows a law of diminishing returns. We define the **ICR Frontier**\index{ICR Frontier!diminishing returns} as the point where the marginal learning signal from additional data drops toward zero.
 
 Mathematically, let $I(D)$ be the information content of a dataset of size $D$. In a redundant dataset, $I(D)$ often scales logarithmically ($\log D$) while the compute cost $C(D)$ scales linearly ($O \cdot D$). The resulting ICR follows @eq-icr-decay:
-
 $$\text{ICR}(D) = \frac{\frac{d}{dD} I(D)}{\frac{d}{dD} C(D)} \approx \frac{1/D}{O} = \frac{1}{O \cdot D}$$ {#eq-icr-decay}
 
 The $1/(O \cdot D)$ decay creates what we call **The Data Wall**\index{Data Wall!zero learning signal}. Beyond the frontier, adding more data yields near-zero learning but still costs linear compute. In this regime, data is no longer an asset; it is a **Data Tax**\index{Data Tax!redundant compute cost} that inflates the $O$ term of the **Iron Law** without improving the accuracy numerator of the **RoC** (Return on Compute, see @sec-introduction-roc-invariant). A systems engineer's goal is to keep the system operating at the "Knee" of the ICR curve, where the learning signal per FLOP is maximized. The static and dynamic selection techniques that follow are designed to achieve exactly that.
@@ -438,53 +611,217 @@ As detailed in the "Data Selection and the Iron Law" callout above, data selecti
 
 A random batch of raw data often has low ICR: it contains redundant examples, noisy samples, or "easy" examples the model has already mastered, wasting GPU cycles on zero-information updates. High-efficiency data pipelines (@fig-data-selection-pipeline) filter, order, and synthesize data to maximize ICR, ensuring that every FLOP contributes to learning. To illustrate, consider *computing ICR* on a concrete coreset selection task. Later in this chapter, @sec-data-selection-measurement-framework-733b provides the complete measurement framework for evaluating these efficiency gains, including the compute-optimal frontier diagnostic that determines whether training is data-starved or compute-starved.
 
-::: {#fig-data-selection-pipeline fig-env="figure" fig-pos="htb" fig-cap="**The Data Selection Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
-
-```{=latex}
+::: {#fig-data-selection-pipeline fig-cap="**The Data Selection Pipeline**: A structured approach to increasing data value. Raw data is first pruned to remove redundancy (Static Pruning), then dynamically selected during training (Active Learning), and finally augmented to increase diversity (Synthesis). Each stage increases the Information-Compute Ratio (ICR)." fig-alt="A flow diagram showing the progression of data: Raw Data -> Static Pruning -> Dynamic Selection -> Synthetic Generation -> High Value Model. Arrows indicate the flow."}
+```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D6EAF8}
-  \definecolor{OrangeLine}{HTML}{E37222}
-  \definecolor{OrangeL}{HTML}{FDEBD0}
-  \definecolor{RedLine}{HTML}{DA291C}
-  \definecolor{RedL}{HTML}{FADBD8}
-  \definecolor{GreyFill}{HTML}{E8E8E8}
-  \definecolor{GreyLine}{HTML}{888888}
+\tikzset{
+Box/.style={align=center, inner xsep=2pt,draw=GreenLine, line width=1pt,fill=none,
+minimum width=24mm, minimum height=25mm,node distance=1.0},
+LineA/.style={violet!50,line width=4.0pt,{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=1pt,shorten >=1pt},
+ALine/.style={black!50, line width=1.1pt,{{Triangle[width=0.9*6pt,length=1.2*6pt]}-}},
+Larrow/.style={fill=violet!50, single arrow,  inner sep=2pt, single arrow head extend=3pt,
+            single arrow head indent=0pt,minimum height=10mm, minimum width=3pt}
+}
+\tikzset{%
+ pics/inbox/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=INBOX,scale=\scalefac, every node/.append style={transform shape}]
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
+rectangle,rounded corners=3pt,minimum width=14mm,minimum height=10mm]at(0,0.3){};
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,
+rectangle,rounded corners=3pt,minimum width=15mm,minimum height=10mm]at(0,0.1){};
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,
+,rectangle,rounded corners=3pt,minimum width=17mm,minimum height=10mm]
+at(0,-0.1){};
+\draw[line width=\Linewidth,draw=\drawcolor,fill=\filllcirclecolor,,rounded corners=2pt](-0.92,0.05)--
+(-0.92,-0.78)--(0.92,-0.78)--(0.92,0.05)--(0.40,0.05)--(0.32,-0.2)--(-0.29,-0.2)--(-0.40,0.05)--cycle;
 
-  \tikzset{
-    Box/.style={
-      draw,
-      rounded corners,
-      minimum width=2cm,
-      minimum height=1cm,
-      align=center,
-      line width=1pt
-    },
-    Arrow/.style={->, line width=1.2pt, color=black!70}
+\node[single arrow, line width=\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,
+      minimum width = 15pt, single arrow head extend=6pt,
+      minimum height=10mm]at(0,0.5) {}; % length of arrow
+ \end{scope}
+     }
   }
+}
+%target
+\tikzset{
+pics/target/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\definecolor{col1}{RGB}{62,100,125}
+\definecolor{col2}{RGB}{219,253,166}
+\colorlet{col1}{\filllcolor}
+\colorlet{col2}{\filllcirclecolor}
+\foreach\i/\col [count=\k]in {22mm/col1,17mm/col2,12mm/col1,7mm/col2,2.5mm/col1}{
+\node[circle,inner sep=0pt,draw=\drawcolor,fill=\col,minimum size=\i,line width=\Linewidth](C\k){};
+}
+\draw[thick,fill=brown,xscale=-1](0,0)--++(111:0.13)--++(135:1)--++(225:0.1)--++(315:1)--cycle;
+\path[green,xscale=-1](0,0)--(135:0.85)coordinate(XS1);
+\draw[thick,fill=yellow,xscale=-1](XS1)--++(80:0.2)--++(135:0.37)--++(260:0.2)--++(190:0.2)--++(315:0.37)--cycle;
+\end{scope}
+    }
+  }
+}
+%brain
+\tikzset{pics/brain/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
+\fill[fill=\filllcolor!50](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
+to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
+to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
+to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
+to[out=160,in=80](-0.42,-0.15)to (-0.48,-0.7)to(0.07,-0.7)to(0.1,-0.5)
+(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
+\draw[draw=\drawcolor,line width=\Linewidth](0.1,-0.5)to[out=0,in=180](0.33,-0.5)
+to[out=0,in=270](0.45,-0.38)to(0.45,-0.18)
+to[out=40,in=240](0.57,-0.13)to[out=110,in=310](0.52,-0.05)
+to[out=130,in=290](0.44,0.15)to[out=90,in=340,distance=8](0.08,0.69)
+(-0.42,-0.15)to (-0.48,-0.7)
+(0.07,-0.7)to(0.1,-0.5)
+(-0.10,-0.42)to[out=310,in=180](0.1,-0.5);
+\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
+to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
+to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
+to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
+\draw[fill=\filllcolor,line width=\Linewidth]
+(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
+(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
+%
+(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
+(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
+(-0.26,0.2)to[bend left=30](-0.24,0.13)
+(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
+(-0.13,0.49)to[bend left=30](-0.04,0.51);
 
-  % Nodes
-  \node[Box, fill=GreyFill, draw=GreyLine] (Raw) at (0,0) {Raw Data};
-
-  \node[Box, fill=BlueL, draw=BlueLine, right=1.5cm of Raw] (Static) {1. Static\\Pruning};
-  \node[below=0.1cm of Static, text=gray, font=\scriptsize] {Pre-training};
-
-  \node[Box, fill=GreenL, draw=GreenLine, right=1.5cm of Static] (Dynamic) {2. Dynamic\\Selection};
-  \node[below=0.1cm of Dynamic, text=gray, font=\scriptsize] {During Training};
-
-  \node[Box, fill=OrangeL, draw=OrangeLine, right=1.5cm of Dynamic] (Synth) {3. Synthetic\\Gen};
-  \node[below=0.1cm of Synth, text=gray, font=\scriptsize] {On-Demand};
-
-  \node[circle, draw=RedLine, fill=RedL, line width=1pt, minimum size=1.2cm, right=1.5cm of Synth, align=center] (Model) {Model};
-
-  % Arrows
-  \draw[Arrow] (Raw) -- (Static);
-  \draw[Arrow] (Static) -- (Dynamic);
-  \draw[Arrow] (Dynamic) -- (Synth);
-  \draw[Arrow] (Synth) -- node[above, font=\scriptsize, text=black!70] {High ICR} (Model);
-
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.12,0.23)--(0.31,0.0);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
+\draw[rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcirclecolor,length=2.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
+\end{scope}
+     }
+  }
+}
+%starS
+\tikzset{
+ mystar/.style={shape=star,star points=4,inner sep=1pt,
+ minimum size=#1,star point ratio=2.1,rounded corners=#1/20},
+pics/starS/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[fill=\filllcolor,mystar={13mm}] at (0,0) {};
+\node[fill=\filllcolor,mystar={8mm}] at (-0.75,0.6) {};
+\node[fill=\filllcolor,mystar={4mm}] at (-0.2,1.0) {};
+\node[fill=\filllcolor,mystar={5mm}] at (-0.8,-0.3) {};
+\end{scope}
+    }
+  }
+}
+%funnel
+\tikzset{%
+ pics/funnel/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
+%
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor,inner sep=1pt,
+rectangle,rounded corners=2pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
+%
+\foreach \i in{-0.5,0,0.5}{
+\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =9pt, single arrow head extend=2pt,
+      minimum height=5mm]at(\i,0.9) {}; % length of arrow
+   }
+\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=\filllcirclecolor, rotate=270,inner sep=1pt,
+      minimum width =11pt, single arrow head extend=2pt,
+      minimum height=5mm]at(0,-1.1) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+%Raw Data
+\node[Box](B1){};
+\fill[green!07](B1.north west) rectangle ($(B1.north east)!0.6!(B1.south east)$)coordinate(B1DE);
+\fill[green!20](B1.south east) rectangle ($(B1.north west)!0.6!(B1.south west)$)coordinate(B1LE);
+\node[Box](){};
+\tikzset{Text2/.style={font=\usefont{T1}{phv}{b}{n}\small,align=center}}
+\node[Text2]at($(B1.south west)!0.5!(B1DE)$){Raw Data};
+\coordinate(Q1)at($(B1.north west)!0.5!(B1DE)$);
+\pic[shift={(0,0)}] at  (Q1){inbox={scalefac=0.7,picname=1,Linewidth=1.0pt,
+ filllcolor=BrownL,drawcolor=black,filllcirclecolor=orange!70!yellow!80}};
+%Static Pruning
+\node[Box, right=of B1](B2){};
+\fill[cyan!07](B2.north west) rectangle ($(B2.north east)!0.6!(B2.south east)$)coordinate(B2DE);
+\fill[cyan!20](B2.south east) rectangle ($(B2.north west)!0.6!(B2.south west)$)coordinate(B2LE);
+\node[Box, right=of B1,draw=BlueD](B2){};
+\node[Text2]at($(B2.south west)!0.5!(B2DE)$){1. Static\\ Pruning};
+\coordinate(Q2)at($(B2.north west)!0.5!(B2DE)$);
+\pic[shift={(0,0)}] at  (Q2){funnel={scalefac=0.53,picname=1,Linewidth=0.5pt,
+ filllcolor=green!70!orange!70,drawcolor=black,filllcirclecolor=red!70!blue!80}};
+%%Dinamic Selection
+\node[Box, right=of B2](B3){};
+\fill[violet!07](B3.north west) rectangle ($(B3.north east)!0.6!(B3.south east)$)coordinate(B3DE);
+\fill[violet!20](B3.south east) rectangle ($(B3.north west)!0.6!(B3.south west)$)coordinate(B3LE);
+\node[Box, right=of B2,draw=violet](B3){};
+\node[Text2]at($(B3.south west)!0.5!(B3DE)$){2. Dinamic\\ Selection};
+\coordinate(Q3)at($(B3.north west)!0.5!(B3DE)$);
+ \pic[shift={(0,0)}] at  (Q3){target={scalefac=0.55,picname=1,drawcolor=BlueD,
+filllcolor=cyan!90!,Linewidth=0.7pt, filllcirclecolor=cyan!20}};
+%Synthetic Gen
+\node[Box, right=of B3](B4){};
+\fill[orange!07](B4.north west) rectangle ($(B4.north east)!0.6!(B4.south east)$)coordinate(B4DE);
+\fill[orange!20](B4.south east) rectangle ($(B4.north west)!0.6!(B4.south west)$)coordinate(B4LE);
+\node[Box, right=of B3,draw=OrangeLine](B4){};
+\node[Text2]at($(B4.south west)!0.5!(B4DE)$){3. Synthetic\\ Gen};
+\coordinate(Q4)at($(B4.north west)!0.5!(B4DE)$);
+\pic[shift={(0.15,-0.23)}] at  (Q4){starS={scalefac=0.7,picname=1,filllcolor=violet!90!}};
+%Model
+\node[Box, right=1.5 of B4](B5){};
+\fill[black!05](B5.north west) rectangle ($(B5.north east)!0.6!(B5.south east)$)coordinate(B5DE);
+\fill[black!15](B5.south east) rectangle ($(B5.north west)!0.6!(B5.south west)$)coordinate(B5LE);
+\node[Box, right=1.5of B4,draw=black](B5){};
+\node[Text2]at($(B5.south west)!0.5!(B5DE)$){Model};
+\coordinate(Q5)at($(B5.north west)!0.5!(B5DE)$);
+\pic[shift={(0,0)}] at  (Q5){brain={scalefac=0.9,picname=1,filllcolor=orange!30!, Linewidth=0.95pt}};
+%arrows
+\foreach \i in{1,2,3}{
+\pgfmathtruncatemacro{\X}{\i + 1} %
+\draw[LineA](B\i)--(B\X);
+}
+\draw[LineA,font=\footnotesize\usefont{T1}{phv}{m}{n},text=black!70](B4)--node[above]{High ICR}(B5);
+\node[below =2pt of B2,text=black!70]{Pre-training};
+\node[below =2pt of B3,text=black!70]{During Training};
+\node[below =2pt of B4,text=black!70]{On-Demand};
 \end{tikzpicture}
 ```
 
@@ -748,7 +1085,7 @@ Each algorithm in @tbl-coreset-comparison represents a different answer to the I
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 % Left plot: Random Sampling
 \begin{scope}
-    \node[font=\bfseries\usefont{T1}{phv}{m}{n}] at (2.5, 4.2) {Random Sampling};
+    \node[font=\small\usefont{T1}{phv}{m}{n}] at (2.15, 5.0) {Random Sampling};
 
     % Decision boundary
     \draw[thick, dashed, gray] (0, 0) -- (5, 5);
@@ -773,8 +1110,8 @@ Each algorithm in @tbl-coreset-comparison represents a different answer to the I
     }
 
     % Axis
-    \draw[->] (0, 0) -- (5.2, 0) node[right, font=\tiny\usefont{T1}{phv}{m}{n}] {$x_1$};
-    \draw[->] (0, 0) -- (0, 5.2) node[above, font=\tiny\usefont{T1}{phv}{m}{n}] {$x_2$};
+    \draw[->,>=Latex,thick] (0, 0) -- (5.2, 0) node[right, font=\footnotesize\usefont{T1}{phv}{m}{n}] {$x_1$};
+    \draw[->,>=Latex,thick] (0, 0) -- (0, 5.2) node[above, font=\footnotesize\usefont{T1}{phv}{m}{n}] {$x_2$};
 
     % Label
     \node[font=\footnotesize\usefont{T1}{phv}{m}{n}, orange] at (2.5, -0.5) {Selected (random)};
@@ -782,7 +1119,7 @@ Each algorithm in @tbl-coreset-comparison represents a different answer to the I
 
 % Right plot: Coreset Selection
 \begin{scope}[xshift=7cm]
-    \node[font=\bfseries\usefont{T1}{phv}{m}{n}] at (2.5, 4.2) {Coreset Selection};
+    \node[font=\small\usefont{T1}{phv}{m}{n}] at (2.15, 5.0) {Coreset Selection};
 
     % Decision boundary
     \draw[thick, dashed, gray] (0, 0) -- (5, 5);
@@ -811,8 +1148,8 @@ Each algorithm in @tbl-coreset-comparison represents a different answer to the I
     }
 
     % Axis
-    \draw[->] (0, 0) -- (5.2, 0) node[right, font=\tiny\usefont{T1}{phv}{m}{n}] {$x_1$};
-    \draw[->] (0, 0) -- (0, 5.2) node[above, font=\tiny\usefont{T1}{phv}{m}{n}] {$x_2$};
+    \draw[->,>=Latex,thick] (0, 0) -- (5.2, 0) node[right, font=\footnotesize\usefont{T1}{phv}{m}{n}] {$x_1$};
+    \draw[->,>=Latex,thick] (0, 0) -- (0, 5.2) node[above, font=\footnotesize\usefont{T1}{phv}{m}{n}] {$x_2$};
 
     % Label
     \node[font=\footnotesize\usefont{T1}{phv}{m}{n}, green!60!black] at (2.5, -0.5) {Selected (boundary)};
@@ -991,12 +1328,10 @@ The effectiveness of curriculum learning stems from how neural networks respond 
 
 \index{Pacing Function!linear warmup}
 Implementing a curriculum requires two components: a difficulty scorer that ranks samples, and a pacing function that controls how quickly hard samples are introduced. A common choice is linear pacing:
-
 $$
 \text{samples}_t = \texttt{sort\_by\_difficulty}[:N \cdot \min(1, t/T_{\text{warmup}})]
 $$
-
-where $t$ is the current epoch and $T_{warmup}$ is the epoch at which the full dataset becomes available. Early epochs train on the easiest $N \cdot (t/T_{warmup})$ fraction; after warmup, training proceeds on the full dataset.
+where $t$ is the current epoch and $T_{\text{warmup}}$ is the epoch at which the full dataset becomes available. Early epochs train on the easiest $N \cdot (t/T_{\text{warmup}})$ fraction; after warmup, training proceeds on the full dataset.
 
 The difficulty scorer can be designed in several ways, each with different computational requirements and applicability (@tbl-difficulty-scoring).
 
@@ -1072,7 +1407,7 @@ Observe the varying convergence gains in @tbl-curriculum-benchmarks:
 | **ImageNet**  | ResNet-50 | Loss-based          |   `{python} CurriculumBenchmarks.imagenet_curriculum_epochs` vs. `{python} CurriculumBenchmarks.imagenet_baseline_epochs` baseline |  **`{python} CurriculumBenchmarks.imagenet_speedup_str`%** faster |
 | **ImageNet**  | ResNet-50 | MentorNet (noisy)   | `{python} CurriculumBenchmarks.mentornet_curriculum_epochs` vs. `{python} CurriculumBenchmarks.mentornet_baseline_epochs` baseline | **`{python} CurriculumBenchmarks.mentornet_speedup_str`%** faster |
 
-: **Curriculum Learning Convergence Speedups.** Target accuracy is 95% of final baseline performance. Gains are larger on redundant datasets (CIFAR-10) and noisy datasets (MentorNet removes approximately 40% noise). ImageNet shows smaller gains because the dataset is less redundant. {#tbl-curriculum-benchmarks .striped .hover}
+: **Curriculum Learning Convergence Speedups.** Target accuracy is 95% of final baseline performance. Gains are larger on redundant datasets (CIFAR-10) and noisy datasets (MentorNet removes approximately 40% noise). ImageNet shows smaller gains because the dataset is less redundant. {#tbl-curriculum-benchmarks .striped .hover tbl-colwidths="[20,20,20,20,20]"}
 
 \index{Self-Paced Learning!adaptive difficulty}
 \index{Anti-Curriculum!hard examples first}
@@ -1086,56 +1421,259 @@ Curriculum learning optimizes the order in which samples are presented but assum
 
 Unlike static pruning, which discards samples permanently, active learning maintains an unlabeled pool and queries it strategically over time. Follow the cycle in @fig-active-learning-loop: the model's current uncertainty determines what gets labeled next, creating a feedback loop where each labeling round improves the model's ability to identify what it still needs to learn.
 
-::: {#fig-active-learning-loop fig-env="figure" fig-pos="htb" fig-cap="**Active Learning Loop**: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes information gain per label." fig-alt="A cycle diagram: Unlabeled Pool -> Selection Strategy -> Oracle -> Labeled Set -> Model Training -> back to Selection Strategy."}
+::: {#fig-active-learning-loop fig-cap="**Active Learning Loop**: Instead of labeling all data, the model selects the most 'confusing' or informative samples from an unlabeled pool. These samples are sent to an Oracle (human annotator) and added to the training set. The model is retrained, and the cycle repeats, creating a feedback loop that maximizes information gain per label." fig-alt="A cycle diagram: Unlabeled Pool -> Selection Strategy -> Oracle -> Labeled Set -> Model Training -> back to Selection Strategy."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{
+Box2/.style={align=flush center, inner sep=2pt,draw=none,fill=black!70,
+font=\fontsize{8pt}{8}\usefont{T1}{phv}{b}{n},text=white,minimum width=20mm, minimum height=5mm },
+Box/.style={align=center, inner xsep=2pt,draw=black!70, line width=1pt,node distance=12mm,
+fill=none, minimum width=25mm, minimum height=20mm},
+Circle1/.style={circle,  minimum size=33mm, draw=none, fill=BrownLine!20},
+LineD/.style={BrownLine!60!black!20,line width=4.0pt,dashed,dash pattern=on 5pt off 2pt,
+{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=5pt,shorten >=1pt},
+LineA/.style={BrownLine!80!black!40,line width=4.0pt,
+{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=5pt,shorten >=1pt},
+ALineA/.style={violet!60,{Circle[line width=1.1pt,fill=white,round,length=5pt,width=5pt]}-,
+line width=1.5pt,shorten <=-3pt,shorten >=-6pt}
+}
 
-```{=latex}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D6EAF8}
-  \definecolor{OrangeLine}{HTML}{E37222}
-  \definecolor{OrangeL}{HTML}{FDEBD0}
-  \definecolor{RedLine}{HTML}{DA291C}
-  \definecolor{RedL}{HTML}{FADBD8}
-  \definecolor{GreyFill}{HTML}{E8E8E8}
-  \definecolor{GreyLine}{HTML}{888888}
-
-  \tikzset{
-    Box/.style={
-      draw,
-      rounded corners,
-      minimum width=2.2cm,
-      minimum height=1.2cm,
-      align=center,
-      line width=1pt
-    },
-    Arrow/.style={->, line width=1.2pt, color=black!70}
+%dataS
+\tikzset{%
+ pics/dataS/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+%plats
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0,-0.3)--(-0.67,0.03)--(0,0.37)--(0.67,0.03)--cycle;
+\draw[fill=\filllcirclecolor,line width=\Linewidth,draw=\drawcolor](0,0)--(-0.67,0.33)--(0,0.67)--(0.67,0.33)--cycle;
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0,0.3)--(-0.67,0.63)--(0,0.97)--(0.67,0.63)--cycle;
+%left
+\draw[line width=\Linewidth,draw=\drawcolor](-0.39,1.21)--++(210:0.55)--++(270:1.22)--(-0.39,-0.56);
+\fill[line width=\Linewidth,fill=\filllcirclecolor!60!violet!,draw=green,draw=\drawcolor](-0.39,1.21)circle(3pt);
+\fill[line width=\Linewidth,fill=\filllcolor,draw=green,draw=\drawcolor](-0.39,-0.56)circle(3pt);
+%right
+\draw[line width=\Linewidth,draw=\drawcolor](0.39,1.21)--++(330:0.55)--++(270:1.22)--(0.39,-0.56);
+\fill[line width=\Linewidth,fill=\filllcirclecolor!60!violet!,draw=green,draw=\drawcolor](0.39,1.21)circle(3pt);
+\fill[line width=\Linewidth,fill=\filllcolor,draw=green,draw=\drawcolor](0.39,-0.56)circle(3pt);
+\end{scope}
+     }
   }
+}
+%graph style
+\tikzset{
+pics/graph/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=GRAPH,line join=round,scale=1, every node/.append style={transform shape}]
+\def\dx{\Width}
+\def\dy{\Height}
+\def\dz{\Depth}
+%
+\def\x{0}
+\def\y{0.15}
+\def\z{0}
+% colors
+\draw[draw=\filllcirclecolor,line width=1pt](-0.2,0)--(1.3,0);
+\draw[draw=\filllcirclecolor,line width=1pt](-0.2,0)--(-0.2,1.2);
+\filldraw[fill=\filllcolor!10, draw=\drawcolor] (\x,\y+\dy,\z) -- (\x,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % gornja strana
+\filldraw[fill=\filllcolor!50, draw=\drawcolor] (\x+\dx,\y,\z) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x+\dx,\y+\dy,\z) -- cycle; % desna strana
+\filldraw[fill=\filllcolor!60, draw=\drawcolor] (\x,\y,\z+\dz) -- (\x+\dx,\y,\z+\dz) -- (\x+\dx,\y+\dy,\z+\dz) -- (\x,\y+\dy,\z+\dz) -- cycle; % prednja strana
+\end{scope}
+    }
+  }
+}
+ %person style
+ \tikzset{
+ pics/man/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=PERSON,scale=\scalefac, every node/.append style={transform shape}]
+     % tie
+    \draw[draw=\tiecolor,fill=\tiecolor] (0.0,-1.1)--(0.16,-0.87)--(0.09,-0.46)--(0.13,-0.37)--(0.0,-0.28)
+                   --(-0.13,-0.37)--(-0.09,-0.46)--(-0.16,-0.87)--cycle;
+    % ears
+    \draw[fill=black] (0.74,0.95) to[out=20,in=80](0.86,0.80) to[out=250,in=330](0.65,0.65) to[out=70,in=260] cycle;
+    \draw[fill=black] (-0.76,0.96) to[out=170,in=110](-0.85,0.80) to[out=290,in=190](-0.65,0.65) to[out=110,in=290] cycle;
 
-  % Nodes
-  % Unlabeled Pool (Top Left)
-  \node[Box, fill=GreyFill, draw=GreyLine, dashed] (Pool) at (0, 3) {Unlabeled\\Pool};
-
-  % Selection Strategy (Top Right)
-  \node[Box, fill=BlueL, draw=BlueLine] (Select) at (5, 3) {Selection\\Strategy};
-
-  % Oracle (Middle Right)
-  \node[circle, draw=OrangeLine, fill=OrangeL, line width=1pt, minimum size=1.5cm, align=center] (Oracle) at (5, 0) {Oracle\\(Human)};
-
-  % Training Set (Bottom Right)
-  \node[Box, fill=GreenL, draw=GreenLine] (TrainSet) at (5, -3) {Training\\Set};
-
-  % Model (Bottom Left)
-  \node[Box, fill=RedL, draw=RedLine] (Model) at (0, -3) {Model};
-
-  % Arrows
-  \draw[Arrow] (Pool) -- node[above, font=\scriptsize] {Query} (Select);
-  \draw[Arrow] (Select) -- node[right, font=\scriptsize] {Uncertainty} (Oracle);
-  \draw[Arrow] (Oracle) -- node[right, font=\scriptsize] {Labels} (TrainSet);
-  \draw[Arrow] (TrainSet) -- node[below, font=\scriptsize] {Train} (Model);
-  \draw[Arrow, dashed] (Model) -- node[left, font=\scriptsize] {Update} (Pool);
-
+    % head
+    \draw[fill=black] (0,0) to[out=180,in=290](-0.72,0.84) to[out=110,in=190](-0.56,1.67)
+                      to[out=70,in=110](0.68,1.58) to[out=320,in=80](0.72,0.84) to[out=250,in=0] cycle;
+    % face
+    \draw[fill=white] (0,0.11) to[out=175,in=290](-0.53,0.65) to[out=110,in=265](-0.61,1.22)
+                      to[out=80,in=235](-0.50,1.45) to[out=340,in=215](0.50,1.47)
+                      to[out=310,in=85](0.60,0.92) to[out=260,in=2] cycle;
+    \draw[fill=black] (-0.50,1.45) to[out=315,in=195](0.40,1.25) to[out=340,in=10](0.37,1.32)
+                      to[out=190,in=310](-0.40,1.49) -- cycle;
+    % neck
+    \draw[line width=1.0pt] (-0.62,-0.2) to[out=50,in=290] (-0.5,0.42);
+    \draw[line width=1.0pt] (0.62,-0.2) to[out=130,in=250] (0.5,0.42);
+    % body
+    \draw[draw=\bodycolor,fill=\bodycolor,line width=\Linewidth] (0.0,-1.0) to[out=150,in=290](-0.48,-0.14) to[out=200,in=50](-1.28,-0.44)
+                   to[out=240,in=80](-1.55,-2.06) -- (1.55,-2.06)
+                   to[out=100,in=300](1.28,-0.44) to[out=130,in=340](0.49,-0.14)
+                   to[out=245,in=30] cycle;
+    % right stet
+    \draw[line width=3pt,\stetcolor] (0.8,-0.32) to[bend left=7](0.78,-0.64)
+         to[out=350,in=80](0.98,-1.35) to[out=250,in=330](0.72,-1.60);
+    \draw[line width=3pt,\stetcolor] (0.43,-1.53) to[out=180,in=240](0.3,-1.15)
+         to[out=60,in=170](0.78,-0.64);
+    % left stet
+    \draw[line width=3pt,\stetcolor] (-0.75,-0.31) to[bend right=20](-0.65,-1.45);
+    \node[fill=\stetcolor,circle,minimum size=5pt] at (-0.65,-1.45) {};
+    % eyes
+    \node[circle,fill=black,inner sep=2pt] at (0.28,0.94) {};
+    \node[circle,fill=black,inner sep=2pt] at (-0.28,0.94) {};
+     % mouth
+    \draw[line width=1.1pt] (-0.25,0.5) to[bend right=40](0.25,0.5);
+ \end{scope}
+     }
+  }
+}
+%target
+\tikzset{
+pics/target/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\definecolor{col1}{RGB}{62,100,125}
+\definecolor{col2}{RGB}{219,253,166}
+\colorlet{col1}{\filllcolor}
+\colorlet{col2}{\filllcirclecolor}
+\foreach\i/\col [count=\k]in {22mm/col1,17mm/col2,12mm/col1,7mm/col2,2.5mm/col1}{
+\node[circle,inner sep=0pt,draw=\drawcolor,fill=\col,minimum size=\i,line width=\Linewidth](C\k){};
+}
+\draw[thick,fill=brown,xscale=-1](0,0)--++(111:0.13)--++(135:1)--++(225:0.1)--++(315:1)--cycle;
+\path[green,xscale=-1](0,0)--(135:0.85)coordinate(XS1);
+\draw[thick,fill=yellow,xscale=-1](XS1)--++(80:0.2)--++(135:0.37)--++(260:0.2)--++(190:0.2)--++(315:0.37)--cycle;
+\end{scope}
+    }
+  }
+}
+%AI style
+\tikzset{
+pics/llm/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[circle,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=1.25*\Linewidth](C\picname) at (0,0){};
+\def\startangle{90}
+\def\radius{1.15}
+\def\radiusI{1.1}
+\foreach \i [evaluate=\i as \j using \i+1] [count =\k] in {0,2,4,6,8} {
+\pgfmathsetmacro{\angle}{\startangle - \i * (360/8)}
+\draw[draw=black,-{Circle[black ,fill=\filllcirclecolor,length=5.5pt,line width=0.5*\Linewidth]},line width=1.5*\Linewidth](C\picname)--++(\startangle - \i*45:\radius) ;
+\node[circle,draw=black,fill=\filllcirclecolor!80!red!50,inner sep=3pt,line width=0.5*\Linewidth](2C\k)at(\startangle - \j*45:\radiusI) {};
+}
+\draw[line width=1.5*\Linewidth](2C1)--++(-0.5,0)|-(2C2);
+\draw[line width=1.5*\Linewidth](2C3)--++(0.5,0)|-(2C4);
+\node[circle,,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth]at (0,0){};
+\end{scope}
+    }
+  }
+}
+%brain
+\tikzset{pics/brain/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
+to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
+to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
+to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
+\draw[fill=\filllcolor,line width=\Linewidth]
+(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
+(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
+%
+(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
+(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
+(-0.26,0.2)to[bend left=30](-0.24,0.13)
+(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
+(-0.13,0.49)to[bend left=30](-0.04,0.51);
+\draw[thick,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
+\draw[thick,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
+\draw[thick,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.12,0.23)--(0.31,0.0);
+\draw[thick,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
+\draw[thick,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
+\end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  tiecolor/.store in=\tiecolor,
+  bodycolor/.store in=\bodycolor,
+  stetcolor/.store in=\stetcolor,
+  tiecolor=red,      % derfault tie color
+  bodycolor=blue!30,  % derfault body color
+  stetcolor=green,  % derfault stet color
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=0.2,
+  Height=0.5,
+  Width=0.25,
+  picname=C
+}
+%Unlabeled Pool
+\node[Box,dashed](B1){};
+\pic[shift={(0,-0.28)}] at  (B1){dataS={scalefac=0.9,picname=1,Linewidth=1.0pt,
+ filllcolor=cyan!90!black!40!,drawcolor=black,filllcirclecolor=orange}};
+ \draw[ALineA,draw=black!70](B1.south west)--++(200:0.45)
+ node[below=1pt,Box2]{Unlabeled Pool};
+%Selection Strategy
+\node[Box,right=3 of B1,draw=BlueLine](B2){};
+ \pic[shift={(0,0)}] at  (B2){target={scalefac=0.7,picname=1,
+ drawcolor=BlueD,filllcolor=green!90!black,Linewidth=0.7pt, filllcirclecolor=green!20}};
+\draw[ALineA,draw=BlueLine](B2.south west)--++(200:0.45)
+ node[below=1pt,Box2,fill=BlueLine]{Selection Strategy};
+%Oracle (Human)
+\node[Box,below=of B2,draw=OrangeLine](B3){};
+ %persons 1
+\begin{scope}[local bounding box=PERSON1,shift={($(B3)+(-0.5,-0.17)$)},scale=1, every node/.append style={transform shape}]
+\pic at (1.0,0) {man={scalefac=0.32,tiecolor=green, bodycolor=RedLine,stetcolor=RedLine, Linewidth=0.5pt}};
+\pic at (0.25,0.16) {man={scalefac=0.4,tiecolor=orange, bodycolor=BlueLine,stetcolor=BlueLine, Linewidth=0.5pt}};
+\end{scope}
+\draw[ALineA,draw=OrangeLine](B3.south west)--++(200:0.45)
+ node[below=1pt,Box2,fill=OrangeLine]{Oracle (Human)};
+%Training Set
+\node[Box,below=of B3,draw=GreenD](B4){};
+\begin{scope}[local bounding box=GRAPH1,shift={($(B4)+(-0.67,-0.75)$)},
+scale=1.3, every node/.append style={transform shape}]
+\pic[shift={(0,0)}] at  (0,0){graph={filllcirclecolor=black!60,scalefac=0.5,picname=1,drawcolor=black,filllcolor=red,Height=0.5,Linewidth=1.25pt}};
+\pic[shift={(0.33,0)}] at  (0,0){graph={filllcirclecolor=none,scalefac=0.5,picname=2,drawcolor=black,filllcolor=violet,Height=1,Linewidth=1.25pt}};
+\pic[shift={(0.66,0)}] at  (0,0){graph={filllcirclecolor=none,scalefac=0.5,picname=3,drawcolor=black,filllcolor=green!60!black,Height=0.25,Linewidth=1.25pt}};
+\pic[shift={(0.99,0)}] at  (0,0){graph={filllcirclecolor=none,scalefac=0.5,picname=4,drawcolor=black,filllcolor=cyan,Height=0.75,Linewidth=1.25pt}};
+\end{scope}
+\draw[ALineA,draw=GreenD](B4.south west)--++(200:0.45)
+ node[below=1pt,Box2,fill=GreenD]{Training Set};
+%Model
+\node[Box,left=3 of B4,draw=RedLine](B5){};
+%AI
+\pic[shift={(0,0)}] at  (B5){llm={scalefac=0.8,picname=1,drawcolor=GreenD,filllcolor=GreenD!20!, Linewidth=1pt,filllcirclecolor=red}};
+%brain
+\pic[shift={(0.12,-0.18)}] at  (C1){brain={scalefac=0.81,picname=2,filllcolor=orange!30!, filllcirclecolor=cyan!55!black!60, Linewidth=0.75pt}};
+\draw[ALineA,draw=RedLine](B5.south west)--++(200:0.45)
+ node[below=1pt,Box2,fill=RedLine]{Model};
+%arrows
+\draw[LineA,BrownLine!80!black!70](B1)--node[above,font=\footnotesize\usefont{T1}{phv}{m}{n},text=black!70]{Query}(B2);
+\draw[LineA](B2)--node[right,font=\footnotesize\usefont{T1}{phv}{m}{n},text=black!70]{Uncertainty}(B3);
+\draw[LineA](B3)--node[right,font=\footnotesize\usefont{T1}{phv}{m}{n},text=black!70]{Labels}(B4);
+\draw[LineA](B4)--node[above,font=\footnotesize\usefont{T1}{phv}{m}{n},text=black!70]{Train}(B5);
+\draw[LineD](B5)--node[left,font=\footnotesize\usefont{T1}{phv}{m}{n},text=black!70]{Update}(B1);
 \end{tikzpicture}
 ```
 
@@ -1402,7 +1940,7 @@ class FixmatchLabelEfficiency:
 | **`{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_labels_str` (0.5%)** | FixMatch         | `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_acc`% | **`{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_eff`$\times$ more efficient** |
 | **`{python} FixmatchLabelEfficiency.cifar10_fixmatch_40_labels_str` (0.08%)** | FixMatch         |  `{python} FixmatchLabelEfficiency.cifar10_fixmatch_40_acc`% |      `{python} FixmatchLabelEfficiency.cifar10_fixmatch_40_eff`$\times$ more efficient |
 
-: **FixMatch Label Efficiency on CIFAR-10.** With 250 labels (0.5% of the dataset), FixMatch achieves within 1.2 points of full supervision, demonstrating 200$\times$ label efficiency. {#tbl-fixmatch-cifar10 .striped .hover}
+: **FixMatch Label Efficiency on CIFAR-10.** With 250 labels (0.5% of the dataset), FixMatch achieves within 1.2 points of full supervision, demonstrating 200$\times$ label efficiency. {#tbl-fixmatch-cifar10 .striped .hover tbl-colwidths="[23,28,16,34]"}
 
 With only `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_labels_str` labeled samples (25 per class), FixMatch achieves `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_acc`% accuracy, within `{python} FixmatchLabelEfficiency.acc_loss_str` points of full supervision using `{python} FixmatchLabelEfficiency.cifar10_fixmatch_250_eff`$\times$ fewer labels. The technique works by generating pseudo-labels on weakly augmented unlabeled images (only when model confidence exceeds 0.95), then training to predict these labels on strongly augmented versions of the same images.
 
@@ -1520,14 +2058,14 @@ class FoundationCostAmortization:
     cost_pretrain_value_str = fmt(cost_pretrain_value, precision=0, commas=True)
     marginal_compute_reduction_str = fmt(marginal_compute_reduction, precision=0, commas=False)
     crossover_tasks_str = fmt(crossover_tasks_value, precision=0, commas=False)
-    label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=False)
+    label_cost_drop_str = fmt(label_cost_reduction, precision=0, commas=True)
 ```
 
 Training each classifier from scratch would require substantial investment in both labeling and compute. With ten tasks each needing `{python} FoundationCostAmortization.labels_per_task_scratch_str` labels at \$1 per label, the total labeling cost reaches **`{python} FoundationCostAmortization.label_cost_scratch_total_str`**. The compute burden amounts to `{python} FoundationCostAmortization.cost_scratch_total_str` GPU-hours across all tasks, with each requiring its own data collection effort. From start to finish, each task takes 6–12 months to complete.
 
 The fine-tuning approach restructures these costs. Pre-training requires a one-time investment of `{python} FoundationCostAmortization.cost_pretrain_value_str` GPU-hours on unlabeled data, but this cost is paid only once. Fine-tuning each task then requires just `{python} FoundationCostAmortization.labels_per_task_finetune_str` labels (`{python} FoundationCostAmortization.label_cost_finetune_total_str` total across all ten tasks) and only `{python} FoundationCostAmortization.cost_finetune_value_str` GPU-hours of compute. Each task reaches deployment in 1–2 weeks after pre-training completes.
 
-The return on investment is substantial across every dimension: labeling costs drop by **`{python} FoundationCostAmortization.label_cost_drop_str`$\times$** (from `{python} FoundationCostAmortization.label_cost_scratch_total_str` to `{python} FoundationCostAmortization.label_cost_finetune_total_str`), per-task marginal compute decreases by **`{python} FoundationCostAmortization.marginal_compute_reduction_str`$\times$**, and time to deployment accelerates by **20--50$\times$** per task.
+The return on investment is substantial across every dimension: labeling costs drop by **`{python} FoundationCostAmortization.label_cost_drop_str`×** (from `{python} FoundationCostAmortization.label_cost_scratch_total_str` to `{python} FoundationCostAmortization.label_cost_finetune_total_str`), per-task marginal compute decreases by **`{python} FoundationCostAmortization.marginal_compute_reduction_str`×**, and time to deployment accelerates by **20--50×** per task.
 
 The cost structure explains *why* the fine-tuning paradigm dominates production ML. The pre-training cost is high but amortized across many downstream applications, while fine-tuning cost remains low on a per-task basis.
 
@@ -1709,37 +2247,44 @@ Synthetic data's greatest limitation is the **domain gap**,[^fn-domain-gap-shift
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \begin{axis}[
-    width=10cm, height=5cm,
+    width=11cm, height=55mm,
     xlabel={Feature Space},
     ylabel={Density},
-    xmin=-3, xmax=7,
-    ymin=0, ymax=0.5,
+    xmin=-3, xmax=7.25,
+    ymin=0, ymax=0.7,
     axis lines=left,
+    axis line style={thick,-latex},
+    axis on top,
     xtick=\empty,
     ytick=\empty,
-    legend style={at={(0.98,0.98)}, anchor=north east, font=\footnotesize\usefont{T1}{phv}{m}{n}, draw=none},
+   % legend style={at={(0.98,0.98)}, anchor=north east, font=\footnotesize\usefont{T1}{phv}{m}{n}, draw=none},
+legend style={at={(0.85,0.92)}, anchor=north},
+  legend cell align=left,
+  legend style={fill=BrownL!30,draw=BrownLine,row sep=1.15pt,
+  font=\fontsize{7pt}{7}\selectfont\usefont{T1}{phv}{m}{n}},
     clip=false
 ]
     % Synthetic data distribution (centered at 0)
-    \addplot[thick, blue, domain=-3:4, samples=100, fill=blue!20, fill opacity=0.5]
+    \addplot[line width=1.25pt, blue, domain=-3:4, samples=100, fill=blue!20, fill opacity=0.5]
         {0.4*exp(-0.5*(x)^2)};
     \addlegendentry{Synthetic}
 
     % Real data distribution (centered at 3, slightly different shape)
-    \addplot[thick, orange, domain=0:7, samples=100, fill=orange!20, fill opacity=0.5]
+    \addplot[line width=1.25pt, orange, domain=0:7, samples=100, fill=orange!20, fill opacity=0.5]
         {0.35*exp(-0.4*(x-3)^2)};
     \addlegendentry{Real}
 
     % Decision boundary learned from synthetic
-    \draw[thick, dashed, red] (axis cs: 1.5, 0) -- (axis cs: 1.5, 0.45);
-    \node[red, font=\footnotesize\usefont{T1}{phv}{m}{n}, align=center] at (axis cs: 1.5, 0.48) {Synthetic\\boundary};
+    \draw[thick, dashed, red] (axis cs: 1.5, 0) -- (axis cs: 1.5, 0.6)
+    node[red, font=\footnotesize\usefont{T1}{phv}{m}{n}, fill=white,above=0pt,inner sep=1pt] {Synthetic boundary};
 
     % Ideal boundary for real data
-    \draw[thick, dotted, green!60!black] (axis cs: 3, 0) -- (axis cs: 3, 0.45);
+    \draw[thick, dotted, green!60!black] (axis cs: 3, 0) -- (axis cs: 3, 0.50);
+ %   \draw[thick, dotted, green!60!black] (axis cs: 0, 0) -- (axis cs: 0, 0.50);
 
     % Domain gap annotation
-    \draw[<->, thick, purple] (axis cs: 0, 0.42) -- (axis cs: 3, 0.42);
-    \node[purple, font=\footnotesize\usefont{T1}{phv}{m}{n}, fill=white, inner sep=1pt] at (axis cs: 1.5, 0.42) {Domain Gap};
+    \draw[latex-latex, thick, purple] (axis cs: 0, 0.48) --
+    node[purple, font=\footnotesize\usefont{T1}{phv}{m}{n}, fill=white, inner sep=1pt]{Domain Gap} (axis cs: 3, 0.48);
 
 \end{axis}
 \end{tikzpicture}
@@ -1842,106 +2387,67 @@ Selecting the right combination of techniques from these three pipeline stages r
 
 @tbl-technique-selection maps individual constraints to techniques, but real projects face multiple constraints simultaneously. The decision tree in @fig-technique-decision-tree structures the selection process hierarchically: start by identifying the *primary* bottleneck, then follow the branches to narrow the field.
 
-::: {#fig-technique-decision-tree fig-env="figure" fig-pos="htb" fig-cap="**Data Selection Technique Selection Tree**: Starting from the primary bottleneck at the top, the branches narrow to the most appropriate technique. Leaf nodes show recommended methods. Multiple paths may apply; combine techniques as needed." fig-alt="A decision tree flowchart with diamond decision nodes and rectangular technique recommendations. Starts with bottleneck identification and branches to specific techniques."}
+::: {#fig-technique-decision-tree fig-cap="**Data Selection Technique Selection Tree**: Start at the top by identifying your primary bottleneck, then follow the branches to find the most appropriate technique. Leaf nodes show recommended methods. Multiple paths may apply; combine techniques as needed." fig-alt="A decision tree flowchart with diamond decision nodes and rectangular technique recommendations. Starts with bottleneck identification and branches to specific techniques."}
+```{.tikz}
 
-```{=latex}
-\usetikzlibrary{shapes.geometric}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth, node distance=1.5cm and 1.5cm]
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D6EAF8}
-  \definecolor{OrangeLine}{HTML}{E37222}
-  \definecolor{OrangeL}{HTML}{FDEBD0}
-  \definecolor{RedLine}{HTML}{DA291C}
-  \definecolor{RedL}{HTML}{FADBD8}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 
   \tikzset{
-    Decision/.style={
-      diamond,
-      draw=BlueLine,
-      fill=BlueL,
-      align=center,
-      line width=1pt,
-      aspect=2,
-      inner sep=2pt,
-      font=\footnotesize\bfseries
-    },
+     Decision/.style={draw=BlueD,fill=cyan!10, trapezium,aspect=2,inner sep=-1.2ex,
+     text width=30mm,line width=1pt,
+                        diamond, minimum width=32mm, minimum height=20mm, align= flush center,
+                        node distance=15mm and 25mm},
     Leaf/.style={
       rectangle,
-      rounded corners,
       draw=GreenLine,
-      fill=GreenL,
+      fill=green!90!black!10,
       align=center,
-      line width=1pt,
+      line width=1pt,minimum width=23mm,
       minimum height=1cm,
-      font=\footnotesize\bfseries
+      font=\footnotesize\usefont{T1}{phv}{m}{n}
     },
-    Arrow/.style={->, line width=1pt, color=black!70, rounded corners}
+    Arrow/.style={->, >=Latex,line width=1pt, color=black!70}
   }
 
-  % Root
-  \node[Decision] (Root) {Primary\\bottleneck?};
+% Root
+\node[Decision] (D1) {Primary\\bottleneck?};
+% Left
+\node[Decision, below left= 19mm and 29mm of D1] (D2) {Labeling\\cost};
+\node[Decision, below = 9mm of D2] (D3) {Oracle\\available?};
+\node[Leaf, left=14mm of D2] (B1){Self-\\Supervised};
+\node[Leaf, below=10mm of D3] (B2){Active\\Learning};
+\node[Leaf, left=14mm of D3] (B3){Semi-\\Supervised};
+%right
+\node[Decision, below right=19mm and 29mm  of D1] (D4) {Data\\scarcity};
+\node[Decision, below = 9mm of D4] (D5) {Simulator\\available?};
+\node[Leaf, right=14mm of D4] (B6){Knowledge\\Distillation};
+\node[Leaf, right=14mm of D5] (B7){Data\\Augmentation};
+\node[Leaf, below=10mm of D5] (B8){Synthetic\\Generation};
+%center
+\node[Decision, below = 9mm of D1] (D6) {Compute\\cost};
+\node[Decision, below = 9mm of D6] (D7) {Redundant\\data?};
+\node[Leaf, below=10mm of $(D3.south)!0.6!(D7.south)$] (B4){Dedup +\\Coreset};
+\node[Leaf, below=10mm of $(D7.south)!0.4!(D5.south)$] (B5){Curriculum\\Learning};
+%%arrows
+\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize] {Labeling $\$\$\$$}(D2);
+\draw[Arrow](D1)-|node[above, pos=0.25, font=\scriptsize] {Not enough data}(D4);
+\draw[Arrow](D1)--node[right, pos=0.25, font=\scriptsize] {Compute $\$\$\$$}(D6);
+\draw[Arrow] (D2) -- node[above, pos=0.45, font=\scriptsize] {Large pool} (B1);
+\draw[Arrow](D2)--node[right, pos=0.25, font=\scriptsize] {Yes}(D3);
+\draw[Arrow](D3)--node[right, pos=0.25, font=\scriptsize] {Yes}(B2);
+\draw[Arrow](D3)--node[above, pos=0.25, font=\scriptsize] {No}(B3);
+%
+\draw[Arrow](D7.west)-|node[above, pos=0.25, font=\scriptsize] {High}(B4.120);
+\draw[Arrow](D7.east)-|node[above, pos=0.25, font=\scriptsize] {Low}(B5.65);
+%
+\draw[Arrow](D5)--node[right, pos=0.25, font=\scriptsize] {Yes}(B8);
+\draw[Arrow](D5)--node[above, pos=0.25, font=\scriptsize] {No}(B7);
 
-  % Level 1 Decisions
-  \node[Decision, below left=1.5cm and 2.5cm of Root] (LabelCost) {Labeling\\cost};
-  \node[Decision, below=2cm of Root] (ComputeCost) {Compute\\cost};
-  \node[Decision, below right=1.5cm and 2.5cm of Root] (DataScarcity) {Data\\scarcity};
+\draw[Arrow] (D4) -- node[above, pos=0.45, font=\scriptsize] {Teacher} (B6);
 
-  % Level 2 Decisions/Leaves
-  % Under LabelCost
-  \node[Decision, below left=1.5cm and 0.5cm of LabelCost] (OracleAvail) {Oracle\\available?};
-  \node[Leaf, below right=1.5cm and 0.5cm of LabelCost] (SelfSup) {Self-\\Supervised};
+\draw[Arrow](D4)--node[right, pos=0.25, font=\scriptsize] {Domain}(D5);
 
-  % Under ComputeCost
-  \node[Decision, below=1.5cm of ComputeCost] (Redundant) {Redundant\\data?};
-
-  % Under DataScarcity
-  \node[Decision, below left=1.5cm and 0.5cm of DataScarcity] (SimAvail) {Simulator\\available?};
-  \node[Leaf, below right=1.5cm and 0.5cm of DataScarcity] (Distill) {Knowledge\\Distillation};
-
-  % Leaves
-  % Under OracleAvail
-  \node[Leaf, below left=1.5cm and -0.5cm of OracleAvail] (Active) {Active\\Learning};
-  \node[Leaf, below right=1.5cm and -0.5cm of OracleAvail] (Semi) {Semi-\\Supervised};
-
-  % Under Redundant
-  \node[Leaf, below left=1.5cm and -0.5cm of Redundant] (Dedup) {Dedup +\\Coreset};
-  \node[Leaf, below right=1.5cm and -0.5cm of Redundant] (Curriculum) {Curriculum\\Learning};
-
-  % Under SimAvail
-  \node[Leaf, below left=1.5cm and -0.5cm of SimAvail] (Synthetic) {Synthetic\\Generation};
-  \node[Leaf, below right=1.5cm and -0.5cm of SimAvail] (Augment) {Data\\Augmentation};
-
-  % Connections
-  % Root -> Level 1
-  \draw[Arrow] (Root) -| node[above, pos=0.25, font=\scriptsize] {Labeling \$\$\$} (LabelCost);
-  \draw[Arrow] (Root) -- node[right, font=\scriptsize] {Compute \$\$\$} (ComputeCost);
-  \draw[Arrow] (Root) -| node[above, pos=0.25, font=\scriptsize] {Not enough data} (DataScarcity);
-
-  % LabelCost -> Level 2
-  \draw[Arrow] (LabelCost) -| node[above, pos=0.25, font=\scriptsize] {Yes} (OracleAvail);
-  \draw[Arrow] (LabelCost) -| node[above, pos=0.25, font=\scriptsize] {Large pool} (SelfSup);
-
-  % ComputeCost -> Level 2
-  \draw[Arrow] (ComputeCost) -- (Redundant);
-
-  % DataScarcity -> Level 2
-  \draw[Arrow] (DataScarcity) -| node[above, pos=0.25, font=\scriptsize] {Domain} (SimAvail);
-  \draw[Arrow] (DataScarcity) -| node[above, pos=0.25, font=\scriptsize] {Teacher} (Distill);
-
-  % OracleAvail -> Leaves
-  \draw[Arrow] (OracleAvail) -| node[above, pos=0.25, font=\scriptsize] {Yes} (Active);
-  \draw[Arrow] (OracleAvail) -| node[above, pos=0.25, font=\scriptsize] {No} (Semi);
-
-  % Redundant -> Leaves
-  \draw[Arrow] (Redundant) -| node[above, pos=0.25, font=\scriptsize] {High} (Dedup);
-  \draw[Arrow] (Redundant) -| node[above, pos=0.25, font=\scriptsize] {Low} (Curriculum);
-
-  % SimAvail -> Leaves
-  \draw[Arrow] (SimAvail) -| node[above, pos=0.25, font=\scriptsize] {Yes} (Synthetic);
-  \draw[Arrow] (SimAvail) -| node[above, pos=0.25, font=\scriptsize] {No} (Augment);
-
+\draw[Arrow](D6)--(D7);
 \end{tikzpicture}
 ```
 
@@ -1972,7 +2478,6 @@ With the bottleneck identified, verify that the corresponding techniques are fea
 ### Step 3: Estimate ROI {.unnumbered}
 
 Meeting the prerequisites is necessary but not sufficient. Before committing engineering resources, estimate the return on investment for each candidate technique:
-
 $$
 \text{ROI} = \frac{\text{(Baseline Cost)} - \text{(Technique Cost + Implementation Cost)}}{\text{Technique Cost + Implementation Cost}}
 $$
@@ -2001,8 +2506,7 @@ Dynamic data selection introduces a new bottleneck: *selection latency*. In stan
 
 \index{Selection Inequality!definition}
 For a selection strategy to be systems-efficient, it must satisfy the **Selection Inequality** expressed in @eq-selection-inequality:
-
-$$ T_{selection} + T_{train}(N_{subset}) < T_{train}(N_{total}) $$ {#eq-selection-inequality}
+$$ T_{\text{selection}} + T_{train}(N_{\text{subset}}) < T_{\text{train}}(N_{\text{total}}) $$ {#eq-selection-inequality}
 
 Here $T_{selection}$ is the time spent scoring the pool and $T_{train}$ is the compute time. If $f(x)$ requires a forward pass of a large model, the cost of selection can exceed the cost of training, producing negative ROI. A concrete scenario illustrates this trade-off.
 
@@ -2250,8 +2754,8 @@ Data selection is not free. It introduces a new term to the Iron Law.
 
 **The Equation**
 
-- [ ] **Selection Cost**: Do you understand why $T_{selection} + T_{train}(subset)$ must be less than $T_{train}(full)$ for the technique to be valid?
-- [ ] **Overhead Management**: How do proxy models and cached embeddings keep $T_{selection}$ low?
+- [ ] **Selection Cost**: Do you understand why $T_{\text{selection}} + T_{\text{train}}(subset)$ must be less than $T_{\text{train}}(\text{full})$ for the technique to be valid?
+- [ ] **Overhead Management**: How do proxy models and cached embeddings keep $T_{\text{selection}}$ low?
 
 **Systems Implications**
 
@@ -2412,7 +2916,6 @@ Answering these questions requires understanding what training data actually cos
 $$
 C_{\text{total}} = C_{\text{acquire}} + C_{\text{label}} + C_{\text{store}} + C_{\text{process}}
 $$
-
 where:
 
 | **Component**            | **Formula**                                           |                             **Typical Range** |
@@ -2502,7 +3005,6 @@ The ratio, where data costs dominate, is typical for supervised learning. It inv
 
 \index{Return on Investment!data selection framework}
 Understanding total costs enables rational decisions about which efficiency techniques merit investment. Every technique carries both a cost (implementation effort, compute overhead) and a benefit (reduced data requirements, faster training). Comparing these trade-offs requires a common framework: Return on Investment (ROI).
-
 $$
 \text{ROI} = \frac{\text{Savings} - \text{Investment}}{\text{Investment}} \times 100\%
 $$
@@ -2677,7 +3179,7 @@ The amortization pattern reveals which circumstances favor infrastructure invest
 
 **The Context**: For years, ImageNet and CIFAR-10 were the gold standards for computer vision. Researchers competed to squeeze every 0.1% accuracy gain, assuming higher scores meant better generalization.
 
-**The Failure**: In 2019, researchers at UC Berkeley (Recht et al.) discovered that these datasets contained significant near-duplicates between the training and test sets. A model could "solve" a test image simply by memorizing a nearly identical training image.
+**The Failure**: In 2019, researchers at UC Berkeley discovered that these datasets contained significant near-duplicates between the training and test sets. A model could "solve" a test image simply by memorizing a nearly identical training image.
 
 **The Consequence**: When the researchers constructed a truly independent test set (CIFAR-10.1) by re-collecting images from the original source with the same methodology, model accuracy dropped by 11–14%. The "superhuman" performance was partly an illusion of memorization.
 
@@ -2803,45 +3305,60 @@ class DistributedOverheadCalc:
 
 **Architecture**:
 
+::: {.content-visible when-format="pdf"}
+\medskip
+\centering
+:::
+
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{
+  LineA/.style={-{Triangle[width=6pt,length=6pt]}, line width=1.5pt,BrownLine!60,text=black},
+  Box/.style={inner xsep=2pt, draw=BlueD, line width=0.75pt,fill=BlueL!70,
+    text width=70mm,align=left,minimum width=110mm, minimum height=18mm},
+   Box2/.style={Box, draw=GreenLine,fill=green!80!black!10,align= flush center,
+   text width=23mm,minimum width=23mm, minimum height=16mm},
+   Text/.style={right,fill=none,text=black!70,font=\footnotesize\usefont{T1}{phv}{m}{n},align=left},
+}
+
 % Coordinator node
-\node[draw, rectangle, rounded corners, fill=blue!10, minimum width=10cm, minimum height=2cm, align=left] (coord) at (0, 2.5) {
-    \textbf{Coordinator Node}\\[2pt]
+\node[Box] (B0) {};
+\node[draw=none,fill=BlueD,text=white,below=0pt of B0.north] (BB0) {\textbf{Coordinator Node}};
+\node[draw=none,align=left,anchor=south]at($(B0.south)+(0,2pt)$){%
     \textbullet\ Maintains global embedding index (FAISS)\\
     \textbullet\ Merges local selections\\
-    \textbullet\ Broadcasts final coreset indices
-};
+    \textbullet\ Broadcasts final coreset indices};
 
-% Worker nodes
-\node[draw, rectangle, rounded corners, fill=green!10, minimum width=2.5cm, minimum height=1.8cm, align=center] (w0) at (-4, -1) {
-    \textbf{Worker 0}\\
-    150K images\\
-    Local EL2N
-};
-
-\node[draw, rectangle, rounded corners, fill=green!10, minimum width=2.5cm, minimum height=1.8cm, align=center] (w1) at (0, -1) {
-    \textbf{Worker 1}\\
-    150K images\\
-    Local EL2N
-};
-
-\node[draw, rectangle, rounded corners, fill=green!10, minimum width=2.5cm, minimum height=1.8cm, align=center] (wn) at (4, -1) {
-    \textbf{Worker N}\\
-    150K images\\
-    Local EL2N
-};
-
-% Arrows
-\draw[->, thick] (w0.north) -- node[left, font=\footnotesize\usefont{T1}{phv}{m}{n}] {local\_scores} (w0.north |- coord.south);
-\draw[->, thick] (w1.north) -- node[right, font=\footnotesize\usefont{T1}{phv}{m}{n}] {local\_scores} (w1.north |- coord.south);
-\draw[->, thick] (wn.north) -- node[right, font=\footnotesize\usefont{T1}{phv}{m}{n}] {local\_scores} (wn.north |- coord.south);
-
-% Ellipsis between workers
-\node at (2, -1) {\Large$\cdots$};
-\node at (-2, -1) {\Large$\cdots$};
+% Worker 1
+\node[Box2,below=of B0.south] (W0){};
+\node[Box2,below=0pt of W0.north,minimum height=6mm,
+fill=GreenLine,text=white] (WW0){\textbf{Worker 1}};
+\node[align=center]at($(WW0.south)!0.5!(W0.south)$){150K images\\
+    Local EL2N};
+% Worker 0
+\node[Box2,below=of B0.194] (W1){};
+\node[Box2,below=0pt of W1.north,minimum height=6mm,
+fill=GreenLine,text=white] (WW1){\textbf{Worker 0}};
+\node[align=center]at($(WW1.south)!0.5!(W1.south)$){150K images\\
+    Local EL2N};
+% Worker N
+\node[Box2,below=of B0.346] (W2){};
+\node[Box2,below=0pt of W2.north,minimum height=6mm,
+fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
+\node[align=center]at($(WW2.south)!0.5!(W2.south)$){150K images\\
+    Local EL2N};
+%arrows
+\foreach \i in{0,1,2}{
+\draw[LineA] (W\i) -- node[Text] {local\_scores} (W\i |- B0.south);
+}
+\node at ($(W1)!0.5!(W0)$) {\Large$\cdots$};
+\node at ($(W2)!0.5!(W0)$) {\Large$\cdots$};
 \end{tikzpicture}
 ```
+::: {.content-visible when-format="pdf"}
+\medskip
+\raggedright
+:::
 
 **Pipeline**:
 
@@ -2920,68 +3437,354 @@ The benefits must be weighed against the distributed selection challenges discus
 The preceding sections examined pairwise interactions, but production systems apply all these optimizations together. Trace the full optimization stack in @fig-optimization-stack, from data to deployment: each stage in this pipeline amplifies or attenuates the effects of others.
 
 ::: {#fig-optimization-stack fig-env="figure" fig-pos="htb" fig-cap="**The Optimization Stack**: The complete pipeline from raw data to deployed system, showing how optimizations at each stage propagate downstream. Data artifacts (rounded boxes) flow through processing stages (rectangular boxes). Optimizations early in the pipeline, particularly data selection, have multiplicative effects because they reduce the workload for all subsequent stages." fig-alt="Pipeline diagram with two rows. Top row shows Raw Data flowing through Data Selection to Curated Data, then through Training to produce a Model. Bottom row shows the Model flowing through Compression to a Compact Model, then through Hardware optimization to a Deployed System."}
+```{.tikz}
+\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\tikzset{
+Box/.style={align=center, inner xsep=2pt,draw=GreenLine, line width=1pt,
+node distance=10mm,fill=none, minimum width=28mm, minimum height=20mm},
+Box1/.style={Box,draw=OrangeLine,fill=none},
+BoxD/.style={Box,font=\footnotesize\usefont{T1}{phv}{b}{n},anchor=south,draw=none,text=white,fill=GreenLine,minimum height=5mm},
+BoxD1/.style={Box,font=\footnotesize\usefont{T1}{phv}{b}{n},anchor=south,draw=none,text=white,fill=OrangeLine,minimum height=5mm},
+Circle1/.style={circle,  minimum size=33mm, draw=none, fill=BrownLine!20},
+LineD/.style={BrownLine!60!black!20,line width=4.0pt,dashed,dash pattern=on 5pt off 2pt,
+{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=5pt,shorten >=1pt},
+LineA/.style={BrownLine!80!black!40,line width=4.0pt,
+{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=1pt,shorten >=1pt},
+ALineA/.style={violet!60,{Circle[line width=1.1pt,fill=white,round,length=5pt,width=5pt]}-,
+line width=1.5pt,shorten <=-3pt,shorten >=-6pt}
+}
 
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ OPTIMIZATION STACK (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-optimization-stack — multiplicative effects across pipeline
-# │
-# │ Goal: Diagram full pipeline from raw data to deployed system; show how
-# │       early-stage optimizations (data selection) propagate downstream.
-# │ Show: Two rows of rounded (data) and rectangular (process) boxes; arrows.
-# │ How: mpatches.FancyBboxPatch; viz.setup_plot(); manual layout.
-# │
-# │ Imports: matplotlib.patches (mpatches), mlsysim.core.viz (viz)
-# │ Exports: (figure only, no prose variables)
-# └─────────────────────────────────────────────────────────────────────────────
-import matplotlib.patches as mpatches
-from mlsysim import viz
+%dataS
+\tikzset{%
+ pics/dataS/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+%plats
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0,-0.3)--(-0.67,0.03)--(0,0.37)--(0.67,0.03)--cycle;
+\draw[fill=\filllcirclecolor,line width=\Linewidth,draw=\drawcolor](0,0)--(-0.67,0.33)--(0,0.67)--(0.67,0.33)--cycle;
+\draw[fill=\filllcolor,line width=\Linewidth,draw=\drawcolor](0,0.3)--(-0.67,0.63)--(0,0.97)--(0.67,0.63)--cycle;
+%left
+\draw[line width=\Linewidth,draw=\drawcolor](-0.39,1.21)--++(210:0.55)--++(270:1.22)--(-0.39,-0.56);
+\fill[line width=\Linewidth,fill=\filllcirclecolor!60!violet!,draw=green,draw=\drawcolor](-0.39,1.21)circle(3pt);
+\fill[line width=\Linewidth,fill=\filllcolor,draw=green,draw=\drawcolor](-0.39,-0.56)circle(3pt);
+\draw[line width=\Linewidth,draw=\drawcolor](0.39,1.21)--++(330:0.55)--++(270:1.22)--(0.39,-0.56);
+\fill[line width=\Linewidth,fill=\filllcirclecolor!60!violet!,draw=green,draw=\drawcolor](0.39,1.21)circle(3pt);
+\fill[line width=\Linewidth,fill=\filllcolor,draw=green,draw=\drawcolor](0.39,-0.56)circle(3pt);
+\end{scope}
+     }
+  }
+}
+%AI style
+\tikzset{
+pics/llm/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[circle,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=1.25*\Linewidth](C\picname) at (0,0){};
+\def\startangle{90}
+\def\radius{1.15}
+\def\radiusI{1.1}
+\foreach \i [evaluate=\i as \j using \i+1] [count =\k] in {0,2,4,6,8} {
+\pgfmathsetmacro{\angle}{\startangle - \i * (360/8)}
+\draw[draw=black,-{Circle[black ,fill=\filllcirclecolor,length=5.5pt,line width=0.5*\Linewidth]},line width=1.5*\Linewidth](C\picname)--++(\startangle - \i*45:\radius) ;
+\node[circle,draw=black,fill=\filllcirclecolor!80!red!50,inner sep=3pt,line width=0.5*\Linewidth](2C\k)at(\startangle - \j*45:\radiusI) {};
+}
+\draw[line width=1.5*\Linewidth](2C1)--++(-0.5,0)|-(2C2);
+\draw[line width=1.5*\Linewidth](2C3)--++(0.5,0)|-(2C4);
+\node[circle,,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth]at (0,0){};
+\end{scope}
+    }
+  }
+}
+%brain
+\tikzset{pics/brain/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=BRAIN,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor,line width=\Linewidth](-0.3,-0.10)to(0.08,0.60)
+to[out=60,in=50,distance=3](-0.1,0.69)to[out=160,in=80](-0.26,0.59)to[out=170,in=90](-0.46,0.42)
+to[out=170,in=110](-0.54,0.25)to[out=210,in=150](-0.54,0.04)
+to[out=240,in=130](-0.52,-0.1)to[out=300,in=240]cycle;
+\draw[fill=\filllcolor,line width=\Linewidth]
+(-0.04,0.64)to[out=120,in=0](-0.1,0.69)(-0.19,0.52)to[out=120,in=330](-0.26,0.59)
+(-0.4,0.33)to[out=150,in=280](-0.46,0.42)
+%
+(-0.44,-0.03)to[bend left=30](-0.34,-0.04)
+(-0.33,0.08)to[bend left=40](-0.37,0.2) (-0.37,0.12)to[bend left=40](-0.45,0.14)
+(-0.26,0.2)to[bend left=30](-0.24,0.13)
+(-0.16,0.32)to[bend right=30](-0.27,0.3)to[bend right=30](-0.29,0.38)
+(-0.13,0.49)to[bend left=30](-0.04,0.51);
+\draw[thick,line width=\Linewidth,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.23,0.03)--(-0.15,-0.03)--(-0.19,-0.18)--(-0.04,-0.28);
+\draw[thick,line width=\Linewidth,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.17,0.13)--(-0.04,0.05)--(-0.06,-0.06)--(0.14,-0.11);
+\draw[thick,line width=\Linewidth,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.12,0.23)--(0.31,0.0);
+\draw[thick,line width=\Linewidth,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.07,0.32)--(0.06,0.26)--(0.16,0.33)--(0.34,0.2);
+\draw[thick,line width=\Linewidth,rounded corners=0.8pt,\drawcircle,-{Circle[fill=\filllcolor,length=2.5pt]}](-0.01,0.43)--(0.06,0.39)--(0.18,0.51)--(0.31,0.4);
+\end{scope}
+     }
+  }
+}
+%funnel
+\tikzset{%
+ pics/funnel/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.12,-0.81)--(-0.19,-0.25)--(-0.7,0.41)--(0.7,0.41)--(0.19,-0.25)--(0.12,-0.81)--cycle;
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](-0.19,-0.25)--(0.08,-0.25);
+\draw[fill=\filllcolor!50,line width=\Linewidth,draw=\drawcolor](0.16,-0.09)--(0.41,0.31);
+%
+\node[line width=\Linewidth,draw=\drawcolor,fill=\filllcolor!50,inner sep=1pt,
+rectangle,rounded corners=2pt,minimum width=16mm,minimum height=5pt]at(0,0.5){};
+%
+\foreach \i in{-0.5,0,0.5}{
+\node[single arrow, line width=0.8*\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,inner sep=1pt,
+      minimum width =9pt, single arrow head extend=2pt,
+      minimum height=5mm]at(\i,0.9) {}; % length of arrow
+   }
+\node[single arrow,line width=0.8*\Linewidth,draw=black,fill=cyan!90!black!30, rotate=270,inner sep=1pt,
+      minimum width =11pt, single arrow head extend=2pt,
+      minimum height=5mm]at(0,-1.1) {}; % length of arrow
+ \end{scope}
+     }
+  }
+}
+\tikzset{
+pics/algorithm/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[fill=\filllcolor!60,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt](\picname-B2)at(0,-0.47){};
+\node[fill=\filllcolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt](\picname-B3)at(-0.6,-0.47){};
+\node[fill=\filllcolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt](\picname-B1)at(0.6,-0.47){};
+%
+\node[fill=\filllcolor!99!violet!80,draw=\drawcolor,line width=\Linewidth,rectangle,
+minimum width=8.5mm,minimum height=3mm,
+rounded corners=2pt,inner sep=1pt](\picname-B0)at(0,0.53){};
+\draw[draw=\drawcolor,shorten >=4pt,shorten <=4pt,line width=1.5*\Linewidth]
+($(\picname-B0.north west)!0.33!(\picname-B0.south west)$)--($(\picname-B0.north east)!0.33!(\picname-B0.south east)$);
+\draw[draw=\drawcolor,shorten >=4pt,shorten <=4pt,line width=1.5*\Linewidth]
+($(\picname-B0.north west)!0.66!(\picname-B0.south west)$)--($(\picname-B0.north east)!0.66!(\picname-B0.south east)$);
+\draw[draw=\drawcolor,rounded corners](\picname-B1)|-(\picname-B0);
+\draw[draw=\drawcolor,rounded corners](\picname-B3)|-(\picname-B0);
+\draw[draw=\drawcolor,rounded corners](\picname-B2)--(\picname-B0);
+\node[fill=\filllcirclecolor!60,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt,rotate=45](R2){};
+\node[fill=\filllcirclecolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt,rotate=45](R1) at (-0.6,0){};
+\node[fill=\filllcirclecolor!30,draw=\drawcolor,line width=\Linewidth,rectangle,minimum size=2.5mm,
+rounded corners=1pt,inner sep=1pt,rotate=45](R3) at (0.6,0){};
+\end{scope}
+    }
+  }
+}
+%CPU
+\tikzset{%
+ pics/cpu/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\node[fill=\filllcolor,minimum width=66, minimum height=66,
+            rounded corners=2,outer sep=2pt] (C1) {};
+\node[fill=white,minimum width=54, minimum height=54] (C2) {};
+\node[fill=\filllcolor!40,minimum width=44, minimum height=44] (C3) {\large CPU};
 
-fig, ax, COLORS, plt = viz.setup_plot(figsize=(10, 3.5))
-ax.set_xlim(-1, 14)
-ax.set_ylim(-2.5, 1.5)
-ax.set_aspect('equal')
-ax.axis('off')
-ax.grid(False)
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
+}
+ \end{scope}
+     }
+  }
+}
+\tikzset{
+pics/llm1/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[circle,minimum size=13mm,draw=\drawcolor, fill=\filllcolor!70,line width=\Linewidth](C\picname) at (0,0){\bfseries LLM};
+\def\startangle{110}
+\def\radius{1.75}
+\def\radiusI{1.4}
+\foreach \i [evaluate=\i as \j using \i+1] in {0,2,4,6,8} {
+\pgfmathsetmacro{\angle}{\startangle - \i * (360/10)}
+\draw[draw=\drawcolor,line width=0.7*\Linewidth,-{Circle[\drawcolor, ,fill=\filllcirclecolor,length=7.0pt]}](C\picname)--++(\startangle - \i*36:\radius) ;
+\draw[draw=\drawcolor,line width=0.7*\Linewidth,-{Circle[\drawcolor, ,fill=\filllcirclecolor!80!red!50,length=4.5pt]}](C\picname)--++(\startangle - \j*36:\radiusI) ;
+}
+\end{scope}
+    }
+  }
+}
+\tikzset{
+pics/rocket/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+%vrh
+\draw[fill=\filllcolor,draw=\drawcolor,line width=\Linewidth](-0.26,0.5)to[bend right=12](0.26,0.5)to[bend right=7] (0,0.85)to[bend right=7] cycle;
+%krila
+\draw[fill=\filllcolor!70!red,,draw=\drawcolor,line width=\Linewidth,rounded corners=1pt](-0.2,-0.7)--(-0.45,-0.9)--(-0.567,-0.4)--(-0.3,-0.17)--cycle;
+\draw[fill=\filllcolor!70!red,draw=\drawcolor,line width=\Linewidth,rounded corners=1pt](0.2,-0.7)--(0.45,-0.9)--(0.567,-0.4)--(0.3,-0.17)--cycle;
+%rep
+\draw[fill=\filllcolor,draw=\drawcolor,line width=\Linewidth](0.16,-0.76)--(0.22,-0.9)--(-0.2,-0.9)--(-0.15,-0.76)--cycle;
+%body
+\draw[fill=\filllcolor,draw=\drawcolor,line width=\Linewidth](-0.2,-0.7)--(0.2,-0.7)to[out=75,in=320](0,0.85)to[out=220,in=105] cycle;
+%krug
+\node[circle,draw=\drawcolor,minimum size=4mm,fill=\filllcirclecolor,line width=\Linewidth]{};
+\draw[draw=\drawcolor](0,-0.99)--(0,-1.3);
+\draw[draw=\drawcolor](-0.11,-0.99)--(-0.11,-1.2);
+\draw[draw=\drawcolor](0.11,-0.99)--(0.11,-1.2);
+\end{scope}
+    }
+  }
+}
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=STREAMING,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\filllcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\filllcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
+\fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(A.west)!0.12!(A.east)$)circle(3pt);
+ \end{scope}
+     }
+  }
+}
+\tikzset{%
+ pics/dataFolderS/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=DATAFOLDER,scale=\scalefac, every node/.append style={transform shape},
+LinE/.style={\filllcirclecolor,line width=2.0pt,
+{{Triangle[width=1.5*3pt,length=2.0*3pt]}-},shorten <=1pt,shorten >=1pt},
+ELin/.style={\filllcirclecolor,line width=2.0pt,
+{-{Triangle[width=1.5*3pt,length=2.0*3pt]}},shorten <=1pt,shorten >=1pt},]
+\draw[line width=\Linewidth,draw=\drawcolor,rounded corners=0.1pt,fill=\filllcolor!20] (0,0) -- (-0.20,2.45)coordinate(\picname-GL)--
+(0.4,2.45)to[out=360,in=180](0.9,2.1)-- (2.5,2.1)--(2.5,0)--cycle ;
+\draw[line width=\Linewidth,draw=\drawcolor,rounded corners=2pt,
+fill=\filllcolor!50] (0,0)coordinate(\picname-DL) -- (2.8,0)
+coordinate(\picname-DD)-- (3,1.8) -- (0.2,1.8) -- cycle;
+\draw[LinE](\picname-DD)--++(330:2.0);
+\draw[LinE](-0.3,1.8)--++(150:2.0);
+\draw[LinE](3,1.8)--++(30:2.0);
+\draw[LinE](\picname-DL)--++(210:2.0);
+ \end{scope}
+     }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  tiecolor/.store in=\tiecolor,
+  bodycolor/.store in=\bodycolor,
+  stetcolor/.store in=\stetcolor,
+  tiecolor=red,      % derfault tie color
+  bodycolor=blue!30,  % derfault body color
+  stetcolor=green,  % derfault stet color
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=0.2,
+  Height=0.5,
+  Width=0.25,
+  picname=C
+}
+%Unlabeled Pool
+\node[Box](B1){};
+\node[BoxD](BB1)at(B1.south){Raw Data};
+\coordinate(S1)at($(B1.north)!0.5!(BB1.north)$);
+\pic[shift={(0,-0.22)}] at  (S1){dataS={scalefac=0.6,picname=1,Linewidth=1.0pt,
+ filllcolor=red!90!black!40!,drawcolor=black,filllcirclecolor=cyan}};
+ % Data Selection
+ \node[Box1,right=of B1](B2){};
+\node[BoxD1](BB2)at(B2.south){Data Selection};
+\coordinate(S2)at($(B2.north)!0.5!(BB2.north)$);
+\pic[shift={(0,0.05)}] at  (S2){funnel={scalefac=0.53,picname=1,Linewidth=0.5pt,
+ filllcolor=BrownL,drawcolor=black,filllcirclecolor=orange!70!yellow!80}};
 
-bw, bh = 2.0, 0.7
-arrow_kw = dict(arrowstyle='->', color='#555555', lw=1.5)
+ % Curated Data
+ \node[Box,right=of B2](B3){};
+\node[BoxD](BB3)at(B3.south){Curated Data};
+\coordinate(S3)at($(B3.north)!0.5!(BB3.north)$);
+\pic[shift={(0,-0.45)}] at  (S3){data={scalefac=0.4,picname=1,filllcolor=magenta, Linewidth=0.7pt}};
+% Training
+ \node[Box1,right=of B3](B4){};
+\node[BoxD1](BB4)at(B4.south){Training};
+\coordinate(S4)at($(B4.north)!0.5!(BB4.north)$);
+\pic[shift={(0,-0.04)}] at  (S4){algorithm={scalefac=0.9,picname=1,
+drawcolor=black,filllcolor=cyan!50!, Linewidth=0.75pt,filllcirclecolor=green}};
 
-def box(ax, x, y, label, is_data=True):
-    fc = COLORS['BlueL'] if is_data else COLORS['OrangeL']
-    ec = COLORS['BlueLine'] if is_data else COLORS['OrangeLine']
-    style = "round,pad=0.12" if is_data else "square,pad=0.05"
-    rect = mpatches.FancyBboxPatch((x - bw/2, y - bh/2), bw, bh, boxstyle=style,
-                                    facecolor=fc, edgecolor=ec, linewidth=1.2, zorder=2)
-    ax.add_patch(rect)
-    ax.text(x, y, label, ha='center', va='center', fontsize=9, fontweight='bold', zorder=3)
-
-# Row 1
-for x, label, is_data in [(0, 'Raw Data', True), (3, 'Data Selection', False), (6, 'Curated Data', True),
-                           (9, 'Training', False), (12, 'Model', True)]:
-    box(ax, x, 0.5, label, is_data)
-
-# Row 2
-for x, label, is_data in [(3, 'Compression', False), (6, 'Compact Model', True),
-                           (9, 'Hardware', False), (12, 'Deployed System', True)]:
-    box(ax, x, -1.2, label, is_data)
-
-# Row 1 arrows
-for x1, x2 in [(1, 2), (4, 5), (7, 8), (10, 11)]:
-    ax.annotate('', xy=(x2, 0.5), xytext=(x1, 0.5), arrowprops=arrow_kw)
-
-# Connector: Model -> Compression (down and left)
-ax.annotate('', xy=(12, -0.1), xytext=(12, 0.15), arrowprops=dict(arrowstyle='-', color='#555555', lw=1.5))
-ax.plot([12, 3], [-0.1, -0.1], color='#555555', lw=1.5, zorder=1)
-ax.annotate('', xy=(3, -0.85), xytext=(3, -0.1), arrowprops=arrow_kw)
-
-# Row 2 arrows
-for x1, x2 in [(4, 5), (7, 8), (10, 11)]:
-    ax.annotate('', xy=(x2, -1.2), xytext=(x1, -1.2), arrowprops=arrow_kw)
-
-plt.show()
+ % Model
+ \node[Box,below right=0 and 1 of B4](B5){};
+\node[BoxD](BB5)at(B5.south){Model};
+\coordinate(S5)at($(B5.north)!0.5!(BB5.north)$);
+%AI
+\pic[shift={(0,0)}] at  (S5){llm={scalefac=0.6,picname=1,drawcolor=GreenD,
+filllcolor=GreenD!20!, Linewidth=0.7pt,filllcirclecolor=red}};
+%brain
+\pic[shift={(0.09,-0.13)}] at  (C1){brain={scalefac=0.6,picname=2,filllcolor=orange!30!,
+filllcirclecolor=cyan!55!black!60, Linewidth=0.5pt}};
+% Compression
+ \node[Box1,below left=0 and 1 of B5](B6){};
+\node[BoxD1](BB6)at(B6.south){Compression};
+\coordinate(S6)at($(B6.north)!0.5!(BB6.north)$);
+\pic[shift={(-0.32,-0.27)}] at  (S6){dataFolderS={scalefac=0.29,picname=1,Linewidth=0.5pt,
+ filllcolor=BrownLine,drawcolor=BrownLine,filllcirclecolor=RedLine}};
+% Compact Model
+ \node[Box,left=of B6](B7){};
+\node[BoxD](BB7)at(B7.south){Compact Model};
+\coordinate(S7)at($(B7.north)!0.5!(BB7.north)$);
+\pic[shift={(0,0)}] at  (S7){llm1={scalefac=0.38,drawcolor=black,filllcolor=orange!50!, Linewidth=1.0pt,filllcirclecolor=violet!70!}};
+% Hardware
+ \node[Box1, left=of B7](B8){};
+\node[BoxD1](BB8)at(B8.south){Hardware};
+\coordinate(S8)at($(B8.north)!0.5!(BB8.north)$);
+\pic[shift={(0,0)}] at  (S8){cpu={scalefac=0.35,picname=1,filllcolor=BlueLine, Linewidth=0.7pt}};
+% Deployed System
+ \node[Box, left=of B8](B9){};
+\node[BoxD](BB9)at(B9.south){Deployed System};
+\coordinate(S9)at($(B9.north)!0.5!(BB9.north)$);
+\pic[shift={(0,0.1)}] at  (S9){rocket={scalefac=0.6,picname=1,
+drawcolor=black,filllcolor=cyan!10!, Linewidth=0.75pt,filllcirclecolor=red}};
+%arrows
+\foreach \i in {1,2,3,6,7,8}{
+\pgfmathtruncatemacro{\x}{\i + 1} %
+\draw[LineA](B\i)--(B\x);
+}
+\draw[LineA](B4)-|(B5);
+\draw[LineA](B5)|-(B6);
+ \end{tikzpicture}
 ```
 
 :::
@@ -3005,17 +3808,14 @@ Three metrics form the core measurement toolkit for evaluating data selection ef
 #### Performance-Per-Data {.unnumbered}
 
 The most direct metric, Performance-Per-Data (PPD), measures accuracy gain per sample:
-
 $$
 \text{PPD}(n) = \frac{\text{Accuracy}(n) - \text{Accuracy}(0)}{n}
 $$
-
 where $n$ is the number of training samples. A higher PPD indicates more efficient use of data. The key insight is that PPD exhibits **diminishing returns**: the first 10,000 samples contribute far more to model performance than the next 10,000.
 
 #### Area Under the Learning Curve {.unnumbered}
 
 Rather than comparing at a single point, AULC integrates performance across all dataset sizes:
-
 $$
 \text{AULC} = \int_0^N \text{Accuracy}(n) \, dn
 $$
@@ -3025,7 +3825,6 @@ A data-efficient strategy has higher AULC because it achieves good accuracy fast
 #### Data Compression Ratio {.unnumbered}
 
 For coreset methods, the Data Compression Ratio (DCR) measures how much data reduction is achieved at a target accuracy:
-
 $$
 \text{DCR} = \frac{N_{\text{full}}}{N_{\text{coreset}}} \text{ at } \text{Accuracy}_{\text{target}}
 $$
@@ -3421,7 +4220,7 @@ The three-stage optimization pipeline addresses different phases of this cost eq
 
 The self-supervised learning paradigm represents a ceiling of data selection: by eliminating task-specific labels entirely, foundation models achieve 1,000$\times$ multipliers on downstream tasks through cost amortization. The structural transformation from "train from scratch" to "pre-train once, fine-tune many" has become the dominant approach in production ML precisely because of its superior data economics.
 
-Translating these techniques into production requires systems engineering: the Selection Inequality ($T_{selection} + T_{train}(subset) < T_{train}(full)$) gates every technique, proxy models and shard-based data loaders reconcile selection algorithms with storage hardware, and data echoing maximizes GPU utilization when pipelines become the bottleneck. The cost modeling framework (total data cost, ROI analysis, and break-even thresholds) provides the quantitative tools to evaluate which techniques merit investment for a given workload, while core metrics (PPD, AULC, DCR) and the compute-optimal frontier diagnostic help practitioners determine whether their training is data-starved or compute-starved.
+Translating these techniques into production requires systems engineering: the Selection Inequality ($T_{\text{selection}} + T_{\text{train}}(\text{subset}) < T_{\text{train}}(\text{full})$) gates every technique, proxy models and shard-based data loaders reconcile selection algorithms with storage hardware, and data echoing maximizes GPU utilization when pipelines become the bottleneck. The cost modeling framework (total data cost, ROI analysis, and break-even thresholds) provides the quantitative tools to evaluate which techniques merit investment for a given workload, while core metrics (PPD, AULC, DCR) and the compute-optimal frontier diagnostic help practitioners determine whether their training is data-starved or compute-starved.
 
 ::: {.callout-takeaways title="Curate, Do not Accumulate"}
 
@@ -3447,3 +4246,8 @@ With high-quality data in hand, we have optimized the source of the system. Even
 
 ::: { .quiz-end }
 :::
+
+```{python}
+#| echo: false
+#| label: chapter-end
+```
