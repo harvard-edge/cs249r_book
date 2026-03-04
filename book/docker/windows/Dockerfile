@@ -307,7 +307,7 @@ RUN Write-Host '=== FINAL VERIFICATION ===' ; `
         Write-Host "Checking $($tool.Name)..." ; `
         try { `
             $out = & $tool.Cmd $tool.Args 2>&1 | Select-Object -First 1 ; `
-            if ($LASTEXITCODE -ne 0) { throw "$($tool.Cmd) exited with $LASTEXITCODE" } ; `
+            if ($LASTEXITCODE -ne 0) { throw ('{0} exited with {1}' -f $tool.Cmd, $LASTEXITCODE) } ; `
             Write-Host "  $out" ; `
             Write-Host "✅ $($tool.Name) verified" ; `
         } catch { `
