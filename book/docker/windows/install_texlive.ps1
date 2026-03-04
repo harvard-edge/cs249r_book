@@ -56,11 +56,34 @@ if (-not $installed) {
 }
 
 Write-Host '🔍 Finding TeX Live bin directory...'
+Write-Host "  TexLiveRoot contents:"
+Get-ChildItem $TexLiveRoot -Directory | ForEach-Object { Write-Host "    $_" }
+
+# Strategy 1: look for a year-numbered directory (e.g. 2025)
 $texYearDir = Get-ChildItem $TexLiveRoot -Directory |
     Where-Object { $_.Name -match '^\d{4}$' } |
     Sort-Object Name -Descending |
     Select-Object -First 1
-$texLiveBin = Join-Path $texYearDir.FullName 'bin\windows'
+
+if ($texYearDir) {
+    $texLiveBin = Join-Path $texYearDir.FullName 'bin\windows'
+} else {
+    # Strategy 2: search recursively for tlmgr.bat
+    Write-Host '  ⚠️ No year directory found, searching recursively for tlmgr.bat...'
+    $tlmgr = Get-ChildItem $TexLiveRoot -Recurse -Filter 'tlmgr.bat' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($tlmgr) {
+        $texLiveBin = $tlmgr.DirectoryName
+    } else {
+        Write-Host '❌ Cannot find TeX Live bin directory'
+        exit 1
+    }
+}
+
+if (-not (Test-Path $texLiveBin)) {
+    Write-Host "❌ TeX Live bin directory does not exist: $texLiveBin"
+    exit 1
+}
 Write-Host "📁 TeX Live bin: $texLiveBin"
 
 [Environment]::SetEnvironmentVariable('PATH', ($texLiveBin + ';' + [Environment]::GetEnvironmentVariable('PATH', 'Machine')), 'Machine')
@@ -98,8 +121,19 @@ if (Test-Path 'C:\temp\tl_packages') {
 
 Write-Host '🔄 Updating tlmgr...'
 & "$texLiveBin\tlmgr.bat" update --self --all
-Write-Host '✅ tlmgr updated'
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '⚠️ tlmgr update returned non-zero, continuing...'
+} else {
+    Write-Host '✅ tlmgr updated'
+}
 
 Write-Host '🔍 Verifying lualatex installation...'
-& "$texLiveBin\lualatex.exe" --version
+$lualatexPath = Join-Path $texLiveBin 'lualatex.exe'
+if (-not (Test-Path $lualatexPath)) {
+    Write-Host "❌ lualatex.exe not found at: $lualatexPath"
+    Write-Host "  Contents of bin dir:"
+    Get-ChildItem $texLiveBin -ErrorAction SilentlyContinue | Select-Object -First 20 | ForEach-Object { Write-Host "    $_" }
+    exit 1
+}
+& $lualatexPath --version
 Write-Host '✅ TeX Live installation verified'
