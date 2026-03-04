@@ -1,7 +1,7 @@
 # escape=`
 # MLSysBook Windows Quarto Build Container (Windows Server 2022)
 # - PowerShell 7 via ZIP (no MSI)
-# - Quarto 1.9.27 via Scoop
+# - Quarto via Scoop (extras bucket)
 # - Python 3.13.1 + requirements
 # - Ghostscript + Inkscape (Chocolatey)
 # - TeX Live (latest by default; overridable via TEXLIVE_VERSION build arg) + packages from tl_packages
@@ -150,19 +150,11 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
     Write-Host '✅ Scoop installation completed!'
 
 # ------------------------------------------------------------
-# PHASE 6: Install Quarto (Main tool)
-# Scoop Extras has 1.8.27; we need 1.9.27, so install via direct download
+# PHASE 6: Install Quarto via Scoop (consistent PATH with other tools)
 # ------------------------------------------------------------
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
-    Write-Host 'Downloading Quarto 1.9.27 (not yet in Scoop Extras)...' ; `
-    $quartoZip = 'C:\temp\quarto-1.9.27-win.zip' ; `
-    Invoke-WebRequest -Uri 'https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-win.zip' -OutFile $quartoZip -UseBasicParsing ; `
-    Expand-Archive -Path $quartoZip -DestinationPath 'C:\' -Force ; `
-    $quartoBin = 'C:\quarto-1.9.27\bin' ; `
-    $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
-    [Environment]::SetEnvironmentVariable('PATH', ($quartoBin + ';' + $mach), 'Machine') ; `
-    $env:PATH = "$quartoBin;$env:PATH" ; `
-    Remove-Item $quartoZip -Force ; `
+    Write-Host 'Installing Quarto via Scoop (extras bucket)...' ; `
+    scoop install extras/quarto ; `
     Write-Host '📦 Quarto installed' ; `
     quarto --version ; `
     Write-Host '✅ Quarto installation completed!'
@@ -295,54 +287,39 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
 # FINAL CHECKS: Comprehensive verification with diagnostics
 # ------------------------------------------------------------
 WORKDIR C:/workspace
-RUN Write-Host '=== FINAL VERIFICATION WITH ENHANCED DIAGNOSTICS ===' ; `
-    Write-Host 'Verifying all installations with comprehensive checks...' ; `
-    Write-Host '' ; `
-    Write-Host '🔍 SYSTEM DIAGNOSTICS:' ; `
-    Write-Host '----------------------' ; `
+RUN Write-Host '=== FINAL VERIFICATION ===' ; `
     Write-Host 'PATH environment variable:' ; `
     Write-Host $env:PATH ; `
     Write-Host '' ; `
-    Write-Host 'Visual C++ Redistributable check:' ; `
-    Get-ChildItem 'C:\Windows\System32' -Filter 'msvcp*.dll' | Select-Object Name, Length, LastWriteTime ; `
-    Write-Host '' ; `
     Write-Host '📊 TOOL VERIFICATION:' ; `
     Write-Host '---------------------' ; `
-    Write-Host 'Checking Quarto...' ; `
-    try { `
-        quarto --version ; `
-        Write-Host '✅ Quarto version check: PASSED' ; `
-        Write-Host 'Running Quarto check for comprehensive validation...' ; `
-        & quarto check 2>&1 | Write-Host ; `
-        if ($LASTEXITCODE -eq 0) { `
-            Write-Host '✅ Quarto check: PASSED' ; `
-        } else { `
-            Write-Host '⚠️ Quarto check: ISSUES DETECTED' ; `
-            Write-Host "Exit code: $LASTEXITCODE" ; `
+    $failures = @() ; `
+    $tools = @( `
+        @{ Name = 'Quarto';      Cmd = 'quarto';       Args = '--version' }, `
+        @{ Name = 'Python';      Cmd = 'python';       Args = '--version' }, `
+        @{ Name = 'R';           Cmd = 'Rscript';      Args = '--version' }, `
+        @{ Name = 'LaTeX';       Cmd = 'lualatex';     Args = '--version' }, `
+        @{ Name = 'Ghostscript'; Cmd = 'gs';           Args = '--version' }, `
+        @{ Name = 'Inkscape';    Cmd = 'inkscape';     Args = '--version' }, `
+        @{ Name = 'rsvg-convert'; Cmd = 'rsvg-convert'; Args = '--version' } `
+    ) ; `
+    foreach ($tool in $tools) { `
+        Write-Host "Checking $($tool.Name)..." ; `
+        try { `
+            $out = & $tool.Cmd $tool.Args 2>&1 | Select-Object -First 1 ; `
+            if ($LASTEXITCODE -ne 0) { throw "$($tool.Cmd) exited with $LASTEXITCODE" } ; `
+            Write-Host "  $out" ; `
+            Write-Host "✅ $($tool.Name) verified" ; `
+        } catch { `
+            Write-Host "❌ $($tool.Name) FAILED: $($_.Exception.Message)" ; `
+            $failures += $tool.Name ; `
         } ; `
-    } catch { `
-        Write-Host '❌ Quarto verification failed:' ; `
-        Write-Host $_.Exception.Message ; `
     } ; `
-    Write-Host 'Checking Python...' ; `
-    python --version ; `
-    Write-Host '✅ Python verified' ; `
-    Write-Host 'Checking R...' ; `
-    R --version ; `
-    Write-Host '✅ R verified' ; `
-    Write-Host 'Checking LaTeX...' ; `
-    lualatex --version ; `
-    Write-Host '✅ LaTeX verified' ; `
-    Write-Host 'Checking Ghostscript...' ; `
-    gs --version ; `
-    Write-Host '✅ Ghostscript verified' ; `
-    Write-Host 'Checking Inkscape...' ; `
-    inkscape --version ; `
-    Write-Host '✅ Inkscape verified' ; `
-    Write-Host 'Checking rsvg-convert...' ; `
-    rsvg-convert --version ; `
-    Write-Host '✅ rsvg-convert verified' ; `
     Write-Host '' ; `
     Write-Host '🎯 FINAL STATUS:' ; `
     Write-Host '----------------' ; `
-    Write-Host '✅ Windows container build completed with enhanced diagnostics'
+    if ($failures.Count -gt 0) { `
+        Write-Host "❌ FAILED: $($failures -join ', ')" ; `
+        exit 1 ; `
+    } ; `
+    Write-Host '✅ All tools verified — container ready for builds'
