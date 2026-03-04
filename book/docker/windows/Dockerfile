@@ -351,20 +351,7 @@ RUN Write-Host '=== STARTING CLEANUP AND ENVIRONMENT SETUP ===' ; `
 # ENV directive here guarantees these paths are committed into the image and
 # visible to every subsequent RUN step and to containers at runtime.
 # ------------------------------------------------------------
-ENV PATH="C:\\Users\\ContainerAdministrator\\scoop\\shims;\
-C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current\\Scripts;\
-C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current;\
-C:\\Users\\ContainerAdministrator\\scoop\\apps\\ghostscript\\current\\bin;\
-C:\\Users\\ContainerAdministrator\\scoop\\apps\\r\\current\\bin;\
-C:\\Users\\ContainerAdministrator\\scoop\\apps\\git\\current\\cmd;\
-C:\\texlive\\bin\\windows;\
-C:\\Program Files\\PowerShell\\7;\
-C:\\ProgramData\\chocolatey\\bin;\
-C:\\Windows\\system32;\
-C:\\Windows;\
-C:\\Windows\\System32\\Wbem;\
-C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;\
-C:\\Windows\\System32\\OpenSSH\\"
+ENV PATH="C:\\Users\\ContainerAdministrator\\scoop\\shims;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current\\Scripts;C:\\Users\\ContainerAdministrator\\scoop\\apps\\python\\current;C:\\Users\\ContainerAdministrator\\scoop\\apps\\ghostscript\\current\\bin;C:\\Users\\ContainerAdministrator\\scoop\\apps\\r\\current\\bin;C:\\Users\\ContainerAdministrator\\scoop\\apps\\git\\current\\cmd;C:\\texlive\\bin\\windows;C:\\Program Files\\PowerShell\\7;C:\\ProgramData\\chocolatey\\bin;C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem;C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\;C:\\Windows\\System32\\OpenSSH\\"
 
 # ------------------------------------------------------------
 # FINAL CHECKS: Comprehensive verification with diagnostics
