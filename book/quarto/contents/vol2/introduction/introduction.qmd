@@ -381,79 +381,391 @@ These scale-induced challenges drive infrastructure investment by the largest AI
 
 [^fn-infiniband-rdma-v2]: **InfiniBand (IB)**: Born in 1999 from the merger of Intel's NGIO and the Compaq/IBM Future I/O initiatives, InfiniBand was originally designed to replace the PCI bus. Its defining feature for ML is RDMA (Remote Direct Memory Access), which bypasses the OS kernel to transfer data directly between application memory on different machines at sub-microsecond latency. HDR IB delivers `{python} InfiniBandScenario.ib_hdr_gbs` GB/s usable bandwidth per link; NDR reaches `{python} InfiniBandScenario.ib_ndr_gbs` GB/s. This bandwidth gap versus standard Ethernet (12--50 GB/s) determines whether large-model training is compute-bound or communication-bound. \index{InfiniBand!RDMA}
 
-## A Breed Apart: The ML Workload Character {#sec-vol2-introduction-breed-apart}
-
-Existing distributed systems like Apache Spark and standard web microservices cannot run the Machine Learning Fleet. The **workload characteristics** of ML systems differ fundamentally from traditional distributed systems, even though the underlying hardware (network, compute, storage) is identical.
-
 ## The Engineering Crux: A Hierarchy of Architecture {#sec-vol2-introduction-engineering-crux}
 
+::: {#sec-vol2-introduction-breed-apart}
+:::
+
 \index{Engineering Crux!hierarchy of scale}
-Building machine learning systems at fleet scale requires a reproducible hierarchy of components. We formalize this throughout Volume II as the **Engineering Crux**: a four-layer stack that transforms raw cluster resources into global-scale AI applications.
+Existing distributed systems like Apache Spark and standard web microservices cannot run the Machine Learning Fleet. The workload characteristics of ML systems differ fundamentally from traditional distributed systems, even though the underlying hardware (network, compute, storage) is identical. To understand why, we need a reproducible hierarchy of components. We formalize this throughout Volume II as the **Engineering Crux**: a four-layer stack that transforms raw cluster resources into global-scale AI applications.
 
 @fig-vol2-system-scaling-regimes visualizes the transition from single-node to fleet. Volume I covered the left side of this diagram: 1–8 accelerators connected by shared memory, where the binding constraint is the **Memory Wall**\index{Memory Wall}. This volume crosses the scaling arrow into the **Distributed Fleet** regime, where thousands of nodes coordinate across a high-speed switch fabric and the bottleneck shifts to the **Bisection Bandwidth Wall**\index{Bisection Bandwidth Wall}: network congestion and message-passing latency dominate.
 
 ::: {#fig-vol2-system-scaling-regimes fig-env="figure" fig-pos="htb" fig-cap="**The Scaling Regimes of ML Systems**: Machine learning engineering is partitioned into two distinct physical regimes. Single-node systems are limited by local memory bandwidth (**Memory Wall**), while distributed fleets are limited by network communication (**Bisection Bandwidth Wall**). Mastery of intra-node data movement is the prerequisite for distributed scaling." fig-alt="Diagram comparing Single-Node Stack (Application, ML Framework, System Software, Hardware) to Distributed Fleet Stack (Governance, Serving/Ops, Distribution, Infrastructure), separated by a scaling arrow."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\footnotesize, x=1cm, y=1.1cm]
-  \tikzset{
-    stack/.style={rectangle, rounded corners=2pt, draw, align=center, minimum width=3.5cm, minimum height=0.8cm, line width=0.8pt},
-    label/.style={font=\usefont{T1}{phv}{b}{n}\small, align=center},
-    sublabel/.style={font=\usefont{T1}{phv}{m}{n}\scriptsize, color=black!70, align=center},
-    bottleneck/.style={rectangle, rounded corners=2pt, draw, dashed, align=center, minimum width=3.5cm, minimum height=0.6cm, line width=0.6pt, fill=RedLine!5},
-    arrow/.style={-latex, line width=1.5pt, draw=GreenLine}
+\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
+\tikzset{
+Box/.style={align=center, inner xsep=2pt,draw=GreenLine, line width=0.5pt,
+node distance=8.5mm,fill=none, minimum width=27mm, minimum height=20mm},
+Box1/.style={Box,draw=OrangeLine,fill=none},
+Box2/.style={align=center, inner sep=0pt,draw=GreenLine, line width=0.5pt,
+anchor=south east,fill=none, minimum width=29mm, minimum height=6mm},
+BoxD/.style={Box,font=\small\usefont{T1}{phv}{b}{n},anchor=north,
+draw=red,dashed,text=black,fill=none, line width=1pt,
+minimum width=59mm,minimum height=9mm},
+BoxD1/.style={Box,font=\small\usefont{T1}{phv}{b}{n},align=center,
+draw=none,text=black,fill=black!007, line width=1pt,
+minimum width=59mm,minimum height=12mm},
+Circle1/.style={circle,  minimum size=33mm, draw=none, fill=BrownLine!20},
+LineD/.style={BrownLine!60!black!20,line width=4.0pt,dashed,dash pattern=on 5pt off 2pt,
+{-{Triangle[width=1.5*6pt,length=2.0*5pt]}},shorten <=5pt,shorten >=1pt},
+LineA/.style={GreenLine!90,line width=7.0pt,font=\usefont{T1}{phv}{b}{n}\small,
+{-{Triangle[width=1.5*8pt,length=2.0*5pt]}},shorten <=7pt,shorten >=8pt},
+ALineA/.style={black!60,{Circle[line width=1.0pt,fill=white,round,length=5pt,width=5pt]}-,
+line width=1.0pt,shorten <=-3pt,shorten >=-1pt},
+Text1/.style={font=\usefont{T1}{phv}{m}{n}\footnotesize,text=black!70}
+}
+
+%CPU
+\tikzset{%
+ pics/cpu/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=FUNNEL,scale=\scalefac, every node/.append style={transform shape}]
+\node[fill=\filllcolor,minimum width=66, minimum height=66,
+            rounded corners=2,outer sep=2pt] (C1) {};
+\node[fill=white,minimum width=54, minimum height=54] (C2) {};
+\node[fill=\filllcolor!40,minimum width=44, minimum height=44] (C3) {\large GPU};
+
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
+           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
+}
+\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
+           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
+}
+ \end{scope}
+     }
   }
+}
 
-  % Single Node Stack
-  \node[label] at (0, 4.5) {Single-Node Stack};
-  \node[sublabel] at (0, 4.1) {1--8 GPUs, Shared Memory};
+%Token style
+\tikzset{
+pics/token/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[draw=\drawcolor,fill=\filllcirclecolor,circle,minimum size=40mm,
+line width=\Linewidth](T-\picname){};
+\node[draw=white,fill=none,circle,minimum size=0.925*40mm,line width=0.6*\Linewidth]{};
+\clip[] circle (0.925*20mm);
+\draw[step=5mm,draw=white] (-2,-2) grid (2,2);
+\foreach \x/\y[count=\a] in {0/0,1.3/0,1/1,-0.5/1.5,-1.5/0.5,-1.0/-0.9,0.5/-1.3,2.0/0}{
+\fill[fill=white,draw=none](\x,0.8*\y)circle(5pt)coordinate(C\a);
+}
+\draw[white,line width=\Linewidth,fill opacity=0.5,fill=\filllcolor!40](C2)--(C3)--(C4)--(C5)--(C6)--(C7)--cycle;
+\foreach \x in {2,...,7}{
+\draw[white,line width=\Linewidth](C1)--(C\x);
+}
+\foreach \x/\y\col[count=\a] in {0/0/red,1.3/0/green,1/1/blue,-0.5/1.5/violet,
+-1.5/0.5/magenta,-1.0/-0.9/brown,0.5/-1.3/yellow}{
+\fill[fill=\col,draw=none](\x,0.8*\y)circle(5pt)coordinate(C\a);
+}
+\end{scope}
+    }
+  }
+}
+%display
+\tikzset{%
+    comp/.style = {draw,
+        minimum width  =18mm,
+        minimum height = 15mm,
+        inner sep      = 0pt,
+        rounded corners,
+       draw = \drawcolor,
+       fill=\filllcolor!10,
+       line width=2.0pt
+    },
+ pics/displayG/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+ \node[comp](\picname-COM){};
+% \draw[draw = \drawcolor,line width=1.0pt]
+% ($(\picname-COM.north west)!0.85!(\picname-COM.south west)$)-- ($(\picname-COM.north east)!0.85!(\picname-COM.south east)$);
+\draw[draw = \drawcolor,line width=\Linewidth]($(\picname-COM.south west)!0.4!(\picname-COM.south east)$)--++(270:0.2)coordinate(DL);
+\draw[draw = \drawcolor,line width=\Linewidth]($(\picname-COM.south west)!0.6!(\picname-COM.south east)$)--++(270:0.2)coordinate(DD);
+\draw[draw = \drawcolor,line width=3*\Linewidth,shorten <=-3mm,shorten >=-3mm](DL)--(DD);
+\end{scope}
+   }
+  }
+}
 
-  \node[stack, fill=RedLine!15, draw=RedLine] (app1) at (0, 3.2) {Application};
-  \node[sublabel] at (0, 3.2) {\\[0.4em]Training Loop / Inference};
+%gear
+% #1 number of teeths
+% #2 radius intern
+% #3 radius extern
+% #4 angle from start to end of the first arc
+% #5 angle to decale the second arc from the first
+% #6 inner radius to cut off
+\tikzset{
+  pics/gear/.style args={#1/#2/#3/#4/#5/#6/#7}{
+   code={
+           \pgfkeys{/channel/.cd, #7}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+    \pgfmathtruncatemacro{\N}{#1}%
+    \def\rin{#2}\def\rout{#3}\def\aA{#4}\def\aOff{#5}\def\rcut{#6}%
+    \path[rounded corners=1.5pt,draw=\drawcolor,fill=\filllcolor]
+      (0:\rin)
+      \foreach \i [evaluate=\i as \n using (\i-1)*360/\N] in {1,...,\N}{%
+        arc (\n:\n+\aA:\rin)
+        -- (\n+\aA+\aOff:\rout)
+        arc (\n+\aA+\aOff:\n+360/\N-\aOff:\rout)
+        -- (\n+360/\N:\rin)
+      } -- cycle;
+      \draw[draw=none,fill=white](0,0) circle[radius=\rcut];
+\end{scope}
+  }}
+}
+%Infinity_loops
+\tikzset{%
+  radius=2, start angle=-90, line cap=round,
+  arr node/.style={sloped, allow upside down, single arrow,
+    single arrow head extend=+2mm, thick, minimum height=+9mm, fill=white},
+  arr/.style ={  edge node={node[arr node, pos={#1}]{}}},
+  arr'/.style={insert path={node[arr node, pos={#1}]{}}},
+ pics/infinityL/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=LOOPS,scale=\scalefac, every node/.append style={transform shape}]
+\draw[line width=+2.5mm, sloped, text=white,draw=\drawcolor]
+  (0, 2) edge[preaction={line cap=butt, line width=+5mm, draw=white, overlay},draw=\filllcirclecolor,
+              out=0, in=180, arr=.2, arr=.8] (6, -2)
+  (6, -2) arc[delta angle= 180]
+    [arr'=.5,draw=\filllcolor] node[very near start]{} node[very near end]{}
+  to[out=180, in=0, arr=.2, arr=.8] (0, -2) arc[delta angle=-180,]
+    [arr'=.5,draw=\filllcolor] node[very near start]{} node[very near end]{};
 
-  \node[stack, fill=OrangeLine!15, draw=OrangeLine] (fw1) at (0, 2.2) {ML Framework};
-  \node[sublabel] at (0, 2.2) {\\[0.4em]PyTorch / JAX / Kernels};
+ \end{scope}
+     }
+  }
+}
 
-  \node[stack, fill=GreenLine!15, draw=GreenLine] (os1) at (0, 1.2) {System Software};
-  \node[sublabel] at (0, 1.2) {\\[0.4em]CUDA Runtime / PCIe DMA};
+%server
+\tikzset {
+  pics/server/.style = {
+    code = {
+     % \colorlet{red}{black}
+\pgfkeys{/channel/.cd, #1}
+      \begin{scope}[anchor=center, transform shape,scale=\scalefac, every node/.append style={transform shape}]
+        \draw[draw=\drawcolor,line width=\Linewidth,fill=\filllcolor](-0.55,-0.5) rectangle (0.55,0.5);
+\foreach \i in {-0.25,0,0.25} {
+                \draw[line width=\Linewidth]( -0.55,\i) -- (0.55, \i);
+}
+        \foreach \i in {-0.375, -0.125, 0.125, 0.375} {
+          \draw[line width=\Linewidth](-0.45,\i)--(0,\i);
+          \fill[](0.35,\i) circle (1.5pt);
+        }
 
-  \node[stack, fill=BlueLine!15, draw=BlueLine] (hw1) at (0, 0.2) {Hardware};
-  \node[sublabel] at (0, 0.2) {\\[0.4em]HBM / NVLink (900 GB/s)};
+        \draw[draw=\drawcolor,line width=1.5*\Linewidth](0,-0.53) |- (-0.55,-0.7);
+        \draw[draw=\drawcolor,line width=1.5*\Linewidth](0,-0.53) |- (0.55,-0.7);
+      \end{scope}
+    }
+  }
+}
+\tikzset{
+pics/llm/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[circle,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth](C\picname) at (0,0){};
+\def\startangle{90}
+\def\radius{1.15}
+\def\radiusI{1.1}
+\foreach \i [evaluate=\i as \j using \i+1] [count =\k] in {0,2,4,6,8} {
+\pgfmathsetmacro{\angle}{\startangle - \i * (360/8)}
+\draw[draw=black,-{Circle[black ,fill=\filllcirclecolor,length=5.5pt,line width=0.5*\Linewidth]},line width=1.5*\Linewidth](C\picname)--++(\startangle - \i*45:\radius) ;
+\node[circle,draw=black,fill=\filllcirclecolor!80!red!50,inner sep=3pt,line width=0.5*\Linewidth](2C\k)at(\startangle - \j*45:\radiusI) {};
+}
+\draw[line width=1.5*\Linewidth](2C1)--++(-0.5,0)|-(2C2);
+\draw[line width=1.5*\Linewidth](2C3)--++(0.5,0)|-(2C4);
+\node[circle,,minimum size=12mm,draw=\drawcolor, fill=\filllcolor!70,line width=0.5*\Linewidth]at (0,0){};
+\node[draw,rectangle,rounded corners=1pt,minimum width=7mm,minimum height=4mm,fill=orange!10](R1)at(0.1,0.1){};
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R1.north west)!0.35!(R1.south west)$)--($(R1.north east)!0.35!(R1.south east)$);
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R1.north west)!0.7!(R1.south west)$)--($(R1.north east)!0.7!(R1.south east)$);
+\node[draw,rectangle,rounded corners=1pt,minimum width=6mm,minimum height=4mm,fill=orange!10](R2)at(-0.05,-0.15){};
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R2.north west)!0.35!(R2.south west)$)--($(R2.north east)!0.35!(R2.south east)$);
+\draw[BrownLine,shorten <=2pt,shorten >=2pt ]($(R2.north west)!0.7!(R2.south west)$)--($(R2.north east)!0.7!(R2.south east)$);
+\end{scope}
+    }
+  }
+}
+\def\inset{3.2pt} %
+\def\myshape{%
+  (0,1.34) to[out=220,in=0] (-1.20,1.03) --
+  (-1.20,-0.23) to[out=280,in=160] (0,-1.53) to[out=20,in=260] (1.20,-0.23) --
+  (1.20,1.03)  to[out=180,in=320] cycle
+}
+\tikzset{
+pics/stitC/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+%\draw[draw=none,fill=\filllcolor!60](0,1.34)to[out=220,in=0](-1.20,1.03)to(-1.20,-0.23)
+%to[out=280,in=160](0,-1.53)to[out=20,in=260](C1)to(1.20,1.03)to[out=180,in=320]cycle;
+\fill[fill=\filllcolor!60] \myshape;
+%
+\begin{scope}
+  \clip \myshape;
+  \draw[draw=\filllcolor, line width=2*\Linewidth,fill=white] \myshape; % boja i debljina po želji
+\end{scope}
+%\fill[fill=\filllcolor!60](0,0)circle(0.4);
+\draw[draw=\filllcirclecolor,line join=round,line cap=round,line width=1.85*\Linewidth](-0.65,-0.35)--++(320:0.5)--++(50:1.4);
+\end{scope}
+    }
+  }
+}
+%code
+\tikzset{
+pics/interpreter/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\node[black,font=\Large\bfseries]at(-0.75,0.65){\textless\,/\,\textgreater};
+\draw[line cap=round,line join=round,green!99!black!90,line width=\Linewidth](-1.32,0.17)--(-1.05,0.17);
+\draw[line cap=round,line join=round,red,line width=\Linewidth](-0.8,0.17)--(-0.1,0.17);
+\draw[line cap=round,line join=round,green!99!black!90,line width=\Linewidth](-1.15,-0.15)--(-0.45,-0.15);
+\draw[line cap=round,line join=round,green!99!black!90,line width=\Linewidth](-1.15,-0.47)--(-0.75,-0.47);
+\draw[line cap=round,line join=round,red,line width=\Linewidth](-0.45,-0.47)--(0.45,-0.47);
+\draw[line cap=round,line join=round,cyan,line width=\Linewidth](0.75,-0.47)--(1.1,-0.47);
+\draw[line cap=round,line join=round,green!99!black!90,line width=\Linewidth](-1.15,-0.79)--(-1,-0.79);
+\draw[line cap=round,line join=round,red,line width=\Linewidth](-0.65,-0.79)--(-0.10,-0.79);
+\draw[line cap=round,line join=round,cyan,line width=\Linewidth](0.2,-0.79)--(1.1,-0.79);
+\draw[line cap=round,line join=round,green!99!black!90,line width=\Linewidth](-1.15,-1.11)--(-0.4,-1.11);
+\draw[line cap=round,line join=round,blue!99!black!90,line width=\Linewidth](-0.15,-1.11)--(1.1,-1.11);
+\end{scope}
+    }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  tiecolor/.store in=\tiecolor,
+  bodycolor/.store in=\bodycolor,
+  stetcolor/.store in=\stetcolor,
+  tiecolor=red,      % derfault tie color
+  bodycolor=blue!30,  % derfault body color
+  stetcolor=green,  % derfault stet color
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=0.2,
+  Height=0.5,
+  Width=0.25,
+  picname=C
+}
 
-  \node[bottleneck, draw=RedLine] (bn1) at (0, -0.8) {\textbf{Bottleneck: Memory Wall}};
 
-  % Scaling Arrow
-  \draw[arrow] (2, 1.7) -- (3, 1.7) node[midway, above, color=GreenLine, font=\usefont{T1}{phv}{b}{n}] {Scaling};
-
-  % Distributed Fleet Stack
-  \node[label] at (5, 4.5) {Distributed Fleet Stack};
-  \node[sublabel] at (5, 4.1) {1,000--100,000+ GPUs};
-
-  \node[stack, fill=VioletLine!15, draw=VioletLine] (app2) at (5, 3.2) {Governance};
-  \node[sublabel] at (5, 3.2) {\\[0.4em]Responsible AI / Security};
-
-  \node[stack, fill=OrangeLine!15, draw=OrangeLine] (fw2) at (5, 2.2) {Serving / Ops};
-  \node[sublabel] at (5, 2.2) {\\[0.4em]Orchestration / CI/CD};
-
-  \node[stack, fill=GreenLine!15, draw=GreenLine] (os2) at (5, 1.2) {Distribution};
-  \node[sublabel] at (5, 1.2) {\\[0.4em]NCCL / RDMA / Comms};
-
-  \node[stack, fill=BlueLine!15, draw=BlueLine] (hw2) at (5, 0.2) {Infrastructure};
-  \node[sublabel] at (5, 0.2) {\\[0.4em]InfiniBand / Ethernet Fabric};
-
-  \node[bottleneck, draw=RedLine] (bn2) at (5, -0.8) {\textbf{Bottleneck: Network Wall}};
-
+% Application
+\node[Box1,draw=none](B1){};
+\node[above=-1pt of B1.north,Text1]{Training Loop / inference};
+\node[Box2,draw=OrangeLine](BB1)at($(B1.south west)+(-3mm,0)$){Application};
+\draw[ALineA](B1.west)--(BB1.north);
+\pic[shift={(0,0.08)}] at  (B1){displayG={scalefac=0.95,picname=DD,
+filllcolor=brown!60!, drawcolor=BrownLine,Linewidth=0.7pt}};
+%\pic[shift={(-0.20,0.23)}] at (D-COM) {gear={11/1.25/1.7/11/2.0/0.6/scalefac=0.26,drawcolor=black,filllcolor=OrangeLine!90}};
+\pic[shift={(0.47,0.32)}] at (DD-COM) {gear={10/1.3/1.8/17/1/0.6/scalefac=0.18,drawcolor=RedLine,filllcolor=RedLine}};
+\pic[shift={(0.05,0.05)}] at  (DD-COM){interpreter={scalefac=0.5,picname=1,filllcolor=cyan!30!, Linewidth=2.0pt,filllcirclecolor=orange}};
+%ML Framework
+\node[Box1,draw=none,below=of B1](B2){};
+\node[above=-1pt of B2.north,Text1]{PyTorch / JAX / Kernels};
+\node[Box2,draw=GreenLine](BB2)at($(B2.south west)+(-3mm,0)$){ML Framework};
+\draw[ALineA](B2.west)--(BB2.north);
+\pic[shift={(0,0)}] at  (B2){token={scalefac=0.43,picname=2,drawcolor=green!55!black,
+filllcirclecolor=green!55!black!90,filllcolor=green!55!black,Linewidth=1.25pt}};
+%System Software
+\node[Box1,draw=none,below=of B2](B3){};
+\node[above=-1pt of B3.north,Text1]{CUDA / PCIe DMA};
+\node[Box2,draw=VioletLine](BB3)at($(B3.south west)+(-3mm,0)$){System Software};
+\draw[ALineA](B3.west)--(BB3.north);
+\pic[shift={(0,0.1)}] at  (B3){displayG={scalefac=0.98,picname=D,
+filllcolor=BlueLine, drawcolor=BlueLine,Linewidth=0.7pt}};
+\pic[shift={(-0.20,0.23)}] at (D-COM) {gear={11/1.25/1.7/11/2.0/0.6/
+scalefac=0.26,drawcolor=black,filllcolor=OrangeLine!90}};
+\pic[shift={(0.2,-0.3)}] at (D-COM) {gear={10/1.3/1.8/17/1/0.6/
+scalefac=0.2,drawcolor=black,filllcolor=OrangeLine!60}};
+%Hardware
+\node[Box1,draw=none,below=of B3](B4){};
+\node[above=-1pt of B4.north,Text1]{HBM / NVLink (900 GB/s)};
+\node[Box2,draw=RedLine](BB4)at($(B4.south west)+(-3mm,0)$){Hardware};
+\draw[ALineA](B4.west)--(BB4.north);
+\pic[shift={(0,0)}] at  (B4){cpu={scalefac=0.49,picname=1,filllcolor=GreenLine, Linewidth=0.7pt}};
+%%%%%%%%%%%%%%%
+% Governance
+%%%%%%%%%%%%%%%
+\node[Box1,right=3.2 of B1,draw=none](B1B){};
+\node[above=-1pt of B1B.north,Text1]{Responsible AI / Security};
+\node[Box2,draw=OrangeLine,anchor=south west](BB1B)at($(B1B.south east)+(3mm,0)$){Governance};
+\draw[ALineA](B1B.east)--(BB1B.north);
+\pic[shift={(0,0.05)}] at  (B1B){stitC={scalefac=0.63,picname=1,drawcolor=orange,
+filllcolor=purple,filllcirclecolor=GreenLine,Linewidth=3.1pt}};
+%Serving / Ops
+\node[Box1,draw=none,below=of B1B](B2B){};
+\node[above=-1pt of B2B.north,Text1]{Orchestration / CI/CD};
+\node[Box2,draw=GreenLine,anchor=south west](BB2B)at($(B2B.south east)+(3mm,0)$){Serving / Ops};
+\draw[ALineA](B2B.east)--(BB2B.north);
+\pic[shift={(-0.6,0)}] at  (B2B){infinityL={scalefac=0.2,picname=1,Linewidth=1.0pt,
+ filllcolor=BlueLine,filllcirclecolor=red,drawcolor=GreenLine}};
+%Distribution
+\node[Box1,draw=none,below=of B2B](B3B){};
+\node[above=-1pt of B3B.north,Text1]{NCCL / RDMA / Comms};
+\node[Box2,draw=VioletLine,anchor=south west](BB3B)at($(B3B.south east)+(3mm,0)$){Distribution};
+\draw[ALineA](B3B.east)--(BB3B.north);
+\pic[shift={(0,0)}] at  (B3B){llm={scalefac=0.78,drawcolor=BlueLine,filllcolor=BlueLine!50!, Linewidth=1pt,filllcirclecolor=red}};
+%Infrastructure
+\node[Box1,draw=none,below=of B3B](B4B){};
+\node[above=-1pt of B4B.north,Text1]{Fabric / RDMA (InfiniBand)};
+\node[Box2,draw=RedLine,anchor=south west](BB4B)at($(B4B.south east)+(3mm,0)$){Infrastructure};
+\draw[ALineA](B4B.east)--(BB4B.north);
+\pic[shift={(0,0.1)}] at  (B4B){server={scalefac=1.2,picname=1,
+drawcolor=black,filllcolor=cyan!15!,Linewidth=0.57pt,Linewidth=1pt}};
+%fitting
+\node[draw=none,fit=(B1)(B4)(BB4)](F1){};
+\node[draw=none,fit=(B1B)(B4B)(BB4B)](F2){};
+\draw[LineA](F1)--node[above]{Scaling}(F2);
+%
+\node[BoxD,below=10pt of F1]{Bottleneck: Memory Wall};
+\node[BoxD,below=10pt of F2]{Bottleneck: Network Wall};
+%
+\node[BoxD1,above=20pt of F1]{Single-Node Stack \\
+{\small\usefont{T1}{phv}{m}{n} 1--8 GPUs, Shared Memory}};
+\node[BoxD1,above=20pt of F2]{Distributed Fleet Stack \\
+{\small\usefont{T1}{phv}{m}{n} 1,000--100,000+ GPUs}};
 \end{tikzpicture}
 ```
 
 :::
 
-The architecture does not change when we scale: every ML system still has Hardware, a System envelope, a Workload, and a Mission. What changes is the physics at each layer. At the Hardware layer, local HBM and NVLink (900 GB/s within a node) give way to InfiniBand fabrics (400 Gb/s per link across racks). At the System layer, a single CUDA runtime is replaced by distributed communication libraries (NCCL, RDMA) coordinating thousands of processes. At the Workload layer, a training loop that fits in one process becomes a distributed job requiring gradient synchronization after every batch. At the Mission layer, new concerns emerge that do not exist on a single node: responsible AI governance, fleet-wide orchestration, and multi-tenant scheduling. The four layers of the Engineering Crux at fleet scale are:
+The stack architecture in @fig-vol2-system-scaling-regimes does not change when we scale: every ML system still has Hardware, a System envelope, a Workload, and a Mission. What changes is the physics at each layer. Read the figure from bottom to top. At the bottom row, **Hardware** (HBM and NVLink at 900 GB/s within one node) becomes **Infrastructure** (InfiniBand RDMA fabric spanning racks at 400 Gb/s per link), and the bottleneck shifts from the Memory Wall to the Bisection Bandwidth Wall. One row up, **System Software** (a single CUDA runtime managing PCIe DMA) becomes **Distribution** (NCCL and RDMA libraries coordinating thousands of processes across the fabric).
 
-1.  **Hardware (The Silicon)**: The physical foundation (The Engine). This layer defines the raw capabilities of individual nodes ($R_{peak}$, $\text{BW}$). Our primary "Hardware Twins" are the **NVIDIA H100** and **B200**.
-2.  **Systems (The Platforms)**: The integrated deployment unit (The Car). This layer defines the cluster "Envelope": bisection bandwidth, power usage effectiveness (PUE), and failure rates (MTBF). Examples include the **H100 Training Cluster**.
-3.  **Workloads (The Models)**: The algorithmic demand (The Route). This layer defines the mathematical workload sharded across the cluster ($O$, $D_{vol}$, $CI$). We use **Lighthouse Workloads** like **GPT-4** and **DLRM**.
-4.  **Missions (The Scenarios)**: The global application context (The Destination). This is the top of the stack, where a fleet is deployed to solve a mission-critical problem. A **Mission** (such as **Frontier Model Training**) introduces high-level requirements (e.g., "99.99% service availability") that dictate the configuration of every layer below.
+The upper two layers undergo an equally profound transformation. **ML Framework** (PyTorch or JAX executing a training loop on one node) becomes **Serving / Ops** (orchestration and CI/CD pipelines that schedule distributed jobs and manage rolling deployments). At the top, **Application** (a single training script or inference service) becomes **Governance** (responsible AI policy, security auditing, and multi-tenant access control), because fleet-scale deployment introduces organizational concerns absent from a single machine. The four layers of the Engineering Crux at fleet scale are:
+
+1.  **Infrastructure** (Hardware — The Engine): The physical foundation. This layer defines the fleet's raw capabilities: per-node $R_{\text{peak}}$ and $\text{BW}$, interconnected by InfiniBand RDMA fabric. Our primary "Hardware Twins" are the **NVIDIA H100** and **B200**.
+2.  **Distribution** (Systems — The Car): The communication substrate. This layer defines the cluster envelope: NCCL and RDMA collectives that coordinate thousands of accelerators, along with bisection bandwidth, power usage effectiveness (PUE), and failure rates (MTBF).
+3.  **Serving / Ops** (Workloads — The Route): The orchestration layer. This layer manages the mathematical workload sharded across the cluster ($O$, $D_{\text{vol}}$, $CI$) through CI/CD pipelines and scheduling. We use **Lighthouse Workloads** like **GPT-4** and **DLRM**.
+4.  **Governance** (Missions — The Destination): The mission context. This is the top of the stack, where responsible AI policy, security, and multi-tenant access control shape fleet-wide behavior. A **Mission** (such as **Frontier Model Training**) introduces high-level requirements (e.g., "99.99% service availability") that dictate the configuration of every layer below.
 
 This hierarchy ensures that every distributed engineering decision is grounded in its "Mission Context." For example, the **Frontier Training** mission inherits the **Cloud Archetype**, uses the **GPT-4** model, and operates on a cluster of **H100** hardware. By standardizing these protagonists, we ensure that the "Physics of Scale" remains traceable across every chapter.
 
