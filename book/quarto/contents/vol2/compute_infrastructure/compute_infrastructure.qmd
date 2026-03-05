@@ -924,7 +924,7 @@ A team is serving a 13B-parameter model at batch size 1 on an H100 and observing
 
 The Roofline Model tells us *whether* a workload can reach peak compute. The next question is what determines that peak in the first place. The answer lies in the specialized arithmetic units that occupy the majority of a modern accelerator's die area: **Tensor Cores**[^fn-tensor-core-evolution] on NVIDIA GPUs and **Matrix Multiply Units (MXUs)** on Google TPUs.
 
-[^fn-tensor-core-evolution]: **Tensor Core**: Introduced with NVIDIA Volta (2017) as $4\times4$$\times$4 FP16 fused matrix-multiply-accumulate units. Each generation widened the tile: Turing (2018) added INT8, Ampere (2020) added TF32/BF16, and Hopper (2022) reached $16\times16$$\times$16 with FP8 support. This precision cascade tracks ML's own shift toward lower-precision training and inference -- each new format unlocks a 2$\times$ throughput gain on the same silicon, making Tensor Core generations a proxy for how quickly the hardware-software co-design loop can widen the Roofline's compute ceiling. \index{Tensor Core!evolution}
+[^fn-tensor-core-evolution]: **Tensor Core**: Introduced with NVIDIA Volta (2017) as $4\times4\times4$ FP16 fused matrix-multiply-accumulate units. Each generation widened the tile: Turing (2018) added INT8, Ampere (2020) added TF32/BF16, and Hopper (2022) reached $16\times16\times16$ with FP8 support. This precision cascade tracks ML's own shift toward lower-precision training and inference---each new format unlocks a $2\times$ throughput gain on the same silicon, making Tensor Core generations a proxy for how quickly the hardware-software co-design loop can widen the Roofline's compute ceiling. \index{Tensor Core!evolution}
 
 A standard CPU floating-point unit performs one multiply-accumulate per cycle per lane. Even with wide SIMD units (AVX-512 provides 16 FP32 lanes), a CPU core performs at most 16 MACs per cycle. With 32 cores, a high-end server CPU achieves approximately 512 MACs per cycle, a respectable number for general-purpose computation but wholly inadequate for the demands of matrix multiplication at neural network scale.
 
@@ -1019,22 +1019,7 @@ The Memory Wall constrains how fast data reaches the compute units; the Roofline
 
 Every floating-point operation dissipates energy as heat. A Tensor Core performing 4,096 MACs per cycle at 2 GHz generates heat proportional to the switching activity of billions of transistors. The **Thermal Design Power (TDP)**[^fn-tdp-thermal] of an accelerator is the maximum sustained heat dissipation that the cooling system must handle, and it has become the single most consequential specification in fleet design.
 
-::: {#nte-thermodynamic-limit .callout-principle icon=false title="The Thermodynamic Limit"}
-
-**The Invariant**: Computation is physically the conversion of ordered energy (electricity) into disordered energy (heat) to produce information (reduced entropy).
-$$ P_{limit} = \frac{\Delta Q}{\Delta t} $$
-
-**The Implication**: The bottleneck of the modern AI datacenter is not FLOPS, but **Watts per square foot**. When a rack generates 100kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon.
-
-:::
-
-::: {#nte-power-density-wall .callout-principle icon=false title="The Power Density Wall"}
-
-**The Invariant**: Cluster scaling is constrained by thermal dissipation limits (Watts per rack) and cooling capacity, not just silicon area or floor space.
-
-**The Implication**: Modern AI accelerators generate heat densities that exceed air cooling capabilities. **Liquid cooling** becomes a facility requirement, not an option, for large-scale training clusters.
-
-:::
+This is the Thermodynamic Limit (Principle \ref{nte-thermodynamic-limit}) in action: the bottleneck of the modern AI datacenter is not FLOPS, but Watts per square foot. When a rack generates 100 kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon. The closely related Power Density Wall (Principle \ref{nte-power-density-wall}) makes the consequence concrete: liquid cooling becomes a facility requirement, not an option, for large-scale training clusters.
 
 [^fn-tdp-thermal]: **TDP (Thermal Design Power)**: Often misunderstood as "power consumption," TDP specifies the maximum sustained thermal load (in watts) that the cooling solution must remove. Accelerators routinely exceed their TDP during transient power spikes -- an H100 can spike to 900 W during a large GEMM before firmware throttles back to 700 W -- which forces rack-level VRM and cooling designs to provision for worst-case, not average, power draw. \index{TDP!thermal constraint}
 
@@ -1183,7 +1168,7 @@ The implications of TDP for fleet design are profound and will recur throughout 
 
 \index{Accelerator!selection}
 
-The preceding sections have established the physical characteristics of accelerators: compute throughput, memory bandwidth, memory capacity, power consumption, and the trade-offs between generality and efficiency. How do these characteristics map to the workloads that a fleet must support? The answer depends on the workload's position on the Roofline plot and its specific resource requirements.
+An accelerator's compute throughput, memory bandwidth, memory capacity, and power consumption are meaningful only in relation to a specific workload. The same H100 that delivers near-peak utilization during large-batch training may achieve less than 5% utilization during single-request inference, because the binding constraint shifts from arithmetic to memory bandwidth. Selecting the right accelerator therefore requires mapping each workload archetype to its position on the Roofline plot and identifying which physical resource dominates its performance.
 
 Large language model training -- our `{python} InfraSetup.frontier_params_b`B running example -- is typically compute-bound during the forward and backward passes because large batch sizes push the arithmetic intensity above the ridge point. The dominant hardware requirement is peak TFLOPS, with memory capacity being a constraint that determines the minimum number of accelerators needed to hold the model state. The H100 and B200 are well-suited for this workload, as are TPU v5p pods for organizations willing to accept the XLA compilation requirement. The choice between GPU and TPU often comes down to software ecosystem compatibility: PyTorch-native research teams prefer GPUs, while JAX-based teams can take advantage of TPU's cost efficiency.
 
@@ -1326,7 +1311,7 @@ The inference workload itself bifurcates into two distinct phases with opposing 
 
 #### The Accelerator Decision Matrix
 
-The preceding sections have established the physical characteristics, analytical tools, and workload-specific considerations that govern accelerator selection. Synthesizing these into a practical decision framework requires mapping each workload archetype (@sec-vol2-introduction-archetypes) to the hardware characteristic that dominates its performance and cost.
+A practical decision framework synthesizes these workload-specific characteristics by mapping each archetype (@sec-vol2-introduction-archetypes) to the hardware resource that dominates its performance and cost.
 
 | **Workload**                    | **Binding Constraint**       | **Key Metric**         | **Recommended Class**     |
 |:--------------------------------|:-----------------------------|:-----------------------|:--------------------------|
@@ -1650,7 +1635,7 @@ For our `{python} InfraSetup.frontier_params_b`B model training across 128 nodes
 
 ### Node Memory Partitioning {#sec-compute-node-memory}
 
-Understanding how a large model's memory footprint maps onto a node's physical resources is essential for capacity planning. The memory required to train a model far exceeds the weight storage, and different components of the training state reside in different tiers of the node's memory hierarchy.
+A common misconception is that a model's memory footprint equals its weight storage. In practice, training state dwarfs the weights: Adam optimizer moments, gradients, and activations collectively consume 5--7$\times$ more memory than the parameters alone, and these components reside in different tiers of the node's memory hierarchy.
 
 As @tbl-memory-breakdown shows, for our `{python} InfraSetup.frontier_params_b`B model, the training memory breaks down as follows:
 
@@ -2265,14 +2250,7 @@ A pod optimized for Transformer training, where the dominant communication patte
 
 Both specialized designs outperform a general-purpose topology for their target workload, illustrating the same generality-efficiency trade-off we observed at the accelerator level. The Generality Tax applies not only to silicon but to every layer of the infrastructure stack: network topologies, cooling systems, and even building designs become more efficient when optimized for a known workload pattern.
 
-::: {#nte-generality-tax .callout-principle icon=false title="The Generality Tax"}
-
-**The Invariant**: Hardware efficiency is inversely proportional to programmability. A general-purpose processor pays an area and power overhead for flexibility that a domain-specific accelerator avoids.
-$$ \eta_{specific} \gg \eta_{general} \quad \text{for a fixed power budget} $$
-
-**The Implication**: The trajectory from CPU to GPU to TPU to fixed-function ASIC is not a technology trend — it is a physical law. Each step trades programmability for efficiency.
-
-:::
+This is the Generality Tax (Principle \ref{nte-generality-tax}): hardware efficiency is inversely proportional to programmability, and the trajectory from CPU to GPU to TPU to fixed-function ASIC is a physical law, not merely a technology trend.
 
 These principles (that the network is the bottleneck, failure is routine, and homogeneity enables efficiency) are not just qualitative observations. They can be quantified by a single metric: **scaling efficiency**, which determines whether adding more nodes to a pod produces proportional returns or diminishing waste.
 
@@ -2541,7 +2519,7 @@ The question that determines whether any of this infrastructure gets built is: *
 \index{CapEx}
 \index{OpEx}
 
-The preceding sections have mapped the physical infrastructure from the transistor to the datacenter, establishing the engineering constraints at each level. Engineering constraints are ultimately economic constraints: every design decision trades cost against performance, and the "right" infrastructure is the one that maximizes useful computation per dollar over the system's lifetime. A 10,000-GPU cluster of H100s represents roughly \$3.5 billion in hardware acquisition cost. The purchase price, however, is only the beginning. Over a typical three-year hardware lifecycle, power and cooling costs can equal or exceed the original hardware investment. Facility construction, networking, staffing, and maintenance add further. Understanding the full financial picture requires **Total Cost of Ownership (TCO)**[^fn-tco-framework] analysis, which encompasses every cost incurred from the day the first shovel breaks ground to the day the last GPU is decommissioned.
+Engineering constraints are ultimately economic constraints: every design decision trades cost against performance, and the "right" infrastructure is the one that maximizes useful computation per dollar over the system's lifetime. A 10,000-GPU cluster of H100s represents roughly \$3.5 billion in hardware acquisition cost. The purchase price, however, is only the beginning. Over a typical three-year hardware lifecycle, power and cooling costs can equal or exceed the original hardware investment. Facility construction, networking, staffing, and maintenance add further. Understanding the full financial picture requires **Total Cost of Ownership (TCO)**[^fn-tco-framework] analysis, which encompasses every cost incurred from the day the first shovel breaks ground to the day the last GPU is decommissioned.
 
 The economics of ML infrastructure differ from traditional IT in three fundamental ways. First, the hardware depreciates faster than any other IT category, with each new accelerator generation delivering 2--3$\times$ the performance per watt and rendering previous generations economically obsolete within 3--4 years. Second, the power consumption is an order of magnitude higher per rack, making electricity a first-order cost rather than a rounding error. Third, the utilization sensitivity is extreme: the same cluster can be a brilliant investment at 80% utilization or a financial disaster at 20% utilization, with no change in hardware or facility costs. These three factors make TCO analysis essential for any organization considering ML infrastructure investment.
 
@@ -2795,7 +2773,7 @@ Your organization needs to train 10 models per year, each requiring 1,000 GPU-ho
 
 \index{Infrastructure Planning}
 
-The preceding sections have examined each level of the infrastructure stack in isolation: accelerator selection, node architecture, rack power and cooling, pod topology, and economics. In practice, infrastructure planning requires considering all these levels simultaneously, because decisions at one level constrain choices at every other level. This section outlines a systematic planning methodology that integrates the concepts from the chapter.
+Infrastructure planning requires considering all levels of the stack simultaneously, because decisions at one level constrain choices at every other level. Selecting an accelerator determines the TDP, which determines the cooling architecture, which constrains the rack density, which constrains the pod layout, which determines the TCO. A systematic methodology integrates these interdependent decisions into a coherent process.
 
 The planning process begins with the **workload characterization**. Before any hardware is selected, the team must answer several questions:
 
@@ -2843,7 +2821,7 @@ The economics of infrastructure complete our tour of the physical stack. From th
 \index{Optical Interconnects}
 \index{Disaggregated Memory}
 
-The infrastructure stack described in the preceding sections represents the state of the art as of 2024. Several technologies under active development, however, could fundamentally alter the constraints that shape fleet design. Understanding these emerging directions is important for infrastructure planners because the decisions made today (facility design, power provisioning, cooling architecture) must accommodate hardware that does not yet exist. A datacenter built in 2025 will host three or four generations of accelerators over its 15-year structural lifetime, and each generation may demand capabilities that the facility must already support.
+A datacenter built in 2025 will host three or four generations of accelerators over its 15-year structural lifetime, and each generation may demand capabilities that the facility must already support. Several technologies under active development could fundamentally alter the constraints that shape fleet design, making it essential for infrastructure planners to anticipate shifts in the Memory Wall, Communication Wall, and Power Wall when committing to facility designs, power provisioning, and cooling architectures today.
 
 Each of the technologies below targets one of the three walls that have governed this chapter. CXL and disaggregated architectures attack the Memory Wall by decoupling capacity from individual accelerators. Optical interconnects attack the Communication Wall by narrowing the bandwidth gap between intra-node and inter-node links. Wafer-scale integration attacks all three walls simultaneously by eliminating the off-chip boundary entirely. For our `{python} InfraSetup.frontier_params_b`B model, these technologies would progressively relax the constraints that currently force complex multi-node parallelism: if CXL memory pooling provides terabyte-scale capacity accessible from any accelerator, and optical interconnects deliver NVLink-class bandwidth between nodes, the distinction between "within a node" and "across nodes" that drives hierarchy-aware parallelism would begin to dissolve.
 

@@ -178,8 +178,7 @@ class NetworkFabricsContextScenario:
     h100_mem_bw = f"{h100_mem_bw_raw.m_as(TB / second):.2f}"
 ```
 
-The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise.
- @sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw` TB/s of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gbs` GB/s. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio`$\times$, from `{python} NetworkFabricsContextScenario.nvlink_h100_gbs` GB/s (NVLink) to `{python} NetworkFabricsContextScenario.ib_ndr_gbs` GB/s (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gbs` GB/s links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
+The concrete bandwidth cliff that separates intra-node from inter-node communication makes this Gradient Bus analogy precise. @sec-compute-infrastructure established that a single H100 delivers `{python} NetworkFabricsContextScenario.h100_tflops` TFLOPS of FP16 throughput with `{python} NetworkFabricsContextScenario.h100_mem_bw` TB/s of memory bandwidth. Within a node, eight such accelerators communicate through NVLink at `{python} NetworkFabricsContextScenario.nvlink_h100_gbs` GB/s. The moment computation crosses a node boundary, however, the available bandwidth drops by a factor of `{python} NetworkFabricsContextScenario.nvlink_to_ib_ratio`$\times$, from `{python} NetworkFabricsContextScenario.nvlink_h100_gbs` GB/s (NVLink) to `{python} NetworkFabricsContextScenario.ib_ndr_gbs` GB/s (NDR InfiniBand per port). This cliff, the transition from intra-node to inter-node communication, is the central challenge of network fabric design. For our 175B model, moving 350 GB of gradients through `{python} NetworkFabricsContextScenario.ib_ndr_gbs` GB/s links means that the AllReduce alone can take seconds, during which every GPU in the cluster sits idle unless the fabric and collective algorithms can overlap that transfer with computation.
 
 @fig-bandwidth-hierarchy makes this hierarchy concrete by plotting the bandwidth at each level across four GPU generations.
 
@@ -352,13 +351,13 @@ These inversions explain why running large-scale distributed training over a sta
 
 ### The Five-Level Model {#sec-network-fabrics-five-level-model}
 
-Network engineering is often taught as a layer cake of protocols. The physics of ML cluster fabrics becomes concrete through a **Five-Level Model** specific to high-performance interconnects:
+Each of these inversions traces back to a specific physical or protocol constraint. A **Five-Level Model** specific to high-performance interconnects makes these constraints concrete:
 
-- **Level 1: Wire and Link** (@sec-network-fabrics-wire-link). The physics of signal transmission. We examine why signal integrity (PAM4, SerDes) and the speed of light in fiber impose hard constraints on latency and cluster geometry.
-- **Level 2: Transport** (@sec-network-fabrics-transport). The protocols that move data reliably. We contrast InfiniBand and RoCE, and use the $\alpha$-$\beta$ model to quantify the latency-versus-bandwidth trade-off for different message sizes.
-- **Level 3: Switch and Topology** (@sec-network-fabrics-topology). The shape of the network. We compare how fat-trees, rail-optimized designs, and dragonflies achieve the bisection bandwidth needed for global collectives.
-- **Level 4: Fabric Behavior** (@sec-network-fabrics-behavior). The dynamics of traffic under load. We analyze congestion control (PFC, DCQCN), adaptive routing, and the incast phenomena that cause tail latency.
-- **Level 5: Cluster Design** (@sec-network-fabrics-cluster). The end-to-end system. We show how these layers integrate into production supercomputers like the NVIDIA SuperPOD and Meta Grand Teton to create a unified Gradient Bus.
+- **Level 1: Wire and Link** (@sec-network-fabrics-wire-link). Signal integrity (PAM4, SerDes) and the speed of light in fiber impose hard constraints on latency and cluster geometry.
+- **Level 2: Transport** (@sec-network-fabrics-transport). InfiniBand and RoCE provide the RDMA primitives; the $\alpha$-$\beta$ model quantifies the latency-versus-bandwidth trade-off for different message sizes.
+- **Level 3: Switch and Topology** (@sec-network-fabrics-topology). Fat-trees, rail-optimized designs, and dragonflies achieve the bisection bandwidth needed for global collectives through different structural trade-offs.
+- **Level 4: Fabric Behavior** (@sec-network-fabrics-behavior). Congestion control (PFC, DCQCN, HPCC), adaptive routing, and incast phenomena determine whether theoretical bandwidth translates to realized throughput.
+- **Level 5: Cluster Design** (@sec-network-fabrics-cluster). Production supercomputers like the NVIDIA SuperPOD and Meta Grand Teton integrate these layers into a unified Gradient Bus.
 
 The remainder of this chapter ascends this stack, starting from the copper and glass at the bottom.
 
@@ -391,10 +390,9 @@ However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of 
 The choice of physical medium determines the reach and economics of each link. Three categories dominate modern ML cluster design:
 
 - **DAC (Direct Attach Copper)**: Passive copper cables offering the lowest latency and cost (~\$50), but limited to ~3 meters. Used exclusively within a rack.
-- **AOC (Active Optical Cable)**: Uses light to carry signals over 10--100 meters. The conversion between electrical and optical signals, combined with **Forward Error Correction (FEC)**[^fn-fec-latency], adds hundreds of nanoseconds to every link.
+- **AOC (Active Optical Cable)**: Fiber with permanently attached transceivers, suitable for 3 to 30 meter runs (~\$500). The conversion between electrical and optical signals, combined with **Forward Error Correction (FEC)**[^fn-fec-latency], adds hundreds of nanoseconds to every link.
 
 [^fn-fec-latency]: **FEC (Forward Error Correction)**: At 400G and 800G speeds, signal integrity is so fragile that the hardware must use FEC to reconstruct corrupted bits. This adds 100--200 ns per hop---a "latency tax" that is physically unavoidable. In a three-tier fat-tree, FEC alone can contribute over 1 $\mu$s to the round-trip time, making it a significant component of the $\alpha$ latency term. \index{FEC!latency tax}
-- **AOC (Active Optical Cable)**: Fiber with permanently attached transceivers, suitable for 3 to 30 meter runs (~\$500).
 - **Pluggable Optics**: Separate transceivers and fiber cords, used for runs exceeding 30 meters to the network core.
 
 ::: {.callout-perspective title="The Cost of Distance"}
@@ -923,7 +921,8 @@ Verify your understanding of hierarchical switch fabrics:
 :::
 
 [^fn-switch-radix-density]: **Switch Radix**: Modern high-end switches (e.g., NVIDIA Quantum-2) feature a radix of 64 ports, each at 400 Gbps. This density allows a two-tier fat-tree to support up to 2,048 GPUs with only two switch hops. As model scale pushes toward 100,000 GPUs, increasing switch radix (to 128 or 256) is the only way to avoid adding more tiers and the resulting latency/cost explosion. \index{Switch Radix!port density}
- Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ tree requires 4,096 switches. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$40 to \$200 million.
+
+Scaling beyond this requires a three-tier architecture with core switches, enabling the fabric to reach `{python} FatTreeScaling.fat_tree_hosts` hosts. The infrastructure cost is substantial: a non-blocking $k=64$ tree requires 4,096 switches. At \$10,000 to \$50,000 per switch, the switching layer alone represents \$40 to \$200 million.
 
 However, scale imposes a latency tax. Typical **hop counts** are 2 for intra-pod (leaf-spine-leaf) and 4 for inter-pod (leaf-spine-core-spine-leaf). Each additional hop introduces serialization delay and switch processing time, adding microseconds to the $\alpha$ latency term that accumulates during the thousands of synchronization steps in a training run.
 
@@ -986,7 +985,7 @@ Communication latency ($\alpha$) is proportional to the number of switch hops.
 2. **Rail-Optimized**: 1 hop $\times$ `{python} RailLatency.rol_hop_lat_us_str` $\mu s$ = **0.6 $\mu s$**.
 3. **Verdict**: **`{python} RailLatency.rol_speedup_str`$\times$ lower latency**.
 
-**The Systems Insight**: For high-frequency tensor parallelism (which synchronizes every layer), a 2$\times$ latency reduction is the difference between 80% and 95% scaling efficiency. Physically aligning the network to the model's math eliminates the "Spine Tax" for the most sensitive traffic. Archetype A clusters achieve their performance because they are **Structured**, not merely large.
+**The Systems Insight**: For high-frequency tensor parallelism (which synchronizes every layer), a 2$\times$ latency reduction is the difference between 80% and 95% scaling efficiency (Principle \ref{nte-scaling-efficiency}). Physically aligning the network to the model's math eliminates the "Spine Tax" for the most sensitive traffic. Archetype A clusters achieve their performance because they are **Structured**, not merely large.
 
 :::
 
@@ -1322,13 +1321,15 @@ The danger of PFC lies in its cascading nature. When a switch port's buffer fill
 
 :::
 
-::: {.callout-perspective title="War Story: The PFC Storm That Froze a Cluster"}
+::: {.callout-war-story title="The PFC Storm That Froze a Cluster (2022)"}
 
-In 2022, a large RoCE-based training cluster experienced a complete fabric freeze that lasted over 40 minutes. The root cause was a single malfunctioning transceiver on one leaf switch that intermittently dropped its link speed from 400 Gbps to 100 Gbps. The reduced bandwidth caused the switch port's buffer to fill during a routine AllReduce burst, triggering PFC PAUSE frames. Because the training job spanned the entire cluster, the pauses propagated through the spine layer and back down to every leaf switch in the fabric. Within 200 milliseconds, every port in the cluster was paused. No data moved. All 4,096 GPUs sat idle.
+**The Context**: A large RoCE-based training cluster connected over 4,096 GPUs through a standard 400 GbE fabric with Priority Flow Control enabled for lossless RDMA.
 
-The insidious aspect was that no alarms fired. PFC pauses are a *normal* flow-control mechanism, so monitoring systems treated them as routine. The team only noticed when training throughput dropped to zero. Diagnosis took 30 minutes because standard tools (`ping`, `iperf`) showed the network was "up" but simply not moving data. The fix was to identify and replace the faulty transceiver, but the investigation revealed a deeper problem: the cluster lacked PFC watchdog timers that would have detected the storm and disabled PFC on the offending port within seconds. After the incident, the team deployed per-port PFC pause counters with alerting thresholds and configured hardware watchdog timers to automatically disable PFC on any port sustaining pauses for more than 50 milliseconds.
+**The Failure**: A single malfunctioning transceiver on one leaf switch intermittently dropped its link speed from 400 Gbps to 100 Gbps. The reduced bandwidth caused the switch port's buffer to fill during a routine AllReduce burst, triggering PFC PAUSE frames. Because the training job spanned the entire cluster, the pauses propagated through the spine layer and back down to every leaf switch in the fabric. Within 200 milliseconds, every port in the cluster was paused. No data moved. All 4,096 GPUs sat idle. No alarms fired because PFC pauses are a *normal* flow-control mechanism, so monitoring systems treated them as routine. Diagnosis took 30 minutes because standard tools (`ping`, `iperf`) showed the network was "up" but not moving data.
 
-The incident illustrates why InfiniBand's credit-based flow control is fundamentally more robust: credits are consumed and replenished per-hop, so a slow receiver cannot propagate backpressure beyond its immediate neighbor. PFC, by contrast, operates as a blunt per-priority mechanism with no concept of individual flow isolation.
+**The Consequence**: The complete fabric freeze lasted over 40 minutes, idling 4,096 GPUs and wasting over 2,700 GPU-hours of compute. The investigation revealed that the cluster lacked PFC watchdog timers that would have detected the storm and disabled PFC on the offending port within seconds.
+
+**The Systems Lesson**: PFC congestion spreading is a structural vulnerability of lossless Ethernet that InfiniBand's credit-based flow control avoids entirely. Credits are consumed and replenished per-hop, so a slow receiver cannot propagate backpressure beyond its immediate neighbor. After the incident, the team deployed per-port PFC pause counters with alerting thresholds and configured hardware watchdog timers to automatically disable PFC on any port sustaining pauses for more than 50 milliseconds.
 
 ```{python}
 #| label: pfc-storm-probability
@@ -1628,7 +1629,7 @@ Designing and operating high-performance fabrics for ML requires unlearning assu
 
 **Fallacy:** *More bandwidth always means faster training.*
 
-Engineers assume upgrading from HDR (`{python} IbHdrReference.ib_hdr_gbps` Gbps) to NDR (`{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps) will yield proportional gains, but the $\alpha$-$\beta$ model (@eq-alpha-beta) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$, dominated by switch hops and FEC (~1 $\mu$s), dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase might improve end-to-end throughput by less than 5% while adding 40% to the power and transceiver cost.
+Engineers assume upgrading from HDR (`{python} IbHdrReference.ib_hdr_gbps` Gbps) to NDR (`{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps) will yield proportional gains, but the $\alpha$-$\beta$ model (@sec-network-fabrics-performance-model) reveals this is only true in the bandwidth-dominated regime. For small models or the small-message phases of pipeline parallelism, the latency term $\alpha$, dominated by switch hops and FEC (~1 $\mu$s), dictates performance. If a workload is latency-bound, a 2$\times$ bandwidth increase might improve end-to-end throughput by less than 5% while adding 40% to the power and transceiver cost.
 
 ```{python}
 #| echo: false
@@ -1734,7 +1735,7 @@ Equally important, the $\alpha$-$\beta$ cost model provides a quantitative vocab
 
 ::: {.callout-chapter-connection title="From Wires to Data Pipelines"}
 
-The network fabric now binds compute nodes into a fleet, and every byte of gradient data and activation tensor flows through it. The fleet, however, also needs to move massive datasets and enormous checkpoints. @sec-data-storage examines the parallel storage systems and data-loading architectures that keep the fleet supplied with data.
+The network fabric now binds compute nodes into a fleet, and every byte of gradient data and activation tensor flows through it. The fleet, however, also needs to move massive datasets and enormous checkpoints. @sec-data-systems examines the parallel storage systems and data-loading architectures that keep the fleet supplied with data.
 
 :::
 
