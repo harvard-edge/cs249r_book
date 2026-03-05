@@ -227,7 +227,7 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
         Write-Host "❌ Python install failed: version check exited $LASTEXITCODE" ; `
         exit 1 ; `
     } ; `
-    $pyExe = (python -c "import sys; print(sys.executable)").Trim() ; `
+    $pyExe = (python -c 'import sys; print(sys.executable)').Trim() ; `
     $pyDir = Split-Path $pyExe -Parent ; `
     $py3Exe = Join-Path $pyDir 'python3.exe' ; `
     if (-not (Test-Path $py3Exe)) { `
