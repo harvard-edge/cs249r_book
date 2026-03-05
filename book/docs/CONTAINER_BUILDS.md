@@ -78,7 +78,6 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ## Workflow Integration
 
 ### Current Workflows
-- `quarto-build-baremetal.yml` - Original workflow (brute force approach, legacy)
 - `quarto-build-container.yml` - Containerized version (fast path, recommended)
 - `build-linux-container.yml` - Linux container management
 - `build-windows-container.yml` - Windows container management
@@ -86,7 +85,7 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ### Migration Status
 1. **✅ Phase 1**: Containerized builds tested and validated
 2. **✅ Phase 2**: Performance significantly improved (45min → 5-10min)
-3. **✅ Phase 3**: Container workflow is now the primary build method
+3. **✅ Phase 3**: Container workflow is the only build method
 
 ## Container Contents
 
@@ -127,7 +126,7 @@ LC_ALL=en_US.UTF-8
 ### Build Issues
 1. Check if container exists: `ghcr.io/harvard-edge/cs249r_book/quarto-linux:latest`
 2. Verify container has all dependencies
-3. Compare with traditional build logs
+3. Review container preflight/toolchain logs first
 
 ### Performance Issues
 1. Monitor container pull times
@@ -148,13 +147,13 @@ LC_ALL=en_US.UTF-8
 - Error rates vs traditional builds
 - Resource usage optimization
 
-## Rollback Plan
+## Recovery Plan
 
 If issues arise:
-1. Keep original `quarto-build-baremetal.yml` as backup
-2. Switch back to traditional builds immediately
-3. Debug container issues separately
-4. Re-enable when resolved
+1. Rebuild and republish the container image
+2. Fix preflight failures before render starts
+3. Re-run the container workflow
+4. Investigate dependency drift in Dockerfiles
 
 ## Security
 

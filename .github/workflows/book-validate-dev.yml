@@ -52,16 +52,6 @@ on:
         required: false
         default: false
         type: boolean
-      # Build method selection
-      build_method:
-        description: 'Build method to use'
-        required: false
-        default: 'both'
-        type: choice
-        options:
-          - both
-          - container
-          - baremetal
       # Container configuration (consistent with other workflows)
       container_registry:
         description: 'Container registry URL'
@@ -152,7 +142,6 @@ jobs:
       build_epub: ${{ steps.config.outputs.build_epub }}
       build_linux: ${{ steps.config.outputs.build_linux }}
       build_windows: ${{ steps.config.outputs.build_windows }}
-      build_method: ${{ steps.config.outputs.build_method }}
       container_registry: ${{ steps.config.outputs.container_registry }}
       container_tag: ${{ steps.config.outputs.container_tag }}
       target: ${{ steps.config.outputs.target }}
@@ -171,7 +160,6 @@ jobs:
             BUILD_EPUB="true"
             BUILD_LINUX="true"
             BUILD_WINDOWS="true"
-            BUILD_METHOD="both"
             TARGET="dev" # For push events, always target dev
             echo "📊 Trigger: Automatic (dev branch push)"
             echo "📊 HTML: $BUILD_HTML (mandatory)"
@@ -179,7 +167,7 @@ jobs:
             echo "📊 EPUB: $BUILD_EPUB (mandatory)"
             echo "📊 Linux: $BUILD_LINUX (mandatory)"
             echo "📊 Windows: $BUILD_WINDOWS (enabled by default)"
-            echo "📊 Method: $BUILD_METHOD (default)"
+            echo "📊 Method: container-only"
             echo "📊 Target: $TARGET"
           else
             # Manual trigger: respect choices
@@ -206,12 +194,11 @@ jobs:
               BUILD_WINDOWS="true"
             fi
 
-            BUILD_METHOD="${{ inputs.build_method }}"
             TARGET="${{ inputs.target }}"
 
             echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
             echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
-            echo "📊 Method: $BUILD_METHOD"
+            echo "📊 Method: container-only"
             echo "📊 Target: $TARGET"
           fi
 
@@ -224,7 +211,7 @@ jobs:
           echo "  PDF: $BUILD_PDF"
           echo "  Linux: $BUILD_LINUX"
           echo "  Windows: $BUILD_WINDOWS"
-          echo "  Method: $BUILD_METHOD"
+          echo "  Method: container"
           echo "  Registry: $CONTAINER_REGISTRY"
           echo "  Tag: $CONTAINER_TAG"
           echo "  Target: $TARGET"
@@ -235,7 +222,6 @@ jobs:
           echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
           echo "build_linux=$BUILD_LINUX" >> $GITHUB_OUTPUT
           echo "build_windows=$BUILD_WINDOWS" >> $GITHUB_OUTPUT
-          echo "build_method=$BUILD_METHOD" >> $GITHUB_OUTPUT
           echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
@@ -247,8 +233,7 @@ jobs:
     needs: [build-config]
     if: |
       always() &&
-      (needs.build-config.result == 'success') &&
-      (needs.build-config.outputs.build_method == 'container' || needs.build-config.outputs.build_method == 'both')
+      (needs.build-config.result == 'success')
     uses: ./.github/workflows/book-build-container.yml
     with:
       build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
@@ -261,36 +246,10 @@ jobs:
       container_registry: ${{ needs.build-config.outputs.container_registry }}
       container_tag: ${{ needs.build-config.outputs.container_tag }}
 
-  build-baremetal:
-    name: '⚠️ Baremetal Build Matrix (Legacy)'
-    needs: [build-config]
-    if: |
-      always() &&
-      (needs.build-config.result == 'success') &&
-      (needs.build-config.outputs.build_method == 'baremetal' || needs.build-config.outputs.build_method == 'both')
-    uses: ./.github/workflows/book-build-baremetal.yml
-    with:
-      build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
-      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
-      build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
-      build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
-      build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
-      build_target: all
-      target: ${{ needs.build-config.outputs.target }}
-
-  report-baremetal-pass:
-    name: 'Baremetal Build Status'
-    runs-on: ubuntu-latest
-    needs: [build-baremetal]
-    if: ${{ needs.build-baremetal.result == 'success' }}
-    steps:
-      - name: Report Baremetal Success
-        run: echo "✅ Baremetal build passed."
-
   # Step 4: Collect build results (needed for outputs)
   collect-results:
     name: '📊 Collect Results'
-    needs: [build-config, build-container, build-baremetal]
+    needs: [build-config, build-container]
     runs-on: ubuntu-latest
     if: always()
     outputs:
@@ -318,38 +277,19 @@ jobs:
           LINUX_EPUB_VOL1=""
           LINUX_EPUB_VOL2=""
 
-          # Check container build results first
-          if [[ "${{ needs.build-config.outputs.build_method }}" == "container" || "${{ needs.build-config.outputs.build_method }}" == "both" ]]; then
-            if [[ "${{ needs.build-container.result }}" == "success" ]]; then
-              echo "✅ Container builds completed successfully."
-              OVERALL_SUCCESS="${{ needs.build-container.outputs.build_success }}"
-              LINUX_HTML_VOL1="${{ needs.build-container.outputs.linux_html_vol1_artifact }}"
-              LINUX_HTML_VOL2="${{ needs.build-container.outputs.linux_html_vol2_artifact }}"
-              LINUX_PDF_VOL1="${{ needs.build-container.outputs.linux_pdf_vol1_artifact }}"
-              LINUX_PDF_VOL2="${{ needs.build-container.outputs.linux_pdf_vol2_artifact }}"
-              LINUX_EPUB_VOL1="${{ needs.build-container.outputs.linux_epub_vol1_artifact }}"
-              LINUX_EPUB_VOL2="${{ needs.build-container.outputs.linux_epub_vol2_artifact }}"
-            else
-              echo "❌ Container builds failed or were skipped."
-              OVERALL_SUCCESS="false"
-            fi
-          fi
-
-          # Fallback to baremetal if container failed and method was 'both', or if method was 'baremetal'
-          if [[ "$OVERALL_SUCCESS" == "false" && ("${{ needs.build-config.outputs.build_method }}" == "baremetal" || "${{ needs.build-config.outputs.build_method }}" == "both") ]]; then
-            if [[ "${{ needs.build-baremetal.result }}" == "success" ]]; then
-              echo "✅ Baremetal builds completed successfully."
-              OVERALL_SUCCESS="${{ needs.build-baremetal.outputs.build_success }}"
-              LINUX_HTML_VOL1="${{ needs.build-baremetal.outputs.linux_html_vol1_artifact }}"
-              LINUX_HTML_VOL2="${{ needs.build-baremetal.outputs.linux_html_vol2_artifact }}"
-              LINUX_PDF_VOL1="${{ needs.build-baremetal.outputs.linux_pdf_vol1_artifact }}"
-              LINUX_PDF_VOL2="${{ needs.build-baremetal.outputs.linux_pdf_vol2_artifact }}"
-              LINUX_EPUB_VOL1="${{ needs.build-baremetal.outputs.linux_epub_vol1_artifact }}"
-              LINUX_EPUB_VOL2="${{ needs.build-baremetal.outputs.linux_epub_vol2_artifact }}"
-            else
-              echo "❌ Baremetal builds also failed or were skipped."
-              OVERALL_SUCCESS="false"
-            fi
+          # Container-only results
+          if [[ "${{ needs.build-container.result }}" == "success" ]]; then
+            echo "✅ Container builds completed successfully."
+            OVERALL_SUCCESS="${{ needs.build-container.outputs.build_success }}"
+            LINUX_HTML_VOL1="${{ needs.build-container.outputs.linux_html_vol1_artifact }}"
+            LINUX_HTML_VOL2="${{ needs.build-container.outputs.linux_html_vol2_artifact }}"
+            LINUX_PDF_VOL1="${{ needs.build-container.outputs.linux_pdf_vol1_artifact }}"
+            LINUX_PDF_VOL2="${{ needs.build-container.outputs.linux_pdf_vol2_artifact }}"
+            LINUX_EPUB_VOL1="${{ needs.build-container.outputs.linux_epub_vol1_artifact }}"
+            LINUX_EPUB_VOL2="${{ needs.build-container.outputs.linux_epub_vol2_artifact }}"
+          else
+            echo "❌ Container builds failed or were skipped."
+            OVERALL_SUCCESS="false"
           fi
 
           # Determine per-platform success based on overall success and which platforms were built
@@ -454,19 +394,12 @@ jobs:
             echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
             echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
             echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
-            echo "- **Method**: 🔄 Both container and baremetal builds (default for auto-push)" >> $GITHUB_STEP_SUMMARY
+            echo "- **Method**: ✅ Container builds only" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
             echo "- **Formats**: ${{ inputs.build_formats }}" >> $GITHUB_STEP_SUMMARY
             echo "- **OS**: ${{ inputs.build_os }}" >> $GITHUB_STEP_SUMMARY
-
-            if [ "${{ inputs.build_method }}" = "baremetal" ]; then
-              echo "- **Method**: ⚠️ Baremetal builds (LEGACY - deprecated)" >> $GITHUB_STEP_SUMMARY
-            elif [ "${{ inputs.build_method }}" = "both" ]; then
-              echo "- **Method**: 🔄 Both container and baremetal builds" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "- **Method**: ✅ Container builds (recommended)" >> $GITHUB_STEP_SUMMARY
-            fi
+            echo "- **Method**: ✅ Container builds only" >> $GITHUB_STEP_SUMMARY
 
             echo "- **Registry**: ${{ needs.build-config.outputs.container_registry }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Tag**: ${{ needs.build-config.outputs.container_tag }}" >> $GITHUB_STEP_SUMMARY

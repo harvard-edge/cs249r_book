@@ -374,6 +374,77 @@ jobs:
         if: matrix.platform == 'windows' && matrix.enabled
         run: docker pull ${{ env.CONTAINER_IMAGE }}
 
+      - name: 🧪 Preflight toolchain (Linux)
+        if: matrix.platform == 'linux' && matrix.enabled
+        working-directory: ${{ vars.BOOK_QUARTO }}
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+          echo "🧪 Running Linux toolchain preflight checks..."
+          command -v quarto
+          quarto --version | sed -n '1p'
+          command -v pandoc
+          pandoc --version | sed -n '1p'
+          command -v python3
+          python3 --version
+          python3 -c "import mlsysim,sys; print('mlsysim:', mlsysim.__file__); print('python:', sys.executable)"
+          command -v Rscript
+          Rscript --version | sed -n '1p'
+          command -v inkscape
+          inkscape --version | sed -n '1p'
+
+          if [ "${{ matrix.format_name }}" = "PDF" ]; then
+            command -v lualatex
+            lualatex --version | sed -n '1p'
+            command -v gs
+            gs --version
+          fi
+
+          if [ "${{ matrix.format_name }}" = "EPUB" ]; then
+            python3 -c "import PIL; print('Pillow:', PIL.__version__)"
+          fi
+
+          echo "✅ Linux toolchain preflight checks passed"
+
+      - name: 🧪 Preflight toolchain (Windows)
+        if: matrix.platform == 'windows' && matrix.enabled
+        shell: pwsh
+        run: |
+          Write-Host "🧪 Running Windows toolchain preflight checks..."
+          docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
+            `$ErrorActionPreference = 'Stop'
+            `$PSNativeCommandUseErrorActionPreference = `$true
+            `$required = @('quarto', 'pandoc', 'python', 'python3', 'Rscript', 'inkscape')
+            foreach (`$cmd in `$required) {
+              `$resolved = Get-Command `$cmd -ErrorAction Stop
+              Write-Host \"✅ `$cmd -> `$(`$resolved.Source)\"
+            }
+
+            quarto --version | Select-Object -First 1
+            pandoc --version | Select-Object -First 1
+            python --version
+            python3 --version
+            python -c 'import mlsysim,sys; print(\"mlsysim:\", mlsysim.__file__); print(\"python:\", sys.executable)'
+            Rscript --version | Select-Object -First 1
+            inkscape --version | Select-Object -First 1
+
+            if ('${{ matrix.format_name }}' -eq 'PDF') {
+              Get-Command lualatex -ErrorAction Stop | Out-Null
+              lualatex --version | Select-Object -First 1
+              `$gsCmd = Get-Command gs -ErrorAction SilentlyContinue
+              if (-not `$gsCmd) { `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue }
+              if (-not `$gsCmd) { throw 'Ghostscript not found (expected gs or gswin64c)' }
+              Write-Host \"✅ ghostscript -> `$(`$gsCmd.Source)\"
+              & `$gsCmd.Source --version
+            }
+
+            if ('${{ matrix.format_name }}' -eq 'EPUB') {
+              python -c 'import PIL; print(\"Pillow:\", PIL.__version__)'
+            }
+          "
+          Write-Host "✅ Windows toolchain preflight checks passed"
+
       - name: 🔨 Build ${{ matrix.format_name }} (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
         working-directory: ${{ vars.BOOK_QUARTO }}
@@ -391,7 +462,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "🔨 Building ${{ matrix.format_name }} on Windows container..."
-          docker run --rm -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
+          docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
             if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
             Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
             quarto render --to ${{ matrix.render_target }} --output-dir '${{ matrix.output_dir }}'
@@ -438,7 +509,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "🔨 Compressing PDF on Windows container..."
-          docker run --rm -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
+          docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
             if (Test-Path 'Machine-Learning-Systems.pdf') {
               Write-Host '📉 Compressing PDF with professional compression tool...'
               Write-Host '🔍 DEBUG: Current directory:'
@@ -513,7 +584,7 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "🔨 Compressing EPUB on Windows container..."
-          docker run --rm -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
+          docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
             if (Test-Path 'Machine-Learning-Systems.epub') {
               Write-Host '📚 Compressing EPUB with optimized compression tool...'
               Write-Host '🔍 DEBUG: Current directory:'
