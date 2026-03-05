@@ -227,7 +227,19 @@ RUN Write-Host '=== STARTING PYTHON INSTALLATION ===' ; `
         Write-Host "❌ Python install failed: version check exited $LASTEXITCODE" ; `
         exit 1 ; `
     } ; `
+    $pyExe = (python -c "import sys; print(sys.executable)").Trim() ; `
+    $pyDir = Split-Path $pyExe -Parent ; `
+    $py3Exe = Join-Path $pyDir 'python3.exe' ; `
+    if (-not (Test-Path $py3Exe)) { `
+        Copy-Item $pyExe $py3Exe -Force ; `
+    } ; `
+    $pv3 = python3 --version ; `
+    if ($LASTEXITCODE -ne 0) { `
+        Write-Host "❌ Python install failed: python3 alias check exited $LASTEXITCODE" ; `
+        exit 1 ; `
+    } ; `
     Write-Host "📦 Python installed: $pv" ; `
+    Write-Host "📦 Python3 alias verified: $pv3" ; `
     Write-Host '✅ Python installation complete'
 
 # ------------------------------------------------------------
@@ -381,6 +393,16 @@ RUN Write-Host '=== VERIFY: Python ===' ; `
     if ($exitCode -ne 0) { Write-Host "❌ Python FAILED: exited $exitCode"; exit 1 } ; `
     Write-Host "  $out" ; `
     Write-Host '✅ Python verified'
+
+RUN Write-Host '=== VERIFY: Python3 ===' ; `
+    $cmd = Get-Command python3 -ErrorAction SilentlyContinue ; `
+    if (-not $cmd) { Write-Host "❌ Python3 FAILED: command not found"; exit 1 } ; `
+    Write-Host "Resolved: $($cmd.Source)" ; `
+    $out = & python3 --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Python3 FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
+    Write-Host '✅ Python3 verified'
 
 RUN Write-Host '=== VERIFY: R ===' ; `
     $cmd = Get-Command Rscript -ErrorAction SilentlyContinue ; `
