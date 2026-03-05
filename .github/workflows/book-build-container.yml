@@ -104,6 +104,12 @@ on:
       build_target:
         description: "Build target used (vol1/vol2/all)"
         value: ${{ jobs.collect-outputs.outputs.build_target }}
+      failed_instances:
+        description: "Failed matrix build instances"
+        value: ${{ jobs.collect-outputs.outputs.failed_instances }}
+      cancelled_instances:
+        description: "Cancelled matrix build instances"
+        value: ${{ jobs.collect-outputs.outputs.cancelled_instances }}
       # Volume I artifacts
       linux_html_vol1_artifact:
         description: "Linux HTML artifact name (Volume I)"
@@ -148,6 +154,7 @@ on:
 permissions:
   contents: read
   packages: read
+  actions: read
 
 # =============================================================================
 # PATH CONFIGURATION - Uses GitHub Repository Variables (Settings > Variables)
@@ -167,7 +174,7 @@ jobs:
       matrix:
         include:
           # =================================================================
-          # Volume I builds (Linux only for now)
+          # Volume I builds
           # =================================================================
           - platform: linux
             platform_name: Linux
@@ -206,7 +213,7 @@ jobs:
             artifact_name: ${{ inputs.target }}-epub-vol1-linux
             output_dir: _build/epub-vol1
           # =================================================================
-          # Volume II builds (Linux only for now)
+          # Volume II builds
           # =================================================================
           - platform: linux
             platform_name: Linux
@@ -380,29 +387,41 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          set -euo pipefail
+          set -eu
           echo "🧪 Running Linux toolchain preflight checks..."
-          command -v quarto
-          quarto --version | sed -n '1p'
-          command -v pandoc
-          pandoc --version | sed -n '1p'
-          command -v python3
-          python3 --version
-          python3 -c "import mlsysim,sys; print('mlsysim:', mlsysim.__file__); print('python:', sys.executable)"
-          command -v Rscript
-          Rscript --version | sed -n '1p'
-          command -v inkscape
-          inkscape --version | sed -n '1p'
+          run_check() {
+            CHECK_NAME="$1"
+            CHECK_CMD="$2"
+            echo "▶ preflight: $CHECK_NAME"
+            if sh -c "$CHECK_CMD"; then
+              echo "✅ preflight: $CHECK_NAME"
+            else
+              echo "❌ preflight failed: $CHECK_NAME"
+              exit 1
+            fi
+          }
+
+          run_check "quarto on PATH" "command -v quarto >/dev/null"
+          run_check "quarto version" "quarto --version | sed -n '1p'"
+          run_check "pandoc on PATH" "command -v pandoc >/dev/null"
+          run_check "pandoc version" "pandoc --version | sed -n '1p'"
+          run_check "python3 on PATH" "command -v python3 >/dev/null"
+          run_check "python3 version" "python3 --version"
+          run_check "mlsysim import" "python3 -c \"import mlsysim,sys; print('mlsysim:', mlsysim.__file__); print('python:', sys.executable)\""
+          run_check "Rscript on PATH" "command -v Rscript >/dev/null"
+          run_check "Rscript version" "Rscript --version | sed -n '1p'"
+          run_check "inkscape on PATH" "command -v inkscape >/dev/null"
+          run_check "inkscape version" "inkscape --version | sed -n '1p'"
 
           if [ "${{ matrix.format_name }}" = "PDF" ]; then
-            command -v lualatex
-            lualatex --version | sed -n '1p'
-            command -v gs
-            gs --version
+            run_check "lualatex on PATH" "command -v lualatex >/dev/null"
+            run_check "lualatex version" "lualatex --version | sed -n '1p'"
+            run_check "ghostscript (gs) on PATH" "command -v gs >/dev/null"
+            run_check "ghostscript version" "gs --version"
           fi
 
           if [ "${{ matrix.format_name }}" = "EPUB" ]; then
-            python3 -c "import PIL; print('Pillow:', PIL.__version__)"
+            run_check "Pillow import" "python3 -c \"import PIL; print('Pillow:', PIL.__version__)\""
           fi
 
           echo "✅ Linux toolchain preflight checks passed"
@@ -415,32 +434,55 @@ jobs:
           docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} pwsh -NoLogo -Command "
             `$ErrorActionPreference = 'Stop'
             `$PSNativeCommandUseErrorActionPreference = `$true
-            `$required = @('quarto', 'pandoc', 'python', 'python3', 'Rscript', 'inkscape')
-            foreach (`$cmd in `$required) {
-              `$resolved = Get-Command `$cmd -ErrorAction Stop
-              Write-Host \"✅ `$cmd -> `$(`$resolved.Source)\"
+
+            function Invoke-Check {
+              param(
+                [string]`$Name,
+                [scriptblock]`$Action
+              )
+              Write-Host \"▶ preflight: `$Name\"
+              try {
+                & `$Action
+                if (-not `$?) { throw 'Command returned non-zero status' }
+                Write-Host \"✅ preflight: `$Name\"
+              } catch {
+                Write-Error \"❌ preflight failed: `$Name -- `$(`$_.Exception.Message)\"
+                throw
+              }
             }
 
-            quarto --version | Select-Object -First 1
-            pandoc --version | Select-Object -First 1
-            python --version
-            python3 --version
-            python -c 'import mlsysim,sys; print(\"mlsysim:\", mlsysim.__file__); print(\"python:\", sys.executable)'
-            Rscript --version | Select-Object -First 1
-            inkscape --version | Select-Object -First 1
+            Invoke-Check 'quarto on PATH' { `$resolved = Get-Command quarto -ErrorAction Stop; Write-Host \"   quarto -> `$(`$resolved.Source)\" }
+            Invoke-Check 'quarto version' { quarto --version | Select-Object -First 1 }
+            Invoke-Check 'pandoc on PATH' { `$resolved = Get-Command pandoc -ErrorAction Stop; Write-Host \"   pandoc -> `$(`$resolved.Source)\" }
+            Invoke-Check 'pandoc version' { pandoc --version | Select-Object -First 1 }
+            Invoke-Check 'python on PATH' { `$resolved = Get-Command python -ErrorAction Stop; Write-Host \"   python -> `$(`$resolved.Source)\" }
+            Invoke-Check 'python version' { python --version }
+            Invoke-Check 'python3 on PATH' { `$resolved = Get-Command python3 -ErrorAction Stop; Write-Host \"   python3 -> `$(`$resolved.Source)\" }
+            Invoke-Check 'python3 version' { python3 --version }
+            Invoke-Check 'mlsysim import' { python -c 'import mlsysim,sys; print(\"mlsysim:\", mlsysim.__file__); print(\"python:\", sys.executable)' }
+            Invoke-Check 'Rscript on PATH' { `$resolved = Get-Command Rscript -ErrorAction Stop; Write-Host \"   Rscript -> `$(`$resolved.Source)\" }
+            Invoke-Check 'Rscript version' { Rscript --version | Select-Object -First 1 }
+            Invoke-Check 'inkscape on PATH' { `$resolved = Get-Command inkscape -ErrorAction Stop; Write-Host \"   inkscape -> `$(`$resolved.Source)\" }
+            Invoke-Check 'inkscape version' { inkscape --version | Select-Object -First 1 }
 
             if ('${{ matrix.format_name }}' -eq 'PDF') {
-              Get-Command lualatex -ErrorAction Stop | Out-Null
-              lualatex --version | Select-Object -First 1
-              `$gsCmd = Get-Command gs -ErrorAction SilentlyContinue
-              if (-not `$gsCmd) { `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue }
-              if (-not `$gsCmd) { throw 'Ghostscript not found (expected gs or gswin64c)' }
-              Write-Host \"✅ ghostscript -> `$(`$gsCmd.Source)\"
-              & `$gsCmd.Source --version
+              Invoke-Check 'lualatex on PATH' { `$resolved = Get-Command lualatex -ErrorAction Stop; Write-Host \"   lualatex -> `$(`$resolved.Source)\" }
+              Invoke-Check 'lualatex version' { lualatex --version | Select-Object -First 1 }
+              Invoke-Check 'ghostscript on PATH' {
+                `$gsCmd = Get-Command gs -ErrorAction SilentlyContinue
+                if (-not `$gsCmd) { `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue }
+                if (-not `$gsCmd) { throw 'Ghostscript not found (expected gs or gswin64c)' }
+                Write-Host \"   ghostscript -> `$(`$gsCmd.Source)\"
+              }
+              Invoke-Check 'ghostscript version' {
+                `$gsCmd = Get-Command gs -ErrorAction SilentlyContinue
+                if (-not `$gsCmd) { `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue }
+                & `$gsCmd.Source --version
+              }
             }
 
             if ('${{ matrix.format_name }}' -eq 'EPUB') {
-              python -c 'import PIL; print(\"Pillow:\", PIL.__version__)'
+              Invoke-Check 'Pillow import' { python -c 'import PIL; print(\"Pillow:\", PIL.__version__)' }
             }
           "
           Write-Host "✅ Windows toolchain preflight checks passed"
@@ -632,6 +674,8 @@ jobs:
     outputs:
       build_success: ${{ steps.collect.outputs.build_success }}
       build_target: ${{ steps.collect.outputs.build_target }}
+      failed_instances: ${{ steps.matrix-status.outputs.failed_instances }}
+      cancelled_instances: ${{ steps.matrix-status.outputs.cancelled_instances }}
       # Volume I artifacts
       linux_html_vol1_artifact: ${{ steps.collect.outputs.linux_html_vol1_artifact }}
       linux_pdf_vol1_artifact: ${{ steps.collect.outputs.linux_pdf_vol1_artifact }}
@@ -650,6 +694,46 @@ jobs:
       windows_epub_vol2_artifact: ${{ steps.collect.outputs.windows_epub_vol2_artifact }}
 
     steps:
+      - name: 🔎 Collect matrix job status details
+        id: matrix-status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = context.runId;
+            const { owner, repo } = context.repo;
+
+            const allJobs = [];
+            for (let page = 1; ; page++) {
+              const resp = await github.rest.actions.listJobsForWorkflowRun({
+                owner,
+                repo,
+                run_id: runId,
+                per_page: 100,
+                page,
+              });
+              allJobs.push(...resp.data.jobs);
+              if (resp.data.jobs.length < 100) break;
+            }
+
+            const matrixBuildJobs = allJobs.filter((job) => {
+              return job.name.includes(" Build ") && job.name.includes("Vol ");
+            });
+
+            const failedJobs = matrixBuildJobs.filter((job) =>
+              ["failure", "timed_out", "action_required", "stale"].includes(job.conclusion || "")
+            );
+            const cancelledJobs = matrixBuildJobs.filter((job) =>
+              (job.conclusion || "") === "cancelled"
+            );
+
+            const failedNames = failedJobs.map((job) => job.name);
+            const cancelledNames = cancelledJobs.map((job) => job.name);
+
+            core.info(`Detected ${failedNames.length} failed matrix instance(s).`);
+            core.info(`Detected ${cancelledNames.length} cancelled matrix instance(s).`);
+            core.setOutput("failed_instances", failedNames.join(" | "));
+            core.setOutput("cancelled_instances", cancelledNames.join(" | "));
+
       - name: 📊 Collect results
         id: collect
         run: |
@@ -661,6 +745,26 @@ jobs:
             echo "build_success=false" >> $GITHUB_OUTPUT
             BUILD_SUCCESS_MSG="❌ Failure"
           fi
+
+          FAILED_INSTANCES="${{ steps.matrix-status.outputs.failed_instances }}"
+          CANCELLED_INSTANCES="${{ steps.matrix-status.outputs.cancelled_instances }}"
+          if [[ -n "$FAILED_INSTANCES" ]]; then
+            echo "❌ Failed matrix instances: $FAILED_INSTANCES"
+          fi
+          if [[ -n "$CANCELLED_INSTANCES" ]]; then
+            echo "⚠️ Cancelled matrix instances (often fail-fast cascade): $CANCELLED_INSTANCES"
+          fi
+
+          {
+            echo "## Container Matrix Result"
+            echo "- Overall: $BUILD_SUCCESS_MSG"
+            if [[ -n "$FAILED_INSTANCES" ]]; then
+              echo "- Failed instances: $FAILED_INSTANCES"
+            fi
+            if [[ -n "$CANCELLED_INSTANCES" ]]; then
+              echo "- Cancelled instances: $CANCELLED_INSTANCES"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
           # 🔌 API-style artifact name generation (reliable and predictable)
           TARGET="${{ inputs.target }}"

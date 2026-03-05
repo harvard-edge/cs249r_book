@@ -630,7 +630,7 @@ Once everything is set up, you'll be able to:
 ### Next Steps
 1. Read [BINDER.md](BINDER.md) for complete CLI reference
 2. Check [DEVELOPMENT.md](DEVELOPMENT.md) for development workflow
-3. Review [contribute.md](contribute.md) for contribution guidelines
+3. Review [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines
 4. Join discussions at [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)
 
 ---
@@ -640,8 +640,8 @@ Once everything is set up, you'll be able to:
 ### Documentation
 - **[BINDER.md](BINDER.md)** - Complete Book Binder CLI reference
 - **[DEVELOPMENT.md](DEVELOPMENT.md)** - Development guidelines and workflow
-- **[contribute.md](contribute.md)** - Contribution guidelines
-- **[PUBLISH_LIVE_WORKFLOW.md](PUBLISH_LIVE_WORKFLOW.md)** - Publishing workflow
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines
+- **[`book-publish-live.yml`](../../.github/workflows/book-publish-live.yml)** - Publishing workflow definition
 
 ### Community
 - **[GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions)** - Ask questions and share knowledge
@@ -671,7 +671,7 @@ We welcome contributions! The easiest way to get started:
 4. **Test locally**: `./binder preview <chapter>`
 5. **Submit a pull request**
 
-For detailed contribution guidelines, see [contribute.md](contribute.md).
+For detailed contribution guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ---
 

@@ -30,12 +30,12 @@ Containerized Linux Build (5-10 minutes):
 ## Files
 
 ### Core Files
-- `docker/linux/Dockerfile` - A single Dockerfile for Linux builds.
-- `docker/linux/README.md` - Linux container documentation
-- `docker/linux/.dockerignore` - Build exclusions
-- `docker/windows/Dockerfile` - A single Dockerfile for Windows builds.
-- `docker/windows/README.md` - Windows container documentation
-- `docker/windows/.dockerignore` - Build exclusions
+- `book/docker/linux/Dockerfile` - Linux build container definition
+- `book/docker/linux/README.md` - Linux container documentation
+- `book/docker/linux/.dockerignore` - Linux build exclusions
+- `book/docker/windows/Dockerfile` - Windows build container definition
+- `book/docker/windows/README.md` - Windows container documentation
+- `book/docker/windows/.dockerignore` - Windows build exclusions
 
 ### Container Lifecycle
 1. **Build**: Weekly automatic rebuilds + manual triggers
@@ -55,17 +55,24 @@ Containerized Linux Build (5-10 minutes):
 You can build the containers locally using these commands:
 - **Linux**:
   ```bash
-  docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
+  docker build -f book/docker/linux/Dockerfile -t mlsysbook-linux .
   ```
 - **Windows**:
   ```powershell
-  docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+  docker build -f book/docker/windows/Dockerfile -t mlsysbook-windows .
   ```
 
 ### Manual Build Test
 ```bash
 # Test containerized build
-gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field format=html
+gh workflow run book-build-container.yml \
+  --field build_linux=true \
+  --field build_windows=false \
+  --field build_html=true \
+  --field build_pdf=false \
+  --field build_epub=false \
+  --field build_target=vol1 \
+  --field target=dev
 ```
 
 ### Container Information
@@ -78,9 +85,9 @@ gh workflow run quarto-build-container.yml --field os=ubuntu-latest --field form
 ## Workflow Integration
 
 ### Current Workflows
-- `quarto-build-container.yml` - Containerized version (fast path, recommended)
-- `build-linux-container.yml` - Linux container management
-- `build-windows-container.yml` - Windows container management
+- `book-build-container.yml` - Containerized book build matrix
+- `infra-container-linux.yml` - Linux container image management
+- `infra-container-windows.yml` - Windows container image management
 
 ### Migration Status
 1. **✅ Phase 1**: Containerized builds tested and validated
@@ -174,8 +181,8 @@ To build the containers, use the standard `docker build` command:
 
 ```bash
 # For Linux
-docker build -f docker/linux/Dockerfile -t mlsysbook-linux .
+docker build -f book/docker/linux/Dockerfile -t mlsysbook-linux .
 
 # For Windows
-docker build -f docker/windows/Dockerfile -t mlsysbook-windows .
+docker build -f book/docker/windows/Dockerfile -t mlsysbook-windows .
 ```
