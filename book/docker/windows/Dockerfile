@@ -366,28 +366,40 @@ RUN Write-Host '=== VERIFY: Quarto ===' ; `
     $cmd = Get-Command quarto -ErrorAction SilentlyContinue ; `
     if (-not $cmd) { Write-Host "❌ Quarto FAILED: command not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    quarto --version ; `
+    $out = & quarto --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Quarto FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ Quarto verified'
 
 RUN Write-Host '=== VERIFY: Python ===' ; `
     $cmd = Get-Command python -ErrorAction SilentlyContinue ; `
     if (-not $cmd) { Write-Host "❌ Python FAILED: command not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    python --version ; `
+    $out = & python --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Python FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ Python verified'
 
 RUN Write-Host '=== VERIFY: R ===' ; `
     $cmd = Get-Command Rscript -ErrorAction SilentlyContinue ; `
     if (-not $cmd) { Write-Host "❌ R FAILED: command not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    Rscript --version ; `
+    $out = & Rscript --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ R FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ R verified'
 
 RUN Write-Host '=== VERIFY: LaTeX ===' ; `
     $cmd = Get-Command lualatex -ErrorAction SilentlyContinue ; `
     if (-not $cmd) { Write-Host "❌ LaTeX FAILED: command not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    lualatex --version | Select-Object -First 1 ; `
+    $out = & lualatex --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ LaTeX FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ LaTeX verified'
 
 RUN Write-Host '=== VERIFY: Ghostscript ===' ; `
@@ -395,19 +407,28 @@ RUN Write-Host '=== VERIFY: Ghostscript ===' ; `
     if (-not $cmd) { $cmd = Get-Command gswin64c -ErrorAction SilentlyContinue } ; `
     if (-not $cmd) { Write-Host "❌ Ghostscript FAILED: gs/gswin64c not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    & $cmd.Source --version ; `
+    $out = & $cmd.Source --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Ghostscript FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ Ghostscript verified'
 
 RUN Write-Host '=== VERIFY: Inkscape ===' ; `
     $cmd = Get-Command inkscape -ErrorAction SilentlyContinue ; `
     if (-not $cmd) { Write-Host "❌ Inkscape FAILED: command not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    inkscape --version ; `
+    $out = & inkscape --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ Inkscape FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ Inkscape verified'
 
 RUN Write-Host '=== VERIFY: rsvg-convert ===' ; `
     $cmd = Get-Command rsvg-convert -ErrorAction SilentlyContinue ; `
     if (-not $cmd) { Write-Host "❌ rsvg-convert FAILED: command not found"; exit 1 } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    rsvg-convert --version ; `
+    $out = & rsvg-convert --version 2>&1 | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { Write-Host "❌ rsvg-convert FAILED: exited $exitCode"; exit 1 } ; `
+    Write-Host "  $out" ; `
     Write-Host '✅ rsvg-convert verified'
