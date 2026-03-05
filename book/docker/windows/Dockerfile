@@ -310,9 +310,11 @@ RUN Write-Host '=== VERIFY TEX LIVE INSTALLATION ===' ; `
         exit 1 ; `
     } ; `
     Write-Host "Resolved: $($cmd.Source)" ; `
-    $lv = lualatex --version | Select-Object -First 1 ; `
-    if ($LASTEXITCODE -ne 0) { `
-        Write-Host "❌ TeX Live verification failed: lualatex --version exited $LASTEXITCODE" ; `
+    $lvAll = & lualatex --version 2>&1 ; `
+    $lv = $lvAll | Select-Object -First 1 ; `
+    $exitCode = if ($null -eq $LASTEXITCODE) { if ($?) { 0 } else { 1 } } else { [int]$LASTEXITCODE } ; `
+    if ($exitCode -ne 0) { `
+        Write-Host "❌ TeX Live verification failed: lualatex --version exited $exitCode" ; `
         exit 1 ; `
     } ; `
     Write-Host "📦 LaTeX verified: $lv" ; `
