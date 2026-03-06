@@ -36,11 +36,11 @@ env:
 #
 # artifact-manifest: JSON file declaring the names of HTML, PDF, and EPUB artifacts
 # main-html-linux: Contains build/html/ (web version)
-# main-pdf-linux:  Contains build/pdf/Machine-Learning-Systems.pdf
-# main-epub-linux: Contains build/epub/Machine-Learning-Systems.epub
+# main-pdf-linux:  Contains Machine-Learning-Systems-Vol{1,2}.pdf
+# main-epub-linux: Contains Machine-Learning-Systems-Vol{1,2}.epub
 # main-html-windows: Contains build/html/ (web version)
-# main-pdf-windows: Contains build/pdf/Machine-Learning-Systems.pdf
-# main-epub-windows: Contains build/epub/Machine-Learning-Systems.epub
+# main-pdf-windows: Contains Machine-Learning-Systems-Vol{1,2}.pdf
+# main-epub-windows: Contains Machine-Learning-Systems-Vol{1,2}.epub
 #
 # This workflow downloads the artifact manifest first to get the exact names,
 # then downloads the HTML, PDF, and EPUB artifacts using those names for coordination.
@@ -1141,8 +1141,8 @@ jobs:
           Combined HTML site with PDF and EPUB assets for download.
 
           - HTML: Interactive web textbook at /book/
-          - PDF: /book/assets/downloads/Machine-Learning-Systems.pdf
-          - EPUB: /book/assets/downloads/Machine-Learning-Systems.epub (if available)
+          - Vol1 PDF/EPUB: /book/vol1/assets/downloads/
+          - Vol2 PDF/EPUB: /book/vol2/assets/downloads/
           - Release: ${{ needs.validate-inputs.outputs.new_version }}
           - Files updated: $CHANGED_FILES"
 
@@ -1194,34 +1194,55 @@ jobs:
           echo "  - Root (redirects to /book/): https://mlsysbook.ai/"
           echo ""
           echo "📄 Direct Asset Links:"
-          echo "  - PDF: https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf"
-          echo "  - EPUB: https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub"
+          echo "  - Vol1 PDF: https://mlsysbook.ai/book/vol1/assets/downloads/Machine-Learning-Systems-Vol1.pdf"
+          echo "  - Vol1 EPUB: https://mlsysbook.ai/book/vol1/assets/downloads/Machine-Learning-Systems-Vol1.epub"
+          echo "  - Vol2 PDF: https://mlsysbook.ai/book/vol2/assets/downloads/Machine-Learning-Systems-Vol2.pdf"
+          echo "  - Vol2 EPUB: https://mlsysbook.ai/book/vol2/assets/downloads/Machine-Learning-Systems-Vol2.epub"
           echo ""
           echo "⏰ Note: Changes may take 1-5 minutes to appear due to CDN caching."
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📤 Upload PDF Artifact for GitHub Release
-        uses: actions/upload-artifact@v6
-        with:
-          name: pdf-artifact
-          path: Machine-Learning-Systems.pdf
-
-      - name: 📤 Upload EPUB Artifact for GitHub Release
-        if: success()
+      - name: 📤 Collect release assets (PDF + EPUB per volume)
         run: |
-          if [ -f "Machine-Learning-Systems.epub" ]; then
-            echo "✅ EPUB file found for upload"
-          else
-            echo "⚠️ No EPUB file found - creating empty artifact to prevent workflow failure"
-            touch Machine-Learning-Systems.epub
+          mkdir -p release-assets
+
+          # Collect Vol1 PDF
+          VOL1_PDF=$(find pdf-vol1-temp -name "*.pdf" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL1_PDF" ]; then
+            cp "$VOL1_PDF" release-assets/Machine-Learning-Systems-Vol1.pdf
+            echo "✅ Vol1 PDF: $(basename "$VOL1_PDF")"
           fi
 
-      - name: 📤 Upload EPUB Artifact
+          # Collect Vol2 PDF
+          VOL2_PDF=$(find pdf-vol2-temp -name "*.pdf" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL2_PDF" ]; then
+            cp "$VOL2_PDF" release-assets/Machine-Learning-Systems-Vol2.pdf
+            echo "✅ Vol2 PDF: $(basename "$VOL2_PDF")"
+          fi
+
+          # Collect Vol1 EPUB
+          VOL1_EPUB=$(find epub-vol1-temp -name "*.epub" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL1_EPUB" ]; then
+            cp "$VOL1_EPUB" release-assets/Machine-Learning-Systems-Vol1.epub
+            echo "✅ Vol1 EPUB: $(basename "$VOL1_EPUB")"
+          fi
+
+          # Collect Vol2 EPUB
+          VOL2_EPUB=$(find epub-vol2-temp -name "*.epub" -type f 2>/dev/null | head -1)
+          if [ -n "$VOL2_EPUB" ]; then
+            cp "$VOL2_EPUB" release-assets/Machine-Learning-Systems-Vol2.epub
+            echo "✅ Vol2 EPUB: $(basename "$VOL2_EPUB")"
+          fi
+
+          echo "📦 Release assets:"
+          ls -la release-assets/
+
+      - name: 📤 Upload release assets artifact
         uses: actions/upload-artifact@v6
         with:
-          name: epub-artifact
-          path: Machine-Learning-Systems.epub
+          name: release-assets
+          path: release-assets/
           if-no-files-found: warn
 
   generate-release-notes:
@@ -1237,11 +1258,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📄 Download PDF from previous job
+      - name: 📄 Download release assets from previous job
         uses: actions/download-artifact@v7
         with:
-          name: pdf-artifact
-          path: ./
+          name: release-assets
+          path: ./release-assets
 
       - name: 📝 Generate Release Notes
         run: |
@@ -1518,17 +1539,11 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 📄 Download PDF from previous job
+      - name: 📦 Download release assets
         uses: actions/download-artifact@v7
         with:
-          name: pdf-artifact
-          path: ./
-
-      - name: 📚 Download EPUB from previous job
-        uses: actions/download-artifact@v7
-        with:
-          name: epub-artifact
-          path: ./
+          name: release-assets
+          path: ./release-assets
 
       - name: 📝 Download release notes
         uses: actions/download-artifact@v7
@@ -1603,82 +1618,56 @@ jobs:
             exit 1
           fi
 
-      - name: 📄 Upload PDF to Release Assets
+      - name: 📦 Upload release assets (PDF + EPUB per volume)
         run: |
-          echo "📄 Uploading PDF to release assets..."
+          echo "📦 Uploading release assets..."
+          echo "📋 Available assets:"
+          ls -la release-assets/
 
-          if [ ! -f "Machine-Learning-Systems.pdf" ]; then
-            echo "❌ PDF file not found!"
-            exit 1
-          fi
+          UPLOAD_FAILURES=0
 
-          echo "📊 PDF size: $(du -h Machine-Learning-Systems.pdf | cut -f1)"
+          for ASSET_FILE in release-assets/*; do
+            [ -f "$ASSET_FILE" ] || continue
+            [ -s "$ASSET_FILE" ] || { echo "⚠️ Skipping empty file: $ASSET_FILE"; continue; }
 
-          # Upload the PDF to the release
-          UPLOAD_RESPONSE=$(curl -s \
-            -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/pdf" \
-            --data-binary @Machine-Learning-Systems.pdf \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.pdf")
+            ASSET_NAME=$(basename "$ASSET_FILE")
+            ASSET_EXT="${ASSET_NAME##*.}"
+            echo ""
+            echo "📤 Uploading $ASSET_NAME ($(du -h "$ASSET_FILE" | cut -f1))..."
 
-          echo "📊 Upload Response:"
-          echo "$UPLOAD_RESPONSE" | jq '.'
+            # Set content type based on extension
+            case "$ASSET_EXT" in
+              pdf)  CONTENT_TYPE="application/pdf" ;;
+              epub) CONTENT_TYPE="application/epub+zip" ;;
+              *)    CONTENT_TYPE="application/octet-stream" ;;
+            esac
 
-          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+            UPLOAD_RESPONSE=$(curl -s \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              -H "Content-Type: $CONTENT_TYPE" \
+              --data-binary @"$ASSET_FILE" \
+              "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=$ASSET_NAME")
 
-          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
-            echo "✅ PDF uploaded successfully to release!"
-            echo "📊 Asset ID: $UPLOAD_ID"
-            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf"
+            UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
+
+            if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
+              echo "✅ $ASSET_NAME uploaded (Asset ID: $UPLOAD_ID)"
+              echo "🔗 https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/$ASSET_NAME"
+            else
+              echo "⚠️ Failed to upload $ASSET_NAME"
+              echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
+              UPLOAD_FAILURES=$((UPLOAD_FAILURES + 1))
+            fi
+          done
+
+          if [ "$UPLOAD_FAILURES" -gt 0 ]; then
+            echo ""
+            echo "⚠️ $UPLOAD_FAILURES asset(s) failed to upload"
           else
-            echo "❌ Failed to upload PDF to release!"
-            echo "📊 Error details:"
-            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
-            exit 1
-          fi
-
-      - name: 📚 Upload EPUB to Release Assets
-        run: |
-          echo "📚 Checking for EPUB file to upload..."
-
-          if [ ! -f "Machine-Learning-Systems.epub" ]; then
-            echo "⚠️ EPUB file not found - skipping EPUB upload"
-            exit 0
-          fi
-
-          # Check if it's an empty file (created as placeholder)
-          if [ ! -s "Machine-Learning-Systems.epub" ]; then
-            echo "⚠️ EPUB file is empty (placeholder) - skipping EPUB upload"
-            exit 0
-          fi
-
-          echo "📚 Uploading EPUB to release assets..."
-          echo "📊 EPUB size: $(du -h Machine-Learning-Systems.epub | cut -f1)"
-
-          # Upload the EPUB to the release
-          UPLOAD_RESPONSE=$(curl -s \
-            -X POST \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/epub+zip" \
-            --data-binary @Machine-Learning-Systems.epub \
-            "https://uploads.github.com/repos/${{ github.repository }}/releases/${{ env.release_id }}/assets?name=Machine-Learning-Systems.epub")
-
-          echo "📊 Upload Response:"
-          echo "$UPLOAD_RESPONSE" | jq '.'
-
-          UPLOAD_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.id')
-
-          if [ "$UPLOAD_ID" != "null" ] && [ -n "$UPLOAD_ID" ]; then
-            echo "✅ EPUB uploaded successfully to release!"
-            echo "📊 Asset ID: $UPLOAD_ID"
-            echo "🔗 Download URL: https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub"
-          else
-            echo "⚠️ Failed to upload EPUB to release (continuing anyway)!"
-            echo "📊 Error details:"
-            echo "$UPLOAD_RESPONSE" | jq -r '.message // "Unknown error"'
+            echo ""
+            echo "✅ All release assets uploaded successfully"
           fi
 
   summary:
@@ -1734,17 +1723,17 @@ jobs:
           echo "- 🔥 [TinyTorch Framework](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
           echo "- ⚙️ [Hardware Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Version Release Notes](https://github.com/${{ github.repository }}/releases/tag/${{ needs.validate-inputs.outputs.new_version }})" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Download Complete PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 [Download EPUB eBook](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 [Direct PDF Access](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 [Direct EPUB Access](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.epub)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download Vol1 PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol1.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 [Download Vol2 PDF](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol2.pdf)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Download Vol1 EPUB](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol1.epub)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 [Download Vol2 EPUB](https://github.com/${{ github.repository }}/releases/download/${{ needs.validate-inputs.outputs.new_version }}/Machine-Learning-Systems-Vol2.epub)" >> $GITHUB_STEP_SUMMARY
           echo "- 🎓 [Share with Students](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 📊 Build Status:" >> $GITHUB_STEP_SUMMARY
           echo "- 📋 **Quarto Build Container Workflow**: Should be running/completed" >> $GITHUB_STEP_SUMMARY
           echo "- 🏗️ **Quarto Build**: HTML + PDF + EPUB generation" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 **PDF Assets**: Available at `/assets/downloads/Machine-Learning-Systems.pdf`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📚 **EPUB Assets**: Available at `/assets/downloads/Machine-Learning-Systems.epub`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📄 **PDF Assets**: Available at \`/book/vol{1,2}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
+          echo "- 📚 **EPUB Assets**: Available at \`/book/vol{1,2}/assets/downloads/\`" >> $GITHUB_STEP_SUMMARY
 
   cleanup-on-failure:
     name: '🧹 Cleanup Failed Release'
