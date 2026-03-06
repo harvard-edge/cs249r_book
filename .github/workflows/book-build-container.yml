@@ -130,26 +130,6 @@ on:
       linux_epub_vol2_artifact:
         description: "Linux EPUB artifact name (Volume II)"
         value: ${{ jobs.collect-outputs.outputs.linux_epub_vol2_artifact }}
-      # Windows Volume I artifacts
-      windows_html_vol1_artifact:
-        description: "Windows HTML artifact name (Volume I)"
-        value: ${{ jobs.collect-outputs.outputs.windows_html_vol1_artifact }}
-      windows_pdf_vol1_artifact:
-        description: "Windows PDF artifact name (Volume I)"
-        value: ${{ jobs.collect-outputs.outputs.windows_pdf_vol1_artifact }}
-      windows_epub_vol1_artifact:
-        description: "Windows EPUB artifact name (Volume I)"
-        value: ${{ jobs.collect-outputs.outputs.windows_epub_vol1_artifact }}
-      # Windows Volume II artifacts
-      windows_html_vol2_artifact:
-        description: "Windows HTML artifact name (Volume II)"
-        value: ${{ jobs.collect-outputs.outputs.windows_html_vol2_artifact }}
-      windows_pdf_vol2_artifact:
-        description: "Windows PDF artifact name (Volume II)"
-        value: ${{ jobs.collect-outputs.outputs.windows_pdf_vol2_artifact }}
-      windows_epub_vol2_artifact:
-        description: "Windows EPUB artifact name (Volume II)"
-        value: ${{ jobs.collect-outputs.outputs.windows_epub_vol2_artifact }}
 
 permissions:
   contents: read
@@ -377,19 +357,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🐳 Ensure Docker daemon (Windows)
-        if: matrix.platform == 'windows' && matrix.enabled
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dockerService = Get-Service -Name docker -ErrorAction Stop
-
-          if ($dockerService.Status -ne 'Running') {
-            Write-Host "Starting Docker service..."
-            Start-Service -Name docker
-          } else {
-            Write-Host "Docker service already running."
-          }
 
           $maxAttempts = 12
           for ($i = 1; $i -le $maxAttempts; $i++) {
@@ -405,9 +372,6 @@ jobs:
             }
           }
 
-      - name: 🐳 Pull Docker Image
-        if: matrix.platform == 'windows' && matrix.enabled
-        run: docker pull ${{ env.CONTAINER_IMAGE }}
 
       - name: 🧪 Preflight toolchain (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
@@ -454,84 +418,6 @@ jobs:
 
           echo "✅ Linux toolchain preflight checks passed"
 
-      - name: 🧪 Preflight toolchain (Windows)
-        if: matrix.platform == 'windows' && matrix.enabled
-        shell: pwsh
-        run: |
-          Write-Host "🧪 Running Windows toolchain preflight checks..."
-          $preflightScript = @"
-
-            `$ErrorActionPreference = 'Stop'
-            `$PSNativeCommandUseErrorActionPreference = `$true
-
-            function Invoke-Check {
-              param(
-                [string]`$Name,
-                [scriptblock]`$Action
-              )
-              Write-Host \"▶ preflight: `$Name\"
-              try {
-                & `$Action
-                if (-not `$?) { throw 'Command returned non-zero status' }
-                Write-Host \"✅ preflight: `$Name\"
-              } catch {
-                `$errorMessage = `$_.Exception.Message
-                Write-Error (\"❌ preflight failed: `$Name -- {0}\" -f `$errorMessage)
-                throw
-              }
-            }
-
-            Invoke-Check 'quarto on PATH' { `$resolved = Get-Command quarto -ErrorAction Stop; Write-Host (\"   quarto -> {0}\" -f `$resolved.Source) }
-            Invoke-Check 'quarto version' { quarto --version | Select-Object -First 1 }
-            Invoke-Check 'pandoc available' {
-              `$pandocCmd = Get-Command pandoc -ErrorAction SilentlyContinue
-              if (`$pandocCmd) {
-                Write-Host (\"   pandoc -> {0}\" -f `$pandocCmd.Source)
-              } else {
-                quarto pandoc --version | Select-Object -First 1 | Out-Null
-                Write-Host \"   pandoc -> bundled via quarto\"
-              }
-            }
-            Invoke-Check 'pandoc version' {
-              `$pandocCmd = Get-Command pandoc -ErrorAction SilentlyContinue
-              if (`$pandocCmd) {
-                pandoc --version | Select-Object -First 1
-              } else {
-                quarto pandoc --version | Select-Object -First 1
-              }
-            }
-            Invoke-Check 'python on PATH' { `$resolved = Get-Command python -ErrorAction Stop; Write-Host (\"   python -> {0}\" -f `$resolved.Source) }
-            Invoke-Check 'python version' { python --version }
-            Invoke-Check 'python3 on PATH' { `$resolved = Get-Command python3 -ErrorAction Stop; Write-Host (\"   python3 -> {0}\" -f `$resolved.Source) }
-            Invoke-Check 'python3 version' { python3 --version }
-            Invoke-Check 'mlsysim import' { python -c 'import mlsysim,sys; print(\"mlsysim:\", mlsysim.__file__); print(\"python:\", sys.executable)' }
-            Invoke-Check 'Rscript on PATH' { `$resolved = Get-Command Rscript -ErrorAction Stop; Write-Host (\"   Rscript -> {0}\" -f `$resolved.Source) }
-            Invoke-Check 'Rscript version' { Rscript --version | Select-Object -First 1 }
-            Invoke-Check 'inkscape on PATH' { `$resolved = Get-Command inkscape -ErrorAction Stop; Write-Host (\"   inkscape -> {0}\" -f `$resolved.Source) }
-            Invoke-Check 'inkscape version' { inkscape --version | Select-Object -First 1 }
-
-            if ('${{ matrix.format_name }}' -eq 'PDF') {
-              Invoke-Check 'lualatex on PATH' { `$resolved = Get-Command lualatex -ErrorAction Stop; Write-Host (\"   lualatex -> {0}\" -f `$resolved.Source) }
-              Invoke-Check 'lualatex version' { lualatex --version | Select-Object -First 1 }
-              Invoke-Check 'ghostscript on PATH' {
-                `$gsCmd = Get-Command gs -ErrorAction SilentlyContinue
-                if (-not `$gsCmd) { `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue }
-                if (-not `$gsCmd) { throw 'Ghostscript not found (expected gs or gswin64c)' }
-                Write-Host (\"   ghostscript -> {0}\" -f `$gsCmd.Source)
-              }
-              Invoke-Check 'ghostscript version' {
-                `$gsCmd = Get-Command gs -ErrorAction SilentlyContinue
-                if (-not `$gsCmd) { `$gsCmd = Get-Command gswin64c -ErrorAction SilentlyContinue }
-                & `$gsCmd.Source --version
-              }
-            }
-
-            if ('${{ matrix.format_name }}' -eq 'EPUB') {
-              Invoke-Check 'Pillow import' { python -c 'import PIL; print(\"Pillow:\", PIL.__version__)' }
-            }
-          "@
-          $preflightScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} -i pwsh -NoLogo -Command -
-          Write-Host "✅ Windows toolchain preflight checks passed"
 
       - name: 🔨 Build ${{ matrix.format_name }} (Linux)
         if: matrix.platform == 'linux' && matrix.enabled
@@ -545,19 +431,6 @@ jobs:
           quarto render --to ${{ matrix.render_target }} --output-dir "${{ matrix.output_dir }}"
           echo "✅ ${{ matrix.format_name }} build completed"
 
-      - name: 🔨 Build ${{ matrix.format_name }} (Windows)
-        if: matrix.platform == 'windows' && matrix.enabled
-        shell: pwsh
-        run: |
-          Write-Host "🔨 Building ${{ matrix.format_name }} on Windows container..."
-          $buildScript = @"
-
-            if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
-            Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
-            quarto render --to ${{ matrix.render_target }} --output-dir '${{ matrix.output_dir }}'
-          "@
-          $buildScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} -i pwsh -NoLogo -Command -
-          Write-Host "✅ ${{ matrix.format_name }} build completed"
 
       - name: 📉 Compress PDF (Linux)
         if: matrix.platform == 'linux' && matrix.format_name == 'PDF' && matrix.enabled
@@ -594,45 +467,6 @@ jobs:
             echo "⚠️ PDF file not found for compression"
           fi
 
-      - name: 📉 Compress PDF (Windows)
-        if: matrix.platform == 'windows' && matrix.format_name == 'PDF' && matrix.enabled
-        shell: pwsh
-        run: |
-          Write-Host "🔨 Compressing PDF on Windows container..."
-          $compressPdfScript = @"
-
-            if (Test-Path 'Machine-Learning-Systems.pdf') {
-              Write-Host '📉 Compressing PDF with professional compression tool...'
-              Write-Host '🔍 DEBUG: Current directory:'
-              Get-Location
-              Write-Host '🔍 DEBUG: Windows environment info:'
-              Write-Host ("OS: {0}" -f [System.Environment]::OSVersion.VersionString)
-              Write-Host ("Architecture: {0}" -f [System.Environment]::Is64BitOperatingSystem)
-              Write-Host '🔍 DEBUG: Verifying Python and Pillow installation:'
-              `$py_version = (python --version 2>&1).Trim()
-              Write-Host "  🐍 Python Version: `$py_version"
-              `$py_path = (python -c 'import sys; print(sys.executable)').Trim()
-              Write-Host "  🐍 Python Path: `$py_path"
-              `$pillow_version = (python -c 'import PIL; print(PIL.__version__)').Trim()
-              Write-Host "  ✅ Pillow Version: `$pillow_version"
-              Write-Host '🔍 DEBUG: Checking for script at relative path:'
-              if (Test-Path '..\\..\\publish\\compress_pdf.py') {
-                Write-Host '✅ Found script at ..\\..\\publish\\compress_pdf.py'
-                python ..\..\publish\compress_pdf.py --input 'Machine-Learning-Systems.pdf' --output 'compressed.pdf' --quality minimal --verbose
-              } else {
-                Write-Host '🔄 Trying fallback path: C:\workspace\book\quarto\publish\compress_pdf.py'
-                python C:\workspace\book\quarto\publish\compress_pdf.py --input 'Machine-Learning-Systems.pdf' --output 'compressed.pdf' --quality minimal --verbose
-              }
-              if (Test-Path 'compressed.pdf') {
-                Move-Item -Force 'compressed.pdf' 'Machine-Learning-Systems.pdf'
-                Write-Host '✅ PDF compression completed'
-              }
-            } else {
-              Write-Warning '⚠️ Machine-Learning-Systems.pdf not found for compression.'
-            }
-          "@
-          $compressPdfScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} -i pwsh -NoLogo -Command -
-          Write-Host "✅ PDF compression completed."
 
       - name: 📚 Compress EPUB (Linux)
         if: matrix.platform == 'linux' && matrix.format_name == 'EPUB' && matrix.enabled
@@ -671,45 +505,6 @@ jobs:
             echo "⚠️ EPUB file not found for compression"
           fi
 
-      - name: 📚 Compress EPUB (Windows)
-        if: matrix.platform == 'windows' && matrix.format_name == 'EPUB' && matrix.enabled
-        shell: pwsh
-        run: |
-          Write-Host "🔨 Compressing EPUB on Windows container..."
-          $compressEpubScript = @"
-
-            if (Test-Path 'Machine-Learning-Systems.epub') {
-              Write-Host '📚 Compressing EPUB with optimized compression tool...'
-              Write-Host '🔍 DEBUG: Current directory:'
-              Get-Location
-              Write-Host '🔍 DEBUG: Windows environment info:'
-              Write-Host ("OS: {0}" -f [System.Environment]::OSVersion.VersionString)
-              Write-Host ("Architecture: {0}" -f [System.Environment]::Is64BitOperatingSystem)
-              Write-Host '🔍 DEBUG: Verifying Python and Pillow installation:'
-              `$py_version = (python --version 2>&1).Trim()
-              Write-Host "  🐍 Python Version: `$py_version"
-              `$py_path = (python -c 'import sys; print(sys.executable)').Trim()
-              Write-Host "  🐍 Python Path: `$py_path"
-              `$pillow_version = (python -c 'import PIL; print(PIL.__version__)').Trim()
-              Write-Host "  ✅ Pillow Version: `$pillow_version"
-              Write-Host '🔍 DEBUG: Checking for script at relative path:'
-              if (Test-Path '..\\..\\publish\\compress_epub.py') {
-                Write-Host '✅ Found script at ..\\..\\publish\\compress_epub.py'
-                python ..\..\publish\compress_epub.py --input 'Machine-Learning-Systems.epub' --output 'compressed.epub' --verbose
-              } else {
-                Write-Host '🔄 Trying fallback path: C:\workspace\book\quarto\publish\compress_epub.py'
-                python C:\workspace\book\quarto\publish\compress_epub.py --input 'Machine-Learning-Systems.epub' --output 'compressed.epub' --verbose
-              }
-              if (Test-Path 'compressed.epub') {
-                Move-Item -Force 'compressed.epub' 'Machine-Learning-Systems.epub'
-                Write-Host '✅ EPUB compression completed (using optimized defaults: quality=50, max-size=1000px)'
-              }
-            } else {
-              Write-Warning '⚠️ Machine-Learning-Systems.epub not found for compression.'
-            }
-          "@
-          $compressEpubScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} -i pwsh -NoLogo -Command -
-          Write-Host "✅ EPUB compression completed."
 
       - name: 📤 Upload artifact
         uses: actions/upload-artifact@v6
