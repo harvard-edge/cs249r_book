@@ -530,7 +530,21 @@ jobs:
               Invoke-Check 'Pillow import' { python -c 'import PIL; print(\"Pillow:\", PIL.__version__)' }
             }
           "@
-          $preflightScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -Command -
+
+          $scriptPath = Join-Path $PWD.Path 'preflight-script.ps1'
+          Set-Content -Path $scriptPath -Value $preflightScript -Encoding UTF8
+
+          docker run --rm `
+            -e PYTHONPATH=C:\workspace `
+            -v "$($PWD.Path):C:\workspace" `
+            -w "C:\workspace\book\quarto" `
+            ${{ env.CONTAINER_IMAGE }} `
+            "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\preflight-script.ps1"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Windows preflight failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
           Write-Host "✅ Windows toolchain preflight checks passed"
 
       - name: 🔨 Build ${{ matrix.format_name }} (Linux)
@@ -549,14 +563,52 @@ jobs:
         if: matrix.platform == 'windows' && matrix.enabled
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           Write-Host "🔨 Building ${{ matrix.format_name }} on Windows container..."
-          $buildScript = @"
 
-            if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
-            Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
-            quarto render --to ${{ matrix.render_target }} --output-dir '${{ matrix.output_dir }}'
-          "@
-          $buildScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto" ${{ env.CONTAINER_IMAGE }} "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -Command -
+          # Write build script to a file to avoid pipe/stdin issues
+          $scriptContent = @'
+          $ErrorActionPreference = 'Stop'
+          Write-Host "📋 Working directory: $(Get-Location)"
+          Write-Host "📋 Listing config files:"
+          Get-ChildItem config\_quarto-*.yml | ForEach-Object { Write-Host "  $_" }
+
+          if (Test-Path '_quarto.yml') { Remove-Item '_quarto.yml' -Force }
+          Copy-Item 'config\${{ matrix.config }}' '_quarto.yml' -Force
+          Write-Host "📋 Using config: ${{ matrix.config }}"
+
+          Write-Host "🔨 Starting quarto render..."
+          quarto render --to ${{ matrix.render_target }} --output-dir '${{ matrix.output_dir }}'
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Quarto render failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+          Write-Host "✅ Quarto render completed successfully"
+
+          # Verify output was produced
+          if (Test-Path '${{ matrix.output_dir }}') {
+            $fileCount = (Get-ChildItem '${{ matrix.output_dir }}' -Recurse -File | Measure-Object).Count
+            Write-Host "📊 Output directory contains $fileCount files"
+          } else {
+            Write-Error "❌ Output directory '${{ matrix.output_dir }}' not found!"
+            exit 1
+          }
+          '@
+
+          $scriptPath = Join-Path $PWD.Path 'build-script.ps1'
+          Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
+
+          docker run --rm `
+            -e PYTHONPATH=C:\workspace `
+            -v "$($PWD.Path):C:\workspace" `
+            -w "C:\workspace\book\quarto" `
+            ${{ env.CONTAINER_IMAGE }} `
+            "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\build-script.ps1"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Windows Docker build failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
           Write-Host "✅ ${{ matrix.format_name }} build completed"
 
       - name: 📉 Compress PDF (Linux)
@@ -598,40 +650,50 @@ jobs:
         if: matrix.platform == 'windows' && matrix.format_name == 'PDF' && matrix.enabled
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           Write-Host "🔨 Compressing PDF on Windows container..."
-          $compressPdfScript = @"
 
-            if (Test-Path 'Machine-Learning-Systems.pdf') {
-              Write-Host '📉 Compressing PDF with professional compression tool...'
-              Write-Host '🔍 DEBUG: Current directory:'
-              Get-Location
-              Write-Host '🔍 DEBUG: Windows environment info:'
-              Write-Host ("OS: {0}" -f [System.Environment]::OSVersion.VersionString)
-              Write-Host ("Architecture: {0}" -f [System.Environment]::Is64BitOperatingSystem)
-              Write-Host '🔍 DEBUG: Verifying Python and Pillow installation:'
-              `$py_version = (python --version 2>&1).Trim()
-              Write-Host "  🐍 Python Version: `$py_version"
-              `$py_path = (python -c 'import sys; print(sys.executable)').Trim()
-              Write-Host "  🐍 Python Path: `$py_path"
-              `$pillow_version = (python -c 'import PIL; print(PIL.__version__)').Trim()
-              Write-Host "  ✅ Pillow Version: `$pillow_version"
-              Write-Host '🔍 DEBUG: Checking for script at relative path:'
-              if (Test-Path '..\\..\\publish\\compress_pdf.py') {
-                Write-Host '✅ Found script at ..\\..\\publish\\compress_pdf.py'
-                python ..\..\publish\compress_pdf.py --input 'Machine-Learning-Systems.pdf' --output 'compressed.pdf' --quality minimal --verbose
-              } else {
-                Write-Host '🔄 Trying fallback path: C:\workspace\book\quarto\publish\compress_pdf.py'
-                python C:\workspace\book\quarto\publish\compress_pdf.py --input 'Machine-Learning-Systems.pdf' --output 'compressed.pdf' --quality minimal --verbose
-              }
-              if (Test-Path 'compressed.pdf') {
-                Move-Item -Force 'compressed.pdf' 'Machine-Learning-Systems.pdf'
-                Write-Host '✅ PDF compression completed'
-              }
-            } else {
-              Write-Warning '⚠️ Machine-Learning-Systems.pdf not found for compression.'
+          $scriptContent = @'
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path 'Machine-Learning-Systems.pdf') {
+            Write-Host '📉 Compressing PDF with professional compression tool...'
+            Write-Host "📋 Current directory: $(Get-Location)"
+
+            $scriptPath = '..\..\publish\compress_pdf.py'
+            if (-not (Test-Path $scriptPath)) {
+              $scriptPath = 'C:\workspace\book\quarto\publish\compress_pdf.py'
             }
-          "@
-          $compressPdfScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -Command -
+            Write-Host "📋 Using script: $scriptPath"
+
+            python $scriptPath --input 'Machine-Learning-Systems.pdf' --output 'compressed.pdf' --quality minimal --verbose
+            if ($LASTEXITCODE -ne 0) { Write-Error "PDF compression failed"; exit $LASTEXITCODE }
+
+            if (Test-Path 'compressed.pdf') {
+              Move-Item -Force 'compressed.pdf' 'Machine-Learning-Systems.pdf'
+              Write-Host '✅ PDF compression completed'
+            } else {
+              Write-Error '❌ compressed.pdf was not produced'
+              exit 1
+            }
+          } else {
+            Write-Warning '⚠️ Machine-Learning-Systems.pdf not found for compression.'
+          }
+          '@
+
+          $scriptPath = Join-Path $PWD.Path 'compress-pdf-script.ps1'
+          Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
+
+          docker run --rm `
+            -e PYTHONPATH=C:\workspace `
+            -v "$($PWD.Path):C:\workspace" `
+            -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" `
+            ${{ env.CONTAINER_IMAGE }} `
+            "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\compress-pdf-script.ps1"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Windows PDF compression failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
           Write-Host "✅ PDF compression completed."
 
       - name: 📚 Compress EPUB (Linux)
@@ -675,40 +737,59 @@ jobs:
         if: matrix.platform == 'windows' && matrix.format_name == 'EPUB' && matrix.enabled
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           Write-Host "🔨 Compressing EPUB on Windows container..."
-          $compressEpubScript = @"
 
-            if (Test-Path 'Machine-Learning-Systems.epub') {
-              Write-Host '📚 Compressing EPUB with optimized compression tool...'
-              Write-Host '🔍 DEBUG: Current directory:'
-              Get-Location
-              Write-Host '🔍 DEBUG: Windows environment info:'
-              Write-Host ("OS: {0}" -f [System.Environment]::OSVersion.VersionString)
-              Write-Host ("Architecture: {0}" -f [System.Environment]::Is64BitOperatingSystem)
-              Write-Host '🔍 DEBUG: Verifying Python and Pillow installation:'
-              `$py_version = (python --version 2>&1).Trim()
-              Write-Host "  🐍 Python Version: `$py_version"
-              `$py_path = (python -c 'import sys; print(sys.executable)').Trim()
-              Write-Host "  🐍 Python Path: `$py_path"
-              `$pillow_version = (python -c 'import PIL; print(PIL.__version__)').Trim()
-              Write-Host "  ✅ Pillow Version: `$pillow_version"
-              Write-Host '🔍 DEBUG: Checking for script at relative path:'
-              if (Test-Path '..\\..\\publish\\compress_epub.py') {
-                Write-Host '✅ Found script at ..\\..\\publish\\compress_epub.py'
-                python ..\..\publish\compress_epub.py --input 'Machine-Learning-Systems.epub' --output 'compressed.epub' --verbose
-              } else {
-                Write-Host '🔄 Trying fallback path: C:\workspace\book\quarto\publish\compress_epub.py'
-                python C:\workspace\book\quarto\publish\compress_epub.py --input 'Machine-Learning-Systems.epub' --output 'compressed.epub' --verbose
-              }
-              if (Test-Path 'compressed.epub') {
-                Move-Item -Force 'compressed.epub' 'Machine-Learning-Systems.epub'
-                Write-Host '✅ EPUB compression completed (using optimized defaults: quality=50, max-size=1000px)'
-              }
+          $scriptContent = @'
+          $ErrorActionPreference = 'Stop'
+          if (Test-Path 'Machine-Learning-Systems.epub') {
+            Write-Host '📚 Compressing EPUB with optimized compression tool...'
+            Write-Host "📋 Current directory: $(Get-Location)"
+
+            $scriptPath = $null
+            if (Test-Path '..\..\publish\compress_epub.py') {
+              $scriptPath = '..\..\publish\compress_epub.py'
+              Write-Host "✅ Found script at $scriptPath"
+            } elseif (Test-Path 'C:\workspace\book\quarto\publish\compress_epub.py') {
+              $scriptPath = 'C:\workspace\book\quarto\publish\compress_epub.py'
+              Write-Host "🔄 Using fallback path: $scriptPath"
             } else {
-              Write-Warning '⚠️ Machine-Learning-Systems.epub not found for compression.'
+              Write-Error '❌ compress_epub.py not found!'
+              exit 1
             }
-          "@
-          $compressEpubScript | docker run --rm -e PYTHONPATH=C:\workspace -v "$($PWD.Path):C:\workspace" -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" ${{ env.CONTAINER_IMAGE }} "C:\Program Files\PowerShell\7\pwsh.exe" -NoLogo -Command -
+
+            python $scriptPath --input 'Machine-Learning-Systems.epub' --output 'compressed.epub' --verbose
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "❌ EPUB compression failed with exit code $LASTEXITCODE"
+              exit $LASTEXITCODE
+            }
+
+            if (Test-Path 'compressed.epub') {
+              Move-Item -Force 'compressed.epub' 'Machine-Learning-Systems.epub'
+              Write-Host '✅ EPUB compression completed'
+            } else {
+              Write-Error '❌ compressed.epub was not created!'
+              exit 1
+            }
+          } else {
+            Write-Warning '⚠️ Machine-Learning-Systems.epub not found for compression.'
+          }
+          '@
+
+          $scriptPath = Join-Path $PWD.Path 'compress-epub-script.ps1'
+          Set-Content -Path $scriptPath -Value $scriptContent -Encoding UTF8
+
+          docker run --rm `
+            -e PYTHONPATH=C:\workspace `
+            -v "$($PWD.Path):C:\workspace" `
+            -w "C:\workspace\book\quarto\${{ matrix.output_dir }}" `
+            ${{ env.CONTAINER_IMAGE }} `
+            "C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\workspace\compress-epub-script.ps1"
+
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "❌ Windows EPUB compression failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
           Write-Host "✅ EPUB compression completed."
 
       - name: 📤 Upload artifact
