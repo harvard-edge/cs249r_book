@@ -37,6 +37,15 @@ on:
           - html
           - pdf
           - epub
+      build_os:
+        description: '⚙️ Build OS (both, linux, windows)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - linux
+          - windows
       # Container validation
       run_health_check:
         description: '💊 Run container health check'
@@ -111,6 +120,7 @@ jobs:
     uses: ./.github/workflows/infra-health-check.yml  # Shared workflow - no book- prefix
     with:
       test_linux: true
+      test_windows: true
       container_registry: 'ghcr.io'
       container_tag: 'latest'
 
@@ -132,6 +142,7 @@ jobs:
       build_pdf: ${{ steps.config.outputs.build_pdf }}
       build_epub: ${{ steps.config.outputs.build_epub }}
       build_linux: ${{ steps.config.outputs.build_linux }}
+      build_windows: ${{ steps.config.outputs.build_windows }}
       container_registry: ${{ steps.config.outputs.container_registry }}
       container_tag: ${{ steps.config.outputs.container_tag }}
       target: ${{ steps.config.outputs.target }}
@@ -149,12 +160,14 @@ jobs:
             BUILD_PDF="true"
             BUILD_EPUB="true"
             BUILD_LINUX="true"
+            BUILD_WINDOWS="true"
             TARGET="dev" # For push events, always target dev
             echo "📊 Trigger: Automatic (dev branch push)"
             echo "📊 HTML: $BUILD_HTML (mandatory)"
             echo "📊 PDF: $BUILD_PDF (mandatory)"
             echo "📊 EPUB: $BUILD_EPUB (mandatory)"
             echo "📊 Linux: $BUILD_LINUX (mandatory)"
+            echo "📊 Windows: $BUILD_WINDOWS (enabled by default)"
             echo "📊 Method: container-only"
             echo "📊 Target: $TARGET"
           else
@@ -173,12 +186,19 @@ jobs:
               BUILD_EPUB="true"
             fi
 
-            BUILD_LINUX="true" # Windows is deprecated
+            BUILD_LINUX="false"
+            if [[ "${{ inputs.build_os }}" == "both" || "${{ inputs.build_os }}" == "linux" ]]; then
+              BUILD_LINUX="true"
+            fi
+            BUILD_WINDOWS="false"
+            if [[ "${{ inputs.build_os }}" == "both" || "${{ inputs.build_os }}" == "windows" ]]; then
+              BUILD_WINDOWS="true"
+            fi
 
             TARGET="${{ inputs.target }}"
 
             echo "📊 Formats: ${{ inputs.build_formats }} (HTML: $BUILD_HTML, PDF: $BUILD_PDF)"
-            echo "📊 OS: Linux (Windows deprecated)"
+            echo "📊 OS: ${{ inputs.build_os }} (Linux: $BUILD_LINUX, Windows: $BUILD_WINDOWS)"
             echo "📊 Method: container-only"
             echo "📊 Target: $TARGET"
           fi
@@ -191,7 +211,8 @@ jobs:
           echo "  HTML: $BUILD_HTML"
           echo "  PDF: $BUILD_PDF"
           echo "  Linux: $BUILD_LINUX"
-                    echo "  Method: container"
+          echo "  Windows: $BUILD_WINDOWS"
+          echo "  Method: container"
           echo "  Registry: $CONTAINER_REGISTRY"
           echo "  Tag: $CONTAINER_TAG"
           echo "  Target: $TARGET"
@@ -201,7 +222,8 @@ jobs:
           echo "build_pdf=$BUILD_PDF" >> $GITHUB_OUTPUT
           echo "build_epub=$BUILD_EPUB" >> $GITHUB_OUTPUT
           echo "build_linux=$BUILD_LINUX" >> $GITHUB_OUTPUT
-                    echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
+          echo "build_windows=$BUILD_WINDOWS" >> $GITHUB_OUTPUT
+          echo "container_registry=$CONTAINER_REGISTRY" >> $GITHUB_OUTPUT
           echo "container_tag=$CONTAINER_TAG" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
 
@@ -216,6 +238,7 @@ jobs:
     uses: ./.github/workflows/book-build-container.yml
     with:
       build_linux: ${{ needs.build-config.outputs.build_linux == 'true' }}
+      build_windows: ${{ needs.build-config.outputs.build_windows == 'true' }}
       build_html: ${{ needs.build-config.outputs.build_html == 'true' }}
       build_pdf: ${{ needs.build-config.outputs.build_pdf == 'true' }}
       build_epub: ${{ needs.build-config.outputs.build_epub == 'true' }}
@@ -232,6 +255,7 @@ jobs:
     if: always()
     outputs:
       linux_success: ${{ steps.collect.outputs.linux_success }}
+      windows_success: ${{ steps.collect.outputs.windows_success }}
       linux_html_vol1_artifact: ${{ steps.collect.outputs.linux_html_vol1_artifact }}
       linux_html_vol2_artifact: ${{ steps.collect.outputs.linux_html_vol2_artifact }}
       linux_pdf_vol1_artifact: ${{ steps.collect.outputs.linux_pdf_vol1_artifact }}
@@ -275,10 +299,16 @@ jobs:
             LINUX_SUCCESS="true"
           fi
 
-          echo "Final Success Status: Linux -> $LINUX_SUCCESS"
+          WINDOWS_SUCCESS="false"
+          if [[ "${{ needs.build-config.outputs.build_windows }}" == "true" && "$OVERALL_SUCCESS" == "true" ]]; then
+            WINDOWS_SUCCESS="true"
+          fi
+
+          echo "Final Success Status: Linux -> $LINUX_SUCCESS, Windows -> $WINDOWS_SUCCESS"
 
           # Set outputs
           echo "linux_success=$LINUX_SUCCESS" >> $GITHUB_OUTPUT
+          echo "windows_success=$WINDOWS_SUCCESS" >> $GITHUB_OUTPUT
           echo "linux_html_vol1_artifact=$LINUX_HTML_VOL1" >> $GITHUB_OUTPUT
           echo "linux_html_vol2_artifact=$LINUX_HTML_VOL2" >> $GITHUB_OUTPUT
           echo "linux_pdf_vol1_artifact=$LINUX_PDF_VOL1" >> $GITHUB_OUTPUT
@@ -320,6 +350,16 @@ jobs:
             echo "⏭️ Linux build: SKIPPED"
           fi
 
+          if [ "${{ needs.build-config.outputs.build_windows }}" = "true" ]; then
+            if [ "${{ needs.collect-results.outputs.windows_success }}" = "true" ]; then
+              echo "✅ Windows build: PASSED"
+            else
+              echo "❌ Windows build: FAILED"
+            fi
+          else
+            echo "⏭️ Windows build: SKIPPED"
+          fi
+
           echo ""
           echo "🎯 OVERALL STATUS:"
           echo "-----------------"
@@ -327,7 +367,9 @@ jobs:
           # Determine overall success
           PRECOMMIT_OK="${{ needs.pre-commit.result == 'success' }}"
           LINUX_OK="${{ needs.collect-results.outputs.linux_success == 'true' || needs.build-config.outputs.build_linux == 'false' }}"
-          if [ "$PRECOMMIT_OK" = "true" ] && [ "$LINUX_OK" = "true" ]; then
+          WINDOWS_OK="${{ needs.collect-results.outputs.windows_success == 'true' || needs.build-config.outputs.build_windows == 'false' }}"
+
+          if [ "$PRECOMMIT_OK" = "true" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
             echo "🟢 VALIDATION: FULLY OPERATIONAL ✅"
             echo "   All enabled checks passed successfully!"
             echo "🚀 PREVIEW: DEPLOYMENT TRIGGERED ✅"
@@ -345,18 +387,19 @@ jobs:
           echo "## 📊 Build Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Pre-commit**: ${{ needs.pre-commit.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Linux Build**: ${{ needs.collect-results.outputs.linux_success == 'true' && '✅ success' || '❌ failed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Windows Build**: ${{ needs.collect-results.outputs.windows_success == 'true' && '✅ success' || '❌ failed' }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           echo "## 🔧 Build Configuration" >> $GITHUB_STEP_SUMMARY
           if [ "${{ github.event_name }}" = "push" ]; then
             echo "- **Trigger**: Automatic (dev branch push)" >> $GITHUB_STEP_SUMMARY
             echo "- **Format**: HTML + PDF (mandatory)" >> $GITHUB_STEP_SUMMARY
-            echo "- **OS**: Linux (mandatory)" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: Linux + Windows (mandatory)" >> $GITHUB_STEP_SUMMARY
             echo "- **Method**: ✅ Container builds only" >> $GITHUB_STEP_SUMMARY
           else
             echo "- **Trigger**: Manual workflow dispatch" >> $GITHUB_STEP_SUMMARY
             echo "- **Formats**: ${{ inputs.build_formats }}" >> $GITHUB_STEP_SUMMARY
-            echo "- **OS**: Linux" >> $GITHUB_STEP_SUMMARY
+            echo "- **OS**: ${{ inputs.build_os }}" >> $GITHUB_STEP_SUMMARY
             echo "- **Method**: ✅ Container builds only" >> $GITHUB_STEP_SUMMARY
 
             echo "- **Registry**: ${{ needs.build-config.outputs.container_registry }}" >> $GITHUB_STEP_SUMMARY
@@ -376,7 +419,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## 🎯 Summary" >> $GITHUB_STEP_SUMMARY
           LINUX_OK="${{ needs.collect-results.outputs.linux_success == 'true' || needs.build-config.outputs.build_linux == 'false' }}"
-          if [ "${{ needs.pre-commit.result }}" = "success" ] && [ "$LINUX_OK" = "true" ]; then
+          WINDOWS_OK="${{ needs.collect-results.outputs.windows_success == 'true' || needs.build-config.outputs.build_windows == 'false' }}"
+
+          if [ "${{ needs.pre-commit.result }}" = "success" ] && [ "$LINUX_OK" = "true" ] && [ "$WINDOWS_OK" = "true" ]; then
             echo "✅ **Validation Passed** - All enabled builds successful" >> $GITHUB_STEP_SUMMARY
             echo "🚀 **Preview Deployment Triggered** - A separate workflow is handling the deployment." >> $GITHUB_STEP_SUMMARY
           else
