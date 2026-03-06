@@ -326,7 +326,15 @@ Recurring *lighthouse archetypes* ground these abstract principles in concrete, 
 
 This exponential growth, combined with the rise of **Federated Learning**[^fn-federated-forward], has transformed ML from a discipline where algorithms dominate to one where systems engineering determines success. A sophisticated algorithm that cannot scale often provides less practical value than a simpler algorithm deployed efficiently across scalable infrastructure.
 
-The transition from single-machine to distributed training introduces qualitative changes in system behavior. The unit of compute is no longer a single server but a **Machine Learning Fleet**: a massive, interconnected distributed system that must act as a single coherent engine.
+The transition from single-machine to distributed training introduces qualitative changes in system behavior. @fig-scale-moment-discontinuity contrasts the two regimes: the single-machine world governed by the Memory Wall versus the fleet-scale world governed by communication dominance, routine failure, and governance complexity.
+
+::: {#fig-scale-moment-discontinuity fig-env="figure" fig-pos="htb" fig-cap="**The Scale Discontinuity**: Single-machine systems (left) are governed by local memory bandwidth and operate with no inter-node coordination, exceptional failures, and a single point of governance. Fleet-scale systems (right) introduce communication dominance, routine hardware failure, and governance complexity as first-order engineering constraints." fig-alt="Side-by-side comparison of single-machine system with one GPU and local memory versus fleet-scale system with twelve GPU nodes, two marked as failed, and three challenge labels."}
+
+![](images/svg/scale-moment-discontinuity.svg)
+
+:::
+
+The discontinuity captured in @fig-scale-moment-discontinuity is qualitative, not merely quantitative: at fleet scale, the binding constraint shifts from silicon to the network fabric, and the engineering discipline shifts from optimization to resilience. The unit of compute is no longer a single server but a **Machine Learning Fleet**: a massive, interconnected distributed system that must act as a single coherent engine.
 
 ::: {.callout-definition title="Machine Learning Fleet"}
 
@@ -781,6 +789,16 @@ The Machine Learning Fleet, by contrast, operates under **Synchronous Tight Coup
 1.  **Iterative Statefulness**: Traditional data processing is often "one-and-done." ML training repeats the same math millions of times, updating a massive shared state (the model weights).
 2.  **Barrier Synchronization**: In a synchronous training step, 10,000 GPUs must wait for the slowest worker to finish before any can proceed. The fleet is therefore hypersensitive to stragglers: a 10% performance drop on one node can reduce the entire cluster's throughput by 10%.
 3.  **Bisection Bandwidth Dominance**: A web service is often "Latent-Bound" (waiting for the user). An ML training job is "Bandwidth-Bound." It needs to move gigabytes of gradient data across the *entire* network every second. This requires non-blocking network topologies that traditional datacenters rarely implement.
+
+@fig-traditional-vs-ml-fleet illustrates this contrast directly: in MapReduce, workers write independently to shared storage and a straggler delays only its own partition, whereas in the ML Fleet, every worker must arrive at an AllReduce barrier before the training step can proceed.
+
+::: {#fig-traditional-vs-ml-fleet fig-env="figure" fig-pos="htb" fig-cap="**Barrier Synchronization vs. Independent Tasks**: MapReduce workers (left) operate independently, writing results to shared storage without coordination. A straggler delays only its own output. ML Fleet workers (right) must synchronize gradients at an AllReduce barrier every training step, meaning a single 10\\% straggler slows the entire cluster by 10\\%." fig-alt="Left panel shows three MapReduce workers writing independently to shared storage. Right panel shows three GPU workers converging on an AllReduce barrier, with one straggler blocking all."}
+
+![](images/svg/traditional-vs-ml-fleet.svg)
+
+:::
+
+The barrier synchronization pattern in @fig-traditional-vs-ml-fleet explains why ML fleets cannot borrow fault-tolerance strategies from MapReduce: in a barrier-coupled system, every worker's progress depends on every other worker's health.
 
 ::: {.callout-checkpoint title="The Fleet Mindset"}
 
@@ -1347,9 +1365,15 @@ class ReliabilityGap:
     prob_10k_str = fmt(p_fleet_large, precision=4)
 ```
 
-If each node in a cluster is `{python} "99.9%"` reliable, a 1,000-node cluster is healthy only **`{python} ReliabilityGap.prob_1k_str`%** of the time. Scale that to a 10,000-node fleet, and the probability of the entire system being healthy at any given second drops to **`{python} ReliabilityGap.prob_10k_str`%**.
+If each node in a cluster is `{python} "99.9%"` reliable, a 1,000-node cluster is healthy only **`{python} ReliabilityGap.prob_1k_str`%** of the time. Scale that to a 10,000-node fleet, and the probability of the entire system being healthy at any given second drops to **`{python} ReliabilityGap.prob_10k_str`%**. @fig-reliability-gap-collapse traces this exponential decay for two per-node reliability levels across fleet sizes from 1 to 10,000 GPUs.
 
-The engineering lesson: **Failure is the common case.** At scale, we stop trying to prevent failure and start engineering for **Resilience**, trading *uptime* for *recovery speed*. The defining challenge of @sec-fault-tolerance-reliability is this shift in mindset: from "How do I keep it running?" to "How do I ensure it self-heals?"
+::: {#fig-reliability-gap-collapse fig-env="figure" fig-pos="htb" fig-cap="**The Reliability Collapse**: Fleet availability as a function of fleet size for two per-node reliability levels. At 99.9\\% per-node reliability (blue), a 1,000-GPU cluster retains only 36.8\\% fleet availability; at 10,000 GPUs, availability collapses to near zero. Even 99.99\\% per-node reliability (green) drops to 36.8\\% at 10,000-GPU scale." fig-alt="Line chart with log-scale x-axis showing fleet availability percentage versus fleet size from 1 to 10000 GPUs. Two curves decline from 100 percent, with the 99.9 percent curve dropping steeply."}
+
+![](images/svg/reliability-gap-collapse.svg)
+
+:::
+
+The exponential decay in @fig-reliability-gap-collapse makes the architectural consequence inescapable: no amount of per-node improvement can sustain fleet-wide availability at scale. The engineering lesson: **Failure is the common case.** At scale, we stop trying to prevent failure and start engineering for **Resilience**, trading *uptime* for *recovery speed*. The defining challenge of @sec-fault-tolerance-reliability is this shift in mindset: from "How do I keep it running?" to "How do I ensure it self-heals?"
 
 ### Communication Intensity (The CI Ratio) {#sec-vol2-introduction-ci-ratio}
 

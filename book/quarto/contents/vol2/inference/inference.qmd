@@ -1275,6 +1275,8 @@ Unlike static or dynamic batching, which group requests at the *request* level, 
 
 :::
 
+The contrast in @fig-continuous-batching-comparison is stark: static batching leaves GPUs idle for the duration of the longest sequence in each batch, while continuous batching eliminates these idle gaps by inserting new requests at every iteration boundary.
+
 ### Continuous Batching Throughput Analysis {#sec-inference-scale-continuous-batching-throughput-analysis-ecd2}
 
 Continuous batching's dynamic batch management maintains high GPU utilization regardless of sequence length variance. The throughput improvement depends on sequence length distribution. For a distribution with coefficient of variation $CV = \sigma / \mu$, the gain is approximately @eq-continuous-batching-gain:
@@ -1906,13 +1908,15 @@ Verify your understanding of different batching mechanics:
 
 :::
 
-The following decision framework guides selection:
+Before selecting a batching strategy, it is essential to understand where latency accumulates across the full request lifecycle. @fig-inference-lifecycle maps each stage from client to response, revealing the "serving tax" that serialization, routing, and coordination impose outside of GPU compute.
 
 ::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time." fig-alt="Flowchart with 5 stages: Client, Load Balancer, Request Queue, Dynamic Batcher, Model Execution. Arrows show request flow with dashed return path. Red annotations below highlight latency sources at each stage."}
 
 ![](images/svg/serving-pipeline.svg)
 
 :::
+
+As @fig-inference-lifecycle shows, non-compute stages (serialization, queuing, routing) can consume a substantial fraction of the latency budget, meaning batching strategy selection must account for the full pipeline, not GPU execution time alone. The following decision framework guides strategy selection:
 
 ```
 Is the model autoregressive (LLM, speech)?
@@ -4016,6 +4020,8 @@ Under tensor parallelism, each request is broadcast to all devices in the shard 
 
 :::
 
+The key constraint visible in @fig-tensor-parallel-routing is that every request requires an AllReduce synchronization across all devices in the shard group, making interconnect bandwidth the latency-determining factor rather than model size.
+
 Under pipeline parallelism, each request traverses stages sequentially, with each stage forwarding activations to the next. @fig-pipeline-parallel-routing illustrates how pipelining multiple requests achieves throughput scaling even though single-request latency equals the sum of all stage times.
 
 ::: {#fig-pipeline-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Request Flow**. (a) A single request flows sequentially through four stages—no latency benefit from parallelism. (b) Multiple requests fill the pipeline: once steady state is reached, throughput scales with the number of stages P, while per-request latency remains approximately constant." fig-alt="Two-part diagram. Top: single request through four stage boxes labeled by layer ranges with GPU labels below. Bottom: Gantt-style grid showing four GPU rows with requests offset by one stage, illustrating pipeline fill and steady-state throughput."}
@@ -4023,6 +4029,8 @@ Under pipeline parallelism, each request traverses stages sequentially, with eac
 ![](images/svg/pipeline-parallel-routing.svg)
 
 :::
+
+The critical insight from @fig-pipeline-parallel-routing is that pipeline parallelism offers no single-request latency benefit: one request still traverses all stages sequentially. Throughput scales only when multiple concurrent requests fill the pipeline, reaching steady-state throughput proportional to the number of stages.
 
 Under expert parallelism, each request is dispatched to the devices hosting its selected experts based on the gating decision. Two AllToAll communication steps bookend the expert compute, as shown in @fig-expert-parallel-routing. Load imbalance is the critical challenge: when the gating function routes disproportionately to some experts, communication overhead becomes a bottleneck.
 
@@ -4032,6 +4040,8 @@ Under expert parallelism, each request is dispatched to the devices hosting its 
 
 :::
 
+As @fig-expert-parallel-routing illustrates, the two AllToAll communication steps make expert parallelism uniquely sensitive to load imbalance: if the gating function concentrates tokens on a few experts, those devices become bottlenecks while others sit idle.
+
 When multiple shard groups provide horizontal scaling, the load balancer routes to groups rather than individual devices. @fig-shard-group-scaling shows this two-level hierarchy: standard load-balancing algorithms (round-robin, two-choices, consistent hashing) operate at the group level, while each group handles its own internal AllReduce locally.
 
 ::: {#fig-shard-group-scaling fig-env="figure" fig-pos="htb" fig-cap="**Horizontal Scaling with Shard Groups**. The load balancer treats each shard group as a single logical inference server. Within each group, 8 GPUs coordinate via tensor parallelism. Adding groups scales throughput linearly; adding GPUs per group reduces per-request latency." fig-alt="Hub-and-spoke diagram: incoming request boxes converge to a Load Balancer, which fans out to three Shard Group boxes each containing an 8-GPU grid and a summary label. Green annotation below states the logical server abstraction."}
@@ -4040,7 +4050,7 @@ When multiple shard groups provide horizontal scaling, the load balancer routes 
 
 :::
 
-The load balancer treats each shard group as a single logical server, applying standard algorithms (round-robin, two-choices, consistent hashing) at the group level.
+The two-level hierarchy in @fig-shard-group-scaling separates concerns: the load balancer treats each shard group as a single logical server using standard algorithms, while internal AllReduce coordination remains local to each group. Adding shard groups scales throughput linearly; adding GPUs per group reduces per-request latency.
 
 ### Health Checking and Failover {#sec-inference-scale-health-checking-failover-070e}
 
@@ -4812,6 +4822,8 @@ A spot-aware architecture splits traffic between on-demand and spot replicas by 
 
 :::
 
+The split architecture in @fig-spot-aware-routing achieves approximately 50% cost reduction compared to a fully on-demand fleet by absorbing preemption risk only for best-effort traffic, while SLO-critical requests remain on guaranteed capacity.
+
 ### Global Inference Infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
 Production inference systems serving global user bases must operate across multiple geographic regions. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located. The architectural patterns for multi-region inference deployment address this requirement.
@@ -4841,7 +4853,7 @@ Each region runs independent inference replicas with identical models. A global 
 
 :::
 
-Key considerations
+As @fig-global-inference-multiregion shows, independent regional replicas reduce RTT from 150--200 ms to under 10 ms for distant users, while the shared model registry ensures consistency across deployments. Several key considerations govern this architecture:
 
 - **Model synchronization**: Model updates must propagate to all regions. Options include:
   - Push-based: Central registry pushes to all regions (simple, potential inconsistency window)
@@ -4860,7 +4872,7 @@ For models too large to replicate globally, caching responses at the edge elimin
 
 :::
 
-Effectiveness depends on request repeatability
+The two paths in @fig-edge-cache-routing highlight the order-of-magnitude latency difference: cache hits return in under 10 ms, while cache misses incur the full backend round-trip. Effectiveness depends on request repeatability, as the following table quantifies:
 
 | **Workload**        | **Cache Hit Rate** | **Suitability** |
 |:--------------------|-------------------:|:----------------|
