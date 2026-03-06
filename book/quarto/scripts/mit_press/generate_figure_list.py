@@ -392,7 +392,7 @@ def main():
     # Write to output directory
     output_path = output_dir / 'FIGURE_LIST.txt'
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text('\n'.join(lines))
+    output_path.write_text('\n'.join(lines), encoding='utf-8')
     
     print(f"[Figure List] Written: {output_path}", file=sys.stderr)
     print(f"[Figure List] Total: {len(merged)} figures", file=sys.stderr)
