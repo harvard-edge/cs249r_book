@@ -18,7 +18,7 @@ Inline refs may be simple identifiers (`{python} var_name`) or dotted class
 attribute access (`{python} ClassName.attr`).
 
 Usage:
-    python3 book/quarto/mlsysim/validate_inline_refs.py [--verbose] [--check-patterns] [--check-lego] [--check-scope]
+    python3 book/tools/scripts/maintenance/validate_inline_refs.py [--verbose] [--check-patterns] [--check-lego] [--check-scope]
 
 Exit codes:
     0 = all checks pass

@@ -13,12 +13,12 @@ Severity levels:
   INFO    — style improvement opportunity (.to().magnitude → .m_as())
 
 Usage:
-    python3 book/quarto/mlsysim/validate_pint_usage.py
-    python3 book/quarto/mlsysim/validate_pint_usage.py --vol1
-    python3 book/quarto/mlsysim/validate_pint_usage.py --vol2
-    python3 book/quarto/mlsysim/validate_pint_usage.py --strict
-    python3 book/quarto/mlsysim/validate_pint_usage.py --file path/to/file.qmd
-    python3 book/quarto/mlsysim/validate_pint_usage.py --no-info
+    python3 book/tools/scripts/maintenance/validate_pint_usage.py
+    python3 book/tools/scripts/maintenance/validate_pint_usage.py --vol1
+    python3 book/tools/scripts/maintenance/validate_pint_usage.py --vol2
+    python3 book/tools/scripts/maintenance/validate_pint_usage.py --strict
+    python3 book/tools/scripts/maintenance/validate_pint_usage.py --file path/to/file.qmd
+    python3 book/tools/scripts/maintenance/validate_pint_usage.py --no-info
 """
 
 import re

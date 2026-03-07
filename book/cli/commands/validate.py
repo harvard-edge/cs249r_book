@@ -917,7 +917,7 @@ class ValidateCommand:
                         ))
 
             if check_scope:
-                from book.quarto.mlsys.validate_inline_refs import check_scope as _check_scope, BOOK_ROOT
+                from book.tools.scripts.maintenance.validate_inline_refs import check_scope as _check_scope, BOOK_ROOT
                 try:
                     scope_warnings = _check_scope(file, verbose=False)
                     for filepath, lineno, check_type, msg in scope_warnings:
@@ -3260,7 +3260,7 @@ class ValidateCommand:
     def _run_unit_tests(self, root: Path) -> ValidationRunResult:
         """Run physics engine unit conversion tests."""
         # validate.py is at book/cli/commands/validate.py
-        # test_units.py is at book/quarto/mlsys/test_units.py
+        # test_units.py is at book/tests/test_units.py
         book_dir = Path(__file__).resolve().parent.parent.parent  # book/
-        script = book_dir / "quarto" / "mlsys" / "test_units.py"
+        script = book_dir / "tests" / "test_units.py"
         return self._delegate_script(script, [], "unit-tests")

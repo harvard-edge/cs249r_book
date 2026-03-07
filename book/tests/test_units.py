@@ -19,9 +19,9 @@ _script_dir = os.path.dirname(os.path.abspath(__file__))
 _quarto_dir = os.path.dirname(_script_dir)
 sys.path.insert(0, _quarto_dir)
 
-from mlsys.constants import *
-from mlsys.formulas import *
-from mlsys.formatting import fmt, sci, fmt_full, fmt_split
+from mlsysim.core.constants import *
+from mlsysim.core.formulas import *
+from mlsysim.fmt import fmt, sci, fmt_full, fmt_split
 
 FAILURES = []
 
@@ -364,7 +364,7 @@ def test_formula_helpers():
 
 def test_hardware_wrong_unit_raises():
     """Wrong-unit HardwareSpec must raise DimensionalityError, not pass silently."""
-    from mlsys.hardware import HardwareSpec
+    from mlsysim.core.hardware import HardwareSpec
     import pint
     ok = True
     # Passing watts as memory_bw (wrong dimension) must fail at construction

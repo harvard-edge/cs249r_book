@@ -5,11 +5,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 
-# Add book/quarto/mlsys to path to import viz
+# Add book/tests/sim to path to import viz
 # Script is in book/tools/scripts/genai/
-# We need to reach book/quarto/mlsys
-# ../../../quarto/mlsys
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../quarto/mlsys")))
+# We need to reach book/tests/sim
+# ../../../tests/sim
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../tests/sim")))
 
 try:
     import viz
