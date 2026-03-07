@@ -1,4 +1,5 @@
 from .types import HardwareNode, ComputeCore, MemoryHierarchy
+from ..core.registry import Registry
 from ..core.constants import (
     ureg,
     V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, V100_FLOPS_FP32,
@@ -10,7 +11,7 @@ from ..core.constants import (
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8
 )
 
-class CloudHardware:
+class CloudHardware(Registry):
     """Datacenter-scale accelerators (Volume II)."""
     V100 = HardwareNode(
         name="NVIDIA V100",
@@ -86,8 +87,20 @@ class CloudHardware:
         dispatch_tax=0.03 * ureg.ms
     )
 
-class WorkstationHardware:
+class WorkstationHardware(Registry):
     """Personal computing systems used for local development."""
+    DGX_Spark = HardwareNode(
+        name="NVIDIA DGX Spark (GB10)",
+        release_year=2024,
+        compute=ComputeCore(
+            peak_flops=250 * ureg.TFLOPs/ureg.s, 
+            precision_flops={"fp8": 500 * ureg.TFLOPs/ureg.s, "fp4": 1000 * ureg.TFLOPs/ureg.s}
+        ),
+        memory=MemoryHierarchy(capacity=128 * ureg.GB, bandwidth=500 * ureg.GB/ureg.s),
+        tdp=250 * ureg.W,
+        dispatch_tax=0.01 * ureg.ms
+    )
+
     MacBookM3Max = HardwareNode(
         name="MacBook Pro (M3 Max)",
         release_year=2023,
@@ -97,7 +110,7 @@ class WorkstationHardware:
         dispatch_tax=0.05 * ureg.ms
     )
 
-class MobileHardware:
+class MobileHardware(Registry):
     """Smartphone and handheld devices (Volume I)."""
     iPhone15Pro = HardwareNode(
         name="iPhone 15 Pro (A17 Pro)",
@@ -127,7 +140,7 @@ class MobileHardware:
         dispatch_tax=1.5 * ureg.ms
     )
 
-class EdgeHardware:
+class EdgeHardware(Registry):
     """Robotics and Industrial Edge (Volume I)."""
     JetsonOrinNX = HardwareNode(
         name="NVIDIA Jetson Orin NX",
@@ -165,7 +178,7 @@ class EdgeHardware:
         dispatch_tax=0.1 * ureg.ms
     )
 
-class TinyHardware:
+class TinyHardware(Registry):
     """Microcontrollers and sub-watt devices."""
     ESP32_S3 = HardwareNode(
         name="ESP32-S3 (AI)",
@@ -186,7 +199,7 @@ class TinyHardware:
         dispatch_tax=2.0 * ureg.ms
     )
 
-class Hardware:
+class Hardware(Registry):
     Cloud = CloudHardware
     Workstation = WorkstationHardware
     Mobile = MobileHardware
@@ -202,6 +215,9 @@ class Hardware:
     MI300X = CloudHardware.MI300X
     TPUv5p = CloudHardware.TPUv5p
     T4 = CloudHardware.T4
+    
+    DGXSpark = WorkstationHardware.DGX_Spark
+    MacBook = WorkstationHardware.MacBookM3Max
     
     iPhone = MobileHardware.iPhone15Pro
     Snapdragon = MobileHardware.Snapdragon8Gen3

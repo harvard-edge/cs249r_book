@@ -204,6 +204,30 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     return (bw_term + lat_term).to(ureg.second)
 
 
+def calc_all_to_all_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s):
+    """
+    All-to-All communication time estimate (typical for MoE token routing).
+
+    T = (N-1)/N × M/β + (N-1) × α
+
+    Args:
+        message_bytes: Total message size in bytes (M) per node
+        n_gpus: Number of GPUs (N)
+        bandwidth_bytes_s: Per-link bandwidth in bytes/second (β)
+        latency_s: Per-message startup latency in seconds (α)
+
+    Returns:
+        Quantity[second]: Estimated All-to-All time
+    """
+    msg = _ensure_unit(message_bytes, ureg.byte)
+    bw  = _ensure_unit(bandwidth_bytes_s, ureg.byte / ureg.second)
+    lat = _ensure_unit(latency_s, ureg.second)
+    n = n_gpus
+    bw_term = (n - 1) / n * msg / bw
+    lat_term = (n - 1) * lat
+    return (bw_term + lat_term).to(ureg.second)
+
+
 def calc_transformer_training_flops(n_params, n_tokens):
     """
     Estimate total training FLOPs for a Transformer model (6PD rule).
@@ -359,20 +383,21 @@ def calc_mtbf_node(gpu_mtbf_h, n_gpus, nic_mtbf_h, n_nics,
     return (1.0 / rate).to(ureg.hour)
 
 
-def calc_pipeline_bubble(n_stages, n_microbatches):
+def calc_pipeline_bubble(n_stages, n_microbatches, v_stages=1):
     """
-    Pipeline bubble fraction (GPipe / 1F1B).
+    Pipeline bubble fraction (GPipe / 1F1B / Interleaved 1F1B).
 
-    bubble = (P - 1) / (P - 1 + M)
+    bubble = (P - 1) / (V * M + P - 1)
 
     Args:
         n_stages: Number of pipeline stages (P)
         n_microbatches: Number of microbatches (M)
+        v_stages: Number of virtual stages per GPU (V, default 1)
 
     Returns:
         Bubble fraction (0.0 to 1.0)
     """
-    return (n_stages - 1) / (n_stages - 1 + n_microbatches)
+    return (n_stages - 1) / (v_stages * n_microbatches + n_stages - 1)
 
 
 def calc_checkpoint_size(n_params, bytes_per_param=16):

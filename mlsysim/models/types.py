@@ -127,6 +127,25 @@ class TransformerWorkload(Workload):
             layers=self.layers
         )
 
+class SparseTransformerWorkload(TransformerWorkload):
+    active_parameters: Quantity
+    experts: int
+    active_experts_per_token: int = 1
+
+    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+        # For MoE, total parameters define the memory footprint,
+        # but active parameters define the computation flops.
+        ops = self.inference_flops or (2 * self.active_parameters.to(ureg.count).magnitude * ureg.flop)
+        weights = self.size_in_bytes(precision) # uses self.parameters (total params)
+        return ComputationGraph(
+            name=self.name,
+            total_ops=ops,
+            parameter_count=self.parameters,
+            weight_bytes=weights,
+            arithmetic_intensity=(ops / weights).to("flop/byte"),
+            layers=self.layers
+        )
+
 class CNNWorkload(Workload):
     parameters: Quantity
     inference_flops: Quantity

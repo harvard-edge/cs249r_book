@@ -2,7 +2,6 @@
 title: "Mathematical Foundations"
 subtitle: "The First-Principles Equations Behind Every MLSYSIM Solver"
 ---
-
 MLSYSIM avoids "black box" heuristics. Every output traces back to one of the equations below.
 Before diving into code, read this page to understand *what* the solvers are computing and *why*.
 
@@ -18,9 +17,12 @@ Click any solver name to go directly to its API documentation.
 
 *Implemented in [`mlsysim.core.solver.SingleNodeSolver`](api/core.solver.SingleNodeSolver.qmd).*
 
-**The physical intuition**: Hardware has two speed limits—how fast it can compute, and how fast it can
-move data from memory to the compute units. Your actual throughput is determined by whichever limit
-you hit first. This is why we take the *maximum* of two terms, not their sum.
+::: {.callout-note appearance="simple" icon=false}
+**💡 Intuition: The Roofline Bottleneck**
+Hardware has two speed limits—how fast it can compute, and how fast it can move data from memory to the compute units. Your actual throughput is determined by whichever limit you hit first. This is why we take the *maximum* of two terms, not their sum.
+
+**📚 Source:** @williams2009roofline
+:::
 
 $$
 T = \max \left( \frac{\text{FLOPs}}{\text{Peak\_FLOPs} \times \eta},\ \frac{\text{Bytes}}{\text{Memory\_BW}} \right) + \text{Dispatch\_Tax}
@@ -96,25 +98,45 @@ at low batch sizes. Upgrading from 100 Gb Ethernet to InfiniBand NDR (400 Gb/s) 
 
 ### 2.3 Pipeline Parallelism Bubble
 
-**Pipeline parallelism** splits a model's layers across multiple stages (nodes). Stage 1
-processes layers 1–20, stage 2 processes layers 21–40, and so on. This allows models too large
-for a single GPU to be trained across multiple nodes.
+**Pipeline parallelism** splits a model's layers across multiple stages (nodes). Stage 1 processes layers 1–20, stage 2 processes layers 21–40, and so on. This allows models too large for a single GPU to be trained across multiple nodes.
 
-The cost is a **pipeline bubble**: at the start of each batch, downstream stages sit idle
-while waiting for upstream stages to produce output. When a pipeline of depth $P$ processes
-$M$ microbatches, the fraction of time spent idle is:
+::: {.callout-note appearance="simple" icon=false}
+**💡 Intuition: Shrinking the Pipeline Bubble**
+In standard 1F1B pipeline parallelism, GPUs sit idle waiting for microbatches to traverse the network. You can't change the speed of light, but you *can* change the software schedule. By assigning multiple "virtual stages" ($V$) to a single GPU, we interleave the execution. While a GPU is waiting for the next microbatch of its *first* virtual stage, it can compute a microbatch for its *second* virtual stage, effectively hiding the network latency behind useful compute.
+
+**📚 Source:** @narayanan2021efficient
+:::
+
+The cost of pipelining is a **pipeline bubble**: at the start of each batch, downstream stages sit idle while waiting for upstream stages to produce output. When a pipeline of depth $P$ processes $M$ microbatches with $V$ virtual stages per GPU, the fraction of time spent idle is:
 
 $$
-\text{Bubble Fraction} = \frac{P - 1}{P - 1 + M}
+\text{Bubble Fraction} = \frac{P - 1}{V \times M + P - 1}
 $$
 
-The intuition: with $P$ stages and $M$ microbatches, the pipeline takes $P - 1 + M$ time
-steps to complete, but only $M$ of those steps have all stages active. The solution is to
-increase $M$ — more microbatches mean the startup and drain phases become a smaller fraction
-of total time.
+The intuition: with $P$ stages and $M$ microbatches, the pipeline takes time to fill and drain. The solution is to either increase $M$ (more microbatches) or increase $V$ (interleaved schedules). Both make the startup and drain phases a smaller fraction of total time.
 
-**Implication**: To keep the bubble below 5%, you need $M \geq 19 \cdot (P-1)$ microbatches.
-With a 4-stage pipeline (P=4), you need at least 57 microbatches to achieve 95% efficiency.
+**Implication**: To keep the bubble below 5% using standard 1F1B ($V=1$), you need $M \geq 19 \cdot (P-1)$ microbatches. With a 4-stage pipeline ($P=4$), you need at least 57 microbatches. By using $V=2$ virtual stages, you cut the required microbatches in half.
+
+### 2.4 Expert Parallelism (Mixture of Experts)
+
+::: {.callout-note appearance="simple" icon=false}
+**💡 Intuition: Breaking the Iron Law**
+Standard dense Transformers obey a strict "Iron Law": if you double the parameters, you double the memory *and* the compute FLOPs. Mixture of Experts (MoE) breaks this law. It routes tokens only to specific "expert" subnetworks. This means your **Memory Bound** is dictated by the massive *Total Parameters*, but your **Compute Bound** is dictated only by the much smaller *Active Parameters*. The physical tradeoff is a massive network bandwidth tax (All-to-All communication) to route tokens to the right experts across the cluster.
+
+**📚 Source:** @shazeer2017outrageously
+:::
+
+To model MoE, we move from 3D to **4D Parallelism**:
+
+$$
+\text{Data Parallelism} = \frac{\text{Total GPUs}}{TP \times PP \times EP}
+$$
+
+Where $EP$ is Expert Parallelism. If $EP > 1$, the solver adds an All-to-All communication penalty for token routing:
+
+$$
+T_{\text{all-to-all}} = \frac{N-1}{N} \times \frac{\text{Message Size}}{\text{Bandwidth}} + (N-1) \times \text{Latency}
+$$
 
 ---
 
@@ -195,6 +217,27 @@ Where:
 
 - $\text{CapEx}_{\text{amortized}} = \text{Hardware\_Cost} / \text{Depreciation\_Years}$
 - $\text{OpEx}_{\text{power}} = E \times \text{Electricity\_Rate}$
+
+---
+
+## 6. Cluster Reliability (The Young-Daly Model)
+
+*Implemented in [`mlsysim.core.solver.ReliabilitySolver`](api/core.solver.ReliabilitySolver.qmd).*
+
+::: {.callout-note appearance="simple" icon=false}
+**💡 Intuition: The Cost of Checkpointing**
+When training massive models on thousands of GPUs for months, hardware failures are not a possibility; they are a statistical certainty. If a node fails, the job crashes and you lose all progress since the last checkpoint. You want to save checkpoints frequently to minimize lost work, but writing a 140GB checkpoint to remote storage takes time, pausing the training. The Young-Daly model calculates the optimal balance between *time wasted saving checkpoints* and *time wasted re-computing after a failure*.
+
+**📚 Source:** @young1974first and @daly2006higher
+:::
+
+The optimal checkpoint interval $\tau_{\text{opt}}$ is defined by the Mean Time Between Failures ($M$) and the time it takes to write a single checkpoint ($\delta$):
+
+$$
+\tau_{\text{opt}} = \sqrt{2 \times \delta \times M}
+$$
+
+For a cluster, the collective $M$ drops linearly with the number of components. If a single node has an MTBF of 10,000 hours, a cluster of 1,000 nodes will have an MTBF of just 10 hours ($10,000 / 1000$).
 
 ---
 

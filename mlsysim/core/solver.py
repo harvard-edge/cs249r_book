@@ -6,6 +6,7 @@ from .formulas import (
     calc_ring_allreduce_time, 
     calc_tree_allreduce_time,
     calc_hierarchical_allreduce_time,
+    calc_all_to_all_time,
     calc_mtbf_cluster, 
     calc_young_daly_interval, 
     calc_failure_probability,
@@ -64,10 +65,12 @@ class DistributedSolver(BaseSolver):
               efficiency: float = 0.5,
               tp_size: int = 1,
               pp_size: int = 1,
+              ep_size: int = 1,
+              v_stages: int = 1,
               microbatch_count: int = 1,
               topology_override: Optional[str] = None) -> Dict[str, Any]:
         """
-        Calculates distributed training performance using the 3D Parallelism model.
+        Calculates distributed training performance using the 3D/4D Parallelism model.
 
         Parameters
         ----------
@@ -87,6 +90,11 @@ class DistributedSolver(BaseSolver):
         pp_size : int
             Pipeline Parallelism degree. Chains model layers across multiple 
             nodes, introducing 'pipeline bubbles' while saving memory.
+        ep_size : int
+            Expert Parallelism degree for MoE models. Introduces All-to-All
+            communication overhead across nodes.
+        v_stages : int
+            Number of virtual stages for interleaved pipeline schedules.
         microbatch_count : int
             Number of microbatches (M). Increasing M reduces the pipeline 
             bubble but increases synchronization overhead.
@@ -96,15 +104,15 @@ class DistributedSolver(BaseSolver):
         Returns
         -------
         Dict[str, Any]
-            Metrics including DP/TP latency, the Pipeline Bubble penalty, 
+            Metrics including DP/TP/EP latency, the Pipeline Bubble penalty, 
             and the final Scaling Efficiency.
         """
-        # 1. 3D Parallelism Decomposition
+        # 1. 3D/4D Parallelism Decomposition
         n_accelerators = fleet.total_accelerators
-        dp_size = n_accelerators // (tp_size * pp_size)
+        dp_size = n_accelerators // (tp_size * pp_size * ep_size)
         
         if dp_size < 1:
-            raise ValueError(f"Infeasible 3D Parallelism: TP({tp_size}) * PP({pp_size}) > Total({n_accelerators})")
+            raise ValueError(f"Infeasible 4D Parallelism: TP({tp_size}) * PP({pp_size}) * EP({ep_size}) > Total({n_accelerators})")
 
         # 2. Single Node Performance (Computation)
         node_perf = Engine.solve(model, fleet.node.accelerator, batch_size=batch_size // dp_size, precision=precision, efficiency=efficiency)
@@ -139,13 +147,25 @@ class DistributedSolver(BaseSolver):
         # TP Communication (Assuming intra-node NVLink)
         t_comm_tp = (message_size / tp_size / fleet.node.intra_node_bw).to("ms") if tp_size > 1 else Q_("0 ms")
 
+        # EP Communication (All-to-All token routing for MoE)
+        if ep_size > 1:
+            t_comm_ep = calc_all_to_all_time(
+                message_bytes=message_size, 
+                n_gpus=ep_size, 
+                bandwidth_bytes_s=fleet.fabric.bandwidth / fleet.fabric.oversubscription_ratio, 
+                latency_s=fleet.fabric.latency or Q_("5 us")
+            )
+        else:
+            t_comm_ep = Q_("0 ms")
+
         # 4. Pipeline Parallelism (PP) Bubble
         # Source: Narayanan et al. (2019), "PipePipe: Efficient Pipeline Parallelism"
-        bubble_fraction = calc_pipeline_bubble(pp_size, microbatch_count)
+        # Supports interleaved 1F1B schedules via v_stages
+        bubble_fraction = calc_pipeline_bubble(pp_size, microbatch_count, v_stages=v_stages)
         t_bubble = (node_perf.latency * bubble_fraction) if pp_size > 1 else Q_("0 ms")
 
         # 5. Total Latency and Scaling Efficiency
-        total_comm_latency = t_comm_dp + t_comm_tp
+        total_comm_latency = t_comm_dp + t_comm_tp + t_comm_ep
         step_latency_total = node_perf.latency + total_comm_latency + t_bubble
         
         scaling_efficiency = (node_perf.latency / step_latency_total).magnitude
@@ -154,13 +174,14 @@ class DistributedSolver(BaseSolver):
             "node_performance": node_perf,
             "dp_communication_latency": t_comm_dp,
             "tp_communication_latency": t_comm_tp,
+            "ep_communication_latency": t_comm_ep,
             "communication_latency": total_comm_latency, # Backwards compatibility for tests
             "pipeline_bubble_latency": t_bubble,
             "bubble_fraction": bubble_fraction,
             "step_latency_total": step_latency_total,
             "scaling_efficiency": scaling_efficiency,
             "effective_throughput": (n_accelerators * node_perf.throughput * scaling_efficiency),
-            "parallelism": {"dp": dp_size, "tp": tp_size, "pp": pp_size}
+            "parallelism": {"dp": dp_size, "tp": tp_size, "pp": pp_size, "ep": ep_size}
         }
 
 class ReliabilitySolver(BaseSolver):

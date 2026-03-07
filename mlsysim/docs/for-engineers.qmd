@@ -1,0 +1,154 @@
+---
+title: "For Engineers & Researchers"
+subtitle: "Back-of-envelope estimates before you provision hardware."
+---
+MLSYSIM gives you quick, type-safe analytical estimates for capacity planning, hardware selection, cost modeling, and sustainability analysis — in seconds, from specifications alone.
+
+---
+
+## Why Use Analytical Models?
+
+Before running expensive benchmarks or provisioning cloud instances, you need directional answers:
+
+- **Will this model fit in GPU memory?** — Check before renting the GPU
+- **What's the expected TTFT for my LLM?** — Estimate before building the serving stack
+- **How many H100s do I actually need?** — Model scaling efficiency before buying the cluster
+- **What will this cost per year?** — TCO analysis before signing the contract
+
+MLSYSIM answers these in microseconds using first-order equations. It won't replace profiling, but it tells you *where to start profiling*.
+
+---
+
+## Quick API Usage
+
+```python
+import mlsysim
+from mlsysim import Engine, ServingSolver, DistributedSolver
+
+# Single-node: Is ResNet-50 memory-bound on A100?
+profile = Engine.solve(
+    model=mlsysim.Models.ResNet50,
+    hardware=mlsysim.Hardware.Cloud.A100,
+    batch_size=1, precision="fp16"
+)
+print(f"{profile.bottleneck}, {profile.latency.to('ms'):~.2f}")
+
+# LLM serving: What's the TTFT for Llama-3.1-70B on H100?
+serving = ServingSolver()
+result = serving.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    seq_len=4096, batch_size=1
+)
+print(f"TTFT: {result['ttft'].to('ms'):~.1f}")
+print(f"ITL:  {result['itl'].to('ms'):~.2f}")
+print(f"KV-cache: {result['kv_cache_size'].to('GB'):~.1f}")
+```
+
+---
+
+## Hardware Sweep Pattern
+
+Compare devices programmatically instead of reading datasheets:
+
+```python
+import mlsysim
+from mlsysim import Engine
+
+model = mlsysim.Models.ResNet50
+
+for hw in [mlsysim.Hardware.Cloud.H100,
+           mlsysim.Hardware.Cloud.A100,
+           mlsysim.Hardware.Cloud.T4,
+           mlsysim.Hardware.Edge.JetsonAGX]:
+    p = Engine.solve(model=model, hardware=hw, batch_size=32, precision="fp16")
+    print(f"{hw.name:20s}  {p.bottleneck:16s}  {p.latency.to('ms'):>8.2f~}  {p.throughput:>8.0f} img/s")
+```
+
+---
+
+## Composing Solvers for Real Questions
+
+The six solvers are designed to chain:
+
+### "Can I serve Llama-70B on 4 H100s within budget?"
+
+```python
+from mlsysim import ServingSolver, EconomicsSolver
+
+# Step 1: Does it fit and what's the latency?
+serving = ServingSolver()
+result = serving.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    seq_len=4096, batch_size=1
+)
+
+# Step 2: What does that fleet cost?
+econ = EconomicsSolver()
+cost = econ.solve(
+    fleet=mlsysim.Systems.Clusters.H100_8,
+    duration_days=365,
+    kwh_price=0.08
+)
+print(f"Annual TCO: ${cost['total_tco'].magnitude:,.0f}")
+```
+
+### "Where should I train to minimize carbon?"
+
+```python
+from mlsysim import SustainabilitySolver
+
+sustain = SustainabilitySolver()
+for grid in [mlsysim.Infra.Grids.Quebec, mlsysim.Infra.Grids.US_Average,
+             mlsysim.Infra.Grids.Poland]:
+    r = sustain.solve(
+        fleet=mlsysim.Systems.Clusters.H100_256,
+        duration_days=30,
+        datacenter=grid
+    )
+    print(f"{grid.name:12s}  {r['carbon_kg'].to('metric_ton'):>8.1f~}")
+```
+
+---
+
+## Writing Custom Solvers
+
+Follow the built-in solver pattern to create your own analysis:
+
+```python
+from mlsysim.hardware.types import HardwareNode
+
+class PowerEfficiencySolver:
+    def solve(self, hardware: HardwareNode) -> dict:
+        flops_per_watt = hardware.compute.peak_flops / hardware.tdp
+        return {
+            "device": hardware.name,
+            "flops_per_watt": flops_per_watt.to("TFLOPs/s/kW"),
+        }
+```
+
+See [Extending MLSYSIM](solver-guide.qmd#extending-mlsysim) for the full guide.
+
+---
+
+## Type Safety
+
+All quantities are `pint.Quantity` objects. Unit conversions are explicit, and dimensional errors are caught at runtime:
+
+```python
+hw = mlsysim.Hardware.Cloud.A100
+hw.compute.peak_flops.to("TFLOPs/s")   # → 312.0 TFLOPs/s
+hw.memory.bandwidth.to("TB/s")          # → 2.0 TB/s
+hw.memory.bandwidth.to("FLOP/s")        # → DimensionalityError ✓
+```
+
+---
+
+## Next Steps
+
+- **[Getting Started](getting-started.qmd)** — Install and run your first analysis
+- **[Solver Guide](solver-guide.qmd)** — Which solver for which question
+- **[MLSys Zoo](zoo/index.qmd)** — Browse all available hardware, model, and infrastructure specs
+- **[API Reference](api/index.qmd)** — Full programmatic API documentation
+- **[Accuracy & Validation](accuracy.qmd)** — How analytical bounds compare to empirical measurements

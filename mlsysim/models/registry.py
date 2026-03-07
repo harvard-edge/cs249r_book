@@ -1,4 +1,6 @@
 from .types import TransformerWorkload, CNNWorkload, Workload
+from ..core.registry import Registry
+from .types import TransformerWorkload, CNNWorkload, Workload
 from ..core.constants import (
     ureg,
     GPT2_PARAMS, GPT3_PARAMS, GPT4_EST_PARAMS, GPT3_TRAINING_OPS,
@@ -9,7 +11,7 @@ from ..core.constants import (
     ALEXNET_PARAMS, ANOMALY_MODEL_PARAMS, DLRM_MODEL_SIZE_FP32
 )
 
-class LanguageModels:
+class LanguageModels(Registry):
     GPT2 = TransformerWorkload(
         name="GPT-2 (1.5B)",
         architecture="Transformer",
@@ -77,7 +79,7 @@ class LanguageModels:
         inference_flops=2 * LLAMA3_70B_PARAMS.magnitude * ureg.flop
     )
 
-class VisionModels:
+class VisionModels(Registry):
     ResNet50 = CNNWorkload(
         name="ResNet-50",
         architecture="CNN",
@@ -107,7 +109,7 @@ class VisionModels:
         layers=8
     )
 
-class TinyModels:
+class TinyModels(Registry):
     DS_CNN = CNNWorkload(
         name="DS-CNN (KWS)",
         architecture="CNN",
@@ -126,7 +128,7 @@ class TinyModels:
         # Generic Workload doesn't have params in type, but we can override
     )
 
-class RecommendationModels:
+class RecommendationModels(Registry):
     # Special class for DLRM as it's defined by size
     DLRM = Workload(
         name="DLRM",
@@ -136,7 +138,7 @@ class RecommendationModels:
     # Note: We'll add specialized size methods if needed, 
     # but for now we maintain string compatibility.
 
-class Models:
+class Models(Registry):
     Language = LanguageModels
     Vision = VisionModels
     Tiny = TinyModels
