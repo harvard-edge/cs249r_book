@@ -159,16 +159,52 @@ jobs:
           fi
           echo "::endgroup::"
 
-      - name: ⬇️ Checkout repository (for scripts)
+      - name: ⬇️ Checkout repository (for scripts and landing site)
         uses: actions/checkout@v6
         with:
           ref: dev
           path: ./repo-scripts
           sparse-checkout: |
             ${{ vars.BOOK_TOOLS }}/scripts/publish/modify_dev_announcement.py
-            .github/dev-landing/index.html
             .github/dev-landing/book-index.html
+            book/quarto/landing_site
+            book/quarto/assets/styles
           sparse-checkout-cone-mode: false
+
+      - name: 🔧 Install Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: 🏠 Build and prepare landing site
+        run: |
+          echo "🏗️ Rendering Quarto landing site..."
+          cd ./repo-scripts/book/quarto
+          quarto render landing_site/index.qmd
+          echo "✅ Landing site rendered"
+          ls -la _build/html-landing/
+
+          echo "🔧 Rewriting URLs for dev site..."
+          # The landing page hardcodes mlsysbook.ai URLs — rewrite for dev site structure.
+          # The rendered index.html will be served from the ROOT of the dev site, so
+          # relative paths use no ../ prefix (e.g. book/vol1/, tinytorch/).
+          cd _build/html-landing
+          for f in $(find . -name "*.html" -type f); do
+            # Volume links: mlsysbook.ai/vol1/ -> book/vol1/
+            sed -i 's|https://mlsysbook.ai/vol1/|book/vol1/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/vol2/|book/vol2/|g' "$f"
+            # Other subsite links
+            sed -i 's|https://mlsysbook.ai/tinytorch/|tinytorch/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/kits/|kits/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/labs/|labs/|g' "$f"
+            # Navbar relative links (href="vol1/" etc. produced by Quarto from _quarto.yml)
+            sed -i 's|href="vol1/"|href="book/vol1/"|g' "$f"
+            sed -i 's|href="vol2/"|href="book/vol2/"|g' "$f"
+            # Download links
+            sed -i 's|https://mlsysbook.ai/vol1/assets/downloads/|book/vol1/assets/downloads/|g' "$f"
+            sed -i 's|https://mlsysbook.ai/vol2/assets/downloads/|book/vol2/assets/downloads/|g' "$f"
+            # Remaining mlsysbook.ai base URL (e.g. site-url, og tags) -> dev site root
+            sed -i 's|https://mlsysbook.ai/|./|g' "$f"
+          done
+          echo "✅ URL rewriting complete"
 
       - name: 🔧 Modify announcement for dev preview
         run: |
@@ -215,9 +251,15 @@ jobs:
           echo "🚚 Copying book content to /${{ vars.DEV_BOOK_PATH }}/ subdirectory..."
           cp -r "${{ github.workspace }}/preview-site/." ${{ vars.DEV_BOOK_PATH }}/
 
-          echo "📄 Deploying landing page to root..."
-          # Copy landing page (preserves tinytorch/ if it exists)
-          cp "${{ github.workspace }}/repo-scripts/.github/dev-landing/index.html" index.html
+          echo "📄 Deploying Quarto landing site to root..."
+          # Copy rendered landing site to root (preserves tinytorch/ and book/ if they exist)
+          LANDING_DIR="${{ github.workspace }}/repo-scripts/book/quarto/_build/html-landing"
+          if [ -d "$LANDING_DIR" ]; then
+            cp -r "$LANDING_DIR"/. ./
+            echo "✅ Quarto landing site deployed to root"
+          else
+            echo "⚠️ Landing site not found, falling back to book-index.html"
+          fi
           # Copy book volume chooser page so /book/ doesn't 404
           cp "${{ github.workspace }}/repo-scripts/.github/dev-landing/book-index.html" ${{ vars.DEV_BOOK_PATH }}/index.html
           touch .nojekyll
