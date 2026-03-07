@@ -1,5 +1,5 @@
 # constants.py
-# The "Physics Engine" of Machine Learning Systems
+# The Analytical Engine of Machine Learning Systems
 # This file defines the single source of truth for hardware specifications,
 # constants, and conversion factors used throughout the textbook.
 
@@ -281,12 +281,15 @@ ENERGY_ADD_INT8_PJ = 0.03 * ureg.picojoule
 # Network transfer energy (reference)
 NETWORK_ENERGY_1KB_PJ = 1_000_000 * ureg.picojoule  # ~1 microjoule for 1KB
 
-# --- Physics ---
+# --- Physical Constants ---
 SPEED_OF_LIGHT_FIBER_KM_S = 200000 * ureg.kilometer / second
 
 # --- Cloud Pricing ---
 ureg.define('dollar = 1 * count')
+ureg.define('USD = dollar')
+ureg.define('EUR = dollar')
 USD = ureg.dollar
+EUR = ureg.EUR
 CLOUD_EGRESS_PER_GB = 0.09 * USD / GB  # AWS data transfer out (2024 baseline)
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
 

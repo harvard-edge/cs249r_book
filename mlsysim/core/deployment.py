@@ -2,7 +2,7 @@
 # Hierarchical Deployment Tier Definitions for MLSys Textbook
 
 from dataclasses import dataclass
-from ..core.constants import (
+from .constants import (
     ureg, Q_,
     SMARTPHONE_RAM_GB, MCU_RAM_KIB, CLOUD_MEM_GIB,
     TINY_MEM_KIB

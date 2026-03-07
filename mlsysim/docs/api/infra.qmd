@@ -1,0 +1,301 @@
+# infra { #mlsysim.infra }
+
+`mlsysim.infra` -- Datacenter infrastructure profiles for sustainability and capacity analysis.
+
+This module defines the physical infrastructure that hosts ML workloads:
+electricity grids, cooling configurations, and datacenter compositions. These
+profiles feed into the sustainability and economics solvers to estimate carbon
+emissions, water usage, and facility-level power draw.
+
+## Sub-modules
+
+| | |
+| --- | --- |
+| [infra.types](infra.types.qmd) | Infrastructure data classes (`GridProfile`, `RackProfile`, `Datacenter`) |
+| [infra.registry](infra.registry.qmd) | Pre-built infrastructure registry (`Infra`) |
+
+---
+
+## Types (`infra.types`) { #mlsysim.infra.types-overview }
+
+### GridProfile { #mlsysim.infra.types.GridProfile }
+
+```python
+infra.types.GridProfile(
+    name: str,
+    carbon_intensity_g_kwh: float,
+    pue: float,
+    wue: float,
+    primary_source: str,
+    metadata: Metadata = Metadata(),
+)
+```
+
+Regional electricity grid characteristics. A `GridProfile` captures the
+carbon intensity, power usage effectiveness (PUE), water usage effectiveness
+(WUE), and primary generation source for a geographic region. These values
+drive the sustainability analysis in the solver layer.
+
+#### Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str` | *required* | Human-readable grid name (e.g. `"Quebec (Hydro)"`) |
+| `carbon_intensity_g_kwh` | `float` | *required* | Grams of CO2 emitted per kWh of electricity (gCO2/kWh) |
+| `pue` | `float` | *required* | Power Usage Effectiveness -- ratio of total facility power to IT equipment power. A PUE of 1.0 means zero cooling/overhead; typical values range from 1.03 (liquid-cooled) to 1.58 (legacy air-cooled) |
+| `wue` | `float` | *required* | Water Usage Effectiveness -- liters of water consumed per kWh of IT energy. 0.0 for closed-loop liquid cooling, up to 1.8 for evaporative towers |
+| `primary_source` | `str` | *required* | Dominant electricity generation source (e.g. `"hydro"`, `"coal"`, `"mixed"`) |
+| `metadata` | `Metadata` | `Metadata()` | Provenance information (source URL, description, last verified date) |
+
+#### Properties
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `carbon_intensity_kg_kwh` | `float` | Carbon intensity converted to kg CO2 per kWh (`carbon_intensity_g_kwh / 1000`) |
+
+##### carbon_intensity_kg_kwh { #mlsysim.infra.types.GridProfile.carbon_intensity_kg_kwh }
+
+```python
+@property
+GridProfile.carbon_intensity_kg_kwh -> float
+```
+
+Returns the grid carbon intensity in **kilograms** of CO2 per kWh. This is
+a convenience conversion from the `carbon_intensity_g_kwh` field (which
+stores the value in grams).
+
+#### Methods
+
+| Name | Description |
+| --- | --- |
+| [`carbon_kg`](#mlsysim.infra.types.GridProfile.carbon_kg) | Calculates total carbon emissions for a given energy consumption, including PUE |
+
+##### carbon_kg { #mlsysim.infra.types.GridProfile.carbon_kg }
+
+```python
+GridProfile.carbon_kg(energy_kwh: float) -> float
+```
+
+Calculates the total carbon emissions (in kg CO2) produced by consuming
+`energy_kwh` kilowatt-hours of **IT equipment** energy in this grid region.
+The calculation accounts for PUE -- the facility-level overhead for cooling,
+lighting, and power distribution:
+
+```
+facility_kwh = energy_kwh * pue
+carbon_kg    = facility_kwh * carbon_intensity_kg_kwh
+```
+
+**Parameters**
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `energy_kwh` | `float` | Energy consumed by IT equipment in kWh (before PUE multiplier) |
+
+**Returns**
+
+| Type | Description |
+| --- | --- |
+| `float` | Total carbon emissions in kilograms of CO2 |
+
+---
+
+### RackProfile { #mlsysim.infra.types.RackProfile }
+
+```python
+infra.types.RackProfile(
+    name: str,
+    power_kw: float,
+    cooling_type: str,
+)
+```
+
+Physical rack configuration describing the power envelope and cooling
+strategy of a single datacenter rack.
+
+#### Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str` | *required* | Human-readable rack name (e.g. `"Traditional Enterprise"`) |
+| `power_kw` | `float` | *required* | Maximum power draw per rack in kilowatts |
+| `cooling_type` | `str` | *required* | Cooling strategy -- `"air"` or `"liquid"` |
+
+---
+
+### Datacenter { #mlsysim.infra.types.Datacenter }
+
+```python
+infra.types.Datacenter(
+    name: str,
+    grid: GridProfile,
+    pue_override: Optional[float] = None,
+)
+```
+
+A datacenter that combines a [`GridProfile`](#mlsysim.infra.types.GridProfile)
+with an optional PUE override. This allows modeling scenarios where a
+specific facility achieves a different PUE than the regional grid default
+(for example, a liquid-cooled AI cluster in an otherwise air-cooled region).
+
+#### Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str` | *required* | Human-readable datacenter name |
+| `grid` | `GridProfile` | *required* | The electricity grid profile for the datacenter's region |
+| `pue_override` | `Optional[float]` | `None` | Facility-specific PUE that overrides the grid default. When `None`, the grid's PUE is used |
+
+#### Properties
+
+| Name | Type | Description |
+| --- | --- | --- |
+| `pue` | `float` | Effective PUE -- returns `pue_override` if set, otherwise the grid's default PUE |
+
+##### pue { #mlsysim.infra.types.Datacenter.pue }
+
+```python
+@property
+Datacenter.pue -> float
+```
+
+Returns the effective Power Usage Effectiveness for this datacenter. If a
+`pue_override` has been set, it takes precedence; otherwise the grid's
+default PUE is returned.
+
+---
+
+## Registry (`infra.registry`) { #mlsysim.infra.registry-overview }
+
+### Infra { #mlsysim.infra.registry.Infra }
+
+```python
+infra.registry.Infra
+```
+
+A curated catalog of reference grid and rack profiles, organized into two
+namespaces. These profiles represent real-world infrastructure
+configurations and are sourced from IEA grid data, hyperscaler PUE reports,
+and industry benchmarks.
+
+#### Namespaces
+
+| Namespace | Description |
+| --- | --- |
+| `Infra.Grids` | Regional electricity grid profiles |
+| `Infra.Racks` | Physical rack power and cooling configurations |
+
+#### Grid Profiles (`Infra.Grids`)
+
+| Name | Carbon Intensity | PUE | WUE | Primary Source |
+| --- | --- | --- | --- | --- |
+| `Quebec` | 20 gCO2/kWh | 1.06 | 0.0 (liquid) | Hydro |
+| `Norway` | 10 gCO2/kWh | 1.06 | 0.0 (liquid) | Hydro |
+| `US_Avg` | 429 gCO2/kWh | 1.12 | 1.8 (evaporative) | Mixed |
+| `Poland` | 820 gCO2/kWh | 1.58 | 1.8 (evaporative) | Coal |
+
+::: {.callout-tip}
+Carbon intensity values are sourced from IEA (2023). PUE tiers correspond to
+best-in-class liquid-cooled (1.06), best-in-class air-cooled hyperscale
+(1.12), and legacy enterprise (1.58) facilities.
+:::
+
+#### Rack Profiles (`Infra.Racks`)
+
+| Name | Power (kW) | Cooling |
+| --- | --- | --- |
+| `Traditional` | 12 kW | Air |
+| `AI_Standard` | 70 kW | Liquid |
+
+::: {.callout-note}
+The `Traditional` rack represents a conventional enterprise server rack
+(12 kW, air-cooled). The `AI_Standard` rack represents a current-generation
+AI training cluster rack (70 kW, liquid-cooled) housing GPU-dense nodes.
+:::
+
+#### Convenience Aliases
+
+Top-level aliases are provided on the `Infra` class for the most commonly
+used grid profiles:
+
+| Alias | Target |
+| --- | --- |
+| `Infra.Quebec` | `Infra.Grids.Quebec` |
+| `Infra.US_Avg` | `Infra.Grids.US_Avg` |
+| `Infra.Poland` | `Infra.Grids.Poland` |
+
+---
+
+## Usage
+
+### Comparing carbon emissions across regions
+
+```python
+import mlsysim
+
+# A training run that consumed 1,000 kWh of IT equipment energy
+energy_kwh = 1000.0
+
+quebec = mlsysim.Infra.Quebec
+us_avg = mlsysim.Infra.US_Avg
+poland = mlsysim.Infra.Poland
+
+print(f"Quebec:  {quebec.carbon_kg(energy_kwh):.1f} kg CO2")
+print(f"US Avg:  {us_avg.carbon_kg(energy_kwh):.1f} kg CO2")
+print(f"Poland:  {poland.carbon_kg(energy_kwh):.1f} kg CO2")
+```
+
+### Inspecting grid properties
+
+```python
+import mlsysim
+
+grid = mlsysim.Infra.Grids.Norway
+print(f"Grid:             {grid.name}")
+print(f"Carbon intensity: {grid.carbon_intensity_g_kwh} gCO2/kWh")
+print(f"PUE:              {grid.pue}")
+print(f"WUE:              {grid.wue} L/kWh")
+print(f"Primary source:   {grid.primary_source}")
+```
+
+### Building a custom datacenter
+
+```python
+from mlsysim.infra.types import Datacenter, GridProfile
+
+# A facility in the US average grid that achieves better-than-default PUE
+# through liquid cooling upgrades
+dc = Datacenter(
+    name="US-West Liquid-Cooled",
+    grid=GridProfile(
+        name="US Average",
+        carbon_intensity_g_kwh=429,
+        pue=1.12,
+        wue=1.8,
+        primary_source="mixed",
+    ),
+    pue_override=1.05,
+)
+
+print(f"Effective PUE: {dc.pue}")            # 1.05 (override)
+print(f"Grid PUE:      {dc.grid.pue}")       # 1.12 (default)
+```
+
+### Combining grid and rack for capacity planning
+
+```python
+import mlsysim
+
+grid = mlsysim.Infra.Grids.US_Avg
+rack = mlsysim.Infra.Racks.AI_Standard
+
+# 100 racks at 70 kW each, running 24/7 for one year
+total_power_kw = 100 * rack.power_kw
+hours_per_year = 8760
+annual_energy_kwh = total_power_kw * hours_per_year
+
+annual_carbon_kg = grid.carbon_kg(annual_energy_kwh)
+print(f"Annual energy: {annual_energy_kwh:,.0f} kWh")
+print(f"Annual carbon: {annual_carbon_kg:,.0f} kg CO2")
+print(f"               {annual_carbon_kg / 1000:,.0f} tonnes CO2")
+```

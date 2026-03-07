@@ -1,0 +1,209 @@
+---
+title: "Sustainability Lab: Modeling Carbon Footprint"
+subtitle: "Same model, same hardware — 41x difference in carbon footprint."
+---
+
+::: {.callout-note}
+## Prerequisites
+This tutorial can be completed independently, but completing the [Hello World tutorial](hello_world.qmd) first provides useful context on how hardware performance relates to energy consumption.
+:::
+
+This lab explores the environmental impact of machine learning at scale. You will model
+the training of a large language model across different geographical regions and discover
+how location, efficiency, and precision affect sustainability.
+
+By the end of this tutorial you will understand:
+
+- How **carbon intensity** varies dramatically across electricity grids
+- How **PUE** (Power Usage Effectiveness) amplifies energy consumption
+- Why choosing *where* to train matters more than *how* to train
+- How to use the `SustainabilitySolver` for carbon-aware decisions
+
+::: {.callout-tip}
+## The sustainability equation
+Carbon footprint = Energy × PUE × Carbon Intensity. The first factor depends on your
+hardware and job duration. The second depends on your datacenter's cooling efficiency.
+The third depends on your region's electricity mix. MLSYSIM lets you vary all three.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim
+spec.loader.exec_module(mlsysim)
+SustainabilitySolver = mlsysim.SustainabilitySolver
+```
+
+```python
+import mlsysim
+from mlsysim import SustainabilitySolver
+```
+
+---
+
+## 2. Select a Fleet
+
+We'll use a production-scale cluster from the **Fleet Zoo** — 8,192 H100 GPUs
+connected via InfiniBand NDR.
+
+```{python}
+fleet = mlsysim.Systems.Clusters.Frontier_8K
+print(f"Fleet: {fleet.name}")
+print(f"Total Accelerators: {fleet.total_accelerators}")
+```
+
+With the fleet defined, the remaining variables are *how long* the job runs and *where*.
+The `duration_days` parameter represents total training time — in practice, this depends on
+the model's compute requirements and the cluster's performance (exactly what the
+[Hello World](hello_world.qmd) and [Distributed Training](distributed.qmd) tutorials
+teach you to calculate). The carbon cost then depends entirely on how that electricity
+is generated.
+
+---
+
+## 3. Compare Two Regions
+
+The `SustainabilitySolver` factors in Power Usage Effectiveness (PUE) and regional
+carbon intensity. The following comparison uses the cleanest and dirtiest grids
+in the registry.
+
+```{python}
+solver = SustainabilitySolver()
+
+# Model training for 30 days in Quebec (Hydro-powered)
+res_quebec = solver.solve(
+    fleet=fleet,
+    duration_days=30,
+    datacenter=mlsysim.Infra.Grids.Quebec
+)
+
+# Compare with training in a coal-heavy region (Poland)
+res_poland = solver.solve(
+    fleet=fleet,
+    duration_days=30,
+    datacenter=mlsysim.Infra.Grids.Poland
+)
+
+print(f"Region: {res_quebec['region_name']}")
+print(f"Carbon Footprint: {res_quebec['carbon_footprint_kg']:.1f} kg CO2e")
+print("-" * 40)
+print(f"Region: {res_poland['region_name']}")
+print(f"Carbon Footprint: {res_poland['carbon_footprint_kg']:.1f} kg CO2e")
+```
+
+::: {.callout-important}
+## The ~41x factor
+The same model, the same hardware, the same training duration — but the carbon
+footprint differs by roughly **41x** depending on the electricity grid. Location
+is the single largest lever for sustainable ML.
+:::
+
+---
+
+## 4. All-Region Comparison
+
+The following sweep covers all four grid regions in the Infrastructure Zoo,
+comparing energy, carbon, and water usage.
+
+```{python}
+grids = [
+    mlsysim.Infra.Grids.Quebec,
+    mlsysim.Infra.Grids.Norway,
+    mlsysim.Infra.Grids.US_Avg,
+    mlsysim.Infra.Grids.Poland,
+]
+
+print(f"{'Region':<20} {'Energy (MWh)':>14} {'Carbon (t CO2e)':>16} {'Water (kL)':>12} {'PUE':>6}")
+print("-" * 72)
+
+for grid in grids:
+    r = solver.solve(fleet=fleet, duration_days=30, datacenter=grid)
+    energy_mwh = r['total_energy_kwh'].magnitude / 1000
+    carbon_t = r['carbon_footprint_kg'] / 1000
+    water_kl = r['water_usage_liters'] / 1000
+    print(f"{r['region_name']:<20} {energy_mwh:>12,.1f}  {carbon_t:>14,.1f}  {water_kl:>10,.1f}  {r['pue']:>5.2f}")
+```
+
+::: {.callout-note}
+## Water matters too
+Datacenters use water for evaporative cooling. The Water Usage Effectiveness (WUE)
+varies by cooling technology: liquid-cooled facilities use far less water than
+evaporative-cooled ones.
+:::
+
+Carbon intensity varies by region, but it is not the only multiplier. The datacenter
+itself adds overhead through cooling and facility power, captured by the PUE metric.
+
+---
+
+## 5. The PUE Multiplier
+
+PUE determines how much energy is "wasted" on cooling and facility overhead.
+Compare a modern liquid-cooled facility (PUE 1.1) against a legacy air-cooled
+one (PUE 1.6), both in the same grid region.
+
+```{python}
+# Both in US Average grid, but different PUE
+res_modern = solver.solve(fleet=fleet, duration_days=30, datacenter=mlsysim.Infra.Grids.US_Avg)
+
+# The US_Avg grid uses PUE from its profile
+print(f"US Average grid:")
+print(f"  PUE:     {res_modern['pue']:.2f}")
+print(f"  Energy:  {res_modern['total_energy_kwh'].magnitude/1000:,.1f} MWh")
+print(f"  Carbon:  {res_modern['carbon_footprint_kg']/1000:,.1f} tonnes CO2e")
+```
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Duration vs. location.**
+Predict: does training for 30 days in Quebec produce more or less carbon than training for 10 days in Poland? Write your prediction, then run both configurations with the `SustainabilitySolver`. Were you right? What does this tell you about the relative importance of training duration vs. grid selection?
+
+**Exercise 2: Why is the solver model-agnostic?**
+Try running `solver.solve(fleet=fleet, duration_days=30, datacenter=mlsysim.Infra.Grids.Quebec)` for different fleet sizes. Notice that the `SustainabilitySolver` does not take a `model` parameter. Why? What assumption is the solver making about GPU utilization during training? When would this assumption break down?
+
+**Exercise 3: PUE sensitivity.**
+Sweep PUE from 1.0 to 2.0. You can create custom grid profiles: `from mlsysim.infra.types import GridProfile` and then `GridProfile(name="Custom", carbon_intensity_g_kwh=390, pue=1.3, wue=1.8, primary_source="mixed")`. At what PUE value does the facility overhead exceed the IT energy itself? (Hint: PUE = total energy / IT energy, so overhead > IT energy when PUE > 2.0.)
+
+**Self-check:** If you train for 30 days in Quebec (20 gCO2/kWh) vs. 15 days in Poland (820 gCO2/kWh), which produces more total carbon? Show the calculation.
+:::
+
+---
+
+## What You Learned
+
+- **Carbon intensity is the biggest lever**: A large difference between hydro (Quebec)
+  and coal (Poland) grids for identical workloads
+- **PUE amplifies everything**: A facility with PUE 1.6 uses 45% more energy than one
+  with PUE 1.1
+- **Water usage varies by cooling technology**: Liquid cooling uses far less water
+  than evaporative cooling
+- **The SustainabilitySolver** chains energy, PUE, and carbon intensity into a single
+  analytical model
+
+---
+
+## Next Steps
+
+- **[LLM Serving Lab](llm_serving.qmd)** — model the two phases of LLM inference and discover the KV-cache memory wall
+- **[Distributed Training](distributed.qmd)** — scale to hundreds of GPUs and analyze where efficiency is lost
+- **[Infrastructure Zoo](../zoo/infra.qmd)** — browse all regional grid profiles and datacenter configurations
+- **[Solver Guide](../solver-guide.qmd)** — learn how to chain the SustainabilitySolver with other solvers
+- **[Math Foundations](../math.qmd)** — see the equations behind energy and carbon calculations

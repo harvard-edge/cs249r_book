@@ -132,7 +132,7 @@ class EdgeHardware:
     JetsonOrinNX = HardwareNode(
         name="NVIDIA Jetson Orin NX",
         release_year=2023,
-        compute=ComputeCore(peak_flops=100 * ureg.TFLOPs/ureg.s),
+        compute=ComputeCore(peak_flops=25 * ureg.TFLOPs/ureg.s, precision_flops={"int8": 100 * ureg.TFLOPs/ureg.s}),
         memory=MemoryHierarchy(capacity=16 * ureg.GB, bandwidth=102 * ureg.GB/ureg.s),
         tdp=25 * ureg.W,
         dispatch_tax=0.2 * ureg.ms

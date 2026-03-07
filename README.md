@@ -73,6 +73,8 @@ Choose a path based on your goal.
 
 **DEPLOY** Pick a [hardware kit](https://mlsysbook.ai/kits/) and run the labs on Arduino, Raspberry Pi, and other edge devices.
 
+**SIMULATE** Explore the [mlsysim Developer Guide](mlsysim/docs/_build/index.html) to understand the physics of ML infrastructure through our first-order analytical platform.
+
 **CONNECT** Say hello in [Discussions](https://github.com/harvard-edge/cs249r_book/discussions). We will do our best to reply.
 
 ---

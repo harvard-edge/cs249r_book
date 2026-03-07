@@ -1,13 +1,15 @@
-# viz.py
+# viz/plots.py
 # Centralized Visualization Style for MLSys Book
 # Ensures all generated figures across Vol 1 & 2 share a consistent,
 # MIT Press-ready aesthetic.
 
 try:
     import matplotlib.pyplot as plt
+    import numpy as np
     _matplotlib_available = True
 except ImportError:
     plt = None
+    np = None
     _matplotlib_available = False
 
 # --- Brand & Book Palette ---
@@ -27,75 +29,96 @@ COLORS = {
 }
 
 def set_book_style():
-    """Applies the global matplotlib style configuration.
-
-    Font priority mirrors TikZ's \\usefont{T1}{phv}{m}{n} (Helvetica).
-    The fallback chain covers macOS (Helvetica), Linux TeX installs
-    (Nimbus Sans L, TeX Gyre Heros), and generic Linux (DejaVu Sans).
-    """
+    """Applies the global matplotlib style configuration."""
     if not _matplotlib_available:
-        raise ImportError(
-            "matplotlib is required for plot generation. "
-            "Install it with: pip install matplotlib"
-        )
+        raise ImportError("matplotlib is required for plot generation.")
     plt.rcParams.update({
         'font.family': 'sans-serif',
-        'font.sans-serif': [
-            'Helvetica',         # macOS native
-            'Helvetica Neue',    # macOS modern variant
-            'Nimbus Sans L',     # Free Helvetica clone (TeX/Linux)
-            'TeX Gyre Heros',    # Free Helvetica clone (TeX)
-            'Arial',             # Windows fallback
-            'DejaVu Sans',       # Universal last resort
-        ],
+        'font.sans-serif': ['Helvetica', 'Helvetica Neue', 'Arial', 'DejaVu Sans'],
         'font.size': 10,
         'text.color': COLORS['primary'],
         'axes.labelsize': 11,
-        'axes.labelcolor': COLORS['primary'],
         'axes.titlesize': 12,
         'axes.titleweight': 'bold',
-        'axes.edgecolor': COLORS['primary'],
-        'axes.linewidth': 0.8,
-        'axes.spines.top': False,
-        'axes.spines.right': False,
-        'xtick.labelsize': 9,
-        'ytick.labelsize': 9,
-        'xtick.color': COLORS['primary'],
-        'ytick.color': COLORS['primary'],
         'axes.grid': True,
         'grid.color': COLORS['grid'],
         'grid.alpha': 0.4,
         'grid.linestyle': '--',
-        'grid.linewidth': 0.6,
-        'legend.fontsize': 9,
-        'legend.frameon': False,
-        'legend.title_fontsize': 10,
-        'lines.linewidth': 2.0,
-        'lines.markersize': 7,
         'figure.dpi': 300,
-        'savefig.bbox': 'tight',
-        'savefig.pad_inches': 0.1,
-        'figure.figsize': (8, 5),
-        'figure.autolayout': True
+        'savefig.bbox': 'tight'
     })
 
-# --- Font Size Convention for Diagram Figures ---
-# All diagram figures (flowcharts, pipelines, etc.) should use:
-#   - Node/box labels:     fontsize=9, fontweight='bold'
-#   - Edge/arrow labels:   fontsize=8
-#   - Step/annotation:     fontsize=8
-#   - Supplementary text:  fontsize=7 (italic gray for minor labels)
-#   - In-plot headings:    fontsize=10-12, fontweight='bold'
-# Data plot text inherits from rcParams (axes: 11, ticks: 9, legend: 9).
-
-# --- Lightweight helpers ---
-
-def setup_plot(figsize=None):
-    """
-    One-line plot setup for QMD blocks.
-    Returns (fig, ax, COLORS, plt) after applying book style.
-    The plt is returned so code blocks don't need separate matplotlib import.
-    """
+def setup_plot(figsize=(8, 5)):
+    """One-line plot setup for QMD blocks."""
     set_book_style()
     fig, ax = plt.subplots(figsize=figsize)
     return fig, ax, COLORS, plt
+
+def plot_roofline(hardware_node, workloads=None):
+    """
+    Plots a standard Roofline Model for a given HardwareNode.
+    Follows the LEGO-style visualization pattern.
+    """
+    # 1. PARAMETERS
+    peak_flops = hardware_node.compute.peak_flops.to('TFLOPs/s').magnitude
+    peak_bw = hardware_node.memory.bandwidth.to('GB/s').magnitude
+    
+    # 2. INVARIANTS
+    x_intensities = np.logspace(-1, 4, 100)
+    
+    # 3. CALCULATION
+    y_memory_bound = peak_bw * x_intensities / 1000 # TFLOPs equivalent
+    y_compute_bound = np.full_like(x_intensities, peak_flops)
+    y_roofline = np.minimum(y_memory_bound, y_compute_bound)
+    
+    # 4. OUTPUT (Visualization)
+    fig, ax, colors, plt = setup_plot()
+    ax.loglog(x_intensities, y_roofline, color=colors['BlueLine'], linewidth=2.5, label=f'{hardware_node.name} Roofline')
+    ax.fill_between(x_intensities, 0, y_roofline, color=colors['BlueFill'], alpha=0.3)
+    
+    if workloads:
+        from ..core.engine import Engine
+        for model in workloads:
+            profile = Engine.solve(model, hardware_node, efficiency=1.0)
+            intensity = profile.arithmetic_intensity.magnitude
+            theoretical_perf = min(peak_bw * intensity / 1000, peak_flops)
+            ax.plot(intensity, theoretical_perf, 'o', color=colors['crimson'], markersize=8)
+            ax.text(intensity * 1.2, theoretical_perf, model.name, color=colors['crimson'], fontsize=9, fontweight='bold')
+
+    ax.set_xlabel('Arithmetic Intensity (FLOP/Byte)')
+    ax.set_ylabel('Performance (TFLOPs/s)')
+    ax.set_title(f'Roofline: {hardware_node.name}')
+    return fig, ax
+
+def plot_evaluation_scorecard(evaluation):
+    """
+    Visualizes the supply-vs-demand scorecard for a SystemEvaluation.
+    Follows the LEGO-style visualization pattern.
+    """
+    # 1. PARAMETERS
+    from ..core.constants import Q_
+    l1_metrics = evaluation.feasibility.metrics
+    l2_metrics = evaluation.performance.metrics
+    
+    # 2. CALCULATION
+    l1_ratio = (l1_metrics['weight_size'] / l1_metrics['capacity']).to_base_units().magnitude
+    l2_ratio = (l2_metrics['latency'] / l2_metrics.get('sla_latency', Q_("1000 ms"))).to_base_units().magnitude
+    
+    levels = ['Memory (RAM)', 'Latency (SLA)']
+    ratios = [l1_ratio, l2_ratio]
+    
+    # 3. OUTPUT (Visualization)
+    fig, ax, colors, plt = setup_plot(figsize=(8, 4))
+    bar_colors = [colors['RedLine'] if r > 1.0 else colors['GreenLine'] for r in ratios]
+    bars = ax.barh(levels, ratios, color=bar_colors, alpha=0.7, edgecolor='black')
+    
+    ax.axvline(1.0, color=colors['primary'], linestyle='--', linewidth=2, label='Physical Limit / SLA')
+    
+    for i, (bar, ratio) in enumerate(zip(bars, ratios)):
+        ax.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height()/2, f"{ratio:.1%}", 
+                va='center', fontweight='bold', color=bar_colors[i])
+
+    ax.set_xlim(0, max(max(ratios) + 0.5, 1.5))
+    ax.set_xlabel('Resource Utilization (Demand / Supply)')
+    ax.set_title(f'System Evaluation: {evaluation.scenario_name}')
+    return fig, ax

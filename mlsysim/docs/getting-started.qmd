@@ -1,0 +1,176 @@
+---
+title: "Getting Started"
+subtitle: "Install MLSYSIM and run your first analysis in under 5 minutes."
+---
+
+::: {.callout-note}
+## Prerequisites
+MLSYSIM assumes basic Python familiarity (variables, functions, `pip install`). No prior ML or hardware knowledge is required. Key concepts like **roofline analysis**, **memory-bound vs. compute-bound**, and **FLOP/s** are explained in context throughout the tutorials. For a full reference of terms, see the [Glossary](glossary.qmd).
+:::
+
+## Installation
+
+MLSYSIM requires Python 3.9+ and installs cleanly with pip:
+
+```bash
+pip install mlsysim
+```
+
+For development or to follow along with tutorials locally:
+
+```bash
+git clone https://github.com/harvard-edge/cs249r_book
+cd cs249r_book/mlsysim
+pip install -e ".[dev]"
+```
+
+::: {.callout-note}
+All tutorials in this documentation can also be run on **Google Colab** or **Binder** without
+any local installation. Look for the launch buttons at the top of each tutorial.
+:::
+
+---
+
+## Your First Analysis
+
+Once installed, you can run a complete roofline analysis in five lines:
+
+```python
+import mlsysim
+from mlsysim import Engine
+
+# 1. Load a model and hardware from the vetted Zoo
+model    = mlsysim.Models.ResNet50
+hardware = mlsysim.Hardware.Cloud.A100
+
+# 2. Solve — the Engine applies the Iron Law of ML Systems
+profile = Engine.solve(model=model, hardware=hardware, batch_size=1, precision="fp16")
+
+# 3. Read the results
+print(f"Bottleneck: {profile.bottleneck}")   # → 'Memory Bound'
+print(f"Latency:    {profile.latency}")       # → 0.34 ms
+print(f"Throughput: {profile.throughput}")    # → 2941 samples/sec
+```
+
+::: {.callout-note}
+## Working with units
+MLSYSIM uses the [Pint](https://pint.readthedocs.io/) library for physical units. All quantities carry attached units (ms, GB, TFLOP/s, etc.). Use `.to('ms')` to convert between units. Use `.magnitude` to extract the raw number when you need it for calculations or plotting.
+:::
+
+---
+
+## Understanding the Output
+
+| Field | What it means |
+|:------|:--------------|
+| `bottleneck` | `'Memory Bound'` or `'Compute Bound'` — which resource limits performance |
+| `latency` | Time to process one batch, derived from the roofline ceiling |
+| `throughput` | Samples per second = `batch_size / latency` |
+| `latency_compute` | Time if only compute were the constraint |
+| `latency_memory` | Time if only memory bandwidth were the constraint |
+
+::: {.callout-tip}
+## The key insight
+If `latency_memory > latency_compute`, you're **memory-bound**: buying faster GPUs won't help much.
+You need to increase batch size or use a more compute-dense operation (e.g., fused attention).
+If you're **compute-bound**, that's when parallelism and quantization pay off.
+:::
+
+---
+
+## Exploring the Zoo
+
+MLSYSIM ships with vetted registries of hardware, models, infrastructure, and systems.
+Use tab-completion to explore:
+
+```python
+# Hardware: Cloud, Edge, Mobile, Tiny categories
+mlsysim.Hardware.Cloud.H100
+mlsysim.Hardware.Edge.JetsonOrinNX
+mlsysim.Hardware.Tiny.ESP32_S3
+
+# Models: Language, Vision, Tiny categories
+mlsysim.Models.Language.Llama3_70B
+mlsysim.Models.Vision.ResNet50
+mlsysim.Models.Tiny.MobileNetV2
+
+# Infrastructure: Regional grids
+mlsysim.Infra.Grids.Quebec      # hydro: ~20 gCO2/kWh
+mlsysim.Infra.Grids.Poland      # coal:  ~820 gCO2/kWh
+```
+
+---
+
+## Adjusting the Efficiency Parameter
+
+The `efficiency` parameter (η) is the single most important tuning knob in
+MLSYSIM. It represents the fraction of theoretical peak hardware performance
+that is actually achieved in practice.
+
+```python
+# Default: well-optimized training (η = 0.5)
+profile_default = Engine.solve(
+    model=model, hardware=hardware,
+    batch_size=32, precision="fp16", efficiency=0.5
+)
+
+# Conservative: typical inference workload (η = 0.35)
+profile_inference = Engine.solve(
+    model=model, hardware=hardware,
+    batch_size=32, precision="fp16", efficiency=0.35
+)
+
+print(f"Training estimate:  {profile_default.latency}")
+print(f"Inference estimate: {profile_inference.latency}")
+```
+
+Typical efficiency ranges:
+
+| Scenario | η range | Notes |
+|:---------|:--------|:------|
+| Well-optimized training (fp16) | 0.35–0.55 | Megatron-LM, DeepSpeed |
+| Inference (fp16) | 0.25–0.45 | vLLM, TensorRT-LLM |
+| Inference (int8) | 0.20–0.40 | Quantized serving |
+
+See the [Accuracy & Validation](accuracy.qmd) page for guidance on choosing η
+for different scenarios.
+
+---
+
+## Defining Custom Models
+
+You are not limited to the Zoo. Define any model by specifying its parameters
+and FLOPs:
+
+```python
+from mlsysim import TransformerWorkload
+from mlsysim import ureg
+
+my_model = TransformerWorkload(
+    name="My-Custom-LLM",
+    architecture="Transformer",
+    parameters=13e9 * ureg.param,
+    layers=40,
+    hidden_dim=5120,
+    heads=40,
+    kv_heads=8,
+    inference_flops=2 * 13e9 * ureg.flop  # Rule of thumb: ~2 FLOPs per parameter per forward pass
+)
+
+profile = Engine.solve(model=my_model, hardware=hardware, batch_size=1)
+print(f"Bottleneck: {profile.bottleneck}")
+print(f"Latency:    {profile.latency}")
+```
+
+---
+
+## Next Steps
+
+::: {.callout-tip}
+## Recommended path
+Follow the [structured learning path](tutorials/index.qmd) on the Tutorials page,
+starting with the **[Hello World Tutorial](tutorials/hello_world.qmd)**.
+
+For a complete reference of which solver to use for different questions, see the
+**[Solver Guide](solver-guide.qmd)**.
+:::

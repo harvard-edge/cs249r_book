@@ -1,245 +1,210 @@
-# scenarios.py
-# Application and Fleet Scenarios for MLSys Textbook
-# Ties Models + Systems/Clusters into concrete named missions.
-#
-# Two scenario types mirror the two-volume scope:
-#
-#   ApplicationScenario  — single-machine deployment (Vol1)
-#     system: SystemArchetype  (one node, 1–8 GPUs)
-#     Exposes: .hardware, .tier, .latency_slo, .accuracy_target
-#
-#   ClusterScenario      — multi-machine distributed workload (Vol2)
-#     cluster: ClusterSpec  (N nodes over a fabric)
-#     Exposes: .hardware (lead accelerator), .cluster, .latency_slo
-#
-# Both share the same .name / .mission_goal / .critical_constraint
-# interface so LEGO blocks work identically across volumes.
-
-from dataclasses import dataclass
-from typing import Optional
-from .models import ModelSpec, Models
-from .systems import SystemArchetype, Systems, Archetypes
-from .clusters import ClusterSpec, Clusters
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Optional, Union, Dict, Any, List
 from .constants import ureg, Q_
+from .types import Quantity
+from ..models.types import Workload, TransformerWorkload
+from ..hardware.types import HardwareNode
+from ..systems.types import Fleet, Node
+from .exceptions import OOMError, SLAViolation
+from .evaluation import SystemEvaluation, EvaluationLevel
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ApplicationScenario — Vol1: single-machine deployment
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass(frozen=True)
-class ApplicationScenario:
+class Scenario(BaseModel):
     """
-    A single-machine ML deployment scenario (Vol1 scope).
-    Binds a SystemArchetype to a ModelSpec with a mission description.
+    A Narrative Bundle tying a Workload, a System, and Performance Constraints.
+    This is the primary entry point for student labs and textbook case studies.
     """
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
-    system: SystemArchetype
-    model: ModelSpec
-    mission_goal: str
-    critical_constraint: str
-    latency_slo: Optional[Q_] = None
-    accuracy_target: Optional[float] = None
-
+    description: str
+    workload: Workload
+    system: Union[Fleet, HardwareNode]
+    
+    # Constraints (SLAs)
+    sla_latency: Optional[Quantity] = None
+    target_accuracy: Optional[float] = None
+    power_budget: Optional[Quantity] = None
+    
     @property
-    def hardware(self):
-        """The underlying accelerator spec (for direct hardware access)."""
-        return self.system.hardware
+    def is_distributed(self) -> bool:
+        return isinstance(self.system, Fleet)
 
-    @property
-    def tier(self):
-        """The deployment tier (Cloud / Edge / Mobile / Tiny)."""
-        return self.system.tier
+    def evaluate(self, batch_size: int = 1, precision: str = "fp16") -> SystemEvaluation:
+        """
+        Runs a full multi-level evaluation of the scenario.
+        """
+        from .engine import Engine
+        from .solver import DistributedSolver, SustainabilitySolver, EconomicsSolver
+        
+        # 1. Resolve Hardware
+        hardware = self.system.node.accelerator if self.is_distributed else self.system
+        
+        # --- LEVEL 1: FEASIBILITY ---
+        weights = self.workload.size_in_bytes()
+        feasible = weights <= hardware.memory.capacity
+        f_status = "PASS" if feasible else "FAIL"
+        
+        # Dynamic unit scaling for summary
+        unit = "MB" if weights < Q_("1 GB") else "GB"
+        f_summary = f"Model fits in memory ({weights.to(unit):.1f} / {hardware.memory.capacity.to(unit):.1f})" if feasible else f"OOM: Requires {weights.to(unit):.1f} but only has {hardware.memory.capacity.to(unit):.1f}"
+        
+        l1 = EvaluationLevel(
+            level_name="Feasibility", 
+            status=f_status, 
+            summary=f_summary,
+            metrics={"weight_size": weights, "capacity": hardware.memory.capacity}
+        )
 
-    def __repr__(self):
-        return f"Scenario({self.name})"
+        # --- LEVEL 2: PERFORMANCE ---
+        if self.is_distributed:
+            solver = DistributedSolver()
+            perf = solver.solve(self.workload, self.system, batch_size=batch_size, precision=precision)
+            actual_latency = perf["step_latency_total"]
+            throughput = perf["effective_throughput"]
+            perf_metrics = {
+                "latency": actual_latency, 
+                "throughput": throughput, 
+                "scaling_eff": perf["scaling_efficiency"],
+                "sla_latency": self.sla_latency
+            }
+        else:
+            perf = Engine.solve(self.workload, self.system, batch_size=batch_size, precision=precision)
+            actual_latency = perf.latency
+            throughput = perf.throughput
+            perf_metrics = {
+                "latency": actual_latency, 
+                "throughput": throughput, 
+                "bottleneck": perf.bottleneck,
+                "sla_latency": self.sla_latency
+            }
 
+        p_status = "PASS"
+        if self.sla_latency and actual_latency > self.sla_latency:
+            p_status = "FAIL"
+        
+        p_summary = f"Latency: {actual_latency:.2f} (Target: {self.sla_latency or 'N/A'})"
+        l2 = EvaluationLevel(level_name="Performance", status=p_status, summary=p_summary, metrics=perf_metrics)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ClusterScenario — Vol2: multi-machine distributed workload
-# ─────────────────────────────────────────────────────────────────────────────
+        # --- LEVEL 3: MACRO ---
+        # Scale to 1 year operation for macro view
+        if self.is_distributed:
+             sim_fleet = self.system
+        else:
+             from ..systems.types import Node, Fleet
+             from ..systems.registry import Fabrics
+             dummy_node = Node(name="Standard", accelerator=hardware, accelerators_per_node=1, intra_node_bw="50 GB/s")
+             sim_fleet = Fleet(name="SimFleet", node=dummy_node, count=1, fabric=Fabrics.Ethernet_10G)
 
-@dataclass(frozen=True)
-class ClusterScenario:
-    """
-    A distributed ML workload scenario (Vol2 scope).
-    Binds a ClusterSpec to a ModelSpec with a mission description.
+        sust = SustainabilitySolver().solve(sim_fleet, duration_days=365)
+        econ = EconomicsSolver().solve(sim_fleet, duration_days=365)
+        
+        m_summary = f"Annual Carbon: {sust['carbon_footprint_kg']:.1f} kg | TCO: ${econ['tco_usd']:,.0f}"
+        l3 = EvaluationLevel(
+            level_name="Macro", 
+            status="PASS", 
+            summary=m_summary,
+            metrics={"carbon_kg": sust['carbon_footprint_kg'], "tco_usd": econ['tco_usd']}
+        )
 
-    .hardware  — lead accelerator (same interface as ApplicationScenario)
-    .cluster   — full ClusterSpec (nodes, fabric, efficiency)
-    """
-    name: str
-    cluster: ClusterSpec
-    model: ModelSpec
-    mission_goal: str
-    critical_constraint: str
-    latency_slo: Optional[Q_] = None
-    accuracy_target: Optional[float] = None
+        return SystemEvaluation(
+            scenario_name=self.name,
+            feasibility=l1,
+            performance=l2,
+            macro=l3
+        )
 
-    @property
-    def hardware(self):
-        """Lead accelerator spec (consistent interface with ApplicationScenario)."""
-        return self.cluster.node.accelerator
+    def validate_scenario(self, batch_size: int = 1, precision: str = "fp16") -> Dict[str, Any]:
+        """
+        Comprehensive validation of the scenario's physical and performance feasibility.
+        """
+        from .engine import Engine
+        from .solver import ServingSolver, DistributedSolver
+        
+        # 1. Resolve Hardware for memory check
+        hardware = self.system.node.accelerator if self.is_distributed else self.system
+        
+        # 2. Memory Feasibility Check
+        weights = self.workload.size_in_bytes()
+        # For transformers, also check KV cache at a reasonable context (e.g., 512)
+        if isinstance(self.workload, TransformerWorkload):
+            kv_cache = self.workload.get_kv_cache_size(seq_len=512, batch_size=batch_size)
+            total_mem = weights + kv_cache
+        else:
+            total_mem = weights
+            
+        if total_mem > hardware.memory.capacity:
+            raise OOMError(
+                f"Physical Failure: {self.name} requires {total_mem.to('GB')} but {hardware.name} only has {hardware.memory.capacity.to('GB')}.",
+                required_bytes=total_mem,
+                available_bytes=hardware.memory.capacity
+            )
 
-    @property
-    def total_gpus(self) -> int:
-        return self.cluster.total_gpus
+        # 3. Performance / SLA Check
+        if self.is_distributed:
+            solver = DistributedSolver()
+            perf = solver.solve(self.workload, self.system, batch_size=batch_size, precision=precision)
+            actual_latency = perf["step_latency_total"]
+        else:
+            perf = Engine.solve(self.workload, self.system, batch_size=batch_size, precision=precision)
+            actual_latency = perf.latency
 
-    def __repr__(self):
-        return f"ClusterScenario({self.name}, {self.total_gpus} GPUs)"
+        if self.sla_latency and actual_latency > self.sla_latency:
+            raise SLAViolation(
+                f"SLA Violation: {self.name} actual latency {actual_latency} exceeds target {self.sla_latency}."
+            )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Vol1 Scenarios — four single-machine "Lighthouse" missions
-# ─────────────────────────────────────────────────────────────────────────────
+        return {
+            "status": "Validated",
+            "memory_utilization": (total_mem / hardware.memory.capacity).to_base_units().magnitude,
+            "performance": perf
+        }
 
 class Scenarios:
     """
-    Named single-machine application scenarios (Vol1).
-
-    The four Lighthouse missions span the full deployment spectrum:
-      Cloud   → FrontierTraining  (H100, GPT-4, TCO/convergence)
-      Edge    → AutonomousVehicle (Jetson Orin, YOLOv8, <10ms latency)
-      Mobile  → OnDeviceAssistant (Smartphone, Llama-2-70B compressed)
-      Tiny    → SmartDoorbell     (ESP32-CAM, WakeVision, battery life)
-      Tiny    → KeywordSpotting   (Cortex-M7, DS-CNN, always-on μW budget)
+    The Lighthouse Archetypes used throughout Volume 1 and Volume 2.
     """
-
-    # --- CLOUD: Frontier Training ---
-    # Single-node proxy; use FleetScenarios.LargeScaleTraining for cluster scope
-    FrontierTraining = ApplicationScenario(
-        name="Frontier Model Training (Single Node)",
-        system=Systems.Cloud,               # H100 SXM
-        model=Models.GPT4,
-        mission_goal="Push the boundary of general intelligence.",
-        critical_constraint="Total Cost of Ownership (TCO) and Convergence Stability.",
-        accuracy_target=0.99,
+    from ..models.registry import Models
+    from ..hardware.registry import Hardware
+    from ..systems.registry import Clusters, Nodes
+    
+    # --- TINYML WORLD ---
+    SmartDoorbell = Scenario(
+        name="Smart Doorbell",
+        description="Identifying humans at the door using a sub-watt microcontroller.",
+        workload=Models.Tiny.WakeVision,
+        system=Hardware.Tiny.ESP32_S3,
+        sla_latency=Q_("200 ms")
     )
 
-    # --- EDGE: Autonomous Vehicle Perception ---
-    AutonomousVehicle = ApplicationScenario(
-        name="Autonomous Vehicle Perception",
-        system=Systems.Edge,                # Jetson Orin NX
-        model=Models.Vision.YOLOv8_Nano,
-        mission_goal="Enable safe, real-time navigation in urban environments.",
-        critical_constraint="End-to-end Latency (< 10 ms) and Safety Certification.",
-        latency_slo=10 * ureg.ms,
-        accuracy_target=0.95,
+    # --- EDGE WORLD ---
+    AutonomousVehicle = Scenario(
+        name="Autonomous Vehicle",
+        description="Real-time object detection for safe urban navigation.",
+        workload=Models.Vision.ResNet50,
+        system=Hardware.Edge.JetsonOrinNX,
+        sla_latency=Q_("10 ms")
     )
 
-    # --- MOBILE: On-Device Language Assistant ---
-    OnDeviceAssistant = ApplicationScenario(
-        name="On-Device Language Assistant",
-        system=Systems.Mobile,              # Flagship smartphone
-        model=Models.Language.Llama2_70B,  # Highly compressed at inference
-        mission_goal="Provide private, offline conversational AI.",
-        critical_constraint="Thermal Throttling and Memory Fragmentation.",
-        latency_slo=50 * ureg.ms,
-        accuracy_target=0.90,
+    # --- WORKSTATION WORLD ---
+    LocalTraining = Scenario(
+        name="Local LLM Fine-tuning",
+        description="Fine-tuning a Llama-3 model on a high-end student workstation.",
+        workload=Models.Language.Llama3_8B,
+        system=Hardware.Workstation.MacBookM3Max,
+        sla_latency=Q_("100 ms")
     )
 
-    # --- TINYML: Smart Doorbell (Vision) ---
-    # Primary TinyML Lighthouse used across Vol1 labs and data chapters.
-    SmartDoorbell = ApplicationScenario(
-        name="Smart Doorbell (Wake Vision)",
-        system=Systems.Tiny,                # ESP32-CAM
-        model=Models.Tiny.WakeVision,
-        mission_goal="Identify humans at the door to trigger high-power alerts.",
-        critical_constraint="Battery Life (> 1 year) and KB-scale SRAM limits.",
-        latency_slo=200 * ureg.ms,
-        accuracy_target=0.85,
+    # --- CLOUD WORLD ---
+    FrontierTraining = Scenario(
+        name="Frontier LLM Training",
+        description="Pre-training a 70B parameter foundation model on a massive fleet.",
+        workload=Models.Language.Llama3_70B,
+        system=Clusters.Frontier_8K,
+        sla_latency=Q_("500 ms") # Per-step target
     )
-
-    # --- TINYML: Keyword Spotting (Audio) ---
-    # Always-on microphone wake-word detection; complementary Tiny Lighthouse.
-    KeywordSpotting = ApplicationScenario(
-        name="Keyword Spotting (Always-On Wake Word)",
-        system=Archetypes.TinyML_M7,        # Cortex-M7 MCU
-        model=Models.Tiny.DS_CNN,
-        mission_goal="Detect wake words continuously on a μW power budget.",
-        critical_constraint="Always-on Power (< 1 mW) and sub-100ms response.",
-        latency_slo=100 * ureg.ms,
-        accuracy_target=0.92,
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Vol2 Fleet Scenarios — distributed multi-machine workloads
-# ─────────────────────────────────────────────────────────────────────────────
-
-class FleetScenarios:
-    """
-    Named distributed workload scenarios (Vol2).
-
-    Each binds a ClusterSpec to a model and a mission.
-
-    Research     → ResearchTraining      (256 GPUs, GPT-3-scale fine-tuning)
-    Production   → LargeScaleTraining    (8 192 GPUs, Llama-2-70B pre-training)
-    Mega         → FrontierTraining      (100 000 GPUs, GPT-4-scale pre-training)
-    Distributed  → DistributedInference  (2 048 GPUs, LLM serving fleet)
-    """
-
-    # --- RESEARCH: Fine-tuning / mid-scale pre-training ---
-    ResearchTraining = ClusterScenario(
-        name="Research Cluster Training (256 GPUs)",
-        cluster=Clusters.Research_256,
-        model=Models.GPT3,
-        mission_goal="Fine-tune or pre-train a GPT-3-class model for research.",
-        critical_constraint="Job Turnaround Time and Cluster Utilization.",
-        accuracy_target=0.95,
-    )
-
-    # --- PRODUCTION: Large-scale pre-training ---
-    # The canonical Vol2 running example: Llama-2-70B on 8K H100s.
-    LargeScaleTraining = ClusterScenario(
-        name="Large-Scale Pre-Training (8 192 GPUs)",
-        cluster=Clusters.Frontier_8K,
-        model=Models.Language.Llama2_70B,
-        mission_goal="Pre-train a 70B parameter foundation model end-to-end.",
-        critical_constraint="Fault Tolerance, Communication Overhead, and MFU.",
-        accuracy_target=0.95,
-    )
-
-    # --- MEGA: Frontier model training ---
-    # GPT-4-scale; used in reliability and fleet orchestration chapters.
-    FrontierTraining = ClusterScenario(
-        name="Frontier Model Training (100 000 GPUs)",
-        cluster=Clusters.Mega_100K,
-        model=Models.GPT4,
-        mission_goal="Train a frontier general-intelligence model.",
-        critical_constraint="Continuous Failure Recovery and TCO at Mega-Scale.",
-        accuracy_target=0.99,
-    )
-
-    # --- DISTRIBUTED INFERENCE: LLM serving fleet ---
-    # Used in inference chapter; 2K GPUs serving concurrent user requests.
-    DistributedInference = ClusterScenario(
-        name="Distributed LLM Inference Fleet (2 048 GPUs)",
-        cluster=Clusters.Production_2K,
-        model=Models.Language.Llama2_70B,
-        mission_goal="Serve a 70B LLM to thousands of concurrent users globally.",
-        critical_constraint="P99 Latency SLO (< 200 ms TTFT) and Cost per Token.",
-        latency_slo=200 * ureg.ms,
-        accuracy_target=0.90,
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Convenience aliases — what chapters actually import
-# ─────────────────────────────────────────────────────────────────────────────
 
 class Applications:
-    """Short aliases for Vol1 single-machine scenarios."""
-    Frontier  = Scenarios.FrontierTraining
+    Doorbell = Scenarios.SmartDoorbell
     AutoDrive = Scenarios.AutonomousVehicle
-    Assistant = Scenarios.OnDeviceAssistant
-    Doorbell  = Scenarios.SmartDoorbell
-    KWS       = Scenarios.KeywordSpotting
-
-
-class Fleet:
-    """Short aliases for Vol2 distributed scenarios."""
-    Research  = FleetScenarios.ResearchTraining
-    Training  = FleetScenarios.LargeScaleTraining
-    Frontier  = FleetScenarios.FrontierTraining
-    Inference = FleetScenarios.DistributedInference
+    Workstation = Scenarios.LocalTraining
+    Frontier = Scenarios.FrontierTraining
