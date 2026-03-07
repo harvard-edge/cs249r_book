@@ -122,6 +122,10 @@ class FaultToleranceSetup:
 
 Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. Statistically, a GPU will fail every few hours. If the system is not designed to absorb these continuous physical failures, the training process will halt entirely, wasting millions of dollars in compute time. In the **Fleet Stack** (@sec-vol2-introduction), Fault Tolerance acts as this necessary **Immune System** of the Infrastructure Layer.
 
+::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML Failure Spectrum**. Reliability challenges at scale range from hard hardware failures (crashes) to silent data corruption (SDC) and performance degradation (gray failures). Fault tolerance engineering must provide mechanisms to detect and recover from each type of failure to maintain fleet-scale throughput." fig-alt="Continuum diagram showing Failure Frequency vs Detection Difficulty. Categories: Hard Failure, Gray Failure, Silent Data Corruption."}
+![](images/svg/_failure-spectrum.svg){width=100%}
+:::
+
 The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication — AllReduce, AllGather, AllToAll — sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer necessary to keep that fleet running.
 
 The transition from small-scale experimentation to large-scale production changes the relationship between systems and failures. A researcher training a model on a single GPU might experience hardware failure once per year. That same researcher scaling to a 1,000 GPU cluster will experience failures multiple times per day. This shift from rare exception to routine occurrence demands different engineering approaches. The mathematical analysis that follows makes this transition precise and quantitative.
@@ -226,65 +230,14 @@ As @fig-young-daly illustrates, the **Young-Daly formula**[^fn-young-daly-histor
 [^fn-young-daly-history]: **Young-Daly Formula**: J. W. Young derived the first-order optimal checkpoint interval in a 1974 *Communications of the ACM* paper; John Daly independently refined it in 2006 with tighter second-order bounds. The formula's square-root relationship ($\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$) means that halving MTBF only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth. \index{Young-Daly Formula!history}
 
 ::: {#fig-young-daly fig-env="figure" fig-pos="htb" fig-cap="**The Young-Daly Optimal Checkpoint**. Total wasted work is the sum of *checkpointing overhead* (which decreases with interval $\tau$) and *rework cost* (which increases with $\tau$). The minimum point defines the optimal interval $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$. For a cluster with 5-hour MTBF and 15-minute write time, the optimal interval is ~1.2 hours." fig-alt="Plot of Overhead vs Checkpoint Interval. A red curve for Rework Cost increases linearly. A blue curve for Checkpoint Overhead decreases hyperbolically. Their sum (green curve) shows a clear minimum point labeled Optimal Interval."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ YOUNG-DALY OPTIMAL CHECKPOINT (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-young-daly — checkpoint overhead vs rework trade-off
-# │
-# │ Goal: Plot overhead = T_write/τ and rework = τ/(2*\text{MTBF}); show optimal
-# │       τ_opt = sqrt(2*T_write*\text{MTBF}) minimizing total waste.
-# │ Show: Three curves; minimum point annotation.
-# │ How: tau = linspace; over_ckpt + over_rework; viz.set_book_style().
-# │
-# │ Imports: numpy (np), matplotlib.pyplot (plt), mlsysim.core.viz (viz)
-# │ Exports: (figure only, no prose variables)
-# └─────────────────────────────────────────────────────────────────────────────
-import numpy as np
-import matplotlib.pyplot as plt
-from mlsysim import viz
-
-viz.set_book_style()
-COLORS = viz.COLORS
-
-# Parameters for visualization
-mtbf = 5.0 # hours
-t_write = 0.25 # hours (15 mins)
-
-tau = np.linspace(0.1, 5.0, 100)
-over_ckpt = t_write / tau
-over_rework = tau / (2 * mtbf)
-total_waste = over_ckpt + over_rework
-
-tau_opt = np.sqrt(2 * t_write * mtbf)
-
-fig, ax = plt.subplots(figsize=(8, 5))
-
-ax.plot(tau, over_ckpt, label='Checkpoint Overhead ($T_{\text{write}}/\\tau$)', color=COLORS['BlueLine'], linestyle='--')
-ax.plot(tau, over_rework, label=r'Expected Rework ($\tau/2\text{MTBF}$)', color=COLORS['RedLine'], linestyle='--')
-ax.plot(tau, total_waste, label='Total Wasted Work', color=COLORS['GreenLine'], linewidth=2.5)
-
-# Optimal point
-ax.scatter([tau_opt], [np.sqrt(2*t_write/mtbf)], color='black', zorder=5)
-ax.annotate(f'$\\tau_{{opt}} \\approx {tau_opt:.1f}$h',
-            xy=(tau_opt, np.sqrt(2*t_write/mtbf)),
-            xytext=(tau_opt + 0.2, 0.6),
-            arrowprops=dict(facecolor='black', shrink=0.05, width=1, headwidth=5))
-
-ax.set_xlabel('Checkpoint Interval $\\tau$ (Hours)')
-ax.set_ylabel('Fraction of Total Time Wasted')
-ax.set_ylim(0, 1.0)
-ax.legend()
-ax.grid(True, alpha=0.3)
-
-plt.show()
-```
-
+![](images/svg/_young-daly-optimization.svg){width=100%}
 :::
 
 The formula $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$ reveals a critical scaling property: as clusters grow larger ($\text{MTBF} \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-storage) to keep $T_{\text{write}}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity.
+
+::: {#fig-checkpoint-tax fig-env="figure" fig-pos="htb" fig-cap="**The Checkpoint Tax**. As cluster size increases, the optimal checkpoint interval shrinks, increasing the fraction of time spent on I/O. For a fixed storage bandwidth, the 'tax' on compute capacity grows with N. Minimizing this tax requires tiered storage staging (NVMe to PFS) to keep $T_{\text{write}}$ independent of cluster scale." fig-alt="Plot showing Checkpoint Overhead percentage vs GPU count. Three curves for different storage bandwidths (1 GB/s, 10 GB/s, 100 GB/s) show how overhead grows with N but is suppressed by bandwidth."}
+![](images/svg/_checkpoint-tax.svg){width=100%}
+:::
 
 ```{python}
 #| label: lego-nines-reliability
@@ -560,121 +513,7 @@ At the nanometer scale of modern transistors, hardware is not deterministic; it 
 Facebook documented a pervasive SDC issue where a hardware fault caused a valid file to be reported as "size zero" during decompression [@dixit2021silent]. As @fig-sdc-example illustrates, the system "worked" (no crash), but data was silently deleted. In ML, this manifests as valid-looking but mathematically garbage gradients.
 
 ::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent Data Corruption Propagation**. Unexpected faults can return incorrect file sizes, leading to data loss during decompression and propagating errors through distributed querying systems. This example from Facebook emphasizes how silent errors bypass standard exception handlers. Source: Facebook (2021)." fig-alt="System diagram showing data flow from compressed storage through defective CPU to database. Arrows indicate processing stages where file size calculation returns zero, causing missing rows in output."}
-
-```{.tikz}
-\begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\footnotesize]
-\tikzset{%
-helvetica/.style={align=flush center,font=\small\usefont{T1}{phv}{m}{n}},
-Line/.style={line width=1.0pt,black!50,text=black},
-cube/.style={cylinder, draw,shape border rotate=90, aspect=1.8,inner ysep=0pt,
-    minimum height=34mm,minimum width=25mm, cylinder uses custom fill,
-    cylinder body fill=black!07,cylinder end fill=black!25},
-Box/.style={,
-    inner xsep=2pt,
-    node distance=1.1,
-    draw=GreenLine,
-    line width=0.75pt,
-    font=\usefont{T1}{phv}{m}{n}\small,
-    align=flush center,
-    fill=GreenL,
-    text width=29mm,
-    minimum width=29mm, minimum height=10mm
-  },
-Box2/.style={helvetica,
-    inner xsep=2pt,
-    node distance=0.8,
-    draw=VioletLine,
-    line width=0.75pt,
-    font=\usefont{T1}{phv}{m}{n}\small,
-     align=flush center,
-    fill=VioletL2,
-    text width=32mm,
-    minimum width=32mm, minimum height=8mm
-  },
-}
-\definecolor{CPU}{RGB}{0,120,176}
-%%%
-\node[Box](B2){Scale math.pow()};
-\node[Box,above=of B2](B1){Decompress file size calculation};
-
-\begin{scope}[local bounding box = CPU,shift={($(B2)+(0,-2.6)$)},
-                          scale=0.7, every node/.append style={transform shape}]
-\node[fill=CPU,minimum width=56, minimum height=56,
-            rounded corners=8,outer sep=2pt] (C1) {};
-\node[fill=white,minimum width=44, minimum height=44] (C2) {};
-\node[fill=CPU!40,minimum width=39, minimum height=39,
-            align=center,inner sep=0pt,font=\usefont{T1}{phv}{m}{n}
-            \fontsize{8pt}{9}\selectfont] (C3) {Defective\\CPU};
-
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=3, minimum height=12,
-           inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=3, minimum height=12,
-           inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=12, minimum height=3,
-           inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=12, minimum height=3,
-           inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
-}
-\end{scope}
-%%
-\begin{scope}[local bounding box = CY1,shift={($(B2)+(5,-0.1)$)}]
-\node (CA1) [cube] {};
-\node (CA2) [cube,minimum height=10pt, fill=CPU!60]at($(CA1.bottom)!0.1!(CA1.top)$) {};
-\node (CA3) [cube,minimum height=10pt,fill=red!80]at($(CA2.bottom)+(0,2.6mm)$){};
-\node (CA4) [cube,minimum height=10pt,fill=red!80]at($(CA3.bottom)+(0,2.6mm)$){};
-\node (CA5) [cube,minimum height=10pt, fill=CPU!60]at($(CA1.bottom)!0.65!(CA1.top)$) {};
-\node[align=center]at (CA1){Spark shuffle and\\ merge database};
-\end{scope}
-%%
-\begin{scope}[local bounding box = CY2,shift={($(B2)+(-5,-0.1)$)}]
-\node (LCA1) [cube] {};
-\node[align=center]at (LCA1){Spark pre-shuffle \\ data store\\(compressed)};
-\end{scope}
-\node[single arrow, draw=black,thick, fill=VioletL,
-      minimum width = 15pt, single arrow head extend=3pt,rotate=270,
-      minimum height=7mm]at($(B2)!0.52!(B1)$) {};
-\node[single arrow, draw=black,thick, fill=VioletL,
-      minimum width = 15pt, single arrow head extend=3pt,rotate=270,
-      minimum height=7mm]at($(B2)!0.39!(CPU)$) {};
-%
-\coordinate(DES)at($(DE1)!0.5!(DE6)$);
-\coordinate(LEV)at($(LE1)!0.5!(LE6)$);
-\node[single arrow, draw=black,thick, fill=VioletL, inner sep=1pt,
-      minimum width = 14pt, single arrow head extend=2pt,anchor=east,
-      minimum height=18mm](LS)at($(LEV)+(-0.5,0)$) {};
-\node[single arrow, draw=black,thick, fill=VioletL, inner sep=1pt,
-      minimum width = 14pt, single arrow head extend=2pt,anchor=west,
-      minimum height=18mm](DS)at($(DES)+(0.5,0)$) {};
-%
-%fitting
-\scoped[on background layer]
-\node[draw=violet,inner xsep=6.5mm,inner ysep=6.5mm,outer sep=0pt,
-yshift=2mm,fill=none,fit=(CPU)(B1),line width=2.5pt](BB1){};
-\node[below=3pt of  BB1.north,anchor=north,helvetica]{Shuffle and merge};
-%%%
-\node[Box2,below left=0.5 of LS](N2){\textbf{2.} Compute (1.1)\textsuperscript{53}};
-\node[Box2,below right=0.5 of DS,fill=BlueL,draw=BlueLine](R3){\textbf{3.} Result = 0};
-\node[Box2,below right=0.3 and -2.5 of R3,text width=43mm](N3){\textbf{3.} Expected Result = 156.24};
-%
-\node[Box2,above= of CY2](N1){\textbf{1.} Compute file size for decompression};
-\node[Box2,above= of CY1](N4){\textbf{4.} Write file to database if size $>$ 0};
-\node[Box2,below right= 0.2 and -1.15of CY1](N5){\textbf{5.} Missing rows in DB};
-%
-\draw[Line,-latex](N5)|-(CA3.before bottom);
-\draw[Line,-latex](N5.50)|-(CA4.6);
-\draw[Line](N3.20)|-(R3);
-\draw[Line,-latex](LCA1.top)|-(B1);
-\draw[Line,latex-](CA1.top)|-(B1);
-\end{tikzpicture}
-```
-
+![](images/svg/_sdc-propagation.svg){width=100%}
 :::
 
 Real-world evidence of SDC in production systems confirms these risks. @fig-sdc-jeffdean shows corrupted data blocks accumulating in a shuffle and merge database at Google, where even a small fraction of corrupted blocks can cascade into significant data quality degradation.
@@ -696,128 +535,7 @@ Google reported that SDC in TPU pods often manifests as sudden, inexplicable spi
 Google addresses this by maintaining "Hot Spares": running the same computation on two distinct chips or having a standby ready to take over. If a "Sanity Checker" (monitoring loss/gradients) detects an anomaly, the workload is instantly migrated to the hot spare, and the suspect chip is drained for diagnostics (@fig-sdc-controller). This moves reliability from the *component* (which we cannot trust) to the *system* (which verifies the result).
 
 ::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot Spare Redundancy**. Google's data centers use hot spare cores to maintain uninterrupted ML training despite hardware failures, seamlessly transitioning workloads from defective machines to backup resources. This approach contrasts with parallel redundancy techniques like DMR/TMR by providing a reactive fault tolerance mechanism that minimizes downtime and preserves data integrity during ML training. Source: Jeff Dean, MLSys 2024 Keynote." fig-alt="Four-panel sequence: normal training grid, defective machine marked red, SDC checker detecting fault, workload transferred to hot spare while defective unit sent for repair."}
-
-```{.tikz}
-\begin{tikzpicture}[line width=0.75pt,font=\small\usefont{T1}{phv}{m}{n}]
-\definecolor{Green}{RGB}{84,180,53}
-\definecolor{Red}{RGB}{249,56,39}
-\definecolor{Blue}{RGB}{0,97,168}
-\definecolor{Siva}{RGB}{161,152,130}
-%
-\tikzset{%
-helvetica/.style={align=flush center,font=\small\usefont{T1}{phv}{m}{n}},
- Line/.style={line width=2.0pt,black!50,rounded corners=7,-latex},
-main/.style={circle, minimum size=5mm, line width=0.7mm,draw=red,keep name},
-keep name/.style={prefix after command={\pgfextra{\let\fixname\tikzlastnode}}},
-    red box/.style={
-      append after command={
-        node [rotate=-50,
-          fit=(\fixname) ,
-          fill=red,
-          text width=1.3mm,
-          inner sep=-\pgflinewidth,
-          rectangle
-        ] {}
-      }
-    }
-}
-\tikzset{
-  Box/.style={helvetica,
-    inner xsep=2pt,
-    node distance=0.7,
-    draw=Green,
-    rounded corners,
-    fill=Green,
-    minimum width=11mm, minimum height=6mm
-  },
- Text/.style={%
-    inner sep=2pt,
-    draw=none,
-    line width=0.75pt,
-    fill=TextColor,
-    helvetica,
-    align=flush center,
-    minimum width=10mm, minimum height=6mm
-  },
-}
-\begin{scope}[local bounding box=M1,shift={(0,0)}]
-\foreach \x in {1,2,3}{
-    \foreach \y in {1,2,3}{
-    \def\br{M1}
-        \node[Box](R\y\x\br) at (1.3*\x,-0.8*\y) {};
-    }
-}
-\node[Box,draw=Blue,fill=Blue]at(R32M1){};
-\node[Box,draw=Siva,fill=Siva]at(R33M1){};
-\node[below=0.2 of R32M1]{Normal training state};
-\end{scope}
-
-\begin{scope}[local bounding box=M1,shift={(4.5,0)}]
-\foreach \x in {1,2,3}{
-    \foreach \y in {1,2,3}{
-    \def\br{M2}
-        \node[Box](R\y\x\br) at (1.3*\x,-0.8*\y) {};
-    }
-}
-\node[Box,draw=Blue,fill=Blue]at(R32M2){};
-\node[Box,draw=Siva,fill=Siva]at(R33M2){};
-\node[below=0.2 of R32M2,align=center,
-            red](DM){Defective machine\\ causes SDC};
-\node [main,red box] (c) at (R23M2){};
-\draw[Line,red](R23M2)--++(0:1)|-(DM);
-\end{scope}
-
-\begin{scope}[local bounding box=M1,shift={(9.0,0)}]
-\foreach \x in {1,2,3}{
-    \foreach \y in {1,2,3}{
-    \def\br{M3}
-        \node[Box](R\y\x\br) at (1.3*\x,-0.8*\y) {};
-    }
-}
-\node[Box,draw=Blue,fill=Blue]at(R32M3){};
-\node[Box,draw=Blue,fill=none,line width=2pt]at(R23M3){};
-\node[Box,draw=Siva,fill=Siva]at(R33M3){};
-\node[below=0.2 of R32M3,align=center,
-            Blue](SD){SDC checker\\ automatically\\ identifies SDC};
-\node [main,red box] (c) at (R23M3){};
-\draw[Line,Blue](R23M3)--++(0:1)|-(SD);
-\end{scope}
-
-\begin{scope}[local bounding box=M1,shift={(13.5,0)}]
-\foreach \x in {1,2,3}{
-    \foreach \y in {1,2,3}{
-    \def\br{M4}
-        \node[Box](R\y\x\br) at (1.3*\x,-0.8*\y) {};
-    }
-}
-\node[Box,draw=Blue,fill=Blue]at(R32M4){};
-\node[Box,draw=red,fill=white,line width=2pt]at(R23M4){};
-\node[Box,draw=Blue,fill=Green,line width=2pt]at(R33M4){};
-\node[below=0.2 of R32M4,align=center,
-            Blue](SD1){SDC checker moves\\ training to hot spare\\
-            and sends defective\\ machine for repair};
-\node [main,red box] (c) at (R23M4){};
-\draw[Line,Blue](R33M4)--++(0:1)|-(SD1);
-\end{scope}
-
-\begin{scope}[local bounding box=LE,shift={(3.5,0.4)}]
-\node[Box,draw=Green,fill=Green](ZE){};
-\node[right=2pt of ZE,font=\small\usefont{T1}{phv}{m}{n}
-             \footnotesize](L1){Synchronous Training Worker};
-\node[Box,draw=Blue,fill=Blue,right=of L1](PL){};
-\node[right=2pt of PL,font=\small\usefont{T1}{phv}{m}{n}
-             \footnotesize](L2){SDC checker};
-%
-\node[Box,draw=Siva,fill=Siva,right=of L2](SI){};
-\node[right=2pt of SI,font=\small\usefont{T1}{phv}{m}{n}
-             \footnotesize](L3){Hot spare};
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=10,inner ysep=6,yshift=0mm,
-           fill=BackColor!60,fit=(ZE)(L3),line width=0.75pt](BB1){};
-\end{scope}
-\end{tikzpicture}
-```
-
+![](images/svg/_sdc-controller.svg){width=100%}
 :::
 
 ::: {.callout-checkpoint title="Detecting Silent Corruption"}
@@ -992,7 +710,21 @@ A single bit-flip in a weight matrix illustrates the severity. If a critical wei
 
 The reliability problem is worsening. As the ML fleet scales to sub-5nm process nodes (@sec-compute-infrastructure), the Failures In Time (FIT) rate for Silent Data Corruption (SDC) rises: smaller nodes have lower critical charges, making bit-flips from cosmic rays and thermal noise more frequent, while chips with billions of transistors have higher statistical probabilities of manufacturing defects that manifest only under specific ML workloads [@ma2024challenges]. ML system architects must treat hardware as an **unreliable substrate**, where algorithmic fault tolerance (gradient checksums, weight replication, periodic consistency checks in the MLOps pipeline (@sec-ops-scale)) is a mandatory requirement rather than an HPC specialty.
 
-Hardware faults fall into three categories based on temporal characteristics. **Transient faults** are temporary disruptions caused by external factors such as cosmic rays or electromagnetic interference [@ziegler1996ibm]; they cause incorrect computations without permanent hardware damage and can corrupt gradient updates during training or alter model weights during inference. **Permanent faults** represent irreversible damage from physical defects or component wear-out, such as stuck-at faults or device failures that require hardware replacement; for long-running training jobs, they can mean days or weeks of lost computation. **Intermittent faults** appear and disappear sporadically due to unstable conditions like loose connections or aging components, causing non-deterministic behavior that compromises model validation and reproducibility.
+Hardware faults fall into three categories based on temporal characteristics.
+
+::: {#fig-fault-temporal-categories fig-env="figure" fig-pos="htb" fig-cap="**Temporal Taxonomy of Hardware Faults**. (A) Transient: temporary disruptions (e.g., bit flips) that do not cause permanent damage. (B) Intermittent: sporadic errors due to unstable conditions or aging. (C) Permanent: irreversible physical damage (e.g., stuck-at-0/1 faults) requiring replacement." fig-alt="Four-panel diagram showing Transient, Intermittent, and Permanent fault patterns over time, with a dedicated bit-flip illustration."}
+::: {layout-ncol=2}
+![**Transient Fault (Bit Flip)**](images/svg/_bit-flip.svg)
+
+![**Permanent Fault (Stuck-at)**](images/svg/_stuck-fault.svg)
+
+![**Transient Timing**](images/svg/_transient-fault.svg)
+
+![**Intermittent Timing**](images/svg/_intermittent-fault.svg)
+:::
+:::
+
+**Transient faults** are temporary disruptions caused by external factors such as cosmic rays or electromagnetic interference [@ziegler1996ibm]; they cause incorrect computations without permanent hardware damage and can corrupt gradient updates during training or alter model weights during inference. **Permanent faults** represent irreversible damage from physical defects or component wear-out, such as stuck-at faults or device failures that require hardware replacement; for long-running training jobs, they can mean days or weeks of lost computation. **Intermittent faults** appear and disappear sporadically due to unstable conditions like loose connections or aging components, causing non-deterministic behavior that compromises model validation and reproducibility.
 
 ### Transient Faults {#sec-ft-transient-faults-1455}
 
@@ -1334,10 +1066,12 @@ Hardware redundancy uses component duplication and voting to detect and mask fau
 
 [^fn-tmr-correction]: **TMR (Triple Modular Redundancy)**: Performs computation three times and takes a majority vote, enabling automatic single-fault correction at 200% hardware overhead. Developed for the Apollo Guidance Computer (1960s), TMR remains the standard for space-grade ML inference where cosmic radiation rates are orders of magnitude higher than at sea level, achieving error rates below $10^{-12}$ per operation. \index{TMR!majority voting}
 
-::: {#fig-tesla-dmr fig-env="figure" fig-pos="htb" fig-cap="**Dual Modular Redundancy**: Tesla's full self-driving computer employs a DMR architecture, replicating critical computations across two independent system-on-chips (socs) to mitigate hardware faults and ensure continuous operation. This redundancy enables the system to mask errors: if one soc fails, the other continues functioning, maintaining safety-critical functions like perception and control. *Source: [Tesla](HTTPS://old.hotchips.org/hc31/HC31_2.3_tesla_hotchips_ppt_final_0817.PDF)*" fig-alt="Block diagram of Tesla self-driving computer with two identical SoCs processing sensor inputs in parallel. Comparator unit validates matching outputs before sending control commands."}
+::: {#fig-tesla-dmr fig-env="figure" fig-pos="htb" fig-cap="**Dual Modular Redundancy (DMR)**. Tesla's full self-driving computer employs a DMR architecture, replicating critical computations across two independent system-on-chips (SoCs). A hardware comparator unit validates that both chips produce matching outputs before allowing a control command to reach the vehicle's actuators, ensuring that a single-chip hardware failure or bit flip cannot trigger dangerous driving behavior." fig-alt="Block diagram of Tesla self-driving computer with two identical SoCs processing sensor inputs in parallel. Comparator unit validates matching outputs before sending control commands."}
+![](images/svg/tesla-dmr.svg){width=100%}
+:::
 
-![](./images/png/tesla_dmr.png)
-
+::: {#fig-error-masking fig-env="figure" fig-pos="htb" fig-cap="**Error Masking via Voting**. In Triple Modular Redundancy (TMR), the same computation runs on three independent units. A voter circuit takes a majority vote of the results. Even if one unit suffers a fault (e.g., bit flip), the system 'masks' the error by selecting the matching outputs from the other two units, allowing continuous operation without interruption." fig-alt="Diagram showing three functional units feeding into a single voter unit. One unit is marked with a red X (fault), but the final output matches the two healthy units."}
+![](images/svg/error-masking.svg){width=100%}
 :::
 
 At the software level, distributed ML systems employ runtime monitoring [@francalanza2017foundation; @mahmoud2021issre], anomaly detection (statistical outlier detection, One-Class SVM [@chandola2009anomaly]), consistency checks across distributed model parameters [@lindholm2019data], and heartbeat mechanisms [@kawazoe1997heartbeat] that detect node failures within configurable timeout periods. Software-implemented fault tolerance (SIFT) techniques [@reis2005swift] such as N-version programming and Reed-Solomon error correction codes [@plank1997tutorial] add redundancy at the software level, enabling detection and correction of errors without dedicated hardware. Watchdog timers [@pont2002using] monitor task execution and trigger recovery actions when systems become unresponsive.
@@ -1852,6 +1586,54 @@ yshift=-6mm,fill=cyan!10,fit=(PERSON2)(DISPLAY3),line width=0.75pt](BB2){};
 \node[above=4pt of  BB2.south,inner sep=0pt, anchor=south,GreenD]{\textbf{Continuous Delivery}};
 \end{tikzpicture}
 ```
+
+:::
+
+## Check-and-Verify: Defending against Silent Data Corruption {#sec-ft-sdc-verification}
+
+As clusters scale to 100,000+ GPUs, the probability of a "Silent Data Corruption" (SDC) event—where an ALU or HBM bit flip occurs without triggering ECC or hardware alerts—approaches certainty during large collective operations. Standard AllReduce algorithms assume that if a node is "alive," its data is correct. In the Machine Learning Fleet, we must transition to a **Byzantine Fault Tolerance** mindset: "Trust, but verify."
+
+```{python}
+#| label: sdc-prob-calc
+#| echo: false
+from mlsysim.fmt import check
+from mlsysim.core.constants import P_SDC_PER_GPU_HR
+
+class SDCCollective:
+    """The risk of silent corruption in global collectives."""
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_gpus = 100000
+    p_sdc_per_gpu_hr = P_SDC_PER_GPU_HR # 1 in a million chance per hour
+    training_step_s = 2
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr)**(n_gpus * (training_step_s / 3600))
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(p_step_sdc > 0.05, f"Prob {p_step_sdc:.4f} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    prob_str = f"{p_step_sdc*100:.2f}%"
+
+    @classmethod
+    def plot(cls):
+        """Visualizes SDC probability risk."""
+        from mlsysim import viz
+        return viz.bar_compare(
+            labels=["No Fault", "SDC Probability"],
+            values=[100 - (cls.p_step_sdc*100), cls.p_step_sdc*100],
+            title="Silent Data Corruption Risk per Step",
+            ylabel="Probability (%)"
+        )
+```
+
+::: {.callout-notebook title="Napkin Math: The SDC Certainty"}
+
+**Problem**: Calculate the probability that at least one GPU in a 100,000-node cluster experiences a silent ALU error during a single 2-second training step.
+
+1. **Fleet Size**: 100,000 accelerators.
+2. **Individual Risk**: $10^{-6}$ per hour (a conservative estimate for SDC).
+3. **The Exposure**: In a 2-second window, the fleet has $100,000 \times (2/3600) \approx 55$ "GPU-hours" of exposure.
+4. **The Probability**: $P(\text{at least one SDC}) \approx$ **`{python} SDCCollective.prob_str`**.
+
+**The Systems Insight**: In a 100k-GPU fleet, a silent error occurs every 20 steps. If your AllReduce does not implement **Checksummed Collectives** or **Hash-and-Verify** gradients, your model parameters will silently drift into "Numerical Garbage" within minutes. Robustness moves from being a "Restart" problem to a **Verification** problem: the fleet must perform redundant reductions or use parity-protected gradients to catch the silent killer of scale.
 
 :::
 
@@ -2404,6 +2186,10 @@ Centralized checkpointing works acceptably for small-scale distributed training 
 #### Distributed Checkpointing {#sec-fault-tolerance-reliability-reliability-distributed-checkpointing-5dcc}
 
 In distributed checkpointing, each worker writes its portion of the checkpoint to a shared filesystem or object storage. A coordinator signals when to checkpoint and confirms completion, but state flows directly from workers to storage without aggregation.
+
+::: {#fig-distributed-checkpoint-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Checkpoint Architecture**. Comparison of centralized vs. distributed patterns. (Top) Centralized aggregation creates bottlenecks at the coordinator. (Bottom) Distributed sharding enables every worker to write directly to the Parallel File System (PFS) in parallel, aggregating bandwidth across the storage fabric and minimizing the training pause." fig-alt="Two-panel comparison. Top: Many workers sending data to a single coordinator, which writes to storage. Bottom: Many workers each writing directly to a shared storage cloud in parallel."}
+![](images/svg/distributed-checkpoint-architecture.svg){width=100%}
+:::
 
 The coordination protocol proceeds in six steps:
 
@@ -3160,6 +2946,10 @@ ML systems face additional debugging challenges. Silent accuracy degradation pro
 
 Effective distributed debugging requires three observability pillars: metrics, logs, and traces.
 
+::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The Three Pillars of Observability**. Diagnosis of fleet failures requires correlating three signal types. **Metrics** reveal *when* and *where* a problem occurs (e.g., GPU utilization drops). **Logs** provide the *what* through event context (e.g., Out-of-Memory exception). **Traces** provide the *why* by linking events across the distributed lifecycle (e.g., identifying the specific request that triggered the memory spike)." fig-alt="Venn diagram with three overlapping circles: Metrics, Logs, and Traces."}
+![](images/svg/observability-three-pillars.svg){width=100%}
+:::
+
 #### Metrics {#sec-fault-tolerance-reliability-reliability-metrics-a1e0}
 
 Metrics are numerical measurements collected over time.
@@ -3302,6 +3092,10 @@ Stragglers arise from multiple root causes. Hardware issues include thermal thro
 The observability pillars above enable detection of recurring failure patterns that experience with large-scale ML systems has identified. The following patterns illustrate how metrics, logs, and traces work together in diagnosis.
 
 #### Training Failures {#sec-fault-tolerance-reliability-reliability-training-failures-bc3a}
+
+::: {#fig-training-failure-signatures fig-env="figure" fig-pos="htb" fig-cap="**Training Failure Signatures**. Common patterns of model loss over time that indicate underlying system or algorithmic failures. (A) Loss Spike: transient numerical instability. (B) Divergence: permanent desynchronization or corruption. (C) Hang: deadlock or crashed worker. Identifying these signatures automatically is essential for rapid recovery in autonomous training pipelines." fig-alt="Plot showing three loss curves. One with a sharp spike and recovery, one drifting upward (divergence), and one flat line starting from a point (hang)."}
+![](images/svg/training-failure-signatures.svg){width=100%}
+:::
 
 A loss spike followed by recovery typically indicates a transient data issue or numerical instability. The spike is usually self-correcting but should be investigated to rule out systematic causes.
 

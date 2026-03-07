@@ -5,10 +5,12 @@
 
 try:
     import matplotlib.pyplot as plt
-    _matplotlib_available = True
+    import numpy as np
+    _viz_available = True
 except ImportError:
     plt = None
-    _matplotlib_available = False
+    np = None
+    _viz_available = False
 
 # --- Brand & Book Palette ---
 COLORS = {
@@ -27,16 +29,11 @@ COLORS = {
 }
 
 def set_book_style():
-    """Applies the global matplotlib style configuration.
-
-    Font priority mirrors TikZ's \\usefont{T1}{phv}{m}{n} (Helvetica).
-    The fallback chain covers macOS (Helvetica), Linux TeX installs
-    (Nimbus Sans L, TeX Gyre Heros), and generic Linux (DejaVu Sans).
-    """
-    if not _matplotlib_available:
+    """Applies the global matplotlib style configuration."""
+    if not _viz_available:
         raise ImportError(
-            "matplotlib is required for plot generation. "
-            "Install it with: pip install matplotlib"
+            "matplotlib and numpy are required for plot generation. "
+            "Install them with: pip install matplotlib numpy"
         )
     plt.rcParams.update({
         'font.family': 'sans-serif',
@@ -79,23 +76,82 @@ def set_book_style():
         'figure.autolayout': True
     })
 
-# --- Font Size Convention for Diagram Figures ---
-# All diagram figures (flowcharts, pipelines, etc.) should use:
-#   - Node/box labels:     fontsize=9, fontweight='bold'
-#   - Edge/arrow labels:   fontsize=8
-#   - Step/annotation:     fontsize=8
-#   - Supplementary text:  fontsize=7 (italic gray for minor labels)
-#   - In-plot headings:    fontsize=10-12, fontweight='bold'
-# Data plot text inherits from rcParams (axes: 11, ticks: 9, legend: 9).
-
 # --- Lightweight helpers ---
 
 def setup_plot(figsize=None):
-    """
-    One-line plot setup for QMD blocks.
-    Returns (fig, ax, COLORS, plt) after applying book style.
-    The plt is returned so code blocks don't need separate matplotlib import.
-    """
+    """One-line plot setup for QMD blocks."""
     set_book_style()
     fig, ax = plt.subplots(figsize=figsize)
     return fig, ax, COLORS, plt
+
+def bar_compare(labels, values, title, ylabel, goal_line=None, colors=None):
+    """Creates a standard comparison bar chart with value labels."""
+    fig, ax, COLORS, plt = setup_plot()
+    if colors is None:
+        colors = [COLORS['BlueLine'], COLORS['GreenLine'], COLORS['OrangeLine'], COLORS['VioletLine']]
+    
+    bars = ax.bar(labels, values, color=colors[:len(labels)], alpha=0.8, edgecolor='white', linewidth=1)
+    ax.set_title(title)
+    ax.set_ylabel(ylabel)
+    
+    # Add value labels
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + (max(values)*0.02),
+                f'{height:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+
+    if goal_line:
+        ax.axhline(y=goal_line, color=COLORS['RedLine'], linestyle='--', linewidth=1.5, label='Constraint')
+        ax.legend()
+        
+    return fig
+
+def plot_latency_breakdown(profile, title="Latency Breakdown"):
+    """Plots a stacked bar showing Compute vs Memory vs Overhead."""
+    fig, ax, COLORS, plt = setup_plot(figsize=(6, 5))
+    
+    comp = profile.latency_compute.m_as('ms')
+    mem = profile.latency_memory.m_as('ms')
+    ovh = profile.latency_overhead.m_as('ms')
+    
+    labels = ['Latency']
+    ax.bar(labels, [comp], label='Compute', color=COLORS['BlueLine'], alpha=0.8)
+    ax.bar(labels, [mem], bottom=[comp], label='Memory', color=COLORS['OrangeLine'], alpha=0.8)
+    ax.bar(labels, [ovh], bottom=[comp+mem], label='Overhead', color=COLORS['RedLine'], alpha=0.8)
+    
+    ax.set_title(title)
+    ax.set_ylabel("Time (ms)")
+    ax.legend(loc='upper right')
+    
+    total = comp + mem + ovh
+    ax.text(0, total/2, f"Total: {total:.2f} ms", ha='center', fontweight='bold', bbox=dict(facecolor='white', alpha=0.8))
+    
+    return fig
+
+def plot_roofline(profile, title="System Roofline Analysis"):
+    """Plots the hardware roofline and the current workload point."""
+    fig, ax, COLORS, plt = setup_plot()
+    
+    max_perf = profile.peak_flops_actual.m_as('GFLOPs/s')
+    max_bw = profile.peak_bw_actual.m_as('GB/s')
+    ridge_point = max_perf / max_bw
+    
+    ai = profile.arithmetic_intensity.m_as('flop/byte')
+    achieved_perf = min(ai * max_bw, max_perf)
+    
+    # X axis: Arithmetic Intensity
+    x = np.logspace(np.log10(ridge_point/100), np.log10(ridge_point*100), 100)
+    y = np.minimum(x * max_bw, max_perf)
+    
+    ax.plot(x, y, color=COLORS['primary'], linewidth=2, label='Roofline')
+    ax.scatter([ai], [achieved_perf], color=COLORS['RedLine'], s=100, zorder=5, label=f'Workload (AI={ai:.1f})')
+    
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.set_xlabel('Arithmetic Intensity (FLOP/Byte)')
+    ax.set_ylabel('Performance (GFLOPs/s)')
+    ax.set_title(title)
+    ax.grid(True, which="both", ls="-", alpha=0.2)
+    ax.legend()
+    
+    return fig

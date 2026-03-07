@@ -221,6 +221,27 @@ A useful mental model frames these distributed strategies as *loop transformatio
 
 If we view the training process as a massive loop over data and layers, distributed strategies are simply **Loop Transformations** applied by the cluster-level compiler:
 
+```{mermaid}
+%%| label: fig-loop-transforms
+%%| fig-cap: "**Distributed Strategies as Loop Transformations**. Visualizing how DP, TP, and PP map to standard compiler optimizations applied at cluster scale."
+flowchart LR
+    subgraph Logical[Logical Training Loop]
+        direction TB
+        L1[for epoch in epochs:] --> L2[for batch in data:]
+        L2 --> L3[for layer in layers:]
+        L3 --> L4[Compute(layer, batch)]
+    end
+
+    subgraph Physical[Physical Implementation]
+        direction TB
+        DP[Data Parallelism] -.->|Unroll Batch Loop| GPU_Batch
+        TP[Tensor Parallelism] -.->|Vectorize Layer Ops| GPU_Ops
+        PP[Pipeline Parallelism] -.->|Pipeline Layer Sequence| GPU_Stages
+    end
+
+    Logical ==> Physical
+```
+
 *   **Data Parallelism = Parallel For Loop.** We unroll the outer loop (batch dimension) across devices. Each device runs the same code body on different data indices.
 *   **Tensor Parallelism = Vectorization (SIMD).** We split the inner loops (matrix multiplication) across devices. This is "Cluster-Scale SIMD," where NVLink acts as the vector register file.
 *   **Pipeline Parallelism = Instruction Pipelining.** We split the sequential operations (layers) across devices. Just as a CPU pipeline stages fetch/decode/execute, the cluster stages Layer 1/Layer 2/Layer 3 to keep all ALUs busy.
@@ -250,27 +271,8 @@ Although modern frameworks abstract away much of the complexity through sharded 
 The distributed training process itself involves splitting the dataset into non-overlapping subsets, assigning each subset to a different GPU, and performing forward and backward passes independently on each device. Once gradients are computed on each GPU, they are synchronized and aggregated before updating the model parameters, ensuring that all devices learn in a consistent manner. The coordinated flow of data splitting, computation, and gradient synchronization (@fig-distributed-training) forms the foundation of distributed training, with each GPU processing its batch independently before synchronization brings all gradients together.
 
 ::: {#fig-distributed-training fig-env="figure" fig-pos="htb" fig-cap="**Data Parallel Training Flow**. Distributed training partitions datasets across GPUs, computes gradients concurrently on each device's data subset, then aggregates gradients through AllReduce to update shared model parameters. Each GPU maintains an identical model copy and processes its portion of the batch independently, with synchronization occurring only during gradient aggregation. This approach achieves near-linear speedup when communication overhead remains below 30--40% of training time." fig-alt="Two parallel GPU workflows showing data parallel training. Each GPU processes a data chunk through forward pass, error computation, loss function, backward pass, then gradients merge at Calculate Global Gradients for parameter updates."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
-\tikzset{%
-  mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
-minimum width=20mm,minimum height=9mm,line width=1pt},
-  mycycle/.style={circle, draw=none, fill=red, minimum width=5mm},
-  myline/.style={line width=1.15pt,draw=cyan},
-%
-  Box/.style={align= flush center,
-    inner xsep=2pt,
-    draw=RedLine,
-    line width=0.75pt,
-    fill=RedL!20,
-    text width=22mm,
-    minimum width=22mm, minimum height=8mm
-  },
-%
-Line/.style={line width=1.0pt,black!50}
-}
-
+![](images/svg/_data-parallel-pipeline.svg){width=100%}
+:::
 \begin{scope}[node distance=-1.7,local bounding box = SC1]]
 \node[mycylinder,fill=red!30] (A) {};
 \scoped[on background layer]
@@ -695,6 +697,10 @@ The key trade-offs across synchronization models are summarized here.
 
 :::
 
+::: {#fig-sync-model-timeline fig-env="figure" fig-pos="htb" fig-cap="**Distributed Synchronization Models**. Timeline comparison of three synchronization strategies. (A) Bulk Synchronous Parallel (BSP) forces all workers to wait at a global barrier every step. (B) Stale Synchronous Parallel (SSP) allows workers to proceed up to $s$ steps ahead of the slowest worker. (C) Asynchronous SGD eliminates barriers entirely, allowing maximum throughput but introducing gradient staleness." fig-alt="Timeline diagram with three panels. Top: BSP with global barriers. Middle: SSP with bounded staleness slack. Bottom: Asynchronous with independent workers and overlapping steps."}
+![](images/svg/sync-model-timeline.svg){width=100%}
+:::
+
 The choice of synchronization model directly affects both system throughput and model convergence. Production systems typically use BSP for final training runs to ensure reproducibility, while exploring SSP or async approaches during hyperparameter search where exact reproducibility is less critical.
 
 #### Barrier Semantics and Failure Modes {#sec-distributed-training-systems-systems-barrier-semantics-failure-modes-5c94}
@@ -1015,57 +1021,8 @@ $$ M_{\text{ZeRO3}} = \frac{112 \text{ GB}}{64} \approx \mathbf{1.75 \text{ GB}}
 ZeRO addresses this redundancy through progressive sharding:
 
 ::: {.callout-note title="Figure: ZeRO Memory Partitioning"}
+![](images/svg/zero-memory-partitioning.svg){width=100%}
 
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=1.5]
-  \definecolor{ParamColor}{RGB}{200,220,255}
-  \definecolor{GradColor}{RGB}{255,220,200}
-  \definecolor{OptColor}{RGB}{220,255,200}
-
-  \usetikzlibrary{positioning}
-
-  \tikzset{
-    bar/.style={draw=black!70, thick, minimum width=1.2cm, minimum height=0.5cm, font=\scriptsize, text=black!80, align=center},
-    label/.style={font=\scriptsize, text=black!80},
-    desc/.style={font=\tiny, text=gray, anchor=north west},
-  }
-
-  % DDP (Replicated)
-  \node[label=DDP] (ddp) {};
-  \node[bar, fill=ParamColor, anchor=north] (ddp-p) at (ddp.south) {P};
-  \node[bar, fill=GradColor, anchor=north] (ddp-g) at (ddp-p.south) {G};
-  \node[bar, fill=OptColor, anchor=north, minimum height=2cm] (ddp-os) at (ddp-g.south) {OS};
-  \node[below, font=\tiny] at (ddp-os.south) {Replicated};
-
-  % ZeRO-1
-  \node[label=ZeRO-1, right=of ddp] (zero1) {};
-  \node[bar, fill=ParamColor, anchor=north] (zero1-p) at (zero1.south) {P};
-  \node[bar, fill=GradColor, anchor=north] (zero1-g) at (zero1-p.south) {G};
-  \node[bar, fill=OptColor, anchor=north, minimum height=0.25cm] (zero1-os) at (zero1-g.south) {OS/N};
-  \node[below, font=\tiny] at (zero1-os.south) {Shard OS};
-
-  % ZeRO-2
-  \node[label=ZeRO-2, right=of zero1] (zero2) {};
-  \node[bar, fill=ParamColor, anchor=north] (zero2-p) at (zero2.south) {P};
-  \node[bar, fill=GradColor, anchor=north, minimum height=0.1cm] (zero2-g) at (zero2-p.south) {G/N};
-  \node[bar, fill=OptColor, anchor=north, minimum height=0.25cm] (zero2-os) at (zero2-g.south) {OS/N};
-  \node[below, font=\tiny] at (zero2-os.south) {+Shard G};
-
-  % ZeRO-3
-  \node[label=ZeRO-3, right=of zero2] (zero3) {};
-  \node[bar, fill=ParamColor, anchor=north, minimum height=0.1cm] (zero3-p) at (zero3.south) {};
-  \node[bar, fill=GradColor, anchor=north, minimum height=0.1cm] (zero3-g) at (zero3-p.south) {};
-  \node[bar, fill=OptColor, anchor=north, minimum height=0.25cm] (zero3-os) at (zero3-g.south) {};
-  \node[anchor=west, font=\tiny] at (zero3-os.south west) {All/N};
-  \node[below, font=\tiny] at (zero3-os.south) {+Shard P};
-
-  % Descriptions
-  \node[desc] (desc1) at (4, 3) {P: Parameters};
-  \node[desc, below=3pt of desc1] {G: Gradients};
-  \node[desc, below=3pt of desc1.south] {OS: Optimizer States};
-
-\end{tikzpicture}
-```
 **ZeRO Memory Reduction**. Standard Data Parallelism (DDP) replicates all model states across every GPU. ZeRO progressively partitions these states: ZeRO-1 shards optimizer states, ZeRO-2 adds gradient sharding, and ZeRO-3 shards the parameters themselves. ZeRO-3 achieves linear memory scaling, enabling models with 100B+ parameters to fit on commodity hardware.
 
 :::
@@ -1379,54 +1336,7 @@ The scaling law regime exhibits three distinct behaviors:
 @fig-critical-batch-size illustrates this relationship between batch size and training efficiency.
 
 ::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical Batch Size and Scaling Regimes**. Below the critical batch size $B*$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B*$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency versus batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
-
-```{.tikz}
-\begin{tikzpicture}[
-  font=\small\usefont{T1}{phv}{m}{n},
-  node distance=1cm and 1cm,
-  BlueLine/.style={blue, ultra thick},
-  RedLine/.style={red, dashed, thick},
-  Annotation/.style={font=\footnotesize},
-  every node/.style={anchor=center},
-  ]
-
-  \begin{axis}[
-    width=12cm,
-    height=7cm,
-    xlabel={Batch Size $B$ (log scale)},
-    ylabel={Sample Efficiency (samples to target loss)},
-    xmode=log,
-    ymode=log,
-    xmin=100, xmax=1000000,
-    ymin=0.1, ymax=2,
-    ytick={0.2, 0.5, 1.0, 2.0},
-    yticklabels={0.2$\times$, 0.5$\times$, 1.0$\times$, 2.0$\times$},
-    grid=major,
-    legend pos=north east,
-    legend style={font=\footnotesize},
-  ]
-
-  % Linear scaling regime (flat)
-  \addplot[BlueLine, domain=100:8000] {1.0};
-
-  % Transition region
-  \addplot[BlueLine, domain=8000:16000, samples=50] {1.0 * (1 + 0.5*((x-8000)/8000)^2)};
-
-  % Diminishing returns regime
-  \addplot[BlueLine, domain=16000:1000000, samples=50] {1.5 * (x/16000)^0.3};
-
-  % Critical batch size line
-  \addplot[RedLine] coordinates {(12000, 0.1) (12000, 2)};
-
-  % Annotations
-  \node[Annotation, anchor=south] (linear) at (axis cs:1000, 1.1) {Linear Scaling};
-  \node[Annotation, anchor=south] (diminishing) at (axis cs:100000, 1.8) {Diminishing Returns};
-  \node[Annotation, anchor=west, RedLine] (critical) at (axis cs:14000, 0.15) {$B*$};
-
-  \end{axis}
-\end{tikzpicture}
-```
-
+![](images/svg/_critical-batch-size.svg){width=100%}
 :::
 
 The critical batch size has important implications for distributed training system design:
@@ -1579,58 +1489,7 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 The fundamental trade-off in distributed training is between communication efficiency and convergence quality. @fig-comm-convergence-tradeoff visualizes this trade-off space.
 
 ::: {#fig-comm-convergence-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Communication-Convergence Trade-off Space**. Each point represents a different distributed training configuration. The Pareto frontier (dashed line) shows optimal configurations where improving one metric requires sacrificing the other. BSP sits at high convergence quality but lower throughput; ASP provides maximum throughput at convergence cost. Gradient compression and SSP occupy intermediate positions." fig-alt="Scatter plot with Communication Efficiency on x-axis and Convergence Quality on y-axis. Points for BSP, SSP, ASP, and gradient compression methods form a Pareto frontier from upper-left to lower-right."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \tikzset{
-    point/.style={only marks, mark=*, mark size=4pt},
-    label/.style={anchor=west, font=\footnotesize},
-    grid/.style={grid=major},
-    line/.style={solid, line width=1.0pt},
-    pareto/.style={black, dashed, thick},
-    labelText/.style={font=\footnotesize},
-    nodeStyle/.style={anchor=west, font=\footnotesize},
-    pointStyle/.style={only marks, mark=*, mark size=4pt},
-  }
-
-  % Define colors consistently
-  \colorlet{BlueL}{blue}
-  \colorlet{OrangeL}{orange}
-  \colorlet{RedL}{red}
-  \colorlet{GreenL}{green!60!black}
-  \colorlet{PurpleL}{purple}
-
-  \begin{axis}[
-    width=11cm,
-    height=8cm,
-    xlabel={Communication Efficiency (throughput)},
-    ylabel={Convergence Quality (final loss)},
-    xmin=0, xmax=100,
-    ymin=0, ymax=100,
-    xtick={0, 25, 50, 75, 100},
-    xticklabels={Low, , Medium, , High},
-    ytick={0, 25, 50, 75, 100},
-    yticklabels={Poor, , Medium, , Optimal},
-    grid=major,
-  ]
-
-  % Pareto frontier
-  \addplot[pareto, domain=15:95, samples=50] {100 - 0.8*(x-15) - 0.005*(x-15)^2};
-
-  % Methods as points
-  \node[pointStyle, BlueL, label=right:BSP] at (axis cs:20, 98) {};
-  \node[pointStyle, OrangeL, label=right:SSP ($s$=4)] at (axis cs:50, 85) {};
-  \node[pointStyle, RedL, label=left:ASP] at (axis cs:90, 65) {};
-  \node[pointStyle, GreenL, label=above:Gradient Compression] at (axis cs:60, 92) {};
-  \node[pointStyle, PurpleL, label=below:Local SGD] at (axis cs:75, 78) {};
-
-  % Annotation
-  \node[labelText, anchor=north east] at (axis cs:95, 20) {Pareto Frontier};
-
-  \end{axis}
-\end{tikzpicture}
-```
-
+![](images/svg/_comm-convergence-tradeoff.svg){width=100%}
 :::
 
 Several techniques occupy different positions on this trade-off curve:
@@ -1647,7 +1506,13 @@ The choice among these methods depends on the specific bottleneck. When network 
 
 When a model is so massive that even a single layer's weights exceed the memory capacity of a GPU, data parallelism entirely collapses. The memory optimization techniques examined in the previous section extend data parallelism's reach, but eventually, we must partition the model itself.
 
-Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A `{python} FrontierTrainingContext.frontier_params_b_str`B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations. For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierTrainingContext.frontier_params_b_str`B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
+Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A `{python} FrontierTrainingContext.frontier_params_b_str`B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations.
+
+::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism Data Flow**. High-level comparison of the two primary model partitioning strategies. (Top) Pipeline Parallelism partitions layers vertically across GPUs, passing activations sequentially. (Bottom) Tensor Parallelism partitions individual operations horizontally within layers, requiring frequent synchronization. These strategies are often combined in hybrid 3D parallelism to handle the largest frontier models." fig-alt="Two-panel comparison. Top: Vertical partitions labeled Stage 1 through N. Bottom: Horizontal partitioning of an operation into two GPU workers."}
+![](images/svg/_model-parallel-flow.svg){width=100%}
+:::
+
+For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierTrainingContext.frontier_params_b_str`B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
 
 ```{python}
 #| label: a100-capacity-context
@@ -1832,75 +1697,7 @@ Pipeline parallelism extends layer-wise partitioning by introducing microbatchin
 As @fig-pipline-parallelism shows, each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. The forward pass involves devices passing activations to the next stage, such as $F_{0,0}$ to $F_{1,0}$. The backward pass transfers gradients back through the pipeline, such as $B_{3,3}$ to $B_{2,3}$. This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
 ::: {#fig-pipline-parallelism fig-cap="**Pipeline Parallelism Schedule**. A 4-stage pipeline processing 4 microbatches, showing forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) across time. Rows represent pipeline stages (GPUs), columns represent time steps. The staggered execution keeps all devices active: while stage 0 computes $F_{0,1}$, stage 1 processes $F_{1,0}$ from the previous microbatch. After all forward passes complete, backward passes propagate in reverse order. The \"Update\" column shows synchronized parameter updates after gradient accumulation across all microbatches." fig-alt="Pipeline schedule grid showing 4 stages processing 4 microbatches. Forward passes F stagger diagonally across time, backward passes B follow in reverse order, ending with synchronized Update column."}
-
-```{.tikz}
-\begin{tikzpicture}[
-    every node/.style={font=\sffamily, draw, minimum width=1cm, minimum height=0.7cm, align=center, outer sep=0},
-    fill0/.style={fill=red!20}, % Complementary to lightgray
-    fill1/.style={fill=blue!20}, % Complementary to orange
-    fill2/.style={fill=orange!20}, % Complementary to blue
-    fill3/.style={fill=yellow!20}, % Complementary to purple
-    back3/.style={fill=yellow!20} % Same as fill3
-]
-
-% Row 0
-\node[fill0] (F0_0) {$F_{0,0}$};
-\node[fill0, right=0cm of F0_0] (F0_1) {$F_{0,1}$};
-\node[fill0, right=0cm of F0_1] (F0_2) {$F_{0,2}$};
-\node[fill0, right=0cm of F0_2] (F0_3) {$F_{0,3}$};
-
-% Row 1
-\node[fill1, above right=0cm and 0cm of F0_0] (F1_0) {$F_{1,0}$};
-\node[fill1, right=0cm of F1_0] (F1_1) {$F_{1,1}$};
-\node[fill1, right=0cm of F1_1] (F1_2) {$F_{1,2}$};
-\node[fill1, right=0cm of F1_2] (F1_3) {$F_{1,3}$};
-
-% Row 2 (stacked above F1)
-\node[fill2, above right=0cm and 0cm of F1_0] (F2_0) {$F_{2,0}$};
-\node[fill2, right=0cm of F2_0] (F2_1) {$F_{2,1}$};
-\node[fill2, right=0cm of F2_1] (F2_2) {$F_{2,2}$};
-\node[fill2, right=0cm of F2_2] (F2_3) {$F_{2,3}$};
-
-% Row 3 (stacked above F2)
-\node[fill3, above right=0cm and 0cm of F2_0] (F3_0) {$F_{3,0}$};
-\node[fill3, right=0cm of F3_0] (F3_1) {$F_{3,1}$};
-\node[fill3, right=0cm of F3_1] (F3_2) {$F_{3,2}$};
-\node[fill3, right=0cm of F3_2] (F3_3) {$F_{3,3}$};
-
-% Row 3 (backward pass)
-\node[back3, right=0cm of F3_3] (B3_3) {$B_{3,3}$};
-\node[back3, right=0cm of B3_3] (B3_2) {$B_{3,2}$};
-\node[back3, right=0cm of B3_2] (B3_1) {$B_{3,1}$};
-\node[back3, right=0cm of B3_1] (B3_0) {$B_{3,0}$};
-
-% Row 2 (backward pass)
-\node[fill2, below=0cm and 0cm of B3_2] (B2_3) {$B_{2,3}$};
-\node[fill2, right=0cm of B2_3] (B2_2) {$B_{2,2}$};
-\node[fill2, right=0cm of B2_2] (B2_1) {$B_{2,1}$};
-\node[fill2, right=0cm of B2_1] (B2_0) {$B_{2,0}$};
-
-% Row 1 (backward pass)
-\node[fill1, below=0cm of B2_2] (B1_3) {$B_{1,3}$};
-\node[fill1, right=0cm of B1_3] (B1_2) {$B_{1,2}$};
-\node[fill1, right=0cm of B1_2] (B1_1) {$B_{1,1}$};
-\node[fill1, right=0cm of B1_1] (B1_0) {$B_{1,0}$};
-
-% Row 0 (backward pass)
-\node[fill0, below=0cm of B1_2] (B0_3) {$B_{0,3}$};
-\node[fill0, right=0cm of B0_3] (B0_2) {$B_{0,2}$};
-\node[fill0, right=0cm of B0_2] (B0_1) {$B_{0,1}$};
-\node[fill0, right=0cm of B0_1] (B0_0) {$B_{0,0}$};
-
-% Update nodes
-\node[fill0, right=0cm of B0_0] (U0_0) {Update};
-\node[fill1, above=0cm of U0_0] (U0_1) {Update};
-\node[fill2, above=0cm of U0_1] (U0_2) {Update};
-\node[fill3, above=0cm of U0_2] (U0_3) {Update};
-
-%\node[draw=none, minimum width=4cm, minimum height=1cm, align=center, right=1cm of F0_3] (Bubble) {Bubble};
-\end{tikzpicture}
-```
-
+![](images/svg/_pipeline-parallelism.svg){width=100%}
 :::
 
 ::: {.callout-definition title="Pipeline Parallelism"}
@@ -2125,6 +1922,10 @@ In a distributed setting, experts are partitioned across workers. If we have 8 G
 2.  **All-to-All Dispatch**: Tokens are routed across the network to the device hosting their selected expert.
 3.  **Computation**: Experts process their assigned tokens.
 4.  **All-to-All Combine**: Processed tokens are routed back to their original device to resume the sequence.
+
+::: {#fig-moe-all-to-all-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture of Experts (MoE) All-to-All Routing**. Expert parallelism requires a unique 'All-to-All' communication pattern. Tokens from a local batch are routed by a gating network to experts sharded across the cluster. This involves a global shuffle where every GPU sends tokens to and receives tokens from potentially every other GPU, stressing the cluster's bisection bandwidth." fig-alt="Diagram showing tokens being routed from a gating network to four different experts sharded across multiple GPUs, then returning to the original sequence order."}
+![](images/svg/moe-all-to-all-routing.svg){width=100%}
+:::
 
 The primary advantage is decoupling model size from compute budget. A trillion-parameter MoE model might use only 10B parameters per token, enabling training on feasible hardware budgets. The constraint is the **All-to-All** communication, which is bandwidth-intensive and sensitive to load imbalance.
 
@@ -2558,76 +2359,7 @@ To systematically weigh the architectural and hardware trade-offs for a new 50-b
 @fig-parallelism-flowchart provides a decision tree for selecting parallelism strategies based on model size, dataset size, and scaling constraints. While intentionally simplified, real-world scenarios often involve additional complexities such as hardware heterogeneity, communication bandwidth, and workload imbalance that may influence the choice of parallelism techniques. Practitioners should view this as a foundational tool for understanding trade-offs and decision points, then adapt it to the specific requirements and constraints of their systems.
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model and dataset fit on single device. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-\tikzset{Line/.style={line width=1.0pt,black!50,text=black
-},
-  Box/.style={inner xsep=2pt,
-    node distance=11mm,
-    draw=GreenLine, line width=0.75pt,
-    fill=GreenL,
-    text width=27mm,align=flush center,
-    minimum width=27mm, minimum height=9mm
-  },
-    Box1/.style={Box,
-    draw=RedLine, fill=RedL,
-    text width=31mm,
-    minimum width=32mm,
-    minimum height=10mm
-  },
-  Text/.style={inner xsep=2pt,
-    draw=none, line width=0.75pt,
-    fill=TextColor,
-    font=\footnotesize\usefont{T1}{phv}{m}{n},
-    align=flush center,
-    minimum width=7mm,
-    minimum height=5mm
-  },
- decision/.style = {align=flush center,text width=42mm,diamond, aspect=2.2, node distance=6mm,
-                             inner xsep=-3pt,  inner ysep=-2.95ex,fill=VioletL2, draw=VioletLine},
-}
-\node[Box](B1){Hybrid\\ Parallelism};
-\node[Box,node distance=16mm,right=of B1](B2){Model\\Parallelism};
-\node[Box,node distance=16 mm,right=of B2](B3){Data\\ Parallelism};
-\node[Box,right=of B3,fill=RedL, draw=RedLine](B4){Single Device Optimization};
-%
-\scoped[on background layer]
-\node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,
-yshift=-1mm,
-fill=BackColor,fit=(B1)(B3),line width=0.75pt](BB){};
-\node[decision,node distance=18mm,
-above=of B4](G1B4){Is\\ the dataset\\ very large?};
-
-\node[Box1,node distance=15mm,
-above=of $(B2.north)!0.5!(B3.north)$](G1B3){Is scaling the model\\ or data more critical?};
-\node[decision,above=of G1B3](G2B3){Are\\ both constraints\\ significant?};
-\node[decision,above=of G2B3](G3B3){Does\\ the dataset fit in a\\  single device?};
-\node[decision,above=of G3B3](G4B3){Does\\ the model fit in a\\ single device?};
-\node[Box,node distance=5mm,above=of G4B3,fill=BlueL, draw=BlueLine](G5B3){Start};
-%
-\node[Box,below=1 of B2,fill=BlueL, draw=BlueLine](DB2){End};
-%
-\draw[Line,-latex](G5B3)--(G4B3);
-\draw[Line,-latex](G4B3)--node[right,pos=0.35]{No}(G3B3);
-\draw[Line,-latex](G4B3)-|node[above,pos=0.05]{Yes}(G1B4);
-\draw[Line,-latex](G3B3)--node[right,pos=0.35]{No}(G2B3);
-\draw[Line,-latex](G2B3)--node[right,pos=0.35]{No}(G1B3);
-\draw[Line,-latex](G1B4)--node[right,pos=0.15]{No}(B4);
-%
-\draw[Line,-latex](G3B3.west)--node[above,pos=0.25]{Yes}++(180:2.3)|-(B2.west);
-\draw[Line,-latex](G2B3)-|node[above,pos=0.05]{Yes}(B1);
-\draw[Line,-latex](G1B3.south)--node[left,align=center,pos=0.45]{Scaling Model}++(270:8mm)-|(B2);
-\draw[Line,-latex](G1B3.south)--++(270:8mm)-|(B3);
-\draw[Line,-latex](G1B4)-|node[above,pos=0.22,text=black]{Yes}(B3.40);
-%
-\draw[Line,-latex](B1)|-(DB2);
-\draw[Line,-latex](B3)|-(DB2);
-\draw[Line,-latex](B2)--(DB2);
-\node[above=2pt of  BB.204,inner sep=0pt,anchor=south,fill=BackColor]{Parallelism Opportunities};
-\end{tikzpicture}
-```
-
+![](images/svg/_parallelism-flowchart.svg){width=100%}
 :::
 
 ## From Principles to Systems {#sec-distributed-training-systems-systems-framework-integration-cf71}
@@ -2775,64 +2507,7 @@ We explored the **3D Parallelism Cube** (@fig-3d-parallelism-cube-summary), the 
 Ultimately, the choice of parallelism is a **loop transformation** applied by the cluster-level compiler. By matching logical communication patterns to physical hardware hierarchies, we move from the "linear scaling regime" of small clusters to the "communication-bound" reality of the exascale supercomputer. @fig-3d-parallelism-sliced visualizes how a single Transformer layer is partitioned across the fleet.
 
 ::: {#fig-3d-parallelism-sliced fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Hybrid 3D Parallel Step**. Visualization of how a single Transformer layer is partitioned across the fleet. **Pipeline Parallelism ($p$)** slices the model vertically by depth (assigning layers to different stages). **Tensor Parallelism ($t$)** slices the weight matrices horizontally within each layer (assigning shards to different GPUs). **Data Parallelism ($d$)** replicates this sliced block $d$ times to process independent data samples. A single training step coordinates $d \times p \times t$ GPUs, where $t$ synchronizes at kilohertz frequency, $p$ at megahertz, and $d$ at hertz." fig-alt="Volumetric diagram showing a model block sliced by three orthogonal planes: depth (green), width (orange), and replicas (blue). Labels show p, t, and d dimensions."}
-
-```{.tikz}
-\begin{tikzpicture}[scale=1.5, font=\small\usefont{T1}{phv}{m}{n}, line join=round]
-  % Define colors
-  \definecolor{BlueL}{RGB}{0,99,149}
-  \definecolor{OrangeL}{RGB}{204,85,0}
-  \definecolor{GreenL}{RGB}{0,143,69}
-
-  % Set node styles
-  \tikzset{
-    face/.style={fill=white, opacity=0.8, draw=black!60, thick},
-    label/.style={font=\bfseries, align=center},
-    gpu/.style={face, minimum width=1cm, minimum height=1cm, fill=#1!10},
-    brace/.style={decorate, decoration={brace, amplitude=5pt}, thick},
-    brace_mirror/.style={decorate, decoration={brace, mirror, amplitude=10pt}, thick}
-  }
-
-  % Explicit node placement: d=replica, p=pipeline stage, t=tensor shard
-  % Replica 0, stage 0: anchor at (0,0)
-  \node[gpu=BlueL]   (data000) at (0, 0)                          {\tiny GPU};
-  \node[gpu=OrangeL] (tensor000) [right=1.2cm of data000]         {};
-  \node[gpu=GreenL]  (pipe000)  [above=1.2cm of data000]          {};
-
-  % Replica 0, stage 1: below stage 0
-  \node[gpu=BlueL]   (data010) [below=1.2cm of data000]           {\tiny GPU};
-  \node[gpu=OrangeL] (tensor010) [right=1.2cm of data010]         {};
-  \node[gpu=GreenL]  (pipe010)  [above=1.2cm of data010]          {};
-
-  % Replica 1, stage 0: to the right of replica 0 (offset by 2.5cm past tensor column)
-  \node[gpu=BlueL]   (data100) [right=2.5cm of tensor000]         {\tiny GPU};
-  \node[gpu=OrangeL] (tensor100) [right=1.2cm of data100]         {};
-  \node[gpu=GreenL]  (pipe100)  [above=1.2cm of data100]          {};
-
-  % Replica 1, stage 1: below replica 1 stage 0
-  \node[gpu=BlueL]   (data110) [below=1.2cm of data100]           {\tiny GPU};
-  \node[gpu=OrangeL] (tensor110) [right=1.2cm of data110]         {};
-  \node[gpu=GreenL]  (pipe110)  [above=1.2cm of data110]          {};
-
-  % Brackets for Replica 0
-  \draw[brace, GreenL]
-    ([yshift=-0.1cm]data000.south west) --
-    ([yshift=0.1cm]data010.north west)
-    node[midway, left=8pt, label] {$p$ stages};
-
-  \draw[brace, OrangeL]
-    ([xshift=-0.1cm]data000.south west) --
-    ([xshift=0.1cm]tensor000.south)
-    node[midway, below=8pt, label] {$t$ shards};
-
-  % Bracket for Data (across both replicas)
-  \draw[brace_mirror, BlueL]
-    ([xshift=-0.1cm]data000.south west) --
-    ([xshift=0.1cm]tensor100.south east)
-    node[midway, below=12pt, label] {$d$ replicas};
-
-\end{tikzpicture}
-```
-
+![](images/svg/3d-parallelism.svg){width=100%}
 :::
 
 ::: {.callout-takeaways title="Parallelism Is a Loop Transformation"}

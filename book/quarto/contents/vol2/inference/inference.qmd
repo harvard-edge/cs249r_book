@@ -64,6 +64,7 @@ Optimizations that shave milliseconds from inference latency or percentage point
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core.constants import *
 from mlsysim.fmt import fmt, sci, check
+from mlsysim.core.constants import LOGIC_WALL_REASONING_STEPS_EXAMPLE
 
 ```
 
@@ -1079,6 +1080,10 @@ Analysis
 
 2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct`% utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms).
 
+::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**. Relationship between system utilization and queuing delay. As utilization approaches 100%, the queuing delay increases exponentially according to Kingman's formula. Production systems typically target 70--80% utilization to maintain a 'safe' region where traffic spikes do not cause unbounded latency growth." fig-alt="Plot of Latency vs Utilization. The curve is relatively flat until 70 percent utilization, then rises sharply (hockey stick shape) toward infinity at 100 percent."}
+![](images/svg/queuing-hockey-stick.svg){width=100%}
+:::
+
 3. **Batch size 32 minimizes total latency**: Despite longer service time (`{python} GPT3ServingResults.b32_service_ms` ms vs `{python} GPT3ServingResults.b8_service_ms` ms), the dramatic reduction in queue wait time (`{python} GPT3ServingResults.b32_wait_ms` ms vs `{python} GPT3ServingResults.b8_wait_ms` ms) yields lower total latency.
 
 4. **Diminishing returns beyond B=32**: Further batch size increases would reduce utilization but memory constraints prevent exploration.
@@ -1309,6 +1314,53 @@ The 3$\times$ throughput improvement from continuous batching comes from elimina
 
 :::
 
+## The Logic Wall: Test-Time Compute Scaling {#sec-inference-logic-wall}
+
+As models transition from "Fast Thinking" (instant pattern matching) to "Slow Thinking" (deliberative reasoning), the bottleneck shifts from **HBM Bandwidth** to **Test-Time Compute**. This is the **Logic Wall**: the realization that for complex problems, the fleet must scale compute *per request* proportional to the difficulty of the task, often through search or "Chain-of-Thought" (CoT) unrolling.
+
+```{python}
+#| label: logic-scaling-calc
+#| echo: false
+from mlsysim.fmt import check
+
+class LogicScaling:
+    """The latency tax of test-time reasoning."""
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    t_std_ms = 100 # standard 1-token decode
+    reasoning_steps = LOGIC_WALL_REASONING_STEPS_EXAMPLE # tokens of 'thought' before the answer
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    t_reasoning_s = (t_std_ms * reasoning_steps) / 1000
+    latency_expansion = reasoning_steps
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(latency_expansion == 128, f"Exp {latency_expansion} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    steps_str = f"{reasoning_steps}"
+    time_s_str = f"{t_reasoning_s:.1f}"
+
+    @classmethod
+    def plot(cls):
+        """Visualizes the Logic Wall latency expansion."""
+        from mlsysim import viz
+        return viz.bar_compare(
+            labels=["Fast (Pattern)", "Slow (Reasoning)"],
+            values=[0.1, cls.t_reasoning_s], # 100ms vs multi-second
+            title="Inference Scaling: Reasoning Depth",
+            ylabel="Latency (Seconds)"
+        )
+```
+
+::: {.callout-notebook title="Napkin Math: Scaling Reasoning Depth"}
+
+**Problem**: Calculate the latency impact of a model that uses `{python} LogicScaling.steps_str` "Thinking Tokens" to solve a complex math proof versus a standard answer.
+
+1. **Standard Response**: 1 token answer = 100 ms.
+2. **Reasoning Response**: `{python} LogicScaling.steps_str` tokens of internal search/CoT before the answer.
+3. **The Latency**: `{python} LogicScaling.steps_str` $\times$ 100 ms = **`{python} LogicScaling.time_s_str` seconds**.
+
+**The Systems Insight**: Test-time scaling transforms the serving architecture from a **Throughput Factory** to a **Search Engine**. While standard serving optimizes for tokens per second, reasoning-heavy models are constrained by **Steps per Second**. This creates a new "Reasoning SLO": users will wait 12 seconds for a correct proof, but not for a simple greeting. In the Machine Learning Fleet, we are moving toward **Dynamic Compute Allocation**, where the scheduler grants more "Thinking Time" to harder prompts.
+
+:::
+
 ### Quantitative Analysis: Traditional vs Continuous Batching {#sec-inference-scale-quantitative-analysis-traditional-vs-continuous-batching-ca70}
 
 The performance gap between traditional and continuous batching becomes quantifiable through careful analysis of wasted compute cycles. The mathematics of batching waste reveals exactly how much throughput is lost and under what conditions continuous batching delivers the greatest improvement.
@@ -1475,115 +1527,8 @@ Average latency comparison
 The result is a **`{python} BatchingWorkedExample.latency_red_str`% reduction in average latency**, exactly matching the waste ratio.
 
 ::: {.callout-note title="Traditional vs. Continuous Batching"}
+![](images/svg/continuous-batching.svg){width=100%}
 
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.65]
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-  \definecolor{OrangeLine}{HTML}{E67817}
-  \definecolor{OrangeL}{HTML}{FCE4CC}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{VioletLine}{HTML}{7E317B}
-  \definecolor{VioletL}{HTML}{E6D4E5}
-  \definecolor{BrownLine}{HTML}{8B4513}
-  \definecolor{BrownL}{HTML}{F5DEB3}
-
-  \tikzset{
-    Box/.style={draw=black!70, line width=0.75pt, anchor=south west, minimum height=0.5cm, inner sep=0pt}
-  }
-
-  % Traditional Batching (top)
-  \node[anchor=west, font=\bfseries] at (0, 6.5) {Traditional Batching};
-
-  % Time axis
-  \draw[->, thick] (0, 0.5) -- (12, 0.5);
-  \node[anchor=west] at (12, 0.5) {Time};
-  \foreach \x/\label in {0/0, 2.5/50, 5/100, 7.5/150, 10/200} {
-    \draw (\x, 0.4) -- (\x, 0.6);
-    \node[below, font=\scriptsize] at (\x, 0.4) {\label};
-  }
-
-  % R1 row
-  \node[Box, fill=GreenL, minimum width=2.5cm] at (0, 5.5) {};
-  \node[Box, fill=black!10, minimum width=7.5cm] at (2.5, 5.5) {};
-  \node[anchor=west, font=\scriptsize] at (0.1, 5.75) {R1: 50 tokens};
-  \node[font=\scriptsize, text=black!60] at (6.25, 5.75) {Idle (waiting)};
-
-  % R2 row
-  \node[Box, fill=BlueL, minimum width=10cm] at (0, 4.5) {};
-  \node[anchor=west, font=\scriptsize, text=black] at (0.1, 4.75) {R2: 200 tokens};
-
-  % R3 row
-  \node[Box, fill=OrangeL, minimum width=5cm] at (0, 3.5) {};
-  \node[Box, fill=black!10, minimum width=5cm] at (5, 3.5) {};
-  \node[anchor=west, font=\scriptsize] at (0.1, 3.75) {R3: 100 tokens};
-  \node[font=\scriptsize, text=black!60] at (7.5, 3.75) {Idle};
-
-  % R4 row
-  \node[Box, fill=VioletL, minimum width=7.5cm] at (0, 2.5) {};
-  \node[Box, fill=black!10, minimum width=2.5cm] at (7.5, 2.5) {};
-  \node[anchor=west, font=\scriptsize, text=black] at (0.1, 2.75) {R4: 150 tokens};
-  \node[font=\scriptsize, text=black!60] at (8.75, 2.75) {Idle};
-
-  % Waste annotation
-  \draw[<->, RedLine, thick] (10.3, 2.5) -- (10.3, 6);
-  \node[anchor=west, font=\scriptsize, text=RedLine] at (10.5, 4.25) {37.5\% waste};
-
-  % Continuous Batching (bottom, shifted down)
-  \node[anchor=west, font=\bfseries] at (0, -0.5) {Continuous Batching};
-
-  % Time axis for continuous
-  \draw[->, thick] (0, -6.5) -- (12, -6.5);
-  \node[anchor=west] at (12, -6.5) {Time};
-  \foreach \x/\label in {0/0, 2.5/50, 5/100, 7.5/150, 10/200} {
-    \draw (\x, -6.6) -- (\x, -6.4);
-    \node[below, font=\scriptsize] at (\x, -6.6) {\label};
-  }
-
-  % R1 row (completes early, freed)
-  \node[Box, fill=GreenL, minimum width=2.5cm] at (0, -1.5) {};
-  \draw[thick, GreenLine] (2.5, -1.25) circle (0.15);
-  \node[font=\tiny, GreenLine] at (2.5, -1.25) {\checkmark};
-  \node[anchor=west, font=\scriptsize] at (0.1, -1.25) {R1};
-
-  % R5 joins in R1's slot
-  \node[Box, fill=RedL, minimum width=4.5cm] at (2.5, -1.5) {};
-  \node[anchor=west, font=\scriptsize] at (2.6, -1.25) {R5 (new)};
-
-  % R2 row (longest, no change)
-  \node[Box, fill=BlueL, minimum width=10cm] at (0, -2.5) {};
-  \node[anchor=west, font=\scriptsize, text=black] at (0.1, -2.25) {R2: 200 tokens};
-
-  % R3 row (completes at 100)
-  \node[Box, fill=OrangeL, minimum width=5cm] at (0, -3.5) {};
-  \draw[thick, GreenLine] (5, -3.25) circle (0.15);
-  \node[font=\tiny, GreenLine] at (5, -3.25) {\checkmark};
-  \node[anchor=west, font=\scriptsize] at (0.1, -3.25) {R3};
-
-  % R6 joins in R3's slot
-  \node[Box, fill=RedL, minimum width=4cm] at (5, -3.5) {};
-  \node[anchor=west, font=\scriptsize] at (5.1, -3.25) {R6 (new)};
-
-  % R4 row (completes at 150)
-  \node[Box, fill=VioletL, minimum width=7.5cm] at (0, -4.5) {};
-  \draw[thick, GreenLine] (7.5, -4.25) circle (0.15);
-  \node[font=\tiny, GreenLine] at (7.5, -4.25) {\checkmark};
-  \node[anchor=west, font=\scriptsize, text=black] at (0.1, -4.25) {R4};
-
-  % R7 joins in R4's slot
-  \node[Box, fill=RedL, minimum width=2.5cm] at (7.5, -4.5) {};
-  \node[anchor=west, font=\scriptsize] at (7.6, -4.25) {R7};
-
-  % Benefit annotation
-  \draw[<->, GreenLine, thick] (10.3, -4.5) -- (10.3, -1);
-  \node[anchor=west, font=\scriptsize, text=GreenLine] at (10.5, -2.75) {0\% waste};
-  \node[anchor=west, font=\scriptsize, text=GreenLine] at (10.5, -3.25) {+3 requests};
-
-\end{tikzpicture}
-```
 **Traditional vs Continuous Batching**. Top: Traditional batching wastes 37.5% of GPU cycles as completed requests (R1, R3, R4) wait idle for the longest request (R2). Bottom: Continuous batching immediately frees slots upon completion, allowing new requests (R5, R6, R7) to join. This eliminates waste and increases effective throughput.
 
 :::
@@ -1722,6 +1667,10 @@ After implementing these changes, P99 dropped to 185 ms. The Infrastructure Laye
 :::
 
 ### Feature-Parallel Batching for Recommendation Systems {#sec-inference-scale-featureparallel-batching-recommendation-systems-2a3f}
+
+::: {#fig-feature-parallel-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Feature-Parallel Batching Pipeline**. Requests are batched by feature type (Users, Items, Context) and dispatched to specialized embedding servers in parallel. The retrieved embeddings are then concatenated and processed by the dense ranking head. This architecture enables scaling to trillions of parameters by decoupling embedding storage from dense compute." fig-alt="Flow diagram showing 3 requests entering a batching layer. Batch is split into User, Item, and Context parallel paths. Each path hits a set of sharded embedding servers. Outputs converge into a dense MLP ranking head."}
+![](images/svg/feature-parallel-pipeline.svg){width=100%}
+:::
 
 Recommendation systems have distinct batching requirements from vision or language models. The computation pattern involves:
 
@@ -1908,7 +1857,31 @@ Verify your understanding of different batching mechanics:
 
 :::
 
-Before selecting a batching strategy, it is essential to understand where latency accumulates across the full request lifecycle. @fig-inference-lifecycle maps each stage from client to response, revealing the "serving tax" that serialization, routing, and coordination impose outside of GPU compute.
+Before selecting a batching strategy, it is essential to understand where latency accumulates across the full request lifecycle. @fig-inference-request-flow maps each stage from client to response, revealing the "serving tax" that serialization, routing, and coordination impose outside of GPU compute.
+
+```{mermaid}
+%%| label: fig-inference-request-flow
+%%| fig-cap: "**Inference Request Lifecycle**. A sequence diagram showing how a user request traverses the serving stack. The 'Serving Tax' is the time spent in the Router, Queue, and Scheduler before the GPU begins mathematical execution."
+sequenceDiagram
+    participant User
+    participant Router
+    participant KV_Cache as KV Cache Manager
+    participant Scheduler as Iteration Scheduler
+    participant GPU
+    
+    User->>Router: POST /v1/chat/completions
+    Router->>KV_Cache: Check capacity / Reserve slots
+    KV_Cache-->>Router: Slot handle
+    Router->>Scheduler: Add to Wait Queue
+    
+    loop Every Iteration
+        Scheduler->>GPU: Execute Batch (Prefill/Decode)
+        GPU-->>Scheduler: Logits / Next Tokens
+        Scheduler->>KV_Cache: Update block status
+    end
+    
+    Scheduler->>User: Stream Result
+```
 
 ::: {#fig-inference-lifecycle fig-env="figure" fig-pos="htb" fig-cap="**End-to-End Inference Pipeline**. A high-level view of the request lifecycle: Client -> Load Balancer -> Request Queue -> Batch Scheduler -> Model Execution -> Response. This visualization highlights the critical \"Serving Tax\" components (serialization, routing, coordination) that consume latency budget outside of the actual GPU compute time." fig-alt="Flowchart with 5 stages: Client, Load Balancer, Request Queue, Dynamic Batcher, Model Execution. Arrows show request flow with dashed return path. Red annotations below highlight latency sources at each stage."}
 
@@ -2116,65 +2089,7 @@ PagedAttention [@kwon2023vllm], introduced in vLLM, applies virtual memory conce
 @fig-paged-attention illustrates the key concepts including page tables that map logical sequence positions to physical memory pages, block size that defines the number of tokens per page (typically 16 tokens), and physical blocks that provide fixed-size memory allocations assignable to any sequence.
 
 ::: {#fig-paged-attention fig-env="figure" fig-pos="htb" fig-cap="**PagedAttention Memory Mapping**. Decoupling the logical view of a sequence's KV cache (contiguous pages) from its physical storage (non-contiguous 16-token blocks). A block table maps logical pages to physical blocks, allowing the system to fill fragmentation gaps with small blocks from any sequence." fig-alt="Three-part diagram: left shows 4 contiguous logical pages (P0-P3), center shows block table mapping logical to physical addresses, right shows 12 scattered physical blocks in HBM with 4 highlighted as mapped."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9]
-  \definecolor{BlockColor}{HTML}{D1E6F3}
-  \definecolor{MappedColor}{HTML}{FCE4CC}
-
-  \tikzset{
-    block/.style={draw=black!70, thick, minimum width=0.8cm, minimum height=0.6cm, font=\tiny, inner sep=0pt},
-    arrow/.style={->, >=stealth, thick, black!60}
-  }
-
-  % Logical View
-  \node[anchor=west] (logical_title) at (0, 3.5) {\textbf{Logical KV Cache} (Contiguous)};
-  \node[block, fill=BlockColor, below=0.2cm of logical_title.south west, anchor=north west] (L0) {P0};
-  \node[block, fill=BlockColor, right=0cm of L0] (L1) {P1};
-  \node[block, fill=BlockColor, right=0cm of L1] (L2) {P2};
-  \node[block, fill=BlockColor, right=0cm of L2] (L3) {P3};
-
-  % Page Table
-  \node[draw, dashed, inner sep=4pt, right=1.5cm of L3, yshift=-0.5cm] (table) {
-    \begin{tabular}{c|c}
-      \tiny Logic & \tiny Phys \\
-      \hline
-      \tiny P0 & \tiny B7 \\
-      \tiny P1 & \tiny B2 \\
-      \tiny P2 & \tiny B9 \\
-      \tiny P3 & \tiny B4
-    \end{tabular}
-  };
-  \node[above, font=\scriptsize] at (table.north) {Block Table};
-
-  % Physical View
-  \node[anchor=west, right=2cm of table.east, yshift=1.5cm] (phys_title) {\textbf{Physical HBM} (Scattered)};
-
-  \node[block, fill=white, below=0.2cm of phys_title.south west, anchor=north west] (physB0) {B0};
-  \node[block, fill=white, right=0cm of physB0] (physB1) {B1};
-  \node[block, fill=MappedColor, right=0cm of physB1] (physB2) {B2};
-  \node[block, fill=white, right=0cm of physB2] (physB3) {B3};
-
-  \node[block, fill=MappedColor, below=0cm of physB0] (physB4) {B4};
-  \node[block, fill=white, right=0cm of physB4] (physB5) {B5};
-  \node[block, fill=white, right=0cm of physB5] (physB6) {B6};
-  \node[block, fill=MappedColor, right=0cm of physB6] (physB7) {B7};
-
-  \node[block, fill=white, below=0cm of physB4] (physB8) {B8};
-  \node[block, fill=MappedColor, right=0cm of physB8] (physB9) {B9};
-  \node[block, fill=white, right=0cm of physB9] (physB10) {B10};
-  \node[block, fill=white, right=0cm of physB10] (physB11) {B11};
-
-  % Mapping arrows
-  \draw[arrow] (L0) to[out=-90, in=180] (table);
-  \draw[arrow] (table) to[out=0, in=180] (physB7.west);
-  \draw[arrow] (table) to[out=0, in=180] (physB2.west);
-  \draw[arrow] (table) to[out=0, in=180] (physB9.west);
-  \draw[arrow] (table) to[out=0, in=180] (physB4.west);
-
-\end{tikzpicture}
-```
-
+![](images/svg/kv-cache-fragmentation.svg){width=100%}
 :::
 
 PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without pre-allocation. It supports memory sharing so common prefixes can share physical pages.
@@ -2803,6 +2718,10 @@ async def swap_to_gpu(sequence_id):
 
 ### Disaggregated Serving: Splitting the Workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
 
+::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**. Separating the Compute-Bound **Prefill Phase** from the Bandwidth-Bound **Decode Phase**. Requests enter the Prefill Pool for prompt processing, and the resulting KV cache is migrated to the Decode Pool for token generation. This allows each phase to run on hardware optimized for its specific bottleneck, improving overall fleet efficiency." fig-alt="System diagram showing Request entering a Prefill Pool of high-compute GPUs. Red dashed arrow labeled KV Cache Transfer points to a Decode Pool of high-memory-bandwidth GPUs. Response exits from the Decode Pool."}
+![](images/svg/disaggregated-serving.svg){width=100%}
+:::
+
 ::: {.callout-definition title="Prefill and Decode Phases"}
 
 ***Prefill and Decode Phases***\index{Prefill and Decode!definition} are the two distinct computational regimes of transformer-based LLM inference.
@@ -3121,72 +3040,7 @@ Pipeline parallelism distributes layers across devices sequentially, with each d
 For inference, pipeline parallelism creates bubbles differently than in training. @fig-pipeline-bubbles contrasts single-request latency (bubble-dominated) with pipelined throughput (bubble-amortized):
 
 ::: {#fig-pipeline-bubbles fig-env="figure" fig-pos="htb" fig-cap="**Pipeline Parallelism Bubbles**. For a single inference request, pipeline parallelism offers no latency benefit as the request must traverse all stages sequentially (top). However, when processing multiple concurrent requests, pipeline bubble utilization improves significantly (bottom), allowing throughput to scale with the number of stages. This makes pipeline parallelism ideal for high-throughput batch processing but less suitable for latency-critical interactive serving." fig-alt="Two timeline diagrams. Top: Single request across 3 GPUs showing sequential processing with idle bubbles. Bottom: Pipelined batch with 4 requests overlapping across stages, minimizing idle time."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \definecolor{Stage1}{HTML}{D1E6F3}
-  \definecolor{Stage2}{HTML}{D4EFDF}
-  \definecolor{Stage3}{HTML}{FCE4CC}
-  \definecolor{Bubble}{HTML}{F5F5F5}
-
-  \tikzset{
-    block/.style={draw=black!50, minimum height=0.6cm, minimum width=1.4cm, font=\scriptsize},
-    label/.style={font=\footnotesize\bfseries}
-  }
-
-  % Scenario A: Single Request (Sequential)
-  \node[label, anchor=west] at (0, 3.5) {A. Single Request (Latency Bound)};
-
-  % Dev 0
-  \node[anchor=east] at (0, 2.8) {GPU 0};
-  \node[block, fill=Stage1] at (0.8, 2.8) {Req1};
-  \node[block, fill=Bubble, minimum width=2.8cm] at (3.0, 2.8) {Idle};
-
-  % Dev 1
-  \node[anchor=east] at (0, 2.0) {GPU 1};
-  \node[block, fill=Bubble, minimum width=1.4cm] at (0.8, 2.0) {Idle};
-  \node[block, fill=Stage2] at (2.3, 2.0) {Req1};
-  \node[block, fill=Bubble, minimum width=1.4cm] at (3.7, 2.0) {Idle};
-
-  % Dev 2
-  \node[anchor=east] at (0, 1.2) {GPU 2};
-  \node[block, fill=Bubble, minimum width=2.8cm] at (1.5, 1.2) {Idle};
-  \node[block, fill=Stage3] at (3.7, 1.2) {Req1};
-
-  % Total Time Arrow
-  \draw[<->] (0.1, 0.8) -- (4.4, 0.8) node[midway, below, font=\scriptsize] {Total Latency = Sum of Stages};
-
-  % Scenario B: Pipelined (Throughput)
-  \node[label, anchor=west] at (0, -0.5) {B. Pipelined Batch (Throughput)};
-
-  % Shift x origin for alignment
-  \begin{scope}[shift={(0, -3)}]
-      % Dev 0
-      \node[anchor=east] at (0, 2.0) {GPU 0};
-      \node[block, fill=Stage1] at (0.8, 2.0) {Req1};
-      \node[block, fill=Stage1] at (2.3, 2.0) {Req2};
-      \node[block, fill=Stage1] at (3.8, 2.0) {Req3};
-
-      % Dev 1
-      \node[anchor=east] at (0, 1.2) {GPU 1};
-      \node[block, fill=Bubble] at (0.8, 1.2) {Idle};
-      \node[block, fill=Stage2] at (2.3, 1.2) {Req1};
-      \node[block, fill=Stage2] at (3.8, 1.2) {Req2};
-      \node[block, fill=Stage2] at (5.3, 1.2) {Req3};
-
-      % Dev 2
-      \node[anchor=east] at (0, 0.4) {GPU 2};
-      \node[block, fill=Bubble, minimum width=2.8cm] at (1.5, 0.4) {Idle};
-      \node[block, fill=Stage3] at (3.8, 0.4) {Req1};
-      \node[block, fill=Stage3] at (5.3, 0.4) {Req2};
-
-      % Note
-      \node[anchor=west, font=\scriptsize, align=left] at (6.5, 1.2) {High Throughput\\after fill};
-  \end{scope}
-
-\end{tikzpicture}
-```
-
+![](images/svg/serving-pipeline.svg){width=100%}
 :::
 
 For a single request, pipeline parallelism provides no latency benefit: the request must traverse all stages sequentially. The pipeline fill time equals the sequential execution time.

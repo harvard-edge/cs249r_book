@@ -74,7 +74,8 @@ from mlsysim.core.constants import (
     WSE3_CORES, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP,
     TPUV5P_MEM_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW, PCIE_GEN5_BW, SYSTEM_MEMORY_BW,
     CLOUD_ELECTRICITY_PER_KWH, USD, GPT3_PARAMS,
-    Mparam, Bparam, TFLOPs, flop, param, MFLOPs, GFLOPs
+    Mparam, Bparam, TFLOPs, flop, param, MFLOPs, GFLOPs,
+    LEAD_TIME_GPU_MONTHS, LEAD_TIME_SUBSTATION_MONTHS, GRID_INTERCONNECTION_QUEUE_US_GW
 )
 from mlsysim.fmt import fmt, sci, check, md, md_math
 
@@ -244,6 +245,10 @@ Wafer-scale engines sit at a unique point on the spectrum: they are highly speci
 :::
 
 The key insight from @fig-wafer-scale-engine is the trade-off that wafer-scale integration accepts: manufacturing complexity and defect-aware routing in exchange for eliminating the inter-chip communication bottleneck entirely, keeping all 900,000 cores within nanoseconds of each other on a single silicon fabric.
+
+::: {#fig-accelerator-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The Accelerator Spectrum**. The landscape of ML hardware involves a fundamental trade-off between programmability and efficiency. General-purpose CPUs provide maximum flexibility but low compute density. Moving toward custom ASICs and systolic arrays increases throughput per watt by hardwiring common dataflows, at the cost of supporting a narrower range of model architectures." fig-alt="Continuum diagram from General Purpose (left) to Domain Specific (right). Nodes: CPU, GPU, TPU, Wafer-Scale Engine, Custom ASIC. Arrows show increasing Efficiency and decreasing Programmability."}
+![](images/svg/accelerator-spectrum.svg){width=100%}
+:::
 
 | **Feature**         |    **CPU**    | **GPU** (H100) | **TPU** (v5p)  | **Wafer-Scale** | **Custom ASIC** |
 |:--------------------|:-------------:|:--------------:|:--------------:|:---------------:|:---------------:|
@@ -470,7 +475,13 @@ While **Archetype A (GPT-4)** is primarily throughput-bound (demanding more TFLO
 
 :::
 
-The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling. High Model FLOPS Utilization (MFU) is only possible through aggressive **tiling**: breaking the massive weight matrices into small tiles that fit entirely within shared memory and registers, then performing as many multiply-accumulate operations on each tile as possible before evicting it. Despite the `{python} InfraSetup.frontier_params_b`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
+The bandwidth gap between registers and HBM is approximately 1,000$\times$. If an operand must be fetched from HBM for a single operation, the arithmetic unit spends 99.9% of its time stalling. High Model FLOPS Utilization (MFU) is only possible through aggressive **tiling**: breaking the massive weight matrices into small tiles that fit entirely within shared memory and registers, then performing as many multiply-accumulate operations on each tile as possible before evicting it.
+
+::: {#fig-tensor-core-tiling fig-env="figure" fig-pos="htb" fig-cap="**Tensor Core Tiling Strategy**. To overcome the HBM bandwidth bottleneck, GPUs decompose large matrix operations into small tiles that fit within the Streaming Multiprocessor's (SM) fast SRAM. Data is loaded once into SRAM and reused across multiple Tensor Core operations, effectively multiplying the arithmetic value of every byte fetched from HBM." fig-alt="Diagram showing a large matrix divided into a grid of tiles. One tile is highlighted and shown being loaded into a smaller SM-local memory block, then feeding into a dense Tensor Core unit."}
+![](images/svg/tensor-core-tiling.svg){width=100%}
+:::
+
+Despite the `{python} InfraSetup.frontier_params_b`B model's massive total memory footprint, the active working set at any given microsecond must be meticulously managed to reside in that top 30 MB of register space, or the chip's theoretical performance becomes a mirage.
 
 [^fn-hbm-origin]: **HBM (High Bandwidth Memory)**: Standardized by JEDEC in 2013 as a joint development between AMD and SK Hynix, originally for graphics cards. ML accelerators adopted HBM because neural networks exhibit the same bandwidth-hungry, capacity-moderate access pattern as high-end rendering. Each HBM generation has roughly doubled bandwidth (128 GB/s in HBM1 to 1.2 TB/s per stack in HBM3e), yet the gap between memory bandwidth and arithmetic throughput continues to widen -- making HBM a necessary but never sufficient response to the Memory Wall. \index{HBM!origin}
 
@@ -488,7 +499,13 @@ Traditional DDR memory connects to the processor through pins on the edge of a p
 
 The physical distance from the DIMM slot to the processor die is measured in centimeters, and every centimeter of copper trace introduces capacitance, signal attenuation, and energy loss. At DDR5 data rates (4,800--6,400 MT/s per pin), the signal conditioning circuits must compensate for significant channel impairment, consuming substantial power per bit transferred. Increasing the data rate on these long traces requires progressively more power for signal conditioning, creating a diminishing-returns curve that DDR5 is already approaching.
 
-HBM solves this problem by changing the physical topology entirely. Instead of routing signals horizontally across a PCB, HBM stacks multiple DRAM dies *vertically*, one on top of another, and connects them with **Through-Silicon Vias (TSVs)**[^fn-tsv-stacking]: microscopic copper pillars etched through the silicon substrate itself. The vertical stacking represents a fundamental change in memory architecture: rather than increasing bandwidth by pushing signals faster through long copper traces (the DDR approach, which has diminishing returns), HBM increases bandwidth by multiplying the number of parallel signal paths through extremely short vertical connections.
+HBM solves this problem by changing the physical topology entirely. Instead of routing signals horizontally across a PCB, HBM stacks multiple DRAM dies *vertically*, one on top of another, and connects them with **Through-Silicon Vias (TSVs)**[^fn-tsv-stacking]: microscopic copper pillars etched through the silicon substrate itself.
+
+::: {#fig-hbm-architecture fig-env="figure" fig-pos="htb" fig-cap="**HBM 3D-Stacked Architecture**. High Bandwidth Memory achieves its performance by vertically stacking DRAM dies and connecting them via Through-Silicon Vias (TSVs). The entire stack sits on a silicon interposer alongside the GPU die, enabling a 1024-bit-wide bus and reducing signal travel distance from centimeters to micrometers. This physical proximity is the key to breaking the Memory Wall." fig-alt="Cross-section diagram of an HBM stack. Multiple DRAM dies are stacked on a logic die, connected by vertical TSVs. The assembly sits on a silicon interposer with microbumps connecting to the GPU die."}
+![](images/svg/hbm-architecture.svg){width=100%}
+:::
+
+The vertical stacking represents a fundamental change in memory architecture: rather than increasing bandwidth by pushing signals faster through long copper traces (the DDR approach, which has diminishing returns), HBM increases bandwidth by multiplying the number of parallel signal paths through extremely short vertical connections.
 
 A single HBM stack contains 8--12 DRAM dies. Each die is thinned to approximately 30--50 micrometers (roughly the thickness of a human hair) using a chemical-mechanical polishing process. The thinning is necessary because the TSVs must pass through the full thickness of each die, and thinner dies allow shorter, lower-resistance vias. The thinned dies are then vertically aligned with sub-micrometer precision and bonded to the die below using thermocompression bonding at temperatures of 300--400 degrees Celsius.
 
@@ -1345,6 +1362,10 @@ With the accelerator's physics established, we face a concrete problem. Our `{py
 
 ## The Node {#sec-compute-node}
 
+::: {#fig-node-topology-comparison fig-env="figure" fig-pos="htb" fig-cap="**Accelerator Node Topologies**. Comparison of internal node wiring. (Left) Standard PCIe topology where all GPUs share a single root complex, creating a bottleneck. (Right) NVLink/NVSwitch topology providing all-to-all connectivity at full bandwidth. The NVSwitch fabric transforms 8 independent GPUs into a single virtual accelerator with unified memory access characteristics." fig-alt="Two-panel diagram. Left: GPUs connected via a central PCIe switch. Right: GPUs connected via multiple NVSwitch chips in a non-blocking mesh."}
+![](images/svg/node-topology-comparison.svg){width=100%}
+:::
+
 \index{Node}
 \index{NVLink}
 \index{NVSwitch}
@@ -1421,6 +1442,10 @@ class BandwidthHierarchyScenario:
 | **Inter-Node**      | InfiniBand NDR     |   **~`{python} BandwidthHierarchyScenario.ib_bw_gbs` GB/s**   |  ~5--10 μs  | Pod (Thousands)    |
 
 : **The Bandwidth Hierarchy**. Each physical boundary introduces an order-of-magnitude bandwidth cliff. These cliffs are not engineering failures to be optimized away; they reflect fundamental differences in the physics of each interconnect medium. The cliffs dictate model partitioning: Tensor Parallelism, which requires AllReduce after every layer, is strictly confined to the intra-node domain. {#tbl-bandwidth-hierarchy-compute}
+
+::: {#fig-bandwidth-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Infrastructure Bandwidth Hierarchy**. Data movement speed drops by orders of magnitude as it moves further from the compute units. The pyramid shows the bandwidth tiers from on-chip SRAM down to the global network. Exploiting this hierarchy through tiered algorithms is the primary task of distributed systems engineering." fig-alt="Pyramid showing bandwidth tiers from SRAM (TB/s) at the tip down to Inter-Pod network (GB/s) at the base."}
+![](images/svg/bandwidth-hierarchy.svg){width=100%}
+:::
 
 As @tbl-bandwidth-hierarchy-compute shows, parallelism strategies must respect these boundaries. The following notebook quantifies the bandwidth gaps.
 
@@ -1836,6 +1861,50 @@ Electricity flows through a chain of transformations before it reaches a GPU's v
 
 Stage 1: Grid Connection. Utility power arrives at the datacenter as high-voltage AC, typically 13.8--69 kV depending on the country and the size of the facility. A dedicated substation or transformer yard steps this down to medium voltage (480 V AC in North America, 400 V AC in Europe). The largest ML facilities require their own substation, which takes 18--24 months to build and requires coordination with the local utility. The grid connection is the ultimate bottleneck: no amount of engineering inside the building can deliver more power than the grid provides.
 
+```{python}
+#| label: grid-queue-calc
+#| echo: false
+from mlsysim.fmt import check
+
+class GridQueue:
+    """The lead-time bottleneck of the ML fleet."""
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    gpu_lead_time_months = LEAD_TIME_GPU_MONTHS
+    substation_lead_time_months = LEAD_TIME_SUBSTATION_MONTHS
+    grid_queue_size_gw = GRID_INTERCONNECTION_QUEUE_US_GW
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    lead_time_ratio = substation_lead_time_months / gpu_lead_time_months
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(lead_time_ratio == 4, f"Ratio {lead_time_ratio} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    ratio_str = f"{lead_time_ratio:.0f}"
+    queue_str = f"{grid_queue_size_gw}"
+
+    @classmethod
+    def plot(cls):
+        """Visualizes the Interconnection Queue."""
+        from mlsysim import viz
+        return viz.bar_compare(
+            labels=["GPU Silicon", "Grid Substation"],
+            values=[cls.gpu_lead_time_months, cls.substation_lead_time_months],
+            title="Fleet Deployment Lead Times",
+            ylabel="Lead Time (Months)",
+            goal_line=6 # Target turnaround for logic layer
+        )
+```
+
+::: {.callout-notebook title="Napkin Math: The Interconnection Queue"}
+
+**Problem**: Compare the deployment timeline for 10,000 GPUs versus the electrical substation required to power them (7 MW).
+
+1. **Silicon Path**: GPU supply chains are volatile, but typical enterprise lead times are **`{python} GridQueue.gpu_lead_time_months` months**.
+2. **Infrastructure Path**: Permitting, EPC (Engineering, Procurement, Construction), and grid connection for a new 10+ MW substation averages **`{python} GridQueue.substation_lead_time_months` months**.
+3. **The Lag**: Infrastructure takes **`{python} GridQueue.ratio_str`$\times$ longer** to deploy than the accelerators themselves.
+
+**The Systems Insight**: In the era of the ML Fleet, the primary bottleneck is not the **Supply Chain** of silicon, but the **Interconnection Queue** of the grid. As of 2024, there are over **`{python} GridQueue.queue_str` GW** of capacity waiting for grid connection in the US alone. An engineer who optimizes for GPU utilization without a 2-year power roadmap will find their fleet "electrically stranded"—expensive silicon sitting in a dark building waiting for a transformer.
+
+:::
+
 Stage 2: UPS and Power Conditioning. An Uninterruptible Power Supply (UPS) sits between the utility feed and the IT equipment. The UPS serves two functions: it conditions the incoming power (removing voltage fluctuations and frequency variations) and provides battery backup during brief outages. Modern online (double-conversion) UPS systems convert AC to DC, charge a battery bank, and then convert back to AC, ensuring clean power but losing 3--5% efficiency. Newer high-efficiency "eco-mode" UPS designs bypass the double conversion during normal operation, achieving 98--99% efficiency but providing slightly less protection against input power anomalies.
 
 Stage 3: Power Distribution Unit (PDU). The PDU distributes power from the UPS to individual racks. In traditional datacenters, the PDU provides the final AC-to-AC step-down (from 480 V to 208/240 V for servers).
@@ -1975,6 +2044,10 @@ The operational procedures for immersion-cooled facilities differ sharply from a
 
 : **The Shift to Liquid Cooling**. At rack power densities above 30 kW, air cooling requires fan power that approaches the power consumed by the GPUs themselves. Liquid cooling is not a premium option; it is a thermodynamic requirement for modern ML racks. {#tbl-cooling-limits}
 
+::: {#fig-cooling-comparison fig-env="figure" fig-pos="htb" fig-cap="**Cooling Architectures: Air vs. Liquid**. Comparison of thermal management strategies for high-density ML racks. Air cooling (left) requires massive airflow and large fan overhead, reaching a physical limit near 30 kW per rack. Liquid cooling (right) uses direct-to-chip cold plates and high-thermal-capacity coolant, enabling densities exceeding 100 kW per rack with significantly lower PUE." fig-alt="Two-panel diagram. Left: Server rack with large fans and blue/red air arrows. Right: Server rack with thin pipes and blue/red liquid arrows leading to a heat exchanger."}
+![](images/svg/cooling-comparison.svg){width=100%}
+:::
+
 As @tbl-cooling-limits illustrates, the capital cost of these cooling technologies spans an order of magnitude. Standard air cooling infrastructure costs \$2,000--5,000 per rack (fans, CRAC units, raised floor tiles). Direct-to-chip liquid cooling costs \$15,000--25,000 per rack (cold plates, manifolds, CDUs, piping). Full immersion cooling costs \$30,000--50,000 per tank (dielectric fluid, sealed tanks, specialized heat exchangers). The break-even analysis between air and liquid cooling depends on rack power density: at 20 kW per rack, air cooling's lower CapEx wins over a 3-year lifecycle. At 40 kW per rack, the electricity savings from liquid cooling's lower PUE (1.08 vs. 1.5) offset the higher CapEx within 18--24 months. At 60+ kW per rack -- the regime of modern ML infrastructure -- air cooling is physically impossible, making the comparison moot. For our `{python} InfraSetup.frontier_params_b`B model's 128-rack training cluster at `{python} RackPowerScenario.rack_power_str` kW per rack, direct-to-chip liquid cooling is the standard choice, balancing density, serviceability, and cost. Immersion cooling offers marginal PUE improvement (1.03 vs. 1.08) but introduces operational complexity that most organizations find unjustified at current rack densities.
 
 ::: {.callout-notebook title="The Cooling Tax"}
@@ -2061,6 +2134,10 @@ A team is planning to deploy 256 H100 GPUs (32 nodes) in an existing air-cooled 
 The rack concentrates power and heat into a physical volume where thermodynamics, not software, sets the limits. A single rack of 32 GPUs, however, is far from sufficient for our `{python} InfraSetup.frontier_params_b`B model, which may require thousands of accelerators to train in a reasonable timeframe. The next level of infrastructure aggregates hundreds of racks into a unified computing system: the pod.
 
 ## The Pod {#sec-compute-pod}
+
+::: {#fig-pod-network-topology fig-env="figure" fig-pos="htb" fig-cap="**Datacenter Pod Topology**. A pod aggregates multiple racks into a single non-blocking network domain. By using a fat-tree or Clos topology with high-radix switches, the pod ensures that any GPU can communicate with any other GPU at full line rate, providing the structural bisection bandwidth required for large-scale gradient synchronization." fig-alt="Diagram showing multiple racks connected to a central spine switch layer. Racks are grouped into pods, with redundant links providing multiple paths between any two racks."}
+![](images/svg/pod-network-topology.svg){width=100%}
+:::
 
 \index{Pod}
 \index{Warehouse-Scale Computer}
@@ -2546,6 +2623,10 @@ For our `{python} InfraSetup.frontier_params_b`B model, a minimum viable trainin
 ### Build vs. Buy {#sec-compute-build-vs-buy}
 
 The most consequential infrastructure decision is whether to build an on-premises cluster or rent capacity from a cloud provider. This decision depends primarily on one variable: sustained utilization.
+
+::: {#fig-tco-build-vs-buy fig-env="figure" fig-pos="htb" fig-cap="**TCO: Build vs. Buy**. Comparison of cumulative cost over time for owned infrastructure (on-premises) versus rented infrastructure (cloud) at different utilization rates. Owned infrastructure requires high upfront CapEx but has lower marginal OpEx, leading to a break-even point typically between 18 and 24 months at high utilization (>70%). At low utilization (<30%), cloud instances are almost always more cost-effective." fig-alt="Plot showing cumulative cost over 36 months. Cloud lines are straight with slopes varying by utilization. On-prem line starts with high CapEx and has a shallower slope. Cross-over points are highlighted."}
+![](images/svg/tco-build-vs-buy.svg){width=100%}
+:::
 
 ```{python}
 #| label: tco-scenario

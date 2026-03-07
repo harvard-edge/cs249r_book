@@ -245,6 +245,11 @@ NETWORK_10G_BW = 10 * Gbps
 NETWORK_100G_BW = 100 * Gbps
 NETWORK_5G_ENERGY_PER_MB_MJ = 100 * ureg.millijoule / MB
 
+# Optical Interconnects (2025-2026 Reference)
+OPTICS_POWER_PLUGGABLE_400G_W = 20 * watt
+OPTICS_POWER_CPO_400G_W = 10 * watt
+OPTICS_POWER_LPO_400G_W = 12 * watt       # Linear Pluggable Optics
+
 # Intra-node interconnects
 NVLINK_V100_BW = 300 * GB / second        # NVLink 2.0 (V100, 6 links × 50 GB/s)
 NVLINK_A100_BW = 600 * GB / second        # NVLink 3.0 (A100, 12 links × 50 GB/s)
@@ -280,6 +285,11 @@ ENERGY_ADD_INT8_PJ = 0.03 * ureg.picojoule
 
 # Network transfer energy (reference)
 NETWORK_ENERGY_1KB_PJ = 1_000_000 * ureg.picojoule  # ~1 microjoule for 1KB
+
+# --- Infrastructure & Grid ---
+LEAD_TIME_GPU_MONTHS = 6
+LEAD_TIME_SUBSTATION_MONTHS = 24
+GRID_INTERCONNECTION_QUEUE_US_GW = 2000
 
 # --- Physics ---
 SPEED_OF_LIGHT_FIBER_KM_S = 200000 * ureg.kilometer / second
@@ -386,6 +396,13 @@ INT8_BITS = 8
 MNIST_IMAGE_WIDTH = 28
 MNIST_IMAGE_HEIGHT = 28
 
+# Synthetic Data Constraints
+SYNTHETIC_PROVENANCE_OVERHEAD = 0.4
+SYNTHETIC_VERIFICATION_PASSES = 3
+
+# Inference Scaling
+LOGIC_WALL_REASONING_STEPS_EXAMPLE = 128
+
 # Statistics
 KS_TEST_COEFFICIENT = 1.36
 
@@ -489,9 +506,12 @@ GPU_MTTF_HOURS = 50_000            # Single GPU die (datacenter, steady-state)
 NIC_MTTF_HOURS = 150_000           # Network interface card
 PSU_MTTF_HOURS = 100_000           # Power supply unit
 PCIE_SWITCH_MTTF_HOURS = 200_000   # PCIe switch/bridge
-CABLE_MTTF_HOURS = 500_000         # Optical cable / transceiver
+CABLE_MTTF_HOURS = 50_000          # Optical cable / transceiver (lowered for SDC analysis)
 TOR_SWITCH_MTTF_HOURS = 300_000    # Top-of-rack switch
 HBM_MTTF_HOURS = 200_000           # HBM memory module
+
+# Silent Data Corruption (SDC) Assumptions
+P_SDC_PER_GPU_HR = 1e-6
 
 # Recovery time assumptions (seconds)
 HEARTBEAT_TIMEOUT_S = 30            # Failure detection latency

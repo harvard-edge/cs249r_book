@@ -92,7 +92,8 @@ from mlsysim.core.constants import (
     H100_FLOPS_FP16_TENSOR, H100_TDP, H100_MEM_CAPACITY, H100_MEM_BW,
     A100_FLOPS_FP16_TENSOR,
     B200_FLOPS_FP16_TENSOR, B200_MEM_BW,
-    Gbps, GB, TB, second, watt, GB, TFLOPs, flop, byte, NS
+    Gbps, GB, TB, second, watt, GB, TFLOPs, flop, byte, NS,
+    OPTICS_POWER_PLUGGABLE_400G_W, OPTICS_POWER_CPO_400G_W
 )
 from mlsysim.fmt import fmt, sci, check, md, md_math
 
@@ -106,7 +107,13 @@ class FECLatency:
 
 Consider the running example that threads through this volume: a 175-billion-parameter language model partitioned across 1,000 GPUs. Each training step requires an AllReduce of 350 GB of gradient data, meaning every GPU must send and receive its share before the next step can begin. If even one link in the fabric is slow, all 999 other GPUs wait. The network is not auxiliary infrastructure; it is the synchronization backbone that determines whether this cluster trains efficiently or wastes millions of dollars in idle compute.
 
-In the **Fleet Stack** (@sec-vol2-introduction), network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation. This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The **Law of Distributed Efficiency** (@eq-iron-law-scale) makes this explicit: the $T_{\text{sync}} / T_{\text{compute}}$ ratio in the Scaling Factor is determined almost entirely by the network fabric. The fabric constrains every layer above it in the stack: @sec-distributed-training-systems cannot overlap communication with computation unless the fabric provides sufficient bandwidth, @sec-collective-communication cannot choose optimal algorithms without knowing the topology, and @sec-fault-tolerance-reliability must account for network partitions alongside node failures.
+In the **Fleet Stack** (@sec-vol2-introduction), network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation.
+
+::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The Five-Level Model of ML Networking**. Network design for the ML fleet spans from physical signaling to cluster-scale orchestration. (1) Wire: signaling and link budget. (2) Transport: RDMA and lossless protocols. (3) Topology: fat-trees and rail-optimization. (4) Behavior: congestion control and routing. (5) Cluster: virtualization and isolation. Each level must be co-designed to minimize the synchronization tax." fig-alt="Stacked diagram with five levels: Wire, Transport, Topology, Behavior, Cluster. Arrows show inter-level dependencies."}
+![](images/svg/five-level-model.svg){width=100%}
+:::
+
+This chapter wires those nodes together, because at scale, communication cost dominates computation cost. The **Law of Distributed Efficiency** (@eq-iron-law-scale) makes this explicit: the $T_{\text{sync}} / T_{\text{compute}}$ ratio in the Scaling Factor is determined almost entirely by the network fabric. The fabric constrains every layer above it in the stack: @sec-distributed-training-systems cannot overlap communication with computation unless the fabric provides sufficient bandwidth, @sec-collective-communication cannot choose optimal algorithms without knowing the topology, and @sec-fault-tolerance-reliability must account for network partitions alongside node failures.
 
 The physical network fabric exists to carry three fundamental collective communication patterns. An **AllReduce**[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training. An **AllGather**[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state. An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to **expert parallelism**[^fn-moe-forward]. @sec-collective-communication covers the *algorithms* that orchestrate these patterns; this chapter covers the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
 
@@ -401,6 +408,10 @@ In an ML fleet, distance is money. A 10,000-GPU cluster requires ~20,000 optical
 
 :::
 
+::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**Signaling Evolution: NRZ vs. PAM4**. To increase bandwidth without doubling clock frequency, modern interconnects transitioned from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating Forward Error Correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
+![](images/svg/pam4-vs-nrz.svg){width=100%}
+:::
+
 ### SerDes, Link Budget, and Power {#sec-network-fabrics-serdes}
 
 \index{SerDes}
@@ -434,6 +445,10 @@ Standard TCP/IP is architecturally unfit for the `{python} NetworkFabricsContext
 RDMA bypasses this entire layer. By offloading the transport logic to the NIC hardware, it allows applications to read and write directly to remote memory. For ML, **GPUDirect RDMA**[^fn-gpudirect-rdma] extends this zero-copy principle to the accelerators themselves. Without GPUDirect, a gradient update follows a tortuous path: GPU memory $\rightarrow$ CPU system RAM $\rightarrow$ kernel buffer $\rightarrow$ NIC. GPUDirect short-circuits this to a single PCIe transaction: GPU $\rightarrow$ NIC. For our 175B model's 350 GB gradient exchange, the optimization eliminates 700 GB of redundant memory copies across the cluster per step, reducing latency and freeing the CPU to orchestrate complex pipelining logic rather than acting as a data mover.
 
 [^fn-gpudirect-rdma]: **GPUDirect RDMA**: Introduced by NVIDIA in 2013 with the Kepler architecture, GPUDirect RDMA enables the NIC to read and write GPU memory directly over PCIe without staging through host RAM. Before GPUDirect, every gradient transfer incurred two extra memory copies (GPU-to-host, host-to-NIC), adding 10--20 $\mu$s per message and consuming CPU memory bandwidth that competes with data loading. Eliminating this bounce path is what makes overlapping communication with backward-pass computation feasible at scale. \index{GPUDirect RDMA!zero-copy}
+
+::: {#fig-gpudirect-data-path fig-env="figure" fig-pos="htb" fig-cap="**GPUDirect RDMA Data Path**. Comparison of traditional vs. GPUDirect data paths. Traditional RDMA (top) requires data to be copied to host RAM before transfer to the NIC. GPUDirect RDMA (bottom) enables the NIC to access GPU memory directly via the PCIe bus, eliminating redundant copies and reducing latency for bulk gradient transfers." fig-alt="Two-panel diagram. Top: Traditional path with GPU to CPU RAM to NIC hops. Bottom: Direct path from GPU to NIC via PCIe."}
+![](images/svg/gpudirect-data-path.svg){width=100%}
+:::
 
 ### InfiniBand and RoCE {#sec-network-fabrics-ib-roce}
 
@@ -815,6 +830,10 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 2.  **Distinction (Durable):** Unlike a standard tree (where bandwidth at the root is a single bottleneck shared by all leaves), a fat-tree replaces each root with multiple spine switches whose combined uplink capacity matches the total edge bandwidth, eliminating the bottleneck.
 3.  **Common Pitfall:** A frequent misconception is that fat-trees guarantee zero network cost. They require $O(N \log N)$ switches and dense cabling: a 4,096-GPU non-blocking fat-tree needs roughly 2,048 switches, costing \$20–100 million in switching hardware alone.
 
+::: {#fig-fat-tree-detail fig-env="figure" fig-pos="htb" fig-cap="**Non-blocking Fat-Tree Topology**. A three-tier Clos network built from radix-k switches. By ensuring that the number of uplinks at each level matches the number of downlinks, the topology provides full bisection bandwidth between any two pods. The multiple parallel paths between leaf and spine enable hardware-based adaptive routing to spray packets and avoid congestion." fig-alt="Hierarchical switch diagram with three tiers: Leaf, Spine, and Core. Multiple parallel paths connect switches across tiers, illustrating full bisection bandwidth."}
+![](images/svg/fat-tree-detail.svg){width=100%}
+:::
+
 :::
 
 The fat-tree[^fn-fat-tree-clos] is the industry standard for ML clusters because it strictly guarantees full bisection bandwidth, a non-negotiable requirement for the AllReduce collective, which demands simultaneous, all-to-all communication. The network is constructed in hierarchical tiers: **Leaf** switches (ToR) connect directly to servers, **Spine** switches interconnect all leaves within a locality domain known as a **pod**, and **Core** switches bind multiple pods together.
@@ -1029,22 +1048,8 @@ The trade-offs between these topologies become stark when quantified for a large
 @fig-network-topologies illustrates the structural differences between these common families.
 
 ::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network Topologies for ML**. (A) Fat-Tree provides full bisection bandwidth through hierarchical switch layers. (B) Torus connects neighbors, optimizing for local communication patterns such as those in TPU pods. (C) Rail-Optimized designs dedicate switch infrastructure to corresponding accelerator positions across nodes, minimizing hop count for tensor parallelism." fig-alt="Three-panel diagram: Fat-Tree with hierarchical switches, Torus with neighbor connections, Rail-Optimized with dedicated switch rails."}
-
-```{.tikz}
-\usetikzlibrary{positioning}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
-  \definecolor{NodeColor}{HTML}{D1E6F3}
-  \definecolor{SwitchColor}{HTML}{006395}
-  \definecolor{RailColor}{HTML}{E67817}
-  \definecolor{GPUColor}{HTML}{F5D2D5}
-  \definecolor{RedLine}{HTML}{CB202D}
-
-  \tikzset{
-    switch/.style={circle, fill=SwitchColor, draw=black!70, line width=0.75pt, inner sep=2pt, minimum size=0.45cm, text=white, font=\tiny\bfseries, anchor=center},
-    nodebox/.style={rectangle, fill=NodeColor, draw=black!70, line width=0.75pt, inner sep=2pt, minimum size=0.4cm, anchor=center},
-    hostbox/.style={draw=black!50, line width=0.75pt, rounded corners=2pt, fill=black!5, inner sep=4pt}
-  }
-
+![](images/svg/rail-optimized.svg){width=100%}
+:::
   % Fat Tree
   \begin{scope}[local bounding box=fattree]
     \node[anchor=south, text=RedLine] (titleA) at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
@@ -1255,76 +1260,8 @@ Because BSP enforces a global barrier at each superstep, the entire cluster move
 
 The danger of PFC lies in its cascading nature. When a switch port's buffer fills, it sends a PAUSE frame upstream, which causes *that* switch's buffers to fill, which triggers *another* PAUSE frame further upstream. In theory, this backpressure should throttle the source. In practice, a single slow receiver can propagate pauses across the entire fabric in milliseconds, freezing links that have no direct relationship to the original congestion point. As @fig-congestion-cascade illustrates, this cascading behavior, known as **congestion spreading** or **victim flows**, is the primary operational risk of PFC-based lossless Ethernet.
 
-::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**PFC Pause Frame Propagation**. Congestion at a tail switch (S4) triggers a backpressure cascade, freezing the entire communication path upstream." fig-alt="Diagram showing PFC pause frame propagation from congested switch S4 upstream through the network path."}
-
-```{=latex}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
-  \usetikzlibrary{positioning, shapes.geometric}
-  \definecolor{BlueLine}{HTML}{006395}
-  \definecolor{BlueL}{HTML}{D1E6F3}
-  \definecolor{RedLine}{HTML}{CB202D}
-  \definecolor{RedL}{HTML}{F5D2D5}
-  \definecolor{GreenLine}{HTML}{008F45}
-  \definecolor{GreenL}{HTML}{D4EFDF}
-
-  \tikzset{
-    switch/.style={draw=black!70, fill=gray!10, line width=0.75pt, rounded corners=2pt, minimum width=1.5cm, minimum height=1cm, font=\bfseries, align=center},
-    gpu/.style={draw=black!70, circle, fill=black!10, line width=0.75pt, minimum size=0.6cm, inner sep=0pt, font=\bfseries},
-    dataflow/.style={->, GreenLine, line width=1.2pt},
-    pauseflow/.style={->, RedLine, dashed, line width=1.0pt},
-    status/.style={font=\bfseries, RedLine, anchor=north},
-    time/.style={font=\footnotesize, black!70}
-  }
-
-  % Switches
-  \node[switch] (swS1) {S1};
-  \node[switch, right=1.5cm of swS1] (swS2) {S2};
-  \node[switch, right=1.5cm of swS2] (swS3) {S3};
-  \node[switch, right=1.5cm of swS3] (swS4) {S4};
-
-  % GPUs
-  \node[gpu, below=1.2cm of swS1] (gpuS1) {G};
-  \node[gpu, below=1.2cm of swS2] (gpuS2) {G};
-  \node[gpu, below=1.2cm of swS3] (gpuS3) {G};
-  \node[gpu, below=1.2cm of swS4] (gpuS4) {G};
-
-  % Vertical links
-  \draw[line width=1.0pt, black!60] (swS1) -- (gpuS1);
-  \draw[line width=1.0pt, black!60] (swS2) -- (gpuS2);
-  \draw[line width=1.0pt, black!60] (swS3) -- (gpuS3);
-  \draw[line width=1.0pt, black!60] (swS4) -- (gpuS4);
-
-  % Time labels
-  \node[time, below=0.1cm of swS1] {t=3 ms};
-  \node[time, below=0.1cm of swS2] {t=2 ms};
-  \node[time, below=0.1cm of swS3] {t=1 ms};
-  \node[time, below=0.1cm of swS4] {t=0};
-
-  % Data Flow
-  \draw[dataflow] ([xshift=-1.5cm]swS1.west) -- (swS1.west);
-  \draw[dataflow] (swS1.east) -- (swS2.west);
-  \draw[dataflow] (swS2.east) -- (swS3.west);
-  \draw[dataflow] (swS3.east) -- (swS4.west);
-  \node[GreenLine, font=\small\bfseries, above=0.2cm of swS2.east] {Data Flow};
-
-  % Pause Flow
-  \draw[pauseflow] (swS4.south west) to[bend left=20] node[midway, below, font=\scriptsize] {PAUSE} (swS3.south east);
-  \draw[pauseflow] (swS3.south west) to[bend left=20] node[midway, below, font=\scriptsize] {PAUSE} (swS2.south east);
-  \draw[pauseflow] (swS2.south west) to[bend left=20] node[midway, below, font=\scriptsize] {PAUSE} (swS1.south east);
-
-  % Congestion indicator
-  \node[star, star points=10, fill=RedL, draw=RedLine, line width=0.75pt, text=black, minimum size=0.8cm, inner sep=0pt, above=0.2cm of swS4] (bang) {\textbf{!}};
-  \node[RedLine, font=\bfseries, above=0.1cm of bang] {CONGESTION};
-
-  % Status labels
-  \node[status, below=0.2cm of gpuS1] {FROZEN};
-  \node[status, below=0.2cm of gpuS2] {PAUSED};
-  \node[status, below=0.2cm of gpuS3] {PAUSED};
-  \node[status, below=0.2cm of gpuS4] {SOURCE};
-
-\end{tikzpicture}
-```
-
+::: {#fig-congestion-cascade fig-env="figure" fig-pos="htb" fig-cap="**PFC Pause Frame Propagation**. Congestion at a tail switch (S4) triggers a backpressure cascade, freezing the entire communication path upstream. This 'congestion spreading' can idle thousands of GPUs across unrelated process groups in a lossless fabric." fig-alt="Diagram showing PFC pause frame propagation from congested switch S4 upstream through the network path."}
+![](images/svg/incast-flow.svg){width=100%}
 :::
 
 ::: {.callout-war-story title="The PFC Storm That Froze a Cluster (2022)"}
@@ -1453,54 +1390,7 @@ In a well-designed cluster, the network fabric acts as a scheduler-aware extensi
 The bandwidth staircase shown in @fig-hierarchical-staircase dictates the parallelism strategy to mitigate this cliff. **Tensor Parallelism**, requiring massive bandwidth for frequent activation exchanges, is confined to the NVLink domain within a node. **Pipeline Parallelism**, involving point-to-point transfers of activations between pipeline stages, spans the InfiniBand links between nodes. **Data Parallelism**, tolerant of lower bandwidth through gradient accumulation and overlap, stretches across the full fabric.
 
 ::: {#fig-hierarchical-staircase fig-env="figure" fig-pos="htb" fig-cap="**The Hierarchical Bandwidth Staircase**. Communication bandwidth drops by orders of magnitude as the distance from the chip increases, dictating parallelism strategies." fig-alt="Staircase or stepped diagram showing bandwidth decreasing from on-chip through NVLink, PCIe, and network levels."}
-
-```{=latex}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
-  \usetikzlibrary{positioning, fit}
-  \tikzset{
-    bar/.style 2 args={
-      draw=#1, fill=#2, line width=0.75pt,
-      minimum height=1cm, inner sep=0pt,
-      anchor=north west
-    },
-    label/.style={anchor=west, font=\bfseries},
-    value/.style={anchor=east, font=\bfseries},
-    annot/.style={anchor=west, font=\small\itshape}
-  }
-
-  % NVLink
-  \node[bar={BlueLine}{BlueL}] (nvlink) at (0, 0) [minimum width=9cm] {};
-  \node[label, text=BlueLine] at ([xshift=0.2cm]nvlink.west) {NVLink (Intra-Node)};
-  \node[value] at ([xshift=-0.2cm]nvlink.east) {900 GB/s};
-  \node[annot] at ([xshift=0.2cm]nvlink.east) {$\leftarrow$ Tensor Parallelism};
-
-  % PCIe
-  \node[bar={GreenLine}{GreenL}, below=0.2cm of nvlink.south west] (pcie) [minimum width=5cm] {};
-  \node[label, text=GreenLine] at ([xshift=0.2cm]pcie.west) {PCIe (Chip-to-Host)};
-  \node[value] at ([xshift=-0.2cm]pcie.east) {64 GB/s};
-
-  % InfiniBand
-  \node[bar={OrangeLine}{OrangeL}, below=0.2cm of pcie.south west] (ib) [minimum width=4cm] {};
-  \node[label, text=OrangeLine] at ([xshift=0.2cm]ib.west) {InfiniBand (Inter-Node)};
-  \node[value] at ([xshift=-0.2cm]ib.east) {50 GB/s};
-  \node[annot] at ([xshift=1.2cm]ib.east) {$\leftarrow$ Pipeline Parallelism};
-
-  % Ethernet
-  \node[bar={RedLine}{RedL}, below=0.2cm of ib.south west] (eth) [minimum width=2.5cm] {};
-  \node[label, text=RedLine] at ([xshift=0.2cm]eth.west) {Ethernet (Data Center)};
-  \node[value] at ([xshift=-0.2cm]eth.east) {25 GB/s};
-  \node[annot] at ([xshift=0.7cm]eth.east) {$\leftarrow$ Data Parallelism};
-
-  % Dashed line
-  \draw[dashed, black!50, line width=1.0pt] (nvlink.south east) -- (nvlink.south east |- eth.south);
-
-  % Distance arrow
-  \draw[->, line width=1.2pt, black!70] ([xshift=-0.5cm]nvlink.west) -- ([xshift=-0.5cm]eth.west)
-    node[midway, left, rotate=90, font=\small] {Increasing Distance / Latency};
-
-\end{tikzpicture}
-```
-
+![](images/svg/topology-bandwidth.svg){width=100%}
 :::
 
 ### Case Study: NVIDIA DGX SuperPOD {#sec-network-fabrics-dgx-superpod}
@@ -1531,7 +1421,54 @@ As cluster sizes push past 100,000 accelerators, the physics tax of current inte
 
 The **Ultra Ethernet Consortium (UEC)** represents a clean-slate overhaul of Ethernet specifically for AI and HPC. Recognizing that TCP/IP is too heavy and RoCEv2's reliance on PFC is too fragile, UEC integrates HPC-native features directly into the standard: native **packet spraying** to use all paths without ECMP hashing collisions, hardware-enforced **in-order delivery** to simplify NIC design, and a new credit-based congestion control mechanism that eliminates the need for Priority Flow Control entirely. The goal is to provide the losslessness of InfiniBand with the ubiquity and multi-vendor economics of Ethernet.
 
-The power consumption of pluggable transceivers is becoming unsustainable at scale. **Co-Packaged Optics (CPO)** addresses this by moving the optical engine from the faceplate directly into the switch ASIC package. By driving optical signals almost from the silicon itself, CPO eliminates the power-hungry electrical traces across the PCB, reducing power per port by 30–50%. For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW of power—energy that can be redirected to computation. CPO also removes the transceiver as a discrete field-replaceable unit, eliminating a common point of mechanical failure.
+The power consumption of pluggable transceivers is becoming unsustainable at scale. **Co-Packaged Optics (CPO)** addresses this by moving the optical engine from the faceplate directly into the switch ASIC package. By driving optical signals almost from the silicon itself, CPO eliminates the power-hungry electrical traces across the PCB, reducing power per port by 30–50%.
+
+```{python}
+#| label: optical-dividend-calc
+#| echo: false
+from mlsysim.fmt import check
+
+class OpticalDividend:
+    """Power savings from Co-Packaged Optics (CPO)."""
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_ports = 128 # 51.2 Tbps switch
+    p_pluggable_w = OPTICS_POWER_PLUGGABLE_400G_W.m_as(watt)
+    p_cpo_w = OPTICS_POWER_CPO_400G_W.m_as(watt)
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    total_pluggable_kw = (n_ports * p_pluggable_w) / 1000
+    total_cpo_kw = (n_ports * p_cpo_w) / 1000
+    savings_kw = total_pluggable_kw - total_cpo_kw
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(savings_kw == 1.28, f"Savings {savings_kw:.2f}kW unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    savings_kw_str = f"{savings_kw:.2f}"
+    total_pluggable_kw_str = f"{total_pluggable_kw:.2f}"
+
+    @classmethod
+    def plot(cls):
+        """Visualizes the Optical Dividend."""
+        from mlsysim import viz
+        return viz.bar_compare(
+            labels=["Pluggable", "CPO"],
+            values=[cls.total_pluggable_kw, cls.total_cpo_kw],
+            title="Optical Power Dividend",
+            ylabel="Total Optics Power (kW)"
+        )
+```
+
+::: {.callout-notebook title="Napkin Math: The Optical Dividend"}
+
+**Problem**: Calculate the power savings of moving a 51.2 Tbps switch from pluggable transceivers to Co-Packaged Optics (CPO).
+
+1. **Pluggable Architecture**: 128 ports $\times$ `{python} int(OpticalDividend.p_pluggable_w)` W = **`{python} OpticalDividend.total_pluggable_kw_str` kW** for optics alone.
+2. **CPO Architecture**: 128 engines $\times$ `{python} int(OpticalDividend.p_cpo_w)` W = **1.28 kW**.
+3. **The Dividend**: You save **`{python} OpticalDividend.savings_kw_str` kW** of power *per switch*.
+
+**The Systems Insight**: In a cluster with 1,000 switches, pluggable optics consume **1.28 Megawatts** just to move light. CPO halves this "Network Tax," redirecting enough power to fuel an additional **1,800 GPUs**. At the Bisection Bandwidth Wall, sustainability is not a choice; it is an architectural requirement driven by the thermal limits of the faceplate.
+
+:::
+
+For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW of power—energy that can be redirected to computation. CPO also removes the transceiver as a discrete field-replaceable unit, eliminating a common point of mechanical failure.
 
 The bandwidth march continues to **800G and 1.6T links** (XDR InfiniBand and 800GbE/1.6TbE). A single 1.6 Tbps port delivers the bandwidth of four 400G lanes, allowing next-generation switches to provide 51.2 Tbps of aggregate throughput. The increased density allows architects to flatten the topology: a cluster that previously required three tiers of switches can now be serviceable with two, halving the transceiver count and reducing tail latency by removing an entire hop of switching and FEC overhead.
 
