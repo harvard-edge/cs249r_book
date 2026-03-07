@@ -13,7 +13,11 @@ def _ensure_unit(val, unit):
     return val
 
 def calc_network_latency_ms(distance_km):
-    """Calculates round-trip time in milliseconds."""
+    """
+    Calculates round-trip time in milliseconds based on speed of light in fiber.
+    
+    Source: Standard networking physics (c/1.5 refractive index).
+    """
     d = _ensure_unit(distance_km, ureg.kilometer)
     round_trip_s = (d * 2) / SPEED_OF_LIGHT_FIBER_KM_S
     return round_trip_s.m_as(ureg.millisecond)
@@ -21,6 +25,8 @@ def calc_network_latency_ms(distance_km):
 def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     """
     Core training time calculation (first-principles).
+    
+    Source: Standard Performance Modeling for Distributed Systems.
     Returns a Pint Quantity in seconds.
     """
     # ops / (n * p * eta)
@@ -36,22 +42,31 @@ def calc_training_time_days(total_ops, num_devices, peak_flops_per_device, effic
 
 def calc_amdahls_speedup(p, s):
     """
-    Calculates overall system speedup given:
-    p: fraction of work that can be improved (0.0 to 1.0)
-    s: speedup of that fraction
+    Calculates overall system speedup (Amdahl's Law).
+    
+    Source: Amdahl (1967), "Validity of the Single Processor Approach to 
+    Achieving Large Scale Computing Capabilities."
+    
+    Args:
+        p: fraction of work that can be improved (0.0 to 1.0)
+        s: speedup of that fraction
     """
     overall = 1 / ((1 - p) + (p / s))
     return overall
 
 def calc_monthly_egress_cost(bytes_per_sec, cost_per_gb):
-    """Calculates monthly cloud egress cost."""
+    """Calculates monthly cloud egress cost based on standard cloud egress rates."""
     b_s = _ensure_unit(bytes_per_sec, ureg.byte / ureg.second)
     monthly_bytes = b_s * (30 * ureg.day)
     cost = monthly_bytes * cost_per_gb
     return cost.m_as(ureg.dollar)
 
 def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
-    """Calculates Total Cost of Ownership (TCO)."""
+    """
+    Calculates Total Cost of Ownership (TCO).
+    
+    Source: Barroso et al. (2018), "The Datacenter as a Computer."
+    """
     u_cost = _ensure_unit(unit_cost, ureg.dollar)
     p_w = _ensure_unit(power_w, ureg.watt)
     price = _ensure_unit(kwh_price, ureg.dollar / ureg.kilowatt_hour)
@@ -63,7 +78,11 @@ def calc_fleet_tco(unit_cost, power_w, quantity, years, kwh_price):
     return total.m_as(ureg.dollar)
 
 def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
-    """Roofline bottleneck analysis."""
+    """
+    Roofline bottleneck analysis.
+    
+    Source: Williams et al. (2009), "Roofline Model."
+    """
     compute_time = ops / device_flops
     memory_time = model_bytes / device_bw
     t_comp_ms = compute_time.m_as(ureg.millisecond)
