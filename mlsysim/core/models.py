@@ -3,7 +3,8 @@
 
 import pint
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
+from .registry import Registry
 from .constants import (
     ureg, Q_,
     GPT2_PARAMS, GPT3_PARAMS, GPT4_EST_PARAMS, GPT4_TRAINING_GPU_DAYS,
@@ -29,14 +30,14 @@ class ModelSpec:
     model_size: Optional[Q_] = None # For models defined by size (DLRM)
     
     def __post_init__(self):
-        """Validate model specs: correct dimension type first, then positive value."""
+        \"\"\"Validate model specs: correct dimension type first, then positive value.\"\"\"
         from .constants import ureg
         if self.parameters is not None:
             if not self.parameters.is_compatible_with(ureg.count):
                 raise pint.DimensionalityError(self.parameters.units, ureg.count,
                     extra_msg=f" — {self.name}.parameters must be in param/count units")
             if self.parameters.magnitude <= 0:
-                raise ValueError(f"{self.name}: parameters must be positive.")
+                raise ValueError(f\"{self.name}: parameters must be positive.\")
         if self.inference_flops is not None and not self.inference_flops.is_compatible_with(ureg.flop):
             raise pint.DimensionalityError(self.inference_flops.units, ureg.flop,
                 extra_msg=f" — {self.name}.inference_flops must be in flop units")
@@ -48,7 +49,7 @@ class ModelSpec:
                 extra_msg=f" — {self.name}.model_size must be in byte units")
 
     def size_in_bytes(self, precision: Q_ = BYTES_FP16) -> Q_:
-        """Calculates the weight storage size for a given precision."""
+        \"\"\"Calculates the weight storage size for a given precision.\"\"\"
         from .constants import ureg
         if self.model_size:
             return self.model_size
@@ -57,47 +58,48 @@ class ModelSpec:
         return (param_count * bpp * ureg.byte).to(ureg.byte)
 
     def __repr__(self):
-        return f"Model({self.name}, {self.architecture})"
+        return f\"Model({self.name}, {self.architecture})\"
 
-class GPT:
-    """GPT Model Family."""
-    GPT2 = ModelSpec("GPT-2 (1.5B)", GPT2_PARAMS, "Transformer", layers=48)
-    GPT3 = ModelSpec("GPT-3 (175B)", GPT3_PARAMS, "Transformer", layers=96, training_ops=GPT3_TRAINING_OPS)
-    GPT4 = ModelSpec("GPT-4", GPT4_EST_PARAMS, "Transformer", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
+class GPT(Registry):
+    \"\"\"GPT Model Family.\"\"\"
+    GPT2 = ModelSpec(\"GPT-2 (1.5B)\", GPT2_PARAMS, \"Transformer\", layers=48)
+    GPT3 = ModelSpec(\"GPT-3 (175B)\", GPT3_PARAMS, \"Transformer\", layers=96, training_ops=GPT3_TRAINING_OPS)
+    GPT4 = ModelSpec(\"GPT-4\", GPT4_EST_PARAMS, \"Transformer\", layers=120, training_gpu_days=GPT4_TRAINING_GPU_DAYS)
 
-class Language:
-    """Large Language Models."""
-    GPT = GPT
-    BERT_Base = ModelSpec("BERT-Base", BERT_BASE_PARAMS, "Transformer", layers=12, inference_flops=22e9 * ureg.flop)
-    BERT_Large = ModelSpec("BERT-Large", BERT_LARGE_PARAMS, "Transformer", layers=24)
-    Llama2_70B = ModelSpec("Llama-2-70B", 70e9 * ureg.param, "Transformer", layers=80)
-    Llama3_8B = ModelSpec("Llama-3.1-8B", LLAMA3_8B_PARAMS, "Transformer", layers=32)
-    Llama3_70B = ModelSpec("Llama-3.1-70B", LLAMA3_70B_PARAMS, "Transformer", layers=80)
-    Llama3_405B = ModelSpec("Llama-3.1-405B", LLAMA3_405B_PARAMS, "Transformer", layers=126)
+class Language(Registry):
+    \"\"\"Large Language Models.\"\"\"
+    # GPT is a nested registry here, but for list() we want to treat it specially or flatten it
+    BERT_Base = ModelSpec(\"BERT-Base\", BERT_BASE_PARAMS, \"Transformer\", layers=12, inference_flops=22e9 * ureg.flop)
+    BERT_Large = ModelSpec(\"BERT-Large\", BERT_LARGE_PARAMS, \"Transformer\", layers=24)
+    Llama2_70B = ModelSpec(\"Llama-2-70B\", 70e9 * ureg.param, \"Transformer\", layers=80)
+    Llama3_8B = ModelSpec(\"Llama-3.1-8B\", LLAMA3_8B_PARAMS, \"Transformer\", layers=32)
+    Llama3_70B = ModelSpec(\"Llama-3.1-70B\", LLAMA3_70B_PARAMS, \"Transformer\", layers=80)
+    Llama3_405B = ModelSpec(\"Llama-3.1-405B\", LLAMA3_405B_PARAMS, \"Transformer\", layers=126)
 
-class Recommendation:
-    """Recommendation Models."""
-    DLRM = ModelSpec("DLRM", 25e9 * ureg.param, "DLRM", model_size=DLRM_MODEL_SIZE_FP32)
+class Recommendation(Registry):
+    \"\"\"Recommendation Models.\"\"\"
+    DLRM = ModelSpec(\"DLRM\", 25e9 * ureg.param, \"DLRM\", model_size=DLRM_MODEL_SIZE_FP32)
 
-class Vision:
-    """Image Classification and Detection."""
-    ALEXNET = ModelSpec("AlexNet", ALEXNET_PARAMS, "CNN", layers=8)
-    ResNet50 = ModelSpec("ResNet-50", RESNET50_PARAMS, "CNN", layers=50, inference_flops=RESNET50_FLOPs)
-    MobileNetV1 = ModelSpec("MobileNetV1", 4.2e6 * ureg.param, "CNN", layers=28)
-    MobileNetV2 = ModelSpec("MobileNetV2", MOBILENETV2_PARAMS, "CNN", layers=54, inference_flops=MOBILENETV2_FLOPs)
-    YOLOv8_Nano = ModelSpec("YOLOv8-Nano", 3.2e6 * ureg.param, "CNN", layers=225, training_ops=8.7e9 * ureg.flop)
+class Vision(Registry):
+    \"\"\"Image Classification and Detection.\"\"\"
+    ALEXNET = ModelSpec(\"AlexNet\", ALEXNET_PARAMS, \"CNN\", layers=8)
+    ResNet50 = ModelSpec(\"ResNet-50\", RESNET50_PARAMS, \"CNN\", layers=50, inference_flops=RESNET50_FLOPs)
+    MobileNetV1 = ModelSpec(\"MobileNetV1\", 4.2e6 * ureg.param, \"CNN\", layers=28)
+    MobileNetV2 = ModelSpec(\"MobileNetV2\", MOBILENETV2_PARAMS, \"CNN\", layers=54, inference_flops=MOBILENETV2_FLOPs)
+    YOLOv8_Nano = ModelSpec(\"YOLOv8-Nano\", 3.2e6 * ureg.param, \"CNN\", layers=225, training_ops=8.7e9 * ureg.flop)
 
-class Tiny:
-    """Always-on and Embedded models."""
-    DS_CNN = ModelSpec("DS-CNN (KWS)", KWS_DSCNN_PARAMS, "CNN", inference_flops=KWS_DSCNN_FLOPs)
-    AnomalyDetector = ModelSpec("Anomaly Detector", ANOMALY_MODEL_PARAMS, "MLP")
-    WakeVision = ModelSpec("Wake Vision (Doorbell)", 0.25e6 * ureg.param, "CNN", inference_flops=25e6 * ureg.flop)
+class Tiny(Registry):
+    \"\"\"Always-on and Embedded models.\"\"\"
+    DS_CNN = ModelSpec(\"DS-CNN (KWS)\", KWS_DSCNN_PARAMS, \"CNN\", inference_flops=KWS_DSCNN_FLOPs)
+    AnomalyDetector = ModelSpec(\"Anomaly Detector\", ANOMALY_MODEL_PARAMS, \"MLP\")
+    WakeVision = ModelSpec(\"Wake Vision (Doorbell)\", 0.25e6 * ureg.param, \"CNN\", inference_flops=25e6 * ureg.flop)
 
-class Models:
+class Models(Registry):
     Language = Language
     Recommendation = Recommendation
     Vision = Vision
     Tiny = Tiny
+    GPT = GPT
     
     # Common aliases
     GPT2 = GPT.GPT2
@@ -108,3 +110,26 @@ class Models:
     ResNet50 = Vision.ResNet50
     MobileNetV2 = Vision.MobileNetV2
     ALEXNET = Vision.ALEXNET
+
+    @classmethod
+    def list(cls, sort_by: str = 'parameters', reverse: bool = False) -> List[ModelSpec]:
+        \"\"\"Consolidated list of all models from all domains.\"\"\"
+        all_items = []
+        # Flatten the categories
+        all_items.extend(cls.GPT.list())
+        all_items.extend(cls.Language.list())
+        all_items.extend(cls.Recommendation.list())
+        all_items.extend(cls.Vision.list())
+        all_items.extend(cls.Tiny.list())
+        
+        # Deduplicate (aliases might cause duplicates)
+        seen = set()
+        unique_items = []
+        for item in all_items:
+            if item.name not in seen:
+                unique_items.append(item)
+                seen.add(item.name)
+        
+        if sort_by:
+            unique_items.sort(key=lambda x: getattr(x, sort_by, 0), reverse=reverse)
+        return unique_items

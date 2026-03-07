@@ -3,7 +3,8 @@
 
 import pint
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
+from .registry import Registry
 from .constants import (
     ureg, Q_,
     V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, V100_FLOPS_FP32,
@@ -72,11 +73,11 @@ class NetworkSpec:
     name: str
     bandwidth: Q_
 
-class Networks:
+class Networks(Registry):
     Ethernet_10G = NetworkSpec("10GbE", NETWORK_10G_BW)
     Ethernet_100G = NetworkSpec("100GbE", NETWORK_100G_BW)
 
-class Cloud:
+class Cloud(Registry):
     """Datacenter-scale Accelerators."""
     V100 = HardwareSpec("NVIDIA V100", 2017, V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, 
                         peak_flops_fp32=V100_FLOPS_FP32, dispatch_tax=0.02 * ureg.ms)
@@ -98,7 +99,7 @@ class Cloud:
     TPUv4 = HardwareSpec("Google TPU v4", 2021, TPUV4_MEM_BW, TPUV4_FLOPS_BF16, 32 * ureg.GiB, dispatch_tax=0.05 * ureg.ms)
     TPUv6 = HardwareSpec("Google TPU v6", 2025, TPUV6_MEM_BW, TPUV6_FLOPS_BF16, TPUV6_MEM_CAPACITY, dispatch_tax=0.04 * ureg.ms)
 
-class Edge:
+class Edge(Registry):
     """Mobile and Robotics Hardware."""
     Generic_Phone = HardwareSpec("Smartphone", 2024, MOBILE_NPU_MEM_BW, MOBILE_NPU_TOPS_INT8, 8 * ureg.GiB, 
                                  battery_capacity=15 * ureg.Wh, dispatch_tax=1.0 * ureg.ms) # High OS overhead
@@ -115,7 +116,7 @@ class Edge:
     GenericServer = HardwareSpec("Edge Server", 2024, 100 * ureg.GB/ureg.s, 1 * ureg.TFLOPs/ureg.s, 128 * ureg.GB, 300 * ureg.W, 
                                  dispatch_tax=0.1 * ureg.ms)
 
-class Tiny:
+class Tiny(Registry):
     """Microcontrollers and Embedded Systems."""
     # ESP32 at 240MHz is ~240 MIPS, for AI math without FPU it's roughly 100-200 MFLOPS (0.0001-0.0002 TFLOPS)
     ESP32 = HardwareSpec("ESP32-CAM", 2019, 0.1 * ureg.GB/ureg.second, 0.0002 * ureg.TFLOPs/ureg.second, ESP32_RAM, ESP32_POWER_MAX, 
@@ -123,7 +124,7 @@ class Tiny:
     Generic_MCU = HardwareSpec("Cortex-M7", 2020, 0.05 * ureg.GB/ureg.second, 0.001 * ureg.TFLOPs/ureg.second, MCU_RAM_KIB, 
                                dispatch_tax=2.0 * ureg.ms)
 
-class Hardware:
+class Hardware(Registry):
     Cloud = Cloud
     Edge = Edge
     Tiny = Tiny
@@ -136,3 +137,15 @@ class Hardware:
     B200 = Cloud.B200
     TPUv4 = Cloud.TPUv4
     ESP32 = Tiny.ESP32
+
+    @classmethod
+    def list(cls, sort_by: str = 'release_year', reverse: bool = False) -> List[HardwareSpec]:
+        """Consolidated list of all hardware from all tiers."""
+        all_items = []
+        all_items.extend(cls.Cloud.list())
+        all_items.extend(cls.Edge.list())
+        all_items.extend(cls.Tiny.list())
+        
+        if sort_by:
+            all_items.sort(key=lambda x: getattr(x, sort_by, 0), reverse=reverse)
+        return all_items
