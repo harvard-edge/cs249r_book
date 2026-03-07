@@ -30,6 +30,7 @@ from cli.commands.formatting import FormatCommand
 from cli.commands.info import InfoCommand
 from cli.commands.bib import BibCommand
 from cli.commands.render import RenderCommand
+from cli.commands.newsletter import NewsletterCommand
 
 console = Console()
 
@@ -64,6 +65,7 @@ class MLSysBookCLI:
         self.info_command = InfoCommand(self.config_manager, self.chapter_discovery)
         self.bib_command = BibCommand(self.config_manager, self.chapter_discovery)
         self.render_command = RenderCommand(self.config_manager, self.chapter_discovery)
+        self.newsletter_command = NewsletterCommand(self.config_manager, verbose=verbose)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -133,6 +135,19 @@ class MLSysBookCLI:
         quality_table.add_row("bib list|clean|update|sync", "Bibliography management", "./binder bib sync --vol1")
         quality_table.add_row("render plots [--vol1|chapter]", "Render matplotlib plots to PNG gallery", "./binder render plots --vol1")
 
+        # Newsletter Commands
+        nl_table = Table(show_header=True, header_style="bold magenta", box=None)
+        nl_table.add_column("Command", style="magenta", width=38)
+        nl_table.add_column("Description", style="white", width=30)
+        nl_table.add_column("Example", style="dim", width=28)
+
+        nl_table.add_row("newsletter new <title>", "Create a new draft", './binder newsletter new "Vol2 Update"')
+        nl_table.add_row("newsletter list", "List drafts and sent", "./binder newsletter list")
+        nl_table.add_row("newsletter preview <slug>", "Preview a draft", "./binder newsletter preview vol2")
+        nl_table.add_row("newsletter publish <slug>", "Push draft to Buttondown", "./binder newsletter publish vol2")
+        nl_table.add_row("newsletter fetch", "Pull sent emails for website", "./binder newsletter fetch")
+        nl_table.add_row("newsletter status", "Subscriber count & recent", "./binder newsletter status")
+
         # Management Commands
         mgmt_table = Table(show_header=True, header_style="bold blue", box=None)
         mgmt_table.add_column("Command", style="green", width=38)
@@ -153,6 +168,7 @@ class MLSysBookCLI:
         console.print(Panel(vol_table, title="📖 Volume Commands", border_style="magenta"))
         console.print(Panel(full_table, title="📚 Full Book Commands", border_style="blue"))
         console.print(Panel(quality_table, title="✅ Quality & Formatting", border_style="yellow"))
+        console.print(Panel(nl_table, title="📬 Newsletter", border_style="magenta"))
         console.print(Panel(mgmt_table, title="🔧 Management", border_style="cyan"))
 
         # Pro Tips
@@ -368,6 +384,10 @@ class MLSysBookCLI:
         """Handle render command group (plots)."""
         return self.render_command.run(args)
 
+    def handle_newsletter_command(self, args):
+        """Handle newsletter command group (new, list, preview, publish, fetch, status)."""
+        return self.newsletter_command.run(args)
+
 
     def handle_debug_command(self, args):
         """Handle debug command.
@@ -463,6 +483,7 @@ class MLSysBookCLI:
             "info": self.handle_info_command,
             "bib": self.handle_bib_command,
             "render": self.handle_render_command,
+            "newsletter": self.handle_newsletter_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,
             "about": self.handle_about_command,
