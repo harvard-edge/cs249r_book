@@ -1,10 +1,10 @@
 # formulas.py
 # Canonical equations for Machine Learning Systems
-# centralizing the logic for TCO, Physics, and Performance math.
+# centralizing the logic for TCO, Roofline, and Performance math.
 
 import math
 import pint
-from .constants import ureg, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour, second, byte
+from .constants import ureg, Q_, SPEED_OF_LIGHT_FIBER_KM_S, MS, MB, GB, hour, second, byte
 
 def _ensure_unit(val, unit):
     """Helper to attach unit if value is a raw number."""
@@ -20,7 +20,7 @@ def calc_network_latency_ms(distance_km):
 
 def dTime(total_ops, num_devices, peak_flops_per_device, efficiency_eta):
     """
-    Core training time calculation (physics-first).
+    Core training time calculation (first-principles).
     Returns a Pint Quantity in seconds.
     """
     # ops / (n * p * eta)
@@ -68,6 +68,16 @@ def calc_bottleneck(ops, model_bytes, device_flops, device_bw):
     memory_time = model_bytes / device_bw
     t_comp_ms = compute_time.m_as(ureg.millisecond)
     t_mem_ms = memory_time.m_as(ureg.millisecond)
+    
+    if t_comp_ms == 0:
+        return {
+            "compute_ms": 0.0,
+            "memory_ms": t_mem_ms,
+            "bottleneck": "Memory",
+            "ratio": float('inf'),
+            "intensity": 0.0
+        }
+
     is_memory_bound = t_mem_ms > t_comp_ms
     ratio = t_mem_ms / t_comp_ms if is_memory_bound else t_comp_ms / t_mem_ms
     intensity = ops / model_bytes
@@ -173,6 +183,96 @@ def calc_tree_allreduce_time(message_bytes, n_gpus, bandwidth_bytes_s, latency_s
     bw_term = 2 * log_n * msg / bw
     lat_term = 2 * log_n * lat
     return (bw_term + lat_term).to(ureg.second)
+
+
+def calc_transformer_training_flops(n_params, n_tokens):
+    """
+    Estimate total training FLOPs for a Transformer model (6PD rule).
+    
+    T ≈ 6 × P × D
+    
+    Source: Kaplan et al. (2020), "Scaling Laws for Neural Language Models"
+    
+    Args:
+        n_params: Number of parameters (P)
+        n_tokens: Number of training tokens (D)
+        
+    Returns:
+        Quantity[flop]: Total training FLOPs
+    """
+    p = _ensure_unit(n_params, ureg.param).to(ureg.count).magnitude
+    d = _ensure_unit(n_tokens, ureg.count).magnitude
+    return (6 * p * d) * ureg.flop
+
+
+def calc_activation_memory(n_layers, seq_len, batch_size, hidden_dim, n_heads=None, 
+                           precision_bytes=2, strategy="selective"):
+    """
+    Estimate activation memory for a Transformer layer.
+    
+    Source: Korthikanti et al. (2023), "Reducing Activation Memory in Transformer Training"
+    
+    Args:
+        n_layers: Number of layers (L)
+        seq_len: Sequence length (S)
+        batch_size: Batch size (B)
+        hidden_dim: Hidden dimension (H)
+        n_heads: Number of attention heads (A)
+        precision_bytes: Bytes per element (default 2 for FP16)
+        strategy: Recompute strategy ('none', 'selective', 'full')
+        
+    Returns:
+        Quantity[byte]: Total activation memory
+    """
+    s, b, h = seq_len, batch_size, hidden_dim
+    # Basic activation per layer: 34 * s * b * h (without recompute)
+    # With selective recompute, it's significantly lower.
+    if strategy == "full":
+        # Only store inputs to the block
+        bytes_per_layer = 2 * s * b * h * precision_bytes
+    elif strategy == "selective":
+        # Store some intermediate activations to avoid full recompute
+        # Reference estimate: ~10 * s * b * h bytes
+        bytes_per_layer = 10 * s * b * h * precision_bytes
+    else:
+        # No recompute: store everything
+        bytes_per_layer = 34 * s * b * h * precision_bytes
+        
+    return (n_layers * bytes_per_layer) * ureg.byte
+
+
+def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node, 
+                                     intra_node_bw, inter_node_bw, 
+                                     intra_node_lat=Q_("500 ns"), inter_node_lat=Q_("5 us")):
+    """
+    Hierarchical AllReduce time estimate (Intra-node NVLink + Inter-node IB).
+    
+    T = T_intra + T_inter + T_intra
+    
+    Source: Standard implementation in NCCL / Horovod.
+    
+    Args:
+        message_bytes: Message size (M)
+        n_nodes: Number of nodes
+        gpus_per_node: GPUs per node (usually 8)
+        intra_node_bw: Intra-node bandwidth (NVLink)
+        inter_node_bw: Inter-node bandwidth (InfiniBand)
+        intra_node_lat: Intra-node latency
+        inter_node_lat: Inter-node latency
+        
+    Returns:
+        Quantity[second]: Estimated communication time
+    """
+    # 1. Intra-node Reduce (to one GPU per node)
+    t_reduce = calc_ring_allreduce_time(message_bytes, gpus_per_node, intra_node_bw, intra_node_lat)
+    
+    # 2. Inter-node AllReduce (between lead GPUs of each node)
+    t_allreduce_inter = calc_ring_allreduce_time(message_bytes, n_nodes, inter_node_bw, inter_node_lat)
+    
+    # 3. Intra-node Broadcast (back to all GPUs)
+    t_broadcast = t_reduce # Symmetry assumption
+    
+    return t_reduce + t_allreduce_inter + t_broadcast
 
 
 def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
