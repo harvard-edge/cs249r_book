@@ -1,4 +1,4 @@
-# viz.py
+# viz/plots.py
 # Centralized Visualization Style for MLSys Book
 # Ensures all generated figures across Vol 1 & 2 share a consistent,
 # MIT Press-ready aesthetic.
@@ -6,11 +6,11 @@
 try:
     import matplotlib.pyplot as plt
     import numpy as np
-    _viz_available = True
+    _matplotlib_available = True
 except ImportError:
     plt = None
     np = None
-    _viz_available = False
+    _matplotlib_available = False
 
 # --- Brand & Book Palette ---
 COLORS = {
@@ -30,128 +30,235 @@ COLORS = {
 
 def set_book_style():
     """Applies the global matplotlib style configuration."""
-    if not _viz_available:
-        raise ImportError(
-            "matplotlib and numpy are required for plot generation. "
-            "Install them with: pip install matplotlib numpy"
-        )
+    if not _matplotlib_available:
+        raise ImportError("matplotlib is required for plot generation.")
     plt.rcParams.update({
         'font.family': 'sans-serif',
-        'font.sans-serif': [
-            'Helvetica',         # macOS native
-            'Helvetica Neue',    # macOS modern variant
-            'Nimbus Sans L',     # Free Helvetica clone (TeX/Linux)
-            'TeX Gyre Heros',    # Free Helvetica clone (TeX)
-            'Arial',             # Windows fallback
-            'DejaVu Sans',       # Universal last resort
-        ],
+        'font.sans-serif': ['Helvetica', 'Helvetica Neue', 'Arial', 'DejaVu Sans'],
         'font.size': 10,
         'text.color': COLORS['primary'],
         'axes.labelsize': 11,
-        'axes.labelcolor': COLORS['primary'],
         'axes.titlesize': 12,
         'axes.titleweight': 'bold',
-        'axes.edgecolor': COLORS['primary'],
-        'axes.linewidth': 0.8,
-        'axes.spines.top': False,
-        'axes.spines.right': False,
-        'xtick.labelsize': 9,
-        'ytick.labelsize': 9,
-        'xtick.color': COLORS['primary'],
-        'ytick.color': COLORS['primary'],
         'axes.grid': True,
         'grid.color': COLORS['grid'],
         'grid.alpha': 0.4,
         'grid.linestyle': '--',
-        'grid.linewidth': 0.6,
-        'legend.fontsize': 9,
-        'legend.frameon': False,
-        'legend.title_fontsize': 10,
-        'lines.linewidth': 2.0,
-        'lines.markersize': 7,
         'figure.dpi': 300,
-        'savefig.bbox': 'tight',
-        'savefig.pad_inches': 0.1,
-        'figure.figsize': (8, 5),
-        'figure.autolayout': True
+        'savefig.bbox': 'tight'
     })
 
-# --- Lightweight helpers ---
-
-def setup_plot(figsize=None):
+def setup_plot(figsize=(8, 5)):
     """One-line plot setup for QMD blocks."""
     set_book_style()
     fig, ax = plt.subplots(figsize=figsize)
     return fig, ax, COLORS, plt
 
-def bar_compare(labels, values, title, ylabel, goal_line=None, colors=None):
-    """Creates a standard comparison bar chart with value labels."""
-    fig, ax, COLORS, plt = setup_plot()
-    if colors is None:
-        colors = [COLORS['BlueLine'], COLORS['GreenLine'], COLORS['OrangeLine'], COLORS['VioletLine']]
-    
-    bars = ax.bar(labels, values, color=colors[:len(labels)], alpha=0.8, edgecolor='white', linewidth=1)
-    ax.set_title(title)
-    ax.set_ylabel(ylabel)
-    
-    # Add value labels
-    for bar in bars:
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height + (max(values)*0.02),
-                f'{height:.2f}', ha='center', va='bottom', fontsize=9, fontweight='bold')
+def plot_roofline(hardware_node, workloads=None):
+    """
+    Plots a publication-quality Roofline Model for a given HardwareNode.
 
-    if goal_line:
-        ax.axhline(y=goal_line, color=COLORS['RedLine'], linestyle='--', linewidth=1.5, label='Constraint')
-        ax.legend()
-        
-    return fig
+    Features:
+    - Ridge point annotated with numeric value
+    - Memory-bound and compute-bound regions shaded and labeled
+    - Memory bandwidth ceiling (diagonal) and compute ceiling (flat)
+    - Workloads plotted with bottleneck classification
+    """
+    # 1. PARAMETERS
+    peak_flops = hardware_node.compute.peak_flops.to("TFLOPs/s").magnitude
+    peak_bw = hardware_node.memory.bandwidth.to("GB/s").magnitude
+    ridge_point = peak_flops / (peak_bw / 1000)  # FLOP/Byte
 
-def plot_latency_breakdown(profile, title="Latency Breakdown"):
-    """Plots a stacked bar showing Compute vs Memory vs Overhead."""
-    fig, ax, COLORS, plt = setup_plot(figsize=(6, 5))
-    
-    comp = profile.latency_compute.m_as('ms')
-    mem = profile.latency_memory.m_as('ms')
-    ovh = profile.latency_overhead.m_as('ms')
-    
-    labels = ['Latency']
-    ax.bar(labels, [comp], label='Compute', color=COLORS['BlueLine'], alpha=0.8)
-    ax.bar(labels, [mem], bottom=[comp], label='Memory', color=COLORS['OrangeLine'], alpha=0.8)
-    ax.bar(labels, [ovh], bottom=[comp+mem], label='Overhead', color=COLORS['RedLine'], alpha=0.8)
-    
-    ax.set_title(title)
-    ax.set_ylabel("Time (ms)")
-    ax.legend(loc='upper right')
-    
-    total = comp + mem + ovh
-    ax.text(0, total/2, f"Total: {total:.2f} ms", ha='center', fontweight='bold', bbox=dict(facecolor='white', alpha=0.8))
-    
-    return fig
+    # 2. AXIS RANGE
+    x_min, x_max = 0.1, 10000
+    x = np.logspace(np.log10(x_min), np.log10(x_max), 500)
 
-def plot_roofline(profile, title="System Roofline Analysis"):
-    """Plots the hardware roofline and the current workload point."""
-    fig, ax, COLORS, plt = setup_plot()
+    # 3. ROOFLINE CURVES
+    y_mem = peak_bw * x / 1000  # BW * AI, converted to TFLOP/s
+    y_compute = np.full_like(x, peak_flops)
+    y_roof = np.minimum(y_mem, y_compute)
+
+    # 4. PLOT
+    fig, ax, colors, _ = setup_plot(figsize=(9, 5.5))
+
+    # Shaded regions
+    mem_mask = x <= ridge_point
+    comp_mask = x >= ridge_point
+    ax.fill_between(
+        x[mem_mask],
+        y_roof[mem_mask] * 0.001,
+        y_roof[mem_mask],
+        color=colors["OrangeL"],
+        alpha=0.5,
+        label="Memory-bound region",
+    )
+    ax.fill_between(
+        x[comp_mask],
+        y_roof[comp_mask] * 0.001,
+        y_roof[comp_mask],
+        color=colors["BlueFill"],
+        alpha=0.5,
+        label="Compute-bound region",
+    )
+
+    # Roofline line
+    ax.loglog(
+        x,
+        y_roof,
+        color=colors["BlueLine"],
+        linewidth=2.5,
+        zorder=5,
+    )
+
+    # Memory bandwidth ceiling label (on the slope)
+    slope_x = ridge_point * 0.08
+    slope_y = peak_bw * slope_x / 1000
+    ax.text(
+        slope_x,
+        slope_y * 1.6,
+        f"BW ceiling: {peak_bw:.0f} GB/s",
+        color=colors["OrangeLine"],
+        fontsize=8.5,
+        fontweight="bold",
+        rotation=38,
+        ha="center",
+        va="bottom",
+    )
+
+    # Compute ceiling label (on the flat)
+    ax.text(
+        ridge_point * 8,
+        peak_flops * 1.12,
+        f"Compute ceiling: {peak_flops:.0f} TFLOP/s",
+        color=colors["BlueLine"],
+        fontsize=8.5,
+        fontweight="bold",
+        ha="center",
+        va="bottom",
+    )
+
+    # Ridge point
+    ax.plot(
+        ridge_point,
+        peak_flops,
+        "D",
+        color=colors["crimson"],
+        markersize=9,
+        zorder=10,
+    )
+    ax.annotate(
+        f"Ridge Point\n{ridge_point:.1f} FLOP/Byte",
+        xy=(ridge_point, peak_flops),
+        xytext=(ridge_point * 3, peak_flops * 0.35),
+        fontsize=8.5,
+        fontweight="bold",
+        color=colors["crimson"],
+        ha="center",
+        arrowprops=dict(
+            arrowstyle="->",
+            color=colors["crimson"],
+            lw=1.2,
+        ),
+    )
+
+    # Vertical dashed line at ridge point
+    ax.axvline(
+        ridge_point,
+        color=colors["crimson"],
+        linestyle=":",
+        linewidth=0.8,
+        alpha=0.5,
+    )
+
+    # Region labels
+    ax.text(
+        x_min * 1.5,
+        peak_flops * 0.6,
+        "MEMORY\nBOUND",
+        color=colors["OrangeLine"],
+        fontsize=11,
+        fontweight="bold",
+        alpha=0.25,
+        ha="left",
+        va="center",
+    )
+    ax.text(
+        x_max * 0.4,
+        peak_flops * 0.6,
+        "COMPUTE\nBOUND",
+        color=colors["BlueLine"],
+        fontsize=11,
+        fontweight="bold",
+        alpha=0.25,
+        ha="right",
+        va="center",
+    )
+
+    # Plot workloads
+    if workloads:
+        from ..core.engine import Engine
+
+        workload_colors = [
+            colors["crimson"],
+            colors["GreenLine"],
+            colors["VioletLine"],
+            colors["BrownLine"],
+        ]
+        for i, model in enumerate(workloads):
+            profile = Engine.solve(model, hardware_node, efficiency=1.0)
+            ai = profile.arithmetic_intensity.magnitude
+            perf = min(peak_bw * ai / 1000, peak_flops)
+            c = workload_colors[i % len(workload_colors)]
+            bound = "memory" if ai < ridge_point else "compute"
+            ax.plot(ai, perf, "o", color=c, markersize=9, zorder=10)
+            ax.annotate(
+                f"{model.name}\n({bound}-bound)",
+                xy=(ai, perf),
+                xytext=(ai * 0.3, perf * 0.4),
+                fontsize=8,
+                fontweight="bold",
+                color=c,
+                ha="center",
+                arrowprops=dict(arrowstyle="->", color=c, lw=1),
+            )
+
+    ax.set_xlabel("Arithmetic Intensity (FLOP/Byte)")
+    ax.set_ylabel("Performance (TFLOP/s)")
+    ax.set_title(f"Roofline: {hardware_node.name}")
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
+    ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
+    return fig, ax
+
+def plot_evaluation_scorecard(evaluation):
+    """
+    Visualizes the supply-vs-demand scorecard for a SystemEvaluation.
+    Follows the LEGO-style visualization pattern.
+    """
+    # 1. PARAMETERS
+    from ..core.constants import Q_
+    l1_metrics = evaluation.feasibility.metrics
+    l2_metrics = evaluation.performance.metrics
     
-    max_perf = profile.peak_flops_actual.m_as('GFLOPs/s')
-    max_bw = profile.peak_bw_actual.m_as('GB/s')
-    ridge_point = max_perf / max_bw
+    # 2. CALCULATION
+    l1_ratio = (l1_metrics['weight_size'] / l1_metrics['capacity']).to_base_units().magnitude
+    l2_ratio = (l2_metrics['latency'] / l2_metrics.get('sla_latency', Q_("1000 ms"))).to_base_units().magnitude
     
-    ai = profile.arithmetic_intensity.m_as('flop/byte')
-    achieved_perf = min(ai * max_bw, max_perf)
+    levels = ['Memory (RAM)', 'Latency (SLA)']
+    ratios = [l1_ratio, l2_ratio]
     
-    # X axis: Arithmetic Intensity
-    x = np.logspace(np.log10(ridge_point/100), np.log10(ridge_point*100), 100)
-    y = np.minimum(x * max_bw, max_perf)
+    # 3. OUTPUT (Visualization)
+    fig, ax, colors, plt = setup_plot(figsize=(8, 4))
+    bar_colors = [colors['RedLine'] if r > 1.0 else colors['GreenLine'] for r in ratios]
+    bars = ax.barh(levels, ratios, color=bar_colors, alpha=0.7, edgecolor='black')
     
-    ax.plot(x, y, color=COLORS['primary'], linewidth=2, label='Roofline')
-    ax.scatter([ai], [achieved_perf], color=COLORS['RedLine'], s=100, zorder=5, label=f'Workload (AI={ai:.1f})')
+    ax.axvline(1.0, color=colors['primary'], linestyle='--', linewidth=2, label='Physical Limit / SLA')
     
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.set_xlabel('Arithmetic Intensity (FLOP/Byte)')
-    ax.set_ylabel('Performance (GFLOPs/s)')
-    ax.set_title(title)
-    ax.grid(True, which="both", ls="-", alpha=0.2)
-    ax.legend()
-    
-    return fig
+    for i, (bar, ratio) in enumerate(zip(bars, ratios)):
+        ax.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height()/2, f"{ratio:.1%}", 
+                va='center', fontweight='bold', color=bar_colors[i])
+
+    ax.set_xlim(0, max(max(ratios) + 0.5, 1.5))
+    ax.set_xlabel('Resource Utilization (Demand / Supply)')
+    ax.set_title(f'System Evaluation: {evaluation.scenario_name}')
+    return fig, ax
