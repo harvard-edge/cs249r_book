@@ -62,7 +62,7 @@ Machine learning systems have a *physics*. Data must move through memory hierarc
 # │
 # │ Goal: Demonstrate the massive scale divergence between traditional software and AI.
 # │ Show: Google Search volume vs. the GPU/CPU compute performance gap.
-# │ How: Compare daily search counts (SI units) and TFLOPS density (A100 vs. CPU).
+# │ How: Compare daily search counts (SI units) and TFLOPS density (H100 vs. CPU).
 # │
 # │ Imports: mlsysim.core.constants (GOOGLE_SEARCHES_PER_DAY, H100/CPU FLOPS)
 # │ Exports: AIMomentStats.google_search_b_str,
@@ -558,7 +558,7 @@ class AlexNetBreakthrough:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    model = Models.Vision.ALEXNET
+    model = Models.Vision.AlexNet
     alexnet_top5_error = 15.3
     second_place_error = 26.2
 
@@ -1094,7 +1094,7 @@ The shift from expert systems to statistical learning to deep learning has drama
 # │ Exports: GPT4Scale.gpt4_gpu_m_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.core.constants import MILLION
+from mlsysim.core.constants import MILLION, GPT4_TRAINING_GPU_DAYS
 from mlsysim.fmt import fmt_percent, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1108,7 +1108,7 @@ class GPT4Scale:
     model = Models.GPT4
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    gpu_days_m = model.training_gpu_days / MILLION
+    gpu_days_m = GPT4_TRAINING_GPU_DAYS / MILLION
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(gpu_days_m >= 1.0, f"GPT-4 scale should be >=1M GPU days, got {gpu_days_m:.1f}M")
@@ -2172,14 +2172,9 @@ class ScenarioRegistry:
     app_doorbell = Applications.Doorbell
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_mission = app_frontier.mission_goal
-    frontier_limit   = app_frontier.critical_constraint
-
-    drive_mission = app_drive.mission_goal
-    drive_limit   = app_drive.critical_constraint
-
-    doorbell_mission = app_doorbell.mission_goal
-    doorbell_limit   = app_doorbell.critical_constraint
+    frontier_limit   = f"SLA: {fmt(app_frontier.sla_latency.m_as('ms'), precision=0)} ms latency"
+    drive_limit      = f"SLA: {fmt(app_drive.sla_latency.m_as('ms'), precision=0)} ms latency"
+    doorbell_limit   = f"Power: {fmt(app_doorbell.power_budget.m_as('mW'), precision=0)} mW" if app_doorbell.power_budget else f"SLA: {fmt(app_doorbell.sla_latency.m_as('ms'), precision=0)} ms latency"
 ```
 
 The data-dependent nature of ML systems creates dynamic lifecycles requiring continuous monitoring and adaptation. Unlike source code that changes only through developer modifications, data reflects real-world dynamics: distribution shifts can silently alter system behavior without any code changes. Traditional tools designed for deterministic code-based systems prove insufficient here. Version control excels at tracking discrete code changes but struggles with large, evolving datasets. Testing frameworks designed for deterministic outputs require adaptation for probabilistic predictions. We address data versioning and quality management in @sec-data-engineering and monitoring approaches that handle probabilistic behaviors in @sec-ml-operations.
@@ -2588,6 +2583,7 @@ This book makes a stronger claim: ML systems engineering is a *distinct engineer
 # │          DeploymentSystems.mem_span_str, DeploymentSystems.compute_span_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.core import Systems
+from mlsysim import Hardware
 from mlsysim.core.constants import GB, MB, KiB, watt, milliwatt, TFLOPs, second, flop
 from mlsysim.fmt import fmt_percent, fmt, check
 
@@ -2598,37 +2594,41 @@ class DeploymentSystems:
     """
 
     # ┌── 1. LOAD (Archetypes) ───────────────────────────────────────────────
-    s_cloud = Systems.Cloud    # H100
-    s_edge = Systems.Edge      # Jetson
-    s_mobile = Systems.Mobile  # Smartphone
-    s_tiny = Systems.Tiny      # ESP32
+    # Tiers provide RAM/storage; Hardware provides compute/power
+    t_cloud  = Systems.Tiers.Cloud
+    t_edge   = Systems.Tiers.Edge
+    t_mobile = Systems.Tiers.Mobile
+    t_tiny   = Systems.Tiers.Tiny
+
+    h_cloud  = Hardware.Cloud.H100
+    h_edge   = Hardware.Edge.JetsonOrinNX
+    h_mobile = Hardware.Mobile.iPhone15Pro
+    h_tiny   = Hardware.Tiny.ESP32
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # We compare the scaling factors (Cloud vs Tiny)
-    mem_scaling = (s_cloud.ram / s_tiny.ram).to('count').magnitude
-    compute_scaling = (s_cloud.peak_flops / s_tiny.peak_flops).to('count').magnitude
-    power_scaling = (s_cloud.power_budget / s_tiny.power_budget).to('count').magnitude
+    mem_scaling = (t_cloud.ram / t_tiny.ram).to('count').magnitude
+    compute_scaling = (h_cloud.peak_flops / h_tiny.peak_flops).to('count').magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(mem_scaling > 1e5, "Cloud memory should be >100,000x TinyML memory.")
     check(compute_scaling > 1e6, "Cloud compute should be >1,000,000x TinyML compute.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    cloud_mem_str = fmt(s_cloud.ram.m_as(GB), precision=0)
-    cloud_compute_str = fmt(s_cloud.peak_flops.m_as(TFLOPs/second), precision=0)
-    cloud_power_str = fmt(s_cloud.power_budget.m_as(watt), precision=0)
+    cloud_mem_str = fmt(t_cloud.ram.m_as(GB), precision=0)
+    cloud_compute_str = fmt(h_cloud.peak_flops.m_as(TFLOPs/second), precision=0)
+    cloud_power_str = fmt(h_cloud.tdp.m_as(watt), precision=0)
 
-    edge_mem_str = fmt(s_edge.ram.m_as(GB), precision=0)
-    edge_compute_str = fmt(s_edge.peak_flops.m_as(TFLOPs/second), precision=1)
-    edge_power_str = fmt(s_edge.power_budget.m_as(watt), precision=0)
+    edge_mem_str = fmt(t_edge.ram.m_as(GB), precision=0)
+    edge_compute_str = fmt(h_edge.peak_flops.m_as(TFLOPs/second), precision=1)
+    edge_power_str = fmt(h_edge.tdp.m_as(watt), precision=0)
 
-    mobile_mem_str = fmt(s_mobile.ram.m_as(GB), precision=0)
-    mobile_compute_str = fmt(s_mobile.peak_flops.m_as(TFLOPs/second), precision=1)
-    mobile_power_str = fmt(s_mobile.power_budget.m_as(watt), precision=0)
+    mobile_mem_str = fmt(t_mobile.ram.m_as(GB), precision=0)
+    mobile_compute_str = fmt(h_mobile.peak_flops.m_as(TFLOPs/second), precision=1)
+    mobile_power_str = fmt(h_mobile.tdp.m_as(watt), precision=0)
 
-    tiny_mem_str = fmt(s_tiny.ram.m_as(KiB), precision=0)
-    tiny_compute_str = fmt(s_tiny.peak_flops.m_as(TFLOPs/second), precision=4)
-    tiny_power_str = fmt(s_tiny.power_budget.m_as(milliwatt), precision=0)
+    tiny_mem_str = fmt(t_tiny.ram.m_as(KiB), precision=0)
+    tiny_compute_str = fmt(h_tiny.peak_flops.m_as(TFLOPs/second), precision=4)
+    tiny_power_str = fmt(h_tiny.tdp.m_as(milliwatt), precision=0)
 
     mem_span_str = f"{mem_scaling:.0e}".replace("e+0", "10^").replace("e+", "10^")
     compute_span_str = f"{compute_scaling:.0e}".replace("e+0", "10^").replace("e+", "10^")
