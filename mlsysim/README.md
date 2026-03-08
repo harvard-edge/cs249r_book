@@ -14,9 +14,10 @@ High-level model definitions (`TransformerWorkload`, `CNNWorkload`).
 
 ### Layer B: Hardware Registry (`mlsysim.hardware`)
 Precise, concrete specifications for real-world silicon.
-*   **Cloud:** `Hardware.H100`, `Hardware.H200`, `Hardware.MI300X`, `Hardware.TPUv5p`.
-*   **Mobile/Workstation:** `Hardware.iPhone`, `Hardware.Snapdragon`, `Hardware.MacBookM3Max`.
-*   **Edge/Tiny:** `Hardware.Jetson`, `Hardware.TeslaFSD`, `Hardware.ESP32`, `Hardware.Arduino`.
+*   **Cloud:** `Hardware.H100`, `Hardware.H200`, `Hardware.B200`, `Hardware.MI300X`, `Hardware.TPUv5p`.
+*   **Workstation:** `Hardware.DGXSpark`, `Hardware.MacBook`.
+*   **Mobile:** `Hardware.iPhone`, `Hardware.Snapdragon`.
+*   **Edge/Tiny:** `Hardware.Jetson`, `Hardware.ESP32`, `Hardware.Tiny.HimaxWE1`.
 
 ### Layer C: Infrastructure & Environment (`mlsysim.infra`)
 Regional grid profiles and datacenter sustainability.

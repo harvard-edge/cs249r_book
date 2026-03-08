@@ -587,3 +587,21 @@ OVERHEAD_PIPELINE_BUBBLE = 0.05    # ~5% for well-tuned pipeline parallelism
 OVERHEAD_CHECKPOINT = 0.03         # ~3% for optimized async checkpointing
 OVERHEAD_FAILURE_RECOVERY = 0.10   # ~10% for failure and restart at 10K+ scale
 OVERHEAD_MAINTENANCE = 0.05        # ~5% for rolling upgrades, maintenance windows
+
+# --- Scaling Laws (Chinchilla Physics) ---
+# Source: Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models"
+CHINCHILLA_TOKENS_PER_PARAM = 20   # Compute-optimal token count (D ≈ 20P)
+CHINCHILLA_COMPUTE_CONSTANT = 6    # C ≈ 6PD (FLOPs per parameter per token)
+
+# --- Critical Batch Size (McCandlish et al. 2018) ---
+# Source: McCandlish et al. (2018), "An Empirical Model of Large-Batch Training"
+# Estimates for when Data Parallelism hits diminishing returns.
+CRITICAL_BATCH_SIZE_BERT = 256
+CRITICAL_BATCH_SIZE_GPT3 = 4096
+CRITICAL_BATCH_SIZE_DEFAULT = 1024
+
+# --- Orchestration & Queueing (Little's Law) ---
+# Typical cluster utilization targets and arrival rates for scenarios.
+TARGET_CLUSTER_UTILIZATION = 0.80  # 80% is high for shared research clusters
+QUEUE_DISCIPLINE = "FIFO"          # First-In-First-Out (Baseline)
+AVERAGE_RESEARCHER_JOB_DAYS = 2.0  # Median job length in research clusters

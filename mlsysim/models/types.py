@@ -31,6 +31,7 @@ class Workload(BaseModel):
     parameters: Optional[Quantity] = None
     model_size: Optional[Quantity] = None
     inference_flops: Optional[Quantity] = None
+    data_rate: Optional[Quantity] = None # e.g., TB/hour for autonomous driving
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         """Lowers the workload into a hardware-agnostic computation graph."""

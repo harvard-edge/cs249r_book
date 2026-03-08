@@ -31,7 +31,11 @@ from .core.solver import (
     ReliabilitySolver, 
     SustainabilitySolver, 
     EconomicsSolver, 
-    ServingSolver
+    ServingSolver,
+    DataSolver,
+    ScalingSolver,
+    OrchestrationSolver,
+    CompressionSolver
 )
 
 # Export Registries

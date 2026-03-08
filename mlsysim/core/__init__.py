@@ -12,8 +12,5 @@ from ..models.registry import Models
 from ..systems.registry import Systems, Tiers
 from ..infra.registry import Infra
 
-from .systems import Archetypes, Systems as LegacySystems
-from .datacenters import Datacenters
-from .deployment import Tiers as LegacyTiers
 from .engine import Engine
 from .scenarios import Scenario, Scenarios, Applications, Fleet

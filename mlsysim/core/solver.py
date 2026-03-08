@@ -13,6 +13,7 @@ from .formulas import (
     calc_pipeline_bubble
 )
 from .constants import ureg, Q_
+from .types import Quantity
 from ..models.types import Workload, TransformerWorkload
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet, NetworkFabric
@@ -397,3 +398,223 @@ class EconomicsSolver(BaseSolver):
         }
         result.update(energy_result)
         return result
+
+class DataSolver(BaseSolver):
+    """
+    Analyzes the 'Data Wall' — the throughput bottleneck between storage and compute.
+    
+    This solver models the data pipeline constraints, comparing the data demand 
+    of a workload (e.g., training tokens or high-resolution video frames) 
+    against the physical bandwidth of the storage hierarchy and IO interconnects.
+
+    Literature Source:
+    1. Janapa Reddi et al. (2025), "Machine Learning Systems," Chapter 4 (Data Engineering).
+    2. Beitzel et al. (2024), "The Data Wall: Scaling Laws for Data Ingestion in AI."
+    3. Mohan et al. (2022), "Analyzing and Mitigating Data Bottlenecks in Deep Learning Training."
+    """
+    def solve(self, workload_data_rate: Quantity, hardware: HardwareNode) -> Dict[str, Any]:
+        """
+        Solves for data pipeline feasibility.
+
+        Parameters
+        ----------
+        workload_data_rate : Quantity
+            The required data ingestion rate (e.g., TB/hour or GB/s).
+        hardware : HardwareNode
+            The hardware node with storage and interconnect specs.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Pipeline metrics including utilization and stall probability.
+        """
+        # 1. Resolve Hardware Supply
+        storage_bw = getattr(hardware.storage, 'bandwidth', Q_("0 GB/s")) if hardware.storage else Q_("0 GB/s")
+        io_bw = getattr(hardware.interconnect, 'bandwidth', Q_("0 GB/s")) if hardware.interconnect else Q_("0 GB/s")
+        
+        # The pipeline is limited by the minimum of storage and interconnect BW
+        supply_bw = min(storage_bw.to("GB/s"), io_bw.to("GB/s"))
+        demand_bw = workload_data_rate.to("GB/s")
+        
+        utilization = (demand_bw / supply_bw).magnitude if supply_bw.magnitude > 0 else float('inf')
+        is_stalled = utilization > 1.0
+        
+        return {
+            "is_stalled": is_stalled,
+            "utilization": utilization,
+            "demand_bw": demand_bw,
+            "supply_bw": supply_bw,
+            "bottleneck": "Storage" if (storage_bw < io_bw and storage_bw.magnitude > 0) else "Interconnect",
+            "margin": (supply_bw - demand_bw).to("GB/s")
+        }
+
+class ScalingSolver(BaseSolver):
+    """
+    Analyzes the 'Scaling Physics' of model training (Chinchilla Laws).
+    
+    This solver determines the optimal model size (P) and dataset size (D) 
+    given a compute budget (C), following the compute-optimal training 
+    regime where D ≈ 20P.
+
+    Literature Source:
+    1. Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models."
+    2. Kaplan et al. (2020), "Scaling Laws for Neural Language Models."
+    3. McCandlish et al. (2018), "An Empirical Model of Large-Batch Training."
+    """
+    def solve(self, compute_budget: Quantity, target_model_size: Optional[Quantity] = None) -> Dict[str, Any]:
+        """
+        Solves for compute-optimal model and dataset parameters.
+
+        Parameters
+        ----------
+        compute_budget : Quantity
+            Total training budget (e.g., in TFLOPs or H100-GPU-days).
+        target_model_size : Quantity, optional
+            If provided, calculates the required tokens for this specific model size.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Optimal parameters, token count, and training duration estimates.
+        """
+        # C = 6 * P * D
+        # Chinchilla: D = 20 * P
+        # C = 120 * P^2  => P = sqrt(C / 120)
+        
+        from .constants import CHINCHILLA_TOKENS_PER_PARAM, CHINCHILLA_COMPUTE_CONSTANT
+        
+        # Convert H100-days to FLOPs if necessary (simplified approximation)
+        c_flops = compute_budget
+        if compute_budget.units == ureg.day:
+             # Assume H100 SXM (990 TFLOPS) at 40% MFU
+             h100_peak = Q_("990 TFLOPs/s")
+             c_flops = (compute_budget * h100_peak * 0.40).to(ureg.flop)
+
+        if target_model_size:
+            p_opt = target_model_size.to(ureg.count).magnitude
+            d_opt = (c_flops.magnitude / (CHINCHILLA_COMPUTE_CONSTANT * p_opt))
+        else:
+            p_opt = math.sqrt(c_flops.magnitude / (CHINCHILLA_COMPUTE_CONSTANT * CHINCHILLA_TOKENS_PER_PARAM))
+            d_opt = CHINCHILLA_TOKENS_PER_PARAM * p_opt
+
+        return {
+            "optimal_parameters": Q_(p_opt, ureg.count),
+            "optimal_tokens": Q_(d_opt, ureg.count),
+            "compute_budget_flops": c_flops,
+            "tokens_per_parameter": d_opt / p_opt if p_opt > 0 else 0
+        }
+
+class OrchestrationSolver(BaseSolver):
+    """
+    Analyzes Cluster Orchestration and Queueing (Little's Law).
+    
+    This solver models the 'Wait Wall' in shared research clusters, 
+    calculating job completion times and researcher wait times based on 
+    cluster utilization and arrival rates.
+
+    Literature Source:
+    1. Little (1961), "A Proof for the Queuing Formula: L = λW."
+    2. Barroso et al. (2018), "The Datacenter as a Computer" (Cluster Mgmt).
+    3. Jeon et al. (2019), "Analysis of Large-Scale Multi-Tenant GPU Clusters."
+    """
+    def solve(self, fleet: Fleet, arrival_rate_jobs_per_day: float, avg_job_duration_days: float) -> Dict[str, Any]:
+        """
+        Solves for cluster wait times and utilization.
+
+        Parameters
+        ----------
+        fleet : Fleet
+            The hardware cluster configuration.
+        arrival_rate_jobs_per_day : float
+            λ: Rate at which new training jobs are submitted.
+        avg_job_duration_days : float
+            The average time a job takes to run if it has the whole cluster.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Wait time, system length, and utilization metrics.
+        """
+        # ρ = λ / μ  (Utilization)
+        # μ = 1 / avg_duration
+        
+        lambda_rate = arrival_rate_jobs_per_day
+        mu_rate = 1.0 / avg_job_duration_days
+        
+        utilization = lambda_rate / mu_rate
+        
+        # M/D/1 Queue approximation for wait time (Fixed duration jobs)
+        # T_wait = ρ / (2μ(1-ρ))
+        if utilization < 1.0:
+            wait_time_days = utilization / (2 * mu_rate * (1 - utilization))
+        else:
+            wait_time_days = float('inf')
+            
+        return {
+            "cluster_utilization": utilization,
+            "avg_wait_time_days": Q_(wait_time_days, ureg.day),
+            "avg_queue_length": utilization**2 / (2 * (1 - utilization)) if utilization < 1.0 else float('inf'),
+            "is_stable": utilization < 1.0
+        }
+
+class CompressionSolver(BaseSolver):
+    """
+    Analyzes model compression trade-offs (Accuracy vs. Efficiency).
+    
+    This solver models the 'Compression Tax' — the accuracy degradation 
+    that occurs when reducing model size via quantization or pruning, 
+    balanced against the gains in memory footprint and inference latency.
+
+    Literature Source:
+    1. Han et al. (2015), "Deep Compression: Compressing Deep Neural Networks 
+       with Pruning, Trained Quantization and Huffman Coding."
+    2. Gholami et al. (2021), "A Survey of Quantization Methods for 
+       Efficient Neural Network Inference."
+    3. Blalock et al. (2020), "What is the State of Neural Network Pruning?"
+    """
+    def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization", target_bitwidth: int = 8, sparsity: float = 0.0) -> Dict[str, Any]:
+        """
+        Solves for compression gains and estimated accuracy impact.
+
+        Parameters
+        ----------
+        model : Workload
+            The model to be compressed.
+        hardware : HardwareNode
+            The target execution hardware.
+        method : str
+            The compression method ('quantization', 'pruning', 'distillation').
+        target_bitwidth : int
+            Target numerical precision in bits (e.g., 8 for INT8, 4 for INT4).
+        sparsity : float
+            Target sparsity ratio (0.0 to 1.0) for pruning.
+
+        Returns
+        -------
+        Dict[str, Any]
+            Compression metrics including memory savings, latency speedup, 
+            and estimated accuracy delta.
+        """
+        original_size = model.size_in_bytes(Q_("4 byte")) # FP32 baseline
+        
+        if method == "quantization":
+            compression_ratio = 32 / target_bitwidth
+            # Empirical heuristic: <1% drop for 8-bit, 2-5% for 4-bit
+            accuracy_delta = -0.005 if target_bitwidth >= 8 else -0.03
+        elif method == "pruning":
+            compression_ratio = 1.0 / (1.0 - sparsity) if sparsity < 1.0 else 100.0
+            # Empirical heuristic: log-linear degradation after 50% sparsity
+            accuracy_delta = -0.01 * math.exp(sparsity * 2) if sparsity > 0.5 else -0.001
+        else:
+            compression_ratio = 1.0
+            accuracy_delta = 0.0
+
+        compressed_size = original_size / compression_ratio
+        
+        return {
+            "original_size_gb": original_size.to("GB"),
+            "compressed_size_gb": compressed_size.to("GB"),
+            "compression_ratio": compression_ratio,
+            "estimated_accuracy_delta": accuracy_delta,
+            "memory_savings_pct": (1.0 - 1.0/compression_ratio) * 100
+        }

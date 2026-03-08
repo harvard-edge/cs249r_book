@@ -1,4 +1,4 @@
-from .types import HardwareNode, ComputeCore, MemoryHierarchy
+from .types import HardwareNode, ComputeCore, MemoryHierarchy, StorageHierarchy, IOInterconnect
 from ..core.registry import Registry
 from ..core.constants import (
     ureg,
@@ -8,7 +8,8 @@ from ..core.constants import (
     B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4,
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP,
     TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY,
-    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8
+    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8,
+    PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
 )
 
 class CloudHardware(Registry):
@@ -18,6 +19,7 @@ class CloudHardware(Registry):
         release_year=2017,
         compute=ComputeCore(peak_flops=V100_FLOPS_FP16_TENSOR, precision_flops={"fp32": V100_FLOPS_FP32}),
         memory=MemoryHierarchy(capacity=V100_MEM_CAPACITY, bandwidth=V100_MEM_BW),
+        interconnect=IOInterconnect(name="PCIe Gen3 x16", bandwidth=15.75 * ureg.GB/ureg.s),
         tdp=V100_TDP,
         dispatch_tax=0.02 * ureg.ms
     )
@@ -27,6 +29,7 @@ class CloudHardware(Registry):
         release_year=2020,
         compute=ComputeCore(peak_flops=A100_FLOPS_FP16_TENSOR, precision_flops={"fp32": A100_FLOPS_FP32, "tf32": A100_FLOPS_TF32, "int8": A100_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=A100_MEM_CAPACITY, bandwidth=A100_MEM_BW),
+        interconnect=IOInterconnect(name="PCIe Gen4 x16", bandwidth=PCIE_GEN4_BW),
         tdp=A100_TDP,
         dispatch_tax=0.015 * ureg.ms,
         metadata={"source_url": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "last_verified": "2025-03-06"}
@@ -37,6 +40,8 @@ class CloudHardware(Registry):
         release_year=2022,
         compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR, precision_flops={"tf32": H100_FLOPS_TF32, "fp8": H100_FLOPS_FP8_TENSOR, "int8": H100_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=H100_MEM_CAPACITY, bandwidth=H100_MEM_BW),
+        storage=StorageHierarchy(capacity=2 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
+        interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
         tdp=H100_TDP,
         dispatch_tax=0.01 * ureg.ms,
         metadata={"source_url": "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-core-gpu-datasheet", "last_verified": "2025-03-06"}
@@ -47,9 +52,12 @@ class CloudHardware(Registry):
         release_year=2023,
         compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR),
         memory=MemoryHierarchy(capacity=141 * ureg.GB, bandwidth=4.8 * ureg.TB/ureg.s),
+        storage=StorageHierarchy(capacity=4 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
+        interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
         tdp=700 * ureg.W,
         dispatch_tax=0.01 * ureg.ms
     )
+
 
     B200 = HardwareNode(
         name="NVIDIA B200",

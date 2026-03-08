@@ -49,6 +49,15 @@ class LanguageModels(Registry):
         heads=12,
         inference_flops=22e9 * ureg.flop
     )
+    BERT_Large = TransformerWorkload(
+        name="BERT-Large",
+        architecture="Transformer",
+        parameters=340e6 * ureg.param,
+        layers=24,
+        hidden_dim=1024,
+        heads=16,
+        inference_flops=72e9 * ureg.flop
+    )
     Llama2_70B = TransformerWorkload(
         name="Llama-2-70B",
         architecture="Transformer",
@@ -125,7 +134,8 @@ class TinyModels(Registry):
     AnomalyDetector = Workload(
         name="Anomaly Detector",
         architecture="MLP",
-        # Generic Workload doesn't have params in type, but we can override
+        parameters=270e3 * ureg.param,
+        inference_flops=540e3 * ureg.flop
     )
 
 class RecommendationModels(Registry):

@@ -40,19 +40,33 @@ class Scenario(BaseModel):
         hardware = self.system.node.accelerator if self.is_distributed else self.system
         
         # --- LEVEL 1: FEASIBILITY ---
+        from .solver import DataSolver
         weights = self.workload.size_in_bytes()
-        feasible = weights <= hardware.memory.capacity
+        mem_feasible = weights <= hardware.memory.capacity
+        
+        # Data Pipeline Check
+        data_status = "PASS"
+        data_summary = ""
+        if self.workload.data_rate:
+            ds = DataSolver().solve(self.workload.data_rate, hardware)
+            if ds["is_stalled"]:
+                data_status = "FAIL"
+                data_summary = f" | Data Wall: Pipeline Stalled ({ds['utilization']:.1f}x capacity)"
+            else:
+                data_summary = f" | Data Pipeline: OK ({ds['utilization']*100:.1f}%)"
+
+        feasible = mem_feasible and (data_status == "PASS")
         f_status = "PASS" if feasible else "FAIL"
         
         # Dynamic unit scaling for summary
         unit = "MB" if weights < Q_("1 GB") else "GB"
-        f_summary = f"Model fits in memory ({weights.to(unit):.1f} / {hardware.memory.capacity.to(unit):.1f})" if feasible else f"OOM: Requires {weights.to(unit):.1f} but only has {hardware.memory.capacity.to(unit):.1f}"
+        mem_summary = f"Model fits in memory ({weights.to(unit):.1f} / {hardware.memory.capacity.to(unit):.1f})" if mem_feasible else f"OOM: Requires {weights.to(unit):.1f} but only has {hardware.memory.capacity.to(unit):.1f}"
         
         l1 = EvaluationLevel(
             level_name="Feasibility", 
             status=f_status, 
-            summary=f_summary,
-            metrics={"weight_size": weights, "capacity": hardware.memory.capacity}
+            summary=mem_summary + data_summary,
+            metrics={"weight_size": weights, "capacity": hardware.memory.capacity, "data_stalled": data_status == "FAIL"}
         )
 
         # --- LEVEL 2: PERFORMANCE ---
@@ -176,6 +190,14 @@ class Scenarios:
         sla_latency=Q_("200 ms")
     )
 
+    TinySensor = Scenario(
+        name="Anomaly Sensor",
+        description="Low-power vibration monitoring for industrial predictive maintenance.",
+        workload=Models.Tiny.AnomalyDetector,
+        system=Hardware.Tiny.ESP32_S3,
+        sla_latency=Q_("10 ms")
+    )
+
     # --- EDGE WORLD ---
     AutonomousVehicle = Scenario(
         name="Autonomous Vehicle",
@@ -183,6 +205,23 @@ class Scenarios:
         workload=Models.Vision.ResNet50,
         system=Hardware.Edge.JetsonOrinNX,
         sla_latency=Q_("10 ms")
+    )
+
+    AutonomousVehicle_Waymo = Scenario(
+        name="Waymo AV Data Pipeline",
+        description="High-throughput data ingestion for autonomous fleet training.",
+        workload=Models.Vision.ResNet50.model_copy(update={"name": "Waymo (High)", "data_rate": Q_("19 TB/hour")}),
+        system=Hardware.Edge.JetsonOrinNX,
+        sla_latency=Q_("10 ms")
+    )
+
+    # --- MOBILE WORLD ---
+    MobileHealth = Scenario(
+        name="Mobile Health",
+        description="On-device medical image analysis for remote diagnostics.",
+        workload=Models.Vision.MobileNetV2,
+        system=Hardware.Mobile.iPhone15Pro,
+        sla_latency=Q_("30 ms")
     )
 
     # --- WORKSTATION WORLD ---

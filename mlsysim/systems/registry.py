@@ -49,6 +49,13 @@ class Nodes:
         intra_node_bw=600 * ureg.GB / ureg.second,
         nics_per_node=8
     )
+    DGX_B200 = Node(
+        name="DGX B200",
+        accelerator=Hardware.B200,
+        accelerators_per_node=8,
+        intra_node_bw=1800 * ureg.GB / ureg.second,
+        nics_per_node=8
+    )
 
 class Fabrics:
     """Vetted Network Fabrics."""
@@ -69,6 +76,18 @@ class Clusters:
         name="Frontier Cluster (8192 GPUs)",
         node=Nodes.DGX_H100,
         count=1024, # 1024 nodes * 8 GPUs = 8192
+        fabric=Fabrics.InfiniBand_NDR
+    )
+    Production_2K = Fleet(
+        name="Production Cluster (2048 GPUs)",
+        node=Nodes.DGX_H100,
+        count=256,
+        fabric=Fabrics.InfiniBand_HDR
+    )
+    Mega_100K = Fleet(
+        name="Mega Cluster (100000 GPUs)",
+        node=Nodes.DGX_H100,
+        count=12500,
         fabric=Fabrics.InfiniBand_NDR
     )
 
