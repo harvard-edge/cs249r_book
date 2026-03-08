@@ -1,0 +1,111 @@
+---
+title: "The Silicon Zoo"
+subtitle: "Vetted Specifications for AI Accelerators and Edge Devices"
+---
+The Silicon Zoo is the **Single Source of Truth (SSoT)** for all physical hardware in `mlsysim`.
+Every specification is typed (`pint.Quantity`), provenance-tracked, and validated against official
+datasheets and MLPerf baselines—so you never have to argue about what the A100's bandwidth actually is.
+
+::: {.callout-tip}
+## How to use this page
+Reference these specs when reasoning about bottlenecks. For any device listed here, you can load it
+directly in Python: `hw = mlsysim.Hardware.Cloud.A100`. The three columns that matter most for
+roofline analysis are **Peak Performance**, **Memory BW**, and **Capacity**.
+:::
+
+```{python}
+#| echo: false
+#| output: asis
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+_m = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = _m
+spec.loader.exec_module(_m)
+mlsysim = _m
+
+def auto_scale(q):
+    if q is None: return "---"
+    if q.is_compatible_with('flop/s'):
+        for unit in ['PFLOPs/s', 'TFLOPs/s', 'GFLOPs/s', 'MFLOPs/s']:
+            scaled = q.to(unit)
+            if scaled.magnitude >= 1.0:
+                return f"{scaled.magnitude:,.1f} {scaled.units:~P}"
+    if q.is_compatible_with('byte'):
+        for unit in ['TB', 'GB', 'MB', 'KB']:
+            scaled = q.to(unit)
+            if scaled.magnitude >= 1.0:
+                return f"{scaled.magnitude:,.1f} {scaled.units:~P}"
+    return f"{q.magnitude:,.1f} {q.units:~P}"
+
+def print_hardware_table(title, hardware_class):
+    print(f"### {title}")
+    print("| Device | Year | Peak Performance | Memory BW | Capacity | TDP |")
+    print("|:---|:---:|:---:|:---:|:---:|:---:|")
+
+    # Use the new Registry .list() method for coherent sorting
+    items = hardware_class.list(sort_by='release_year', reverse=True)
+    for item in items:
+        if True: # Registry already filtered for us
+            flops = auto_scale(item.compute.peak_flops)
+            bw = auto_scale(item.memory.bandwidth)
+            cap = auto_scale(item.memory.capacity)
+            tdp = f"{item.tdp.magnitude:,.0f} {item.tdp.units:~P}" if item.tdp else "---"
+            print(f"| **{item.name}** | {item.release_year} | {flops} | {bw} | {cap} | {tdp} |")
+    print("\n")
+
+# Use direct attribute lookup from the reloaded package
+reg = getattr(mlsysim, 'Hardware', None)
+if reg:
+    if hasattr(reg, 'Cloud'): print_hardware_table("Data Center Accelerators", reg.Cloud)
+    if hasattr(reg, 'Mobile'): print_hardware_table("Mobile Devices", reg.Mobile)
+    if hasattr(reg, 'Edge'): print_hardware_table("Edge & Robotics", reg.Edge)
+    if hasattr(reg, 'Tiny'): print_hardware_table("TinyML Microcontrollers", reg.Tiny)
+else:
+    print("Error: Hardware registry not found in mlsysim.")
+```
+
+---
+
+## How to Read the Silicon Zoo
+
+### The Three Numbers That Matter
+
+For roofline analysis, focus on three columns:
+
+1. **Peak Performance (TFLOP/s)** — the compute ceiling. This determines how fast compute-bound workloads run (e.g., large-batch training, LLM pre-fill).
+
+2. **Memory Bandwidth (TB/s)** — the memory ceiling. This determines how fast memory-bound workloads run (e.g., small-batch inference, LLM token decoding).
+
+3. **Capacity (GB)** — the memory wall. If your model plus activations exceed this, the workload is infeasible on a single device.
+
+### The Ridge Point
+
+The ratio of Peak Performance to Memory Bandwidth gives the **ridge point** (in FLOP/byte). Workloads with arithmetic intensity below the ridge point are memory-bound; above it, compute-bound. See the [Math Foundations](../math.qmd) page for the full derivation.
+
+### Common Patterns
+
+- **Cloud GPUs** (A100, H100, H200) have 40-80+ GB of HBM with very high bandwidth (2-5 TB/s). They are designed for throughput.
+- **Edge devices** (Jetson) trade peak performance for lower power budgets, making TDP per TFLOP a useful comparison metric.
+- **TinyML MCUs** (RP2040, nRF5340) have KB-scale memory — only the smallest quantized models fit. Use the [Model Zoo](models.qmd) to find matching workloads.
+
+### Textbook Connection
+
+These specifications are used throughout Volumes 1 and 2 of the textbook. The *Hardware Acceleration* chapter uses them for roofline construction, and the *Compute Infrastructure* chapter uses them for fleet sizing and TCO analysis.
+
+---
+
+
+::: {.callout-note}
+## Missing a device?
+You can define custom hardware specs on-the-fly in Python or contribute new vetted specs to the registry.
+See the [Contributing Guide](../contributing.qmd) for how to add persistent specs, or the
+[Hardware API Reference](../api/hardware.qmd) for defining custom  objects.
+:::
+
+*Note: For full technical specs and validation details, see the API Reference.*

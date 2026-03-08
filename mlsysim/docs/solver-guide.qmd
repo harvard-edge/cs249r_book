@@ -1,0 +1,168 @@
+---
+title: "Which Solver Do I Need?"
+subtitle: "A decision guide for choosing the right MLSYSIM analytical tool."
+---
+MLSYSIM provides six specialized solvers, each designed to answer a different class of question about ML systems. This page helps you pick the right one.
+
+---
+
+## Start With Your Question
+
+**"How fast will my model run on this GPU?"**
+: Use the **SingleNodeSolver** (Roofline). It applies the Iron Law to determine whether your workload is compute-bound or memory-bound and returns latency, throughput, and bottleneck classification.
+
+**"How fast will my LLM generate tokens?"**
+: Use the **ServingSolver**. It models the two distinct phases of autoregressive inference: the compute-bound pre-fill (TTFT) and the memory-bound decode (ITL), plus KV-cache memory pressure.
+
+**"How does performance scale across multiple GPUs?"**
+: Use the **DistributedSolver**. It decomposes workloads using 3D Parallelism (DP, TP, PP) and calculates communication overhead, pipeline bubbles, and scaling efficiency.
+
+**"How much will this cost to run?"**
+: Use the **EconomicsSolver**. It calculates Total Cost of Ownership: CapEx (hardware purchase), OpEx (energy + maintenance), and total TCO over a specified duration.
+
+**"What is the carbon footprint?"**
+: Use the **SustainabilitySolver**. It computes energy consumption (factoring in PUE), carbon emissions (using regional grid intensity), and water usage across different datacenter locations.
+
+**"How often will my cluster fail during training?"**
+: Use the **ReliabilitySolver**. It estimates fleet-wide MTBF, failure probability for a given job duration, and the Young-Daly optimal checkpoint interval.
+
+---
+
+## Quick Reference
+
+| Solver | Key Inputs | Key Outputs | Best For |
+|:-------|:-----------|:------------|:---------|
+| **SingleNodeSolver** | model, hardware, batch_size, precision | latency, throughput, bottleneck | "Is my model memory-bound?" |
+| **ServingSolver** | model, hardware, seq_len, batch_size | TTFT, ITL, KV-cache size, feasibility | "Can I serve this LLM on this GPU?" |
+| **DistributedSolver** | model, fleet, tp/pp/dp sizes | scaling efficiency, communication overhead | "How many GPUs do I actually need?" |
+| **EconomicsSolver** | fleet, duration_days, kwh_price | CapEx, OpEx, total TCO | "What will this cost over 3 years?" |
+| **SustainabilitySolver** | fleet, duration_days, datacenter | energy, carbon (kg CO2e), water | "Where should I train to minimize carbon?" |
+| **ReliabilitySolver** | fleet, job_duration, checkpoint_time | MTBF, failure probability, checkpoint interval | "Will my training job complete?" |
+
+---
+
+## Composing Solvers
+
+Real-world questions often require **chaining** multiple solvers. Some examples:
+
+### "Can I serve Llama-70B on 4 H100s within budget?"
+1. **ServingSolver** — check if the model fits in memory and estimate TTFT/ITL
+2. **EconomicsSolver** — calculate the cost of running that fleet
+
+### "What is the most sustainable way to train GPT-3?"
+1. **DistributedSolver** — find the optimal parallelism configuration
+2. **SustainabilitySolver** — compare carbon footprint across regions
+
+### "Should I use A100s or H100s for inference?"
+1. **SingleNodeSolver** on A100 — get latency and bottleneck
+2. **SingleNodeSolver** on H100 — get latency and bottleneck
+3. **EconomicsSolver** for each — compare cost per query
+
+---
+
+## Textbook Chapter Mapping
+
+Each solver connects to specific chapters in the *Machine Learning Systems* textbook:
+
+| Solver | Volume 1 Chapters | Volume 2 Chapters |
+|:-------|:-------------------|:-------------------|
+| **SingleNodeSolver** | Model Training, Hardware Acceleration, Benchmarking | Performance Engineering |
+| **ServingSolver** | Model Serving | Inference at Scale |
+| **DistributedSolver** | — | Distributed Training, Collective Communication |
+| **EconomicsSolver** | — | Compute Infrastructure |
+| **SustainabilitySolver** | — | Sustainable AI |
+| **ReliabilitySolver** | — | Fault Tolerance |
+
+---
+
+::: {.callout-tip}
+## Engine.solve() vs. individual solvers
+`Engine.solve()` is a convenience shortcut for `SingleNodeSolver().solve()`. They produce identical results. Use `Engine.solve()` for quick single-node analysis. Use individual solvers (`ServingSolver`, `DistributedSolver`, etc.) when you need specialized analyses beyond the basic roofline.
+:::
+
+## Code Example
+
+```python
+import mlsysim
+from mlsysim import SingleNodeSolver, ServingSolver
+
+# Question: Is ResNet-50 memory-bound on A100?
+solver = SingleNodeSolver()
+profile = solver.solve(
+    model=mlsysim.Models.ResNet50,
+    hardware=mlsysim.Hardware.Cloud.A100,
+    batch_size=1
+)
+print(f"Bottleneck: {profile.bottleneck}")  # → Memory Bound
+
+# Question: What is the TTFT for Llama-3.1-8B?
+serving = ServingSolver()
+result = serving.solve(
+    model=mlsysim.Models.Language.Llama3_8B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    seq_len=2048,
+    batch_size=1
+)
+print(f"TTFT: {result['ttft'].to('ms'):~.1f}")
+print(f"ITL:  {result['itl'].to('ms'):~.2f}")
+```
+
+---
+
+## Extending MLSYSIM
+
+### Why analytical solvers?
+
+MLSYSIM is not an empirical profiler (like PyTorch Profiler) or a cycle-accurate simulator (like gem5). It is an **analytical modeling platform** that computes performance bounds from specifications and first-order equations. This is a deliberate design choice:
+
+- **Speed**: Closed-form equations evaluate in microseconds. You can sweep thousands of hardware × model × parallelism configurations in seconds — impossible with empirical profiling.
+- **Intuition**: By working from equations rather than opaque traces, students see *exactly* which physical quantity (bandwidth, compute, memory capacity) creates the bottleneck.
+- **Accessibility**: No hardware required. A laptop running `pip install mlsysim` gives you the same analysis as a $50,000 GPU cluster.
+- **Composability**: Solvers can be chained because they share typed inputs/outputs. The output of one solver feeds naturally into the next.
+
+### Solver architecture
+
+Every solver follows the same pattern:
+
+1. **Takes typed registry objects** — `HardwareNode`, `TransformerWorkload`, `Fleet`, `GridProfile` — as input. These carry physical units (`pint.Quantity`), so dimensional errors are caught at runtime.
+2. **Applies first-order equations** from the [Math Foundations](math.qmd) page.
+3. **Returns typed results** — either a `PerformanceProfile` (for `SingleNodeSolver`) or a `dict` with `Quantity`-valued fields (for specialized solvers).
+
+### Writing a custom solver
+
+You can create your own solver by following the same pattern. Here is a "power efficiency" solver that computes TFLOP/s per watt across the hardware registry:
+
+```python
+import mlsysim
+from mlsysim.hardware.types import HardwareNode
+
+class PowerEfficiencySolver:
+    """Compare hardware on performance-per-watt."""
+
+    def solve(self, hardware: HardwareNode) -> dict:
+        if hardware.tdp is None:
+            raise ValueError(f"{hardware.name}: no TDP specified")
+
+        flops_per_watt = hardware.compute.peak_flops / hardware.tdp
+
+        return {
+            "device": hardware.name,
+            "peak_flops": hardware.compute.peak_flops,
+            "tdp": hardware.tdp,
+            "flops_per_watt": flops_per_watt.to("TFLOPs/s/kW"),
+        }
+
+# Use it
+solver = PowerEfficiencySolver()
+
+for hw in [mlsysim.Hardware.Cloud.H100, mlsysim.Hardware.Cloud.A100,
+           mlsysim.Hardware.Cloud.T4, mlsysim.Hardware.Edge.JetsonOrinNX]:
+    r = solver.solve(hw)
+    print(f"{r['device']:25s}  {r['flops_per_watt']:>10.1f~}")
+```
+
+The key principle: keep your solver's `.solve()` method a pure function of its inputs. Use `pint.Quantity` for all physical calculations so that unit errors are impossible. For more complex solvers, see the [source code](https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim/core/solver.py) for the six built-in solvers.
+
+---
+
+*For the equations behind each solver, see [Math Foundations](math.qmd). For API details, see the [Solver API Reference](api/core.solver.qmd).*

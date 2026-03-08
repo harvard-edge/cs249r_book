@@ -1,0 +1,411 @@
+# models { #mlsysim.models }
+
+`mlsysim.models` -- ML workload definitions and a curated registry of reference models.
+
+This module provides the data types used to describe ML workloads in a
+hardware-agnostic way, together with a pre-built registry of well-known models
+spanning language, vision, TinyML, and recommendation architectures.
+
+## Sub-modules
+
+| | |
+| --- | --- |
+| [models.types](models.types.qmd) | Workload data classes (`Workload`, `TransformerWorkload`, `CNNWorkload`, `ComputationGraph`) |
+| [models.registry](models.registry.qmd) | Pre-built model registry (`Models`) |
+
+---
+
+## Types (`models.types`) { #mlsysim.models.types-overview }
+
+### ComputationGraph { #mlsysim.models.types.ComputationGraph }
+
+```python
+models.types.ComputationGraph(
+    name: str,
+    total_ops: Quantity,
+    parameter_count: Quantity,
+    weight_bytes: Quantity,
+    arithmetic_intensity: Quantity,
+    layers: Optional[int] = None,
+)
+```
+
+The hardware-agnostic "Intermediate Representation" (IR) of a workload.
+A `ComputationGraph` captures the computational demand of a model without
+reference to any specific accelerator. It is produced by calling
+[`Workload.lower()`](#mlsysim.models.types.Workload.lower) and is consumed by
+the solver and engine layers to compute runtime, memory, and energy estimates.
+
+#### Fields
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `name` | `str` | Human-readable name of the workload |
+| `total_ops` | `Quantity` | Total arithmetic operations (e.g. FLOPs) for one forward pass |
+| `parameter_count` | `Quantity` | Number of learnable parameters |
+| `weight_bytes` | `Quantity` | Weight footprint in bytes at the chosen precision |
+| `arithmetic_intensity` | `Quantity` | Operational intensity in Ops/Byte (ops / weight_bytes) |
+| `layers` | `Optional[int]` | Number of layers (optional, used for pipeline parallelism estimates) |
+
+---
+
+### Workload { #mlsysim.models.types.Workload }
+
+```python
+models.types.Workload(
+    name: str,
+    architecture: str,
+    metadata: Metadata = Metadata(),
+    parameters: Optional[Quantity] = None,
+    model_size: Optional[Quantity] = None,
+    inference_flops: Optional[Quantity] = None,
+)
+```
+
+Base class for all ML workloads. A `Workload` records the architecture-level
+properties of a model (parameter count, FLOPs, etc.) and knows how to
+**lower** itself into a [`ComputationGraph`](#mlsysim.models.types.ComputationGraph).
+
+Subclasses such as [`TransformerWorkload`](#mlsysim.models.types.TransformerWorkload)
+and [`CNNWorkload`](#mlsysim.models.types.CNNWorkload) add architecture-specific
+fields and override `lower()` with the appropriate cost model.
+
+#### Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `name` | `str` | *required* | Human-readable model name |
+| `architecture` | `str` | *required* | Architecture family (e.g. `"Transformer"`, `"CNN"`, `"DLRM"`) |
+| `metadata` | `Metadata` | `Metadata()` | Provenance information (source URL, description, last verified date) |
+| `parameters` | `Optional[Quantity]` | `None` | Number of learnable parameters |
+| `model_size` | `Optional[Quantity]` | `None` | Pre-computed model size in bytes (used when parameter count alone is insufficient, e.g. DLRM embedding tables) |
+| `inference_flops` | `Optional[Quantity]` | `None` | FLOPs for a single forward pass |
+
+#### Methods
+
+| Name | Description |
+| --- | --- |
+| [`lower`](#mlsysim.models.types.Workload.lower) | Lowers the workload into a hardware-agnostic computation graph |
+| [`size_in_bytes`](#mlsysim.models.types.Workload.size_in_bytes) | Calculates the model weight footprint at a given precision |
+
+##### lower { #mlsysim.models.types.Workload.lower }
+
+```python
+Workload.lower(precision: Quantity = BYTES_FP16) -> ComputationGraph
+```
+
+Lowers the workload into a hardware-agnostic
+[`ComputationGraph`](#mlsysim.models.types.ComputationGraph). The `precision`
+argument controls the bytes-per-parameter assumption (default: FP16 = 2 bytes).
+
+**Parameters**
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `precision` | `Quantity` | `BYTES_FP16` (2 bytes) | Bytes per parameter for weight memory calculation |
+
+**Returns**
+
+| Type | Description |
+| --- | --- |
+| `ComputationGraph` | A hardware-agnostic computation graph encoding ops, memory, and arithmetic intensity |
+
+::: {.callout-note}
+The base `Workload` class raises `NotImplementedError`. Use a concrete
+subclass such as `TransformerWorkload` or `CNNWorkload`.
+:::
+
+##### size_in_bytes { #mlsysim.models.types.Workload.size_in_bytes }
+
+```python
+Workload.size_in_bytes(precision: Quantity = BYTES_FP16) -> Quantity
+```
+
+Calculates the model weight footprint in bytes. If `model_size` is set
+explicitly it is returned directly; otherwise `parameters * precision` is used.
+
+**Parameters**
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `precision` | `Quantity` | `BYTES_FP16` (2 bytes) | Bytes per parameter |
+
+**Returns**
+
+| Type | Description |
+| --- | --- |
+| `Quantity` | Total weight memory in bytes |
+
+---
+
+### TransformerWorkload { #mlsysim.models.types.TransformerWorkload }
+
+```python
+models.types.TransformerWorkload(
+    name: str,
+    architecture: str,
+    parameters: Quantity,          # required
+    layers: int,                   # required
+    hidden_dim: Optional[int] = None,
+    heads: Optional[int] = None,
+    kv_heads: Optional[int] = None,
+    training_ops: Optional[Quantity] = None,
+    inference_flops: Optional[Quantity] = None,
+    metadata: Metadata = Metadata(),
+)
+```
+
+Extends [`Workload`](#mlsysim.models.types.Workload) for Transformer
+architectures. Adds fields that capture the attention geometry (hidden
+dimension, number of heads, grouped-query-attention head count) and provides
+a method to estimate KV-cache memory.
+
+#### Additional Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `parameters` | `Quantity` | *required* | Number of learnable parameters |
+| `layers` | `int` | *required* | Number of Transformer layers |
+| `hidden_dim` | `Optional[int]` | `None` | Model hidden dimension (defaults to 4096 internally when not set) |
+| `heads` | `Optional[int]` | `None` | Number of attention heads (defaults to 32 internally when not set) |
+| `kv_heads` | `Optional[int]` | `None` | Number of key-value heads for Grouped Query Attention; defaults to `heads` when not set |
+| `training_ops` | `Optional[Quantity]` | `None` | Total training FLOPs (for cost estimation) |
+| `inference_flops` | `Optional[Quantity]` | `None` | FLOPs for a single forward pass |
+
+#### Methods
+
+| Name | Description |
+| --- | --- |
+| [`get_kv_cache_size`](#mlsysim.models.types.TransformerWorkload.get_kv_cache_size) | Calculates KV-cache memory for a given context length and batch size |
+| [`lower`](#mlsysim.models.types.TransformerWorkload.lower) | Lowers the workload into a `ComputationGraph` |
+
+##### get_kv_cache_size { #mlsysim.models.types.TransformerWorkload.get_kv_cache_size }
+
+```python
+TransformerWorkload.get_kv_cache_size(
+    seq_len: int,
+    batch_size: int,
+    precision: Quantity = BYTES_FP16,
+) -> Quantity
+```
+
+Calculates the KV-cache memory required for autoregressive decoding at the
+given sequence length and batch size.
+
+**Parameters**
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `seq_len` | `int` | *required* | Maximum sequence (context) length |
+| `batch_size` | `int` | *required* | Number of concurrent sequences |
+| `precision` | `Quantity` | `BYTES_FP16` (2 bytes) | Bytes per element in the KV cache |
+
+**Returns**
+
+| Type | Description |
+| --- | --- |
+| `Quantity` | Total KV-cache memory in bytes |
+
+##### lower { #mlsysim.models.types.TransformerWorkload.lower }
+
+```python
+TransformerWorkload.lower(precision: Quantity = BYTES_FP16) -> ComputationGraph
+```
+
+Lowers the Transformer workload into a `ComputationGraph`. If
+`inference_flops` is not set, the cost model uses the approximation
+`ops = 2 * parameters` (one multiply-accumulate per parameter in the
+forward pass).
+
+**Returns**
+
+| Type | Description |
+| --- | --- |
+| `ComputationGraph` | Hardware-agnostic computation graph with ops, weight bytes, and arithmetic intensity |
+
+---
+
+### CNNWorkload { #mlsysim.models.types.CNNWorkload }
+
+```python
+models.types.CNNWorkload(
+    name: str,
+    architecture: str,
+    parameters: Quantity,          # required
+    inference_flops: Quantity,     # required
+    layers: Optional[int] = None,
+    metadata: Metadata = Metadata(),
+)
+```
+
+Extends [`Workload`](#mlsysim.models.types.Workload) for Convolutional Neural
+Network architectures. Both `parameters` and `inference_flops` are required
+because CNN FLOPs cannot be reliably inferred from parameter count alone (the
+relationship depends on spatial dimensions and stride patterns).
+
+#### Additional Fields
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `parameters` | `Quantity` | *required* | Number of learnable parameters |
+| `inference_flops` | `Quantity` | *required* | FLOPs for a single forward pass |
+| `layers` | `Optional[int]` | `None` | Number of network layers |
+
+#### Methods
+
+| Name | Description |
+| --- | --- |
+| [`lower`](#mlsysim.models.types.CNNWorkload.lower) | Lowers the workload into a `ComputationGraph` using the explicit FLOPs count |
+
+##### lower { #mlsysim.models.types.CNNWorkload.lower }
+
+```python
+CNNWorkload.lower(precision: Quantity = BYTES_FP16) -> ComputationGraph
+```
+
+Lowers the CNN workload into a `ComputationGraph`. Uses the explicitly
+provided `inference_flops` as the total operation count.
+
+---
+
+## Registry (`models.registry`) { #mlsysim.models.registry-overview }
+
+### Models { #mlsysim.models.registry.Models }
+
+```python
+models.registry.Models
+```
+
+A curated catalog of well-known ML models, organized into four namespaces.
+Every entry is a pre-configured [`Workload`](#mlsysim.models.types.Workload)
+instance (either `TransformerWorkload` or `CNNWorkload`).
+
+#### Namespaces
+
+| Namespace | Description |
+| --- | --- |
+| `Models.Language` | Large language models and encoder-only Transformers |
+| `Models.Vision` | Convolutional image classifiers and detectors |
+| `Models.Tiny` | TinyML workloads for microcontrollers and edge devices |
+| `Models.Recommendation` | Recommendation system architectures |
+
+#### Language Models (`Models.Language`)
+
+| Name | Architecture | Parameters | Inference FLOPs | Layers |
+| --- | --- | --- | --- | --- |
+| `GPT2` | Transformer | 1.5 B | 3.0 GFLOP | 48 |
+| `GPT3` | Transformer | 175 B | 350 GFLOP | 96 |
+| `GPT4` | Transformer | 1.76 T | 3.52 TFLOP | 120 |
+| `BERT_Base` | Transformer | 110 M | 22 GFLOP | 12 |
+| `Llama2_70B` | Transformer | 70 B | 140 GFLOP | 80 |
+| `Llama3_8B` | Transformer | 8.03 B | 16.06 GFLOP | 32 |
+| `Llama3_70B` | Transformer | 70.6 B | 141.2 GFLOP | 80 |
+
+#### Vision Models (`Models.Vision`)
+
+| Name | Architecture | Parameters | Inference FLOPs | Layers |
+| --- | --- | --- | --- | --- |
+| `ResNet50` | CNN | 25.6 M | 4.1 GFLOP | 50 |
+| `MobileNetV2` | CNN | 3.5 M | 300 MFLOP | 54 |
+| `YOLOv8_Nano` | CNN | 3.2 M | 8.7 GFLOP | 225 |
+| `AlexNet` | CNN | 60 M | 1.5 GFLOP | 8 |
+
+#### Tiny Models (`Models.Tiny`)
+
+| Name | Architecture | Parameters | Inference FLOPs | Layers |
+| --- | --- | --- | --- | --- |
+| `DS_CNN` | CNN | 200 K | 20 MFLOP | -- |
+| `WakeVision` | CNN | 250 K | 25 MFLOP | -- |
+| `AnomalyDetector` | MLP | -- | -- | -- |
+
+#### Recommendation Models (`Models.Recommendation`)
+
+| Name | Architecture | Parameters | Model Size | Layers |
+| --- | --- | --- | --- | --- |
+| `DLRM` | DLRM | -- | 100 GB (FP32) | -- |
+
+::: {.callout-note}
+DLRM is defined by its total model size rather than a parameter count because
+the majority of its footprint comes from embedding tables that do not follow
+standard parameter-to-bytes conversion rules.
+:::
+
+#### Convenience Aliases
+
+Top-level aliases are provided on the `Models` class so you can skip the
+namespace when there is no ambiguity:
+
+| Alias | Target |
+| --- | --- |
+| `Models.GPT2` | `Models.Language.GPT2` |
+| `Models.GPT3` | `Models.Language.GPT3` |
+| `Models.GPT4` | `Models.Language.GPT4` |
+| `Models.Llama2_70B` | `Models.Language.Llama2_70B` |
+| `Models.Llama3_8B` | `Models.Language.Llama3_8B` |
+| `Models.Llama3_70B` | `Models.Language.Llama3_70B` |
+| `Models.ResNet50` | `Models.Vision.ResNet50` |
+| `Models.MobileNetV2` | `Models.Vision.MobileNetV2` |
+| `Models.AlexNet` | `Models.Vision.AlexNet` |
+| `Models.WakeVision` | `Models.Tiny.WakeVision` |
+| `Models.DLRM` | `Models.Recommendation.DLRM` |
+
+---
+
+## Usage
+
+### Inspecting a pre-built model
+
+```python
+import mlsysim
+
+llm = mlsysim.Models.Language.Llama3_8B
+print(f"Parameters: {llm.parameters}")
+print(f"KV-cache (2048 ctx): {llm.get_kv_cache_size(2048, 1)}")
+```
+
+### Lowering a model to a ComputationGraph
+
+```python
+import mlsysim
+
+graph = mlsysim.Models.GPT3.lower()
+print(f"Ops:   {graph.total_ops}")
+print(f"Bytes: {graph.weight_bytes}")
+print(f"AI:    {graph.arithmetic_intensity}")
+```
+
+### Creating a custom model
+
+```python
+from mlsysim.models.types import TransformerWorkload
+from mlsysim.core.constants import ureg
+
+my_model = TransformerWorkload(
+    name="My-LLM",
+    architecture="Transformer",
+    parameters=13e9 * ureg.param,
+    layers=40,
+    hidden_dim=5120,
+    heads=40,
+)
+
+# Lower to a computation graph and inspect
+graph = my_model.lower()
+print(f"Weight footprint (FP16): {my_model.size_in_bytes()}")
+print(f"Arithmetic intensity:    {graph.arithmetic_intensity}")
+```
+
+### Creating a custom CNN
+
+```python
+from mlsysim.models.types import CNNWorkload
+from mlsysim.core.constants import ureg
+
+my_cnn = CNNWorkload(
+    name="EfficientNet-B0",
+    architecture="CNN",
+    parameters=5.3e6 * ureg.param,
+    inference_flops=0.39e9 * ureg.flop,
+    layers=237,
+)
+```

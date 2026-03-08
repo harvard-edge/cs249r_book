@@ -1,0 +1,229 @@
+---
+title: "Contributing to MLSYSIM"
+subtitle: "How to add hardware specs, write tutorials, and grow the MLSys Zoo."
+---
+MLSYSIM grows stronger with every new hardware spec, tutorial, and bug report. This guide
+explains how to contribute — whether you are a student who found a discrepancy in a spec,
+an instructor who wants to share a teaching scenario, or a practitioner who wants a new
+solver.
+
+::: {.callout-note}
+## Before you start
+
+MLSYSIM is maintained as part of the [ML Systems textbook](https://mlsysbook.ai) project.
+All contributions go through GitHub. If you are not familiar with Git and pull requests,
+[GitHub's guide](https://docs.github.com/en/get-started/quickstart/contributing-to-projects)
+is a good starting point.
+
+**Repository:** [harvard-edge/cs249r_book](https://github.com/harvard-edge/cs249r_book)
+:::
+
+---
+
+## Types of Contributions
+
+| Contribution | Difficulty | Impact |
+|:---|:---:|:---|
+| Report a bug or wrong spec | ⭐ Beginner | High — specs affect all users |
+| Add a hardware spec to the Zoo | ⭐⭐ Intermediate | High — expands coverage |
+| Write a tutorial | ⭐⭐ Intermediate | High — improves learning |
+| Add a new model to the Zoo | ⭐⭐ Intermediate | Medium |
+| Add a new solver | ⭐⭐⭐ Advanced | High — new analysis capabilities |
+
+---
+
+## 1. Reporting Issues
+
+The fastest way to contribute: open an issue on GitHub.
+
+**Good bug reports include:**
+
+- Which spec is wrong (e.g., "A100 peak TFLOP/s in `hardware/constants.py`")
+- The correct value and your source (official datasheet URL preferred)
+- The version of MLSYSIM you are using (`python -c "import mlsysim; print(mlsysim.__version__)"`)
+
+**Good feature requests include:**
+
+- What hardware/model you want added and why
+- A link to the official specification document
+
+---
+
+## 2. Adding Hardware to the Silicon Zoo
+
+Every chip in the Silicon Zoo follows a strict format with mandatory provenance metadata.
+Here is the pattern using the A100 as a reference:
+
+```python
+# In mlsysim/hardware/registry.py
+
+A100 = HardwareNode(
+    name="NVIDIA A100",
+    release_year=2020,
+    compute=ComputeCore(
+        peak_flops=A100_FLOPS_FP16_TENSOR,        # from constants.py
+        precision_flops={
+            "fp32": A100_FLOPS_FP32,
+            "tf32": A100_FLOPS_TF32,
+            "int8": A100_FLOPS_INT8
+        }
+    ),
+    memory=MemoryHierarchy(
+        capacity=A100_MEM_CAPACITY,
+        bandwidth=A100_MEM_BW
+    ),
+    tdp=A100_TDP,
+    dispatch_tax=0.015 * ureg.ms,
+    metadata={
+        "source_url": "https://...",   # REQUIRED: official datasheet
+        "last_verified": "2025-03-06"  # REQUIRED: date you checked
+    }
+)
+```
+
+**Constants go in `mlsysim/core/constants.py`**, never hardcoded in the registry:
+
+```python
+# In mlsysim/core/constants.py — add named constants with comments
+A100_MEM_BW          = Q_(2000, "GB/s")     # HBM2e, SXM4 form factor
+A100_FLOPS_FP16_TENSOR = Q_(312, "TFLOP/s") # Tensor Core, with sparsity OFF
+A100_MEM_CAPACITY    = Q_(80, "GB")
+A100_TDP             = Q_(400, "W")         # SXM4 variant
+```
+
+### Provenance rules
+
+Every spec must have:
+
+1. A link to an **official primary source** (manufacturer datasheet, not a blog post)
+2. A `last_verified` date — specs change across chip revisions and firmware updates
+3. Clarity on **which variant** (e.g., SXM5 vs. PCIe, different memory configs)
+
+When a spec has known variation across SKUs, use the **most conservative published value**
+unless the variant is specified in the node name.
+
+---
+
+## 3. Adding Models to the Model Zoo
+
+Language models follow `TransformerWorkload`, vision models follow `CNNWorkload`.
+
+```python
+# In mlsysim/models/registry.py
+
+Llama3_8B = TransformerWorkload(
+    name="Llama-3.1-8B",
+    architecture="Transformer",
+    parameters=LLAMA3_8B_PARAMS,    # defined in constants.py
+    layers=32,
+    hidden_dim=4096,
+    heads=32,
+    kv_heads=8,                     # GQA: fewer KV heads than query heads
+    inference_flops=2 * LLAMA3_8B_PARAMS.magnitude * ureg.flop
+)
+```
+
+For `inference_flops`, the standard approximation is $2P$ FLOPs per token for transformer
+forward passes (multiply-accumulate counted as 2 operations). When a more precise count
+is available from the paper, use it and note the source in a comment.
+
+---
+
+## 4. Writing a Tutorial
+
+The best tutorials teach **one insight** through **one concrete example**. Before writing,
+answer these questions:
+
+1. **What is the one thing the reader will understand after this tutorial?**
+2. **What would they have guessed incorrectly before reading it?**
+3. **What surprising number will they compute?**
+
+### Tutorial structure
+
+Follow the pattern established in [Hello World](tutorials/hello_world.qmd) and
+[LLM Serving](tutorials/llm_serving.qmd):
+
+```
+---
+title: "Short, specific title"
+subtitle: "Payoff sentence: what you learn in 10 words."
+---
+
+[2-3 sentence hook: what problem does this solve?]
+
+By the end of this tutorial you will understand:
+- [Concept 1]
+- [Concept 2]
+- [Concept 3]
+
+::: {.callout-tip}
+## Background concept
+[1-paragraph intuition before any code]
+:::
+
+## 1. Setup
+[import block — path hack MUST be hidden with #| echo: false]
+
+## 2. First Example
+[minimal working code + output]
+
+## 3-N. Build Understanding
+[progressive complexity, callouts explaining surprising results]
+
+## What You Learned
+[bullet list recap]
+
+## Next Steps
+[2-3 links to related content]
+```
+
+### Code style in tutorials
+
+- **Hide the path hack**: Always wrap the `importlib.util` setup in `#| echo: false`
+- **Show clean imports**: The first visible code block should be `import mlsysim`
+- **Comment sparingly**: Code should be readable without comments; add a callout if explanation is needed
+- **Print with units**: Always use pint's `~` format spec: `f"{value.to('ms'):~.2f}"`
+- **Use Zoo entries**: Pull from `mlsysim.Hardware.*` and `mlsysim.Models.*` — no hardcoded constants
+
+---
+
+## 5. Running Tests
+
+Before submitting a pull request, ensure the test suite passes:
+
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
+
+# Run the full test suite
+pytest mlsysim/tests/ -v
+
+# Run a specific test file
+pytest mlsysim/tests/test_solvers.py -v
+```
+
+---
+
+## 6. Submitting a Pull Request
+
+1. **Fork** the repository on GitHub
+2. **Create a branch** with a descriptive name: `git checkout -b feat/add-b200-hardware`
+3. **Make your changes** following the patterns above
+4. **Run tests** to confirm nothing is broken
+5. **Open a PR** against the `main` branch with:
+   - A clear description of what changed and why
+   - A link to the source document for any new spec values
+   - Output showing your change working (`python -c "..."` snippet)
+
+---
+
+## Community Standards
+
+MLSYSIM is a pedagogical tool used in courses. Contributions should:
+
+- **Prioritize accuracy over completeness** — a wrong spec is worse than a missing one
+- **Cite sources** — every number needs a URL
+- **Explain the analytical reasoning** — a tutorial that teaches why is better than one that shows how
+
+Thank you for helping make MLSYSIM more accurate and useful for the next generation of
+ML systems engineers.

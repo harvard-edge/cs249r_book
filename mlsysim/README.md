@@ -1,69 +1,75 @@
-# 🚀 mlsysim
-### The ML Systems Infrastructure & Modeling Platform
+# 🚀 mlsysim: The ML Systems Modeling Platform
 
-`mlsysim` is the high-performance, physics-grounded analytical engine powering the **Machine Learning Systems** textbook ecosystem (`mlsysbook.ai`). It provides a unified "Single Source of Truth" (SSoT) for modeling systems from sub-watt microcontrollers to exaflop-scale global fleets.
-
----
-
-## 🏗 One Core, Multiple Worlds
-`mlsysim` is designed to be the shared brain for every product in the ecosystem:
-*   📚 **The Book**: Powers the precise "Napkin Math" and invariant checks in every chapter.
-*   🧪 **The Labs**: Drives the interactive "Persona-based" simulations and trade-off explorers.
-*   🛠 **The Kits**: Interfaces with physical hardware kits to bridge theory and measurement.
-*   🔥 **Tito (TinyTorch)**: Provides the analytical baseline for custom framework profiling.
+`mlsysim` is the high-performance, physics-grounded analytical simulator powering the **Machine Learning Systems** textbook ecosystem. It provides a unified "Single Source of Truth" (SSoT) for modeling systems from sub-watt microcontrollers to exaflop-scale global fleets.
 
 ---
 
-## 📐 Architecture (The 3-Layer Stack)
-The package is organized into three professional domains:
+## 🏗 The 5-Layer Analytical Stack
+`mlsysim` implements a "Progressive Lowering" architecture, separating high-level workloads from the physical infrastructure that executes them.
 
-1.  **`mlsysim.core` (The Physics & Definitions)**:
-    *   **Constants**: Immutable physical truths (H100 specs, Grid carbon intensity).
-    *   **Formulas**: The "Iron Laws" of ML systems (Stateless math via `pint`).
-    *   **Scenarios**: Definitive workloads like **Doorbell**, **AV**, and **GPT-4**.
-    *   **Engine**: The analytical solver for single-node performance (Latency, MFU, Energy).
-2.  **`mlsysim.sim` (The Analytical Simulator)**:
-    *   **Personas**: Scale multipliers and constraints (Cloud Titan, Tiny Pioneer).
-    *   **Simulations**: Domain logic (Sustainability, Reliability) that processes choices into ledgers.
-    *   **Ledger**: The universal multi-dimensional scorecard.
-3.  **`mlsysim.viz` (The Presentation)**:
-    *   Presentation logic: LaTeX formatting, Markdown helpers, and professional plotting.
+### Layer A: Workload Representation (`mlsysim.models`)
+High-level model definitions (`TransformerWorkload`, `CNNWorkload`).
+*   **Math:** FLOPs, parameter counts, and arithmetic intensity.
+*   **Key Models:** `Models.Llama3_70B`, `Models.GPT3`, `Models.ResNet50`.
+
+### Layer B: Hardware Registry (`mlsysim.hardware`)
+Precise, concrete specifications for real-world silicon.
+*   **Cloud:** `Hardware.H100`, `Hardware.H200`, `Hardware.MI300X`, `Hardware.TPUv5p`.
+*   **Mobile/Workstation:** `Hardware.iPhone`, `Hardware.Snapdragon`, `Hardware.MacBookM3Max`.
+*   **Edge/Tiny:** `Hardware.Jetson`, `Hardware.TeslaFSD`, `Hardware.ESP32`, `Hardware.Arduino`.
+
+### Layer C: Infrastructure & Environment (`mlsysim.infra`)
+Regional grid profiles and datacenter sustainability.
+*   **Math:** PUE, Carbon Intensity (gCO2/kWh), WUE.
+*   **Grids:** `Infra.Quebec`, `Infra.Poland`, `Infra.US_Avg`.
+
+### Layer D: Systems & Topology (`mlsysim.systems`)
+Fleet configurations, network fabrics, and narrative scenarios.
+*   **Scenarios:** `Applications.Doorbell`, `Applications.AutoDrive`, `Applications.Frontier`.
+
+### Layer E: Execution & Solvers (`mlsysim.core.solver`)
+The physics-grounded solvers that resolve the hierarchy of constraints.
+*   **`SingleNodeSolver`**: Roofline and Iron Law performance.
+*   **`ServingSolver`**: LLM Pre-fill vs. Decoding and KV-Cache growth.
+*   **`DistributedSolver`**: 3D Parallelism (TP/PP/DP) and Network Oversubscription.
+*   **`SustainabilitySolver`**: Carbon Footprint and Water usage.
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Usage: The System Evaluation
 
-### Installation (Developer Mode)
-To use `mlsysim` across the monorepo (Labs, Book, etc.), perform an editable install from the root:
-```bash
-pip install -e .
-```
+The primary way to use `mlsysim` is through the **Hierarchy of Constraints**.
 
-### Quick Usage
 ```python
 import mlsysim
-from mlsysim.sim import ResourceSimulation
 
-# 1. Setup Scenario & Persona
+# 1. Pick a Lighthouse Scenario
 scenario = mlsysim.Applications.Doorbell
-persona = mlsysim.sim.Personas.TinyPioneer
 
-# 2. Run an analytical simulation
-sim = ResourceSimulation(scenario, persona)
-ledger = sim.evaluate({"region": "Quebec", "duration_days": 365})
+# 2. Run a Multi-Level Evaluation
+evaluation = scenario.evaluate()
 
-# 3. Inspect the results
-print(f"Annual Carbon: {ledger.sustainability.carbon_kg:,.0f} kg CO2e")
+# 3. View the Scorecard
+print(evaluation.scorecard())
+```
+
+**Example Scorecard Output:**
+```text
+=== SYSTEM EVALUATION: Smart Doorbell ===
+Level 1: Feasibility -> [PASS]
+   Model fits in memory (0.5 MB / 0.5 MB)
+Level 2: Performance -> [PASS]
+   Latency: 105.00 ms (Target: 200 ms)
+Level 3: Macro/Economics -> [PASS]
+   Annual Carbon: 5.1 kg | TCO: $31,501
 ```
 
 ---
 
 ## 🛡 Stability & Integrity
-Because this core powers a printed textbook, we enforce strict **Invariant Verification**: All math cells in the book use `check()` guards. If a core formula change breaks the book's narrative, the build system will fail immediately.
+Because this core powers a printed textbook, we enforce strict **Invariant Verification**. Every physical constant is traceable to a primary source (datasheet or paper), and dimensional integrity is enforced via `pint`.
 
----
-
-## 👩‍💻 For Contributors & TAs
-We built `mlsysim` to be extensible. To add a new domain lab, simply subclass `BaseSimulation` in the `sim` sub-package.
-
-See the [**Developer Documentation**](docs/index.qmd) for full API details and the "Wicked Sick" guide to building custom systems models.
+## 🛠 Installation
+```bash
+pip install -e .
+```

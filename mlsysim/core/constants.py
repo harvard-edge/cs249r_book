@@ -1,5 +1,5 @@
 # constants.py
-# The "Physics Engine" of Machine Learning Systems
+# The Analytical Engine of Machine Learning Systems
 # This file defines the single source of truth for hardware specifications,
 # constants, and conversion factors used throughout the textbook.
 
@@ -292,11 +292,15 @@ LEAD_TIME_SUBSTATION_MONTHS = 24
 GRID_INTERCONNECTION_QUEUE_US_GW = 2000
 
 # --- Physics ---
+# --- Physical Constants ---
 SPEED_OF_LIGHT_FIBER_KM_S = 200000 * ureg.kilometer / second
 
 # --- Cloud Pricing ---
 ureg.define('dollar = 1 * count')
+ureg.define('USD = dollar')
+ureg.define('EUR = dollar')
 USD = ureg.dollar
+EUR = ureg.EUR
 CLOUD_EGRESS_PER_GB = 0.09 * USD / GB  # AWS data transfer out (2024 baseline)
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
 
@@ -492,9 +496,7 @@ TPU_POD_CHIPS = 4096
 TPU_POD_MEM = 131 * TB
 TPU_POD_POWER = 3 * ureg.megawatt
 
-# =============================================================================
 # Fleet-Scale Constants (Volume II)
-# =============================================================================
 # These constants support distributed systems calculations across Volume II.
 # They define the quantitative reference points for cluster-scale reasoning:
 # reliability, communication cost models, sustainability, and capacity planning.

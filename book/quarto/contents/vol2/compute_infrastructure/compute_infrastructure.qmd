@@ -633,6 +633,38 @@ The distinction between memory *capacity* (how many gigabytes the HBM can store)
 
 **Conclusion**: The processor spends **`{python} InfraSetup.dominance_str`%** of its time waiting for data from memory. The arithmetic units are idle for almost the entire token generation. Even a hypothetical processor with *infinite* compute throughput would generate tokens only negligibly faster, because the memory transfer time dominates completely. This is why HBM bandwidth improvements deliver nearly linear speedups for inference workloads.
 
+::: {.callout-notebook title="The Memory Wall: H100 vs. H200"}
+
+\index{NVIDIA H200!memory wall}\index{LLM inference!memory bottleneck}To understand why the "Memory Wall" is the primary constraint for modern LLMs, we compare the **NVIDIA H100** against its successor, the **H200**. While both chips share the same compute cores (same peak TFLOPS), the H200 provides `{python} H200Comparison.bw_gain_str` higher memory bandwidth and `{python} H200Comparison.cap_gain_str` more HBM capacity.
+
+```{python}
+#| echo: false
+#| label: h200-comparison
+import mlsysim
+from mlsysim.fmt import fmt
+
+class H200Comparison:
+    h100 = mlsysim.Hardware.H100
+    h200 = mlsysim.Hardware.H200
+    model = mlsysim.Models.Language.Llama2_70B
+
+    solver = mlsysim.ServingSolver()
+    res_h100 = solver.solve(model, h100, seq_len=2048, batch_size=1)
+    res_h200 = solver.solve(model, h200, seq_len=2048, batch_size=1)
+
+    bw_gain_str = fmt((h200.memory.bandwidth / h100.memory.bandwidth).to_base_units().magnitude, precision=1) + "x"
+    cap_gain_str = fmt((h200.memory.capacity / h100.memory.capacity).to_base_units().magnitude, precision=1) + "x"
+
+    itl_h100 = res_h100['itl']
+    itl_h200 = res_h200['itl']
+    speedup = (itl_h100 / itl_h200).to_base_units().magnitude
+    speedup_str = fmt(speedup, precision=1) + "x"
+```
+
+**Conclusion**: For LLM decoding, the H200 is **`{python} H200Comparison.speedup_str` faster** than the H100 despite having identical compute power. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
+
+:::
+
 :::
 
 The napkin math reveals a profound asymmetry at the heart of modern ML infrastructure. The accelerator vendors invest billions of dollars in designing faster arithmetic units (more Tensor Cores, higher clock speeds, wider datapaths), yet for single-request inference, the arithmetic completes in a fraction of a millisecond while the memory transfer takes tens of milliseconds. The arithmetic units are over 500$\times$ faster than the memory system for this workload, meaning that over 99% of the silicon dedicated to computation is idle during inference.

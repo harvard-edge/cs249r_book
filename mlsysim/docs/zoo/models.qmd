@@ -1,0 +1,107 @@
+---
+title: "The Model Zoo"
+subtitle: "Reference Workloads for Systems Modeling"
+---
+The Model Zoo defines the **Computational Demand** placed on the hardware. Every workload is
+pulled from the `mlsysim.Models` registry and characterized by its FLOPs, parameter count, and
+architecture type—independent of any specific hardware.
+
+::: {.callout-tip}
+## Arithmetic Intensity = FLOPs ÷ Bytes
+The key number for roofline analysis is each model's **arithmetic intensity**—how many floating-point
+operations it performs per byte of memory loaded. Models with low arithmetic intensity (small batch,
+decoder-only inference) tend to be memory-bound on any hardware. Pair these specs with the
+[Silicon Zoo](hardware.qmd) to find your bottleneck.
+:::
+
+```{python}
+#| echo: false
+#| output: asis
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+_m = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = _m
+spec.loader.exec_module(_m)
+mlsysim = _m
+
+def auto_scale(q):
+    if q is None: return "---"
+    if q.is_compatible_with('flop'):
+        for unit in ['ZFLOPs', 'PFLOPs', 'TFLOPs', 'GFLOPs', 'MFLOPs']:
+            scaled = q.to(unit)
+            if scaled.magnitude >= 1.0:
+                return f"{scaled.magnitude:,.1f} {scaled.units:~P}"
+    if q.is_compatible_with('param'):
+        for unit in ['Tparam', 'Bparam', 'Mparam', 'Kparam']:
+            scaled = q.to(unit)
+            if scaled.magnitude >= 1.0:
+                return f"{scaled.magnitude:,.1f} {scaled.units:~P}"
+    return f"{q.magnitude:,.1f} {q.units:~P}"
+
+def print_model_table(title, model_class):
+    print(f"### {title}")
+    print("| Model | Architecture | Parameters | Inference FLOPS | Layers |")
+    print("|:---|:---:|:---:|:---:|:---:|")
+
+    for attr_name in sorted(dir(model_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(model_class, attr_name)
+        if "Workload" in type(item).__name__:
+            params = auto_scale(getattr(item, 'parameters', None))
+            flops = auto_scale(getattr(item, 'inference_flops', None))
+            layers = getattr(item, 'layers', "---")
+            print(f"| **{item.name}** | {item.architecture} | {params} | {flops} | {layers} |")
+    print("\n")
+
+reg = getattr(mlsysim, 'Models', None)
+if reg:
+    if hasattr(reg, 'Language'): print_model_table("Large Language Models (LLMs)", reg.Language)
+    if hasattr(reg, 'Vision'): print_model_table("Vision Models (CNNs)", reg.Vision)
+    if hasattr(reg, 'Tiny'): print_model_table("TinyML Models", reg.Tiny)
+else:
+    print("Error: Models registry not found in mlsysim.")
+```
+
+---
+
+## How to Read the Model Zoo
+
+### Parameters vs. Inference FLOPs
+
+These two numbers tell very different stories:
+
+- **Parameters** determine memory footprint: at fp16, each parameter is 2 bytes. A 70B-parameter model needs ~140 GB just for weights — more than a single A100.
+- **Inference FLOPs** determine compute time: the total floating-point operations for one forward pass. Higher FLOPs means more work for the GPU's compute cores.
+
+The ratio of FLOPs to memory accessed (the **arithmetic intensity**) determines whether a workload is compute-bound or memory-bound. At small batch sizes, most models are memory-bound because the weights must be loaded regardless of batch size.
+
+### Which Model for Which Hardware?
+
+As a rough guide:
+
+- **TinyML MCUs** (KB-scale memory) — only `Tiny` models fit (MobileNetV2, TinyBERT)
+- **Edge devices** (Jetson, 8-32 GB) — small Vision and Language models at int8
+- **Single Cloud GPU** (40-80 GB) — models up to ~30B parameters at fp16
+- **Multi-GPU clusters** — 70B+ models require distributed serving or training
+
+### Textbook Connection
+
+The *Model Training* and *Model Serving* chapters use these workload profiles to demonstrate roofline analysis and serving cost estimation. The *Model Compression* chapter shows how quantization reduces both parameter memory and inference FLOPs.
+
+---
+
+*
+::: {.callout-note}
+## Add your own model
+Defining custom workloads is straightforward. You can extend the registry or define a
+(or ) object directly in your code.
+Learn more in the [Contributing Guide](../contributing.qmd) and the [Models API Reference](../api/models.qmd).
+:::
+
+Note: For dynamic memory footprint and KV-cache calculations, see the API Reference.*

@@ -1,0 +1,337 @@
+---
+title: "LLM Serving Lab: TTFT, ITL, and the Memory Wall"
+subtitle: "Model the two physical regimes of LLM inference before deploying a single server."
+---
+::: {.callout-note}
+## Background: What is an LLM and why is serving different?
+
+A **Large Language Model (LLM)** like Llama-3 generates text one token (roughly one word) at a time. Unlike image models that process a fixed input in one pass, LLMs run the model *repeatedly*, once for each output token. This creates two distinct phases with different performance characteristics, which is why LLM serving requires its own dedicated solver. You should complete the [Hello World tutorial](hello_world.qmd) before this one.
+:::
+
+Running a large language model in production is not like running ResNet. An LLM inference
+request goes through **two completely different physical regimes**, each bottlenecked by a
+different hardware resource. Understanding this is the difference between guessing at your
+deployment budget and calculating it precisely.
+
+By the end of this tutorial you will understand:
+
+- Why **TTFT** (Time to First Token) and **ITL** (Inter-Token Latency) have different bottlenecks
+- How **KV-cache** memory pressure limits batch concurrency
+- Why **quantization** helps decoding more than prefill
+- How to pick the right GPU for your serving latency targets
+
+::: {.callout-tip}
+## The Two Phases of LLM Inference
+
+Recall from the [Hello World tutorial](hello_world.qmd) that every workload is either memory-bound
+or compute-bound. LLM serving is unusual because *both regimes* occur in the same request:
+
+**Pre-fill (TTFT):** All prompt tokens processed in a single forward pass. The model sees the
+full context at once — this is compute-intensive and saturates GPU arithmetic units. Optimizing
+TTFT means getting more TFLOP/s.
+
+**Decoding (ITL):** One token generated at a time. Each step must reload the *entire model*
+from HBM (High Bandwidth Memory) to produce just one output token. This is overwhelmingly **memory-bound**.
+Optimizing ITL means getting more GB/s.
+
+The same GPU has two different speed limits for the same model.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+# Build-system path setup — hidden from students
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim_mod = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim_mod
+spec.loader.exec_module(mlsysim_mod)
+import mlsysim
+```
+
+```python
+import mlsysim
+from mlsysim import ServingSolver
+```
+
+Unlike the general-purpose `Engine.solve` from the Hello World tutorial, `ServingSolver`
+separates inference into two phases — pre-fill and decoding — each with its own bottleneck.
+
+Select our workload and hardware from the **MLSys Zoo**:
+
+```{python}
+from mlsysim import ServingSolver
+
+# Llama-3.1-8B: 8B parameters, 32 layers, 4096 hidden_dim
+# 8 GQA (Grouped Query Attention) heads — fewer KV heads than query heads, saving memory
+model = mlsysim.Models.Llama3_8B
+
+# NVIDIA H100 SXM5: 80 GB HBM3, 3.35 TB/s, 989 TFLOP/s (fp16)
+hardware = mlsysim.Hardware.Cloud.H100
+
+print(f"Model:      {model.name}")
+print(f"Parameters: {model.parameters.to('Gparam'):.1f}")
+print(f"Layers:     {model.layers}, Hidden: {model.hidden_dim}")
+print(f"")
+print(f"Hardware:   {hardware.name}")
+print(f"Memory:     {hardware.memory.capacity.to('GB'):.0f} GB @ "
+      f"{hardware.memory.bandwidth.to('TB/s'):.2f} TB/s")
+print(f"Compute:    {hardware.compute.peak_flops.to('TFLOPs/s'):.0f} TFLOP/s (fp16)")
+```
+
+---
+
+## 2. First Serving Prediction
+
+The `ServingSolver` takes a **sequence length** — the total context window that must be
+processed during pre-fill and cached during decoding.
+
+```{python}
+solver = ServingSolver()
+
+result = solver.solve(
+    model=model,
+    hardware=hardware,
+    seq_len=2048,      # tokens in context (prompt + history)
+    batch_size=1,      # concurrent users
+    precision="fp16"
+)
+
+print(f"Feasible:          {result['feasible']}")
+print(f"")
+print(f"── Latency ──────────────────────────────")
+print(f"TTFT (prefill):    {result['ttft'].to('ms'):~.1f}")
+print(f"ITL  (per token):  {result['itl'].to('ms'):~.2f}")
+print(f"")
+print(f"── Memory ───────────────────────────────")
+print(f"Model weights:     {result['model_weights_size']:~.2f}")
+print(f"KV-cache (2K ctx): {result['kv_cache_size']:~.3f}")
+print(f"Total required:    {result['total_memory_required']:~.2f}")
+print(f"Memory util:       {result['memory_utilization']:.1%}")
+```
+
+::: {.callout-note}
+## Reading the output
+
+- **TTFT** is tens of milliseconds — bounded by the GPU's 989 TFLOP/s compute ceiling.
+- **ITL** is a small fraction of a millisecond — bounded by the 3.35 TB/s HBM bandwidth.
+  At each decode step, ~16 GB of weights must transit from HBM to compute units, yet
+  only one token of computation happens. The bandwidth is the wall, not the FLOPs.
+- **Memory util** tells you how much of the 80 GB HBM is occupied. The remainder is
+  available for more concurrent users (larger `batch_size`).
+- **Typical SLA targets**: For interactive chat applications, aim for TTFT < 200 ms and
+  ITL < 50 ms/token. The numbers above are well within these targets for a single user.
+:::
+
+---
+
+## 3. The KV-Cache Memory Wall
+
+The KV-cache stores the Key and Value matrices from every attention layer for every token
+in the active context. This statefulness is what makes LLM decoding uniquely memory-bound.
+
+::: {.callout-note}
+## 🧮 See the Math
+To see the exact formula for how KV-Cache size scales with sequence length, batch size, and network architecture, see the [Mathematical Foundations: KV-Cache Size](../math.qmd#kv-cache-size).
+:::
+
+This means doubling `batch_size` doubles the KV-cache. At some point, you hit the
+**memory wall** — the combined model + KV-cache exceeds the accelerator's HBM capacity.
+
+```{python}
+print(f"{'Batch':>6}  {'Ctx':>6}  {'KV-Cache':>10}  {'Total':>8}  {'Util':>6}  {'Feasible':>8}")
+print("-" * 56)
+
+for batch in [1, 4, 8, 16, 32, 64]:
+    r = solver.solve(
+        model=model,
+        hardware=hardware,
+        seq_len=2048,
+        batch_size=batch,
+        precision="fp16"
+    )
+    print(
+        f"{batch:>6}  "
+        f"{'2048':>6}  "
+        f"{r['kv_cache_size']:>10.3f~}  "
+        f"{r['total_memory_required']:>8.2f~}  "
+        f"{r['memory_utilization']:>6.1%}  "
+        f"{'✓' if r['feasible'] else '✗ OOM':>8}"
+    )
+```
+
+::: {.callout-warning}
+## Finding the memory wall
+
+Watch for `✗ OOM` — this is where `total_memory_required` exceeds the 80 GB HBM capacity.
+That batch size is infeasible on a single H100. You would need to either: reduce the
+context window, switch to a lower-precision format, or add more GPUs.
+:::
+
+```{python}
+# Also sweep context length at fixed batch size
+print(f"\n{'Ctx':>6}  {'KV-Cache':>10}  {'Total':>8}  {'Util':>6}  {'Feasible':>8}")
+print("-" * 48)
+
+for ctx in [512, 1024, 2048, 4096, 8192, 16384, 32768]:
+    r = solver.solve(
+        model=model,
+        hardware=hardware,
+        seq_len=ctx,
+        batch_size=8,
+        precision="fp16"
+    )
+    print(
+        f"{ctx:>6}  "
+        f"{r['kv_cache_size']:>10.3f~}  "
+        f"{r['total_memory_required']:>8.2f~}  "
+        f"{r['memory_utilization']:>6.1%}  "
+        f"{'✓' if r['feasible'] else '✗ OOM':>8}"
+    )
+```
+
+---
+
+## 4. Quantization: Precision as a Latency Knob
+
+Reducing numerical precision does two things simultaneously:
+
+1. **Shrinks model weights** → fewer bytes to load per decode step → lower ITL
+2. **Shrinks KV-cache** → more headroom for larger batches or longer contexts
+
+But precision affects the **two phases differently**: TTFT (compute-bound) improves only
+when going to fp8 or below on hardware with native low-precision tensor cores. ITL
+(memory-bound) improves with every step down in precision.
+
+```{python}
+print(f"{'Precision':>10}  {'TTFT':>8}  {'ITL':>10}  {'Weights':>8}  {'KV-Cache':>10}  {'Util':>7}")
+print("-" * 64)
+
+for prec in ["fp16", "int8", "int4"]:
+    r = solver.solve(
+        model=model,
+        hardware=hardware,
+        seq_len=8192,
+        batch_size=8,
+        precision=prec
+    )
+    print(
+        f"{prec:>10}  "
+        f"{r['ttft'].to('ms'):>8.1f~}  "
+        f"{r['itl'].to('ms'):>10.3f~}  "
+        f"{r['model_weights_size']:>8.2f~}  "
+        f"{r['kv_cache_size']:>10.3f~}  "
+        f"{r['memory_utilization']:>7.1%}"
+    )
+```
+
+::: {.callout-tip}
+## Why ITL improves more than TTFT
+
+Going from `fp16` → `int8` halves the model size. At **decode time**, each step must load
+the full model from HBM — half the bytes means half the time. ITL drops by ~50%.
+
+At **prefill time**, the computation is the bottleneck (not bandwidth), so halving byte
+count helps less — you're not memory-bound in the first place. The improvement is
+smaller and depends on whether your hardware has native `int8` tensor core support.
+
+**Rule of thumb**: Quantization is a decoding optimization first, a prefill optimization second.
+:::
+
+---
+
+## 5. Hardware Comparison
+
+Different GPUs have different ratios of compute-to-memory-bandwidth. For LLM serving:
+
+- **Higher TFLOP/s** → faster TTFT (prefill is compute-bound)
+- **Higher HBM bandwidth** → faster ITL (decoding is memory-bound)
+
+```{python}
+gpus = [
+    ("A100 (80GB)", mlsysim.Hardware.Cloud.A100),
+    ("H100 SXM5",  mlsysim.Hardware.Cloud.H100),
+    ("H200",       mlsysim.Hardware.Cloud.H200),
+    ("MI300X",     mlsysim.Hardware.Cloud.MI300X),
+]
+
+print(f"{'GPU':>14}  {'BW (TB/s)':>10}  {'TTFT':>8}  {'ITL':>10}  {'Max Util':>9}")
+print("-" * 60)
+
+for name, hw in gpus:
+    r = solver.solve(
+        model=model,
+        hardware=hw,
+        seq_len=4096,
+        batch_size=4,
+        precision="fp16"
+    )
+    print(
+        f"{name:>14}  "
+        f"{hw.memory.bandwidth.to('TB/s'):>10.2f~}  "
+        f"{r['ttft'].to('ms'):>8.1f~}  "
+        f"{r['itl'].to('ms'):>10.3f~}  "
+        f"{r['memory_utilization']:>9.1%}"
+    )
+```
+
+::: {.callout-note}
+## Why H200 wins on ITL
+
+The H200 uses HBM3e with **4.8 TB/s** bandwidth vs the H100's 3.35 TB/s — a 43% increase.
+This directly maps to a 43% lower ITL, because decoding is a pure memory-bound operation.
+
+The MI300X is even more interesting: its massive 192 GB HBM pool lets you pack far more
+concurrent users (batch_size) before hitting the memory wall.
+:::
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict the memory wall.**
+Before running the code, estimate: at what batch size will Llama-3.1-8B hit OOM on an 80 GB H100 with seq_len=4096 at FP16? Write your estimate, then sweep batch sizes to find the actual limit. How close were you?
+
+**Exercise 2: The quantization trade-off.**
+Before running: predict which GPU will benefit most from quantization (int8 vs. fp16) in terms of ITL improvement. (Hint: ITL depends on bandwidth, not compute. Think about which GPU has the lowest bandwidth relative to its memory capacity.) Then run the hardware comparison sweep (Section 5) at both precisions and check your prediction.
+
+**Exercise 3: Context length scaling.**
+Before running: predict whether TTFT scales linearly or quadratically with seq_len. (Hint: the simplified model in MLSYSIM computes prefill FLOPs as `2 × params × seq_len`, which is linear. But real transformers have attention layers whose cost grows as O(seq_len²). How does this affect your prediction for long contexts?) Sweep seq_len from 512 to 16384 at batch_size=1 and plot TTFT vs. seq_len. Does the result match the simplified model or the quadratic attention model?
+
+**Self-check:** A user asks "Will my chatbot feel responsive on a single A100?" What two metrics would you check, and what thresholds would you target for a good user experience?
+:::
+
+---
+
+## What You Learned
+
+- **LLM serving has two regimes**: Pre-fill (TTFT) is **compute-bound**; Decoding (ITL) is
+  **memory-bound**. They respond to different optimizations.
+- **KV-cache memory** scales as $O(L \times S \times B \times \text{bpp})$: longer contexts
+  and larger batches both consume HBM, eventually causing OOM.
+- **Quantization** is primarily a **decoding speedup**: halving precision halves the bytes
+  loaded per decode step, directly halving ITL.
+- **Hardware selection**: For low-latency chat (ITL-critical), maximize HBM bandwidth.
+  For long-context applications (TTFT-critical), maximize TFLOP/s.
+
+---
+
+## Next Steps
+
+- **[Distributed Training](distributed.qmd)**: Scale a model across hundreds of GPUs using
+  3D parallelism — and discover why scaling efficiency is rarely 100%
+- **[Math Foundations](../math.qmd)**: The exact equations behind TTFT, ITL, and KV-cache sizing
+- **[Silicon Zoo](../zoo/hardware.qmd)**: Compare full hardware specs across the entire fleet

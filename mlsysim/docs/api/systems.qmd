@@ -1,0 +1,283 @@
+# systems { #mlsysim.systems }
+
+`systems` -- Fleet and cluster configurations for ML infrastructure.
+
+The `systems` module defines the physical topology of ML deployments: from individual server nodes to multi-thousand-GPU clusters connected by high-speed fabrics. Every specification is unit-typed via [Pint](https://pint.readthedocs.io) and sourced from vendor datasheets.
+
+## Sub-modules
+
+| Sub-module | Description |
+|------------|-------------|
+| [`systems.types`](#types) | Data classes: `DeploymentTier`, `NetworkFabric`, `Node`, `Fleet`. |
+| [`systems.registry`](#registry) | Pre-built registry of vetted tiers, nodes, fabrics, and clusters. |
+
+---
+
+## Types { #types }
+
+`systems.types` -- Pydantic data models for system-level building blocks.
+
+### DeploymentTier { #mlsysim.systems.types.DeploymentTier }
+
+```python
+systems.types.DeploymentTier(
+    name,
+    ram,
+    storage,
+    typical_latency_budget,
+)
+```
+
+Deployment category with resource constraints. Captures the broad resource envelope of a deployment target (Cloud, Edge, Mobile, Tiny) so that solvers can reason about where a workload will run.
+
+#### Fields {.doc-section .doc-section-parameters}
+
+| Name | Type | Description | Default |
+|------|------|-------------|---------|
+| name | str | Human-readable tier label (e.g., `"Cloud"`, `"Edge"`). | _required_ |
+| ram | Quantity | Total system RAM available at this tier. | _required_ |
+| storage | Quantity | Total persistent storage available. | _required_ |
+| typical_latency_budget | Quantity | Representative end-to-end latency SLA for this tier. | _required_ |
+
+---
+
+### NetworkFabric { #mlsysim.systems.types.NetworkFabric }
+
+```python
+systems.types.NetworkFabric(
+    name,
+    topology='fat-tree',
+    bandwidth,
+    latency=None,
+    oversubscription_ratio=1.0,
+)
+```
+
+Interconnect specifications for inter-node communication. Models the physical network connecting nodes in a cluster, parameterizing the alpha-beta communication model used by the `DistributedSolver`.
+
+#### Fields {.doc-section .doc-section-parameters}
+
+| Name | Type | Description | Default |
+|------|------|-------------|---------|
+| name | str | Fabric identifier (e.g., `"100GbE"`, `"IB NDR"`). | _required_ |
+| topology | str | Network topology. | `"fat-tree"` |
+| bandwidth | Quantity | Per-link bandwidth (e.g., `100 GB/s`). | _required_ |
+| latency | Optional\[Quantity\] | Per-hop latency. | `None` |
+| oversubscription_ratio | float | Blocking ratio. `1.0` means non-blocking (full bisection bandwidth); `3.0` means 3:1 oversubscription. | `1.0` |
+
+---
+
+### Node { #mlsysim.systems.types.Node }
+
+```python
+systems.types.Node(
+    name,
+    accelerator,
+    accelerators_per_node,
+    intra_node_bw,
+    nics_per_node=1,
+    psus_per_node=2,
+)
+```
+
+A physical server node containing one or more accelerators. Represents a single machine in a cluster (e.g., an NVIDIA DGX box) with its internal interconnect and I/O configuration.
+
+#### Fields {.doc-section .doc-section-parameters}
+
+| Name | Type | Description | Default |
+|------|------|-------------|---------|
+| name | str | Node identifier (e.g., `"DGX H100"`). | _required_ |
+| accelerator | [HardwareNode](hardware.types.HardwareNode.qmd) | The accelerator installed in this node. | _required_ |
+| accelerators_per_node | int | Number of accelerators per node (e.g., 8 for a DGX). | _required_ |
+| intra_node_bw | Quantity | Intra-node interconnect bandwidth (e.g., NVLink bandwidth). | _required_ |
+| nics_per_node | int | Number of network interface cards. | `1` |
+| psus_per_node | int | Number of power supply units. | `2` |
+
+---
+
+### Fleet { #mlsysim.systems.types.Fleet }
+
+```python
+systems.types.Fleet(
+    name,
+    node,
+    count,
+    fabric,
+    region=None,
+    datacenter=None,
+    mtbf_hours=None,
+)
+```
+
+A cluster of identical nodes connected by a network fabric. This is the primary system-level object passed to distributed solvers (`DistributedSolver`, `EconomicsSolver`, `SustainabilitySolver`, `ReliabilitySolver`).
+
+#### Fields {.doc-section .doc-section-parameters}
+
+| Name | Type | Description | Default |
+|------|------|-------------|---------|
+| name | str | Cluster identifier (e.g., `"Research Cluster (256 GPUs)"`). | _required_ |
+| node | [Node](#mlsysim.systems.types.Node) | The node template replicated across the cluster. | _required_ |
+| count | int | Total number of nodes in the cluster. | _required_ |
+| fabric | [NetworkFabric](#mlsysim.systems.types.NetworkFabric) | The inter-node network fabric. | _required_ |
+| region | Optional\[[GridProfile](infra.types.qmd)\] | Regional power grid profile for sustainability calculations. | `None` |
+| datacenter | Optional\[[Datacenter](infra.types.qmd)\] | Datacenter profile (PUE, cooling). | `None` |
+| mtbf_hours | Optional\[Quantity\] | Mean Time Between Failures for the cluster. | `None` |
+
+#### Properties
+
+| Name | Type | Description |
+|------|------|-------------|
+| [total_accelerators](#mlsysim.systems.types.Fleet.total_accelerators) | int | Total GPU/accelerator count across the entire fleet. |
+| [effective_pue](#mlsysim.systems.types.Fleet.effective_pue) | float | Power Usage Effectiveness for energy calculations. |
+
+##### total_accelerators { #mlsysim.systems.types.Fleet.total_accelerators }
+
+```python
+@property
+Fleet.total_accelerators -> int
+```
+
+Returns `count * node.accelerators_per_node`. For example, a cluster of 32 DGX H100 nodes (8 GPUs each) yields 256 total accelerators.
+
+##### effective_pue { #mlsysim.systems.types.Fleet.effective_pue }
+
+```python
+@property
+Fleet.effective_pue -> float
+```
+
+Returns the Power Usage Effectiveness for the fleet. Resolution order:
+
+1. `datacenter.pue` if a `Datacenter` is attached.
+2. `region.pue` if a `GridProfile` is attached.
+3. `1.12` (default hyperscale PUE) otherwise.
+
+---
+
+## Registry { #registry }
+
+`systems.registry` -- Pre-built, vetted system configurations.
+
+All entries are class-level attributes with dot-access via the `Systems` namespace. The `Systems` class aggregates four sub-registries: `Tiers`, `Nodes`, `Fabrics`, and `Clusters`.
+
+### Systems { #mlsysim.systems.registry.Systems }
+
+```python
+systems.registry.Systems()
+```
+
+Top-level registry aggregating all system sub-registries.
+
+| Sub-registry | Description |
+|--------------|-------------|
+| [Systems.Tiers](#mlsysim.systems.registry.Tiers) | Deployment tier definitions. |
+| [Systems.Nodes](#mlsysim.systems.registry.Nodes) | Reference server nodes. |
+| [Systems.Fabrics](#mlsysim.systems.registry.Fabrics) | Network fabric specifications. |
+| [Systems.Clusters](#mlsysim.systems.registry.Clusters) | Production cluster configurations. |
+
+---
+
+### Systems.Tiers { #mlsysim.systems.registry.Tiers }
+
+```python
+systems.registry.Tiers()
+```
+
+Vetted Deployment Tiers defining the resource envelope for each deployment category.
+
+| Attribute | RAM | Storage | Latency Budget |
+|-----------|-----|---------|----------------|
+| `Tiers.Cloud` | 512 GB | 10 TB | 200 ms |
+| `Tiers.Edge` | 32 GB | 1 TB | 50 ms |
+| `Tiers.Mobile` | ~8 GB | 256 GB | 30 ms |
+| `Tiers.Tiny` | ~520 KiB | 4 MB | 100 ms |
+
+---
+
+### Systems.Nodes { #mlsysim.systems.registry.Nodes }
+
+```python
+systems.registry.Nodes()
+```
+
+Vetted Reference Nodes based on NVIDIA DGX product specifications.
+
+| Attribute | Accelerator | GPUs/Node | Intra-node BW | NICs |
+|-----------|-------------|-----------|---------------|------|
+| `Nodes.DGX_H100` | H100 | 8 | 900 GB/s (NVLink) | 8 |
+| `Nodes.DGX_A100` | A100 | 8 | 600 GB/s (NVLink) | 8 |
+
+---
+
+### Systems.Fabrics { #mlsysim.systems.registry.Fabrics }
+
+```python
+systems.registry.Fabrics()
+```
+
+Vetted Network Fabrics spanning commodity Ethernet to high-performance InfiniBand.
+
+| Attribute | Name | Bandwidth |
+|-----------|------|-----------|
+| `Fabrics.Ethernet_10G` | 10GbE | 10 Gbit/s |
+| `Fabrics.Ethernet_100G` | 100GbE | 100 Gbit/s |
+| `Fabrics.InfiniBand_HDR` | IB HDR | 200 Gbit/s |
+| `Fabrics.InfiniBand_NDR` | IB NDR | 400 Gbit/s |
+
+---
+
+### Systems.Clusters { #mlsysim.systems.registry.Clusters }
+
+```python
+systems.registry.Clusters()
+```
+
+Vetted Production Clusters representing common deployment scales.
+
+| Attribute | Total GPUs | Nodes | Node Type | Fabric |
+|-----------|-----------|-------|-----------|--------|
+| `Clusters.Research_256` | 256 | 32 DGX H100 | DGX_H100 | 100GbE |
+| `Clusters.Frontier_8K` | 8192 | 1024 DGX H100 | DGX_H100 | IB NDR |
+
+---
+
+## Usage Example
+
+```python
+import mlsysim
+
+# --- Access pre-built clusters from the registry ---
+cluster = mlsysim.Systems.Clusters.Research_256
+print(f"Cluster:      {cluster.name}")
+print(f"Total GPUs:   {cluster.total_accelerators}")   # 256
+print(f"Fabric:       {cluster.fabric.name}")           # 100GbE
+print(f"PUE:          {cluster.effective_pue}")         # 1.12 (default)
+
+# --- Build a custom fleet from components ---
+from mlsysim.systems.types import Node, Fleet, NetworkFabric
+from mlsysim.hardware.registry import Hardware
+
+my_node = Node(
+    name="Custom Node",
+    accelerator=Hardware.Cloud.H100,
+    accelerators_per_node=4,
+    intra_node_bw="900 GB/s",
+)
+
+my_fabric = NetworkFabric(
+    name="Custom 100GbE",
+    bandwidth="100 Gbit/s",
+    oversubscription_ratio=2.0,  # 2:1 blocking
+)
+
+my_fleet = Fleet(
+    name="Dev Cluster",
+    node=my_node,
+    count=16,
+    fabric=my_fabric,
+)
+
+print(f"\nCustom fleet:  {my_fleet.name}")
+print(f"Total GPUs:    {my_fleet.total_accelerators}")  # 64
+print(f"Effective PUE: {my_fleet.effective_pue}")       # 1.12 (default)
+```
