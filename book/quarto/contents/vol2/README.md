@@ -53,7 +53,7 @@ Volume II assumes you have read Volume I or have equivalent knowledge of single-
 
 I develop this volume in the open because I believe it produces a better textbook. Every commit is visible, every editorial decision is traceable. If something looks rough, that is because you are watching the book being written.
 
-If you notice an error, have a suggestion, or want to contribute, open an issue or start a discussion. The book is better for every reader who engages with it.
+If you notice an error, have a suggestion, or want to propose a topic, please [open an issue](https://github.com/harvard-edge/cs249r_book/issues) or [start a discussion](https://github.com/harvard-edge/cs249r_book/discussions). Feedback on structure, missing topics, examples, and clarity is especially valuable at this stage. The book is better for every reader who engages with it.
 
 ## Links
 

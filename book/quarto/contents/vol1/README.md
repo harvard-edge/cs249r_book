@@ -57,6 +57,10 @@ If you are an instructor adopting this for a course, the natural division is:
 - **Parts I and II** (Chapters 1 through 8) for a foundations course
 - **Parts III and IV** (Chapters 9 through 15) for an optimization and deployment course
 
+## Feedback
+
+If you spot an error, find an explanation that could be clearer, or have a suggestion, please [open an issue](https://github.com/harvard-edge/cs249r_book/issues). Even small corrections make the book better for every reader.
+
 ## Links
 
 | Resource | Link |
