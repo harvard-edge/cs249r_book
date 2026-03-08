@@ -8,6 +8,11 @@
   <a href="README/README_ko.md">한국어</a>
 </p>
 
+> [!NOTE]
+> **You are on the `dev` branch.** This is the default branch and where active development happens.
+> I am in the process of **restructuring the textbook into two focused volumes**, adding new content, and updating diagrams throughout.
+> For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
+
 <div align="center">
 
 <p align="center">
@@ -38,6 +43,57 @@
 📚 **Hardcopy edition coming 2026 with MIT Press.**
 
 </div>
+
+---
+
+## Branch Guide
+
+This repository uses `dev` as the default branch. Here is how the branches relate to the book:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          BRANCH STRUCTURE                               │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│   main (last stable release)                                            │
+│   ├── Single-volume textbook (published and available)                  │
+│   └── Stable PDF, EPUB, and online edition                              │
+│         │                                                               │
+│         │  ┌──────────────────────────────────────────────────────┐     │
+│         └──┤  TRANSITION IN PROGRESS                              │     │
+│            │  Splitting into two focused volumes                  │     │
+│            └────────────────────┬─────────────────────────────────┘     │
+│                                 │                                       │
+│   dev (default branch, you are here)                                    │
+│   ├── 📘 Volume I: Introduction to Machine Learning Systems             │
+│   │      Foundations for single-machine ML (1 to 8 GPUs)                │
+│   │      Status: Content complete, undergoing editorial polish          │
+│   │                                                                     │
+│   └── 📙 Volume II: Machine Learning Systems at Scale                   │
+│          Distributed systems and production infrastructure              │
+│          Status: Active development, chapters being written             │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+| Branch | What It Contains | Status |
+|--------|-----------------|--------|
+| [`main`](https://github.com/harvard-edge/cs249r_book/tree/main) | Last stable single-volume release | Stable, available for reading |
+| **`dev`** (you are here) | Two-volume restructured textbook | Under active development |
+
+---
+
+## Working in the Open
+
+I develop this textbook in the open. Like an artist who paints in a public studio, I do my work where anyone can watch, learn from the process, and contribute.
+
+What this means for you:
+
+- **Volume I** content is mature and undergoing final editorial polish. It is ready for classroom use.
+- **Volume II** is actively being written. Chapters, diagrams, and sections are in various stages of completion. Expect rough edges, placeholder figures, and sections under construction. This is normal. You are seeing the book being built.
+- **The transition from one volume to two** means some cross-references, navigation, and structure are still being updated.
+
+I believe open development produces better textbooks. Every commit, every revision, every editorial decision is visible. If you want the polished, stable version, use the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main). If you want to see where the book is headed, or help shape it, you are in the right place.
 
 ---
 
@@ -167,7 +223,7 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
-This textbook started as a single volume. As the scope grew to cover both foundational principles and large-scale distributed systems, we split it into two focused volumes. Volume I is complete and available now. Volume II covers distributed systems, production infrastructure, and responsible AI at scale. It is complete and will be published Summer 2026.
+This textbook started as a single volume. As the scope grew to cover both foundational principles and large-scale distributed systems, I am splitting it into two focused volumes, much like Hennessy and Patterson's *Computer Organization and Design* and *Computer Architecture: A Quantitative Approach*. Volume I is complete and available now. Volume II is actively being developed and will be published Summer 2026. The `main` branch still holds the original single-volume edition. This `dev` branch is where the two-volume restructuring is happening.
 
 | Volume | Title | Focus | Status |
 |--------|-------|-------|--------|
@@ -186,6 +242,9 @@ The [full textbook](https://mlsysbook.ai/book/) combines both volumes for compre
 | **IV. Deployment** | Making it work | Model Serving, MLOps, Responsible Engineering |
 
 ### Volume II: Machine Learning Systems at Scale *(Coming Summer 2026)*
+
+> [!CAUTION]
+> **Volume II is a work in progress.** All 16 chapters exist and the structure is locked in, but the content within each chapter is still being written and revised. I share it openly because I believe in transparent development.
 
 Volume II picks up where Volume I ends, moving from a single machine to fleets of machines. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
 
