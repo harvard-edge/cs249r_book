@@ -8,11 +8,6 @@
   <a href="README/README_ko.md">한국어</a>
 </p>
 
-> [!NOTE]
-> **You are on the `dev` branch.** This is the default branch and where active development happens.
-> I am in the process of **restructuring the textbook into two focused volumes**, adding new content, and updating diagrams throughout.
-> For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
-
 <div align="center">
 
 <p align="center">
@@ -30,12 +25,9 @@
 <p align="center">
 
   <!-- Reader Navigation -->
-  **[📖 Read Online](https://mlsysbook.ai/book/)** •
   **[📘 Volume I](https://mlsysbook.ai/vol1/)** •
   **[📙 Volume II *(Summer 2026)*](https://mlsysbook.ai/vol2/)** •
   **[Tiny🔥Torch](https://mlsysbook.ai/tinytorch/)** •
-  **[📄 Download PDF](https://mlsysbook.ai/book/assets/downloads/Machine-Learning-Systems.pdf)** •
-  **[📓 Download EPUB](https://mlsysbook.ai/epub)** •
   **[🌐 Ecosystem](https://mlsysbook.org)**
 
 </p>
@@ -45,6 +37,11 @@
 </div>
 
 ---
+
+> [!NOTE]
+> **You are on the `dev` branch.** This is the default branch and where active development happens.
+> I am restructuring the textbook from a single volume into two focused, tighter volumes. New content is being added, existing content is being refined, and diagrams are being updated throughout.
+> For the last stable release, see the [`main` branch](https://github.com/harvard-edge/cs249r_book/tree/main).
 
 ## Branch Guide
 
@@ -60,8 +57,8 @@ This repository uses `dev` as the default branch. Here is how the branches relat
 │   └── Stable PDF, EPUB, and online edition                              │
 │         │                                                               │
 │         │  ┌──────────────────────────────────────────────────────┐     │
-│         └──┤  TRANSITION IN PROGRESS                              │     │
-│            │  Splitting into two focused volumes                  │     │
+│         └──┤  RESTRUCTURING IN PROGRESS                           │     │
+│            │  Refocusing into two tighter volumes                 │     │
 │            └────────────────────┬─────────────────────────────────┘     │
 │                                 │                                       │
 │   dev (default branch, you are here)                                    │
@@ -223,12 +220,12 @@ This textbook teaches you to think at the intersection of machine learning and s
 
 ### Book Structure
 
-This textbook started as a single volume. As the scope grew to cover both foundational principles and large-scale distributed systems, I am splitting it into two focused volumes, much like Hennessy and Patterson's *Computer Organization and Design* and *Computer Architecture: A Quantitative Approach*. Volume I is complete and available now. Volume II is actively being developed and will be published Summer 2026. The `main` branch still holds the original single-volume edition. This `dev` branch is where the two-volume restructuring is happening.
+This textbook started as a single volume. I am restructuring it into two focused, tighter volumes. The restructuring is not simply splitting the original in half. It is an editorial refinement: sharpening each volume's focus, removing overlap, and ensuring each stands on its own. Volume I is complete and available now. Volume II is actively being developed and will be published Summer 2026. The `main` branch still holds the original single-volume edition. This `dev` branch is where the two-volume restructuring is happening.
 
 | Volume | Title | Focus | Status |
 |--------|-------|-------|--------|
-| **[Volume I](https://mlsysbook.ai/vol1/)** | Introduction to Machine Learning Systems | Single-machine ML systems, foundations through deployment | Available now |
-| **[Volume II](https://mlsysbook.ai/vol2/)** | Machine Learning Systems at Scale | Distributed infrastructure, training at scale, and responsible AI | Coming Summer 2026 |
+| **[Volume I](https://mlsysbook.ai/vol1/)** | Introduction to Machine Learning Systems | One machine, one to eight accelerators. Foundations, optimization, and deployment. | Available now |
+| **[Volume II](https://mlsysbook.ai/vol2/)** | Machine Learning Systems at Scale | Many machines, thousands of accelerators. Distributed training, infrastructure, and production at scale. | Coming Summer 2026 |
 
 The [full textbook](https://mlsysbook.ai/book/) combines both volumes for comprehensive coverage.
 

@@ -67,13 +67,13 @@ def generate_contributor_cell(contributor: dict, show_badges: bool = True, image
     return f'''      <td align="center" valign="top" width="{width_pct}"><a href="{profile}"><img src="{avatar_url}?v=4?s={image_size}" width="{image_size}px;" alt="{name}"/><br /><sub><b>{name}</b></sub></a>{badges}</td>'''
 
 
-def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 9, image_size: int = 50) -> str:
+def generate_contributor_table(contributors: list, show_badges: bool = True, cols: int = 7, image_size: int = 50) -> str:
     """Generate an HTML table for contributors.
 
     Args:
         contributors: List of contributor dicts
         show_badges: Whether to show contribution badges
-        cols: Number of columns per row (default 9 for compact display)
+        cols: Number of columns per row (default 7 for readable wrapping)
         image_size: Size of avatar images in pixels (default 50 for compact display)
     """
     if not contributors:
