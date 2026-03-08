@@ -10,6 +10,8 @@
 --   3. Apply \lettrine to that paragraph's first word
 --   4. One drop cap per chapter
 --
+-- Opt-out: Set `dropcap: false` in a chapter's YAML frontmatter to skip it.
+--
 -- This keeps QMD files clean — no manual \lettrine calls needed.
 -- =============================================================================
 
@@ -38,6 +40,9 @@ if not is_target_format() then
 end
 
 debug("Filter active for format")
+
+-- Frontmatter flag: default true, set `dropcap: false` to opt out
+local dropcap_enabled = true
 
 -- Check if a header has the .unnumbered class
 local function is_unnumbered(el)
@@ -119,8 +124,28 @@ local function apply_lettrine(el)
   return pandoc.Para(new_content)
 end
 
+-- Read frontmatter metadata
+local function read_meta(meta)
+  if meta.dropcap ~= nil then
+    if type(meta.dropcap) == "boolean" then
+      dropcap_enabled = meta.dropcap
+    elseif meta.dropcap == false then
+      dropcap_enabled = false
+    else
+      local val = pandoc.utils.stringify(meta.dropcap)
+      dropcap_enabled = val ~= "false"
+    end
+  end
+  if not dropcap_enabled then
+    debug("Dropcap disabled via frontmatter (dropcap: false)")
+  end
+end
+
 -- Main filter: process all blocks in document order
-function Blocks(blocks)
+local function process_blocks(blocks)
+  if not dropcap_enabled then
+    return blocks
+  end
   local new_blocks = pandoc.List()
   local state = "looking_for_chapter"  -- States: looking_for_chapter, looking_for_numbered_h2, looking_for_para, done
   local chapter_name = ""
@@ -164,6 +189,8 @@ function Blocks(blocks)
   return new_blocks
 end
 
+-- Return filter traversal: Meta first (to read frontmatter), then Blocks
 return {
-  { Blocks = Blocks }
+  { Meta = read_meta },
+  { Blocks = process_blocks }
 }
