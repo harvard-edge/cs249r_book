@@ -51,7 +51,7 @@ Volume I assumes a CS/EE undergraduate background: operating systems, computer a
 
 ## How to Read
 
-The chapters are designed to be read in order. Each chapter builds on the frameworks and vocabulary established in prior chapters. The Iron Law introduced in Chapter 1 is used throughout the entire volume to reason about performance bottlenecks.
+The chapters are designed to be read in order. Each chapter builds on the frameworks and vocabulary established in prior chapters. The Iron Law introduced in the opening chapter is used throughout the entire volume to reason about performance bottlenecks.
 
 If you are an instructor adopting this for a course, the natural division is:
 - **Parts I and II** (Chapters 1 through 8) for a foundations course
@@ -59,7 +59,7 @@ If you are an instructor adopting this for a course, the natural division is:
 
 ## Feedback
 
-If you spot an error, find an explanation that could be clearer, or have a suggestion, please [open an issue](https://github.com/harvard-edge/cs249r_book/issues). Even small corrections make the book better for every reader.
+If you spot an error, find an explanation that could be clearer, or have a suggestion, please [open an issue](https://github.com/harvard-edge/cs249r_book/issues) or [start a discussion](https://github.com/harvard-edge/cs249r_book/discussions). Even small corrections make the book better for every reader.
 
 ## Links
 
@@ -69,3 +69,4 @@ If you spot an error, find an explanation that could be clearer, or have a sugge
 | Volume II | [book/quarto/contents/vol2/](../vol2/) |
 | Main README | [Repository root](../../../../README.md) |
 | Full textbook | [mlsysbook.ai/book](https://mlsysbook.ai/book/) |
+| Discussions | [GitHub Discussions](https://github.com/harvard-edge/cs249r_book/discussions) |

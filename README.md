@@ -98,25 +98,17 @@ I believe open development produces better textbooks. Every commit, every revisi
 
 **The world is rushing to build AI systems. It is not engineering them.**
 
-That gap is what we mean by AI engineering.
+That gap is what I mean by AI engineering.
 
 **AI engineering is the discipline of building efficient, reliable, safe, and robust intelligent systems that operate in the real world, not just models in isolation.**
 
-**Our mission:** Establish AI engineering as a foundational discipline, alongside software engineering and computer engineering, by teaching how to design, build, and evaluate end to end intelligent systems. The long term impact of AI will be shaped by engineers who can turn ideas into working, dependable systems.
-
----
-
-## What’s in this repo
-
-This repository is the open learning stack for AI systems engineering.
-
-It includes the textbook source, TinyTorch, hardware kits, and upcoming co-labs that connect principles to runnable code and real devices.
+**The mission of this project:** Establish AI engineering as a foundational discipline, alongside software engineering and computer engineering, by teaching how to design, build, and evaluate end to end intelligent systems. The long term impact of AI will be shaped by engineers who can turn ideas into working, dependable systems.
 
 ---
 
 ## Start Here
 
-Choose a path based on your goal.
+This repository is the open learning stack for AI systems engineering: textbook source, TinyTorch, hardware kits, and upcoming co-labs that connect principles to runnable code and real devices. Choose a path based on your goal.
 
 **READ** Start with the [textbook](https://mlsysbook.ai/book/):
 - [📘 Volume I: Introduction to Machine Learning Systems](https://mlsysbook.ai/vol1/) covers ML basics, development, optimization, and operations. Available now.
@@ -254,9 +246,9 @@ Volume II picks up where Volume I ends, moving from a single machine to fleets o
 
 ---
 
-## What Makes This Different
+## Design Philosophy
 
-This is a living textbook. We keep it updated as the field grows, with community input along the way.
+This is a living textbook. I keep it updated as the field grows, with community input along the way.
 
 AI headlines move fast. The engineering principles underneath move much more slowly. Parallelism, memory hierarchies, reliability mathematics, and quantization theory are as relevant today as they were a decade ago and will remain so a decade from now. This textbook is built around those enduring foundations.
 
@@ -264,7 +256,7 @@ Whether you are reading a chapter, running a lab, or sharing feedback, you are h
 
 ### Research to Teaching Loop
 
-We use the same loop for research and teaching: define the system problem, build a reference implementation, benchmark it, then turn it into curriculum and tooling so others can reproduce and extend it.
+The same loop drives both research and teaching: define the system problem, build a reference implementation, benchmark it, then turn it into curriculum and tooling so others can reproduce and extend it.
 
 | Loop Step | Research Artifacts | Teaching Artifacts |
 |-----------|-------------------|-------------------|
@@ -330,7 +322,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 
 ## Contributing
 
-We welcome contributions to the book, TinyTorch, and hardware kits!
+Contributions to the book, TinyTorch, and hardware kits are welcome!
 
 | I want to... | Go here |
 |--------------|---------|

@@ -11,7 +11,7 @@
 
 ## About This Volume
 
-Volume II picks up where Volume I ends, moving from a single machine to fleets of machines connected by high speed networks. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
+Volume II picks up where Volume I ends, moving from a single machine to fleets of machines connected by high-speed networks. It covers the mathematical and algorithmic demand for scale, how to build the physical infrastructure that meets it, how to serve models to billions of users, and how to do all of this safely and responsibly.
 
 Where Volume I teaches you to optimize a single node (one to eight accelerators, shared memory, PCIe/NVLink within one box), Volume II teaches you to orchestrate many nodes (hundreds to thousands of accelerators, InfiniBand/Ethernet fabric, message passing, fault tolerance across racks and datacenters).
 
