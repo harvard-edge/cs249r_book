@@ -1095,7 +1095,7 @@ Model extraction attacks exploit the input-output behavior of deployed models ac
 
 The first line of defense monitors query patterns to identify extraction attempts. Model extraction requires substantial query volume to achieve high-fidelity replication, often involving systematic probing of the input space. Detection systems track per-user query statistics and flag anomalous behavior.
 
-*Query Volume Monitoring*: Track the number of queries per user over time windows. Legitimate users typically exhibit bursty, irregular usage patterns, while extraction attacks require sustained high-volume querying. For an image classification API, a threshold might be:
+The most direct signal is query volume. Legitimate users typically exhibit bursty, irregular usage patterns, while extraction attacks require sustained high-volume querying. Tracking per-user query counts over sliding time windows provides a first-order detection mechanism. For an image classification API, a threshold might be:
 
 $$
 \text{alert}(\text{user}) = \begin{cases}
@@ -1106,7 +1106,7 @@ $$
 
 where $q_{\text{daily}}$ and $q_{\text{hourly}}$ represent query counts. These thresholds must be calibrated based on legitimate usage statistics, use-case requirements, and service tier (free vs. paid).
 
-*Input Distribution Analysis*: Extraction attacks often use synthetic or systematically generated inputs that differ from natural user queries. Detection systems compute distributional divergence between a user's query distribution and the expected input distribution:
+Volume alone is insufficient because a sophisticated attacker can throttle query rates below detection thresholds. A stronger signal comes from the queries themselves: extraction attacks often use synthetic or systematically generated inputs that differ markedly from natural user queries. Detection systems quantify this difference by computing distributional divergence between a user's query distribution and the expected input distribution:
 
 $$
 D_{\text{KL}}(P_{\text{user}} \| P_{\text{expected}}) > \tau
@@ -1114,7 +1114,7 @@ $$
 
 where $D_{\text{KL}}$ is Kullback-Leibler divergence and $\tau$ is an alert threshold. For a language model API, this might detect unusual token distributions, repetitive patterns, or adversarially crafted prompts designed to probe model boundaries.
 
-*Temporal Pattern Analysis*: Extraction attacks exhibit regular, automated query patterns. Features include inter-query time distribution (automated tools have low variance, human users have high variance), query diversity (extraction uses systematic sampling, legitimate use follows task-specific patterns), and session duration (extraction involves long, uninterrupted sessions).
+A third detection axis exploits the temporal regularity of automated tools. Extraction attacks exhibit distinctive timing signatures: low variance in inter-query intervals (compared to the high variance of human users), systematic rather than task-specific sampling patterns, and long uninterrupted sessions that differ from typical browsing behavior.
 
 Machine learning-based anomaly detection can combine these features. Training a binary classifier on historical data (benign vs. known extraction attempts) enables real-time classification:
 
@@ -1128,7 +1128,7 @@ where $f_\theta$ is a trained classifier (e.g., random forest, neural network) a
 
 Complementing detection, rate limiting mechanically constrains the information an attacker can extract within a given time period. However, limits must accommodate legitimate high-volume users (e.g., production applications making batch predictions).
 
-*Tiered Rate Limiting*: Implement different limits based on authentication level and payment tier:
+The simplest approach assigns fixed quotas based on authentication level and payment tier:
 
 - Free tier: 1,000 queries/day, 10 queries/second burst
 - Basic tier: 100,000 queries/day, 100 queries/second
@@ -1136,7 +1136,7 @@ Complementing detection, rate limiting mechanically constrains the information a
 
 This economic barrier raises the cost of extraction (attackers must pay for high query volumes) while serving legitimate enterprise customers.
 
-*Adaptive Rate Limiting*: Dynamically adjust limits based on anomaly scores. Users with high anomaly scores face stricter limits, while verified legitimate users receive relaxed limits:
+Fixed tiers raise the cost of extraction but treat all users within a tier identically, allowing a patient attacker with an enterprise account to extract freely. Adaptive rate limiting addresses this gap by dynamically adjusting limits based on the anomaly scores from the detection layer. Users with high anomaly scores face progressively stricter limits, while verified legitimate users receive relaxed quotas:
 
 $$
 \text{limit}_{\text{effective}}(u) = \text{limit}_{\text{base}} \times \exp(-\alpha \cdot \text{score}_{\text{anomaly}}(u))
@@ -1148,7 +1148,7 @@ where $\alpha$ controls sensitivity. A user with anomaly score 0.8 might face 55
 
 Reducing the precision of model outputs makes extraction more difficult without significantly degrading utility for legitimate use cases.
 
-*Confidence Rounding*: Round output probabilities to coarser precision. Instead of returning full-precision logits or probabilities:
+The most straightforward technique rounds output probabilities to coarser precision. Instead of returning full-precision logits or probabilities, the API truncates each class probability:
 
 $$
 \tilde{p}_i = \text{round}(p_i, d)
@@ -1156,7 +1156,7 @@ $$
 
 where $d$ is the number of decimal places. For a 1000-class ImageNet classifier, rounding from 6 decimals to 2 decimals (e.g., 0.384627 → 0.38) reduces information leakage by ~4 bits per class while maintaining decision boundaries.
 
-*Top-k Truncation*: Return only the top-$k$ predicted classes rather than the full probability distribution:
+Rounding reduces precision per class, but the attacker still receives a probability for every class. A complementary defense restricts the number of classes returned, exposing only the top-$k$ predicted classes rather than the full probability distribution:
 
 $$
 \text{output} = \{(c_i, p_i) : i \in \text{top-}k\}
@@ -1164,7 +1164,7 @@ $$
 
 For $k=5$ on a 1000-class problem, this reduces information leakage by $\log_2(1000/5) \approx 7.6$ bits per query. Legitimate users rarely need beyond top-5 predictions, making this a practical defense.
 
-*Additive Noise Injection*: Add calibrated noise to outputs to reduce extraction fidelity while preserving decision quality:
+Both rounding and truncation are deterministic: given the same input, the API returns the same perturbed output, allowing an attacker to average out the perturbation over repeated queries. Adding calibrated random noise to each response breaks this determinism while preserving decision quality:
 
 $$
 \tilde{p}_i = p_i + \mathcal{N}(0, \sigma^2)
@@ -1172,7 +1172,7 @@ $$
 
 followed by re-normalization to ensure $\sum_i \tilde{p}_i = 1$. The noise scale $\sigma$ must balance extraction defense with utility preservation. For a sentiment classifier, $\sigma = 0.05$ adds sufficient uncertainty to impede extraction while rarely flipping prediction decisions.
 
-*Differential Privacy for Predictions*: Apply differential privacy mechanisms to inference outputs, providing formal privacy guarantees. For a query $q$, the privatized response satisfies $(\epsilon, \delta)$-DP:
+Noise injection can be formalized through differential privacy, which provides mathematically rigorous guarantees rather than ad-hoc perturbation. For a query $q$, the privatized response satisfies $(\epsilon, \delta)$-DP:
 
 $$
 \Pr[\mathcal{M}(D, q) = o] \leq e^{\epsilon} \Pr[\mathcal{M}(D', q) = o] + \delta
@@ -1198,10 +1198,10 @@ The Information Leakage Invariant (Principle \ref{nte-information-leakage}) gove
 
 Careful API design reduces exploitable information channels:
 
-- *Minimal Output Format*: Return only class predictions, not full probability distributions or logits
-- *Coarse Confidence Bins*: Return categorical confidence ("high", "medium", "low") instead of numeric probabilities
-- *Disable Intermediate Outputs*: Prevent access to hidden layer activations, attention weights, or embeddings
-- *Version Abstraction*: Avoid exposing model version details that enable targeted extraction
+- Return only class predictions, not full probability distributions or logits
+- Replace numeric probabilities with coarse confidence bins ("high", "medium", "low")
+- Prevent access to hidden layer activations, attention weights, or embeddings
+- Abstract away model version details that would enable targeted extraction
 
 The following exercise illustrates how these defenses combine when *protecting a production API*.
 
