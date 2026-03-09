@@ -23,19 +23,26 @@ from .hardware.types import HardwareNode
 from .models.types import Workload, TransformerWorkload, CNNWorkload
 from .systems.types import Fleet, Node, NetworkFabric, DeploymentTier
 from .core.scenarios import Scenario, Scenarios, Applications
-from .core.engine import Engine
 from .core.config import SimulationConfig, load_config
+from .core.engine import PerformanceProfile, Engine
 from .core.solver import (
-    SingleNodeSolver, 
-    DistributedSolver, 
-    ReliabilitySolver, 
-    SustainabilitySolver, 
-    EconomicsSolver, 
+    SingleNodeSolver,
+    DistributedSolver,
+    ReliabilitySolver,
+    SustainabilitySolver,
+    EconomicsSolver,
     ServingSolver,
     DataSolver,
     ScalingSolver,
     OrchestrationSolver,
-    CompressionSolver
+    CompressionSolver,
+    EfficiencySolver,
+    TransformationSolver,
+    TopologySolver,
+    InferenceScalingSolver,
+    SensitivitySolver,
+    SynthesisSolver,
+    ResponsibleEngineeringSolver,
 )
 
 # Export Registries
@@ -49,3 +56,29 @@ from .core.constants import ureg
 
 # Visualization
 from .viz.plots import plot_evaluation_scorecard, plot_roofline
+
+__all__ = [
+    # Submodules
+    "core", "hardware", "models", "infra", "systems", "sim", "fmt", "viz",
+    # Types
+    "HardwareNode", "Workload", "TransformerWorkload", "CNNWorkload",
+    "Fleet", "Node", "NetworkFabric", "DeploymentTier",
+    # Scenarios and config
+    "Scenario", "Scenarios", "Applications",
+    "SimulationConfig", "load_config",
+    # Engine
+    "PerformanceProfile", "Engine",
+    # Solvers
+    "SingleNodeSolver", "DistributedSolver", "ReliabilitySolver",
+    "SustainabilitySolver", "EconomicsSolver", "ServingSolver",
+    "DataSolver", "ScalingSolver", "OrchestrationSolver", "CompressionSolver",
+    "EfficiencySolver", "TransformationSolver", "TopologySolver",
+    "InferenceScalingSolver", "SensitivitySolver", "SynthesisSolver",
+    "ResponsibleEngineeringSolver",
+    # Registries
+    "Hardware", "Models", "Infra", "Systems",
+    # Units
+    "ureg",
+    # Visualization
+    "plot_evaluation_scorecard", "plot_roofline",
+]

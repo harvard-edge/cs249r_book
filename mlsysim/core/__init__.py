@@ -12,5 +12,7 @@ from ..models.registry import Models
 from ..systems.registry import Systems, Tiers
 from ..infra.registry import Infra
 
-from .engine import Engine
 from .scenarios import Scenario, Scenarios, Applications, Fleet
+from .results import *
+from .pipeline import Pipeline, CompositionError
+from .walls import Domain, Wall, wall, walls_for_solver, walls_in_domain, taxonomy

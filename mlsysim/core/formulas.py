@@ -320,9 +320,13 @@ def calc_hierarchical_allreduce_time(message_bytes, n_nodes, gpus_per_node,
 
 def calc_young_daly_interval(checkpoint_cost_s, mtbf_s):
     """
-    Optimal checkpoint interval (Young-Daly model).
+    Optimal checkpoint interval (Young's first-order approximation).
 
     τ_opt = √(2 × δ × M)
+
+    This implements Young (1974), not Daly's (2006) higher-order correction
+    which adds the checkpoint cost: τ_opt = √(2δM) + δ. The Young form is
+    the standard simplification used in practice.
 
     Args:
         checkpoint_cost_s: Time to write one checkpoint in seconds (δ)

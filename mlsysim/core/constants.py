@@ -2,121 +2,14 @@
 # The Analytical Engine of Machine Learning Systems
 # This file defines the single source of truth for hardware specifications,
 # constants, and conversion factors used throughout the textbook.
+#
+# Measurement units live in units.py; tuneable simulation defaults live in
+# defaults.py. This module re-exports both for backward compatibility and
+# adds the genuine hardware/model constants that belong here.
 
-import pint
-ureg = pint.UnitRegistry()
-ureg.default_format = "~P"           # compact Pretty: "312 TFLOPs/s" not "312.0 teraFLOPs / second"
-pint.set_application_registry(ureg)  # canonical registry for the whole mlsysim package
-Q_ = ureg.Quantity
-
-# --- Dimensionless Scalars (Helpers) ---
-QUADRILLION = 1e15
-TRILLION = 1e12
-BILLION = 1e9
-MILLION = 1e6
-THOUSAND = 1e3
-HUNDRED = 100
-
-# --- Units ---
-byte = ureg.byte
-second = ureg.second
-joule = ureg.joule
-watt = ureg.watt
-kilowatt = ureg.kilowatt
-milliwatt = ureg.milliwatt
-meter = ureg.meter
-hour = ureg.hour
-day = ureg.day
-count = ureg.count
-
-# Register data-scale aliases so .to(TB), .to(GB/second), etc. work
-ureg.define('KB = 1e3 * byte')
-ureg.define('MB = 1e6 * byte')
-ureg.define('GB = 1e9 * byte')
-ureg.define('TB = 1e12 * byte')
-ureg.define('PB = 1e15 * byte')
-
-KB = ureg.KB
-MB = ureg.MB
-GB = ureg.GB
-TB = ureg.TB
-PB = ureg.PB
-
-# Common precision sizes
-BYTES_FP32 = 4 * byte
-BYTES_INT32 = 4 * byte
-BYTES_FP16 = 2 * byte
-BYTES_INT8 = 1 * byte
-BYTES_INT4 = 0.5 * byte
-BYTES_ADAM_STATE = 8 * byte
-
-# Binary units (pint has kibibyte etc. built-in, register short aliases)
-ureg.define('KiB = 1024 * byte')
-ureg.define('MiB = 1048576 * byte')
-ureg.define('GiB = 1073741824 * byte')
-ureg.define('TiB = 1099511627776 * byte')
-
-KiB = ureg.KiB
-MiB = ureg.MiB
-GiB = ureg.GiB
-TiB = ureg.TiB
-
-# --- Time (registered so .to(MS) scales magnitudes correctly) ---
-ureg.define('MS = 1e-3 * second')   # NOTE: MS = millisecond here. SI convention uses ms (lowercase). Prefer ms.
-ureg.define('US = 1e-6 * second')
-ureg.define('NS = 1e-9 * second')
-
-MS = ureg.MS
-ms = ureg.ms          # pint built-in millisecond (alias for convenience)
-US = ureg.US
-NS = ureg.NS
-MILLISECOND = MS
-MICROSECOND = US
-NANOSECOND = NS
-
-# Common time conversions (unitless scalars)
-SECONDS_PER_MINUTE = 60
-MINUTES_PER_HOUR = 60
-SEC_PER_HOUR = SECONDS_PER_MINUTE * MINUTES_PER_HOUR
-HOURS_PER_DAY = 24
-SEC_PER_DAY = SEC_PER_HOUR * HOURS_PER_DAY
-DAYS_PER_MONTH = 30
-DAYS_PER_YEAR = 365
-SEC_PER_YEAR = SEC_PER_DAY * DAYS_PER_YEAR
-SEC_PER_YEAR_LEAP = int(365.25 * SEC_PER_DAY)
-HOURS_PER_YEAR = 8760
-
-# Data size scalars
-BITS_PER_BYTE = 8
-KIB_TO_BYTES = 1024
-MIB_TO_BYTES = 1024 * 1024
-GIB_TO_BYTES = 1024 * 1024 * 1024
-
-# Time scalars
-MS_PER_SEC = 1000
+from .units import *  # noqa: F401,F403 — re-export full unit registry
 
 # --- Hardware Specifications (The Silicon Contract) ---
-
-# FLOPs are dimensionless "operations"
-ureg.define('flop = 1 * count')
-ureg.define('KFLOPs = 1e3 * flop')
-ureg.define('MFLOPs = 1e6 * flop')
-ureg.define('GFLOP = 1e9 * flop')
-ureg.define('GFLOPs = 1e9 * flop')
-ureg.define('TFLOP = 1e12 * flop')
-ureg.define('TFLOPs = 1e12 * flop')
-ureg.define('PFLOPs = 1e15 * flop')
-ureg.define('ZFLOPs = 1e21 * flop')
-
-flop = ureg.flop
-KFLOPs = ureg.KFLOPs
-MFLOPs = ureg.MFLOPs
-GFLOP = ureg.GFLOP
-GFLOPs = ureg.GFLOPs
-TFLOP = ureg.TFLOP
-TFLOPs = ureg.TFLOPs
-PFLOPs = ureg.PFLOPs
-ZFLOPs = ureg.ZFLOPs
 
 # NVIDIA V100 (Volta, 2017) — Source: NVIDIA V100 Data Sheet
 V100_FLOPS_FP16_TENSOR = 125 * TFLOPs / second
@@ -237,10 +130,7 @@ IMAGE_DIM_RESNET = 224
 IMAGE_CHANNELS_RGB = 3
 COLOR_DEPTH_8BIT = 256
 
-
 # --- Network & Interconnect ---
-ureg.define('Gbps = 1e9 * bit / second')
-Gbps = ureg.Gbps
 NETWORK_10G_BW = 10 * Gbps
 NETWORK_100G_BW = 100 * Gbps
 NETWORK_5G_ENERGY_PER_MB_MJ = 100 * ureg.millijoule / MB
@@ -296,11 +186,6 @@ GRID_INTERCONNECTION_QUEUE_US_GW = 2000
 SPEED_OF_LIGHT_FIBER_KM_S = 200000 * ureg.kilometer / second
 
 # --- Cloud Pricing ---
-ureg.define('dollar = 1 * count')
-ureg.define('USD = dollar')
-ureg.define('EUR = dollar')
-USD = ureg.dollar
-EUR = ureg.EUR
 CLOUD_EGRESS_PER_GB = 0.09 * USD / GB  # AWS data transfer out (2024 baseline)
 CLOUD_ELECTRICITY_PER_KWH = 0.12 * USD / ureg.kilowatt_hour
 
@@ -348,17 +233,6 @@ VIDEO_BYTES_PER_PIXEL_RGB = 3 * byte
 VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 
 # --- Models & Workloads ---
-ureg.define('param = 1 * count')
-ureg.define('Kparam = 1e3 * param')
-ureg.define('Mparam = 1e6 * param')
-ureg.define('Bparam = 1e9 * param')
-ureg.define('Tparam = 1e12 * param')
-
-param = ureg.param
-Kparam = ureg.Kparam
-Mparam = ureg.Mparam
-Bparam = ureg.Bparam
-Tparam = ureg.Tparam
 
 # GPT-2 (1.5B) — used in training chapter worked examples
 GPT2_PARAMS = 1.5e9 * param
@@ -496,112 +370,15 @@ TPU_POD_CHIPS = 4096
 TPU_POD_MEM = 131 * TB
 TPU_POD_POWER = 3 * ureg.megawatt
 
+# --- Shared Precision Map ---
+# Used by Engine, ServingSolver, SynthesisSolver to map precision strings to byte widths.
+PRECISION_MAP = {
+    "fp32": BYTES_FP32,
+    "fp16": BYTES_FP16,
+    "int8": BYTES_INT8,
+    "int4": BYTES_INT4,
+}
+
 # Fleet-Scale Constants (Volume II)
-# These constants support distributed systems calculations across Volume II.
-# They define the quantitative reference points for cluster-scale reasoning:
-# reliability, communication cost models, sustainability, and capacity planning.
-
-# --- Reliability (Component MTTF) ---
-# Mean Time To Failure for datacenter-grade components.
-# Source: Meta (2024), Google (2024), Barroso et al. (2018)
-GPU_MTTF_HOURS = 50_000            # Single GPU die (datacenter, steady-state)
-NIC_MTTF_HOURS = 150_000           # Network interface card
-PSU_MTTF_HOURS = 100_000           # Power supply unit
-PCIE_SWITCH_MTTF_HOURS = 200_000   # PCIe switch/bridge
-CABLE_MTTF_HOURS = 50_000          # Optical cable / transceiver (lowered for SDC analysis)
-TOR_SWITCH_MTTF_HOURS = 300_000    # Top-of-rack switch
-HBM_MTTF_HOURS = 200_000           # HBM memory module
-
-# Silent Data Corruption (SDC) Assumptions
-P_SDC_PER_GPU_HR = 1e-6
-
-# Recovery time assumptions (seconds)
-HEARTBEAT_TIMEOUT_S = 30            # Failure detection latency
-RESCHEDULE_TIME_S = 60              # Time to allocate replacement node
-CHECKPOINT_WRITE_BW_GBS = 100       # Aggregate storage write BW for checkpoints (GB/s)
-
-# --- Cluster Scale References ---
-# Canonical cluster sizes used as worked examples throughout Volume II.
-CLUSTER_SMALL_GPUS = 256
-CLUSTER_MEDIUM_GPUS = 2_048
-CLUSTER_LARGE_GPUS = 8_192
-CLUSTER_MEGA_GPUS = 100_000
-
-# --- Inter-Node Network (Fleet-Scale Byte Rates) ---
-# Byte-per-second equivalents for bandwidth calculations.
-# These complement the Gbps values defined above for bit-rate contexts.
-INFINIBAND_NDR_BW_GBS = 50         # 400 Gbps / 8 = 50 GB/s per port
-INFINIBAND_HDR_BW_GBS = 25         # 200 Gbps / 8 = 25 GB/s per port
-INFINIBAND_XDR_BW_GBS = 100        # 800 Gbps / 8 = 100 GB/s per port (2025)
-ETHERNET_400G_BW_GBS = 50          # 400 GbE = 50 GB/s
-ETHERNET_800G_BW_GBS = 100         # 800 GbE = 100 GB/s (2025)
-ROCE_100G_BW_GBS = 12.5            # 100 GbE RoCE = 12.5 GB/s
-
-# Communication model parameters (α-β model)
-IB_NDR_LATENCY_US = 5              # InfiniBand NDR one-way latency (μs)
-IB_HDR_LATENCY_US = 7              # InfiniBand HDR one-way latency (μs)
-ROCE_LATENCY_US = 10               # RoCE v2 one-way latency (μs)
-TCP_LATENCY_US = 50                # TCP/IP over Ethernet one-way latency (μs)
-
-# --- Sustainability ---
-# Power Usage Effectiveness (PUE) — total facility power / IT equipment power
-PUE_LIQUID_COOLED = 1.06           # Best-in-class liquid-cooled AI datacenter
-PUE_BEST_AIR = 1.12                # Best-in-class air-cooled hyperscale
-PUE_TYPICAL = 1.40                 # Industry average traditional datacenter
-PUE_LEGACY = 1.58                  # Older enterprise datacenters
-
-# Water Usage Effectiveness (WUE) — liters per kWh
-WUE_AIR_COOLED = 0.5               # Air-cooled (minimal water)
-WUE_EVAPORATIVE = 1.8              # Evaporative cooling towers
-WUE_LIQUID = 0.0                   # Closed-loop liquid cooling (near zero)
-
-# Regional carbon intensity (gCO2 per kWh) — Source: IEA (2023)
-CARBON_US_AVG_GCO2_KWH = 429       # US national average grid
-CARBON_EU_AVG_GCO2_KWH = 270       # EU average grid
-CARBON_QUEBEC_GCO2_KWH = 20        # Quebec (hydroelectric dominant)
-CARBON_FRANCE_GCO2_KWH = 50        # France (nuclear dominant)
-CARBON_POLAND_GCO2_KWH = 820       # Poland (coal dominant)
-CARBON_NORWAY_GCO2_KWH = 10        # Norway (hydroelectric)
-
-# Power density
-RACK_POWER_TRADITIONAL_KW = 12     # Traditional datacenter rack (kW)
-RACK_POWER_AI_TYPICAL_KW = 70      # AI cluster rack, current generation (kW)
-RACK_POWER_AI_HIGH_KW = 100        # AI cluster rack, high-density (kW)
-AIR_COOLING_LIMIT_KW = 30          # Approximate rack power where air cooling fails (kW)
-
-# --- MFU and Scaling Efficiency References ---
-# Model FLOPS Utilization (MFU) — actual FLOPS / peak FLOPS
-MFU_TRAINING_LOW = 0.30            # Lower bound for well-optimized training
-MFU_TRAINING_HIGH = 0.50           # Upper bound for excellent training MFU
-MFU_INFERENCE_BATCH1 = 0.05        # Inference at batch size 1 (memory-bound)
-MFU_INFERENCE_BATCHED = 0.40       # Inference at large batch size
-
-# Scaling efficiency η = T_1 / (N × T_N)
-SCALING_EFF_32GPU = 0.90           # Near-linear regime
-SCALING_EFF_256GPU = 0.70          # Communication starts to bite
-SCALING_EFF_1024GPU = 0.50         # Significant overhead
-SCALING_EFF_8192GPU = 0.35         # Fleet-scale regime
-
-# Overhead budgets (fraction of wall time)
-OVERHEAD_PIPELINE_BUBBLE = 0.05    # ~5% for well-tuned pipeline parallelism
-OVERHEAD_CHECKPOINT = 0.03         # ~3% for optimized async checkpointing
-OVERHEAD_FAILURE_RECOVERY = 0.10   # ~10% for failure and restart at 10K+ scale
-OVERHEAD_MAINTENANCE = 0.05        # ~5% for rolling upgrades, maintenance windows
-
-# --- Scaling Laws (Chinchilla Physics) ---
-# Source: Hoffmann et al. (2022), "Training Compute-Optimal Large Language Models"
-CHINCHILLA_TOKENS_PER_PARAM = 20   # Compute-optimal token count (D ≈ 20P)
-CHINCHILLA_COMPUTE_CONSTANT = 6    # C ≈ 6PD (FLOPs per parameter per token)
-
-# --- Critical Batch Size (McCandlish et al. 2018) ---
-# Source: McCandlish et al. (2018), "An Empirical Model of Large-Batch Training"
-# Estimates for when Data Parallelism hits diminishing returns.
-CRITICAL_BATCH_SIZE_BERT = 256
-CRITICAL_BATCH_SIZE_GPT3 = 4096
-CRITICAL_BATCH_SIZE_DEFAULT = 1024
-
-# --- Orchestration & Queueing (Little's Law) ---
-# Typical cluster utilization targets and arrival rates for scenarios.
-TARGET_CLUSTER_UTILIZATION = 0.80  # 80% is high for shared research clusters
-QUEUE_DISCIPLINE = "FIFO"          # First-In-First-Out (Baseline)
-AVERAGE_RESEARCHER_JOB_DAYS = 2.0  # Median job length in research clusters
+# Re-exported from defaults.py for backward compatibility.
+from .defaults import *  # noqa: E402,F401,F403

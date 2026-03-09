@@ -1,7 +1,7 @@
 from .types import HardwareNode, ComputeCore, MemoryHierarchy, StorageHierarchy, IOInterconnect
 from ..core.registry import Registry
 from ..core.constants import (
-    ureg,
+    ureg, USD,
     V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, V100_FLOPS_FP32,
     A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP, A100_FLOPS_FP32, A100_FLOPS_TF32, A100_FLOPS_INT8,
     H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8,
@@ -9,7 +9,7 @@ from ..core.constants import (
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP,
     TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8,
-    PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
+    PCIE_GEN3_BW, PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
 )
 
 class CloudHardware(Registry):
@@ -19,8 +19,9 @@ class CloudHardware(Registry):
         release_year=2017,
         compute=ComputeCore(peak_flops=V100_FLOPS_FP16_TENSOR, precision_flops={"fp32": V100_FLOPS_FP32}),
         memory=MemoryHierarchy(capacity=V100_MEM_CAPACITY, bandwidth=V100_MEM_BW),
-        interconnect=IOInterconnect(name="PCIe Gen3 x16", bandwidth=15.75 * ureg.GB/ureg.s),
+        interconnect=IOInterconnect(name="PCIe Gen3 x16", bandwidth=PCIE_GEN3_BW),
         tdp=V100_TDP,
+        unit_cost=10000 * USD,
         dispatch_tax=0.02 * ureg.ms
     )
 
@@ -31,6 +32,7 @@ class CloudHardware(Registry):
         memory=MemoryHierarchy(capacity=A100_MEM_CAPACITY, bandwidth=A100_MEM_BW),
         interconnect=IOInterconnect(name="PCIe Gen4 x16", bandwidth=PCIE_GEN4_BW),
         tdp=A100_TDP,
+        unit_cost=15000 * USD,
         dispatch_tax=0.015 * ureg.ms,
         metadata={"source_url": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "last_verified": "2025-03-06"}
     )
@@ -43,6 +45,7 @@ class CloudHardware(Registry):
         storage=StorageHierarchy(capacity=2 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
         tdp=H100_TDP,
+        unit_cost=30000 * USD,
         dispatch_tax=0.01 * ureg.ms,
         metadata={"source_url": "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-core-gpu-datasheet", "last_verified": "2025-03-06"}
     )
@@ -54,7 +57,8 @@ class CloudHardware(Registry):
         memory=MemoryHierarchy(capacity=141 * ureg.GB, bandwidth=4.8 * ureg.TB/ureg.s),
         storage=StorageHierarchy(capacity=4 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
-        tdp=700 * ureg.W,
+        tdp=H100_TDP,
+        unit_cost=35000 * USD,
         dispatch_tax=0.01 * ureg.ms
     )
 
@@ -64,16 +68,18 @@ class CloudHardware(Registry):
         release_year=2024,
         compute=ComputeCore(peak_flops=B200_FLOPS_FP16_TENSOR, precision_flops={"fp8": B200_FLOPS_FP8_TENSOR, "int4": B200_FLOPS_INT4}),
         memory=MemoryHierarchy(capacity=B200_MEM_CAPACITY, bandwidth=B200_MEM_BW),
-        tdp=1000 * ureg.W,
+        tdp=B200_TDP,
+        unit_cost=40000 * USD,
         dispatch_tax=0.008 * ureg.ms
     )
 
     MI300X = HardwareNode(
         name="AMD MI300X",
         release_year=2023,
-        compute=ComputeCore(peak_flops=1300 * ureg.TFLOPs/ureg.s),
-        memory=MemoryHierarchy(capacity=192 * ureg.GB, bandwidth=5.3 * ureg.TB/ureg.s),
-        tdp=750 * ureg.W,
+        compute=ComputeCore(peak_flops=MI300X_FLOPS_FP16_TENSOR),
+        memory=MemoryHierarchy(capacity=MI300X_MEM_CAPACITY, bandwidth=MI300X_MEM_BW),
+        tdp=MI300X_TDP,
+        unit_cost=15000 * USD,
         dispatch_tax=0.012 * ureg.ms
     )
     
@@ -92,6 +98,7 @@ class CloudHardware(Registry):
         compute=ComputeCore(peak_flops=T4_FLOPS_FP16_TENSOR, precision_flops={"int8": T4_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=16 * ureg.GiB, bandwidth=T4_MEM_BW),
         tdp=T4_TDP,
+        unit_cost=2500 * USD,
         dispatch_tax=0.03 * ureg.ms
     )
 

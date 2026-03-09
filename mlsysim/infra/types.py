@@ -16,9 +16,13 @@ class GridProfile(BaseModel):
     def carbon_intensity_kg_kwh(self) -> float:
         return self.carbon_intensity_g_kwh / 1000.0
 
-    def carbon_kg(self, energy_kwh: float) -> float:
-        facility_kwh = energy_kwh * self.pue
-        return facility_kwh * self.carbon_intensity_kg_kwh
+    def carbon_kg(self, facility_energy_kwh: float) -> float:
+        """Carbon footprint from total facility energy (PUE already applied).
+
+        Args:
+            facility_energy_kwh: Total facility energy in kWh (IT energy × PUE).
+        """
+        return facility_energy_kwh * self.carbon_intensity_kg_kwh
 
 class RackProfile(BaseModel):
     name: str

@@ -13,7 +13,7 @@ from .ledger import SystemLedger, PerformanceMetrics, SustainabilityMetrics, Eco
 from .personas import Persona, Personas
 from ..core.scenarios import Scenario
 from ..core.engine import Engine
-from ..core.solver import SustainabilitySolver
+from ..core.solver import SustainabilitySolver, SingleNodeSolver, EconomicsSolver, ReliabilitySolver
 from ..hardware.types import HardwareNode
 from ..systems.types import Fleet
 from ..infra.registry import Infra
@@ -66,7 +66,7 @@ class ResourceSimulation(BaseSimulation):
         hardware = self.scenario.system.node.accelerator if isinstance(self.scenario.system, Fleet) else self.scenario.system
         
         perf_base = Engine.solve(workload, hardware)
-        mfu_val = (perf_base.latency_compute / perf_base.latency).to_base_units().magnitude
+        mfu_val = perf_base.mfu
         
         # 2. EXTRACT USER CHOICES
         region_name = choice.get("region", "US_Avg")
@@ -90,12 +90,13 @@ class ResourceSimulation(BaseSimulation):
         sust_solver = SustainabilitySolver()
         impact = sust_solver.solve(sim_fleet, duration_days=duration_days, datacenter=grid)
         
-        # 5. ECONOMIC MATH
-        electricity_cost = impact["total_energy_kwh"].magnitude * 0.12 
-        hw_cost_per_unit = hardware.unit_cost.magnitude if hardware.unit_cost else 30000.0
-        total_capex = hw_cost_per_unit * sim_fleet.total_accelerators
-        
-        # 6. ASSEMBLE UNIVERSAL LEDGER
+        # 5. ECONOMIC MATH (delegate to EconomicsSolver)
+        econ_result = EconomicsSolver().solve(sim_fleet, duration_days=duration_days, datacenter=grid)
+
+        # 6. RELIABILITY MATH (delegate to ReliabilitySolver)
+        rel_result = ReliabilitySolver().solve(sim_fleet, job_duration_hours=duration_days * 24)
+
+        # 7. ASSEMBLE UNIVERSAL LEDGER
         ledger = SystemLedger(
             mission_name=self.scenario.name,
             track_name=self.persona.name,
@@ -104,25 +105,25 @@ class ResourceSimulation(BaseSimulation):
                 latency=perf_base.latency,
                 throughput=perf_base.throughput * sim_fleet.total_accelerators,
                 mfu=mfu_val,
-                hfu=mfu_val * 1.1, 
+                hfu=perf_base.hfu,
                 bottleneck=perf_base.bottleneck
             ),
             sustainability=SustainabilityMetrics(
-                energy=impact["total_energy_kwh"],
-                carbon_kg=impact["carbon_footprint_kg"],
-                pue=impact["pue"],
-                water_liters=impact["water_usage_liters"]
+                energy=impact.total_energy_kwh,
+                carbon_kg=impact.carbon_footprint_kg,
+                pue=impact.pue,
+                water_liters=impact.water_usage_liters
             ),
             economics=EconomicMetrics(
-                capex=total_capex,
-                opex=electricity_cost,
-                tco=total_capex + electricity_cost,
-                cost_per_million=(electricity_cost / (perf_base.throughput.magnitude * duration_days * 24 * 3600 * sim_fleet.total_accelerators + 1e-9)) * 1e6
+                capex=econ_result.capex_usd,
+                opex=econ_result.total_opex_usd,
+                tco=econ_result.tco_usd,
+                cost_per_million=(econ_result.total_opex_usd / (perf_base.throughput.magnitude * duration_days * 24 * 3600 * sim_fleet.total_accelerators + 1e-9)) * 1e6
             ),
             reliability=ReliabilityMetrics(
-                mttf=Q_("50000 hours") / sim_fleet.total_accelerators,
-                goodput=0.95,
-                recovery_time=Q_("15 minutes")
+                mttf=rel_result.fleet_mtbf,
+                goodput=1.0 - rel_result.failure_probability,
+                recovery_time=Q_("15 minutes")  # Recovery time remains an assumption
             )
         )
         return ledger

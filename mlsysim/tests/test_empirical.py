@@ -34,7 +34,7 @@ def test_llama_inference_h100():
     solver = mlsysim.ServingSolver()
     result = solver.solve(model, hardware, seq_len=2048, batch_size=1, efficiency=1.0)
     
-    itl = result['itl'].m_as("ms")
+    itl = result.itl.m_as("ms")
     
     # ITL = ModelSize / BW = 140GB / 3.35TB/s = ~41.8ms
     assert 40 <= itl <= 45

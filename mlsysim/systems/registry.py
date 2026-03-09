@@ -1,8 +1,9 @@
 from .types import DeploymentTier, Node, Fleet, NetworkFabric
 from ..core.constants import (
-    ureg,
+    ureg, Q_,
     SMARTPHONE_RAM_GB, MCU_RAM_KIB, CLOUD_MEM_GIB, TINY_MEM_KIB,
-    INFINIBAND_NDR_BW, INFINIBAND_HDR_BW, NETWORK_10G_BW, NETWORK_100G_BW
+    INFINIBAND_NDR_BW, INFINIBAND_HDR_BW, NETWORK_10G_BW, NETWORK_100G_BW,
+    IB_NDR_LATENCY_US, IB_HDR_LATENCY_US, TCP_LATENCY_US
 )
 from ..hardware.registry import Hardware
 
@@ -59,10 +60,10 @@ class Nodes:
 
 class Fabrics:
     """Vetted Network Fabrics."""
-    Ethernet_10G = NetworkFabric(name="10GbE", bandwidth=NETWORK_10G_BW)
-    Ethernet_100G = NetworkFabric(name="100GbE", bandwidth=NETWORK_100G_BW)
-    InfiniBand_HDR = NetworkFabric(name="IB HDR", bandwidth=INFINIBAND_HDR_BW)
-    InfiniBand_NDR = NetworkFabric(name="IB NDR", bandwidth=INFINIBAND_NDR_BW)
+    Ethernet_10G = NetworkFabric(name="10GbE", bandwidth=NETWORK_10G_BW, latency=Q_(TCP_LATENCY_US, "us"))
+    Ethernet_100G = NetworkFabric(name="100GbE", bandwidth=NETWORK_100G_BW, latency=Q_(TCP_LATENCY_US, "us"))
+    InfiniBand_HDR = NetworkFabric(name="IB HDR", bandwidth=INFINIBAND_HDR_BW, latency=Q_(IB_HDR_LATENCY_US, "us"))
+    InfiniBand_NDR = NetworkFabric(name="IB NDR", bandwidth=INFINIBAND_NDR_BW, latency=Q_(IB_NDR_LATENCY_US, "us"))
 
 class Clusters:
     """Vetted Production Clusters."""

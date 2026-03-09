@@ -1,6 +1,6 @@
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Any, Annotated, List, Union
-from ..core.constants import Q_, ureg
+from ..core.constants import Q_, ureg, PUE_BEST_AIR
 from ..hardware.types import HardwareNode
 from ..infra.types import Datacenter, GridProfile
 from ..core.types import Quantity
@@ -53,4 +53,4 @@ class Fleet(BaseModel):
             return self.datacenter.pue
         if self.region:
             return self.region.pue
-        return 1.12 # Default Hyperscale PUE
+        return PUE_BEST_AIR  # Default Hyperscale PUE
