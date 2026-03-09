@@ -79,7 +79,7 @@ The speed of light sets the latency floor for all communication. In a vacuum, li
 
 Higher bandwidth demands more signaling energy per bit, creating a bandwidth-distance product constraint. Modern InfiniBand NDR operates at 100 Gbps per lane using PAM4 signaling (4 voltage levels per symbol), which requires more precise analog circuits than the simpler NRZ (2 levels) used by earlier generations. This precision comes at a cost: the maximum reach of a copper cable at NDR rates is approximately 2 meters before the signal degrades below recoverable levels. Longer distances require active optical cables (AOCs) or fiber transceivers that convert electrical signals to light and back, adding both cost (hundreds of dollars per link) and latency (nanoseconds per conversion). The bandwidth-distance product is a fundamental constraint: a link can have high bandwidth or long distance, but not both cheaply.
 
-Moving data also costs energy that scales with distance. Accessing data from local SRAM costs roughly 0.5 pJ/bit. Moving it across a PCB (NVLink) costs 5--10 pJ/bit. Moving it across a datacenter via InfiniBand optical links costs 20--50 pJ/bit.
+Moving data also costs energy that scales with distance, as @fig-data-movement-hierarchy illustrates. Accessing data from local SRAM costs roughly 0.5 pJ/bit. Moving it across a PCB (NVLink) costs 5--10 pJ/bit. Moving it across a datacenter via InfiniBand optical links costs 20--50 pJ/bit.
 
 ::: {#fig-data-movement-hierarchy fig-env="figure" fig-pos="htb" fig-cap="**The Data Movement Energy Hierarchy**. The energy cost of moving a single bit increases by orders of magnitude as it traverses the system hierarchy, from local SRAM through HBM and intra-node NVLink to inter-node InfiniBand fabrics. This energy gradient makes data locality the primary driver of sustainable and efficient distributed ML system design." fig-alt="Pyramid or tiered diagram showing increasing energy cost (pJ per bit) from local SRAM (base) up to remote datacenter nodes (top)."}
 ![](images/svg/data-movement-hierarchy.svg){width=100%}
@@ -490,7 +490,7 @@ class LogPOverlap:
 4.  **Hidden**: All `{python} LogPOverlap.L_str` μs of $L$ can overlap with compute.
 5.  **Exposed**: The `{python} LogPOverlap.two_o_str` μs of $o$ cannot overlap.
 
-**Effective time**: max(`{python} LogPOverlap.compute_str`, `{python} LogPOverlap.L_str` + `{python} LogPOverlap.two_o_str`) = `{python} LogPOverlap.effective_str` $\mu$s (communication hidden!).
+**Effective time**: max(`{python} LogPOverlap.compute_str`, `{python} LogPOverlap.L_str` + `{python} LogPOverlap.two_o_str`) = `{python} LogPOverlap.effective_str` $\mu$s (communication hidden!). @fig-comm-compute-overlap shows this overlap visually.
 
 ::: {#fig-comm-compute-overlap fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Overlap**. By pipelining collective operations with the backward pass, systems can hide network latency behind arithmetic execution. Overlap is successful only when the non-overlappable overhead ($o$) is minimized, allowing the bulk of the transfer ($L$) to proceed while the GPU computes the next layer's gradients." fig-alt="Timeline diagram showing overlapping Compute and Communication bars. Computation for layer N overlaps with Communication for layer N-1."}
 ![](images/svg/comm-compute-overlap.svg){width=100%}
@@ -615,7 +615,7 @@ This reality gap has practical consequences for algorithm selection. The crossov
 
 ## Choosing the Vehicle: Collective Operation Primitives {#sec-communication-collective-operations-collective-operations-collective-operation-vocabulary-fdc7}
 
-If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, our gradient must now choose its vehicle: strictly choreographed group exchanges known as Collective Operations.
+If a GPU simply opens a socket and sends a massive gradient to another GPU, the entire cluster will rapidly collapse into an unmanageable web of deadlocks and congestion. With the terrain mapped, our gradient must now choose its vehicle: strictly choreographed group exchanges known as Collective Operations. @fig-collective-primitives-overview provides a visual overview of the six core primitives that form this vocabulary.
 
 ::: {.callout-definition title="Collective Operation"}
 
@@ -1481,7 +1481,7 @@ class ThreeLevelNapkin:
 ![](images/svg/sharp-innetwork.svg){width=100%}
 :::
 
-Hierarchical AllReduce reduces the *volume* of cross-node traffic, but the aggregation still requires multiple network round-trips. An alternative approach eliminates round-trips entirely by performing the reduction *inside the network switch itself*. NVIDIA's **Scalable Hierarchical Aggregation and Reduction Protocol (SHARP)**[^fn-sharp-innetwork] implements this idea: instead of gradients traveling to a destination GPU for summation, the InfiniBand switch aggregates partial sums as data packets pass through it.
+Hierarchical AllReduce reduces the *volume* of cross-node traffic, but the aggregation still requires multiple network round-trips. As @fig-sharp-innetwork contrasts, an alternative approach eliminates round-trips entirely by performing the reduction *inside the network switch itself*. NVIDIA's **Scalable Hierarchical Aggregation and Reduction Protocol (SHARP)**[^fn-sharp-innetwork] implements this idea: instead of gradients traveling to a destination GPU for summation, the InfiniBand switch aggregates partial sums as data packets pass through it.
 
 [^fn-sharp-innetwork]: **SHARP (Scalable Hierarchical Aggregation and Reduction Protocol)**: In-network computing on Quantum InfiniBand switches that performs reduction (sum, min, max) in the switch ASIC with sub-microsecond latency, eliminating the store-and-forward overhead at each intermediate GPU. Production deployments report 2--3$\times$ AllReduce speedups for 1--64 MB gradients, though the number of concurrent aggregation trees is limited by switch resources, creating contention in multi-tenant clusters. \index{SHARP!in-network reduction}
 
@@ -1505,7 +1505,7 @@ The topology detection process begins with hardware enumeration. NCCL queries th
 ![](images/svg/torus-reduction.svg){width=100%}
 :::
 
-Google's TPU pods use a 3D torus topology where each TPU connects directly to 6 neighbors ($\pm$X, $\pm$Y, $\pm$Z). Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **dimension-ordered reduction**:
+Google's TPU pods use a 3D torus topology where each TPU connects directly to 6 neighbors ($\pm$X, $\pm$Y, $\pm$Z), as @fig-torus-reduction depicts. Unlike the hierarchical fat-tree topology of InfiniBand clusters, the torus provides uniform, direct connectivity: every TPU chip has the same number of links (6) and the same per-link bandwidth, regardless of its position in the mesh. The optimal AllReduce strategy for this topology is **dimension-ordered reduction**:
 
 1. Reduce along the X dimension (all TPUs in the same YZ plane)
 2. Reduce along the Y dimension (all TPUs in the same Z column)
