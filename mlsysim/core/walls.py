@@ -1,4 +1,4 @@
-"""The 17 ML Systems Walls — canonical taxonomy.
+"""The 22 ML Systems Walls — canonical taxonomy.
 
 This module is the single source of truth for the wall classification
 used throughout mlsysim, the paper, and the textbook.  Every wall
@@ -6,7 +6,7 @@ represents a physical or logical constraint that bounds system
 performance; each is resolved by a dedicated solver.
 
 The walls are organized into five domains that progress from local
-hardware resources to global societal impact:
+hardware resources to global fleet-scale operations:
 
     Domain 1 — Node      : What a single accelerator can achieve in isolation.
     Domain 2 — Data      : How data moves to and through the accelerator.
@@ -38,7 +38,7 @@ class Domain(Enum):
     NODE      = "node"        # Domain 1: Single-accelerator resource ceilings
     DATA      = "data"        # Domain 2: Data movement and pipelines
     ALGORITHM = "algorithm"   # Domain 3: Algorithmic and scaling laws
-    FLEET     = "fleet"       # Domain 4: Multi-node, fleet-scale, societal
+    FLEET     = "fleet"       # Domain 4: Multi-node, fleet-scale operations
     ANALYSIS  = "analysis"    # Domain 5: Cross-cutting diagnostic tools
 
 
@@ -51,7 +51,7 @@ class Wall:
     Attributes
     ----------
     number : int
-        Canonical wall number (1–17).
+        Canonical wall number (1–22).
     name : str
         Short human-readable name (e.g., "Compute", "Memory").
     domain : Domain
@@ -74,7 +74,7 @@ class Wall:
     sources: List[str] = field(default_factory=list)
 
 
-# ── The 17 Walls ─────────────────────────────────────────────────
+# ── The 22 Walls ─────────────────────────────────────────────────
 # Numbering and domain assignment follow the paper (Table 1).
 
 # Domain 1: Node — single-accelerator resource ceilings
@@ -111,9 +111,52 @@ SOFTWARE = Wall(
     ],
 )
 
+SERVING = Wall(
+    number=4,
+    name="Serving",
+    domain=Domain.NODE,
+    solver_name="ServingSolver",
+    constraint="LLM inference has two distinct regimes: compute-bound prefill and memory-bound decode.",
+    equation="TTFT = OPs_prefill / Peak; ITL = |W| / BW_HBM",
+    sources=[
+        "Pope et al. (2023), LLM Inference",
+        "Yu et al. (2022), ORCA",
+    ],
+)
+
+BATCHING = Wall(
+    number=5,
+    name="Batching",
+    domain=Domain.NODE,
+    solver_name="ContinuousBatchingSolver",
+    constraint="Static batching wastes memory through KV-cache fragmentation.",
+    equation="KV_paged = 2 × L × H × D × ⌈S/p⌉ × p × B × b",
+    sources=["Kwon et al. (2023), vLLM / PagedAttention"],
+)
+
+STREAMING = Wall(
+    number=6,
+    name="Streaming",
+    domain=Domain.NODE,
+    solver_name="WeightStreamingSolver",
+    constraint="Wafer-scale architectures shift bottleneck from HBM to injection interconnect.",
+    equation="T_layer = max(|W|/BW_inject, 2|W|B / (Peak × η))",
+    sources=["Cerebras Systems (2024), Weight Streaming"],
+)
+
+TAIL_LATENCY = Wall(
+    number=7,
+    name="Tail Latency",
+    domain=Domain.NODE,
+    solver_name="TailLatencySolver",
+    constraint="P99 tail latency grows non-linearly as utilization approaches 1.",
+    equation="Erlang-C M/M/c queueing model",
+    sources=["Dean & Barroso (2013), The Tail at Scale"],
+)
+
 # Domain 2: Data — data movement and pipelines
 INGESTION = Wall(
-    number=4,
+    number=8,
     name="Ingestion",
     domain=Domain.DATA,
     solver_name="DataSolver",
@@ -123,7 +166,7 @@ INGESTION = Wall(
 )
 
 TRANSFORMATION = Wall(
-    number=5,
+    number=9,
     name="Transformation",
     domain=Domain.DATA,
     solver_name="TransformationSolver",
@@ -133,7 +176,7 @@ TRANSFORMATION = Wall(
 )
 
 LOCALITY = Wall(
-    number=6,
+    number=10,
     name="Locality",
     domain=Domain.DATA,
     solver_name="TopologySolver",
@@ -147,7 +190,7 @@ LOCALITY = Wall(
 
 # Domain 3: Algorithm — scaling laws and compression
 COMPLEXITY = Wall(
-    number=7,
+    number=11,
     name="Complexity",
     domain=Domain.ALGORITHM,
     solver_name="ScalingSolver",
@@ -157,7 +200,7 @@ COMPLEXITY = Wall(
 )
 
 REASONING = Wall(
-    number=8,
+    number=12,
     name="Reasoning",
     domain=Domain.ALGORITHM,
     solver_name="InferenceScalingSolver",
@@ -170,7 +213,7 @@ REASONING = Wall(
 )
 
 FIDELITY = Wall(
-    number=9,
+    number=13,
     name="Fidelity",
     domain=Domain.ALGORITHM,
     solver_name="CompressionSolver",
@@ -182,9 +225,9 @@ FIDELITY = Wall(
     ],
 )
 
-# Domain 4: Fleet — multi-node and societal
+# Domain 4: Fleet — multi-node and operations
 COMMUNICATION = Wall(
-    number=10,
+    number=14,
     name="Communication",
     domain=Domain.FLEET,
     solver_name="DistributedSolver",
@@ -197,7 +240,7 @@ COMMUNICATION = Wall(
 )
 
 FRAGILITY = Wall(
-    number=11,
+    number=15,
     name="Fragility",
     domain=Domain.FLEET,
     solver_name="ReliabilitySolver",
@@ -210,7 +253,7 @@ FRAGILITY = Wall(
 )
 
 MULTI_TENANT = Wall(
-    number=12,
+    number=16,
     name="Multi-tenant",
     domain=Domain.FLEET,
     solver_name="OrchestrationSolver",
@@ -220,7 +263,7 @@ MULTI_TENANT = Wall(
 )
 
 CAPITAL = Wall(
-    number=13,
+    number=17,
     name="Capital",
     domain=Domain.FLEET,
     solver_name="EconomicsSolver",
@@ -230,7 +273,7 @@ CAPITAL = Wall(
 )
 
 SUSTAINABILITY = Wall(
-    number=14,
+    number=18,
     name="Sustainability",
     domain=Domain.FLEET,
     solver_name="SustainabilitySolver",
@@ -239,9 +282,19 @@ SUSTAINABILITY = Wall(
     sources=["Patterson et al. (2022), Carbon Emissions"],
 )
 
-ETHICS = Wall(
-    number=15,
-    name="Ethics",
+CHECKPOINT = Wall(
+    number=19,
+    name="Checkpoint",
+    domain=Domain.FLEET,
+    solver_name="CheckpointSolver",
+    constraint="Periodic state saves impose I/O burst penalties on training MFU.",
+    equation="MFU_penalty = T_write / T_interval",
+    sources=["Eisenman et al. (2022), Check-N-Run"],
+)
+
+SAFETY = Wall(
+    number=20,
+    name="Safety",
     domain=Domain.FLEET,
     solver_name="ResponsibleEngineeringSolver",
     constraint="Privacy and fairness guarantees impose computational overhead.",
@@ -251,7 +304,7 @@ ETHICS = Wall(
 
 # Domain 5: Analysis — cross-cutting diagnostics
 SENSITIVITY = Wall(
-    number=16,
+    number=21,
     name="Sensitivity",
     domain=Domain.ANALYSIS,
     solver_name="SensitivitySolver",
@@ -261,7 +314,7 @@ SENSITIVITY = Wall(
 )
 
 SYNTHESIS = Wall(
-    number=17,
+    number=22,
     name="Synthesis",
     domain=Domain.ANALYSIS,
     solver_name="SynthesisSolver",
@@ -270,31 +323,18 @@ SYNTHESIS = Wall(
     sources=["Williams et al. (2009), Roofline"],
 )
 
-# Also expose ServingSolver's wall — it resolves the two-phase
-# inference lifecycle (prefill vs decode), which is a sub-wall of
-# the Memory Wall (#2) specific to autoregressive models.
-SERVING = Wall(
-    number=2,  # Sub-wall of Memory
-    name="Serving",
-    domain=Domain.NODE,
-    solver_name="ServingSolver",
-    constraint="LLM inference has two distinct regimes: compute-bound prefill and memory-bound decode.",
-    equation="TTFT = OPs_prefill / Peak; ITL = |W| / BW_HBM",
-    sources=[
-        "Pope et al. (2023), LLM Inference",
-        "Yu et al. (2022), ORCA",
-    ],
-)
+# Backward compatibility alias
+ETHICS = SAFETY
 
 
 # ── Wall Registry ────────────────────────────────────────────────
 
 ALL_WALLS = [
-    COMPUTE, MEMORY, SOFTWARE,
+    COMPUTE, MEMORY, SOFTWARE, SERVING, BATCHING, STREAMING, TAIL_LATENCY,
     INGESTION, TRANSFORMATION, LOCALITY,
     COMPLEXITY, REASONING, FIDELITY,
     COMMUNICATION, FRAGILITY, MULTI_TENANT,
-    CAPITAL, SUSTAINABILITY, ETHICS,
+    CAPITAL, SUSTAINABILITY, CHECKPOINT, SAFETY,
     SENSITIVITY, SYNTHESIS,
 ]
 
@@ -302,14 +342,14 @@ ALL_WALLS = [
 _BY_NUMBER = {w.number: w for w in ALL_WALLS}
 _BY_NAME = {w.name.lower(): w for w in ALL_WALLS}
 _BY_SOLVER = {}
-for w in ALL_WALLS + [SERVING]:
+for w in ALL_WALLS:
     _BY_SOLVER.setdefault(w.solver_name, []).append(w)
 
 
 def wall(number: int) -> Wall:
     """Look up a wall by its canonical number."""
     if number not in _BY_NUMBER:
-        raise KeyError(f"No wall with number {number}. Valid: 1–17.")
+        raise KeyError(f"No wall with number {number}. Valid: 1–22.")
     return _BY_NUMBER[number]
 
 
@@ -330,14 +370,14 @@ def taxonomy() -> str:
     This is the pedagogical entry point — print this in a notebook
     and students see the entire analytical framework at a glance.
     """
-    lines = ["═══ The 17 ML Systems Walls ═══", ""]
+    lines = ["═══ The 22 ML Systems Walls ═══", ""]
     for domain in Domain:
         domain_walls = walls_in_domain(domain)
         label = {
             Domain.NODE:      "Domain 1 — Node (Single-Accelerator Resources)",
             Domain.DATA:      "Domain 2 — Data (Movement & Pipelines)",
             Domain.ALGORITHM: "Domain 3 — Algorithm (Scaling & Compression)",
-            Domain.FLEET:     "Domain 4 — Fleet (Multi-Node & Society)",
+            Domain.FLEET:     "Domain 4 — Fleet (Multi-Node & Operations)",
             Domain.ANALYSIS:  "Domain 5 — Analysis (Cross-Cutting Diagnostics)",
         }[domain]
         lines.append(f"  {label}")

@@ -33,6 +33,10 @@
 \usepackage{titlesec}
 \usepackage{fancyhdr}
 
+% Branding: styled product name (display) vs. plain text (code)
+\newcommand{\mlsysim}{MLSys\,\textperiodcentered\,im}
+\newcommand{\MLSYSIM}{\textbf{\mlsysim}}  % bold variant for emphasis
+
 % Coverage matrix symbols
 \newcommand{\fullmark}{\checkmark}
 \newcommand{\halfmark}{$\circ$}
@@ -78,12 +82,12 @@
     linkcolor=blue,
     citecolor=blue,
     urlcolor=blue,
-    pdftitle={MLSYSIM: A Unified Analytical Framework for the Hardware-Software Co-Design of Machine Learning Systems},
+    pdftitle={MLSys·im: First-Principles Infrastructure Modeling for Machine Learning Systems},
     pdfauthor={Vijay Janapa Reddi}
 }
 
 \title{
-  \Huge\bfseries MLSys\,\textperiodcentered\,im\\[0.4em]
+  {\Huge\bfseries \mlsysim}\\[0.4em]
   \Large\normalfont\itshape First-Principles Infrastructure Modeling for Machine Learning Systems
 }
 
@@ -103,42 +107,53 @@
 \maketitle
 
 \begin{abstract}
-As machine learning models transition from laboratory curiosities to critical infrastructure, the systems required to sustain them have reached a point of extreme bimodal complexity. Developers must reason about constraints spanning from sub-milliwatt microcontrollers to multi-gigawatt datacenter fleets. Existing evaluation methodologies are polarized between hardware-dependent empirical profiling and cycle-accurate simulation, leaving a void for rapid, full-stack architectural reasoning. We present \textbf{MLSYSIM} (\textbf{M}achine \textbf{L}earning \textbf{Sys}tems \textbf{I}nfrastructure and \textbf{M}odeling), a first-principles analytical modeling framework that formalizes the ``physics of systems'' into a dimensionally-strict Python engine. MLSYSIM introduces a 5-layer \emph{Progressive Lowering} abstraction that decouples computational demand from silicon supply and environmental context. By strictly enforcing unit-level integrity at runtime, MLSYSIM eliminates the silent conversion errors that plague ad-hoc systems modeling. We codify a complete taxonomy of 22 ``Systems Walls''---including compute, memory, serving, batching, streaming, tail latency, ingestion, transformation, locality, reasoning, checkpointing, and responsibility---resolved by a composable suite of 21 solvers. Our evaluation demonstrates that MLSYSIM enables sub-second design-space exploration, identifying binding constraints and synthesizing ideal hardware specifications across the entire ML systems lifecycle.
+As machine learning models transition from laboratory curiosities to critical infrastructure, the systems required to sustain them have reached a point of extreme bimodal complexity. Developers must reason about constraints spanning from sub-milliwatt microcontrollers to multi-gigawatt datacenter fleets. Existing evaluation methodologies are polarized between hardware-dependent empirical profiling and cycle-accurate simulation, leaving a void for rapid, full-stack architectural reasoning. We present \MLSYSIM{} (\textbf{M}achine \textbf{L}earning \textbf{Sys}tems \textbf{I}nfrastructure and \textbf{M}odeling), a first-principles analytical modeling framework that formalizes the ``physics of systems'' into a dimensionally-strict Python engine. \mlsysim introduces a 5-layer \emph{Progressive Lowering} abstraction that decouples computational demand from silicon supply and environmental context. By strictly enforcing unit-level integrity at runtime, \mlsysim eliminates the silent conversion errors that plague ad-hoc systems modeling. We codify a complete taxonomy of 22 ``Systems Walls''---including compute, memory, serving, batching, streaming, tail latency, ingestion, transformation, locality, reasoning, checkpointing, and safety---organized into five domains and resolved by a composable suite of 21 solvers. Our evaluation demonstrates that \mlsysim enables sub-second design-space exploration, identifying binding constraints and synthesizing ideal hardware specifications across the entire ML systems lifecycle.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/mlsysim-overview.pdf}
+\caption{\textbf{\mlsysim Framework Overview.} (a)~Demand--supply separation decouples workload specifications from hardware capabilities and environmental context. (b)~22 Systems Walls organized into five domains, each grounded in a published equation. (c)~Stateless solver composition chains 21 solvers to identify binding constraints through a three-level evaluation. (d)~Example outputs for LLaMA-3 70B on 1024$\times$ H100, produced in $<$0.3\,s on a laptop.}
+\label{fig:overview}
+\end{figure*}
+
 In ``The Bitter Lesson,'' Rich Sutton observes that general methods leveraging massive computation ultimately defeat domain-specific heuristics~\citep{sutton2019bitter}. Deep learning surpassed handcrafted features, large language models outperformed linguistic rule systems, and AlphaZero mastered games through self-play rather than encoded heuristics. Each breakthrough was enabled not by algorithmic ingenuity alone but by the ability to scale learning systems across increasingly powerful hardware. This pattern has transformed machine learning from a branch of mathematical optimization into a discipline of massive-scale systems engineering. Training a frontier model now requires orchestrating tens of thousands of accelerators across datacenter fabrics where high-bandwidth memory ceilings, network bisection bandwidth, power delivery constraints, and regional carbon intensities interact in non-obvious ways~\citep{dean2012large,shoeybi2019megatron}. The systems engineer who configures this infrastructure must reason simultaneously about compute rooflines~\citep{williams2009roofline}, Chinchilla-optimal scaling~\citep{hoffmann2022chinchilla}, and total cost of ownership---a breadth of quantitative reasoning that no single existing tool adequately supports.
 
-Yet the hardware required to develop intuition for these systems is prohibitively scarce. A student cannot requisition a 100,000-GPU cluster to explore how fat-tree versus torus topologies affect AllReduce latency, or how doubling HBM bandwidth shifts the binding constraint from memory to network. This creates a profound \emph{accessibility gap} in ML systems education: the very infrastructure students must learn to reason about is the infrastructure they cannot access. The gap is not merely inconvenient; it is pedagogically dangerous. Students who learn ML systems only through high-level APIs develop brittle mental models that collapse at production scale, where silent failures in memory management, synchronization overhead, and thermal throttling determine whether a training run succeeds or wastes millions of dollars in compute~\citep{patterson2022carbon}.
+Consider a concrete example. A team deploying LLaMA-3 70B for interactive serving must answer: \emph{How many H100 GPUs are needed to meet a 50\,ms time-to-first-token SLA at 95th-percentile latency?} The answer depends on at least seven interacting constraints: the model's 70 billion parameters require $\sim$140\,GB in FP16, exceeding a single GPU's 80\,GB HBM capacity (Wall~2: Memory). Tensor-parallel sharding across two GPUs introduces NVLink synchronization overhead (Wall~14: Communication). Continuous batching with PagedAttention determines KV-cache memory utilization (Wall~5: Batching). The decode phase is memory-bandwidth-bound at 3.35\,TB/s per device (Wall~4: Serving). Tail latency under load follows Erlang-C queueing dynamics (Wall~7: Tail Latency). And the fleet's total cost of ownership and carbon footprint---\$4.2M and 128\,tCO\textsubscript{2} over three years---constrain what is economically and environmentally viable (Walls~17--18). No existing tool reasons about all seven constraints simultaneously in the time it takes to re-run a notebook cell.
 
-The community has attempted to bridge this gap through modeling, but existing tools occupy extremes of a fidelity--speed tradeoff that leaves a critical void. Empirical profilers such as MLPerf~\citep{mlperf2020} provide ground-truth measurements but require physical silicon, restricting their use to organizations that already possess the hardware in question. Cycle-accurate simulators like ASTRA-sim~2.0~\citep{won2023astrasim2} and Timeloop/Accelergy~\citep{parashar2019timeloop,wu2019accelergy} model microarchitectural behavior with high fidelity but require hours to simulate configurations that a systems architect needs to evaluate in seconds. Calculon~\citep{calculon2023} provides faster analytical estimates for distributed training but focuses narrowly on performance prediction without addressing the full taxonomy of systems constraints---memory walls, data ingestion bottlenecks, reliability, sustainability, and economics---that collectively determine whether a system design is viable. None of these tools enforce dimensional correctness, leaving practitioners vulnerable to the silent unit-conversion errors that plague ad-hoc systems modeling: confusing gigabytes with gigabits, neglecting the refractive index of fiber in latency calculations, or mixing per-device and per-node bandwidth figures.
+\paragraph{The accessibility gap.}
+Yet the hardware required to develop intuition for these systems is prohibitively scarce. A student cannot requisition a 100,000-GPU cluster to explore how fat-tree versus torus topologies affect AllReduce latency, or how doubling HBM bandwidth shifts the binding constraint from memory to network. This creates a profound \emph{accessibility gap} in ML systems education: the very infrastructure students must learn to reason about is the infrastructure they cannot access. The gap is not merely inconvenient; it is pedagogically dangerous. Students who learn ML systems only through high-level APIs develop brittle mental models that collapse at production scale, where silent failures in memory management, synchronization overhead, and thermal throttling determine whether a training run succeeds or wastes millions of dollars in compute~\citep{patterson2022carbon}. The same gap afflicts researchers performing design-space exploration and engineers sizing production deployments: both need rapid, full-stack reasoning that today requires either back-of-the-envelope calculations (error-prone, incomplete) or dedicated hardware (expensive, slow).
 
-We argue that what ML systems education needs is the equivalent of what MIPS and SPIM provided for computer architecture~\citep{hennessy2019architecture}. Patterson and Hennessy did not give students cycle-accurate x86 simulators; they gave them a \emph{taxonomically complete} instruction set that exposed every architectural concept---pipelining, hazards, caches, virtual memory---through a model simple enough to reason about yet faithful enough to build real intuition. MLSYSIM occupies the same pedagogical niche for ML systems. It sacrifices microarchitectural detail to achieve sub-second execution, enabling students to sweep thousands of hardware--model--topology combinations in the time a cycle-accurate simulator requires for one. What it preserves is \emph{completeness}: every fundamental bottleneck to scaling a machine learning system has a mathematical resolver within the framework.
+\paragraph{The fidelity--speed--scope void.}
+The community has attempted to bridge this gap through modeling, but existing tools are constrained along three axes---fidelity, speed, and scope---and no tool occupies the region where all three are adequate (\Cref{tab:comparison}). Empirical profilers such as MLPerf~\citep{mlperf2020} provide ground-truth measurements but require physical silicon, restricting their use to organizations that already possess the hardware in question. Cycle-accurate simulators like ASTRA-sim~2.0~\citep{won2023astrasim2} and Timeloop/Accelergy~\citep{parashar2019timeloop,wu2019accelergy} model microarchitectural behavior with high fidelity but require hours to simulate configurations that a systems architect needs to evaluate in seconds. Analytical tools like Calculon~\citep{calculon2023} achieve speed comparable to \mlsysim but focus narrowly on LLM training performance, ignoring data pipelines, reliability, sustainability, economics, and inference serving. Vidur~\citep{agrawal2024vidur} models LLM inference with high accuracy but does not extend to training, fleet economics, or sustainability. None of these tools enforce dimensional correctness, leaving practitioners vulnerable to the silent unit-conversion errors that plague ad-hoc systems modeling: confusing gigabytes with gigabits, neglecting the refractive index of fiber in latency calculations, or mixing per-device and per-node bandwidth figures.
 
-We present \textbf{MLSYSIM} (Machine Learning Systems Infrastructure and Modeling), an open-source, pure-Python analytical modeling framework that formalizes the back-of-the-envelope calculations of ML systems engineering into a dimensionally strict, composable engine. MLSYSIM requires no GPU---it runs on any laptop---and produces results in sub-second time, making it suitable for interactive classroom use, homework assignments, and rapid design-space exploration. Designed as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025}, MLSYSIM makes systems reasoning tangible: students configure workloads, select hardware from a vetted registry, specify infrastructure context, and observe how constraints propagate through solvers to produce performance bounds, cost estimates, and sustainability metrics.
+\paragraph{The MIPS analogy.}
+We argue that what ML systems education and rapid design-space exploration need is the equivalent of what MIPS and SPIM provided for computer architecture~\citep{hennessy2019architecture}. Patterson and Hennessy did not give students cycle-accurate x86 simulators; they gave them a \emph{taxonomically complete} instruction set that exposed every architectural concept---pipelining, hazards, caches, virtual memory---through a model simple enough to reason about yet faithful enough to build real intuition. \mlsysim occupies the same niche for ML systems. It sacrifices microarchitectural detail to achieve sub-second execution, enabling students and practitioners to sweep thousands of hardware--model--topology combinations in the time a cycle-accurate simulator requires for one. What it preserves is \emph{completeness}: every fundamental bottleneck to scaling a machine learning system---from single-accelerator compute ceilings to fleet-scale carbon emissions---has a mathematical resolver within the framework.
+
+\paragraph{\mlsysim.}
+We present \MLSYSIM{} (Machine Learning Systems Infrastructure and Modeling), an open-source, pure-Python analytical modeling framework that formalizes the back-of-the-envelope calculations of ML systems engineering into a dimensionally strict, composable engine. \Cref{fig:overview} illustrates the framework's architecture. \mlsysim separates computational \emph{demand} (the workload) from silicon \emph{supply} (the hardware) and environmental \emph{context} (infrastructure and topology), then passes this configuration through a composable suite of 21 solvers that resolve 22 physical and logical constraints---the ``Systems Walls''---organized into five domains spanning single-node resources to fleet-scale operations. The framework requires no GPU, runs on any laptop, and produces full-stack analysis in under 0.3 seconds, making it suitable for interactive classroom use, homework assignments, and rapid design-space exploration. Designed as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025}, \mlsysim makes systems reasoning tangible: students and engineers configure workloads, select hardware from a vetted registry, specify infrastructure context, and observe how constraints propagate to reveal binding bottlenecks, sensitivity gradients, and synthesized hardware requirements.
 
 This paper makes the following contributions:
 
-\begin{itemize}[leftmargin=*,itemsep=2pt]
-    \item \textbf{A 5-Layer Progressive Lowering Abstraction} that formally separates computational demand (Workload) from silicon supply (Hardware), environmental context (Infrastructure), deployment topology (Systems), and analytical resolution (Solvers), enabling modular reasoning about each layer independently.
+\begin{enumerate}[leftmargin=*,itemsep=3pt,label=\textbf{C\arabic*.}]
+    \item \textbf{A Taxonomy of 22 Systems Walls} organized into five domains (Node, Data, Algorithm, Fleet, Analysis), each wall grounded in a published equation and resolved by a dedicated solver. The taxonomy provides a complete, structured vocabulary for reasoning about the constraints that bound ML system performance (\Cref{sec:taxonomy}).
 
-    \item \textbf{Dimensional Strictness as a Runtime Invariant.} By encoding every physical quantity with units via the \texttt{pint} library, MLSYSIM transforms dimensional analysis from a manual discipline into a runtime guarantee---attempting to add FLOP/s to GB/s raises a deterministic error, eliminating an entire class of silent modeling bugs.
+    \item \textbf{Demand--Supply Separation with Dimensional Strictness.} A 5-layer progressive lowering abstraction formally decouples computational demand from silicon supply and environmental context. Every physical quantity carries SI units at runtime via the \texttt{pint} library, transforming dimensional analysis from a manual discipline into a machine-checked invariant (\Cref{sec:philosophy,sec:architecture}).
 
-    \item \textbf{A 21-Solver Grand Unified Suite} that codifies the complete taxonomy of ML systems ``Walls''---from Roofline compute bounds~\citep{williams2009roofline} and Chinchilla scaling laws~\citep{hoffmann2022chinchilla} to inference serving, tail latency, reliability modeling, carbon accounting~\citep{patterson2022carbon}, and the responsibility overhead of safety and alignment---into a single composable engine.
+    \item \textbf{Composable Solver Algebra.} 21 stateless solvers compose through chaining: each solver is a pure function $f(\text{config}) \to \text{metrics}$, producing a three-level evaluation (feasibility, profile, fleet) that identifies binding constraints and enables sensitivity analysis across the full parameter space (\Cref{sec:solver-formalism}).
 
-    \item \textbf{Automated System Synthesis} through an inverse-solving meta-solver that, given a model and service-level agreement, identifies binding constraints and synthesizes the hardware specifications required to meet them.
+    \item \textbf{Inverse Roofline Synthesis.} A meta-solver inverts the analysis: given a workload and service-level agreement, it derives the minimum hardware specifications (bandwidth, compute, capacity) required to meet the target, enabling hardware--software co-design from SLA requirements (\Cref{sec:usage}).
+\end{enumerate}
 
-    \item \textbf{Lab-Ready Educational Infrastructure} including a Scenario~$\times$~Persona matrix that generates autogradable assignments, a Silicon Zoo registry of vetted hardware specifications sourced from datasheets, and integration with the \emph{Machine Learning Systems} textbook curriculum.
-\end{itemize}
-
-The remainder of this paper is organized as follows. \Cref{sec:related} surveys related work in ML systems modeling and positions MLSYSIM within the landscape. \Cref{sec:philosophy} presents the design philosophy underlying MLSYSIM, including the principles of analytical speed, dimensional strictness, taxonomic completeness, and demand--supply separation. \Cref{sec:taxonomy} formalizes the taxonomy of 22 Systems Walls organized into four domains. \Cref{sec:solver-formalism} describes how solvers compose through stateless chaining and a three-level evaluation scorecard. \Cref{sec:architecture} describes the 5-layer progressive lowering architecture. \Cref{sec:usage} demonstrates MLSYSIM through case studies in sensitivity analysis and hardware synthesis. \Cref{sec:validation} validates predictions against published benchmarks. \Cref{sec:labs} presents the lab integration framework, including six reference labs and the Scenario~$\times$~Persona matrix. \Cref{sec:discussion} discusses design trade-offs, limitations, and future directions. \Cref{sec:conclusion} concludes.
+The remainder of this paper is organized as follows. \Cref{sec:related} surveys related work and positions \mlsysim within the modeling landscape. \Cref{sec:philosophy} presents the design philosophy. \Cref{sec:taxonomy} formalizes the 22-wall taxonomy. \Cref{sec:solver-formalism} describes solver composition. \Cref{sec:architecture} details the progressive lowering architecture. \Cref{sec:usage} demonstrates the framework through use cases. \Cref{sec:validation} validates predictions against published benchmarks. \Cref{sec:discussion} discusses limitations and future work. \Cref{sec:conclusion} concludes.
 
 \section{Related Work}
 \label{sec:related}
 
-Tools for modeling and evaluating ML systems span a wide spectrum of fidelity, scope, and intended audience. We organize prior work into four categories and position MLSYSIM relative to each.
+Tools for modeling and evaluating ML systems span a wide spectrum of fidelity, scope, and intended audience. We organize prior work into four categories and position \mlsysim relative to each.
 
 \subsection{Cycle-Accurate Simulators}
 
@@ -146,33 +161,33 @@ Cycle-accurate simulators provide the highest fidelity by modeling hardware beha
 
 ASTRA-sim 2.0~\citep{won2023astrasim2} addresses the ML gap by providing a hierarchical network simulator purpose-built for distributed training. It models collective communication patterns such as AllReduce across realistic network topologies, producing high-fidelity estimates of communication overhead. However, ASTRA-sim inherits the fundamental cost of cycle-accuracy: simulating one training step of a large model at cluster scale can take hours, making iterative design-space exploration impractical. Furthermore, its scope is limited to network and communication analysis; it does not model economics, sustainability, data pipelines, or reliability.
 
-MLSYSIM deliberately trades cycle-accuracy for sub-second execution. Where ASTRA-sim answers ``how many microseconds does this AllReduce take on this exact topology,'' MLSYSIM answers ``which of 22 possible bottlenecks binds this system, and how does changing hardware shift the binding constraint?'' The two tools are complementary: MLSYSIM identifies the design region worth exploring, and cycle-accurate simulators can then validate specific points within it.
+\mlsysim deliberately trades cycle-accuracy for sub-second execution. Where ASTRA-sim answers ``how many microseconds does this AllReduce take on this exact topology,'' \mlsysim answers ``which of 22 possible bottlenecks binds this system, and how does changing hardware shift the binding constraint?'' The two tools are complementary: \mlsysim identifies the design region worth exploring, and cycle-accurate simulators can then validate specific points within it.
 
 \subsection{Accelerator Design Tools}
 
 A second class of tools targets the design and evaluation of individual accelerator architectures. Timeloop~\citep{parashar2019timeloop} provides a systematic methodology for evaluating DNN accelerator dataflows, modeling how data tiles map onto spatial architectures and estimating latency and energy for each mapping. Accelergy~\citep{wu2019accelergy}, its companion framework, supplies the energy estimation primitives that Timeloop consumes. Together, they form a powerful toolkit for accelerator architects exploring the design space of novel silicon.
 
-These tools operate at the operator and tile level---modeling how a single convolution or matrix multiplication executes on a specific microarchitecture. They do not reason about system-level concerns: how multiple accelerators communicate across a network fabric, how the data pipeline feeds those accelerators, or what the total cost of ownership looks like at fleet scale. MLSYSIM operates one abstraction level higher. It consumes the \emph{outputs} of accelerator-level analysis (peak FLOP/s, memory bandwidth, TDP) as inputs to its hardware registry and reasons about how those specifications interact with workload demands, network topologies, and infrastructure constraints.
+These tools operate at the operator and tile level---modeling how a single convolution or matrix multiplication executes on a specific microarchitecture. They do not reason about system-level concerns: how multiple accelerators communicate across a network fabric, how the data pipeline feeds those accelerators, or what the total cost of ownership looks like at fleet scale. \mlsysim operates one abstraction level higher. It consumes the \emph{outputs} of accelerator-level analysis (peak FLOP/s, memory bandwidth, TDP) as inputs to its hardware registry and reasons about how those specifications interact with workload demands, network topologies, and infrastructure constraints.
 
 \subsection{Analytical and Co-Design Tools}
 
-Closest in spirit to MLSYSIM are analytical tools that sacrifice microarchitectural detail for speed. Calculon~\citep{calculon2023} is an analytical co-design tool for large language model training. It models training time as a function of hardware specifications, parallelism strategies, and model architecture, achieving execution speeds comparable to MLSYSIM. Calculon demonstrates the value of analytical modeling for rapid ``what-if'' exploration.
+Closest in spirit to \mlsysim are analytical tools that sacrifice microarchitectural detail for speed. Calculon~\citep{calculon2023} is an analytical co-design tool for large language model training. It models training time as a function of hardware specifications, parallelism strategies, and model architecture, achieving execution speeds comparable to \mlsysim. Calculon demonstrates the value of analytical modeling for rapid ``what-if'' exploration.
 
 However, Calculon's scope is narrow by design: it targets transformer-based LLM training exclusively, with no support for CNNs, mixture-of-experts architectures, or inference workloads. It does not model data pipelines, reliability, sustainability, economics, or ethical considerations. It also lacks dimensional enforcement, relying on the user to maintain unit consistency across calculations.
 
 LLM-Viewer~\citep{yuan2024llmviewer} and llm-analysis~\citep{kim2023llmanalysis} provide lightweight memory and latency estimation for transformer inference. These tools are useful for single-model profiling but do not extend to fleet-level reasoning, multi-tenant scheduling, or cross-domain constraint analysis.
 
-MLSYSIM generalizes the analytical approach to the full ML systems stack. Where Calculon models one domain (LLM training performance) with one solver, MLSYSIM composes 21 solvers spanning compute, memory, serving, batching, streaming, tail latency, network, data pipelines, scaling laws, compression, reliability, checkpointing, economics, sustainability, and responsible engineering. Crucially, MLSYSIM enforces dimensional strictness at runtime via the \texttt{pint} library, transforming unit consistency from a manual discipline into a machine-checked invariant.
+\mlsysim generalizes the analytical approach to the full ML systems stack. Where Calculon models one domain (LLM training performance) with one solver, \mlsysim composes 21 solvers spanning compute, memory, serving, batching, streaming, tail latency, network, data pipelines, scaling laws, compression, reliability, checkpointing, economics, sustainability, and responsible engineering. Crucially, \mlsysim enforces dimensional strictness at runtime via the \texttt{pint} library, transforming unit consistency from a manual discipline into a machine-checked invariant.
 
 \subsection{Pedagogical Precedents}
 
-MLSYSIM draws direct inspiration from the tradition of pedagogical simulators in systems education. Patterson and Hennessy's MIPS/SPIM simulator~\citep{patterson2014organization} taught generations of students computer architecture not by replicating a production processor, but by providing a simplified model that made architectural concepts tangible through rapid experimentation. Similarly, xv6~\citep{cox2011xv6} and MINIX~\citep{tanenbaum2006minix} teach operating systems by stripping away production complexity to reveal core abstractions.
+\mlsysim draws direct inspiration from the tradition of pedagogical simulators in systems education. Patterson and Hennessy's MIPS/SPIM simulator~\citep{patterson2014organization} taught generations of students computer architecture not by replicating a production processor, but by providing a simplified model that made architectural concepts tangible through rapid experimentation. Similarly, xv6~\citep{cox2011xv6} and MINIX~\citep{tanenbaum2006minix} teach operating systems by stripping away production complexity to reveal core abstractions.
 
-MLSYSIM follows this pedagogical philosophy for the ML systems domain. Production ML infrastructure---spanning millions of lines of code across frameworks, compilers, schedulers, and orchestrators---is too complex for students to reason about directly. MLSYSIM provides a ``wind tunnel'' in which students can sweep hardware configurations, toggle parallelism strategies, and observe how binding constraints shift, all in sub-second iteration cycles. Its integration with the companion textbook~\citep{mlsysbook2025} provides structured laboratory exercises with autogradable assessments, a capability absent from all research-oriented tools surveyed above.
+\mlsysim follows this pedagogical philosophy for the ML systems domain. Production ML infrastructure---spanning millions of lines of code across frameworks, compilers, schedulers, and orchestrators---is too complex for students to reason about directly. \mlsysim provides a ``wind tunnel'' in which students can sweep hardware configurations, toggle parallelism strategies, and observe how binding constraints shift, all in sub-second iteration cycles. Its integration with the companion textbook~\citep{mlsysbook2025} provides structured laboratory exercises with autogradable assessments, a capability absent from all research-oriented tools surveyed above.
 
 \subsection{Summary of Positioning}
 
-\Cref{tab:comparison} summarizes the landscape. MLSYSIM occupies a unique position: it is the only tool that combines analytical speed, full-stack scope, dimensional enforcement, and pedagogical integration.
+\Cref{tab:comparison} summarizes the landscape. \mlsysim occupies a unique position: it is the only tool that combines analytical speed, full-stack scope, dimensional enforcement, and pedagogical integration.
 
 \begin{table*}[t]
 \centering
@@ -190,7 +205,7 @@ Accelergy & Analytical & Accelerator energy estimation & Minutes & \emptymark & 
 Calculon & Analytical & LLM training performance & Seconds & \emptymark & \emptymark \\
 LLM-Viewer & Analytical & LLM inference memory/latency & Seconds & \emptymark & \emptymark \\
 \midrule
-\textbf{MLSYSIM} & \textbf{Analytical} & \textbf{Full-stack: compute, memory, network, data,} & \textbf{Sub-sec.} & \fullmark & \fullmark \\
+\MLSYSIM & \textbf{Analytical} & \textbf{Full-stack: compute, memory, network, data,} & \textbf{Sub-sec.} & \fullmark & \fullmark \\
  & & \textbf{scaling, reliability, economics, sustainability,} & & & \\
  & & \textbf{ethics (21 solvers)} & & & \\
 \bottomrule
@@ -200,19 +215,19 @@ LLM-Viewer & Analytical & LLM inference memory/latency & Seconds & \emptymark & 
 \section{Design Philosophy}
 \label{sec:philosophy}
 
-The central question MLSYSIM addresses is: \emph{Where does the complexity of an ML system come from?} We argue that complexity arises from the non-linear interaction of constraints across four distinct domains---compute, communication, algorithms, and societal context---and that an effective modeling tool must formalize \emph{all four} simultaneously. Four design principles govern MLSYSIM's approach.
+The central question \mlsysim addresses is: \emph{Where does the complexity of an ML system come from?} We argue that complexity arises from the non-linear interaction of constraints across five distinct domains---node resources, data movement, algorithms, fleet-scale operations, and cross-cutting analysis---and that an effective modeling tool must formalize \emph{all five} simultaneously. Four design principles govern \mlsysim's approach.
 
 \subsection{Analytical Speed over Cycle Accuracy}
 \label{sec:speed}
 
-A first-order equation that engineers \emph{use} daily is more valuable than a cycle-accurate trace that is \emph{too slow to iterate on}. Cycle-accurate simulators such as ASTRA-sim~\citep{won2023astrasim2} and gem5~\citep{binkert2011gem5} provide microarchitectural fidelity but require hours per configuration point. MLSYSIM deliberately sacrifices this detail---it does not model L1 cache hit rates or warp scheduling---to achieve sub-second execution per solve. This enables design-space sweeps over thousands of hardware--model--topology combinations in seconds, the kind of rapid ``what-if'' exploration that \citet{hennessy2019architecture} identify as essential for quantitative architectural reasoning.
+A first-order equation that engineers \emph{use} daily is more valuable than a cycle-accurate trace that is \emph{too slow to iterate on}. Cycle-accurate simulators such as ASTRA-sim~\citep{won2023astrasim2} and gem5~\citep{binkert2011gem5} provide microarchitectural fidelity but require hours per configuration point. \mlsysim deliberately sacrifices this detail---it does not model L1 cache hit rates or warp scheduling---to achieve sub-second execution per solve. This enables design-space sweeps over thousands of hardware--model--topology combinations in seconds, the kind of rapid ``what-if'' exploration that \citet{hennessy2019architecture} identify as essential for quantitative architectural reasoning.
 
-To maintain rigor despite analytical simplification, MLSYSIM enforces a \textbf{``No Magic Numbers'' invariant}. Every hardware constant references a datasheet URL and verification date. The H100's peak FP16 throughput is not a bare \texttt{989} floating-point literal; it is \texttt{989\,*\,TFLOPs\,/\,second}, sourced from NVIDIA's published datasheet~\citep{nvidia2023h100}. This provenance discipline ensures that analytical speed does not degrade into analytical sloppiness.
+To maintain rigor despite analytical simplification, \mlsysim enforces a \textbf{``No Magic Numbers'' invariant}. Every hardware constant references a datasheet URL and verification date. The H100's peak FP16 throughput is not a bare \texttt{989} floating-point literal; it is \texttt{989\,*\,TFLOPs\,/\,second}, sourced from NVIDIA's published datasheet~\citep{nvidia2023h100}. This provenance discipline ensures that analytical speed does not degrade into analytical sloppiness.
 
 \subsection{Dimensional Strictness as an Invariant}
 \label{sec:dimensional}
 
-Systems modeling is a battle against units. Mixing gigabits with gigabytes, or omitting the refractive index of fiber in latency calculations, are canonical failure modes that silently corrupt results. MLSYSIM treats dimensional correctness not as a feature but as a \textbf{runtime invariant}, analogous to memory safety in Rust. The framework wraps every physical quantity using the \texttt{pint} unit library. If a user attempts to add FLOP/s to GB/s, the framework raises a deterministic \texttt{DimensionalityError} before any computation proceeds:
+Systems modeling is a battle against units. Mixing gigabits with gigabytes, or omitting the refractive index of fiber in latency calculations, are canonical failure modes that silently corrupt results. \mlsysim treats dimensional correctness not as a feature but as a \textbf{runtime invariant}, analogous to memory safety in Rust. The framework wraps every physical quantity using the \texttt{pint} unit library. If a user attempts to add FLOP/s to GB/s, the framework raises a deterministic \texttt{DimensionalityError} before any computation proceeds:
 
 \begin{lstlisting}[caption={Dimensional strictness prevents silent unit errors at the API level.},label={lst:units}]
 from mlsysim.core.constants import Q_
@@ -227,12 +242,12 @@ This design eliminates the single most common class of bugs in back-of-the-envel
 \subsection{Taxonomic Completeness}
 \label{sec:taxonomic}
 
-We define a modeling framework as ``complete'' only when every fundamental bottleneck to scaling has a mathematical resolver. MLSYSIM codifies 22 such bottlenecks---which we call \emph{Systems Walls}---organized into four domains: Local Resource Walls (the Metabolism), Movement Walls (the Skeleton), Algorithmic Walls (the Mind), and Societal Walls (the World). Each wall maps to a dedicated solver with a formal equation grounded in the systems literature. \Cref{sec:taxonomy} presents the full taxonomy with formal definitions, and \Cref{sec:solver-formalism} describes how solvers compose.
+We define a modeling framework as ``complete'' only when every fundamental bottleneck to scaling has a mathematical resolver. \mlsysim codifies 22 such bottlenecks---which we call \emph{Systems Walls}---organized into five domains: Node (single-accelerator resources), Data (movement and pipelines), Algorithm (scaling and compression), Fleet (multi-node operations and societal impact), and Analysis (cross-cutting diagnostics). Each wall maps to a dedicated solver with a formal equation grounded in the systems literature. \Cref{sec:taxonomy} presents the full taxonomy with formal definitions, and \Cref{sec:solver-formalism} describes how solvers compose.
 
 \subsection{Demand--Supply Separation}
 \label{sec:demand-supply}
 
-MLSYSIM enforces a strict separation between \emph{what} a model computes and \emph{where} it runs. A \texttt{TransformerWorkload} describes computational demand---parameters, layers, FLOPs, arithmetic intensity---without reference to any specific accelerator. A \texttt{HardwareNode} describes physical supply---peak throughput, memory bandwidth, TDP---without reference to any specific model. This decoupling, inspired by the compiler IR philosophy of progressive lowering~\citep{hennessy2019architecture}, enables hardware--software co-design: the same GPT-3 workload can be evaluated against an H100, a TPU~v5p, or a hypothetical future accelerator in a single parametric sweep, with all dimensional conversions handled automatically.
+\mlsysim enforces a strict separation between \emph{what} a model computes and \emph{where} it runs. A \texttt{TransformerWorkload} describes computational demand---parameters, layers, FLOPs, arithmetic intensity---without reference to any specific accelerator. A \texttt{HardwareNode} describes physical supply---peak throughput, memory bandwidth, TDP---without reference to any specific model. This decoupling, inspired by the compiler IR philosophy of progressive lowering~\citep{hennessy2019architecture}, enables hardware--software co-design: the same GPT-3 workload can be evaluated against an H100, a TPU~v5p, or a hypothetical future accelerator in a single parametric sweep, with all dimensional conversions handled automatically.
 
 
 
@@ -241,10 +256,10 @@ MLSYSIM enforces a strict separation between \emph{what} a model computes and \e
 
 We identify 22 distinct ``Walls''---physical or logical constraints that bound system performance---each resolved by a dedicated solver that accepts typed inputs and produces dimensionally correct bounds. \Cref{tab:walls} provides a complete summary; the subsections that follow formalize each domain.
 
-\subsection{Domain 1: Local Resource Walls (The Metabolism)}
-\label{sec:walls-metabolism}
+\subsection{Domain 1: Node --- Single-Accelerator Resources}
+\label{sec:walls-node}
 
-The Metabolism walls define what a single accelerator node can achieve in isolation. They are the innermost constraints and the first a practitioner should evaluate.
+The Node walls define what a single accelerator can achieve in isolation. They are the innermost constraints and the first a practitioner should evaluate.
 
 \textbf{Wall~1: The Compute Wall.} Every accelerator has a peak throughput ceiling measured in floating-point operations per second. No software optimization can exceed this bound; it is set by the number of arithmetic units and the clock frequency. The \texttt{SingleNodeSolver} resolves this wall via Roofline analysis~\citep{williams2009roofline}:
 \begin{equation}
@@ -270,40 +285,63 @@ I^{*} = \frac{\text{Peak}_{\text{FLOPS}}}{BW_{\text{HBM}}} \quad \text{(flop/byt
 \end{equation}
 Workloads with arithmetic intensity $I < I^{*}$ are memory-bound; those with $I > I^{*}$ are compute-bound.
 
-\textbf{Wall~3: The Software Wall.} The gap between peak and achieved FLOPS is governed by kernel fusion efficiency, occupancy, and memory access patterns. The \texttt{MetabolismSolver} models this as a multiplicative efficiency factor $\eta$ that modulates the Roofline ceiling. FlashAttention~\citep{dao2022flashattention}, for example, achieves a $2.5\times$ speedup over standard attention by fusing memory-bound operations into a single kernel pass, effectively raising $\eta$ from ${\sim}0.3$ to ${\sim}0.75$ for attention layers.
+\textbf{Wall~3: The Software Wall.} The gap between peak and achieved FLOPS is governed by kernel fusion efficiency, occupancy, and memory access patterns. The \texttt{EfficiencySolver} models this as a multiplicative efficiency factor $\eta$ that modulates the Roofline ceiling. FlashAttention~\citep{dao2022flashattention}, for example, achieves a $2.5\times$ speedup over standard attention by fusing memory-bound operations into a single kernel pass, effectively raising $\eta$ from ${\sim}0.3$ to ${\sim}0.75$ for attention layers.
 
-\subsection{Domain 2: Movement \& Pipeline Walls (The Skeleton)}
-\label{sec:walls-skeleton}
+\textbf{Wall~4: The Serving Wall.} Autoregressive LLM inference exhibits two distinct phases with different Roofline characteristics. The \emph{prefill} phase processes all input tokens in parallel and is compute-bound; the \emph{decode} phase generates one token at a time and is memory-bandwidth-bound. The \texttt{ServingSolver} models this two-phase behavior, enabling practitioners to reason about why batching strategies that improve prefill throughput may have no effect on decode latency.
 
-The Skeleton walls govern how data moves \emph{to} the accelerator. A node that is locally unconstrained can still starve if the data pipeline cannot keep pace.
+\textbf{Wall~5: The Batching Wall.} Static batching wastes memory through external fragmentation---each request reserves a contiguous KV-cache block sized for maximum sequence length. The \texttt{ContinuousBatchingSolver} models iteration-level scheduling with non-contiguous allocation via PagedAttention~\citep{kwon2023efficient}:
+\begin{equation}
+\label{eq:pagedkv}
+\text{KV}_{\text{paged}} = 2 \times L \times H \times D \times \lceil S / p \rceil \times p \times B \times b
+\end{equation}
+where $L$ is layers, $H$ is KV heads, $D$ is head dimension, $S$ is sequence length, $p$ is page size in tokens, $B$ is batch size, and $b$ is bytes per element. Internal fragmentation is bounded by the last page, eliminating the 40--50\% external fragmentation of contiguous allocation.
 
-\textbf{Wall~4: The Ingestion Wall.} Storage I/O must supply training samples at the rate the accelerator consumes them. The \texttt{DataSolver} computes the demand--supply ratio:
+\textbf{Wall~6: The Streaming Wall.} Wafer-scale architectures (e.g., Cerebras CS-3) invert the GPU memory wall: activations reside on-wafer in SRAM while model weights stream from external MemoryX nodes. The \texttt{WeightStreamingSolver} models this as:
+\begin{equation}
+\label{eq:weightstream}
+T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2|W_{\ell}| \times B}{\text{Peak} \times \eta}\right)
+\end{equation}
+The bottleneck shifts from HBM bandwidth to injection interconnect bandwidth. The optimal batch size---where injection perfectly overlaps compute---is $B^{*} = (BW_{\text{inject}} \times \text{Peak} \times \eta) / (2|W_{\ell}|)$.
+
+\textbf{Wall~7: The Tail Latency Wall.} Deploying inference at scale requires not just median performance but P99 tail latency guarantees. The \texttt{TailLatencySolver} models inference replicas as an M/M/$c$ queue using the Erlang-C formula~\citep{dean2013tail}:
+\begin{equation}
+\label{eq:erlangc}
+\mathbb{P}[\text{wait}] = \frac{(c\rho)^c / c! \cdot (1-\rho)^{-1}}{\sum_{k=0}^{c-1}(c\rho)^k/k! + (c\rho)^c/c! \cdot (1-\rho)^{-1}}
+\end{equation}
+where $c$ is the number of replicas, $\rho = \lambda / (c\mu)$ is per-server utilization, and $\lambda$, $\mu$ are arrival and service rates. P99 latency grows non-linearly as $\rho \to 1$, making the distinction between 80\% and 95\% utilization the difference between stable and catastrophic tail behavior.
+
+\subsection{Domain 2: Data --- Movement \& Pipelines}
+\label{sec:walls-data}
+
+The Data walls govern how data moves \emph{to} the accelerator. A node that is locally unconstrained can still starve if the data pipeline cannot keep pace.
+
+\textbf{Wall~8: The Ingestion Wall.} Storage I/O must supply training samples at the rate the accelerator consumes them. The \texttt{DataSolver} computes the demand--supply ratio:
 \begin{equation}
 \label{eq:ingestion}
 \rho_{\text{data}} = \frac{BW_{\text{demand}}}{BW_{\text{supply}}}
 \end{equation}
 When $\rho_{\text{data}} > 1$, the accelerator stalls waiting for data. $BW_{\text{demand}}$ is the product of batch size, sample size, and step rate; $BW_{\text{supply}}$ is the effective throughput of the storage subsystem after accounting for read amplification and caching.
 
-\textbf{Wall~5: The Transformation Wall.} Raw data rarely arrives in tensor-ready form. JPEG decoding, tokenization, and augmentation execute on CPU cores, creating a preprocessing bottleneck that the \texttt{TransformationSolver} quantifies:
+\textbf{Wall~9: The Transformation Wall.} Raw data rarely arrives in tensor-ready form. JPEG decoding, tokenization, and augmentation execute on CPU cores, creating a preprocessing bottleneck that the \texttt{TransformationSolver} quantifies:
 \begin{equation}
 \label{eq:transform}
 T_{\text{transform}} = \frac{B \times S_{\text{sample}}}{C_{\text{throughput}}}
 \end{equation}
 where $B$ is the batch size, $S_{\text{sample}}$ is the per-sample processing cost, and $C_{\text{throughput}}$ is the aggregate CPU preprocessing throughput.
 
-\textbf{Wall~6: The Locality Wall.} Network topology determines how much bandwidth is available between any two nodes in the cluster. The \texttt{TopologySolver} models this through the \emph{bisection bandwidth fraction} $\beta$, which varies by topology: Fat-Tree provides full bisection ($\beta = 1.0$), Dragonfly achieves $\beta \approx 0.85$, and 3D~Torus yields $\beta \approx 0.67$. The effective inter-node bandwidth is:
+\textbf{Wall~10: The Locality Wall.} Network topology determines how much bandwidth is available between any two nodes in the cluster. The \texttt{TopologySolver} models this through the \emph{bisection bandwidth fraction} $\beta$, which varies by topology: Fat-Tree provides full bisection ($\beta = 1.0$), Dragonfly achieves $\beta \approx 0.85$, and 3D~Torus yields $\beta \approx 0.67$. The effective inter-node bandwidth is:
 \begin{equation}
 \label{eq:locality}
 BW_{\text{eff}} = \frac{BW_{\text{link}} \times \beta}{\text{oversubscription}}
 \end{equation}
 This wall becomes binding when collective communication patterns demand bandwidth that the topology cannot supply at scale.
 
-\subsection{Domain 3: Algorithmic \& Scaling Walls (The Mind)}
-\label{sec:walls-mind}
+\subsection{Domain 3: Algorithm --- Scaling \& Compression}
+\label{sec:walls-algorithm}
 
-The Mind walls arise not from hardware but from the mathematics of learning itself. They determine how much computation a workload \emph{requires}, independent of the silicon that executes it.
+The Algorithm walls arise not from hardware but from the mathematics of learning itself. They determine how much computation a workload \emph{requires}, independent of the silicon that executes it.
 
-\textbf{Wall~7: The Complexity Wall.} Chinchilla scaling laws~\citep{hoffmann2022chinchilla} establish that training compute scales jointly with model size $P$ and dataset size $D$. The \texttt{ScalingSolver} implements:
+\textbf{Wall~11: The Complexity Wall.} Chinchilla scaling laws~\citep{hoffmann2022chinchilla} establish that training compute scales jointly with model size $P$ and dataset size $D$. The \texttt{ScalingSolver} implements:
 \begin{align}
 \label{eq:chinchilla}
 C &= 6PD \quad \text{(total training FLOPs)} \\
@@ -312,14 +350,14 @@ P^{*} &= \sqrt{\frac{C}{120}} \quad \text{(optimal model size for budget } C\tex
 \end{align}
 These relations allow students to reason backward from a compute budget to the largest model that can be trained optimally, or forward from a model size to the minimum viable training cluster.
 
-\textbf{Wall~8: The Reasoning Wall.} Inference-time compute scaling---``System-2 thinking''---introduces a cost that grows with the number of reasoning steps $K$. The \texttt{InferenceScalingSolver} models this as:
+\textbf{Wall~12: The Reasoning Wall.} Inference-time compute scaling---``System-2 thinking''---introduces a cost that grows with the number of reasoning steps $K$. The \texttt{InferenceScalingSolver} models this as:
 \begin{equation}
 \label{eq:reasoning}
 T_{\text{reason}} = K \times T_{\text{step}}(P, S_{\text{context}})
 \end{equation}
 where $T_{\text{step}}$ is the per-step latency, itself a function of model size $P$ and context length $S_{\text{context}}$. Chain-of-thought and tree-search strategies can increase $K$ by $10$--$100\times$ relative to single-pass inference~\citep{brown2024inference}, fundamentally altering serving cost economics.
 
-\textbf{Wall~9: The Fidelity Wall.} Compression trades model fidelity for efficiency. The \texttt{CompressionSolver} quantifies this via two primary mechanisms~\citep{han2015deep,gholami2021survey}:
+\textbf{Wall~13: The Fidelity Wall.} Compression trades model fidelity for efficiency. The \texttt{CompressionSolver} quantifies this via two primary mechanisms~\citep{han2015deep,gholami2021survey}:
 \begin{align}
 \label{eq:compression}
 r_{\text{quant}} &= \frac{32}{b} \quad \text{(quantization ratio at } b \text{ bits)} \\
@@ -327,12 +365,12 @@ r_{\text{prune}} &= \frac{1}{1 - s} \quad \text{(pruning ratio at sparsity } s\t
 \end{align}
 The accuracy impact $\Delta_{\text{acc}}$ is modeled as a configurable function rather than a hardcoded constant, since the fidelity--compression frontier varies by architecture and task.
 
-\subsection{Domain 4: Societal \& Macro Walls (The World)}
-\label{sec:walls-world}
+\subsection{Domain 4: Fleet --- Multi-Node \& Operations}
+\label{sec:walls-fleet}
 
-The World walls arise when systems operate at datacenter scale, where coordination, reliability, economics, and environmental impact become first-order concerns.
+The Fleet walls arise when systems operate at datacenter scale, where coordination, reliability, economics, environmental impact, and safety become first-order constraints.
 
-\textbf{Wall~10: The Communication Wall.} Distributed training requires synchronization across $N$ nodes. The \texttt{DistributedSolver} models the dominant collective operations. For Ring AllReduce~\citep{shoeybi2019megatron}:
+\textbf{Wall~14: The Communication Wall.} Distributed training requires synchronization across $N$ nodes. The \texttt{DistributedSolver} models the dominant collective operations. For Ring AllReduce~\citep{shoeybi2019megatron}:
 \begin{equation}
 \label{eq:allreduce}
 T_{\text{ring}} = \frac{2(N-1)}{N} \cdot \frac{M}{\beta} + 2(N-1) \cdot \alpha
@@ -348,7 +386,7 @@ where $V$ is the number of virtual pipeline stages and $M_{\text{micro}}$ is the
 T_{\text{a2a}} = \frac{(N-1)}{N} \cdot \frac{M}{\beta} + (N-1) \cdot \alpha
 \end{equation}
 
-\textbf{Wall~11: The Fragility Wall.} Component failures are inevitable at scale. If each node has a mean time between failures of $\text{MTBF}_{\text{node}}$, then a cluster of $N$ nodes has~\citep{daly2006higher}:
+\textbf{Wall~15: The Fragility Wall.} Component failures are inevitable at scale. If each node has a mean time between failures of $\text{MTBF}_{\text{node}}$, then a cluster of $N$ nodes has~\citep{daly2006higher}:
 \begin{equation}
 \label{eq:mtbf}
 \text{MTBF}_{\text{cluster}} = \frac{\text{MTBF}_{\text{node}}}{N}
@@ -365,21 +403,21 @@ The Young-Daly formula~\citep{young1974first,daly2006higher} gives the optimal c
 \end{equation}
 where $\delta$ is the time to write one checkpoint. The \texttt{ReliabilitySolver} uses these relations to estimate the fraction of compute lost to checkpointing and recovery.
 
-\textbf{Wall~12: The Multi-tenant Wall.} Shared clusters introduce queueing delays. The \texttt{OrchestrationSolver} models job wait times using an M/D/1 queue~\citep{little1961proof}:
+\textbf{Wall~16: The Multi-tenant Wall.} Shared clusters introduce queueing delays. The \texttt{OrchestrationSolver} models job wait times using an M/D/1 queue~\citep{little1961proof}:
 \begin{equation}
 \label{eq:queue}
 T_{\text{wait}} = \frac{\rho}{2\mu(1 - \rho)}
 \end{equation}
 where $\rho = \lambda / \mu$ is the cluster utilization, $\lambda$ is the job arrival rate, and $\mu$ is the service rate. As $\rho \to 1$, wait times diverge hyperbolically---a fact that surprises students accustomed to thinking of ``high utilization'' as desirable.
 
-\textbf{Wall~13: The Capital Wall.} The \texttt{EconomicsSolver} computes total cost of ownership:
+\textbf{Wall~17: The Capital Wall.} The \texttt{EconomicsSolver} computes total cost of ownership:
 \begin{equation}
 \label{eq:tco}
 \text{TCO} = \text{CapEx} + \text{OpEx}_{\text{energy}} + \text{OpEx}_{\text{maint}}
 \end{equation}
 where $\text{OpEx}_{\text{energy}} = E_{\text{total}} \times P_{\text{kWh}}$ converts total energy consumption to dollar cost at the regional electricity price.
 
-\textbf{Wall~14: The Sustainability Wall.} The \texttt{SustainabilitySolver} converts energy into environmental impact~\citep{patterson2022carbon}:
+\textbf{Wall~18: The Sustainability Wall.} The \texttt{SustainabilitySolver} converts energy into environmental impact~\citep{patterson2022carbon}:
 \begin{align}
 \label{eq:sustainability}
 E_{\text{total}} &= E_{\text{IT}} \times \text{PUE} \\
@@ -388,26 +426,33 @@ E_{\text{total}} &= E_{\text{IT}} \times \text{PUE} \\
 \end{align}
 where PUE is the power usage effectiveness of the datacenter, $\text{CI}_{\text{region}}$ is the carbon intensity of the local grid, and WUE is the water usage effectiveness.
 
-\textbf{Wall~15: The Ethics Wall.} Privacy and fairness guarantees impose measurable computational overhead. The \texttt{ResponsibleEngineeringSolver} models the cost of differential privacy via DP-SGD~\citep{abadi2016deep}, where the noise multiplier scales inversely with the privacy budget:
+\textbf{Wall~19: The Checkpoint Wall.} Long-running training jobs must periodically save model state (weights + optimizer states) to persistent storage. The \texttt{CheckpointSolver} models the I/O burst penalty:
+\begin{equation}
+\label{eq:checkpoint2}
+\text{MFU}_{\text{penalty}} = \frac{T_{\text{write}}}{T_{\text{interval}}} = \frac{|W| \times \beta_{\text{opt}} / BW_{\text{storage}}}{T_{\text{ckpt\_interval}}}
+\end{equation}
+where $\beta_{\text{opt}}$ is the optimizer state multiplier (16$\times$ for Adam: master weights + momentum + variance + gradients + FP16 copies). For a 70B-parameter model with Adam, the checkpoint size exceeds 1\,TB, making storage bandwidth the binding constraint during I/O bursts~\citep{eisenman2022checknrun}.
+
+\textbf{Wall~20: The Safety Wall.} Privacy and fairness guarantees impose measurable computational overhead---an engineering constraint, not a moral judgment. The \texttt{ResponsibleEngineeringSolver} models the cost of differential privacy via DP-SGD~\citep{abadi2016deep}, where the noise multiplier scales inversely with the privacy budget:
 \begin{equation}
 \label{eq:dpsgd}
 \sigma \propto \frac{1}{\epsilon}
 \end{equation}
 The per-step clipping and noise addition incur a training slowdown of approximately $2$--$10\times$. Fairness constraints require sufficient representation of minority subgroups, demanding additional data proportional to $O(1/p_{\min})$ where $p_{\min}$ is the smallest subgroup prevalence.
 
-\subsection{Meta-Solvers}
-\label{sec:walls-meta}
+\subsection{Domain 5: Analysis --- Cross-Cutting Diagnostics}
+\label{sec:walls-analysis}
 
-Two additional solvers operate \emph{across} the taxonomy rather than within a single wall.
+Two solvers operate \emph{across} the taxonomy rather than within a single domain, providing diagnostic and design tools that span all walls.
 
-\textbf{Wall~16: The Sensitivity Wall.} The \texttt{SensitivitySolver} identifies the binding constraint by computing partial derivatives of end-to-end latency with respect to each hardware parameter:
+\textbf{Wall~21: The Sensitivity Wall.} The \texttt{SensitivitySolver} identifies the binding constraint by computing partial derivatives of end-to-end latency with respect to each hardware parameter:
 \begin{equation}
 \label{eq:sensitivity}
 \frac{\partial T}{\partial BW_{\text{mem}}}, \quad \frac{\partial T}{\partial \text{Peak}_{\text{FLOPS}}}, \quad \frac{\partial T}{\partial BW_{\text{net}}}, \quad \ldots
 \end{equation}
 The parameter with the largest sensitivity is the binding constraint---the single upgrade that would yield the greatest performance improvement. This transforms ``where should I invest?'' from intuition into calculation.
 
-\textbf{Wall~17: The Synthesis Wall.} The \texttt{SynthesisSolver} performs the \emph{inverse} problem: given a service-level agreement (e.g., 50\,ms inter-token latency), derive the hardware specifications required to meet it:
+\textbf{Wall~22: The Synthesis Wall.} The \texttt{SynthesisSolver} performs the \emph{inverse} problem: given a service-level agreement (e.g., 50\,ms inter-token latency), derive the hardware specifications required to meet it:
 \begin{align}
 \label{eq:synthesis}
 BW_{\text{required}} &= \frac{|W|}{T_{\text{target}}} \\
@@ -415,81 +460,46 @@ BW_{\text{required}} &= \frac{|W|}{T_{\text{target}}} \\
 \end{align}
 This enables hardware-software co-design: rather than asking ``how fast is my system?'' the practitioner asks ``what system do I need?''~\citep{kwon2023efficient}.
 
-\subsection{New Walls: Serving, Batching, Streaming, Tail Latency, and Checkpointing}
-\label{sec:walls-new}
-
-Five additional walls extend the taxonomy to cover inference serving, memory management, alternative architectures, tail latency guarantees, and checkpoint overhead.
-
-\textbf{Wall~18: The Serving Wall.} Autoregressive LLM inference exhibits two distinct phases with different Roofline characteristics. The \emph{prefill} phase processes all input tokens in parallel and is compute-bound; the \emph{decode} phase generates one token at a time and is memory-bandwidth-bound. The \texttt{ServingSolver} models this two-phase behavior, enabling practitioners to reason about why batching strategies that improve prefill throughput may have no effect on decode latency.
-
-\textbf{Wall~19: The Batching Wall.} Static batching wastes memory through external fragmentation---each request reserves a contiguous KV-cache block sized for maximum sequence length. The \texttt{ContinuousBatchingSolver} models iteration-level scheduling with non-contiguous allocation via PagedAttention~\citep{kwon2023efficient}:
-\begin{equation}
-\label{eq:pagedkv}
-\text{KV}_{\text{paged}} = 2 \times L \times H \times D \times \lceil S / p \rceil \times p \times B \times b
-\end{equation}
-where $L$ is layers, $H$ is KV heads, $D$ is head dimension, $S$ is sequence length, $p$ is page size in tokens, $B$ is batch size, and $b$ is bytes per element. Internal fragmentation is bounded by the last page, eliminating the 40--50\% external fragmentation of contiguous allocation.
-
-\textbf{Wall~20: The Streaming Wall.} Wafer-scale architectures (e.g., Cerebras CS-3) invert the GPU memory wall: activations reside on-wafer in SRAM while model weights stream from external MemoryX nodes. The \texttt{WeightStreamingSolver} models this as:
-\begin{equation}
-\label{eq:weightstream}
-T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2|W_{\ell}| \times B}{\text{Peak} \times \eta}\right)
-\end{equation}
-The bottleneck shifts from HBM bandwidth to injection interconnect bandwidth. The optimal batch size---where injection perfectly overlaps compute---is $B^{*} = (BW_{\text{inject}} \times \text{Peak} \times \eta) / (2|W_{\ell}|)$.
-
-\textbf{Wall~21: The Tail Latency Wall.} Deploying inference at scale requires not just median performance but P99 tail latency guarantees. The \texttt{TailLatencySolver} models inference replicas as an M/M/$c$ queue using the Erlang-C formula~\citep{dean2013tail}:
-\begin{equation}
-\label{eq:erlangc}
-\mathbb{P}[\text{wait}] = \frac{(c\rho)^c / c! \cdot (1-\rho)^{-1}}{\sum_{k=0}^{c-1}(c\rho)^k/k! + (c\rho)^c/c! \cdot (1-\rho)^{-1}}
-\end{equation}
-where $c$ is the number of replicas, $\rho = \lambda / (c\mu)$ is per-server utilization, and $\lambda$, $\mu$ are arrival and service rates. P99 latency grows non-linearly as $\rho \to 1$, making the distinction between 80\% and 95\% utilization the difference between stable and catastrophic tail behavior.
-
-\textbf{Wall~22: The Checkpoint Wall.} Long-running training jobs must periodically save model state (weights + optimizer states) to persistent storage. The \texttt{CheckpointSolver} models the I/O burst penalty:
-\begin{equation}
-\label{eq:checkpoint}
-\text{MFU}_{\text{penalty}} = \frac{T_{\text{write}}}{T_{\text{interval}}} = \frac{|W| \times \beta_{\text{opt}} / BW_{\text{storage}}}{T_{\text{ckpt\_interval}}}
-\end{equation}
-where $\beta_{\text{opt}}$ is the optimizer state multiplier (16$\times$ for Adam: master weights + momentum + variance + gradients + FP16 copies). For a 70B-parameter model with Adam, the checkpoint size exceeds 1\,TB, making storage bandwidth the binding constraint during I/O bursts~\citep{eisenman2022checknrun}.
-
 \begin{table*}[t]
 \centering
-\caption{\textbf{The ML Systems Wall Taxonomy.} Each wall represents a physical or logical constraint resolved by a dedicated solver. Two walls (Compute and Memory) share the SingleNodeSolver, yielding 21 distinct solvers across the taxonomy. Domains progress from local node resources through data movement and algorithmic scaling to fleet-wide societal impact.}
+\caption{\textbf{The 22 ML Systems Walls.} Each wall represents a physical or logical constraint resolved by a dedicated solver. Walls 1--2 (Compute and Memory) share the \texttt{SingleNodeSolver}, yielding 21 distinct solvers across 22 walls. Domains progress from local node resources through data movement and algorithmic scaling to fleet-wide operations and cross-cutting analysis.}
 \label{tab:walls}
 \small
-\begin{tabularx}{\textwidth}{@{}r l l l X l@{}}
+\begin{tabularx}{\textwidth}{@{}r l l X l@{}}
 \toprule
-\textbf{\#} & \textbf{Wall} & \textbf{What's Bounded} & \textbf{Solver} & \textbf{Core Equation} & \textbf{Domain} \\
+\textbf{\#} & \textbf{Wall} & \textbf{What's Bounded} & \textbf{Core Equation} & \textbf{Key Ref.} \\
 \midrule
-\multicolumn{6}{@{}l}{\textit{Node --- Single-Accelerator Resources (The Metabolism)}} \\
-1  & Compute       & Peak FLOP/s ceiling    & SingleNodeSolver    & $T = \text{OPs} / (\text{Peak} \times \eta)$ & Node \\
-2  & Memory        & HBM BW + capacity      & SingleNodeSolver    & $T = |W| / BW_{\text{HBM}}$ & Node \\
-3  & Software      & Achieved MFU           & EfficiencySolver    & $\eta = f(\text{kernel, fusion, occupancy})$ & Node \\
-18 & Serving       & Prefill vs.\ decode    & ServingSolver       & Two-phase roofline & Node \\
-19 & Batching      & KV-cache fragmentation & ContinuousBatchingSolver & PagedAttention: $\text{size} = 2LHD \lceil S/p \rceil Bb$ & Node \\
-20 & Streaming     & Injection interconnect BW & WeightStreamingSolver & $T_{\text{layer}} = \max(T_{\text{inject}}, T_{\text{compute}})$ & Node \\
-21 & Tail Latency  & P99 queueing delay     & TailLatencySolver   & Erlang-C M/M/$c$ & Node \\
+\multicolumn{5}{@{}l}{\textit{Domain 1: Node --- Single-Accelerator Resources}} \\
+1  & Compute       & Peak FLOP/s ceiling    & $T = \text{OPs} / (\text{Peak} \times \eta)$ & \citealt{williams2009roofline} \\
+2  & Memory        & HBM BW + capacity      & $T = |W| / BW_{\text{HBM}}$ & \citealt{williams2009roofline} \\
+3  & Software      & Achieved MFU           & $\eta = f(\text{kernel, fusion, occupancy})$ & \citealt{chowdhery2022palm} \\
+4  & Serving       & Prefill vs.\ decode    & Two-phase roofline & \citealt{pope2023llm} \\
+5  & Batching      & KV-cache fragmentation & $\text{KV} = 2LHD \lceil S/p \rceil pBb$ & \citealt{kwon2023efficient} \\
+6  & Streaming     & Injection BW           & $T = \max(T_{\text{inject}}, T_{\text{compute}})$ & Cerebras (2024) \\
+7  & Tail Latency  & P99 queueing delay     & Erlang-C M/M/$c$ & \citealt{dean2013tail} \\
 \midrule
-\multicolumn{6}{@{}l}{\textit{Data --- Movement \& Pipelines (The Skeleton)}} \\
-4  & Ingestion     & Storage I/O throughput  & DataSolver          & $\rho = BW_{\text{demand}} / BW_{\text{supply}}$ & Data \\
-5  & Transformation & CPU preprocessing     & TransformationSolver & $T = B \cdot S / C_{\text{tput}}$ & Data \\
-6  & Locality      & Network bisection BW   & TopologySolver      & $BW_{\text{eff}} = BW_{\text{link}} \cdot \beta / \text{osub}$ & Data \\
+\multicolumn{5}{@{}l}{\textit{Domain 2: Data --- Movement \& Pipelines}} \\
+8  & Ingestion     & Storage I/O throughput  & $\rho = BW_{\text{demand}} / BW_{\text{supply}}$ & \citealt{mohan2022analyzing} \\
+9  & Transformation & CPU preprocessing     & $T = B \cdot S / C_{\text{tput}}$ & \citealt{murray2021tf} \\
+10 & Locality      & Network bisection BW   & $BW_{\text{eff}} = BW_{\text{link}} \cdot \beta / \text{osub}$ & \citealt{leiserson1985fat} \\
 \midrule
-\multicolumn{6}{@{}l}{\textit{Algorithm --- Scaling \& Compression (The Mind)}} \\
-7  & Complexity    & Scaling law bounds     & ScalingSolver       & $C = 6PD;\; P^{*} = \sqrt{C/120}$ & Algorithm \\
-8  & Reasoning     & Inference-time compute & InferenceScalingSolver & $T = K \times T_{\text{step}}$ & Algorithm \\
-9  & Fidelity      & Accuracy--efficiency   & CompressionSolver   & $r = 32/b;\; r = 1/(1{-}s)$ & Algorithm \\
+\multicolumn{5}{@{}l}{\textit{Domain 3: Algorithm --- Scaling \& Compression}} \\
+11 & Complexity    & Scaling law bounds     & $C = 6PD;\; P^{*} = \sqrt{C/120}$ & \citealt{hoffmann2022chinchilla} \\
+12 & Reasoning     & Inference-time compute & $T = K \times T_{\text{step}}$ & \citealt{brown2024inference} \\
+13 & Fidelity      & Accuracy--efficiency   & $r = 32/b;\; r = 1/(1{-}s)$ & \citealt{han2015deep} \\
 \midrule
-\multicolumn{6}{@{}l}{\textit{Fleet --- Multi-Node \& Society (The World)}} \\
-10 & Communication & AllReduce overhead     & DistributedSolver   & $T = 2\tfrac{N{-}1}{N}\tfrac{M}{\beta} + 2(N{-}1)\alpha$ & Fleet \\
-11 & Fragility     & Cluster MTBF           & ReliabilitySolver   & $\text{MTBF}_{\text{cl}} = \text{MTBF}_{\text{node}}/N$ & Fleet \\
-12 & Multi-tenant  & Queue wait time        & OrchestrationSolver & $T_{\text{wait}} = \rho / [2\mu(1{-}\rho)]$ & Fleet \\
-13 & Capital       & Total cost of ownership & EconomicsSolver    & $\text{TCO} = \text{CapEx} + \text{OpEx}$ & Fleet \\
-14 & Sustainability & Carbon + water        & SustainabilitySolver & $\text{CO}_2 = E \times \text{PUE} \times \text{CI}$ & Fleet \\
-15 & Ethics        & DP-SGD overhead        & ResponsibleEngSolver & $\sigma \propto 1/\epsilon$ & Fleet \\
-22 & Checkpoint    & I/O burst MFU penalty  & CheckpointSolver    & $\text{penalty} = T_{\text{write}} / T_{\text{interval}}$ & Fleet \\
+\multicolumn{5}{@{}l}{\textit{Domain 4: Fleet --- Multi-Node \& Operations}} \\
+14 & Communication & AllReduce overhead     & $T = 2\tfrac{N{-}1}{N}\tfrac{M}{\beta} + 2(N{-}1)\alpha$ & \citealt{shoeybi2019megatron} \\
+15 & Fragility     & Cluster MTBF           & $\text{MTBF}_{\text{cl}} = \text{MTBF}_{\text{node}}/N$ & \citealt{daly2006higher} \\
+16 & Multi-tenant  & Queue wait time        & $T_{\text{wait}} = \rho / [2\mu(1{-}\rho)]$ & \citealt{little1961proof} \\
+17 & Capital       & Total cost of ownership & $\text{TCO} = \text{CapEx} + \text{OpEx}$ & \citealt{barroso2018datacenter} \\
+18 & Sustainability & Carbon + water        & $\text{CO}_2 = E \times \text{PUE} \times \text{CI}$ & \citealt{patterson2022carbon} \\
+19 & Checkpoint    & I/O burst MFU penalty  & $\text{penalty} = T_{\text{write}} / T_{\text{interval}}$ & \citealt{eisenman2022checknrun} \\
+20 & Safety        & DP-SGD overhead        & $\sigma \propto 1/\epsilon$ & \citealt{abadi2016deep} \\
 \midrule
-\multicolumn{6}{@{}l}{\textit{Meta --- Cross-Cutting Diagnostics}} \\
-16 & Sensitivity   & Binding constraint     & SensitivitySolver   & $\partial T / \partial x_i$ & Meta \\
-17 & Synthesis     & Inverse spec derivation & SynthesisSolver    & $BW_{\text{req}} = |W| / T_{\text{target}}$ & Meta \\
+\multicolumn{5}{@{}l}{\textit{Domain 5: Analysis --- Cross-Cutting Diagnostics}} \\
+21 & Sensitivity   & Binding constraint     & $\partial T / \partial x_i$ & \citealt{williams2009roofline} \\
+22 & Synthesis     & Inverse spec derivation & $BW_{\text{req}} = |W| / T_{\text{target}}$ & \citealt{kwon2023efficient} \\
 \bottomrule
 \end{tabularx}
 \end{table*}
@@ -503,7 +513,7 @@ The walls define \emph{what} constrains a system. This section formalizes \emph{
 \subsection{Stateless, Pure-Function Design}
 \label{sec:solvers-stateless}
 
-Every solver in MLSYSIM is a pure function: it accepts a typed configuration, performs analytical computation, and returns a result dictionary. Solvers maintain no hidden state between invocations. This design yields three properties that matter for both software engineering and pedagogy. First, \emph{reproducibility}: identical inputs always produce identical outputs. Second, \emph{testability}: each solver can be validated in isolation against textbook equations. Third, \emph{transparency}: students can inspect exactly which equations produced a result without tracing through mutable state.
+Every solver in \mlsysim is a pure function: it accepts a typed configuration, performs analytical computation, and returns a result dictionary. Solvers maintain no hidden state between invocations. This design yields three properties that matter for both software engineering and pedagogy. First, \emph{reproducibility}: identical inputs always produce identical outputs. Second, \emph{testability}: each solver can be validated in isolation against textbook equations. Third, \emph{transparency}: students can inspect exactly which equations produced a result without tracing through mutable state.
 
 Formally, each solver $s_i$ implements:
 \begin{equation}
@@ -522,13 +532,13 @@ Because solvers are stateless and share a common type system, the output of one 
 \mathsf{Scaling} \xrightarrow{\;\mathcal{R}_1\;} \mathsf{Distributed} \xrightarrow{\;\mathcal{R}_2\;} \mathsf{Economics} \xrightarrow{\;\mathcal{R}_3\;} \mathsf{Sustainability}
 \end{equation}
 
-\Cref{lst:composability} demonstrates this exact chain in MLSYSIM. The \texttt{ScalingSolver} calculates the optimal model size for a given compute budget ($\mathcal{R}_1$). The \texttt{DistributedSolver} takes that workload and computes the real-world execution time on an 8,192-GPU fleet, factoring in 3D parallelism overhead ($\mathcal{R}_2$). Finally, the \texttt{EconomicsSolver} converts that execution time into a Total Cost of Ownership ($\mathcal{R}_3$).
+\Cref{lst:composability} demonstrates this exact chain in \mlsysim. The \texttt{ScalingSolver} calculates the optimal model size for a given compute budget ($\mathcal{R}_1$). The \texttt{DistributedSolver} takes that workload and computes the real-world execution time on an 8,192-GPU fleet, factoring in 3D parallelism overhead ($\mathcal{R}_2$). Finally, the \texttt{EconomicsSolver} converts that execution time into a Total Cost of Ownership ($\mathcal{R}_3$).
 
 \begin{lstlisting}[caption={Solver Composition: Bridging algorithmic scaling, distributed execution, and fleet economics in a single executable chain.},label={lst:composability},float=t]
 import mlsysim
 from mlsysim import ScalingSolver, DistributedSolver, EconomicsSolver
 
-# 1. The Mind: Find optimal parameters for a fixed compute budget
+# 1. Algorithm: Find optimal parameters for a fixed compute budget
 budget = mlsysim.Q_("100000 H100_days")
 optimal = ScalingSolver().solve(compute_budget=budget)
 
@@ -539,7 +549,7 @@ model = mlsysim.TransformerWorkload(
     layers=80, hidden_dim=8192, heads=64
 )
 
-# 2. The Skeleton & World: Evaluate on a massive 8K GPU cluster
+# 2. Fleet: Evaluate on a massive 8K GPU cluster
 fleet = mlsysim.Systems.Clusters.Frontier_8K
 perf = DistributedSolver().solve(
     model, fleet, 
@@ -559,7 +569,7 @@ Each link in the chain preserves dimensional correctness: units propagate throug
 \subsection{The SystemEvaluation Scorecard}
 \label{sec:solvers-scorecard}
 
-MLSYSIM provides a \texttt{Scenario.evaluate()} entry point that orchestrates solver composition automatically through a three-level evaluation:
+\mlsysim provides a \texttt{Scenario.evaluate()} entry point that orchestrates solver composition automatically through a three-level evaluation:
 
 \textbf{Level~1: Feasibility.} Does the model fit? Can the data pipeline keep pace? The framework checks memory capacity against model size, ingestion bandwidth against training throughput, and reports any wall where demand exceeds supply.
 
@@ -574,7 +584,7 @@ The complete evaluation produces a \texttt{SystemEvaluation} scorecard---a singl
 \section{Architecture}
 \label{sec:architecture}
 
-MLSYSIM implements the design principles of \Cref{sec:philosophy} through a five-layer \emph{Progressive Lowering} stack (\Cref{fig:stack}). Each layer adds physical context to an analysis without coupling to layers above or below.
+\mlsysim implements the design principles of \Cref{sec:philosophy} through a five-layer \emph{Progressive Lowering} stack (\Cref{fig:stack}). Each layer adds physical context to an analysis without coupling to layers above or below.
 
 \begin{figure}[t]
 \centering
@@ -588,7 +598,7 @@ MLSYSIM implements the design principles of \Cref{sec:philosophy} through a five
     \node (C) [layer, below=of B] {\textbf{Layer C: Infrastructure (Context)} \\ \textit{Datacenter --- Carbon Intensity, PUE, WUE, Grid}};
     \node (D) [layer, below=of C] {\textbf{Layer D: Systems (Topology)} \\ \textit{Fleet --- Node Count, Fabric (Tree/Torus), Oversubscription}};
     \node (E) [layer, below=of D, fill=orange!10] {\textbf{Layer E: Solvers (Analysis)} \\ \textit{21 Solvers --- Physics-grounded Analytical Bounds}};
-    \node (F) [layer, below=of E, fill=green!10] {\textbf{Results: System Scorecard} \\ \textit{Feasibility, Performance, TCO, Carbon, Ethics}};
+    \node (F) [layer, below=of E, fill=green!10] {\textbf{Results: System Scorecard} \\ \textit{Feasibility, Performance, TCO, Carbon, Safety}};
 
     \draw [connector] (A) -- (E);
     \draw [connector] (B) -- (D);
@@ -596,14 +606,14 @@ MLSYSIM implements the design principles of \Cref{sec:philosophy} through a five
     \draw [connector] (D) -- (E);
     \draw [connector] (E) -- (F);
 \end{tikzpicture}
-\caption{\textbf{The MLSYSIM 5-Layer Stack.} Computational demand (Layer~A) is progressively lowered through hardware supply, environmental context, and network topology before solvers produce a system scorecard.}
+\caption{\textbf{The \mlsysim 5-Layer Stack.} Computational demand (Layer~A) is progressively lowered through hardware supply, environmental context, and network topology before solvers produce a system scorecard.}
 \label{fig:stack}
 \end{figure}
 
 \subsection{The Progressive Lowering Stack}
 \label{sec:stack}
 
-\textbf{Layer A: Workloads (Demand).} A workload is a hardware-agnostic description of computational demand. MLSYSIM provides five concrete types: \texttt{TransformerWorkload} (parameters, layers, hidden dimension, head count), \texttt{CNNWorkload} (parameters, inference FLOPs), \texttt{SparseTransformerWorkload} for Mixture-of-Experts models (total vs.\ active parameters), \texttt{SSMWorkload} for state-space models such as Mamba (O(1) state cache independent of sequence length), and \texttt{DiffusionWorkload} for generative image models (FLOPs scale with denoising steps). Every workload exposes a \texttt{lower()} method that produces a \texttt{ComputationGraph}---an intermediate representation containing total operations, weight bytes, and arithmetic intensity in \texttt{flop/byte}. This IR is the contract between demand and supply: it captures \emph{what} must be computed without prescribing \emph{how}.
+\textbf{Layer A: Workloads (Demand).} A workload is a hardware-agnostic description of computational demand. \mlsysim provides five concrete types: \texttt{TransformerWorkload} (parameters, layers, hidden dimension, head count), \texttt{CNNWorkload} (parameters, inference FLOPs), \texttt{SparseTransformerWorkload} for Mixture-of-Experts models (total vs.\ active parameters), \texttt{SSMWorkload} for state-space models such as Mamba (O(1) state cache independent of sequence length), and \texttt{DiffusionWorkload} for generative image models (FLOPs scale with denoising steps). Every workload exposes a \texttt{lower()} method that produces a \texttt{ComputationGraph}---an intermediate representation containing total operations, weight bytes, and arithmetic intensity in \texttt{flop/byte}. This IR is the contract between demand and supply: it captures \emph{what} must be computed without prescribing \emph{how}.
 
 \textbf{Layer B: Hardware (Supply).} A \texttt{HardwareNode} composes four subsystems: \texttt{ComputeCore} (peak FLOP/s with a precision-keyed dictionary for FP16, TF32, FP8, INT8), \texttt{MemoryHierarchy} (capacity and bandwidth), optional \texttt{StorageHierarchy}, and optional \texttt{IOInterconnect}. Each node also carries TDP, unit cost, and a kernel dispatch tax. The \texttt{ridge\_point()} method computes the Roofline inflection $R = F_{\text{peak}} / BW_{\text{mem}}$ in \texttt{flop/byte}~\citep{williams2009roofline}, enabling immediate classification of any lowered workload as compute-bound or memory-bound.
 
@@ -616,7 +626,7 @@ MLSYSIM implements the design principles of \Cref{sec:philosophy} through a five
 \subsection{The Type System}
 \label{sec:types}
 
-MLSYSIM's type system is built on Pydantic \texttt{BaseModel} classes with \texttt{pint} \texttt{Quantity} fields, providing both schema validation and dimensional enforcement at construction time. The composition hierarchy is deliberately shallow: \texttt{HardwareNode} aggregates \texttt{ComputeCore} and \texttt{MemoryHierarchy} as direct fields, not through deep inheritance. This design makes the relationship between a hardware specification and its physical quantities immediately legible:
+\mlsysim's type system is built on Pydantic \texttt{BaseModel} classes with \texttt{pint} \texttt{Quantity} fields, providing both schema validation and dimensional enforcement at construction time. The composition hierarchy is deliberately shallow: \texttt{HardwareNode} aggregates \texttt{ComputeCore} and \texttt{MemoryHierarchy} as direct fields, not through deep inheritance. This design makes the relationship between a hardware specification and its physical quantities immediately legible:
 
 \begin{lstlisting}[caption={Composing a custom hardware node with dimensional types.},label={lst:hwnode}]
 from mlsysim.hardware.types import *
@@ -639,7 +649,7 @@ The \texttt{ComputationGraph} IR bridges the demand--supply gap. When a solver c
 \subsection{The Registry Pattern}
 \label{sec:registry}
 
-Reproducible systems analysis requires reproducible inputs. MLSYSIM organizes vetted hardware specifications, model architectures, and cluster topologies into hierarchical class-based registries. \texttt{Hardware.Cloud.H100} returns a fully constructed \texttt{HardwareNode} whose constants are sourced from datasheets with provenance metadata including source URLs and verification dates. The registry is organized taxonomically---\texttt{Hardware.Cloud}, \texttt{Hardware.Mobile}, \texttt{Hardware.Edge}, \texttt{Hardware.Tiny}---spanning six orders of magnitude from sub-milliwatt microcontrollers (\texttt{Hardware.Tiny.ESP32\_S3}, 512\,KiB SRAM) to datacenter accelerators (\texttt{Hardware.Cloud.B200}, 192\,GiB HBM3e) and wafer-scale engines (\texttt{Hardware.Cloud.CerebrasCS3}, 44\,GiB on-wafer SRAM, 125\,PFLOP/s). Similarly, \texttt{Models.Language.GPT3} returns a \texttt{TransformerWorkload} with 175B parameters, 96 layers, and hidden dimension 12288---all drawn from published specifications. Additionally, \texttt{import\_hf\_model()} enables direct import of any public HuggingFace model by fetching its \texttt{config.json} and analytically estimating parameter count---no \texttt{torch} or \texttt{transformers} dependency required.
+Reproducible systems analysis requires reproducible inputs. \mlsysim organizes vetted hardware specifications, model architectures, and cluster topologies into hierarchical class-based registries. \texttt{Hardware.Cloud.H100} returns a fully constructed \texttt{HardwareNode} whose constants are sourced from datasheets with provenance metadata including source URLs and verification dates. The registry is organized taxonomically---\texttt{Hardware.Cloud}, \texttt{Hardware.Mobile}, \texttt{Hardware.Edge}, \texttt{Hardware.Tiny}---spanning six orders of magnitude from sub-milliwatt microcontrollers (\texttt{Hardware.Tiny.ESP32\_S3}, 512\,KiB SRAM) to datacenter accelerators (\texttt{Hardware.Cloud.B200}, 192\,GiB HBM3e) and wafer-scale engines (\texttt{Hardware.Cloud.CerebrasCS3}, 44\,GiB on-wafer SRAM, 125\,PFLOP/s). Similarly, \texttt{Models.Language.GPT3} returns a \texttt{TransformerWorkload} with 175B parameters, 96 layers, and hidden dimension 12288---all drawn from published specifications. Additionally, \texttt{import\_hf\_model()} enables direct import of any public HuggingFace model by fetching its \texttt{config.json} and analytically estimating parameter count---no \texttt{torch} or \texttt{transformers} dependency required.
 
 The \texttt{list(sort\_by=)} class method enables programmatic comparison: \texttt{Hardware.Cloud.list(sort\_by="memory.bandwidth")} returns all cloud accelerators ranked by HBM bandwidth. Users extend the registry by instantiating new \texttt{HardwareNode} objects with their own specifications (\Cref{lst:hwnode}), ensuring that custom hardware participates in the same dimensionally strict analysis pipeline as vetted entries.
 
@@ -668,7 +678,7 @@ print(f"MFU: {profile.mfu:.2f}")            # 0.42
 \label{sec:usage}
 
 \subsection{Sensitivity: The Automated Architect}
-Using the \texttt{SensitivitySolver}, engineers can identify the ``Binding Constraint'' of their system. \Cref{lst:sensitivity} shows how MLSYSIM calculates the local derivative of performance with respect to hardware specifications.
+Using the \texttt{SensitivitySolver}, engineers can identify the ``Binding Constraint'' of their system. \Cref{lst:sensitivity} shows how \mlsysim calculates the local derivative of performance with respect to hardware specifications.
 
 \begin{lstlisting}[caption={Sensitivity analysis code example.},label={lst:sensitivity}]
 import mlsysim
@@ -679,92 +689,92 @@ print(f"Memory BW Sensitivity: {res['memory_bw_sensitivity']}")
 \end{lstlisting}
 
 \subsection{Synthesis: Inverse Solving for Silicon}
-For hardware-software co-design, the \texttt{SynthesisSolver} performs the inverse solve: given an SLA, what silicon should we build? For a frontier LLM requiring a 50ms ITL, MLSYSIM synthesizes the required HBM bandwidth and the ideal compute-memory balance ratio ($R_{peak}/BW$).
+For hardware-software co-design, the \texttt{SynthesisSolver} performs the inverse solve: given an SLA, what silicon should we build? For a frontier LLM requiring a 50ms ITL, \mlsysim synthesizes the required HBM bandwidth and the ideal compute-memory balance ratio ($R_{peak}/BW$).
 
 \section{Discussion \& Limitations}
 \label{sec:discussion}
 
-No model is faithful at all scales. MLSYSIM deliberately operates at the first-order analytical level, and users must understand what that choice sacrifices. We organize the limitations into modeling scope, accuracy trade-offs, and pedagogical implications, then outline future directions.
+No model is faithful at all scales. \mlsysim deliberately operates at the first-order analytical level, and users must understand what that choice sacrifices. We organize the limitations into modeling scope, accuracy trade-offs, and pedagogical implications, then outline future directions.
 
-\subsection{What MLSYSIM Cannot Model}
+\subsection{What \mlsysim Cannot Model}
 
-\textbf{No microarchitectural effects.} MLSYSIM has no notion of L1/L2 cache hierarchies, branch prediction, warp scheduling, or register pressure. These second-order effects are absorbed into a single scalar efficiency parameter ($\eta$, the ratio of sustained to peak FLOP/s). While $\eta$ provides a serviceable approximation for back-of-the-envelope reasoning, it cannot capture workload-dependent microarchitectural behavior---a matrix multiply and a sparse attention kernel may achieve very different $\eta$ on identical silicon.
+\textbf{No microarchitectural effects.} \mlsysim has no notion of L1/L2 cache hierarchies, branch prediction, warp scheduling, or register pressure. These second-order effects are absorbed into a single scalar efficiency parameter ($\eta$, the ratio of sustained to peak FLOP/s). While $\eta$ provides a serviceable approximation for back-of-the-envelope reasoning, it cannot capture workload-dependent microarchitectural behavior---a matrix multiply and a sparse attention kernel may achieve very different $\eta$ on identical silicon.
 
-\textbf{No real network congestion.} The communication model uses the classical $\alpha$-$\beta$ formulation (latency plus inverse-bandwidth), which assumes dedicated links. MLSYSIM does not model adaptive routing, network contention under multi-tenant traffic, or congestion collapse---phenomena that become critical at scales beyond $\sim$10{,}000 nodes, precisely the regime where ASTRA-sim~2.0~\citep{won2023astrasim2} provides essential fidelity.
+\textbf{No real network congestion.} The communication model uses the classical $\alpha$-$\beta$ formulation (latency plus inverse-bandwidth), which assumes dedicated links. \mlsysim does not model adaptive routing, network contention under multi-tenant traffic, or congestion collapse---phenomena that become critical at scales beyond $\sim$10{,}000 nodes, precisely the regime where ASTRA-sim~2.0~\citep{won2023astrasim2} provides essential fidelity.
 
 \textbf{No OS/runtime overhead.} Kernel launch latency, CUDA stream scheduling, Python GIL contention, and host--device transfer overhead are absent. For inference-dominated workloads where kernel launch time can rival compute time, this omission can meaningfully affect predictions.
 
-\textbf{No dynamic behavior.} MLSYSIM models steady-state throughput. Transient effects---thermal throttling, dynamic clock boosting, memory fragmentation over long training runs, and checkpoint I/O bursts---are outside its scope. A training run that degrades over 72 hours due to thermal saturation will appear identical to one that sustains peak throughput.
+\textbf{No dynamic behavior.} \mlsysim models steady-state throughput. Transient effects---thermal throttling, dynamic clock boosting, memory fragmentation over long training runs, and checkpoint I/O bursts---are outside its scope. A training run that degrades over 72 hours due to thermal saturation will appear identical to one that sustains peak throughput.
 
 \textbf{Heuristic accuracy models.} The \texttt{CompressionSolver}'s accuracy degradation curves are conservative polynomial estimates, not architecture-specific empirical fits. Real accuracy loss under quantization depends on model architecture, dataset characteristics, and calibration methodology. Users should treat these curves as directional indicators, not ground truth.
 
 \subsection{The Accuracy--Speed Trade-off}
 
-These limitations are not oversights; they are deliberate design choices. MLSYSIM sacrifices second-order accuracy for three orders of magnitude improvement in evaluation speed. This is precisely the trade-off that MIPS made relative to Verilog simulation~\citep{hennessy2019architecture}: MIPS cannot model pipeline hazards with cycle-level precision, but it made computer architecture accessible to millions of students who would never have run a Verilog synthesis.
+These limitations are not oversights; they are deliberate design choices. \mlsysim sacrifices second-order accuracy for three orders of magnitude improvement in evaluation speed. This is precisely the trade-off that MIPS made relative to Verilog simulation~\citep{hennessy2019architecture}: MIPS cannot model pipeline hazards with cycle-level precision, but it made computer architecture accessible to millions of students who would never have run a Verilog synthesis.
 
-The relevant question is not ``How accurate is MLSYSIM?'' but ``Does it identify the correct binding constraint?'' A first-order model that correctly determines whether a system is memory-bound, compute-bound, or network-bound provides actionable architectural insight even when its absolute latency prediction is $\pm$20\% from a cycle-accurate trace. The binding constraint dictates which hardware investment yields the largest return, and this ordinal ranking is far more robust than cardinal predictions. Practitioners who know that their system is memory-bandwidth-bound will invest in higher-bandwidth memory regardless of whether the predicted latency is 47\,ms or 53\,ms.
+The relevant question is not ``How accurate is \mlsysim?'' but ``Does it identify the correct binding constraint?'' A first-order model that correctly determines whether a system is memory-bound, compute-bound, or network-bound provides actionable architectural insight even when its absolute latency prediction is $\pm$20\% from a cycle-accurate trace. The binding constraint dictates which hardware investment yields the largest return, and this ordinal ranking is far more robust than cardinal predictions. Practitioners who know that their system is memory-bandwidth-bound will invest in higher-bandwidth memory regardless of whether the predicted latency is 47\,ms or 53\,ms.
 
 \subsection{Future Work}
 
-We identify six directions for extending MLSYSIM.
+We identify six directions for extending \mlsysim.
 
-\textbf{Empirical validation at scale.} We plan to validate MLSYSIM predictions against published training reports---Meta's Llama~3 training log, Google's PaLM training report, and the growing corpus of reproducibility studies---to quantify the gap between first-order predictions and measured throughput across hardware generations.
+\textbf{Empirical validation at scale.} We plan to validate \mlsysim predictions against published training reports---Meta's Llama~3 training log, Google's PaLM training report, and the growing corpus of reproducibility studies---to quantify the gap between first-order predictions and measured throughput across hardware generations.
 
 \textbf{Community hardware registry.} The Silicon Zoo currently contains a curated set of hardware entries verified against manufacturer datasheets. We plan to open contributions from the community, with automated verification scripts that cross-check submitted specifications against known physical limits (e.g., memory bandwidth cannot exceed pin count $\times$ data rate).
 
-\textbf{Integration with Marimo labs.} Interactive notebooks using the Marimo framework will allow students to manipulate hardware parameters with sliders and observe binding constraints shift in real time, transforming MLSYSIM from a scripting tool into a visual exploration environment.
+\textbf{Integration with Marimo labs.} Interactive notebooks using the Marimo framework will allow students to manipulate hardware parameters with sliders and observe binding constraints shift in real time, transforming \mlsysim from a scripting tool into a visual exploration environment.
 
 \textbf{Custom degradation curves.} Future versions will allow users to supply empirically fitted accuracy-compression curves from their own quantization experiments, replacing the current heuristic polynomials with data-grounded models.
 
-\textbf{TinyTorch integration.} MLSYSIM provides analytical predictions; TinyTorch~\citep{mlsysbook2025}, the companion educational framework, provides implementation-based verification. Connecting the two tools creates a predict-then-verify loop: students estimate training time and memory consumption in MLSYSIM, then run the actual training in TinyTorch and compare. This closed loop reinforces quantitative reasoning by grounding analytical models in empirical observation.
+\textbf{TinyTorch integration.} \mlsysim provides analytical predictions; TinyTorch~\citep{mlsysbook2025}, the companion educational framework, provides implementation-based verification. Connecting the two tools creates a predict-then-verify loop: students estimate training time and memory consumption in \mlsysim, then run the actual training in TinyTorch and compare. This closed loop reinforces quantitative reasoning by grounding analytical models in empirical observation.
 
 \textbf{Multi-objective optimization.} The current solver suite evaluates constraints independently. A Pareto frontier solver that simultaneously optimizes across latency, cost, carbon footprint, and accuracy would enable richer design-space exploration and expose the inherent tensions between performance and sustainability.
 
 \subsection{The Pedagogical Argument}
 
-Even if MLSYSIM's predictions deviate by 20\% from reality, the pedagogical value lies in the \emph{reasoning process}, not the numerical output. A student who sweeps 1{,}000 configurations and discovers that memory bandwidth is the binding constraint for LLM inference has learned the most durable lesson in ML systems engineering: \emph{know your bottleneck}. The framework teaches students to ask the right questions---``What is the arithmetic intensity?'', ``Where is the ridge point on the Roofline?'', ``What is the communication-to-computation ratio?''---and these questions transfer to real systems even when the specific numbers change with the next hardware generation.
+Even if \mlsysim's predictions deviate by 20\% from reality, the pedagogical value lies in the \emph{reasoning process}, not the numerical output. A student who sweeps 1{,}000 configurations and discovers that memory bandwidth is the binding constraint for LLM inference has learned the most durable lesson in ML systems engineering: \emph{know your bottleneck}. The framework teaches students to ask the right questions---``What is the arithmetic intensity?'', ``Where is the ridge point on the Roofline?'', ``What is the communication-to-computation ratio?''---and these questions transfer to real systems even when the specific numbers change with the next hardware generation.
 
-This is the same insight that motivated Patterson and Hennessy to build MIPS rather than license a production ISA~\citep{patterson2014organization}. The goal was never cycle-accurate simulation of commercial processors; it was to produce graduates who \emph{think architecturally}. MLSYSIM aspires to produce graduates who think in terms of systems constraints, binding resources, and quantitative trade-offs---skills that remain valuable regardless of which accelerator or framework dominates in any given year.
+This is the same insight that motivated Patterson and Hennessy to build MIPS rather than license a production ISA~\citep{patterson2014organization}. The goal was never cycle-accurate simulation of commercial processors; it was to produce graduates who \emph{think architecturally}. \mlsysim aspires to produce graduates who think in terms of systems constraints, binding resources, and quantitative trade-offs---skills that remain valuable regardless of which accelerator or framework dominates in any given year.
 
 \section{Validation}
 \label{sec:validation}
 
-An analytical framework earns trust through transparent confrontation with empirical ground truth. We validate MLSYSIM along two axes: \emph{accuracy} against published benchmarks, and \emph{speed} relative to alternative modeling tools.
+An analytical framework earns trust through transparent confrontation with empirical ground truth. We validate \mlsysim along two axes: \emph{accuracy} against published benchmarks, and \emph{speed} relative to alternative modeling tools.
 
 \subsection{Empirical Anchors}
 
-We anchor MLSYSIM predictions against two widely-reported benchmarks spanning training and inference workloads.
+We anchor \mlsysim predictions against two widely-reported benchmarks spanning training and inference workloads.
 
 \paragraph{MLPerf ResNet-50 on A100.}
-For ResNet-50 training on a single NVIDIA A100 at batch size 2048, MLSYSIM predicts a throughput of approximately 37,000 samples/s using the \texttt{SingleNodeSolver} with a model-fitting utilization (MFU) of 0.49. The MLPerf Inference v4.0 NVIDIA submission reports throughput in the same range for the Offline scenario~\citep{mlperf2020}. The prediction error is below 5\%, validating the Roofline-based throughput model~\citep{williams2009roofline} at the core of MLSYSIM's single-node solver.
+For ResNet-50 training on a single NVIDIA A100 at batch size 2048, \mlsysim predicts a throughput of approximately 37,000 samples/s using the \texttt{SingleNodeSolver} with a model-fitting utilization (MFU) of 0.49. The MLPerf Inference v4.0 NVIDIA submission reports throughput in the same range for the Offline scenario~\citep{mlperf2020}. The prediction error is below 5\%, validating the Roofline-based throughput model~\citep{williams2009roofline} at the core of \mlsysim's single-node solver.
 
 \paragraph{vLLM Llama-2-70B on H100.}
-For autoregressive decoding of Llama-2-70B on a single H100 (FP16, batch size 1), MLSYSIM predicts an inter-token latency (ITL) of approximately 42\,ms. The calculation is transparent: 140\,GB of model weights divided by 3.35\,TB/s HBM bandwidth yields 41.8\,ms per token~\citep{nvidia2023h100}. Published vLLM benchmarks for this configuration report ITL values in the 40--50\,ms range~\citep{kwon2023efficient}. The error is again below 5\%, confirming that decode-phase LLM inference is memory-bandwidth-bound and well-approximated by the bandwidth--capacity ratio.
+For autoregressive decoding of Llama-2-70B on a single H100 (FP16, batch size 1), \mlsysim predicts an inter-token latency (ITL) of approximately 42\,ms. The calculation is transparent: 140\,GB of model weights divided by 3.35\,TB/s HBM bandwidth yields 41.8\,ms per token~\citep{nvidia2023h100}. Published vLLM benchmarks for this configuration report ITL values in the 40--50\,ms range~\citep{kwon2023efficient}. The error is again below 5\%, confirming that decode-phase LLM inference is memory-bandwidth-bound and well-approximated by the bandwidth--capacity ratio.
 
-These two anchors---one compute-bound (ResNet-50 training) and one memory-bound (LLM decoding)---validate MLSYSIM across both regimes of the Roofline model. Every hardware entry in the Silicon Zoo includes \texttt{metadata.source\_url} and \texttt{metadata.last\_verified} fields, ensuring traceability to the vendor datasheets from which constants are sourced.
+These two anchors---one compute-bound (ResNet-50 training) and one memory-bound (LLM decoding)---validate \mlsysim across both regimes of the Roofline model. Every hardware entry in the Silicon Zoo includes \texttt{metadata.source\_url} and \texttt{metadata.last\_verified} fields, ensuring traceability to the vendor datasheets from which constants are sourced.
 
 \subsection{Design-Space Exploration Speed}
 
-MLSYSIM's analytical engine sweeps over 1,000 hardware--model--precision configurations in under one second on a standard laptop. By contrast, ASTRA-sim~2.0 requires hours to simulate a single distributed training configuration at cycle-level fidelity~\citep{won2023astrasim2}. This three-order-of-magnitude speedup is not incidental---it is the design objective. Sub-second execution transforms MLSYSIM from a verification tool into an \emph{exploration} tool, enabling interactive ``What-if'' analyses: \emph{What happens if we double HBM bandwidth? Switch from fat-tree to torus? Move the datacenter from Iowa to Singapore?}
+\mlsysim's analytical engine sweeps over 1,000 hardware--model--precision configurations in under one second on a standard laptop. By contrast, ASTRA-sim~2.0 requires hours to simulate a single distributed training configuration at cycle-level fidelity~\citep{won2023astrasim2}. This three-order-of-magnitude speedup is not incidental---it is the design objective. Sub-second execution transforms \mlsysim from a verification tool into an \emph{exploration} tool, enabling interactive ``What-if'' analyses: \emph{What happens if we double HBM bandwidth? Switch from fat-tree to torus? Move the datacenter from Iowa to Singapore?}
 
 \subsection{Accuracy Scope and Limitations}
 
-MLSYSIM provides first-order estimates, not cycle-accurate predictions. It does not model microarchitectural effects such as cache miss rates, warp scheduling, or branch misprediction. It does not simulate real network congestion under bursty traffic or OS scheduling overhead. These omissions are deliberate. The MFU parameter in each solver absorbs second-order effects into a single empirically-calibrated efficiency coefficient, following the same philosophy as the Roofline model's use of achievable bandwidth rather than peak bandwidth~\citep{williams2009roofline}.
+\mlsysim provides first-order estimates, not cycle-accurate predictions. It does not model microarchitectural effects such as cache miss rates, warp scheduling, or branch misprediction. It does not simulate real network congestion under bursty traffic or OS scheduling overhead. These omissions are deliberate. The MFU parameter in each solver absorbs second-order effects into a single empirically-calibrated efficiency coefficient, following the same philosophy as the Roofline model's use of achievable bandwidth rather than peak bandwidth~\citep{williams2009roofline}.
 
-For MLSYSIM's intended use cases---architectural reasoning, lab exercises, capacity planning, and design-space exploration---first-order accuracy is sufficient and often preferable. A student who understands \emph{why} a system is memory-bound has learned more than one who can predict its throughput to three decimal places. To safeguard against model drift, the test suite includes empirical anchor tests that fail automatically if predictions deviate beyond $\pm$10\% of published values.
+For \mlsysim's intended use cases---architectural reasoning, lab exercises, capacity planning, and design-space exploration---first-order accuracy is sufficient and often preferable. A student who understands \emph{why} a system is memory-bound has learned more than one who can predict its throughput to three decimal places. To safeguard against model drift, the test suite includes empirical anchor tests that fail automatically if predictions deviate beyond $\pm$10\% of published values.
 
 \subsection{Dimensional Correctness as Validation}
 
-Beyond numerical accuracy, MLSYSIM enforces a structural form of validation through dimensional analysis. Every physical quantity carries units at runtime via the \texttt{pint} library: FLOP/s cannot be added to GB/s, latency in milliseconds cannot be compared to bandwidth in TB/s without explicit conversion. This eliminates an entire category of silent modeling errors---confusing gigabytes with gigabits, omitting the refractive index of fiber in latency calculations, mixing per-device and per-node figures---that plague ad-hoc spreadsheet models and cannot be caught by numerical validation alone.
+Beyond numerical accuracy, \mlsysim enforces a structural form of validation through dimensional analysis. Every physical quantity carries units at runtime via the \texttt{pint} library: FLOP/s cannot be added to GB/s, latency in milliseconds cannot be compared to bandwidth in TB/s without explicit conversion. This eliminates an entire category of silent modeling errors---confusing gigabytes with gigabits, omitting the refractive index of fiber in latency calculations, mixing per-device and per-node figures---that plague ad-hoc spreadsheet models and cannot be caught by numerical validation alone.
 
 \section{Lab Integration}
 \label{sec:labs}
 
-MLSYSIM is designed not merely as a modeling tool but as a \emph{teaching instrument}. Its analytical engine, deterministic execution, and zero-hardware requirement make it uniquely suited for structured lab exercises that build systems intuition through quantitative exploration.
+\mlsysim is designed not merely as a modeling tool but as a \emph{teaching instrument}. Its analytical engine, deterministic execution, and zero-hardware requirement make it uniquely suited for structured lab exercises that build systems intuition through quantitative exploration.
 
 \subsection{The Scenario $\times$ Persona Matrix}
 
-To structure lab assignments, MLSYSIM introduces two orthogonal abstractions: \emph{Scenarios} and \emph{Personas}.
+To structure lab assignments, \mlsysim introduces two orthogonal abstractions: \emph{Scenarios} and \emph{Personas}.
 
 A \textbf{Scenario} is a narrative bundle that binds a Workload, a System, and a Service-Level Agreement (SLA) into a concrete engineering problem. \Cref{tab:scenarios} lists the five reference scenarios spanning the full deployment spectrum from milliwatt edge devices to gigawatt-scale clusters.
 
@@ -790,7 +800,7 @@ A \textbf{Persona} provides scaling context and narrative framing. The \emph{Clo
 
 \subsection{Six Reference Labs}
 
-We have designed six reference labs that collectively exercise the full solver suite across both volumes of the textbook~\citep{mlsysbook2025}. Each lab poses a concrete engineering question, requires students to configure MLSYSIM programmatically, and yields a quantitative answer that can be autograded. \Cref{tab:labs} summarizes the mapping.
+We have designed six reference labs that collectively exercise the full solver suite across both volumes of the textbook~\citep{mlsysbook2025}. Each lab poses a concrete engineering question, requires students to configure \mlsysim programmatically, and yields a quantitative answer that can be autograded. \Cref{tab:labs} summarizes the mapping.
 
 \begin{table}[t]
 \centering
@@ -831,24 +841,24 @@ Combining the \texttt{OrchestrationSolver} and \texttt{EconomicsSolver}, student
 
 \subsection{Autogradability and Accessibility}
 
-All six labs are fully deterministic: MLSYSIM's analytical solvers involve no stochastic components, so answers are reproducible to floating-point precision across platforms. This determinism enables autograding without tolerance windows or statistical tests. Labs are distributed as Jupyter notebooks compatible with Marimo, require no GPU or cloud resources, and execute in under one second on any laptop.
+All six labs are fully deterministic: \mlsysim's analytical solvers involve no stochastic components, so answers are reproducible to floating-point precision across platforms. This determinism enables autograding without tolerance windows or statistical tests. Labs are distributed as Jupyter notebooks compatible with Marimo, require no GPU or cloud resources, and execute in under one second on any laptop.
 
 The zero-hardware requirement is pedagogically significant. It ensures that every student, regardless of institutional compute budget, can engage with the same systems reasoning exercises as those at resource-rich universities---directly addressing the accessibility gap identified in \Cref{sec:intro}. A student at a community college with no GPU cluster can explore how fat-tree versus torus topologies affect AllReduce latency with the same fidelity as a student at a national laboratory.
 
 \subsection{Textbook Integration}
 
-MLSYSIM serves as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025}. The solver suite is partitioned to mirror the textbook's two-volume structure. Volume~I labs---The Iron Law, The CPU Wall, and The Compression Tax---exercise the \texttt{SingleNodeSolver}, \texttt{DataSolver}, \texttt{TransformationSolver}, and \texttt{CompressionSolver}, covering the single-machine systems that form the foundation of ML engineering. Volume~II labs---The Chinchilla Budget, The 3D Puzzle, and The Wait Wall---exercise the \texttt{ScalingSolver}, \texttt{DistributedSolver}, \texttt{OrchestrationSolver}, and \texttt{EconomicsSolver}, extending reasoning to the distributed, multi-tenant, and economically-constrained systems that characterize production scale. Each lab maps to a specific textbook chapter, and the Scenario~$\times$~Persona matrix provides sufficient combinatorial variety to generate fresh assignments across semesters without repeating configurations.
+\mlsysim serves as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025}. The solver suite is partitioned to mirror the textbook's two-volume structure. Volume~I labs---The Iron Law, The CPU Wall, and The Compression Tax---exercise the \texttt{SingleNodeSolver}, \texttt{DataSolver}, \texttt{TransformationSolver}, and \texttt{CompressionSolver}, covering the single-machine systems that form the foundation of ML engineering. Volume~II labs---The Chinchilla Budget, The 3D Puzzle, and The Wait Wall---exercise the \texttt{ScalingSolver}, \texttt{DistributedSolver}, \texttt{OrchestrationSolver}, and \texttt{EconomicsSolver}, extending reasoning to the distributed, multi-tenant, and economically-constrained systems that characterize production scale. Each lab maps to a specific textbook chapter, and the Scenario~$\times$~Persona matrix provides sufficient combinatorial variety to generate fresh assignments across semesters without repeating configurations.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-Machine learning has become infrastructure, yet the tools for reasoning about that infrastructure remain either too slow for interactive exploration or too narrow for full-stack analysis. MLSYSIM addresses this gap with a first-principles analytical framework that formalizes the physics of ML systems into a dimensionally strict, composable engine. Its 5-layer progressive lowering architecture cleanly separates computational demand from silicon supply, while 21 solvers codify every fundamental bottleneck---from Roofline compute bounds and inference serving to tail latency, checkpointing, and carbon accounting---into a unified analytical suite.
+Machine learning has become infrastructure, yet the tools for reasoning about that infrastructure remain either too slow for interactive exploration or too narrow for full-stack analysis. \mlsysim addresses this gap with a first-principles analytical framework that formalizes the physics of ML systems into a dimensionally strict, composable engine. Its 5-layer progressive lowering architecture cleanly separates computational demand from silicon supply, while 21 solvers codify every fundamental bottleneck---from Roofline compute bounds and inference serving to tail latency, checkpointing, and carbon accounting---into a unified analytical suite.
 
-The core insight is simple: \emph{a first-order equation that is used is more valuable than a cycle-accurate trace that is too slow to run}. By enabling sub-second evaluation of complete system configurations, MLSYSIM makes quantitative systems reasoning accessible to any student with a laptop---no cluster required.
+The core insight is simple: \emph{a first-order equation that is used is more valuable than a cycle-accurate trace that is too slow to run}. By enabling sub-second evaluation of complete system configurations, \mlsysim makes quantitative systems reasoning accessible to any student with a laptop---no cluster required.
 
-MLSYSIM is part of a broader curriculum vision. Together with TinyTorch, which teaches how ML frameworks work internally through progressive implementation, MLSYSIM teaches how to reason about ML systems at scale through analytical modeling. The two tools provide complementary coverage: TinyTorch builds intuition from the bottom up (tensors, autograd, optimizers), while MLSYSIM builds intuition from the top down (scaling laws, binding constraints, fleet economics). Both are available as part of the open-source \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025} at \url{https://mlsysbook.ai}.
+\mlsysim is part of a broader curriculum vision. Together with TinyTorch, which teaches how ML frameworks work internally through progressive implementation, \mlsysim teaches how to reason about ML systems at scale through analytical modeling. The two tools provide complementary coverage: TinyTorch builds intuition from the bottom up (tensors, autograd, optimizers), while \mlsysim builds intuition from the top down (scaling laws, binding constraints, fleet economics). Both are available as part of the open-source \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025} at \url{https://mlsysbook.ai}.
 
-As ML systems grow more complex---trillion-parameter models, million-device fleets, multi-modal pipelines---the need for rapid analytical reasoning tools will only intensify. MLSYSIM provides the foundation for that reasoning: not a replacement for empirical measurement, but a complement that makes the right experiment obvious before the first GPU is powered on.
+As ML systems grow more complex---trillion-parameter models, million-device fleets, multi-modal pipelines---the need for rapid analytical reasoning tools will only intensify. \mlsysim provides the foundation for that reasoning: not a replacement for empirical measurement, but a complement that makes the right experiment obvious before the first GPU is powered on.
 
 \appendix
 \section{Solver Implementation Details}
