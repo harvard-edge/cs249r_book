@@ -1,7 +1,7 @@
 name: '🚀 Publish All (Live)'
 
 # Orchestrator workflow that deploys ALL subsites sequentially
-# Book → Kits → TinyTorch → Labs
+# Book → Kits → TinyTorch → MLSYSIM → Labs
 
 on:
   workflow_dispatch:
@@ -28,6 +28,10 @@ on:
         default: true
       deploy_tinytorch:
         description: 'Deploy TinyTorch?'
+        type: boolean
+        default: true
+      deploy_mlsysim:
+        description: 'Deploy MLSYSIM?'
         type: boolean
         default: true
       deploy_labs:
@@ -137,12 +141,48 @@ jobs:
           commit_message: '🔥 Deploy TinyTorch - ${{ github.sha }}'
 
   # ==========================================================================
-  # Step 4: Deploy Labs (after tinytorch)
+  # Step 4: Deploy MLSYSIM (after tinytorch)
+  # ==========================================================================
+  deploy-mlsysim:
+    name: '🧮 Deploy MLSYSIM'
+    needs: [deploy-tinytorch]
+    if: ${{ always() && inputs.deploy_mlsysim && (needs.deploy-tinytorch.result == 'success' || needs.deploy-tinytorch.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install Python dependencies
+        run: |
+          pip install -e .
+          pip install quartodoc
+
+      - name: Build MLSYSIM
+        working-directory: ${{ vars.MLSYSIM_DOCS }}
+        run: |
+          quarto render
+          touch _build/.nojekyll
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./${{ vars.MLSYSIM_DOCS }}/_build
+          destination_dir: ${{ vars.DEV_MLSYSIM_PATH }}
+          publish_branch: gh-pages
+          keep_files: true
+          commit_message: '🧮 Deploy MLSYSIM - ${{ github.sha }}'
+
+  # ==========================================================================
+  # Step 5: Deploy Labs (after mlsysim)
   # ==========================================================================
   deploy-labs:
     name: '🔬 Deploy Labs'
-    needs: [deploy-tinytorch]
-    if: ${{ always() && inputs.deploy_labs && (needs.deploy-tinytorch.result == 'success' || needs.deploy-tinytorch.result == 'skipped') }}
+    needs: [deploy-mlsysim]
+    if: ${{ always() && inputs.deploy_labs && (needs.deploy-mlsysim.result == 'success' || needs.deploy-mlsysim.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -171,7 +211,7 @@ jobs:
   # ==========================================================================
   summary:
     name: '📋 Deployment Summary'
-    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-labs]
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -187,10 +227,12 @@ jobs:
           echo "| 📚 Book | ${{ needs.deploy-book.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 📦 Kits | ${{ needs.deploy-kits.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔥 TinyTorch | ${{ needs.deploy-tinytorch.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🧮 MLSYSIM | ${{ needs.deploy-mlsysim.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🔬 Labs | ${{ needs.deploy-labs.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🌐 Live URLs" >> $GITHUB_STEP_SUMMARY
           echo "- 📚 [Book](https://mlsysbook.ai/book/)" >> $GITHUB_STEP_SUMMARY
           echo "- 📦 [Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔥 [TinyTorch](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
+          echo "- 🧮 [MLSYSIM](https://mlsysbook.ai/mlsysim/)" >> $GITHUB_STEP_SUMMARY
           echo "- 🔬 [Labs](https://mlsysbook.ai/labs/)" >> $GITHUB_STEP_SUMMARY
