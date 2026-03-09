@@ -107,7 +107,7 @@ class FECLatency:
 
 Consider the running example that threads through this volume: a 175-billion-parameter language model partitioned across 1,000 GPUs. Each training step requires an AllReduce of 350 GB of gradient data, meaning every GPU must send and receive its share before the next step can begin. If even one link in the fabric is slow, all 999 other GPUs wait. The network is not auxiliary infrastructure; it is the synchronization backbone that determines whether this cluster trains efficiently or wastes millions of dollars in idle compute.
 
-In the **Fleet Stack** (@sec-vol2-introduction), network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation.
+In the **Fleet Stack** (@sec-vol2-introduction), network fabrics form the connective tissue binding the Infrastructure Layer into a coherent whole. @sec-compute-infrastructure established the building blocks: accelerators, power delivery, and cooling. Those components define what each node can compute in isolation. @fig-network-five-level-model organizes the fabric design space into five co-dependent levels, from physical signaling to cluster-scale orchestration.
 
 ::: {#fig-network-five-level-model fig-env="figure" fig-pos="htb" fig-cap="**The Five-Level Model of ML Networking**. Network design for the ML fleet spans from physical signaling to cluster-scale orchestration. (1) Wire: signaling and link budget. (2) Transport: RDMA and lossless protocols. (3) Topology: fat-trees and rail-optimization. (4) Behavior: congestion control and routing. (5) Cluster: virtualization and isolation. Each level must be co-designed to minimize the synchronization tax." fig-alt="Stacked diagram with five levels: Wire, Transport, Topology, Behavior, Cluster. Arrows show inter-level dependencies."}
 ![](images/svg/five-level-model.svg){width=100%}
@@ -416,6 +416,8 @@ In an ML fleet, distance is money. A 10,000-GPU cluster requires ~20,000 optical
 
 :::
 
+As bandwidth demands grew, the industry moved from binary NRZ signaling to four-level PAM4, doubling throughput per wire at the cost of reduced noise margins (@fig-pam4-vs-nrz).
+
 ::: {#fig-pam4-vs-nrz fig-env="figure" fig-pos="htb" fig-cap="**Signaling Evolution: NRZ vs. PAM4**. To increase bandwidth without doubling clock frequency, modern interconnects transitioned from NRZ (2 voltage levels, 1 bit per symbol) to PAM4 (4 voltage levels, 2 bits per symbol). The trade-off is reduced noise margin: the 'eye' of the signal is smaller, necessitating Forward Error Correction (FEC) and increasing the irreducible $\alpha$ latency of the fabric." fig-alt="Signal waveform comparison. NRZ shows two levels (0, 1). PAM4 shows four levels (00, 01, 10, 11). Shaded regions indicate the reduced noise margin in PAM4."}
 ![](images/svg/pam4-vs-nrz.svg){width=100%}
 :::
@@ -450,7 +452,7 @@ Large-scale training requires sustained, synchronized bulk transfers. A single A
 
 Standard TCP/IP is architecturally unfit for the `{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps era. The protocol stack was designed when network speeds were orders of magnitude slower than CPU memory bandwidth, but today that relationship has inverted. Processing a `{python} NetworkFabricsContextScenario.ib_ndr_gbps` Gbps stream through the Linux kernel imposes a crushing interrupt tax: copying payload data between user space and kernel buffers can consume the entire memory bandwidth of a dual-socket server, requiring tens of CPU cores merely to keep the pipe full. The result is a CPU wall where the host processor becomes the bottleneck for network traffic, starving the application logic it is meant to serve.
 
-RDMA bypasses this entire layer. By offloading the transport logic to the NIC hardware, it allows applications to read and write directly to remote memory. For ML, **GPUDirect RDMA**[^fn-gpudirect-rdma] extends this zero-copy principle to the accelerators themselves. Without GPUDirect, a gradient update follows a tortuous path: GPU memory $\rightarrow$ CPU system RAM $\rightarrow$ kernel buffer $\rightarrow$ NIC. GPUDirect short-circuits this to a single PCIe transaction: GPU $\rightarrow$ NIC. For our 175B model's 350 GB gradient exchange, the optimization eliminates 700 GB of redundant memory copies across the cluster per step, reducing latency and freeing the CPU to orchestrate complex pipelining logic rather than acting as a data mover.
+RDMA bypasses this entire layer. By offloading the transport logic to the NIC hardware, it allows applications to read and write directly to remote memory. For ML, **GPUDirect RDMA**[^fn-gpudirect-rdma] extends this zero-copy principle to the accelerators themselves. Without GPUDirect, a gradient update follows a tortuous path: GPU memory $\rightarrow$ CPU system RAM $\rightarrow$ kernel buffer $\rightarrow$ NIC. GPUDirect short-circuits this to a single PCIe transaction: GPU $\rightarrow$ NIC, as @fig-gpudirect-data-path contrasts. For our 175B model's 350 GB gradient exchange, the optimization eliminates 700 GB of redundant memory copies across the cluster per step, reducing latency and freeing the CPU to orchestrate complex pipelining logic rather than acting as a data mover.
 
 [^fn-gpudirect-rdma]: **GPUDirect RDMA**: Introduced by NVIDIA in 2013 with the Kepler architecture, GPUDirect RDMA enables the NIC to read and write GPU memory directly over PCIe without staging through host RAM. Before GPUDirect, every gradient transfer incurred two extra memory copies (GPU-to-host, host-to-NIC), adding 10--20 $\mu$s per message and consuming CPU memory bandwidth that competes with data loading. Eliminating this bounce path is what makes overlapping communication with backward-pass computation feasible at scale. \index{GPUDirect RDMA!zero-copy}
 
@@ -852,7 +854,7 @@ To mitigate congestion at this edge, network architects maximize the switch **ra
 
 :::
 
-The fat-tree[^fn-fat-tree-clos] is the industry standard for ML clusters because it strictly guarantees full bisection bandwidth, a non-negotiable requirement for the AllReduce collective, which demands simultaneous, all-to-all communication. The network is constructed in hierarchical tiers: **Leaf** switches (ToR) connect directly to servers, **Spine** switches interconnect all leaves within a locality domain known as a **pod**, and **Core** switches bind multiple pods together.
+The fat-tree[^fn-fat-tree-clos] is the industry standard for ML clusters because it strictly guarantees full bisection bandwidth, a non-negotiable requirement for the AllReduce collective, which demands simultaneous, all-to-all communication. @fig-fat-tree-detail shows the resulting three-tier structure. The network is constructed in hierarchical tiers: **Leaf** switches (ToR) connect directly to servers, **Spine** switches interconnect all leaves within a locality domain known as a **pod**, and **Core** switches bind multiple pods together.
 
 [^fn-fat-tree-clos]: **Fat-Tree (Clos Network)**: The underlying multi-stage switching theory was invented by Charles Clos at Bell Labs in 1953 to minimize the number of electromechanical crosspoints in telephone exchanges. Charles Leiserson at MIT generalized the concept in 1985 as the "fat-tree," where the tree is "fat" because link bandwidth increases toward the root, proving it could emulate any network of equal hardware volume. The same cost-minimization logic that drove 1950s telephony now drives ML cluster design: minimize switch count while guaranteeing non-blocking connectivity for global AllReduce. \index{Fat-Tree!Clos origin}
 
@@ -1065,84 +1067,6 @@ The trade-offs between these topologies become stark when quantified for a large
 
 ::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network Topologies for ML**. (A) Fat-Tree provides full bisection bandwidth through hierarchical switch layers. (B) Torus connects neighbors, optimizing for local communication patterns such as those in TPU pods. (C) Rail-Optimized designs dedicate switch infrastructure to corresponding accelerator positions across nodes, minimizing hop count for tensor parallelism." fig-alt="Three-panel diagram: Fat-Tree with hierarchical switches, Torus with neighbor connections, Rail-Optimized with dedicated switch rails."}
 ![](images/svg/rail-optimized.svg){width=100%}
-:::
-  % Fat Tree
-  \begin{scope}[local bounding box=fattree]
-    \node[anchor=south, text=RedLine] (titleA) at (2, 3.5) {\textbf{A. Leaf-Spine (Fat-Tree)}};
-
-    % Spine
-    \node[switch] (sA) at (0.5, 3) {};
-    \node[switch, right=0.55cm of sA] (sB) {};
-    \node[switch, right=0.55cm of sB] (sC) {};
-    \node[switch, right=0.55cm of sC] (sD) {};
-
-    % Leaf
-    \node[switch] (l0) at (0, 1.5) {};
-    \node[switch, right=0.55cm of l0] (l1) {};
-    \node[switch, right=1.55cm of l1] (l3) {};
-    \node[switch, right=0.55cm of l3] (l4) {};
-
-    % Nodes
-    \node[nodebox] (nA) at (-0.25, 0) {};
-    \node[nodebox, right=0.1cm of nA] (nB) {};
-    \node[nodebox, right=0.1cm of nB] (nC) {};
-    \node[nodebox, right=0.1cm of nC] (nD) {};
-
-    \node[nodebox] (nmA) at (2.75, 0) {};
-    \node[nodebox, right=0.1cm of nmA] (nmB) {};
-    \node[nodebox, right=0.1cm of nmB] (nmC) {};
-    \node[nodebox, right=0.1cm of nmC] (nmD) {};
-
-    % Connections
-    \foreach \s in {sA, sB, sC, sD} {
-        \draw[black!40, line width=1.0pt] (\s) -- (l0);
-        \draw[black!40, line width=1.0pt] (\s) -- (l1);
-        \draw[black!40, line width=1.0pt] (\s) -- (l3);
-        \draw[black!40, line width=1.0pt] (\s) -- (l4);
-    }
-    \draw[black!60, line width=1.0pt] (l0) -- (nA); \draw[black!60, line width=1.0pt] (l0) -- (nB);
-    \draw[black!60, line width=1.0pt] (l1) -- (nC); \draw[black!60, line width=1.0pt] (l1) -- (nD);
-    \draw[black!60, line width=1.0pt] (l3) -- (nmA); \draw[black!60, line width=1.0pt] (l3) -- (nmB);
-    \draw[black!60, line width=1.0pt] (l4) -- (nmC); \draw[black!60, line width=1.0pt] (l4) -- (nmD);
-  \end{scope}
-
-  % Rail Optimized
-  \begin{scope}[shift={(6,0)}, local bounding box=rail]
-    \node[anchor=south, text=RedLine] (titleC) at (1.5, 3.5) {\textbf{C. Rail-Optimized}};
-
-    % Rail Switches
-    \node[switch, fill=RailColor] (rs0) at (0, 3) {R0};
-    \node[switch, fill=RailColor, right=0.55cm of rs0] (rs1) {R1};
-    \node[switch, fill=RailColor, right=0.55cm of rs1] (rs2) {R2};
-    \node[switch, fill=RailColor, right=0.55cm of rs2] (rs3) {R3};
-
-    % Nodes
-    \node[hostbox, minimum width=3.8cm, minimum height=1.0cm] (host1) at (1.5, 0) {};
-    \node[anchor=west, font=\tiny\bfseries] at (host1.west) {Node 1};
-
-    \node[hostbox, minimum width=3.8cm, minimum height=1.0cm, below=0.5cm of host1] (host2) {};
-    \node[anchor=west, font=\tiny\bfseries] at (host2.west) {Node 2};
-
-    % GPUs
-    \node[nodebox, fill=GPUColor] (g10) at (0, 0) {};
-    \node[nodebox, fill=GPUColor, right=0.6cm of g10] (g11) {};
-    \node[nodebox, fill=GPUColor, right=0.6cm of g11] (g12) {};
-    \node[nodebox, fill=GPUColor, right=0.6cm of g12] (g13) {};
-
-    \node[nodebox, fill=GPUColor] (g20) at (0, -1.5) {};
-    \node[nodebox, fill=GPUColor, right=0.6cm of g20] (g21) {};
-    \node[nodebox, fill=GPUColor, right=0.6cm of g21] (g22) {};
-    \node[nodebox, fill=GPUColor, right=0.6cm of g22] (g23) {};
-
-    % Draw cables
-    \foreach \x in {0, 1, 2, 3} {
-        \draw[line width=1.2pt, RailColor] (g1\x) -- (rs\x);
-        \draw[line width=1.2pt, RailColor] (g2\x) -- (rs\x);
-    }
-  \end{scope}
-\end{tikzpicture}
-```
-
 :::
 
 ::: {.callout-checkpoint title="Topology Selection"}

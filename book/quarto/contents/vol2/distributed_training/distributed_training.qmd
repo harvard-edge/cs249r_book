@@ -271,7 +271,7 @@ Although modern frameworks abstract away much of the complexity through sharded 
 The distributed training process itself involves splitting the dataset into non-overlapping subsets, assigning each subset to a different GPU, and performing forward and backward passes independently on each device. Once gradients are computed on each GPU, they are synchronized and aggregated before updating the model parameters, ensuring that all devices learn in a consistent manner. The coordinated flow of data splitting, computation, and gradient synchronization (@fig-distributed-training) forms the foundation of distributed training, with each GPU processing its batch independently before synchronization brings all gradients together.
 
 ::: {#fig-distributed-training fig-env="figure" fig-pos="htb" fig-cap="**Data Parallel Training Flow**. Distributed training partitions datasets across GPUs, computes gradients concurrently on each device's data subset, then aggregates gradients through AllReduce to update shared model parameters. Each GPU maintains an identical model copy and processes its portion of the batch independently, with synchronization occurring only during gradient aggregation. This approach achieves near-linear speedup when communication overhead remains below 30--40% of training time." fig-alt="Two parallel GPU workflows showing data parallel training. Each GPU processes a data chunk through forward pass, error computation, loss function, backward pass, then gradients merge at Calculate Global Gradients for parameter updates."}
-![](images/svg/_data-parallel-pipeline.svg){width=100%}
+![](images/svg/data-parallel-pipeline.svg){width=100%}
 :::
 \begin{scope}[node distance=-1.7,local bounding box = SC1]]
 \node[mycylinder,fill=red!30] (A) {};
@@ -685,7 +685,7 @@ Stale Synchronous Parallel (SSP) relaxes this constraint by allowing workers to 
 
 Asynchronous SGD eliminates synchronization barriers entirely as workers update parameters independently. This maximizes hardware utilization but introduces gradient staleness that can degrade convergence. When a worker computes gradients on parameters that are already $\tau$ steps stale, the effective learning rate decreases. Compensation techniques include learning rate scaling with $\eta' = \eta / \sqrt{\tau}$ or momentum correction.
 
-The key trade-offs across synchronization models are summarized here.
+The key trade-offs across synchronization models are summarized here, and @fig-sync-model-timeline illustrates how each strategy schedules work across workers over time.
 
 ::: {.callout-notebook title="Synchronization Model Trade-offs"}
 
@@ -1341,7 +1341,7 @@ The scaling law regime exhibits three distinct behaviors:
 @fig-critical-batch-size illustrates this relationship between batch size and training efficiency.
 
 ::: {#fig-critical-batch-size fig-env="figure" fig-pos="htb" fig-cap="**Critical Batch Size and Scaling Regimes**. Below the critical batch size $B*$, larger batches reduce noise and improve sample efficiency (linear scaling regime). Above $B*$, larger batches provide diminishing returns: while throughput increases, total samples required also increases, reducing sample efficiency. The optimal operating point balances hardware utilization against convergence efficiency." fig-alt="Graph showing sample efficiency versus batch size. Efficiency is flat in the linear regime below B-star, then decreases in the diminishing returns regime above B-star. Vertical dashed line marks critical batch size."}
-![](images/svg/_critical-batch-size.svg){width=100%}
+![](images/svg/critical-batch-size.svg){width=100%}
 :::
 
 The critical batch size has important implications for distributed training system design:
@@ -1494,7 +1494,7 @@ Despite higher parallelism, 64-GPU training costs more per run due to communicat
 The fundamental trade-off in distributed training is between communication efficiency and convergence quality. @fig-comm-convergence-tradeoff visualizes this trade-off space.
 
 ::: {#fig-comm-convergence-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Communication-Convergence Trade-off Space**. Each point represents a different distributed training configuration. The Pareto frontier (dashed line) shows optimal configurations where improving one metric requires sacrificing the other. BSP sits at high convergence quality but lower throughput; ASP provides maximum throughput at convergence cost. Gradient compression and SSP occupy intermediate positions." fig-alt="Scatter plot with Communication Efficiency on x-axis and Convergence Quality on y-axis. Points for BSP, SSP, ASP, and gradient compression methods form a Pareto frontier from upper-left to lower-right."}
-![](images/svg/_comm-convergence-tradeoff.svg){width=100%}
+![](images/svg/comm-convergence-tradeoff.svg){width=100%}
 :::
 
 Several techniques occupy different positions on this trade-off curve:
@@ -1511,10 +1511,10 @@ The choice among these methods depends on the specific bottleneck. When network 
 
 When a model is so massive that even a single layer's weights exceed the memory capacity of a GPU, data parallelism entirely collapses. The memory optimization techniques examined in the previous section extend data parallelism's reach, but eventually, we must partition the model itself.
 
-Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. A `{python} FrontierTrainingContext.frontier_params_b_str`B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations.
+Even with ZeRO-3 fully deployed, sharding optimizer states, gradients, and parameters across workers, some architectures remain intractable. As @fig-model-parallel-flow shows, model parallelism addresses this by partitioning the model itself across devices using two complementary strategies. A `{python} FrontierTrainingContext.frontier_params_b_str`B parameter model using FSDP across 64 GPUs still requires 700 GB / 64 = 11 GB of parameters per GPU before accounting for activations.
 
 ::: {#fig-model-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism Data Flow**. High-level comparison of the two primary model partitioning strategies. (Top) Pipeline Parallelism partitions layers vertically across GPUs, passing activations sequentially. (Bottom) Tensor Parallelism partitions individual operations horizontally within layers, requiring frequent synchronization. These strategies are often combined in hybrid 3D parallelism to handle the largest frontier models." fig-alt="Two-panel comparison. Top: Vertical partitions labeled Stage 1 through N. Bottom: Horizontal partitioning of an operation into two GPU workers."}
-![](images/svg/_model-parallel-flow.svg){width=100%}
+![](images/svg/model-parallel-flow.svg){width=100%}
 :::
 
 For long-context transformers where activation memory dominates, a 2048-token sequence through `{python} FrontierTrainingContext.frontier_params_b_str`B parameters generates 200+ GB of intermediate activations, and no amount of optimizer sharding addresses this constraint. Model parallelism addresses these limitations by splitting the model architecture itself across devices, rather than replicating it with sharded state.
@@ -1702,7 +1702,7 @@ Pipeline parallelism extends layer-wise partitioning by introducing microbatchin
 As @fig-pipline-parallelism shows, each device, as represented by the rows in the drawing, processes its assigned model layers for different microbatches simultaneously. The forward pass involves devices passing activations to the next stage, such as $F_{0,0}$ to $F_{1,0}$. The backward pass transfers gradients back through the pipeline, such as $B_{3,3}$ to $B_{2,3}$. This overlapping computation reduces idle time and increases throughput while maintaining the logical sequence of operations across devices.
 
 ::: {#fig-pipline-parallelism fig-cap="**Pipeline Parallelism Schedule**. A 4-stage pipeline processing 4 microbatches, showing forward passes ($F_{i,j}$) and backward passes ($B_{i,j}$) across time. Rows represent pipeline stages (GPUs), columns represent time steps. The staggered execution keeps all devices active: while stage 0 computes $F_{0,1}$, stage 1 processes $F_{1,0}$ from the previous microbatch. After all forward passes complete, backward passes propagate in reverse order. The \"Update\" column shows synchronized parameter updates after gradient accumulation across all microbatches." fig-alt="Pipeline schedule grid showing 4 stages processing 4 microbatches. Forward passes F stagger diagonally across time, backward passes B follow in reverse order, ending with synchronized Update column."}
-![](images/svg/_pipeline-parallelism.svg){width=100%}
+![](images/svg/pipeline-parallelism.svg){width=100%}
 :::
 
 ::: {.callout-definition title="Pipeline Parallelism"}
@@ -1921,7 +1921,7 @@ The **Sparse Pull / Sparse Push** pattern avoids the bandwidth bottleneck of den
 
 While tensor parallelism splits dense layers across devices, **Expert Parallelism** enables scaling model capacity (parameters) without increasing compute cost (FLOPs) by using conditional computation. In a Mixture-of-Experts (MoE) architecture [@shazeer2017outrageously], the feed-forward network (FFN) of each transformer block is replaced by a set of $N$ "experts" (independent FFNs). For each token, a gating network selects a small subset (typically top-1 or top-2) of experts to process it.
 
-In a distributed setting, experts are partitioned across workers. If we have 8 GPUs and 8 experts, each GPU hosts one expert. The training process introduces a distinct communication pattern:
+In a distributed setting, experts are partitioned across workers. If we have 8 GPUs and 8 experts, each GPU hosts one expert. The training process introduces a distinct communication pattern, as @fig-moe-all-to-all-routing illustrates:
 
 1.  **Gating**: Each token determines its destination expert.
 2.  **All-to-All Dispatch**: Tokens are routed across the network to the device hosting their selected expert.
@@ -2372,7 +2372,7 @@ To systematically weigh the architectural and hardware trade-offs for a new 50-b
 @fig-parallelism-flowchart provides a decision tree for selecting parallelism strategies based on model size, dataset size, and scaling constraints. While intentionally simplified, real-world scenarios often involve additional complexities such as hardware heterogeneity, communication bandwidth, and workload imbalance that may influence the choice of parallelism techniques. Practitioners should view this as a foundational tool for understanding trade-offs and decision points, then adapt it to the specific requirements and constraints of their systems.
 
 ::: {#fig-parallelism-flowchart fig-env="figure" fig-pos="htb" fig-cap="**Parallelism Strategy Decision Tree**. A systematic selection guide based on two key questions: Does the model fit in single-device memory? Does the dataset fit on a single device? Models exceeding device memory require model parallelism; large datasets benefit from data parallelism; significant constraints in both dimensions demand hybrid approaches. While simplified, this framework captures the primary decision points before practitioners must consider secondary factors like hardware heterogeneity and workload imbalance." fig-alt="Decision tree flowchart starting from Start. Diamond nodes ask about model and dataset fit on single device. Paths lead to four outcomes: Single Device Optimization, Data Parallelism, Model Parallelism, or Hybrid Parallelism."}
-![](images/svg/_parallelism-flowchart.svg){width=100%}
+![](images/svg/parallelism-flowchart.svg){width=100%}
 :::
 
 ## From Principles to Systems {#sec-distributed-training-systems-systems-framework-integration-cf71}

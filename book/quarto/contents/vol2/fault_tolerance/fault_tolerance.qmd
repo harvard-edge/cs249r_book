@@ -120,10 +120,10 @@ class FaultToleranceSetup:
 
 ## Failure Analysis at Scale {#sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b}
 
-Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. Statistically, a GPU will fail every few hours. If the system is not designed to absorb these continuous physical failures, the training process will halt entirely, wasting millions of dollars in compute time. In the **Fleet Stack** (@sec-vol2-introduction), Fault Tolerance acts as this necessary **Immune System** of the Infrastructure Layer.
+Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. Statistically, a GPU will fail every few hours. If the system is not designed to absorb these continuous physical failures, the training process will halt entirely, wasting millions of dollars in compute time. In the **Fleet Stack** (@sec-vol2-introduction), Fault Tolerance acts as this necessary **Immune System** of the Infrastructure Layer. The challenges span the full failure spectrum, from hard crashes to silent data corruption, as @fig-fault-tolerance-failure-spectrum illustrates.
 
 ::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML Failure Spectrum**. Reliability challenges at scale range from hard hardware failures (crashes) to silent data corruption (SDC) and performance degradation (gray failures). Fault tolerance engineering must provide mechanisms to detect and recover from each type of failure to maintain fleet-scale throughput." fig-alt="Continuum diagram showing Failure Frequency vs Detection Difficulty. Categories: Hard Failure, Gray Failure, Silent Data Corruption."}
-![](images/svg/_failure-spectrum.svg){width=100%}
+![](images/svg/failure-spectrum.svg){width=100%}
 :::
 
 The distributed training systems examined in @sec-distributed-training-systems achieve massive throughput by coordinating thousands of devices, and the collective communication patterns from @sec-collective-communication — AllReduce, AllGather, AllToAll — sustain that coordination through rigidly synchronized exchanges. However, this tight synchronization creates fragility: a failure in any single device can stall the entire fleet. This chapter builds the resilience layer necessary to keep that fleet running.
@@ -238,13 +238,13 @@ As @fig-young-daly illustrates, the **Young-Daly formula**[^fn-young-daly-histor
 [^fn-young-daly-history]: **Young-Daly Formula**: J. W. Young derived the first-order optimal checkpoint interval in a 1974 *Communications of the ACM* paper; John Daly independently refined it in 2006 with tighter second-order bounds. The formula's square-root relationship ($\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$) means that halving MTBF only increases optimal checkpoint frequency by $\sqrt{2}\approx 1.4\times$, explaining why doubling cluster size does not demand doubling checkpoint I/O bandwidth. \index{Young-Daly Formula!history}
 
 ::: {#fig-young-daly fig-env="figure" fig-pos="htb" fig-cap="**The Young-Daly Optimal Checkpoint**. Total wasted work is the sum of *checkpointing overhead* (which decreases with interval $\tau$) and *rework cost* (which increases with $\tau$). The minimum point defines the optimal interval $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$. For a cluster with 5-hour MTBF and 15-minute write time, the optimal interval is ~1.2 hours." fig-alt="Plot of Overhead vs Checkpoint Interval. A red curve for Rework Cost increases linearly. A blue curve for Checkpoint Overhead decreases hyperbolically. Their sum (green curve) shows a clear minimum point labeled Optimal Interval."}
-![](images/svg/_young-daly-optimization.svg){width=100%}
+![](images/svg/young-daly-optimization.svg){width=100%}
 :::
 
-The formula $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$ reveals a critical scaling property: as clusters grow larger ($\text{MTBF} \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-storage) to keep $T_{\text{write}}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity.
+The formula $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}}$ reveals a critical scaling property: as clusters grow larger ($\text{MTBF} \downarrow$), we must checkpoint more frequently. This, in turn, demands higher-bandwidth storage systems (@sec-data-storage) to keep $T_{\text{write}}$ small, otherwise the "Checkpoint Tax" will consume most of the cluster's compute capacity, as @fig-checkpoint-tax quantifies.
 
 ::: {#fig-checkpoint-tax fig-env="figure" fig-pos="htb" fig-cap="**The Checkpoint Tax**. As cluster size increases, the optimal checkpoint interval shrinks, increasing the fraction of time spent on I/O. For a fixed storage bandwidth, the 'tax' on compute capacity grows with N. Minimizing this tax requires tiered storage staging (NVMe to PFS) to keep $T_{\text{write}}$ independent of cluster scale." fig-alt="Plot showing Checkpoint Overhead percentage vs GPU count. Three curves for different storage bandwidths (1 GB/s, 10 GB/s, 100 GB/s) show how overhead grows with N but is suppressed by bandwidth."}
-![](images/svg/_checkpoint-tax.svg){width=100%}
+![](images/svg/checkpoint-tax.svg){width=100%}
 :::
 
 ```{python}
@@ -529,7 +529,7 @@ At the nanometer scale of modern transistors, hardware is not deterministic; it 
 Facebook documented a pervasive SDC issue where a hardware fault caused a valid file to be reported as "size zero" during decompression [@dixit2021silent]. As @fig-sdc-example illustrates, the system "worked" (no crash), but data was silently deleted. In ML, this manifests as valid-looking but mathematically garbage gradients.
 
 ::: {#fig-sdc-example fig-env="figure" fig-pos="htb" fig-cap="**Silent Data Corruption Propagation**. Unexpected faults can return incorrect file sizes, leading to data loss during decompression and propagating errors through distributed querying systems. This example from Facebook emphasizes how silent errors bypass standard exception handlers. Source: Facebook (2021)." fig-alt="System diagram showing data flow from compressed storage through defective CPU to database. Arrows indicate processing stages where file size calculation returns zero, causing missing rows in output."}
-![](images/svg/_sdc-propagation.svg){width=100%}
+![](images/svg/sdc-propagation.svg){width=100%}
 :::
 
 Real-world evidence of SDC in production systems confirms these risks. @fig-sdc-jeffdean shows corrupted data blocks accumulating in a shuffle and merge database at Google, where even a small fraction of corrupted blocks can cascade into significant data quality degradation.
@@ -551,7 +551,7 @@ Google reported that SDC in TPU pods often manifests as sudden, inexplicable spi
 Google addresses this by maintaining "Hot Spares": running the same computation on two distinct chips or having a standby ready to take over. If a "Sanity Checker" (monitoring loss/gradients) detects an anomaly, the workload is instantly migrated to the hot spare, and the suspect chip is drained for diagnostics (@fig-sdc-controller). This moves reliability from the *component* (which we cannot trust) to the *system* (which verifies the result).
 
 ::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot Spare Redundancy**. Google's data centers use hot spare cores to maintain uninterrupted ML training despite hardware failures, seamlessly transitioning workloads from defective machines to backup resources. This approach contrasts with parallel redundancy techniques like DMR/TMR by providing a reactive fault tolerance mechanism that minimizes downtime and preserves data integrity during ML training. Source: Jeff Dean, MLSys 2024 Keynote." fig-alt="Four-panel sequence: normal training grid, defective machine marked red, SDC checker detecting fault, workload transferred to hot spare while defective unit sent for repair."}
-![](images/svg/_sdc-controller.svg){width=100%}
+![](images/svg/sdc-controller.svg){width=100%}
 :::
 
 ::: {.callout-checkpoint title="Detecting Silent Corruption"}
@@ -726,17 +726,17 @@ A single bit-flip in a weight matrix illustrates the severity. If a critical wei
 
 The reliability problem is worsening. As the ML fleet scales to sub-5nm process nodes (@sec-compute-infrastructure), the Failures In Time (FIT) rate for Silent Data Corruption (SDC) rises: smaller nodes have lower critical charges, making bit-flips from cosmic rays and thermal noise more frequent, while chips with billions of transistors have higher statistical probabilities of manufacturing defects that manifest only under specific ML workloads [@ma2024challenges]. ML system architects must treat hardware as an **unreliable substrate**, where algorithmic fault tolerance (gradient checksums, weight replication, periodic consistency checks in the MLOps pipeline (@sec-ops-scale)) is a mandatory requirement rather than an HPC specialty.
 
-Hardware faults fall into three categories based on temporal characteristics.
+Hardware faults fall into three categories based on temporal characteristics, as @fig-fault-temporal-categories summarizes.
 
 ::: {#fig-fault-temporal-categories fig-env="figure" fig-pos="htb" fig-cap="**Temporal Taxonomy of Hardware Faults**. (A) Transient: temporary disruptions (e.g., bit flips) that do not cause permanent damage. (B) Intermittent: sporadic errors due to unstable conditions or aging. (C) Permanent: irreversible physical damage (e.g., stuck-at-0/1 faults) requiring replacement." fig-alt="Four-panel diagram showing Transient, Intermittent, and Permanent fault patterns over time, with a dedicated bit-flip illustration."}
 ::: {layout-ncol=2}
-![**Transient Fault (Bit Flip)**](images/svg/_bit-flip.svg)
+![**Transient Fault (Bit Flip)**](images/svg/bit-flip.svg)
 
-![**Permanent Fault (Stuck-at)**](images/svg/_stuck-fault.svg)
+![**Permanent Fault (Stuck-at)**](images/svg/stuck-fault.svg)
 
-![**Transient Timing**](images/svg/_transient-fault.svg)
+![**Transient Timing**](images/svg/transient-fault.svg)
 
-![**Intermittent Timing**](images/svg/_intermittent-fault.svg)
+![**Intermittent Timing**](images/svg/intermittent-fault.svg)
 :::
 :::
 
@@ -1076,7 +1076,7 @@ font=\usefont{T1}{phv}{m}{n}\small,bluegraph](PBE){Parity bit examples};
 
 [^fn-crc-gradient-validation]: **CRC (Cyclic Redundancy Check)**: Polynomial checksum algorithm developed by W. Wesley Peterson in 1961, detecting over 99.9% of transmission errors with negligible computational overhead. In distributed ML training, CRC-32 validates gradient payloads exchanged during AllReduce across thousands of nodes; without this check, a single corrupted gradient packet would silently poison the parameter update for every worker in the collective. \index{CRC!gradient validation}
 
-Hardware redundancy uses component duplication and voting to detect and mask faults [@sheaffer2007hardware]. Double modular redundancy (DMR)[^fn-dmr-detection] duplicates computation and compares outputs at 100% silicon overhead; triple modular redundancy (TMR)[^fn-tmr-correction] performs computation three times and takes a majority vote at 200% overhead, enabling automatic single-fault correction [@arifeen2020approximate]. Tesla's Full Self-Driving computer uses DMR across two independent SoCs (@fig-tesla-dmr), while the Boeing 777 uses TMR in its primary flight computer for safety-critical aviation control [@yeh1996triple; @bannon2019computer].
+Hardware redundancy uses component duplication and voting to detect and mask faults [@sheaffer2007hardware]. Double modular redundancy (DMR)[^fn-dmr-detection] duplicates computation and compares outputs at 100% silicon overhead; triple modular redundancy (TMR)[^fn-tmr-correction] performs computation three times and takes a majority vote at 200% overhead, enabling automatic single-fault correction [@arifeen2020approximate]. @fig-error-masking shows how a TMR voter circuit masks a single faulty unit by selecting the majority output. Tesla's Full Self-Driving computer uses DMR across two independent SoCs (@fig-tesla-dmr), while the Boeing 777 uses TMR in its primary flight computer for safety-critical aviation control [@yeh1996triple; @bannon2019computer].
 
 [^fn-dmr-detection]: **DMR (Double Modular Redundancy)**: Duplicates computation and compares outputs to detect (but not correct) errors, at 100% silicon overhead versus TMR's 200%. DMR detects 99.99% of transient faults in critical paths. Tesla's Full Self-Driving computer uses DMR across two independent SoCs, reflecting the design trade-off: DMR halves the hardware cost of TMR while requiring a safe fallback policy when outputs disagree. \index{DMR!detection trade-off}
 
@@ -1857,16 +1857,16 @@ $$
 
 :::
 
-@fig-checkpoint-tax illustrates the fundamental trade-off: checkpointing too frequently wastes time saving state, while checkpointing too rarely wastes computation when failures occur. The Young-Daly formula identifies the optimal balance point.
+@fig-checkpoint-tradeoff illustrates the fundamental trade-off: checkpointing too frequently wastes time saving state, while checkpointing too rarely wastes computation when failures occur. The Young-Daly formula identifies the optimal balance point.
 
-::: {#fig-checkpoint-tax fig-env="figure" fig-pos="htb" fig-cap="**The Checkpoint Tax**. Checkpoint save overhead decreases with longer intervals, but wasted computation from failures increases. The Young-Daly optimal interval minimizes total overhead. For a 175B model with ~2.5-minute checkpoint writes on a cluster with 2-hour MTBF, the optimal interval is approximately 24 minutes." fig-alt="Three curves: checkpoint overhead decreasing with interval, rework cost increasing, and total wasted work with minimum at optimal interval around 24 minutes."}
+::: {#fig-checkpoint-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**The Checkpoint Trade-Off**. Checkpoint save overhead decreases with longer intervals, but wasted computation from failures increases. The Young-Daly optimal interval minimizes total overhead. For a 175B model with ~2.5-minute checkpoint writes on a cluster with 2-hour MTBF, the optimal interval is approximately 24 minutes." fig-alt="Three curves: checkpoint overhead decreasing with interval, rework cost increasing, and total wasted work with minimum at optimal interval around 24 minutes."}
 
 ```{python}
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ CHECKPOINT TAX (FIGURE)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-checkpoint-tax — Young-Daly applied to 175B model
+# │ Context: @fig-checkpoint-tradeoff — Young-Daly applied to 175B model
 # │
 # │ Goal: Plot checkpoint overhead, rework cost, total waste vs interval τ;
 # │       show τ_opt ≈ 24 min for 2.5-min write, 2-hr \text{MTBF}.
@@ -2209,7 +2209,7 @@ Centralized checkpointing works acceptably for small-scale distributed training 
 
 #### Distributed Checkpointing {#sec-fault-tolerance-reliability-reliability-distributed-checkpointing-5dcc}
 
-In distributed checkpointing, each worker writes its portion of the checkpoint to a shared filesystem or object storage. A coordinator signals when to checkpoint and confirms completion, but state flows directly from workers to storage without aggregation.
+In distributed checkpointing, each worker writes its portion of the checkpoint to a shared filesystem or object storage, as @fig-distributed-checkpoint-architecture contrasts with the centralized approach. A coordinator signals when to checkpoint and confirms completion, but state flows directly from workers to storage without aggregation.
 
 ::: {#fig-distributed-checkpoint-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Checkpoint Architecture**. Comparison of centralized vs. distributed patterns. (Top) Centralized aggregation creates bottlenecks at the coordinator. (Bottom) Distributed sharding enables every worker to write directly to the Parallel File System (PFS) in parallel, aggregating bandwidth across the storage fabric and minimizing the training pause." fig-alt="Two-panel comparison. Top: Many workers sending data to a single coordinator, which writes to storage. Bottom: Many workers each writing directly to a shared storage cloud in parallel."}
 ![](images/svg/distributed-checkpoint-architecture.svg){width=100%}
@@ -2968,7 +2968,7 @@ ML systems face additional debugging challenges. Silent accuracy degradation pro
 
 ### Observability Pillars {#sec-fault-tolerance-reliability-reliability-observability-pillars-0e45}
 
-Effective distributed debugging requires three observability pillars: metrics, logs, and traces.
+Effective distributed debugging requires three observability pillars, shown in @fig-observability-three-pillars: metrics, logs, and traces.
 
 ::: {#fig-observability-three-pillars fig-env="figure" fig-pos="htb" fig-cap="**The Three Pillars of Observability**. Diagnosis of fleet failures requires correlating three signal types. **Metrics** reveal *when* and *where* a problem occurs (e.g., GPU utilization drops). **Logs** provide the *what* through event context (e.g., Out-of-Memory exception). **Traces** provide the *why* by linking events across the distributed lifecycle (e.g., identifying the specific request that triggered the memory spike)." fig-alt="Venn diagram with three overlapping circles: Metrics, Logs, and Traces."}
 ![](images/svg/observability-three-pillars.svg){width=100%}
@@ -3113,7 +3113,7 @@ Stragglers arise from multiple root causes. Hardware issues include thermal thro
 
 ### Common Failure Patterns {#sec-fault-tolerance-reliability-reliability-common-failure-patterns-3306}
 
-The observability pillars above enable detection of recurring failure patterns that experience with large-scale ML systems has identified. The following patterns illustrate how metrics, logs, and traces work together in diagnosis.
+The observability pillars above enable detection of recurring failure patterns that experience with large-scale ML systems has identified. @fig-training-failure-signatures catalogs the most common training loss signatures, each requiring a different diagnostic and recovery response.
 
 #### Training Failures {#sec-fault-tolerance-reliability-reliability-training-failures-bc3a}
 

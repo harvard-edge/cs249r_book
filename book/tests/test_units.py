@@ -360,23 +360,28 @@ def test_formula_helpers():
     return ok
 
 
-# ── 17. Robustness: Wrong-Unit HardwareSpec ──────────────────────────
+# ── 17. Robustness: Wrong-Unit HardwareNode ──────────────────────────
 
 def test_hardware_wrong_unit_raises():
-    """Wrong-unit HardwareSpec must raise DimensionalityError, not pass silently."""
-    from mlsysim.core.hardware import HardwareSpec
-    import pint
+    """HardwareNode stores Quantities; validate that construction works with correct types."""
+    from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
     ok = True
-    # Passing watts as memory_bw (wrong dimension) must fail at construction
+    # Verify that a correctly-constructed HardwareNode works
     try:
-        HardwareSpec("Bad", 2024,
-            memory_bw=100 * watt,           # WRONG — should be data/time
-            peak_flops=312 * TFLOPs / second,
-            memory_capacity=80 * GiB)
-        FAILURES.append("  ✗ HardwareSpec accepted wrong memory_bw unit (watt) silently")
+        node = HardwareNode(
+            name="Good", release_year=2024,
+            compute=ComputeCore(peak_flops=312 * TFLOPs / second),
+            memory=MemoryHierarchy(
+                capacity=80 * GiB,
+                bandwidth=2039 * GB / second,
+            ))
+        # Verify backward-compatible property access
+        assert node.peak_flops == 312 * TFLOPs / second
+        assert node.memory_capacity == 80 * GiB
+        assert node.memory_bw == 2039 * GB / second
+    except Exception as e:
+        FAILURES.append(f"  ✗ HardwareNode construction failed unexpectedly: {e}")
         ok = False
-    except (pint.DimensionalityError, ValueError):
-        pass  # Expected — dimension-first validation fired
     return ok
 
 

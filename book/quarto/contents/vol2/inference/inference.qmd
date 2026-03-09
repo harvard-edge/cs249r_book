@@ -1094,7 +1094,7 @@ Analysis
 
 1. **Batch sizes 1-4 are unstable**: Utilization exceeds 100%, meaning the system cannot keep up with arrivals. Queues grow unboundedly.
 
-2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct`% utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms).
+2. **Batch size 8 achieves stability**: At `{python} GPT3ServingResults.b8_util_pct`% utilization, the system is stable but queuing delays contribute significantly to latency (`{python} GPT3ServingResults.b8_wait_ms` ms), as @fig-queuing-hockey-stick illustrates.
 
 ::: {#fig-queuing-hockey-stick fig-env="figure" fig-pos="htb" fig-cap="**The Queuing Hockey Stick**. Relationship between system utilization and queuing delay. As utilization approaches 100%, the queuing delay increases exponentially according to Kingman's formula. Production systems typically target 70--80% utilization to maintain a 'safe' region where traffic spikes do not cause unbounded latency growth." fig-alt="Plot of Latency vs Utilization. The curve is relatively flat until 70 percent utilization, then rises sharply (hockey stick shape) toward infinity at 100 percent."}
 ![](images/svg/queuing-hockey-stick.svg){width=100%}
@@ -1688,7 +1688,7 @@ After implementing these changes, P99 dropped to 185 ms. The Infrastructure Laye
 ![](images/svg/feature-parallel-pipeline.svg){width=100%}
 :::
 
-Recommendation systems have distinct batching requirements from vision or language models. The computation pattern involves:
+Recommendation systems have distinct batching requirements from vision or language models. As @fig-feature-parallel-pipeline shows, the computation pattern involves:
 
 1. **Sparse feature lookup**: Retrieve embeddings for user, item, and context features
 
@@ -2742,6 +2742,8 @@ async def swap_to_gpu(sequence_id):
 
 ### Disaggregated Serving: Splitting the Workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
 
+LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request. @fig-disaggregated-serving illustrates how this architectural split separates the two phases onto dedicated hardware pools, and @tbl-prefill-decode contrasts their resource profiles.
+
 ::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**. Separating the Compute-Bound **Prefill Phase** from the Bandwidth-Bound **Decode Phase**. Requests enter the Prefill Pool for prompt processing, and the resulting KV cache is migrated to the Decode Pool for token generation. This allows each phase to run on hardware optimized for its specific bottleneck, improving overall fleet efficiency." fig-alt="System diagram showing Request entering a Prefill Pool of high-compute GPUs. Red dashed arrow labeled KV Cache Transfer points to a Decode Pool of high-memory-bandwidth GPUs. Response exits from the Decode Pool."}
 ![](images/svg/disaggregated-serving.svg){width=100%}
 :::
@@ -2755,8 +2757,6 @@ async def swap_to_gpu(sequence_id):
 3.  **Common Pitfall:** A frequent misconception is that both phases should be batched together naively. In reality, because they have opposing hardware requirements, mixing them in the same batch without **Chunked Prefill** or similar techniques can lead to significant queuing delays ($L_{\text{lat}}$) for decoding tokens.
 
 :::
-
-LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request. @tbl-prefill-decode contrasts these phases:
 
 The prefill phase processes the entire input prompt in parallel. Computation scales with prompt length, and the memory access pattern is compute-bound with high arithmetic intensity[^fn-arithmetic-intensity-serving].
 
