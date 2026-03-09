@@ -50,8 +50,10 @@ from ..infra.types import Datacenter, GridProfile
 class BaseSolver(ABC):
     """Base class for all mlsysim solvers.
 
-    Each solver declares its input requirements, output type, and the
-    wall(s) it resolves from the canonical taxonomy (see core/walls.py).
+    Each solver declares its input requirements and output type.
+    Taxonomic classification (which walls a solver resolves) lives in
+    ``core/walls.py`` — the single source of truth for the 22-wall
+    framework.  Use ``walls_for_solver(cls.__name__)`` to look up walls.
 
     Attributes
     ----------
@@ -59,12 +61,9 @@ class BaseSolver(ABC):
         Domain concepts this solver needs (e.g., "workload", "fleet").
     produces : type[SolverResult] | None
         The typed result model this solver returns.
-    walls : tuple[int, ...]
-        Canonical wall numbers this solver resolves (see walls.py).
     """
     requires: tuple = ()
     produces: Optional[Type[SolverResult]] = None
-    walls: tuple = ()
 
     @abstractmethod
     def solve(self, **kwargs) -> Any:
@@ -73,14 +72,11 @@ class BaseSolver(ABC):
     @classmethod
     def schema(cls) -> dict:
         """Return a summary of this solver's interface for composition checking."""
-        from .walls import wall as lookup_wall
-        wall_info = []
-        for n in cls.walls:
-            try:
-                w = lookup_wall(n)
-                wall_info.append({"number": w.number, "name": w.name, "domain": w.domain.value})
-            except KeyError:
-                wall_info.append({"number": n, "name": "?", "domain": "?"})
+        from .walls import walls_for_solver
+        wall_info = [
+            {"number": w.number, "name": w.name, "domain": w.domain.value}
+            for w in walls_for_solver(cls.__name__)
+        ]
         return {
             "solver": cls.__name__,
             "walls": wall_info,
@@ -101,7 +97,6 @@ class SingleNodeSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = PerformanceProfile
-    walls = (1, 2)
 
     def solve(self, model: Workload, hardware: HardwareNode, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5, raise_errors: bool = False) -> PerformanceProfile:
         """
@@ -128,7 +123,6 @@ class DistributedSolver(BaseSolver):
     """
     requires = ("workload", "fleet")
     produces = DistributedResult
-    walls = (10,)
 
     def solve(self,
               model: Workload,
@@ -284,7 +278,6 @@ class ReliabilitySolver(BaseSolver):
     """
     requires = ("fleet",)
     produces = ReliabilityResult
-    walls = (11,)
 
     def solve(self, fleet: Fleet, job_duration_hours: float, checkpoint_time_s: float = 60.0) -> ReliabilityResult:
         """
@@ -325,7 +318,6 @@ class CheckpointSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = CheckpointResult
-    walls = (4, 11)
 
     def solve(self, model: Workload, hardware: HardwareNode, optimizer: str = "adam", checkpoint_interval_hours: float = 4.0) -> CheckpointResult:
         """Solves for checkpoint size, write time, and resulting MFU penalty."""
@@ -380,7 +372,6 @@ class SustainabilitySolver(BaseSolver):
     """
     requires = ("fleet",)
     produces = SustainabilityResult
-    walls = (14,)
 
     def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None, mfu: float = 1.0) -> SustainabilityResult:
         """
@@ -457,7 +448,6 @@ class ServingSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = ServingResult
-    walls = (2,)
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5) -> ServingResult:
         """
@@ -505,7 +495,6 @@ class ContinuousBatchingSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = ContinuousBatchingResult
-    walls = (2,)
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, max_batch_size: int = 1, page_size: int = 16, precision: str = "fp16", efficiency: float = 0.5) -> ContinuousBatchingResult:
         """Solves for continuous batching throughput and PagedAttention memory."""
@@ -588,7 +577,6 @@ class WeightStreamingSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = WeightStreamingResult
-    walls = (2, 8)  # Memory Wall (SRAM) & Interconnect Wall
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5) -> WeightStreamingResult:
         """Solves for continuous batching throughput under Weight Streaming physics."""
@@ -672,7 +660,6 @@ class TailLatencySolver(BaseSolver):
     """
     requires = ("hardware",)
     produces = TailLatencyResult
-    walls = (13,)
 
     def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1) -> TailLatencyResult:
         """Solves for P50 and P99 tail latencies under variable load."""
@@ -716,7 +703,6 @@ class EconomicsSolver(BaseSolver):
     """
     requires = ("fleet",)
     produces = EconomicsResult
-    walls = (13,)
 
     def solve(self, fleet: Fleet, duration_days: float, kwh_price: Optional[float] = None, datacenter: Optional[Any] = None, grid: Optional[Any] = None, mfu: float = 1.0) -> EconomicsResult:
         """
@@ -793,7 +779,6 @@ class DataSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = DataResult
-    walls = (4,)
 
     def solve(self, workload_data_rate: Quantity, hardware: HardwareNode) -> DataResult:
         """
@@ -846,7 +831,6 @@ class ScalingSolver(BaseSolver):
     """
     requires = ("compute_budget",)
     produces = ScalingResult
-    walls = (7,)
 
     def solve(self, compute_budget: Quantity, target_model_size: Optional[Quantity] = None) -> ScalingResult:
         """
@@ -904,7 +888,6 @@ class OrchestrationSolver(BaseSolver):
     """
     requires = ("fleet",)
     produces = OrchestrationResult
-    walls = (12,)
 
     def solve(self, fleet: Fleet, arrival_rate_jobs_per_day: float, avg_job_duration_days: float) -> OrchestrationResult:
         """
@@ -963,7 +946,6 @@ class CompressionSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = CompressionResult
-    walls = (9,)
 
     def solve(self, model: Workload, hardware: HardwareNode, method: str = "quantization", target_bitwidth: int = 8, sparsity: float = 0.0) -> CompressionResult:
         """
@@ -1041,7 +1023,6 @@ class EfficiencySolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = EfficiencyResult
-    walls = (3,)
 
     def solve(self, model: Workload, hardware: HardwareNode,
               workload_type: str = "ffn", use_flash_attention: bool = False,
@@ -1117,7 +1098,7 @@ class EfficiencySolver(BaseSolver):
 
 class TransformationSolver(BaseSolver):
     """
-    Quantifies the CPU preprocessing bottleneck (Wall 5: CPU Preprocessing).
+    Quantifies the CPU preprocessing bottleneck (Wall 9: Transformation).
 
     This solver models the 'Transformation Wall' — the gap between CPU-bound
     data preprocessing (JPEG decode, tokenization, augmentation) and
@@ -1133,7 +1114,6 @@ class TransformationSolver(BaseSolver):
     """
     requires = ("hardware",)
     produces = TransformationResult
-    walls = (5,)
 
     def solve(self, batch_size: int, sample_size_bytes: Quantity,
               cpu_throughput: Quantity, accelerator_step_time: Quantity) -> TransformationResult:
@@ -1177,7 +1157,7 @@ class TransformationSolver(BaseSolver):
 
 class TopologySolver(BaseSolver):
     """
-    Models bisection bandwidth for different network topologies (Wall 6).
+    Models bisection bandwidth for different network topologies (Wall 10).
 
     This solver calculates the effective bandwidth available to collective
     communication operations based on the physical network topology. Different
@@ -1194,7 +1174,6 @@ class TopologySolver(BaseSolver):
     """
     requires = ("fabric",)
     produces = TopologyResult
-    walls = (6,)
 
     # Bisection bandwidth fractions (β) relative to full fat-tree.
     # Ring and torus_3d are computed dynamically from num_nodes in solve().
@@ -1270,7 +1249,7 @@ class TopologySolver(BaseSolver):
 
 class InferenceScalingSolver(BaseSolver):
     """
-    Models inference-time compute scaling (Wall 8: Reasoning/CoT Cost).
+    Models inference-time compute scaling (Wall 12: Reasoning/CoT Cost).
 
     This solver quantifies the cost of 'System-2 thinking' — inference-time
     compute scaling via chain-of-thought (CoT) reasoning, where the model
@@ -1286,7 +1265,6 @@ class InferenceScalingSolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = InferenceScalingResult
-    walls = (8,)
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode,
               reasoning_steps: int = 8, context_length: int = 2048,
@@ -1353,7 +1331,7 @@ class InferenceScalingSolver(BaseSolver):
 
 class SensitivitySolver(BaseSolver):
     """
-    Identifies the binding constraint via numerical sensitivity analysis (Wall 16).
+    Identifies the binding constraint via numerical sensitivity analysis (Wall 21).
 
     This solver computes numerical partial derivatives of inference latency
     with respect to each hardware parameter (peak FLOPS, memory bandwidth,
@@ -1368,7 +1346,6 @@ class SensitivitySolver(BaseSolver):
     """
     requires = ("workload", "hardware")
     produces = SensitivityResult
-    walls = (16,)
 
     def solve(self, model: Workload, hardware: HardwareNode,
               precision: str = "fp16", perturbation_pct: float = 10.0,
@@ -1443,7 +1420,7 @@ class SensitivitySolver(BaseSolver):
 
 class SynthesisSolver(BaseSolver):
     """
-    Given an SLA, synthesizes the required hardware specs (Wall 17: Inverse Solve).
+    Given an SLA, synthesizes the required hardware specs (Wall 22: Inverse Solve).
 
     This solver inverts the Roofline model: instead of predicting latency from
     hardware specs, it starts from a target latency SLA and works backward to
@@ -1459,7 +1436,6 @@ class SynthesisSolver(BaseSolver):
     """
     requires = ("workload", "target_latency")
     produces = SynthesisResult
-    walls = (17,)
 
     def solve(self, model: Workload, target_latency: Quantity,
               precision: str = "fp16", efficiency: float = 0.5) -> SynthesisResult:
@@ -1518,9 +1494,9 @@ class SynthesisSolver(BaseSolver):
 
 class ResponsibleEngineeringSolver(BaseSolver):
     """
-    Models the computational cost of responsible AI practices (Wall 15).
+    Models the computational cost of responsible AI practices (Wall 20: Safety).
 
-    This solver quantifies the 'Ethics Tax' — the additional compute, data,
+    This solver quantifies the 'Safety Tax' — the additional compute, data,
     and time required when training with differential privacy (DP-SGD) or
     fairness constraints. These are not optional overheads but engineering
     requirements that must be budgeted into system design.
@@ -1536,7 +1512,6 @@ class ResponsibleEngineeringSolver(BaseSolver):
     """
     requires = ("training_time",)
     produces = ResponsibleEngineeringResult
-    walls = (15,)
 
     def solve(self, base_training_time: Quantity,
               epsilon: float = 1.0, delta: float = 1e-5,

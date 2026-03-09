@@ -54,22 +54,16 @@ class Pipeline:
         """
         lines = [f"═══ {self.name} ═══", ""]
 
-        from .walls import wall as lookup_wall, Domain
+        from .walls import walls_for_solver, Domain
 
         # Collect what has been produced so far
         produced_concepts = set()
 
         for i, solver in enumerate(self.solvers):
             cls = solver.__class__
-            # Build wall tag from registry
-            wall_tags = []
-            for wn in cls.walls:
-                try:
-                    w = lookup_wall(wn)
-                    wall_tags.append(f"Wall {w.number}: {w.name}")
-                except KeyError:
-                    wall_tags.append(f"Wall {wn}")
-            tag = ", ".join(wall_tags) if wall_tags else "?"
+            # Look up walls from the taxonomy (single source of truth)
+            solver_walls = walls_for_solver(cls.__name__)
+            tag = ", ".join(f"Wall {w.number}: {w.name}" for w in solver_walls) or "?"
             produces_name = cls.produces.__name__ if cls.produces else "Any"
 
             lines.append(f"  Stage {i+1}: {cls.__name__}")
@@ -97,11 +91,8 @@ class Pipeline:
         domain_order = list(Domain)
         covered = set()
         for solver in self.solvers:
-            for wn in solver.__class__.walls:
-                try:
-                    covered.add(lookup_wall(wn).domain)
-                except KeyError:
-                    pass
+            for w in walls_for_solver(solver.__class__.__name__):
+                covered.add(w.domain)
         covered_names = [d.value for d in domain_order if d in covered]
         lines.append(f"  Domains covered: {', '.join(covered_names)}")
 
