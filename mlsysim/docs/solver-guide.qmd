@@ -2,7 +2,7 @@
 title: "Which Solver Do I Need?"
 subtitle: "A decision guide for choosing the right MLSYSIM analytical tool."
 ---
-MLSYSIM provides 17 specialized solvers organized across five domains — **Node**, **Data**, **Algorithm**, **Fleet**, and **Analysis** — each resolving a specific physical or logical constraint ("wall") that bounds ML system performance. This page helps you pick the right one.
+MLSYSIM provides 21 specialized solvers organized across five domains — **Node**, **Data**, **Algorithm**, **Fleet**, and **Analysis** — each resolving a specific physical or logical constraint ("wall") that bounds ML system performance. This page helps you pick the right one.
 
 ---
 
@@ -13,6 +13,18 @@ MLSYSIM provides 17 specialized solvers organized across five domains — **Node
 
 **"How fast will my LLM generate tokens?"**
 : Use the **ServingSolver**. It models the two distinct phases of autoregressive inference: the compute-bound pre-fill (TTFT) and the memory-bound decode (ITL), plus KV-cache memory pressure.
+
+**"What throughput can I get with PagedAttention and continuous batching?"**
+: Use the **ContinuousBatchingSolver**. It models iteration-level scheduling and non-contiguous KV cache allocation, calculating throughput gains over static batching.
+
+**"How does inference work on a Cerebras wafer-scale system?"**
+: Use the **WeightStreamingSolver**. It models the inverted bottleneck of wafer-scale inference: activations stay on-wafer (SRAM) while weights stream from external MemoryX nodes. The binding constraint shifts from memory bandwidth to injection interconnect bandwidth.
+
+**"Will my inference deployment meet P99 latency SLAs?"**
+: Use the **TailLatencySolver**. It models inference servers as M/M/c queues using the Erlang C formula to compute P50 and P99 wait times under variable load.
+
+**"How much MFU do I lose to checkpointing?"**
+: Use the **CheckpointSolver**. It calculates checkpoint size (weights + optimizer states), I/O write time, and the resulting MFU penalty based on checkpoint frequency.
 
 **"Is my storage system fast enough for my training data?"**
 : Use the **DataSolver**. It analyzes the "Data Wall" — the throughput bottleneck between your storage/interconnect and your compute engine.
@@ -70,6 +82,9 @@ MLSYSIM provides 17 specialized solvers organized across five domains — **Node
 | **SingleNodeSolver** | 1, 2 | model, hardware, batch_size | latency, throughput, bottleneck | "Is my model memory-bound?" |
 | **EfficiencySolver** | 3 | model, hardware, workload_type | MFU, achievable FLOPS, overhead breakdown | "What MFU will my workload achieve?" |
 | **ServingSolver** | 2 | model, hardware, seq_len | TTFT, ITL, KV-cache, feasibility | "Can I serve this LLM on this GPU?" |
+| **ContinuousBatchingSolver** | 2 | model, hardware, seq_len, max_batch | throughput, fragmentation, speedup | "What throughput with PagedAttention?" |
+| **WeightStreamingSolver** | 2, 8 | model, hardware, seq_len, batch_size | throughput, bottleneck, optimal_batch | "Cerebras wafer-scale inference?" |
+| **TailLatencySolver** | 13 | arrival_rate, service_latency, replicas | P50, P99, SLO violation probability | "Will I meet P99 latency SLAs?" |
 
 ### Domain 2 — Data (Movement & Pipelines)
 
@@ -93,6 +108,7 @@ MLSYSIM provides 17 specialized solvers organized across five domains — **Node
 |:-------|:-----|:-----------|:------------|:---------|
 | **DistributedSolver** | 10 | model, fleet, tp/pp/dp sizes | scaling efficiency, comm overhead | "How many GPUs do I actually need?" |
 | **ReliabilitySolver** | 11 | fleet, job_duration | MTBF, failure probability, checkpoint interval | "Will my training job complete?" |
+| **CheckpointSolver** | 4, 11 | model, hardware, optimizer | checkpoint_size, write_time, MFU penalty | "How much MFU do I lose to checkpoints?" |
 | **OrchestrationSolver** | 12 | fleet, arrival_rate, avg_duration | avg_wait_time, utilization | "How busy is my cluster?" |
 | **EconomicsSolver** | 13 | fleet, duration_days, kwh_price | CapEx, OpEx, total TCO | "What will this cost over 3 years?" |
 | **SustainabilitySolver** | 14 | fleet, duration_days, datacenter | energy, carbon (kg CO₂e), water | "Where should I train to minimize carbon?" |
@@ -124,6 +140,15 @@ Real-world questions often require **chaining** multiple solvers. Some examples:
 2. **SingleNodeSolver** on H100 — get latency and bottleneck
 3. **EconomicsSolver** for each — compare cost per query
 
+### "GPU vs. Cerebras for large-batch inference?"
+1. **ContinuousBatchingSolver** on H100 — get PagedAttention throughput
+2. **WeightStreamingSolver** on Cerebras CS-3 — get weight streaming throughput
+3. **TailLatencySolver** — check P99 SLA compliance for each
+
+### "What is the I/O penalty of checkpointing during training?"
+1. **ReliabilitySolver** — determine optimal checkpoint interval from fleet MTBF
+2. **CheckpointSolver** — calculate the actual MFU penalty of writing checkpoints at that interval
+
 ---
 
 ## Textbook Chapter Mapping
@@ -148,6 +173,10 @@ Each solver connects to specific chapters in the *Machine Learning Systems* text
 | **SustainabilitySolver** | Fleet | — | Sustainable AI |
 | **ResponsibleEngineeringSolver** | Fleet | — | Responsible AI |
 | **SensitivitySolver** | Analysis | Benchmarking | Performance Engineering |
+| **ContinuousBatchingSolver** | Node | Model Serving | Inference at Scale |
+| **WeightStreamingSolver** | Node | — | Hardware Design, Inference at Scale |
+| **TailLatencySolver** | Fleet | — | Compute Infrastructure |
+| **CheckpointSolver** | Fleet | — | Fault Tolerance |
 | **SynthesisSolver** | Analysis | — | Hardware Design |
 
 ---
@@ -194,7 +223,7 @@ print(f"ITL:  {result.itl.to('ms'):~.2f}")
 
 ### Why analytical solvers?
 
-MLSYSIM is not an empirical profiler (like PyTorch Profiler) or a cycle-accurate simulator (like gem5). It is an **analytical modeling platform** that computes performance bounds from specifications and first-order equations. This is a deliberate design choice:
+MLSYSIM (**M**achine **L**earning **Sys**tems **I**nfrastructure **M**odeling) is not an empirical profiler (like PyTorch Profiler) or a cycle-accurate simulator (like gem5). It is an **analytical infrastructure modeling platform** that computes performance bounds from specifications and first-order equations. This is a deliberate design choice:
 
 - **Speed**: Closed-form equations evaluate in microseconds. You can sweep thousands of hardware × model × parallelism configurations in seconds — impossible with empirical profiling.
 - **Intuition**: By working from equations rather than opaque traces, students see *exactly* which physical quantity (bandwidth, compute, memory capacity) creates the bottleneck.
@@ -242,7 +271,7 @@ for hw in [mlsysim.Hardware.Cloud.H100, mlsysim.Hardware.Cloud.A100,
     print(f"{r['device']:25s}  {r['flops_per_watt']:>10.1f~}")
 ```
 
-The key principle: keep your solver's `.solve()` method a pure function of its inputs. Use `pint.Quantity` for all physical calculations so that unit errors are impossible. For production solvers, extend `BaseSolver` and return a typed `SolverResult` subclass — see the [source code](https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim/core/solver.py) for the 17 built-in solvers and [walls.py](https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim/core/walls.py) for the canonical wall taxonomy.
+The key principle: keep your solver's `.solve()` method a pure function of its inputs. Use `pint.Quantity` for all physical calculations so that unit errors are impossible. For production solvers, extend `BaseSolver` and return a typed `SolverResult` subclass — see the [source code](https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim/core/solver.py) for the 21 built-in solvers and [walls.py](https://github.com/harvard-edge/cs249r_book/tree/main/mlsysim/core/walls.py) for the canonical wall taxonomy.
 
 ---
 
