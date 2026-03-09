@@ -42,6 +42,15 @@ class ReliabilityResult(SolverResult):
     expected_failures: float
 
 
+class CheckpointResult(SolverResult):
+    """Result from CheckpointSolver: IOPS and MFU penalty modeling."""
+    checkpoint_size: Quantity
+    write_time_seconds: Quantity
+    max_bandwidth_required: Quantity
+    storage_bottleneck: bool
+    mfu_penalty_pct: float
+
+
 class SustainabilityResult(SolverResult):
     """Result from SustainabilitySolver: energy, carbon, and water footprint."""
     it_energy_kwh: Quantity
@@ -61,6 +70,38 @@ class ServingResult(SolverResult):
     model_weights_size: Quantity
     total_memory_required: Quantity
     memory_utilization: float
+
+
+class ContinuousBatchingResult(SolverResult):
+    """Result from ContinuousBatchingSolver: production LLM serving with PagedAttention."""
+    feasible: bool
+    throughput_tokens_per_sec: float
+    max_active_requests: int
+    memory_fragmentation_pct: float
+    paged_kv_cache_size: Quantity
+    ttft: Quantity
+    itl: Quantity
+    speedup_vs_static: float
+
+
+class WeightStreamingResult(SolverResult):
+    """Result from WeightStreamingSolver: Wafer-scale SRAM batch processing."""
+    feasible: bool
+    throughput_tokens_per_sec: float
+    bottleneck: str
+    layer_compute_time: Quantity
+    layer_injection_time: Quantity
+    optimal_batch_size: int
+    wafer_memory_utilization: float
+
+
+class TailLatencyResult(SolverResult):
+    """Result from TailLatencySolver: queuing theory limits (M/M/c)."""
+    p50_latency: Quantity
+    p99_latency: Quantity
+    queue_utilization: float
+    is_stable: bool
+    slo_violation_probability: float
 
 
 class EconomicsResult(SolverResult):

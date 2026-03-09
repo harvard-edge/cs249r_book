@@ -9,6 +9,7 @@ from ..core.constants import (
     MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP,
     TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY,
     T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8,
+    WSE3_FLOPS_FP16, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP, WSE3_CORES,
     PCIE_GEN3_BW, PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
 )
 
@@ -100,6 +101,21 @@ class CloudHardware(Registry):
         tdp=T4_TDP,
         unit_cost=2500 * USD,
         dispatch_tax=0.03 * ureg.ms
+    )
+
+    Cerebras_CS3 = HardwareNode(
+        name="Cerebras CS-3 (WSE-3)",
+        release_year=2024,
+        # A single WSE acts as a gigantic compute core with minimal dispatch tax
+        compute=ComputeCore(peak_flops=WSE3_FLOPS_FP16),
+        # Memory reflects the 44GB on-wafer SRAM, meaning large weights must stream from MemoryX
+        memory=MemoryHierarchy(capacity=WSE3_MEM_CAPACITY, bandwidth=WSE3_MEM_BW),
+        # Injection bandwidth from MemoryX (approx 1.2 TB/s per WSE)
+        interconnect=IOInterconnect(name="SwarmX / MemoryX", bandwidth=1.2 * ureg.TB / ureg.second),
+        tdp=WSE3_TDP,
+        unit_cost=2000000 * USD,  # Approx. estimation for a CS-3 system
+        dispatch_tax=0.001 * ureg.ms,
+        metadata={"source_url": "https://www.cerebras.net/product-system/"}
     )
 
 class WorkstationHardware(Registry):
@@ -230,6 +246,7 @@ class Hardware(Registry):
     MI300X = CloudHardware.MI300X
     TPUv5p = CloudHardware.TPUv5p
     T4 = CloudHardware.T4
+    CerebrasCS3 = CloudHardware.Cerebras_CS3
     
     DGXSpark = WorkstationHardware.DGX_Spark
     MacBook = WorkstationHardware.MacBookM3Max

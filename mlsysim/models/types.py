@@ -167,3 +167,61 @@ class CNNWorkload(Workload):
             arithmetic_intensity=(self.inference_flops / weights).to("flop/byte"),
             layers=self.layers
         )
+
+class SSMWorkload(Workload):
+    parameters: Quantity
+    layers: int
+    state_size: int
+    hidden_dim: int
+    inference_flops: Optional[Quantity] = None
+    
+    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
+        param_count = self.parameters.to(ureg.count).magnitude
+        bpp = precision.to(ureg.byte).magnitude
+        return (param_count * bpp * ureg.byte).to(ureg.byte)
+
+    def get_state_cache_size(self, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
+        # State space model memory footprint is independent of sequence length (O(1) w.r.t seq_len)
+        # Represents the recursive state vector maintained by the model (e.g., Mamba)
+        # Typically: layers * batch * hidden_dim * state_size * precision
+        bpp = precision.to(ureg.byte).magnitude
+        size_bytes = self.layers * batch_size * self.hidden_dim * self.state_size * bpp
+        return (size_bytes * ureg.byte).to(ureg.byte)
+
+    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+        ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
+        weights = self.size_in_bytes(precision)
+        return ComputationGraph(
+            name=self.name,
+            total_ops=ops,
+            parameter_count=self.parameters,
+            weight_bytes=weights,
+            arithmetic_intensity=(ops / weights).to("flop/byte"),
+            layers=self.layers
+        )
+
+
+class DiffusionWorkload(Workload):
+    parameters: Quantity
+    denoising_steps: int
+    resolution: int
+    inference_flops: Optional[Quantity] = None  # FLOPs for ONE denoising step
+    
+    def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
+        param_count = self.parameters.to(ureg.count).magnitude
+        bpp = precision.to(ureg.byte).magnitude
+        return (param_count * bpp * ureg.byte).to(ureg.byte)
+
+    def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
+        # Total inference flops = Flops per step * denoising steps
+        base_ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
+        total_ops = base_ops * self.denoising_steps
+        weights = self.size_in_bytes(precision)
+        return ComputationGraph(
+            name=self.name,
+            total_ops=total_ops,
+            parameter_count=self.parameters,
+            weight_bytes=weights,
+            arithmetic_intensity=(total_ops / weights).to("flop/byte"),
+            layers=None
+        )

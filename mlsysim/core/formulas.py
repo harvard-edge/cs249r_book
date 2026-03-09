@@ -512,3 +512,89 @@ def calc_effective_flops(peak_flops, mfu, scaling_eff, goodput_ratio):
     """
     pf = _ensure_unit(peak_flops, ureg.flop / ureg.second)
     return (pf * mfu * scaling_eff * goodput_ratio).to(ureg.flop / ureg.second)
+
+
+# =============================================================================
+# Inference & Serving Formulas
+# =============================================================================
+
+def calc_paged_kv_cache_size(n_layers, n_heads, head_dim, seq_len, batch_size,
+                             page_size_tokens=16, bytes_per_elem=2):
+    """
+    KV cache memory for autoregressive inference using PagedAttention (vLLM).
+
+    Size = 2 × L × H × D × (ceil(S / page_size) * page_size) × B × bytes
+
+    Internal fragmentation is captured by the padded space in the last page,
+    eliminating the 40-50% external fragmentation of contiguous allocation.
+
+    Source: Kwon et al. (2023), "Efficient Memory Management for Large Language... PagedAttention"
+
+    Args:
+        n_layers: Number of transformer layers (L)
+        n_heads: Number of attention heads (H)
+        head_dim: Dimension per head (D)
+        seq_len: Sequence length / context window (S)
+        batch_size: Batch size (B)
+        page_size_tokens: Tokens per page (typically 16)
+        bytes_per_elem: Bytes per element (default 2 for FP16/BF16)
+
+    Returns:
+        tuple: (Quantity[byte] size, float fragmentation_percent)
+    """
+    bpe = _ensure_unit(bytes_per_elem, ureg.byte)
+    padded_seq_len = math.ceil(seq_len / page_size_tokens) * page_size_tokens
+    
+    internal_frag = max(0, padded_seq_len - seq_len)
+    frag_pct = internal_frag / padded_seq_len if padded_seq_len > 0 else 0.0
+    
+    size = (2 * n_layers * n_heads * head_dim * padded_seq_len * batch_size * bpe).to(ureg.byte)
+    return size, frag_pct
+
+
+def calc_queue_latency_mmc(arrival_rate_hz, service_rate_hz, num_servers):
+    """
+    M/M/c queueing model for inference tail latency approximation.
+    
+    Evaluates stable queues (λ < cμ) and calculates P50/P99 wait times
+    based on the Erlang C formula.
+    
+    Args:
+        arrival_rate_hz: Request arrival rate (λ)
+        service_rate_hz: Request service rate per server (μ)
+        num_servers: Number of replicas (c)
+        
+    Returns:
+        tuple: (utilization, Quantity[second] p50_wait_time, Quantity[second] p99_wait_time)
+    """
+    lam = _ensure_unit(arrival_rate_hz, ureg.hertz).magnitude
+    mu = _ensure_unit(service_rate_hz, ureg.hertz).magnitude
+    c = max(1, int(num_servers))
+    
+    if lam >= c * mu or mu == 0:
+        return 1.0, float('inf') * ureg.second, float('inf') * ureg.second
+        
+    rho = lam / (c * mu)
+    
+    # Erlang C calculation for probability of queuing
+    try:
+        numerator = ((c * rho)**c / math.factorial(c)) * (1 / (1 - rho))
+        sum_denom = sum(((c * rho)**i / math.factorial(i)) for i in range(c))
+        p_wait = numerator / (sum_denom + numerator)
+    except OverflowError:
+        # For very large cluster sizes
+        p_wait = rho
+        
+    rate_param = c * mu * (1 - rho)
+    
+    if p_wait < 0.5:
+        p50_wait = 0.0
+    else:
+        p50_wait = -math.log(0.5 / p_wait) / rate_param
+        
+    if p_wait < 0.01:
+        p99_wait = 0.0
+    else:
+        p99_wait = -math.log(0.01 / p_wait) / rate_param
+        
+    return rho, p50_wait * ureg.second, p99_wait * ureg.second

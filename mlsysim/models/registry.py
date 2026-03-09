@@ -1,6 +1,5 @@
-from .types import TransformerWorkload, CNNWorkload, Workload
+from .types import TransformerWorkload, CNNWorkload, Workload, SSMWorkload, DiffusionWorkload
 from ..core.registry import Registry
-from .types import TransformerWorkload, CNNWorkload, Workload
 from ..core.constants import (
     ureg,
     GPT2_PARAMS, GPT3_PARAMS, GPT4_EST_PARAMS, GPT3_TRAINING_OPS,
@@ -148,11 +147,43 @@ class RecommendationModels(Registry):
     # Note: We'll add specialized size methods if needed, 
     # but for now we maintain string compatibility.
 
+class StateSpaceModels(Registry):
+    Mamba_130M = SSMWorkload(
+        name="Mamba-130M",
+        architecture="SSM",
+        parameters=130e6 * ureg.param,
+        layers=24,
+        hidden_dim=768,
+        state_size=16, 
+        inference_flops=2 * 130e6 * ureg.flop
+    )
+    Mamba_2_8B = SSMWorkload(
+        name="Mamba-2.8B",
+        architecture="SSM",
+        parameters=2.8e9 * ureg.param,
+        layers=64,
+        hidden_dim=2560,
+        state_size=16,
+        inference_flops=2 * 2.8e9 * ureg.flop
+    )
+
+class GenerativeVisionModels(Registry):
+    StableDiffusion_v1_5 = DiffusionWorkload(
+        name="Stable Diffusion v1.5",
+        architecture="Diffusion/U-Net",
+        parameters=860e6 * ureg.param,
+        resolution=512,
+        denoising_steps=50,
+        inference_flops=20e9 * ureg.flop 
+    )
+
 class Models(Registry):
     Language = LanguageModels
     Vision = VisionModels
     Tiny = TinyModels
     Recommendation = RecommendationModels
+    StateSpace = StateSpaceModels
+    GenerativeVision = GenerativeVisionModels
     
     GPT2 = LanguageModels.GPT2
     GPT3 = LanguageModels.GPT3
@@ -165,3 +196,5 @@ class Models(Registry):
     WakeVision = TinyModels.WakeVision
     DLRM = RecommendationModels.DLRM
     AlexNet = VisionModels.AlexNet
+    Mamba_2_8B = StateSpaceModels.Mamba_2_8B
+    StableDiffusion_v1_5 = GenerativeVisionModels.StableDiffusion_v1_5

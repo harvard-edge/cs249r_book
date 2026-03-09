@@ -91,16 +91,19 @@ WSE1_CORES = 400000 * count
 WSE1_MEM_CAPACITY = 18 * GB
 WSE1_MEM_BW = 9 * PB / second
 WSE1_TDP = 15000 * watt
+WSE1_FLOPS_FP16 = 9 * PFLOPs / second  # Estimated
 
 WSE2_CORES = 850000 * count
 WSE2_MEM_CAPACITY = 40 * GB
 WSE2_MEM_BW = 20 * PB / second
 WSE2_TDP = 15000 * watt
+WSE2_FLOPS_FP16 = 38 * PFLOPs / second  # Estimated
 
 WSE3_CORES = 900000 * count
 WSE3_MEM_CAPACITY = 44 * GB
 WSE3_MEM_BW = 21 * PB / second
 WSE3_TDP = 23000 * watt
+WSE3_FLOPS_FP16 = 125 * PFLOPs / second
 
 # High-end Desktop CPU (Reference)
 CPU_FLOPS_FP32 = 1 * TFLOPs / second

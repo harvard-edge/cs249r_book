@@ -5,8 +5,9 @@ from pydantic import BaseModel, ConfigDict
 from .engine import Engine, PerformanceProfile
 from .results import (
     SolverResult,
-    DistributedResult, ReliabilityResult, SustainabilityResult,
-    ServingResult, EconomicsResult, DataResult, TopologyResult,
+    DistributedResult, ReliabilityResult, CheckpointResult, SustainabilityResult,
+    ServingResult, ContinuousBatchingResult, WeightStreamingResult, TailLatencyResult, 
+    EconomicsResult, DataResult, TopologyResult,
     EfficiencyResult, TransformationResult, ScalingResult,
     CompressionResult, SynthesisResult, OrchestrationResult,
     InferenceScalingResult, SensitivityResult, ResponsibleEngineeringResult,
@@ -310,6 +311,57 @@ class ReliabilitySolver(BaseSolver):
             expected_failures=(job_dur_q / fleet_mtbf).magnitude,
         )
 
+class CheckpointSolver(BaseSolver):
+    """
+    Analyzes the storage constraints and I/O burst penalties of saving model states.
+    
+    Training massive models requires saving hundreds of gigabytes (Weights + 
+    Optimizer States) to persistent storage. This solver calculates the time 
+    spent blocked on I/O, subtracting from the cluster's Model FLOPs Utilization.
+
+    Literature Source:
+    1. Eisenman et al. (2022), "Check-N-Run: A Checkpointing System for 
+       Training Large Language Models."
+    """
+    requires = ("workload", "hardware")
+    produces = CheckpointResult
+    walls = (4, 11)
+
+    def solve(self, model: Workload, hardware: HardwareNode, optimizer: str = "adam", checkpoint_interval_hours: float = 4.0) -> CheckpointResult:
+        """Solves for checkpoint size, write time, and resulting MFU penalty."""
+        from .formulas import calc_checkpoint_size
+        
+        # Calculate size based on optimizer states
+        # Default Adam: 16 bytes per parameter (master weights + momentum + variance + gradients + fp16 weights)
+        if optimizer.lower() == "adam":
+            bytes_per_param = 16
+        else:
+            bytes_per_param = 4  # e.g., SGD
+            
+        ckpt_size = calc_checkpoint_size(model.parameters, bytes_per_param=bytes_per_param)
+        
+        storage_bw = getattr(hardware.storage, 'bandwidth', Q_("0 GB/s")) if hardware.storage else Q_("0 GB/s")
+        # Fallback to network or standard disk speed if undefined
+        if storage_bw.magnitude == 0:
+            storage_bw = Q_("1 GB/s")
+            
+        t_write = (ckpt_size / storage_bw).to("second")
+        
+        # Calculate penalty to MFU
+        interval_s = Q_(checkpoint_interval_hours, "hour").to("second")
+        if interval_s.magnitude > 0:
+            penalty_pct = (t_write / interval_s).magnitude
+        else:
+            penalty_pct = 1.0
+            
+        return CheckpointResult(
+            checkpoint_size=ckpt_size.to("GB"),
+            write_time_seconds=t_write,
+            max_bandwidth_required=storage_bw,
+            storage_bottleneck=t_write.m_as("second") > 60.0, # Flag if checkpoint takes > 1 min
+            mfu_penalty_pct=penalty_pct
+        )
+
 class SustainabilitySolver(BaseSolver):
     """
     Calculates Datacenter-scale Sustainability metrics.
@@ -330,7 +382,7 @@ class SustainabilitySolver(BaseSolver):
     produces = SustainabilityResult
     walls = (14,)
 
-    def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None) -> SustainabilityResult:
+    def solve(self, fleet: Fleet, duration_days: float, datacenter: Optional[Datacenter] = None, mfu: float = 1.0) -> SustainabilityResult:
         """
         Calculates energy, carbon, and water footprint for a fleet operation.
         """
@@ -350,7 +402,12 @@ class SustainabilitySolver(BaseSolver):
         duration_hours = duration_days * 24
         
         # 2. Power
-        it_power_w = fleet.node.accelerator.tdp * fleet.total_accelerators if fleet.node.accelerator.tdp else H100_TDP * fleet.total_accelerators
+        base_tdp = fleet.node.accelerator.tdp if fleet.node.accelerator.tdp else H100_TDP
+        # Energy proportionality: Idle power is ~30% of TDP. Dynamic power scales with compute utilization (MFU).
+        idle_power = base_tdp * 0.3
+        dynamic_power = base_tdp * 0.7 * mfu
+        effective_power_per_chip = idle_power + dynamic_power
+        it_power_w = effective_power_per_chip * fleet.total_accelerators
             
         # 3. Energy Consumption
         it_energy_kwh = (it_power_w * Q_(duration_hours, "hour")).to("kWh")
@@ -431,6 +488,219 @@ class ServingSolver(BaseSolver):
             memory_utilization=(total_memory_required / hardware.memory.capacity).to_base_units().magnitude,
         )
 
+
+class ContinuousBatchingSolver(BaseSolver):
+    """
+    Analyzes production LLM serving with Continuous Batching and PagedAttention.
+    
+    Traditional static batching suffers from severe memory fragmentation and 
+    padding waste. This solver models the throughput improvements achieved by 
+    iteration-level scheduling and non-contiguous KV cache allocation.
+
+    Literature Source:
+    1. Kwon et al. (2023), "Efficient Memory Management for Large Language Model
+       Serving with PagedAttention."
+    2. Yu et al. (2022), "ORCA: A Distributed Serving System for 
+       Transformer-Based Generative Models."
+    """
+    requires = ("workload", "hardware")
+    produces = ContinuousBatchingResult
+    walls = (2,)
+
+    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, max_batch_size: int = 1, page_size: int = 16, precision: str = "fp16", efficiency: float = 0.5) -> ContinuousBatchingResult:
+        """Solves for continuous batching throughput and PagedAttention memory."""
+        prec_map = PRECISION_MAP
+        bpp = prec_map.get(precision, BYTES_FP16)
+        peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
+        
+        # Base latency metrics
+        prefill_ops = 2 * model.parameters.to(ureg.count).magnitude * seq_len * max_batch_size * ureg.flop
+        t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
+        
+        model_weights_bytes = model.size_in_bytes(bpp)
+        max_memory_for_kv = hardware.memory.capacity - model_weights_bytes
+        
+        if max_memory_for_kv.magnitude <= 0:
+            return ContinuousBatchingResult(
+                feasible=False, throughput_tokens_per_sec=0.0, max_active_requests=0,
+                memory_fragmentation_pct=0.0, paged_kv_cache_size=Q_("0 GB"),
+                ttft=t_prefill, itl=Q_("1000000 ms"), speedup_vs_static=1.0
+            )
+
+        # Calculate memory using PagedAttention formulas
+        from .formulas import calc_paged_kv_cache_size
+        n_heads = model.kv_heads or model.heads or 32
+        h_dim = model.hidden_dim or 4096
+        head_dim = h_dim // (model.heads or 32)
+        
+        bytes_per_seq, frag_pct = calc_paged_kv_cache_size(
+            model.layers, n_heads, 
+            head_dim,
+            seq_len, batch_size=1, page_size_tokens=page_size, bytes_per_elem=bpp
+        )
+        
+        max_possible_requests = int((max_memory_for_kv / bytes_per_seq).to_base_units().magnitude)
+        active_requests = min(max_possible_requests, max_batch_size)
+        
+        total_kv_cache = bytes_per_seq * active_requests
+        
+        # Throughput
+        t_decode_per_token = ((model_weights_bytes + total_kv_cache) / hardware.memory.bandwidth).to("ms")
+        
+        if active_requests == 0 or t_decode_per_token.magnitude == 0:
+            throughput = 0.0
+            speedup = 1.0
+        else:
+            throughput = (active_requests / t_decode_per_token).to("1/s").magnitude
+            # Traditional static batching assumes ~50% fragmentation and padding waste
+            # meaning effective batch size is roughly halved for varying lengths
+            static_effective_batch = max(1, active_requests // 2)
+            # Static batching reserves contiguous blocks, so cache size is higher
+            static_t_decode = ((model_weights_bytes + (bytes_per_seq * static_effective_batch * 1.5)) / hardware.memory.bandwidth).to("ms")
+            static_throughput = (static_effective_batch / static_t_decode).to("1/s").magnitude
+            speedup = throughput / static_throughput if static_throughput > 0 else 1.0
+            
+        return ContinuousBatchingResult(
+            feasible=active_requests > 0,
+            throughput_tokens_per_sec=throughput,
+            max_active_requests=active_requests,
+            memory_fragmentation_pct=frag_pct,
+            paged_kv_cache_size=total_kv_cache.to("GB"),
+            ttft=t_prefill,
+            itl=t_decode_per_token,
+            speedup_vs_static=speedup
+        )
+
+
+class WeightStreamingSolver(BaseSolver):
+    """
+    Analyzes Wafer-Scale inference (e.g., Cerebras CS-3) using Weight Streaming.
+    
+    Instead of holding weights in HBM and streaming activations (the GPU Memory Wall),
+    this architecture holds massive activation batches on-wafer (SRAM) and streams 
+    the model weights from external MemoryX nodes.
+    
+    The bottleneck shifts from Memory Bandwidth to Injection Interconnect Bandwidth.
+
+    Literature Source:
+    1. Lie et al. (2022), "Cerebras Architecture Deep Dive: First Look Inside 
+       the Hardware/Software Co-Design for Deep Learning."
+    """
+    requires = ("workload", "hardware")
+    produces = WeightStreamingResult
+    walls = (2, 8)  # Memory Wall (SRAM) & Interconnect Wall
+
+    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5) -> WeightStreamingResult:
+        """Solves for continuous batching throughput under Weight Streaming physics."""
+        bpp = PRECISION_MAP.get(precision, BYTES_FP16)
+        peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
+        
+        # 1. SRAM Capacity Constraint
+        # Entire batch's KV Cache must fit in the 44GB on-wafer SRAM
+        # Working set (activations for the current layer) must also fit, but KV cache dominates
+        n_heads = model.kv_heads or model.heads or 32
+        h_dim = model.hidden_dim or 4096
+        head_dim = h_dim // (model.heads or 32)
+        
+        # KV dimensions per layer per sequence
+        bytes_per_seq_per_layer = seq_len * n_heads * head_dim * 2 * bpp.magnitude
+        total_kv_bytes = bytes_per_seq_per_layer * model.layers * batch_size * ureg.byte
+        
+        # Let's add 10% overhead for working memory
+        total_memory_required = (total_kv_bytes * 1.1).to("GB")
+        
+        feasible = total_memory_required <= hardware.memory.capacity
+        utilization = (total_memory_required / hardware.memory.capacity).magnitude if hardware.memory.capacity.magnitude > 0 else 1.0
+        
+        # 2. Injection Bottleneck vs Compute Bottleneck per Layer
+        layer_params = model.parameters / model.layers
+        layer_weight_bytes = layer_params.to(ureg.count).magnitude * bpp.magnitude * ureg.byte
+        
+        # Injection time (MemoryX -> WSE)
+        inj_bw = hardware.interconnect.bandwidth if hardware.interconnect else Q_("100 GB/s")
+        if inj_bw.magnitude == 0:
+            inj_bw = Q_("100 GB/s")
+            
+        layer_injection_time = (layer_weight_bytes / inj_bw).to("ms")
+        
+        # Compute time (Wafer compute) for one sequence token across the batch
+        # 2 * parameters * batch_size
+        layer_decode_flops = 2 * layer_params.to(ureg.count).magnitude * batch_size * ureg.flop
+        layer_compute_time = (layer_decode_flops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
+        
+        # True layer time is bounded by the slowest process
+        if layer_compute_time >= layer_injection_time:
+            bottleneck = "Compute-Bound"
+            layer_time = layer_compute_time
+        else:
+            bottleneck = "Interconnect-Bandwidth-Bound"
+            layer_time = layer_injection_time
+            
+        total_token_time = layer_time * model.layers
+        tps = (batch_size / total_token_time).to("1/s").magnitude if total_token_time.magnitude > 0 else 0.0
+        
+        # 3. Optimal Batch Size Analysis
+        # What batch size perfectly overlaps injection and compute?
+        # Solve: t_inject = (2 * layer_params * B) / (peak_flops * efficiency)
+        # => B = t_inject * peak_flops * efficiency / (2 * layer_params)
+        optimal_batch = (layer_injection_time * peak_flops * efficiency) / (2 * layer_params.to(ureg.count).magnitude * ureg.flop)
+        optimal_batch_int = max(1, int(optimal_batch.to_base_units().magnitude))
+
+        # Short-circuit: if infeasible (SRAM overflow), report zero throughput
+        if not feasible:
+            tps = 0.0
+
+        return WeightStreamingResult(
+            feasible=feasible,
+            throughput_tokens_per_sec=tps,
+            bottleneck=bottleneck,
+            layer_compute_time=layer_compute_time,
+            layer_injection_time=layer_injection_time,
+            optimal_batch_size=optimal_batch_int,
+            wafer_memory_utilization=min(utilization, 1.0) if feasible else utilization,
+        )
+
+class TailLatencySolver(BaseSolver):
+    """
+    Analyzes queueing delays and P99 tail latency for deployed inference models.
+    
+    Models inference servers as M/M/c queues to determine if the deployment 
+    can sustain the target arrival rate while meeting strict SLA latency bounds.
+
+    Literature Source:
+    1. Dean & Barroso (2013), "The Tail at Scale."
+    """
+    requires = ("hardware",)
+    produces = TailLatencyResult
+    walls = (13,)
+
+    def solve(self, arrival_rate_qps: float, service_latency_ms: float, num_replicas: int = 1) -> TailLatencyResult:
+        """Solves for P50 and P99 tail latencies under variable load."""
+        from .formulas import calc_queue_latency_mmc
+        
+        service_rate_hz = 1000.0 / service_latency_ms if service_latency_ms > 0 else 0.0
+        
+        rho, p50_w, p99_w = calc_queue_latency_mmc(arrival_rate_qps, service_rate_hz, num_replicas)
+        
+        is_stable = rho < 1.0
+        
+        # P99 wait time exceeding 5x service latency signifies severe SLA risk
+        slo_threshold = service_latency_ms * 5
+        
+        p99_w_ms = p99_w.m_as(ureg.millisecond)
+        p50_w_ms = p50_w.m_as(ureg.millisecond)
+        
+        violation_prob = 1.0 if not is_stable else (p99_w_ms / slo_threshold if slo_threshold > 0 else 0)
+        violation_prob = min(1.0, max(0.0, violation_prob))
+        
+        return TailLatencyResult(
+            p50_latency=Q_(p50_w_ms + service_latency_ms, "ms"),
+            p99_latency=Q_(p99_w_ms + service_latency_ms, "ms"),
+            queue_utilization=rho,
+            is_stable=is_stable,
+            slo_violation_probability=violation_prob
+        )
+
 class EconomicsSolver(BaseSolver):
     """
     Calculates Total Cost of Ownership (TCO) including Capex and Opex.
@@ -448,7 +718,7 @@ class EconomicsSolver(BaseSolver):
     produces = EconomicsResult
     walls = (13,)
 
-    def solve(self, fleet: Fleet, duration_days: float, kwh_price: Optional[float] = None, datacenter: Optional[Any] = None, grid: Optional[Any] = None) -> EconomicsResult:
+    def solve(self, fleet: Fleet, duration_days: float, kwh_price: Optional[float] = None, datacenter: Optional[Any] = None, grid: Optional[Any] = None, mfu: float = 1.0) -> EconomicsResult:
         """
         Calculates the TCO for a fleet over a specified duration.
 
@@ -464,6 +734,8 @@ class EconomicsSolver(BaseSolver):
             A specific datacenter profile.
         grid : GridProfile, optional
             A specific grid profile.
+        mfu : float, optional
+            Model FLOPs Utilization (0.0 to 1.0) impacting energy footprint.
 
         Returns
         -------
@@ -471,7 +743,7 @@ class EconomicsSolver(BaseSolver):
             Financial metrics including CapEx, OpEx, and total TCO.
         """
         sust_solver = SustainabilitySolver()
-        energy_result = sust_solver.solve(fleet, duration_days, datacenter=datacenter or grid)
+        energy_result = sust_solver.solve(fleet, duration_days, datacenter=datacenter or grid, mfu=mfu)
         
         price = kwh_price
         if price is None:
