@@ -173,6 +173,7 @@ RUN $qv = quarto --version ; `
         exit 1 ; `
     } ; `
     Write-Host "📦 Quarto installed: $qv" ; `
+    Write-Host "Required Quarto >= 1.9.27 for llms-txt support";`
     Write-Host '✅ Quarto installation completed!'
 
 # ------------------------------------------------------------
