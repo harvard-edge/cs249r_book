@@ -147,6 +147,22 @@ RUN Write-Host '=== STARTING SCOOP INSTALLATION ===' ; `
 RUN Write-Host '=== STARTING QUARTO INSTALLATION ===' ; `
     Write-Host 'Installing Quarto via Scoop (extras bucket)...' ; `
     scoop install extras/quarto ; `
+    Write-Host '✅ Quarto installation completed!'
+
+# Ensure required Quarto version
+RUN $qv = quarto --version ; `
+    Write-Host "Installed Quarto version: $qv" ; `
+    if ($qv -lt "1.9.27") { `
+        Write-Host "⚠️ Scoop version too old. Installing Quarto 1.9.27 manually..." ; `
+        Invoke-WebRequest `
+          -Uri "https://github.com/quarto-dev/quarto-cli/releases/download/v1.9.27/quarto-1.9.27-win.zip" `
+          -OutFile "C:\temp\quarto.zip" ; `
+        Expand-Archive C:\temp\quarto.zip -DestinationPath C:\quarto -Force ; `
+        $quartoBin = "C:\quarto\quarto-1.9.27\bin" ; `
+        $mach = [Environment]::GetEnvironmentVariable('PATH','Machine') ; `
+        [Environment]::SetEnvironmentVariable('PATH', "$quartoBin;$mach", 'Machine') ; `
+        Write-Host "✅ Quarto upgraded to 1.9.27" ; `
+    } ; `
     if (-not (Get-Command quarto -ErrorAction SilentlyContinue)) { `
         Write-Host '❌ Quarto install failed: executable not found in PATH' ; `
         exit 1 ; `
