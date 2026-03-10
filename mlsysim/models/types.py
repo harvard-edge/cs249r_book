@@ -68,12 +68,13 @@ class TransformerWorkload(Workload):
         n_kv_heads = self.kv_heads or n_heads
         return calc_kv_cache_size(n_layers=self.layers, n_heads=n_kv_heads, head_dim=head_dim, seq_len=seq_len, batch_size=batch_size, bytes_per_elem=precision)
 
-    def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective") -> Quantity:
+    def training_memory(self, batch_size: int, seq_len: int, precision: str = "fp16", optimizer: str = "adam", strategy: str = "selective", zero_stage: int = 0, dp_size: int = 1, is_lora: bool = False, lora_rank: int = 16) -> Quantity:
         """
         Estimate training memory for a Transformer model.
         
         Source: Shoeybi et al. (2019), "Megatron-LM: Training Multi-Billion Parameter 
                 Language Models Using Model Parallelism"
+        Source: Rajbhandari et al. (2020), "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models."
         
         Args:
             batch_size: Mini-batch size (B)
@@ -81,6 +82,9 @@ class TransformerWorkload(Workload):
             precision: Precision format ('fp32', 'fp16', 'int8', 'int4')
             optimizer: Optimizer type ('adam', 'sgd')
             strategy: Recompute strategy ('none', 'selective', 'full')
+            zero_stage: ZeRO optimization stage (0, 1, 2, 3)
+            dp_size: Data parallel size for ZeRO sharding
+            is_lora: Whether Low-Rank Adaptation (PEFT) is used
             
         Returns:
             Quantity[byte]: Total training memory per GPU
@@ -94,7 +98,8 @@ class TransformerWorkload(Workload):
         n_params = self.parameters.to(ureg.count).magnitude
         
         # 1. Weights and Gradients
-        w_grad_mem = n_params * (bpp + bpp) * ureg.byte
+        weight_mem = n_params * bpp * ureg.byte
+        grad_mem = n_params * bpp * ureg.byte
         
         # 2. Optimizer States (Adam = 12 bytes/param for FP32 states)
         if optimizer.lower() == "adam":
@@ -103,6 +108,26 @@ class TransformerWorkload(Workload):
         else:
             # SGD: master weights (4) = 4 bytes/param
             opt_mem = n_params * 4 * ureg.byte
+            
+        # LoRA: trainable fraction ≈ 2 * r * d_model * n_adapted_layers / total_params
+        # For typical configs (all linear layers in attention + MLP):
+        #   n_adapted = 4 * layers (Q, K, V, O projections)
+        #   trainable = 2 * r * d_model * 4 * layers / total_params
+        if is_lora:
+            d_model = self.hidden_dim or 4096
+            n_adapted = 4 * self.layers  # Q, K, V, O per layer
+            lora_params = 2 * lora_rank * d_model * n_adapted
+            lora_fraction = min(lora_params / n_params, 1.0)
+            grad_mem = grad_mem * lora_fraction
+            opt_mem = opt_mem * lora_fraction
+
+        # ZeRO Sharding
+        if zero_stage >= 1:
+            opt_mem = opt_mem / dp_size
+        if zero_stage >= 2:
+            grad_mem = grad_mem / dp_size
+        if zero_stage >= 3:
+            weight_mem = weight_mem / dp_size
             
         # 3. Activation Memory (proportional to B, S, H)
         act_mem = calc_activation_memory(
@@ -114,7 +139,7 @@ class TransformerWorkload(Workload):
             strategy=strategy
         )
         
-        return (w_grad_mem + opt_mem + act_mem).to(ureg.GB)
+        return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GB)
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)

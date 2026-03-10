@@ -45,6 +45,14 @@ This document tracks the systematic build-out of the advanced features for Volum
 *   Established **Engineering & Modeling Best Practices** in `BEST_PRACTICES.md`.
 *   Created **Hello World** and **Manual Sweep** tutorials for students.
 
+### SOTA Paradigm Completeness (New Additions) [COMPLETED]
+*   **ZeRO/FSDP:** Added `zero_stage` support in `TransformerWorkload.training_memory` and `DistributedSolver`, appropriately sharding memory footprints for optimizer states and gradients.
+*   **PEFT/LoRA:** Added `is_lora` flag to eliminate 99% of optimizer state footprint for fine-tuning workloads, making large-model single-node tuning mathematically feasible.
+*   **Activation Recomputation:** Added `activation_recomputation` flag trading off +33% training FLOPS for massive activation memory savings via selective recalculation.
+*   **Compute/Communication Overlap:** Added `overlap_comm` flag to `DistributedSolver` changing the latency equation from strictly additive to mathematically hiding network latency behind backward pass computation.
+*   **Speculative Decoding:** Upgraded `ServingSolver` with `draft_model` and `draft_acceptance_rate` inputs, calculating probability-weighted expected latency improvements.
+*   **Disaggregated Serving:** Added `decode_hardware` and `network_bandwidth` options to `ServingSolver` to model split pre-fill and decode clusters exchanging KV-cache payloads over datacenter fabrics.
+
 ---
 
 ## 🛠 Feature Specs

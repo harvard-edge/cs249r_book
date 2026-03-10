@@ -135,7 +135,14 @@ class DistributedSolver(BaseSolver):
               ep_size: int = 1,
               v_stages: int = 1,
               microbatch_count: int = 1,
-              topology_override: Optional[str] = None) -> DistributedResult:
+              topology_override: Optional[str] = None,
+              zero_stage: int = 0,
+              is_lora: bool = False,
+              activation_recomputation: bool = False,
+              overlap_comm: bool = False,
+              overlap_efficiency: float = 0.85,
+              congestion_factor: float = 1.0,
+              seq_len: int = 2048) -> DistributedResult:
         """
         Calculates distributed training performance using the 3D/4D Parallelism model.
 
@@ -167,6 +174,23 @@ class DistributedSolver(BaseSolver):
             bubble but increases synchronization overhead.
         topology_override : str, optional
             Force a specific topology (ring, tree).
+        zero_stage : int
+            ZeRO optimization stage (0, 1, 2, 3) for sharding memory and altering DP comms.
+        is_lora : bool
+            Whether using Low-Rank Adaptation (PEFT).
+        activation_recomputation : bool
+            Whether to trade FLOPS (+33%) for activation memory savings.
+        overlap_comm : bool
+            Whether to overlap DP communication with backward pass compute.
+        overlap_efficiency : float
+            Fraction of communication hidden behind compute (0.0-1.0).
+            Default 0.85 reflects typical Megatron-LM overlap efficiency.
+        congestion_factor : float
+            Multiplicative factor on communication time to account for
+            network congestion (1.0 = ideal, 1.5-2.0 = shared fabric,
+            2.0-3.0 = oversubscribed multi-tenant).
+        seq_len : int
+            Sequence length for memory calculation.
 
         Returns
         -------
@@ -182,6 +206,8 @@ class DistributedSolver(BaseSolver):
             raise ValueError(f"Infeasible 4D Parallelism: TP({tp_size}) * PP({pp_size}) * EP({ep_size}) > Total({n_accelerators})")
 
         # 2. Single Node Performance (Computation)
+        local_batch = max(1, batch_size // (dp_size * tp_size * pp_size * ep_size)) # Fix: global batch is divided by DP
+        # Wait, usually global batch size = local_batch_per_dp * dp_size.
         local_batch = max(1, batch_size // dp_size)
         if batch_size < dp_size:
             import warnings
@@ -190,14 +216,23 @@ class DistributedSolver(BaseSolver):
                 f"some ranks will be idle. Using local_batch=1.",
                 stacklevel=2,
             )
-        node_perf = Engine.solve(model, fleet.node.accelerator, batch_size=local_batch, precision=precision, efficiency=efficiency)
+        node_perf = Engine.solve(
+            model, fleet.node.accelerator, batch_size=local_batch, 
+            precision=precision, efficiency=efficiency,
+            is_training=True, seq_len=seq_len, zero_stage=zero_stage,
+            dp_size=dp_size, is_lora=is_lora, 
+            activation_recomputation=activation_recomputation
+        )
 
         # 3. Communication Overhead (Network)
         # DP AllReduce exchanges gradients, which equal model size in the active precision.
         # With TP, each rank holds 1/tp_size of the model, so gradient buffer is smaller.
+        # With ZeRO-1/2, AllReduce is replaced by Reduce-Scatter and All-Gather (same total volume but different patterns).
         gradient_size = model.size_in_bytes() / tp_size
+        if is_lora:
+            gradient_size = gradient_size * 0.01
         
-        # DP AllReduce (Gradients — same size as model weights per DP rank)
+        # DP Communication
         if dp_size > 1:
             if fleet.node.accelerators_per_node > 1 and dp_size > fleet.node.accelerators_per_node:
                 # Hierarchical: Ring within node, then Ring across nodes
@@ -242,10 +277,23 @@ class DistributedSolver(BaseSolver):
         t_bubble = (node_perf.latency * bubble_fraction) if pp_size > 1 else Q_("0 ms")
 
         # 5. Total Latency and Scaling Efficiency
+        # Apply congestion factor to all communication
+        t_comm_dp = t_comm_dp * congestion_factor
+        t_comm_tp = t_comm_tp * congestion_factor
+        t_comm_ep = t_comm_ep * congestion_factor
         total_comm_latency = t_comm_dp + t_comm_tp + t_comm_ep
-        step_latency_total = node_perf.latency + total_comm_latency + t_bubble
+
+        if overlap_comm:
+            # Overlap DP communication with backward pass compute.
+            # overlap_efficiency=1.0 means perfect overlap (theoretical best).
+            # Default 0.85 reflects real framework behavior (Megatron-LM).
+            exposed_dp_latency = t_comm_dp * (1 - overlap_efficiency)
+            step_latency_total = node_perf.latency + exposed_dp_latency + t_comm_tp + t_comm_ep + t_bubble
+        else:
+            step_latency_total = node_perf.latency + total_comm_latency + t_bubble
         
         scaling_efficiency = (node_perf.latency / step_latency_total).magnitude
+
         
         return DistributedResult(
             node_performance=node_perf,
@@ -449,24 +497,92 @@ class ServingSolver(BaseSolver):
     requires = ("workload", "hardware")
     produces = ServingResult
 
-    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5) -> ServingResult:
+    def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
+              decode_hardware: Optional[HardwareNode] = None, network_bandwidth: Quantity = Q_("100 GB/s"),
+              draft_model: Optional[TransformerWorkload] = None, draft_acceptance_rate: float = 0.7) -> ServingResult:
         """
         Solves for LLM serving performance.
+
+        Parameters
+        ----------
+        model : TransformerWorkload
+            The primary model to be served.
+        hardware : HardwareNode
+            The hardware node for serving (or pre-fill node in disaggregated serving).
+        seq_len : int
+            Sequence length (context window).
+        batch_size : int
+            Batch size.
+        precision : str
+            Numerical precision.
+        efficiency : float
+            Compute efficiency.
+        decode_hardware : HardwareNode, optional
+            If provided, models Disaggregated Serving where 'hardware' does pre-fill 
+            and 'decode_hardware' does decoding. KV-cache is transferred over the network.
+        network_bandwidth : Quantity
+            Network bandwidth between pre-fill and decode nodes.
+        draft_model : TransformerWorkload, optional
+            If provided, models Speculative Decoding using this smaller draft model.
+        draft_acceptance_rate : float
+            Expected acceptance rate (0.0 to 1.0) of draft tokens per step.
+
+        Returns
+        -------
+        ServingResult
+            Serving performance metrics.
         """
         prec_map = PRECISION_MAP
         bpp = prec_map.get(precision, BYTES_FP16)
-        peak_flops = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
         
+        # 1. Pre-fill Phase
+        peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
         prefill_ops = 2 * model.parameters.to(ureg.count).magnitude * seq_len * batch_size * ureg.flop
-        t_prefill = (prefill_ops / (peak_flops * efficiency)).to("ms") + hardware.dispatch_tax
+        t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
         
-        model_weights_bytes = model.size_in_bytes(bpp)
         kv_cache_bytes = model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
         
-        t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / hardware.memory.bandwidth).to("ms")
+        # 2. Disaggregated Serving (KV-Cache Transfer)
+        if decode_hardware:
+            t_transfer = (kv_cache_bytes / network_bandwidth).to("ms")
+            t_prefill += t_transfer
+            decode_hw = decode_hardware
+        else:
+            decode_hw = hardware
+
+        # 3. Decode Phase
+        model_weights_bytes = model.size_in_bytes(bpp)
+        t_decode_per_token = ((model_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+
+        # 4. Speculative Decoding
+        if draft_model:
+            # Time to generate 1 token with draft model
+            draft_weights_bytes = draft_model.size_in_bytes(bpp)
+            t_draft_token = ((draft_weights_bytes + kv_cache_bytes) / decode_hw.memory.bandwidth).to("ms")
+            
+            # Speculative decoding batches K draft tokens (e.g., K=4)
+            K = 4
+            t_draft_phase = t_draft_token * K
+            
+            # Verification phase: Target model verifies K tokens in parallel (compute-bound or memory-bound)
+            # Simplification: verifying K tokens is roughly 1 forward pass of target model + small compute overhead
+            t_verify = t_decode_per_token # essentially memory bound by loading target weights once
+            
+            # Expected tokens per step via geometric series (Leviathan et al., 2023):
+            # E[accepted] = alpha*(1 - alpha^K)/(1 - alpha), plus 1 bonus token
+            alpha = draft_acceptance_rate
+            if alpha < 1.0:
+                expected_tokens = 1 + alpha * (1 - alpha**K) / (1 - alpha)
+            else:
+                expected_tokens = 1 + K  # perfect acceptance
+            
+            # Effective ITL
+            t_decode_per_token = (t_draft_phase + t_verify) / expected_tokens
         
         total_memory_required = model_weights_bytes + kv_cache_bytes
-        feasible = total_memory_required <= hardware.memory.capacity
+        if draft_model:
+            total_memory_required += draft_model.size_in_bytes(bpp)
+        feasible = total_memory_required <= decode_hw.memory.capacity
         
         return ServingResult(
             feasible=feasible,
@@ -475,7 +591,7 @@ class ServingSolver(BaseSolver):
             kv_cache_size=kv_cache_bytes.to("GB"),
             model_weights_size=model_weights_bytes.to("GB"),
             total_memory_required=total_memory_required.to("GB"),
-            memory_utilization=(total_memory_required / hardware.memory.capacity).to_base_units().magnitude,
+            memory_utilization=(total_memory_required / decode_hw.memory.capacity).to_base_units().magnitude,
         )
 
 

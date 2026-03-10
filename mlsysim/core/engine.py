@@ -73,7 +73,9 @@ class Engine:
     @staticmethod
     def solve(model: Workload, hardware: HardwareNode, batch_size: int = 1,
               precision: str = "fp16", efficiency: float = 0.5,
-              raise_errors: bool = False) -> PerformanceProfile:
+              raise_errors: bool = False, is_training: bool = False,
+              seq_len: int = 2048, zero_stage: int = 0, dp_size: int = 1,
+              is_lora: bool = False, activation_recomputation: bool = False) -> PerformanceProfile:
         """
         Solves the Roofline performance profile for a single hardware node.
 
@@ -91,6 +93,18 @@ class Engine:
             Achieved compute efficiency as a fraction of peak (0.0 to 1.0).
         raise_errors : bool
             If True, raise OOMError when the model does not fit in memory.
+        is_training : bool
+            Whether to model training (impacts memory and FLOPs).
+        seq_len : int
+            Sequence length (used for training memory footprint).
+        zero_stage : int
+            ZeRO optimization stage (0, 1, 2, 3) for memory sharding.
+        dp_size : int
+            Data parallel size for ZeRO sharding.
+        is_lora : bool
+            Whether to use Low-Rank Adaptation (reduces optimizer memory).
+        activation_recomputation : bool
+            Whether to use activation recomputation (saves memory, adds 33% FLOPs).
 
         Returns
         -------
@@ -108,23 +122,44 @@ class Engine:
         # 3. Lower the workload to a ComputationGraph
         graph = model.lower(bpp)
 
-        # 4. Feasibility check — does the model fit in memory?
-        feasible = graph.weight_bytes <= hardware.memory.capacity
+        # 4. Resolve memory footprint and FLOPs based on training vs inference
+        if is_training:
+            # Training is roughly 3x FLOPs of inference (1 forward, 2 backward passes)
+            # With activation recomputation, it adds another forward pass (+33% total training ops) -> 4x base ops
+            ops_multiplier = 4 if activation_recomputation else 3
+            base_ops = graph.total_ops * ops_multiplier
+            
+            # Calculate training memory footprint
+            if hasattr(model, 'training_memory'):
+                strategy = "selective" if activation_recomputation else "none"
+                memory_footprint = model.training_memory(
+                    batch_size=batch_size, seq_len=seq_len, precision=precision, 
+                    strategy=strategy, zero_stage=zero_stage, dp_size=dp_size, is_lora=is_lora
+                )
+            else:
+                # Fallback for non-Transformer workloads: 3x weights + gradients + states
+                memory_footprint = graph.weight_bytes * (3 if not is_lora else 1.1)
+        else:
+            base_ops = graph.total_ops
+            memory_footprint = graph.weight_bytes
+
+        # 5. Feasibility check — does the model fit in memory?
+        feasible = memory_footprint <= hardware.memory.capacity
         if not feasible and raise_errors:
             raise OOMError(
-                f"Model '{model.name}' requires {graph.weight_bytes.to('GB'):~P} "
+                f"Model '{model.name}' requires {memory_footprint.to('GB'):~P} "
                 f"but hardware '{hardware.name}' has only "
                 f"{hardware.memory.capacity.to('GB'):~P}.",
-                required_bytes=graph.weight_bytes,
+                required_bytes=memory_footprint,
                 available_bytes=hardware.memory.capacity,
             )
 
-        # 5. Roofline bottleneck analysis
+        # 6. Roofline bottleneck analysis
         # Scale compute by batch_size: processing B samples requires B × ops_per_sample.
-        # Weights are loaded once regardless of batch size (weight-streaming model).
+        # Note: if is_training, base_ops already represents the full training step cost per sample.
         effective_flops = peak_flops * efficiency
         effective_bw = hardware.memory.bandwidth
-        batch_ops = graph.total_ops * batch_size
+        batch_ops = base_ops * batch_size
 
         # Guard against zero ops or zero bandwidth
         if batch_ops.magnitude == 0:
@@ -135,7 +170,8 @@ class Engine:
         if effective_bw.magnitude == 0:
             memory_time = Q_("0 ms")
         else:
-            memory_time = (graph.weight_bytes / effective_bw).to("ms")
+            # Memory time is bottlenecked by loading the memory footprint
+            memory_time = (memory_footprint / effective_bw).to("ms")
 
         roofline = calc_bottleneck(
             batch_ops, graph.weight_bytes, effective_flops, effective_bw
@@ -175,7 +211,7 @@ class Engine:
             bottleneck=bottleneck,
             arithmetic_intensity=graph.arithmetic_intensity,
             energy=energy,
-            memory_footprint=graph.weight_bytes,
+            memory_footprint=memory_footprint,
             peak_flops_actual=effective_flops,
             peak_bw_actual=effective_bw,
             mfu=mfu,
