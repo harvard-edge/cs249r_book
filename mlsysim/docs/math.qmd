@@ -2,8 +2,7 @@
 title: "Mathematical Foundations"
 subtitle: "The First-Principles Equations Behind Every MLSys·im Solver"
 ---
-MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below.
-Before diving into code, read this page to understand *what* the solvers are computing and *why*.
+MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below, each grounded in a published systems paper. Before diving into code, read this page to understand *what* the 21 solvers are computing and *why*.
 
 ::: {.callout-tip}
 ## Reading these equations
@@ -302,7 +301,7 @@ The estimated accuracy impact ($\Delta A$) is non-linear and typically follows e
 
 *Implemented in [`mlsysim.core.solver.SustainabilitySolver`](api/core.solver.SustainabilitySolver.qmd).*
 
-### 4.1 Total Energy
+### 8.1 Total Energy
 
 $$
 E = \text{IT\_Power} \times \text{Hours} \times \text{PUE}
@@ -311,7 +310,7 @@ $$
 Power Usage Effectiveness (PUE) accounts for cooling and facility overhead. A PUE of 1.0 is
 theoretical perfect efficiency; hyperscale datacenters typically achieve 1.1–1.4.
 
-### 4.2 Carbon Footprint
+### 8.2 Carbon Footprint
 
 $$
 C = E \times \text{Carbon\_Intensity}
@@ -359,12 +358,100 @@ For a cluster, the collective $M$ drops linearly with the number of components. 
 
 ---
 
+## 11. Tail Latency (Erlang-C Queueing)
+
+*Implemented in [`mlsysim.core.solver.TailLatencySolver`](api/core.solver.TailLatencySolver.qmd).*
+
+::: {.callout-note appearance="simple" icon=false}
+**Intuition: Why P99 Matters More Than Median**
+Deploying inference at scale requires not just median performance but P99 tail latency guarantees. As server utilization increases from 80% to 95%, tail latency doesn't increase linearly — it explodes. This non-linearity surprises engineers accustomed to thinking of "high utilization" as desirable.
+
+**Source:** @dean2013tail
+:::
+
+For an inference server farm modeled as an M/M/$c$ queue with $c$ replicas and per-server utilization $\rho = \lambda / (c\mu)$:
+
+$$
+\mathbb{P}[\text{wait}] = \frac{(c\rho)^c / c! \cdot (1-\rho)^{-1}}{\sum_{k=0}^{c-1}(c\rho)^k/k! + (c\rho)^c/c! \cdot (1-\rho)^{-1}}
+$$
+
+P99 latency grows non-linearly as $\rho \to 1$. The TailLatencySolver computes P50 and P99 wait times and SLO violation probability as a function of arrival rate, service latency, and replica count.
+
+---
+
+## 12. Weight Streaming (Wafer-Scale Inference)
+
+*Implemented in [`mlsysim.core.solver.WeightStreamingSolver`](api/core.solver.WeightStreamingSolver.qmd).*
+
+::: {.callout-note appearance="simple" icon=false}
+**Intuition: Inverting the Memory Wall**
+Wafer-scale architectures (e.g., Cerebras CS-3) invert the GPU memory wall: activations reside on-wafer in SRAM while model weights stream from external MemoryX nodes. The bottleneck shifts from HBM bandwidth to injection interconnect bandwidth.
+:::
+
+Per-layer execution time is:
+
+$$
+T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2|W_{\ell}| \times B}{\text{Peak} \times \eta}\right)
+$$
+
+The optimal batch size where injection and compute perfectly overlap:
+
+$$
+B^{*} = \frac{BW_{\text{inject}} \times \text{Peak} \times \eta}{2|W_{\ell}|}
+$$
+
+---
+
+## 13. Responsible Engineering (DP-SGD Overhead)
+
+*Implemented in [`mlsysim.core.solver.ResponsibleEngineeringSolver`](api/core.solver.ResponsibleEngineeringSolver.qmd).*
+
+Privacy and fairness guarantees impose measurable computational overhead. Differential privacy via DP-SGD requires per-sample gradient clipping and calibrated noise addition:
+
+$$
+\sigma \propto \frac{1}{\epsilon}
+$$
+
+The per-step clipping and noise addition incur a training slowdown of approximately 2–10×. Fairness constraints require sufficient representation of minority subgroups, demanding additional data proportional to $O(1/p_{\min})$ where $p_{\min}$ is the smallest subgroup prevalence.
+
+---
+
+## 14. Sensitivity Analysis (Binding Constraints)
+
+*Implemented in [`mlsysim.core.solver.SensitivitySolver`](api/core.solver.SensitivitySolver.qmd).*
+
+The SensitivitySolver identifies the binding constraint by computing partial derivatives of end-to-end latency with respect to each hardware parameter:
+
+$$
+\frac{\partial T}{\partial BW_{\text{mem}}}, \quad \frac{\partial T}{\partial \text{Peak}_{\text{FLOPS}}}, \quad \frac{\partial T}{\partial BW_{\text{net}}}, \quad \ldots
+$$
+
+The parameter with the largest (most negative) sensitivity is the binding constraint — the single upgrade that would yield the greatest performance improvement. This transforms "where should I invest?" from intuition into calculation.
+
+---
+
+## 15. Inverse Roofline Synthesis
+
+*Implemented in [`mlsysim.core.solver.SynthesisSolver`](api/core.solver.SynthesisSolver.qmd).*
+
+The SynthesisSolver inverts the analysis: given a workload and a service-level agreement, it derives the minimum hardware specifications required:
+
+$$
+BW_{\text{required}} = \frac{|W|}{T_{\text{target}}}, \qquad \text{FLOPS}_{\text{required}} = \frac{\text{OPs}}{T_{\text{target}} \times \eta}
+$$
+
+This enables hardware–software co-design: rather than asking "how fast is my system?" the practitioner asks "what system do I need?"
+
+---
+
 ::: {.callout-note}
 ## Limitations of First-Order Models
 These equations are first-order analytical models. They assume:
 (1) uniform memory access patterns, (2) no cache effects, (3) no network contention under
 heavy load, and (4) linear scaling of throughput with batch size.
 Real systems deviate from these assumptions. MLSys·im predictions are typically accurate
-within ±20% of measured hardware performance—sufficient for systems intuition and
+within ±20% of measured hardware performance — sufficient for systems intuition and
 capacity planning, but not a substitute for empirical profiling.
+
+For a detailed discussion of accuracy, limitations, and when to use MLSys·im vs. empirical profiling, see [Accuracy & Validation](accuracy.qmd).
 :::

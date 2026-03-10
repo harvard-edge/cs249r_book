@@ -69,7 +69,7 @@ for hw in [mlsysim.Hardware.Cloud.H100,
 
 ## Composing Solvers for Real Questions
 
-The six solvers are designed to chain:
+The 21 solvers are designed to chain — the output of one feeds into the next:
 
 ### "Can I serve Llama-70B on 4 H100s within budget?"
 
@@ -110,6 +110,113 @@ for grid in [mlsysim.Infra.Grids.Quebec, mlsysim.Infra.Grids.US_Average,
     print(f"{grid.name:12s}  {r['carbon_kg'].to('metric_ton'):>8.1f~}")
 ```
 
+### "Should I invest in FLOPS or bandwidth for next-gen inference?"
+
+```python
+from mlsysim import SensitivitySolver
+
+solver = SensitivitySolver()
+res = solver.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    hardware=mlsysim.Hardware.Cloud.A100
+)
+
+print(res.sensitivities)
+# {'peak_flops': -0.06, 'memory_bandwidth': -0.88, 'memory_capacity': 0.00}
+print(f"Binding constraint: {res.binding_constraint}")
+# → memory_bandwidth (10% more BW = 8.8% faster; 10% more FLOPS = 0.6% faster)
+```
+
+---
+
+## Production Workflow: Capacity Planning
+
+MLSys·im fits into a four-stage capacity planning workflow:
+
+| Stage | What You Do | Which Solvers | Output |
+|:------|:------------|:--------------|:-------|
+| **1. Requirements** | Define SLA targets (latency, throughput) | `SynthesisSolver` | Minimum hardware specs |
+| **2. Shortlisting** | Evaluate 5–10 hardware configs | `ServingSolver` + `EconomicsSolver` | Ranked candidates with TCO |
+| **3. Validation** | Profile top 2–3 candidates | *Empirical (vLLM, PyTorch Profiler)* | Ground-truth measurements |
+| **4. Procurement** | Make the business case | `SustainabilitySolver` + `SensitivitySolver` | TCO, carbon, binding constraint report |
+
+MLSys·im handles stages 1, 2, and 4. Stage 3 requires empirical profiling on real hardware. The value is in **narrowing the design space** from thousands of configurations to a handful worth profiling — saving weeks of benchmarking time.
+
+::: {.callout-tip}
+## Safety Margins
+MLSys·im models workloads in isolation. Production systems run multiple workloads on shared infrastructure with context switching, memory fragmentation, and co-location interference. Apply a **1.3–2× safety margin** on MLSys·im latency estimates for production SLA planning.
+:::
+
+### "Will my 30-day training run complete without failure?"
+
+```python
+from mlsysim import ReliabilitySolver, CheckpointSolver
+
+# Step 1: How often will the cluster fail?
+reliability = ReliabilitySolver()
+rel = reliability.solve(
+    fleet=mlsysim.Systems.Clusters.H100_256,
+    job_duration_days=30
+)
+print(f"Fleet MTBF: {rel.fleet_mtbf.to('hours'):~.1f}")
+print(f"Expected failures in 30 days: {rel.expected_failures:.1f}")
+print(f"Optimal checkpoint interval: {rel.optimal_interval.to('minutes'):~.1f}")
+
+# Step 2: What's the MFU penalty of checkpointing at that interval?
+ckpt = CheckpointSolver()
+penalty = ckpt.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    hardware=mlsysim.Hardware.Cloud.H100,
+    optimizer="adam",
+    checkpoint_interval=rel.optimal_interval
+)
+print(f"Checkpoint size: {penalty.checkpoint_size.to('GB'):~.1f}")
+print(f"MFU penalty: {penalty.mfu_penalty*100:.1f}%")
+```
+
+### "What hardware do I need to meet this latency SLA?"
+
+```python
+from mlsysim import SynthesisSolver
+
+# Invert the Roofline: given a target, derive minimum specs
+synth = SynthesisSolver()
+specs = synth.solve(
+    model=mlsysim.Models.Language.Llama3_70B,
+    target_latency=mlsysim.Q_("30 ms/token"),  # ITL SLA
+    precision="fp16"
+)
+print(f"Minimum memory BW: {specs.required_bandwidth.to('TB/s'):~.2f}")
+print(f"Minimum memory:    {specs.required_memory.to('GB'):~.1f}")
+print(f"Minimum FLOPS:     {specs.required_flops.to('TFLOP/s'):~.1f}")
+
+# Which hardware in the Zoo meets these specs?
+for hw in mlsysim.Hardware.all():
+    if (hw.memory.bandwidth >= specs.required_bandwidth and
+        hw.memory.capacity >= specs.required_memory):
+        print(f"  ✓ {hw.name}")
+```
+
+---
+
+## Dimensional Strictness: Why Units Matter
+
+All quantities in MLSys·im are `pint.Quantity` objects with physical units enforced at runtime. This prevents the most common class of back-of-envelope errors — the kind that cause real production incidents:
+
+```python
+hw = mlsysim.Hardware.Cloud.A100
+
+# These work — units are compatible:
+ridge_point = hw.compute.peak_flops / hw.memory.bandwidth  # → FLOP/byte ✓
+time = model_bytes / hw.memory.bandwidth                    # → seconds ✓
+
+# These raise DimensionalityError — caught before producing a bad number:
+hw.memory.bandwidth + hw.compute.peak_flops   # GB/s + FLOP/s → ERROR
+hw.memory.bandwidth.to("FLOP/s")              # GB/s ≠ FLOP/s → ERROR
+```
+
+In spreadsheet modeling, confusing gigabytes with gigabits or mixing per-device and per-node bandwidth silently produces a 8× or 4× error. In MLSys·im, these errors are structurally impossible. Think of it as type safety for systems analysis.
+
 ---
 
 ## Writing Custom Solvers
@@ -129,19 +236,6 @@ class PowerEfficiencySolver:
 ```
 
 See [Extending MLSys·im](solver-guide.qmd#extending-mlsysim) for the full guide.
-
----
-
-## Type Safety
-
-All quantities are `pint.Quantity` objects. Unit conversions are explicit, and dimensional errors are caught at runtime:
-
-```python
-hw = mlsysim.Hardware.Cloud.A100
-hw.compute.peak_flops.to("TFLOPs/s")   # → 312.0 TFLOPs/s
-hw.memory.bandwidth.to("TB/s")          # → 2.0 TB/s
-hw.memory.bandwidth.to("FLOP/s")        # → DimensionalityError ✓
-```
 
 ---
 

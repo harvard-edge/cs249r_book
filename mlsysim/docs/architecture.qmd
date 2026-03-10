@@ -1,10 +1,16 @@
 ---
 title: "The 5-Layer Architecture"
-subtitle: "The Mental Model of Progressive Lowering"
+subtitle: "Demand–Supply Separation and Progressive Lowering"
 ---
-The core philosophy of MLSys·im is **Progressive Lowering**. Rather than treating machine learning systems as black boxes, MLSys·im organizes the domain into five composable layers.
 
-Abstract workload *demand* (Layer A) is progressively mapped onto concrete hardware *supply* (Layers B, C, D) through analytical *solvers* (Layer E). Understanding this stack is the key to mastering both this library and the textbook it accompanies.
+::: {.callout-tip}
+## The MIPS Analogy
+Patterson and Hennessy did not give students cycle-accurate x86 simulators; they gave them a *taxonomically complete* instruction set that exposed every architectural concept through a model simple enough to reason about yet faithful enough to build real intuition. MLSys·im occupies the same niche for ML systems — sacrificing microarchitectural detail to achieve sub-second execution, enabling students and practitioners to sweep thousands of configurations in the time a cycle-accurate simulator requires for one.
+:::
+
+The core philosophy of MLSys·im is **Demand–Supply Separation with Progressive Lowering**. Rather than treating machine learning systems as black boxes, MLSys·im cleanly decouples *what* a model computes (demand) from *where* it runs (supply) and *why* constraints emerge (analysis).
+
+Abstract workload *demand* (Layer A) is progressively mapped onto concrete hardware *supply* (Layers B, C, D) through analytical *solvers* (Layer E) that enforce **dimensional strictness** at runtime — every physical quantity carries SI units via the `pint` library, making unit mismatches structurally impossible. Understanding this stack is the key to mastering both this library and the textbook it accompanies.
 
 ## The Stack Diagram
 
@@ -17,7 +23,7 @@ flowchart TB
     B["<b>Layer B: Hardware (Silicon)</b><br/>HardwareNode, ComputeCore, MemoryHierarchy, StorageHierarchy<br/><i>Peak FLOP/s, BW, Capacity, TDP, IO BW</i>"]
     C["<b>Layer C: Infrastructure (Environment)</b><br/>GridProfile, Datacenter<br/><i>Carbon Intensity, PUE, WUE</i>"]
     D["<b>Layer D: Systems (Topology)</b><br/>Node, Fleet, NetworkFabric<br/><i>Topology, Accelerators/Node, Fabric BW</i>"]
-    E["<b>Layer E: Solvers (21 Walls)</b><br/>Node: SingleNode · Efficiency · Serving · ContinuousBatching · WeightStreaming · TailLatency<br/>Data: Data · Transformation · Topology<br/>Algorithm: Scaling · InferenceScaling · Compression<br/>Fleet: Distributed · Reliability · Checkpoint · Orchestration · Economics · Sustainability · ResponsibleEngineering<br/>Analysis: Sensitivity · Synthesis"]
+    E["<b>Layer E: Solvers (22 Walls, 21 Solvers)</b><br/>Node (1–7): SingleNode · Efficiency · Serving · ContinuousBatching · WeightStreaming · TailLatency<br/>Data (8–10): Data · Transformation · Topology<br/>Algorithm (11–13): Scaling · InferenceScaling · Compression<br/>Fleet (14–16): Distributed · Reliability · Orchestration<br/>Operations (17–20): Economics · Sustainability · Checkpoint · ResponsibleEngineering<br/>Analysis (21–22): Sensitivity · Synthesis"]
     F["<b>Typed Results</b><br/>PerformanceProfile · DistributedResult · ServingResult · ..."]
 
     A --> E
@@ -77,46 +83,107 @@ The way you structure this system determines your communication overhead and you
 
 ---
 
+## The 22 Systems Walls
+
+Before introducing the solvers, it is essential to understand the **22 physical and logical constraints** that bound ML system performance. Each wall represents a specific bottleneck, grounded in a published equation and resolved by a dedicated solver. The walls are organized into six domains that progress from local node resources to fleet-scale operations.
+
+| # | Wall | Domain | What's Bounded | Core Equation | Key Reference |
+|:--|:-----|:-------|:---------------|:--------------|:--------------|
+| 1 | Compute | Node | Peak FLOP/s ceiling | $T = \text{OPs} / (\text{Peak} \times \eta)$ | Williams et al. (2009) |
+| 2 | Memory | Node | HBM BW + capacity | $T = \|W\| / BW_{\text{HBM}}$ | Williams et al. (2009) |
+| 3 | Software | Node | Achieved MFU | $\eta = f(\text{kernel, fusion, occupancy})$ | Chowdhery et al. (2022) |
+| 4 | Serving | Node | Prefill vs. decode | Two-phase roofline | Pope et al. (2023) |
+| 5 | Batching | Node | KV-cache fragmentation | $\text{KV} = 2LHD \lceil S/p \rceil pBb$ | Kwon et al. (2023) |
+| 6 | Streaming | Node | Injection BW | $T = \max(T_{\text{inject}}, T_{\text{compute}})$ | Cerebras (2024) |
+| 7 | Tail Latency | Node | P99 queueing delay | Erlang-C M/M/$c$ | Dean & Barroso (2013) |
+| 8 | Ingestion | Data | Storage I/O throughput | $\rho = BW_{\text{demand}} / BW_{\text{supply}}$ | Mohan et al. (2022) |
+| 9 | Transformation | Data | CPU preprocessing | $T = B \cdot S / C_{\text{tput}}$ | Murray et al. (2021) |
+| 10 | Locality | Data | Network bisection BW | $BW_{\text{eff}} = BW_{\text{link}} \cdot \beta / \text{osub}$ | Leiserson (1985) |
+| 11 | Complexity | Algorithm | Scaling law bounds | $C = 6PD$; $P^{*} = \sqrt{C/120}$ | Hoffmann et al. (2022) |
+| 12 | Reasoning | Algorithm | Inference-time compute | $T = K \times T_{\text{step}}$ | Brown et al. (2024) |
+| 13 | Fidelity | Algorithm | Accuracy–efficiency | $r = 32/b$; $r = 1/(1{-}s)$ | Han et al. (2015) |
+| 14 | Communication | Fleet | AllReduce overhead | $T = 2\frac{N{-}1}{N}\frac{M}{\beta} + 2(N{-}1)\alpha$ | Shoeybi et al. (2019) |
+| 15 | Fragility | Fleet | Cluster MTBF | $\text{MTBF}_{\text{cl}} = \text{MTBF}_{\text{node}}/N$ | Daly (2006) |
+| 16 | Multi-tenant | Fleet | Queue wait time | $T_{\text{wait}} = \rho / [2\mu(1{-}\rho)]$ | Little (1961) |
+| 17 | Capital | Operations | Total cost of ownership | $\text{TCO} = \text{CapEx} + \text{OpEx}$ | Barroso et al. (2018) |
+| 18 | Sustainability | Operations | Carbon + water | $\text{CO}_2 = E \times \text{PUE} \times \text{CI}$ | Patterson et al. (2022) |
+| 19 | Checkpoint | Operations | I/O burst MFU penalty | $\text{penalty} = T_{\text{write}} / T_{\text{interval}}$ | Eisenman et al. (2022) |
+| 20 | Safety | Operations | DP-SGD overhead | $\sigma \propto 1/\epsilon$ | Abadi et al. (2016) |
+| 21 | Sensitivity | Analysis | Binding constraint | $\partial T / \partial x_i$ | Williams et al. (2009) |
+| 22 | Synthesis | Analysis | Inverse spec derivation | $BW_{\text{req}} = \|W\| / T_{\text{target}}$ | Kwon et al. (2023) |
+
+: The 22 ML Systems Walls. Each wall represents a physical or logical constraint resolved by a dedicated solver. Walls 1–2 (Compute and Memory) share the `SingleNodeSolver`, yielding 21 distinct solvers across 22 walls. See the [research paper](whitepaper.qmd) for full citations. {#tbl-walls}
+
+---
+
 ## 5. Layer E: Solvers (Analysis)
 
 The previous four layers are just static definitions (nouns). **Solvers** are the engines (verbs) that bridge demand and supply to answer specific questions.
 
-Each solver resolves one or more of the **21 ML Systems Walls** — physical or logical constraints that bound system performance. The walls are organized into five domains:
+Each solver resolves one or more of the **22 ML Systems Walls** — physical or logical constraints that bound system performance. The walls are organized into six domains that progress from local node resources through data movement and algorithmic scaling to fleet coordination, operations, and cross-cutting analysis.
 
-**Domain 1 — Node** (Single-Accelerator Resources):
+::: {.callout-note}
+## The 22 Walls at a Glance
+Walls 1–2 (Compute and Memory) share the `SingleNodeSolver`, yielding **21 distinct solvers** across 22 walls.
+:::
 
-*   **`SingleNodeSolver`** (Walls 1–2): Roofline model — compute and memory ceilings.
-*   **`EfficiencySolver`** (Wall 3): MFU decomposition — kernel fusion, FlashAttention, SM occupancy.
-*   **`ServingSolver`** (Wall 2): Two-phase LLM inference — prefill vs. decode.
-*   **`ContinuousBatchingSolver`** (Wall 2): PagedAttention and iteration-level scheduling throughput.
-*   **`WeightStreamingSolver`** (Walls 2, 8): Wafer-scale inference (e.g., Cerebras CS-3) — injection bandwidth bottleneck.
-*   **`TailLatencySolver`** (Wall 13): M/M/c queueing for P50/P99 SLA analysis.
+**Domain 1 — Node** (Single-Accelerator Resources, Walls 1–7):
 
-**Domain 2 — Data** (Movement & Pipelines):
+*   **`SingleNodeSolver`** (Wall 1: Compute, Wall 2: Memory): Roofline model — peak FLOP/s ceiling and HBM bandwidth + capacity.
+*   **`EfficiencySolver`** (Wall 3: Software): MFU decomposition — kernel fusion, FlashAttention, SM occupancy.
+*   **`ServingSolver`** (Wall 4: Serving): Two-phase LLM inference — compute-bound prefill vs. memory-bound decode.
+*   **`ContinuousBatchingSolver`** (Wall 5: Batching): PagedAttention and iteration-level scheduling with non-contiguous KV-cache allocation.
+*   **`WeightStreamingSolver`** (Wall 6: Streaming): Wafer-scale inference (e.g., Cerebras CS-3) — injection bandwidth bottleneck.
+*   **`TailLatencySolver`** (Wall 7: Tail Latency): M/M/c queueing (Erlang-C) for P50/P99 SLA analysis.
 
-*   **`DataSolver`** (Wall 4): Storage I/O bottleneck analysis.
-*   **`TransformationSolver`** (Wall 5): CPU preprocessing stall detection.
-*   **`TopologySolver`** (Wall 6): Network bisection bandwidth for fat-tree, dragonfly, torus, ring.
+**Domain 2 — Data** (Movement & Pipelines, Walls 8–10):
 
-**Domain 3 — Algorithm** (Scaling & Compression):
+*   **`DataSolver`** (Wall 8: Ingestion): Storage I/O demand–supply bandwidth ratio.
+*   **`TransformationSolver`** (Wall 9: Transformation): CPU preprocessing stall detection (JPEG decode, tokenization, augmentation).
+*   **`TopologySolver`** (Wall 10: Locality): Network bisection bandwidth for fat-tree, dragonfly, torus, ring topologies.
 
-*   **`ScalingSolver`** (Wall 7): Chinchilla-optimal model and dataset sizing.
-*   **`InferenceScalingSolver`** (Wall 8): Chain-of-thought reasoning cost.
-*   **`CompressionSolver`** (Wall 9): Quantization/pruning accuracy-efficiency trade-offs.
+**Domain 3 — Algorithm** (Scaling & Compression, Walls 11–13):
 
-**Domain 4 — Fleet** (Multi-Node & Society):
+*   **`ScalingSolver`** (Wall 11: Complexity): Chinchilla scaling laws — compute-optimal model and dataset sizing.
+*   **`InferenceScalingSolver`** (Wall 12: Reasoning): Inference-time compute scaling — chain-of-thought and tree-search cost.
+*   **`CompressionSolver`** (Wall 13: Fidelity): Quantization/pruning accuracy–efficiency trade-offs.
 
-*   **`DistributedSolver`** (Wall 10): 3D/4D parallelism, Ring AllReduce, pipeline bubbles.
-*   **`ReliabilitySolver`** (Wall 11): Fleet MTBF and Young-Daly checkpointing.
-*   **`CheckpointSolver`** (Walls 4, 11): Checkpoint I/O burst penalties and MFU impact.
-*   **`OrchestrationSolver`** (Wall 12): Queueing theory for shared clusters.
-*   **`EconomicsSolver`** (Wall 13): Total Cost of Ownership (CapEx + OpEx).
-*   **`SustainabilitySolver`** (Wall 14): Energy, carbon, and water footprint.
-*   **`ResponsibleEngineeringSolver`** (Wall 15): DP-SGD slowdown and fairness data cost.
+**Domain 4 — Fleet** (Multi-Node Coordination, Walls 14–16):
 
-**Domain 5 — Analysis** (Cross-Cutting Diagnostics):
+*   **`DistributedSolver`** (Wall 14: Communication): 4D parallelism (DP × TP × PP × EP), Ring AllReduce, pipeline bubbles.
+*   **`ReliabilitySolver`** (Wall 15: Fragility): Fleet MTBF and Young-Daly optimal checkpoint interval.
+*   **`OrchestrationSolver`** (Wall 16: Multi-tenant): Queueing theory (M/D/1) for shared cluster wait times.
 
-*   **`SensitivitySolver`** (Wall 16): Binding constraint identification via partial derivatives.
-*   **`SynthesisSolver`** (Wall 17): Inverse Roofline — derive hardware specs from an SLA.
+**Domain 5 — Operations** (Economics, Sustainability & Safety, Walls 17–20):
 
-*See the [Solver Guide](solver-guide.qmd) to learn how to apply these solvers.*
+*   **`EconomicsSolver`** (Wall 17: Capital): Total Cost of Ownership (CapEx + OpEx).
+*   **`SustainabilitySolver`** (Wall 18: Sustainability): Energy, carbon footprint (kg CO₂e), and water usage.
+*   **`CheckpointSolver`** (Wall 19: Checkpoint): Checkpoint I/O burst penalties and MFU impact.
+*   **`ResponsibleEngineeringSolver`** (Wall 20: Safety): DP-SGD slowdown and fairness data cost.
+
+**Domain 6 — Analysis** (Cross-Cutting Diagnostics, Walls 21–22):
+
+*   **`SensitivitySolver`** (Wall 21: Sensitivity): Binding constraint identification via partial derivatives.
+*   **`SynthesisSolver`** (Wall 22: Synthesis): Inverse Roofline — derive hardware specs from an SLA.
+
+### Solver Composition
+
+Because every solver is a **stateless pure function** — $s_i : (\text{Workload}, \text{Hardware}, \text{Infra}, \text{Systems}) \rightarrow \mathcal{R}_i$ — solvers compose naturally through chaining. The output of one solver feeds into the next, with dimensional correctness preserved at every step:
+
+$$
+\text{Scaling} \xrightarrow{\;\mathcal{R}_1\;} \text{Distributed} \xrightarrow{\;\mathcal{R}_2\;} \text{Economics} \xrightarrow{\;\mathcal{R}_3\;} \text{Sustainability}
+$$
+
+This design yields three critical properties: **reproducibility** (identical inputs always produce identical outputs), **testability** (each solver validates against textbook equations in isolation), and **transparency** (students inspect exactly which equations produced a result).
+
+### Three-Level Evaluation
+
+The `Scenario.evaluate()` entry point orchestrates solver composition through a three-level evaluation:
+
+1. **Level 1 — Feasibility.** Does the model fit in memory? Can the data pipeline keep pace? Any wall where demand exceeds supply is flagged immediately.
+2. **Level 2 — Performance.** What are the achievable latency, throughput, and utilization? Roofline analysis, communication modeling, and pipeline bubble combine for end-to-end step time.
+3. **Level 3 — Macro.** What does it cost, and what does it emit? TCO, carbon, water, and responsibility overhead are computed from the performance results.
+
+A feasibility failure at Level 1 short-circuits the evaluation — there is no point optimizing AllReduce if the model does not fit in memory.
+
+*See the [Solver Guide](solver-guide.qmd) to learn how to apply these solvers, and [Math Foundations](math.qmd) for the equations behind each.*
