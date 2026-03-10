@@ -169,12 +169,24 @@ requires the same memory load as a full matrix-vector product, but performs far 
 
 ### 3.3 KV-Cache Size
 
+**Simplified form** (contiguous allocation):
+
 $$
-\text{KV\_Bytes} = 2 \times \text{Seq\_Len} \times \text{Batch} \times \text{Hidden\_Size} \times \text{Layers} \times \text{Bytes\_Per\_Param}
+\text{KV\_Bytes} = 2 \times L \times H_{\text{kv}} \times d \times S \times B \times b
 $$
 
+where $L$ is the number of layers, $H_{\text{kv}}$ is the number of KV heads (equals $H$ for MHA, less for GQA), $d$ is the head dimension, $S$ is the sequence length, $B$ is the batch size, and $b$ is the bytes per parameter.
+
+**PagedAttention form** (paged allocation, as in vLLM):
+
+$$
+\text{KV\_Bytes} = 2 \times L \times H_{\text{kv}} \times d \times \lceil S/p \rceil \times p \times B \times b
+$$
+
+where $p$ is the page size in tokens. When $p = S$ (no paging), this reduces to the simplified form.
+
 The factor of 2 counts both the K and V matrices. At fp16 (2 bytes/param), a 70B model with
-a 4096-token context at batch=32 requires approximately **540 GB** of KV-cache—more than
+a 4096-token context at batch=32 requires approximately **540 GB** of KV-cache — more than
 a single H100 node can hold.
 
 ---
@@ -441,6 +453,126 @@ BW_{\text{required}} = \frac{|W|}{T_{\text{target}}}, \qquad \text{FLOPS}_{\text
 $$
 
 This enables hardware–software co-design: rather than asking "how fast is my system?" the practitioner asks "what system do I need?"
+
+---
+
+## 16. Software Efficiency (Wall 3: MFU Decomposition)
+
+*Implemented in [`mlsysim.core.solver.EfficiencySolver`](api/core.solver.EfficiencySolver.qmd).*
+
+The gap between peak and achieved FLOP/s is captured by the utilization parameter $\eta$:
+
+$$
+\eta = \frac{\text{Achieved\_FLOP/s}}{\text{Peak\_FLOP/s}}
+$$
+
+In practice, $\eta$ decomposes into multiplicative factors:
+
+$$
+\eta = \eta_{\text{occupancy}} \times \eta_{\text{fusion}} \times \eta_{\text{precision}} \times \eta_{\text{memory}}
+$$
+
+where occupancy captures warp-level parallelism, fusion captures kernel launch elimination, precision captures tensor core utilization, and memory captures data reuse. Well-optimized training (Megatron-LM, DeepSpeed) achieves $\eta \approx 0.35\text{–}0.55$; unoptimized inference may drop below 0.10.
+
+---
+
+## 17. Continuous Batching (Wall 5: PagedAttention)
+
+*Implemented in [`mlsysim.core.solver.ContinuousBatchingSolver`](api/core.solver.ContinuousBatchingSolver.qmd).*
+
+Static batching wastes memory by pre-allocating contiguous KV-cache for the maximum sequence length. PagedAttention allocates KV-cache in fixed-size pages:
+
+$$
+\text{KV\_paged} = 2 \times L \times H_{\text{kv}} \times d \times \lceil S/p \rceil \times p \times B \times b
+$$
+
+The memory savings come from eliminating internal fragmentation. The effective batch size $B_{\text{eff}}$ under a memory budget $M_{\text{budget}}$ is:
+
+$$
+B_{\text{eff}} = \left\lfloor \frac{M_{\text{budget}} - |W|}{2 \times L \times H_{\text{kv}} \times d \times S \times b} \right\rfloor
+$$
+
+where $|W|$ is the model weight footprint. Continuous batching dynamically inserts and removes requests as they complete, keeping $B_{\text{eff}}$ near maximum at all times.
+
+---
+
+## 18. Data Transformation (Wall 9: CPU Preprocessing)
+
+*Implemented in [`mlsysim.core.solver.TransformationSolver`](api/core.solver.TransformationSolver.qmd).*
+
+CPU preprocessing (decode, resize, tokenize, augment) must keep pace with GPU consumption:
+
+$$
+T_{\text{transform}} = \frac{B \times S}{C_{\text{throughput}} \times W}
+$$
+
+where $B$ is the batch size, $S$ is the per-sample processing cost (e.g., JPEG decode + resize), $C_{\text{throughput}}$ is the single-core throughput, and $W$ is the number of CPU workers. The pipeline is stalled when:
+
+$$
+T_{\text{transform}} > T_{\text{compute}}
+$$
+
+Common mitigations: increase $W$ (more workers), cache preprocessed data, or use GPU-accelerated decoding (DALI).
+
+---
+
+## 19. Network Topology (Wall 10: Bisection Bandwidth)
+
+*Implemented in [`mlsysim.core.solver.TopologySolver`](api/core.solver.TopologySolver.qmd).*
+
+The effective bandwidth available for collective communication depends on the network topology and its oversubscription ratio:
+
+$$
+\text{BW}_{\text{eff}} = \frac{\text{BW}_{\text{link}} \times \beta}{\text{oversubscription}}
+$$
+
+where $\beta$ is the bisection bandwidth ratio (1.0 for full bisection in fat-tree topologies, <1.0 for oversubscribed networks). For a $k$-ary fat-tree with oversubscription ratio $r$:
+
+$$
+\text{BW}_{\text{bisection}} = \frac{k^2}{4r} \times \text{BW}_{\text{link}}
+$$
+
+Fat-tree topologies (Leiserson, 1985) provide full bisection bandwidth ($r=1$), making them ideal for AllReduce-heavy workloads. Dragonfly and torus topologies trade bisection bandwidth for lower cost at scale.
+
+---
+
+## 20. Inference-Time Scaling (Wall 12: Reasoning Compute)
+
+*Implemented in [`mlsysim.core.solver.InferenceScalingSolver`](api/core.solver.InferenceScalingSolver.qmd).*
+
+Chain-of-thought, tree search, and other inference-time scaling strategies multiply the compute cost by the number of reasoning steps $K$:
+
+$$
+T_{\text{reasoning}} = K \times T_{\text{step}}
+$$
+
+where $T_{\text{step}}$ is the latency of a single forward pass (from the roofline model). For best-of-$N$ sampling:
+
+$$
+T_{\text{best-of-N}} = N \times T_{\text{generate}} + T_{\text{verify}}
+$$
+
+The key insight from Snell et al. (2024) is that inference-time compute can substitute for training-time compute: a smaller model with $K$ reasoning steps may match a larger model with a single pass, at the cost of $K\times$ inference latency.
+
+---
+
+## 21. Checkpoint I/O (Wall 19: MFU Penalty)
+
+*Implemented in [`mlsysim.core.solver.CheckpointSolver`](api/core.solver.CheckpointSolver.qmd).*
+
+Periodic checkpointing imposes an I/O burst that pauses training:
+
+$$
+\text{MFU\_penalty} = \frac{T_{\text{write}}}{T_{\text{interval}}}
+$$
+
+where $T_{\text{write}}$ is the time to write one checkpoint (model weights + optimizer state) and $T_{\text{interval}}$ is the checkpoint interval. For Adam optimizer with fp16 weights:
+
+$$
+\text{Checkpoint\_Size} = |W| \times (1 + 2 + 2) = 5|W|
+$$
+
+The factor of 5 accounts for fp16 weights (1×), fp32 master weights (2×), and fp32 momentum + variance (2×). The optimal checkpoint interval from the Young-Daly formula (Section 10) balances checkpoint overhead against expected rework from failures.
 
 ---
 
