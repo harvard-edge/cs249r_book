@@ -5,14 +5,15 @@ used throughout mlsysim, the paper, and the textbook.  Every wall
 represents a physical or logical constraint that bounds system
 performance; each is resolved by a dedicated solver.
 
-The walls are organized into five domains that progress from local
+The walls are organized into six domains that progress from local
 hardware resources to global fleet-scale operations:
 
-    Domain 1 — Node      : What a single accelerator can achieve in isolation.
-    Domain 2 — Data      : How data moves to and through the accelerator.
-    Domain 3 — Algorithm : How much computation the model requires.
-    Domain 4 — Fleet     : Consequences of distributed, multi-node operation.
-    Domain 5 — Analysis  : Cross-cutting diagnostic and synthesis tools.
+    Domain 1 — Node       : What a single accelerator can achieve in isolation.
+    Domain 2 — Data       : How data moves to and through the accelerator.
+    Domain 3 — Algorithm  : How much computation the model requires.
+    Domain 4 — Fleet      : Consequences of distributed, multi-node coordination.
+    Domain 5 — Operations : Economics, sustainability, and safety constraints.
+    Domain 6 — Analysis   : Cross-cutting diagnostic and synthesis tools.
 
 Reference
 ---------
@@ -30,16 +31,17 @@ from typing import List, Optional, Type
 # ── Domain Enum ───────────────────────────────────────────────────
 
 class Domain(Enum):
-    """The five domains of the ML Systems Wall taxonomy.
+    """The six domains of the ML Systems Wall taxonomy.
 
     Each domain groups walls by the *scope* of the constraint:
-    single node → data movement → algorithm → fleet → cross-cutting.
+    single node → data movement → algorithm → fleet → operations → cross-cutting.
     """
-    NODE      = "node"        # Domain 1: Single-accelerator resource ceilings
-    DATA      = "data"        # Domain 2: Data movement and pipelines
-    ALGORITHM = "algorithm"   # Domain 3: Algorithmic and scaling laws
-    FLEET     = "fleet"       # Domain 4: Multi-node, fleet-scale operations
-    ANALYSIS  = "analysis"    # Domain 5: Cross-cutting diagnostic tools
+    NODE       = "node"        # Domain 1: Single-accelerator resource ceilings
+    DATA       = "data"        # Domain 2: Data movement and pipelines
+    ALGORITHM  = "algorithm"   # Domain 3: Algorithmic and scaling laws
+    FLEET      = "fleet"       # Domain 4: Multi-node coordination
+    OPERATIONS = "operations"  # Domain 5: Economics, sustainability, and safety
+    ANALYSIS   = "analysis"    # Domain 6: Cross-cutting diagnostic tools
 
 
 # ── Wall Dataclass ────────────────────────────────────────────────
@@ -225,7 +227,7 @@ FIDELITY = Wall(
     ],
 )
 
-# Domain 4: Fleet — multi-node and operations
+# Domain 4: Fleet — multi-node coordination
 COMMUNICATION = Wall(
     number=14,
     name="Communication",
@@ -262,10 +264,11 @@ MULTI_TENANT = Wall(
     sources=["Little (1961), L = λW"],
 )
 
+# Domain 5: Operations — economics, sustainability, and safety
 CAPITAL = Wall(
     number=17,
     name="Capital",
-    domain=Domain.FLEET,
+    domain=Domain.OPERATIONS,
     solver_name="EconomicsSolver",
     constraint="Total cost of ownership bounds what is economically feasible.",
     equation="TCO = CapEx + OpEx",
@@ -275,7 +278,7 @@ CAPITAL = Wall(
 SUSTAINABILITY = Wall(
     number=18,
     name="Sustainability",
-    domain=Domain.FLEET,
+    domain=Domain.OPERATIONS,
     solver_name="SustainabilitySolver",
     constraint="Energy consumption converts to carbon and water footprint.",
     equation="CO₂ = E × PUE × CI",
@@ -285,7 +288,7 @@ SUSTAINABILITY = Wall(
 CHECKPOINT = Wall(
     number=19,
     name="Checkpoint",
-    domain=Domain.FLEET,
+    domain=Domain.OPERATIONS,
     solver_name="CheckpointSolver",
     constraint="Periodic state saves impose I/O burst penalties on training MFU.",
     equation="MFU_penalty = T_write / T_interval",
@@ -295,14 +298,14 @@ CHECKPOINT = Wall(
 SAFETY = Wall(
     number=20,
     name="Safety",
-    domain=Domain.FLEET,
+    domain=Domain.OPERATIONS,
     solver_name="ResponsibleEngineeringSolver",
     constraint="Privacy and fairness guarantees impose computational overhead.",
     equation="σ ∝ 1/ε (DP-SGD slowdown)",
     sources=["Abadi et al. (2016), DP-SGD"],
 )
 
-# Domain 5: Analysis — cross-cutting diagnostics
+# Domain 6: Analysis — cross-cutting diagnostics
 SENSITIVITY = Wall(
     number=21,
     name="Sensitivity",
@@ -374,11 +377,12 @@ def taxonomy() -> str:
     for domain in Domain:
         domain_walls = walls_in_domain(domain)
         label = {
-            Domain.NODE:      "Domain 1 — Node (Single-Accelerator Resources)",
-            Domain.DATA:      "Domain 2 — Data (Movement & Pipelines)",
-            Domain.ALGORITHM: "Domain 3 — Algorithm (Scaling & Compression)",
-            Domain.FLEET:     "Domain 4 — Fleet (Multi-Node & Operations)",
-            Domain.ANALYSIS:  "Domain 5 — Analysis (Cross-Cutting Diagnostics)",
+            Domain.NODE:       "Domain 1 — Node (Single-Accelerator Resources)",
+            Domain.DATA:       "Domain 2 — Data (Movement & Pipelines)",
+            Domain.ALGORITHM:  "Domain 3 — Algorithm (Scaling & Compression)",
+            Domain.FLEET:      "Domain 4 — Fleet (Multi-Node Coordination)",
+            Domain.OPERATIONS: "Domain 5 — Operations (Economics, Sustainability & Safety)",
+            Domain.ANALYSIS:   "Domain 6 — Analysis (Cross-Cutting Diagnostics)",
         }[domain]
         lines.append(f"  {label}")
         for w in domain_walls:
