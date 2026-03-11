@@ -189,6 +189,60 @@ The factor of 2 counts both the K and V matrices. At fp16 (2 bytes/param), a 70B
 a 4096-token context at batch=32 requires approximately **540 GB** of KV-cache — more than
 a single H100 node can hold.
 
+### 3.4 Prompt Caching (Prefix Caching)
+
+*Literature: @zheng2024sglang (RadixAttention for automatic prefix caching).*
+
+When a prefix of the context (e.g., a system prompt) has been seen before, its KV-cache entries are already computed and resident in memory. Only the *new* tokens require prefill computation:
+
+$$
+\text{TTFT}_{\text{cached}} = \frac{2 \times \text{Parameters} \times (\text{Seq\_Len} - P_{\text{cached}}) \times \text{Batch}}{\text{Peak\_FLOPs} \times \eta} + \text{Dispatch\_Tax}
+$$
+
+where $P_{\text{cached}}$ is the number of tokens with pre-computed KV entries. The key asymmetry: **TTFT improves proportionally** (only new tokens need compute), but **ITL is unchanged** (the decode phase still loads the full model weights regardless) and **memory is unchanged** (the full KV-cache, including cached prefix, remains resident).
+
+The TTFT speedup ratio is:
+
+$$
+\text{Speedup} = \frac{\text{Seq\_Len}}{\text{Seq\_Len} - P_{\text{cached}}}
+$$
+
+For a chatbot with a 1024-token system prompt in a 4096-token context, caching yields a $\frac{4096}{3072} = 1.33\times$ TTFT improvement. For RAG applications where 75% of the context is cached retrieval, the speedup reaches $4\times$.
+
+### 3.5 Disaggregated Serving
+
+*Literature: @patel2024splitwise (Splitwise: phase-aware LLM inference).*
+
+In disaggregated (or "splitwise") serving, the compute-bound prefill and memory-bound decode phases run on different hardware optimized for each:
+
+$$
+\text{TTFT}_{\text{disagg}} = \text{TTFT}_{\text{prefill\_node}} + \frac{\text{KV\_Cache\_Bytes}}{\text{Network\_BW}}
+$$
+
+The second term is the cost of transferring the KV-cache from the prefill node to the decode node over the network. This is worthwhile when:
+
+1. The prefill node has higher compute throughput (e.g., more FLOPS)
+2. The decode node has higher memory bandwidth (e.g., more HBM bandwidth per GPU)
+3. The KV-cache transfer time is small relative to the TTFT savings
+
+### 3.6 Speculative Decoding
+
+*Literature: @leviathan2023fast (Fast Inference from Transformers via Speculative Decoding).*
+
+Speculative decoding uses a small *draft* model to generate $K$ candidate tokens cheaply, then *verifies* all $K$ in a single forward pass of the target model. The expected number of accepted tokens per step follows a geometric series [@leviathan2023fast]:
+
+$$
+\mathbb{E}[\text{accepted}] = 1 + \frac{\alpha(1 - \alpha^K)}{1 - \alpha}
+$$
+
+where $\alpha$ is the draft model's acceptance rate (probability that its token matches the target model's distribution). The effective ITL becomes:
+
+$$
+\text{ITL}_{\text{spec}} = \frac{K \cdot t_{\text{draft}} + t_{\text{verify}}}{\mathbb{E}[\text{accepted}]}
+$$
+
+With a good draft model ($\alpha \approx 0.8$, $K = 4$), speculative decoding can achieve approximately $2.5\times$ ITL improvement. The trade-off is additional memory for the draft model weights.
+
 ---
 
 ## 4. The Data Wall

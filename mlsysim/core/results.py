@@ -70,6 +70,7 @@ class ServingResult(SolverResult):
     model_weights_size: Quantity
     total_memory_required: Quantity
     memory_utilization: float
+    prompt_cache_hit_ratio: float = 0.0
 
 
 class ContinuousBatchingResult(SolverResult):

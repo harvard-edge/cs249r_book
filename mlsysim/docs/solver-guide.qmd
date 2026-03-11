@@ -14,6 +14,15 @@ MLSys·im provides 21 specialized solvers that resolve 22 physical and logical c
 **"How fast will my LLM generate tokens?"**
 : Use the **ServingSolver**. It models the two distinct phases of autoregressive inference: the compute-bound pre-fill (TTFT) and the memory-bound decode (ITL), plus KV-cache memory pressure.
 
+**"How much does prompt caching reduce TTFT?"**
+: Use the **ServingSolver** with `cached_prefix_len`. When a prefix of the context is already in the KV-cache (e.g., a system prompt shared across requests), only the new tokens need prefill computation. TTFT drops proportionally; ITL and memory are unchanged. See [§3.4 Math Foundations](math.qmd) and @zheng2024sglang.
+
+**"What if I split prefill and decode onto different hardware?"**
+: Use the **ServingSolver** with `decode_hardware`. Disaggregated serving runs the compute-bound prefill on one node and the memory-bound decode on another (optimized for each phase), with KV-cache transferred over the network. See [§3.5 Math Foundations](math.qmd) and @patel2024splitwise.
+
+**"Can speculative decoding speed up my decode phase?"**
+: Use the **ServingSolver** with `draft_model`. Speculative decoding generates $K$ candidate tokens with a small draft model, then verifies them in parallel with the target model. The effective ITL improves by the expected acceptance rate. See [§3.6 Math Foundations](math.qmd) and @leviathan2023fast.
+
 **"What throughput can I get with PagedAttention and continuous batching?"**
 : Use the **ContinuousBatchingSolver**. It models iteration-level scheduling and non-contiguous KV cache allocation, calculating throughput gains over static batching.
 
@@ -81,7 +90,7 @@ MLSys·im provides 21 specialized solvers that resolve 22 physical and logical c
 |:-------|:-----|:-----------|:------------|:---------|
 | **SingleNodeSolver** | 1–2 | model, hardware, batch_size | latency, throughput, bottleneck | "Is my model memory-bound?" |
 | **EfficiencySolver** | 3 | model, hardware, workload_type | MFU, achievable FLOPS, overhead breakdown | "What MFU will my workload achieve?" |
-| **ServingSolver** | 4 | model, hardware, seq_len | TTFT, ITL, KV-cache, feasibility | "Can I serve this LLM on this GPU?" |
+| **ServingSolver** | 4 | model, hardware, seq_len, cached_prefix_len, decode_hardware, draft_model | TTFT, ITL, KV-cache, feasibility, cache_hit_ratio | "Can I serve this LLM on this GPU?" |
 | **ContinuousBatchingSolver** | 5 | model, hardware, seq_len, max_batch | throughput, fragmentation, speedup | "What throughput with PagedAttention?" |
 | **WeightStreamingSolver** | 6 | model, hardware, seq_len, batch_size | throughput, bottleneck, optimal_batch | "Cerebras wafer-scale inference?" |
 | **TailLatencySolver** | 7 | arrival_rate, service_latency, replicas | P50, P99, SLO violation probability | "Will I meet P99 latency SLAs?" |
@@ -146,6 +155,11 @@ Real-world questions often require **chaining** multiple solvers. Some examples:
 1. **SingleNodeSolver** on A100 — get latency and bottleneck
 2. **SingleNodeSolver** on H100 — get latency and bottleneck
 3. **EconomicsSolver** for each — compare cost per query
+
+### "How much does prompt caching save for a chatbot with a system prompt?"
+1. **ServingSolver** without caching — baseline TTFT
+2. **ServingSolver** with `cached_prefix_len` — TTFT with system prompt cached
+3. Compare: the ratio equals `(seq_len - cached_prefix_len) / seq_len`
 
 ### "GPU vs. Cerebras for large-batch inference?"
 1. **ContinuousBatchingSolver** on H100 — get PagedAttention throughput

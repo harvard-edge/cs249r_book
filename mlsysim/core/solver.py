@@ -499,7 +499,8 @@ class ServingSolver(BaseSolver):
 
     def solve(self, model: TransformerWorkload, hardware: HardwareNode, seq_len: int, batch_size: int = 1, precision: str = "fp16", efficiency: float = 0.5,
               decode_hardware: Optional[HardwareNode] = None, network_bandwidth: Quantity = Q_("100 GB/s"),
-              draft_model: Optional[TransformerWorkload] = None, draft_acceptance_rate: float = 0.7) -> ServingResult:
+              draft_model: Optional[TransformerWorkload] = None, draft_acceptance_rate: float = 0.7,
+              cached_prefix_len: int = 0) -> ServingResult:
         """
         Solves for LLM serving performance.
 
@@ -518,7 +519,7 @@ class ServingSolver(BaseSolver):
         efficiency : float
             Compute efficiency.
         decode_hardware : HardwareNode, optional
-            If provided, models Disaggregated Serving where 'hardware' does pre-fill 
+            If provided, models Disaggregated Serving where 'hardware' does pre-fill
             and 'decode_hardware' does decoding. KV-cache is transferred over the network.
         network_bandwidth : Quantity
             Network bandwidth between pre-fill and decode nodes.
@@ -526,6 +527,11 @@ class ServingSolver(BaseSolver):
             If provided, models Speculative Decoding using this smaller draft model.
         draft_acceptance_rate : float
             Expected acceptance rate (0.0 to 1.0) of draft tokens per step.
+        cached_prefix_len : int
+            Number of tokens with pre-computed KV-cache (prompt caching / prefix caching).
+            When > 0, the prefill phase only processes (seq_len - cached_prefix_len) new
+            tokens, reducing TTFT proportionally. The full KV-cache (including cached prefix)
+            still occupies memory. Must be < seq_len.
 
         Returns
         -------
@@ -534,12 +540,15 @@ class ServingSolver(BaseSolver):
         """
         prec_map = PRECISION_MAP
         bpp = prec_map.get(precision, BYTES_FP16)
-        
-        # 1. Pre-fill Phase
+
+        # 1. Pre-fill Phase (with optional prompt caching)
         peak_flops_prefill = hardware.compute.precision_flops.get(precision, hardware.compute.peak_flops)
-        prefill_ops = 2 * model.parameters.to(ureg.count).magnitude * seq_len * batch_size * ureg.flop
+        # Prompt caching: only new tokens need prefill computation
+        new_tokens = max(1, seq_len - cached_prefix_len)
+        prefill_ops = 2 * model.parameters.to(ureg.count).magnitude * new_tokens * batch_size * ureg.flop
         t_prefill = (prefill_ops / (peak_flops_prefill * efficiency)).to("ms") + hardware.dispatch_tax
-        
+
+        # KV-cache covers the full sequence (cached prefix + new tokens)
         kv_cache_bytes = model.get_kv_cache_size(seq_len=seq_len, batch_size=batch_size, precision=bpp)
         
         # 2. Disaggregated Serving (KV-Cache Transfer)
@@ -584,6 +593,8 @@ class ServingSolver(BaseSolver):
             total_memory_required += draft_model.size_in_bytes(bpp)
         feasible = total_memory_required <= decode_hw.memory.capacity
         
+        cache_hit_ratio = cached_prefix_len / seq_len if seq_len > 0 else 0.0
+
         return ServingResult(
             feasible=feasible,
             ttft=t_prefill,
@@ -592,6 +603,7 @@ class ServingSolver(BaseSolver):
             model_weights_size=model_weights_bytes.to("GB"),
             total_memory_required=total_memory_required.to("GB"),
             memory_utilization=(total_memory_required / decode_hw.memory.capacity).to_base_units().magnitude,
+            prompt_cache_hit_ratio=cache_hit_ratio,
         )
 
 
