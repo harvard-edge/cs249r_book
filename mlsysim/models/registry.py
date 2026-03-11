@@ -2,12 +2,32 @@ from .types import TransformerWorkload, CNNWorkload, Workload, SSMWorkload, Diff
 from ..core.registry import Registry
 from ..core.constants import (
     ureg,
-    GPT2_PARAMS, GPT3_PARAMS, GPT4_EST_PARAMS, GPT3_TRAINING_OPS,
-    BERT_BASE_PARAMS, BERT_LARGE_PARAMS,
-    RESNET50_PARAMS, RESNET50_FLOPs, MOBILENETV2_PARAMS, MOBILENETV2_FLOPs,
-    LLAMA3_8B_PARAMS, LLAMA3_70B_PARAMS,
-    KWS_DSCNN_PARAMS, KWS_DSCNN_FLOPs, YOLOV8_NANO_FLOPs,
-    ALEXNET_PARAMS, ANOMALY_MODEL_PARAMS, DLRM_MODEL_SIZE_FP32
+    # Language model constants
+    GPT2_PARAMS, GPT2_LAYERS, GPT2_HIDDEN_DIM, GPT2_HEADS,
+    GPT3_PARAMS, GPT3_LAYERS, GPT3_HIDDEN_DIM, GPT3_HEADS, GPT3_TRAINING_OPS,
+    GPT4_EST_PARAMS, GPT4_LAYERS, GPT4_HIDDEN_DIM, GPT4_HEADS,
+    BERT_BASE_PARAMS, BERT_BASE_LAYERS, BERT_BASE_HIDDEN_DIM, BERT_BASE_HEADS, BERT_BASE_FLOPs,
+    BERT_LARGE_PARAMS, BERT_LARGE_LAYERS, BERT_LARGE_HIDDEN_DIM, BERT_LARGE_HEADS, BERT_LARGE_FLOPs,
+    LLAMA2_70B_PARAMS, LLAMA2_70B_LAYERS, LLAMA2_70B_HIDDEN_DIM, LLAMA2_70B_HEADS,
+    LLAMA3_8B_PARAMS, LLAMA3_8B_LAYERS, LLAMA3_8B_HIDDEN_DIM, LLAMA3_8B_HEADS, LLAMA3_8B_KV_HEADS,
+    LLAMA3_70B_PARAMS, LLAMA3_70B_LAYERS, LLAMA3_70B_HIDDEN_DIM, LLAMA3_70B_HEADS, LLAMA3_70B_KV_HEADS,
+    # Vision model constants
+    RESNET50_PARAMS, RESNET50_FLOPs,
+    MOBILENETV2_PARAMS, MOBILENETV2_FLOPs,
+    ALEXNET_PARAMS, ALEXNET_FLOPs,
+    YOLOV8_NANO_PARAMS, YOLOV8_NANO_FLOPs, YOLOV8_NANO_LAYERS,
+    # Tiny model constants
+    KWS_DSCNN_PARAMS, KWS_DSCNN_FLOPs,
+    WAKEVISION_PARAMS, WAKEVISION_FLOPs,
+    ANOMALY_MODEL_PARAMS,
+    # Recommendation constants
+    DLRM_MODEL_SIZE_FP32,
+    # SSM constants
+    MAMBA_130M_PARAMS, MAMBA_130M_LAYERS, MAMBA_130M_HIDDEN_DIM, MAMBA_130M_STATE_SIZE,
+    MAMBA_2_8B_PARAMS, MAMBA_2_8B_LAYERS, MAMBA_2_8B_HIDDEN_DIM, MAMBA_2_8B_STATE_SIZE,
+    # Diffusion constants
+    STABLE_DIFFUSION_V1_5_PARAMS, STABLE_DIFFUSION_V1_5_RESOLUTION,
+    STABLE_DIFFUSION_V1_5_STEPS, STABLE_DIFFUSION_V1_5_FLOPs_PER_STEP,
 )
 
 class LanguageModels(Registry):
@@ -15,18 +35,18 @@ class LanguageModels(Registry):
         name="GPT-2 (1.5B)",
         architecture="Transformer",
         parameters=GPT2_PARAMS,
-        layers=48,
-        hidden_dim=1600,
-        heads=25,
+        layers=GPT2_LAYERS,
+        hidden_dim=GPT2_HIDDEN_DIM,
+        heads=GPT2_HEADS,
         inference_flops=2 * GPT2_PARAMS.magnitude * ureg.flop
     )
     GPT3 = TransformerWorkload(
         name="GPT-3 (175B)",
         architecture="Transformer",
         parameters=GPT3_PARAMS,
-        layers=96,
-        hidden_dim=12288,
-        heads=96,
+        layers=GPT3_LAYERS,
+        hidden_dim=GPT3_HIDDEN_DIM,
+        heads=GPT3_HEADS,
         training_ops=GPT3_TRAINING_OPS,
         inference_flops=2 * GPT3_PARAMS.magnitude * ureg.flop
     )
@@ -34,56 +54,56 @@ class LanguageModels(Registry):
         name="GPT-4",
         architecture="Transformer",
         parameters=GPT4_EST_PARAMS,
-        layers=120,
-        hidden_dim=16384,
-        heads=128,
+        layers=GPT4_LAYERS,
+        hidden_dim=GPT4_HIDDEN_DIM,
+        heads=GPT4_HEADS,
         inference_flops=2 * GPT4_EST_PARAMS.magnitude * ureg.flop
     )
     BERT_Base = TransformerWorkload(
         name="BERT-Base",
         architecture="Transformer",
         parameters=BERT_BASE_PARAMS,
-        layers=12,
-        hidden_dim=768,
-        heads=12,
-        inference_flops=22e9 * ureg.flop
+        layers=BERT_BASE_LAYERS,
+        hidden_dim=BERT_BASE_HIDDEN_DIM,
+        heads=BERT_BASE_HEADS,
+        inference_flops=BERT_BASE_FLOPs
     )
     BERT_Large = TransformerWorkload(
         name="BERT-Large",
         architecture="Transformer",
-        parameters=340e6 * ureg.param,
-        layers=24,
-        hidden_dim=1024,
-        heads=16,
-        inference_flops=72e9 * ureg.flop
+        parameters=BERT_LARGE_PARAMS,
+        layers=BERT_LARGE_LAYERS,
+        hidden_dim=BERT_LARGE_HIDDEN_DIM,
+        heads=BERT_LARGE_HEADS,
+        inference_flops=BERT_LARGE_FLOPs
     )
     Llama2_70B = TransformerWorkload(
         name="Llama-2-70B",
         architecture="Transformer",
-        parameters=70e9 * ureg.param,
-        layers=80,
-        hidden_dim=8192,
-        heads=64,
-        inference_flops=140e9 * ureg.flop
+        parameters=LLAMA2_70B_PARAMS,
+        layers=LLAMA2_70B_LAYERS,
+        hidden_dim=LLAMA2_70B_HIDDEN_DIM,
+        heads=LLAMA2_70B_HEADS,
+        inference_flops=2 * LLAMA2_70B_PARAMS.magnitude * ureg.flop
     )
     Llama3_8B = TransformerWorkload(
         name="Llama-3.1-8B",
         architecture="Transformer",
         parameters=LLAMA3_8B_PARAMS,
-        layers=32,
-        hidden_dim=4096,
-        heads=32,
-        kv_heads=8,
+        layers=LLAMA3_8B_LAYERS,
+        hidden_dim=LLAMA3_8B_HIDDEN_DIM,
+        heads=LLAMA3_8B_HEADS,
+        kv_heads=LLAMA3_8B_KV_HEADS,
         inference_flops=2 * LLAMA3_8B_PARAMS.magnitude * ureg.flop
     )
     Llama3_70B = TransformerWorkload(
         name="Llama-3.1-70B",
         architecture="Transformer",
         parameters=LLAMA3_70B_PARAMS,
-        layers=80,
-        hidden_dim=8192,
-        heads=64,
-        kv_heads=8,
+        layers=LLAMA3_70B_LAYERS,
+        hidden_dim=LLAMA3_70B_HIDDEN_DIM,
+        heads=LLAMA3_70B_HEADS,
+        kv_heads=LLAMA3_70B_KV_HEADS,
         inference_flops=2 * LLAMA3_70B_PARAMS.magnitude * ureg.flop
     )
 
@@ -105,15 +125,15 @@ class VisionModels(Registry):
     YOLOv8_Nano = CNNWorkload(
         name="YOLOv8-Nano",
         architecture="CNN",
-        parameters=3.2e6 * ureg.param,
+        parameters=YOLOV8_NANO_PARAMS,
         inference_flops=YOLOV8_NANO_FLOPs,
-        layers=225
+        layers=YOLOV8_NANO_LAYERS
     )
     AlexNet = CNNWorkload(
         name="AlexNet",
         architecture="CNN",
         parameters=ALEXNET_PARAMS,
-        inference_flops=1.5e9 * ureg.flop, # Estimated
+        inference_flops=ALEXNET_FLOPs,
         layers=8
     )
 
@@ -127,54 +147,51 @@ class TinyModels(Registry):
     WakeVision = CNNWorkload(
         name="Wake Vision (Doorbell)",
         architecture="CNN",
-        parameters=0.25e6 * ureg.param,
-        inference_flops=25e6 * ureg.flop
+        parameters=WAKEVISION_PARAMS,
+        inference_flops=WAKEVISION_FLOPs
     )
     AnomalyDetector = Workload(
         name="Anomaly Detector",
         architecture="MLP",
-        parameters=270e3 * ureg.param,
-        inference_flops=540e3 * ureg.flop
+        parameters=ANOMALY_MODEL_PARAMS,
+        inference_flops=2 * ANOMALY_MODEL_PARAMS.magnitude * ureg.flop
     )
 
 class RecommendationModels(Registry):
-    # Special class for DLRM as it's defined by size
     DLRM = Workload(
         name="DLRM",
         architecture="DLRM",
         model_size=DLRM_MODEL_SIZE_FP32
     )
-    # Note: We'll add specialized size methods if needed, 
-    # but for now we maintain string compatibility.
 
 class StateSpaceModels(Registry):
     Mamba_130M = SSMWorkload(
         name="Mamba-130M",
         architecture="SSM",
-        parameters=130e6 * ureg.param,
-        layers=24,
-        hidden_dim=768,
-        state_size=16, 
-        inference_flops=2 * 130e6 * ureg.flop
+        parameters=MAMBA_130M_PARAMS,
+        layers=MAMBA_130M_LAYERS,
+        hidden_dim=MAMBA_130M_HIDDEN_DIM,
+        state_size=MAMBA_130M_STATE_SIZE,
+        inference_flops=2 * MAMBA_130M_PARAMS.magnitude * ureg.flop
     )
     Mamba_2_8B = SSMWorkload(
         name="Mamba-2.8B",
         architecture="SSM",
-        parameters=2.8e9 * ureg.param,
-        layers=64,
-        hidden_dim=2560,
-        state_size=16,
-        inference_flops=2 * 2.8e9 * ureg.flop
+        parameters=MAMBA_2_8B_PARAMS,
+        layers=MAMBA_2_8B_LAYERS,
+        hidden_dim=MAMBA_2_8B_HIDDEN_DIM,
+        state_size=MAMBA_2_8B_STATE_SIZE,
+        inference_flops=2 * MAMBA_2_8B_PARAMS.magnitude * ureg.flop
     )
 
 class GenerativeVisionModels(Registry):
     StableDiffusion_v1_5 = DiffusionWorkload(
         name="Stable Diffusion v1.5",
         architecture="Diffusion/U-Net",
-        parameters=860e6 * ureg.param,
-        resolution=512,
-        denoising_steps=50,
-        inference_flops=20e9 * ureg.flop 
+        parameters=STABLE_DIFFUSION_V1_5_PARAMS,
+        resolution=STABLE_DIFFUSION_V1_5_RESOLUTION,
+        denoising_steps=STABLE_DIFFUSION_V1_5_STEPS,
+        inference_flops=STABLE_DIFFUSION_V1_5_FLOPs_PER_STEP
     )
 
 class Models(Registry):
@@ -184,7 +201,7 @@ class Models(Registry):
     Recommendation = RecommendationModels
     StateSpace = StateSpaceModels
     GenerativeVision = GenerativeVisionModels
-    
+
     GPT2 = LanguageModels.GPT2
     GPT3 = LanguageModels.GPT3
     GPT4 = LanguageModels.GPT4

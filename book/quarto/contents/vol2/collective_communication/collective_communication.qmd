@@ -106,11 +106,12 @@ These three constraints interact multiplicatively. Latency sets the floor for ev
 # │ How: α-β model: T = 2(N-1)α + 2(N-1)/N × M/β; bare arithmetic (no pint)
 # │      because this is a step-by-step pedagogical trace.
 # │
-# │ Imports: mlsysim.book (check)
+# │ Imports: mlsysim.fmt (check); mlsysim.core.constants (INFINIBAND_NDR_BW, GB, second)
 # │ Exports: gradient_size_gb_str, ring_bw_time_ms_str, ring_lat_time_ms_str,
 # │          ring_total_ms_str, n_gpus_napkin_str, ring_bw_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check
+from mlsysim.core.constants import INFINIBAND_NDR_BW, GB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class AllReduceCost:
@@ -123,7 +124,7 @@ class AllReduceCost:
     llama_params_b = 70
     bytes_per_param = 4 # FP32 gradients
     n_gpus = 64
-    ib_bw_gbs = 50 # GB/s NDR 400G per port
+    ib_bw_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s NDR 400G per port
     alpha_us = 3 # microseconds
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -527,12 +528,13 @@ The alpha-beta model becomes most valuable when applied to real training configu
 # │ How: α-β model applied per tier: NVLink ReduceScatter → IB Ring → NVLink
 # │      AllGather; comm-to-compute ratio computed for both strategies.
 # │
-# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second)
 # │ Exports: gradient_bf16_gb_str, intra_rs_time_ms_str, inter_payload_gb_str,
 # │          inter_ring_bw_time_ms_str, inter_ring_lat_time_ms_str,
 # │          intra_ag_time_ms_str, hier_total_llama_ms_str, flat_total_ms_str,
 # │          ccr_hier_str, ccr_flat_str, n_gpus_llama_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class LlamaBudgetCalc:
     """Hierarchical vs. flat Ring AllReduce timing budget for a 70B model on 128 GPUs."""
@@ -543,9 +545,9 @@ class LlamaBudgetCalc:
     param_count_b       = 70
     gradient_bf16_gb    = param_count_b * 2   # 140 GB in BF16
 
-    nvlink_bw   = 900    # GB/s
+    nvlink_bw   = NVLINK_H100_BW.m_as(GB/second)        # GB/s
     nvlink_alpha = 1.5   # us
-    ib_bw        = 50    # GB/s per port
+    ib_bw        = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s per port
     ib_alpha     = 3     # us
     compute_per_step_ms = 200  # approximate for illustration
 
@@ -1267,11 +1269,12 @@ The net effect: inter-node traffic is reduced by a factor of $G$ (GPUs per node)
 # │ How: Flat: T = 2M/β_IB; Hierarchical: T = T_rs + T_inter + T_ag with
 # │      NVLink for intra-node phases and IB for inter-node phase.
 # │
-# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second)
 # │ Exports: flat_time_ms_str, intra_data_mb_str, intra_rs_ms_str,
 # │          inter_data_mb_str, inter_time_ms_str, intra_ag_ms_str,
 # │          hier_total_ms_str, speedup_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class HierarchicalAllreduceCalc:
     """Flat vs. 3-step hierarchical AllReduce timing for a 1 GB gradient on 64 GPUs."""
@@ -1279,8 +1282,8 @@ class HierarchicalAllreduceCalc:
     n_nodes_har    = 8
     gpus_per_node  = 8
     gradient_gb    = 1       # 1 GB gradient buffer
-    ib_bw_gbs      = 50      # InfiniBand GB/s
-    nvlink_bw_gbs  = 900     # NVLink GB/s
+    ib_bw_gbs      = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # InfiniBand GB/s
+    nvlink_bw_gbs  = NVLINK_H100_BW.m_as(GB/second)           # NVLink GB/s
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     flat_data_gb  = 2 * gradient_gb   # bandwidth-optimal Ring sends ~2×
@@ -1408,12 +1411,13 @@ The hierarchical approach generalizes beyond two levels. Large clusters with mul
 # │ How: α-β model per tier; each level reduces payload by GPUs-per-unit before
 # │      crossing the next, slower boundary (oversubscription ratio 2:1).
 # │
-# │ Imports: (none from mlsys — bare arithmetic for pedagogical clarity)
+# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second)
 # │ Exports: total_gpus_3l_str, gradient_3l_gb_str, step1_payload_gb_str,
 # │          step1_time_ms_str, step2_payload_gb_str, step2_ring_bw_ms_str,
 # │          step3_payload_gb_str, step3_ring_bw_ms_str, total_3l_ms_str,
 # │          flat_3l_ms_str, reduction_factor_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 
 class ThreeLevelNapkin:
     """3-tier hierarchical AllReduce budget for a 128-GPU rack-scale cluster."""
@@ -1425,8 +1429,8 @@ class ThreeLevelNapkin:
     total_gpus_3l  = n_racks * nodes_per_rack * gpus_per_node_3l
 
     gradient_3l_gb = 2    # 2 GB gradient (BF16 for a ~250B model)
-    nvlink_bw_3l   = 900  # GB/s
-    ib_bw_3l       = 50   # GB/s per port
+    nvlink_bw_3l   = NVLINK_H100_BW.m_as(GB/second)           # GB/s
+    ib_bw_3l       = (INFINIBAND_NDR_BW / 8).m_as(GB/second)  # GB/s per port
     cross_rack_bw  = 25   # GB/s effective (50/2 oversubscription)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1956,12 +1960,13 @@ The combination of hierarchical AllReduce (reducing the volume of data to commun
 #| label: napkin-overlap-calc
 #| echo: false
 from mlsysim.fmt import check
+from mlsysim.core.constants import NVLINK_H100_BW, GB, second
 
 class NapkinOverlap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     params_b = 70
     bytes_per_param = 2       # FP16
-    nvlink_bw_gbs = 900
+    nvlink_bw_gbs = NVLINK_H100_BW.m_as(GB/second)
     compute_s = 2.1
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gradient_gb = params_b * bytes_per_param

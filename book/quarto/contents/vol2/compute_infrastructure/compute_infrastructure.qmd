@@ -693,19 +693,39 @@ The practical implication is that accelerator selection for inference workloads 
 # │ Show: Log-scale; two curves; growth annotations.
 # │ How: gpus, years, tflops, bandwidth; twinx; matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt)
+# │ Imports: matplotlib.pyplot (plt), mlsysim.core.constants
+# │          (V100_FLOPS_FP16_TENSOR, A100_FLOPS_FP16_TENSOR,
+# │          H100_FLOPS_FP8_TENSOR, B200_FLOPS_FP8_TENSOR,
+# │          V100_MEM_BW, A100_MEM_BW, H100_MEM_BW, B200_MEM_BW,
+# │          TFLOPs, GB, TB, second)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ Dual-axis plot: compute (36×) vs memory BW (9×) V100→B200; show
 import matplotlib.pyplot as plt
+from mlsysim.core.constants import (
+    V100_FLOPS_FP16_TENSOR, A100_FLOPS_FP16_TENSOR,
+    H100_FLOPS_FP8_TENSOR, B200_FLOPS_FP8_TENSOR,
+    V100_MEM_BW, A100_MEM_BW, H100_MEM_BW, B200_MEM_BW,
+    TFLOPs, GB, TB, second,
+)
 
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 gpus = ['V100', 'A100', 'H100', 'B200']
 years = [2017, 2020, 2022, 2024]
-tflops = [125, 312, 1979, 4500]
-bandwidth = [900, 2039, 3350, 8000]
+tflops = [
+    V100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second),
+    A100_FLOPS_FP16_TENSOR.m_as(TFLOPs/second),
+    H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second),
+    B200_FLOPS_FP8_TENSOR.m_as(TFLOPs/second),
+]
+bandwidth = [
+    V100_MEM_BW.m_as(GB/second),
+    A100_MEM_BW.m_as(GB/second),
+    H100_MEM_BW.m_as(GB/second),
+    B200_MEM_BW.m_as(GB/second),
+]
 
 fig, ax1 = plt.subplots(figsize=(8, 5))
 
@@ -827,18 +847,21 @@ The Roofline's diagnostic power extends beyond individual kernels to entire trai
 # │ Show: Log-log; roofline; filled regions; workload scatter.
 # │ How: y = min(BW*x, P_peak); workloads dict; matplotlib.
 # │
-# │ Imports: matplotlib.pyplot (plt), numpy (np)
+# │ Imports: matplotlib.pyplot (plt), numpy (np),
+# │          mlsysim.core.constants (H100_FLOPS_FP8_TENSOR, H100_MEM_BW,
+# │          TFLOPs, TB, second)
 # │ Exports: (figure only, no prose variables)
 # └─────────────────────────────────────────────────────────────────────────────
 # ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
 # │ H100 roofline; plot LLM decode/CNN/LLM training workloads; show
 import matplotlib.pyplot as plt
 import numpy as np
+from mlsysim.core.constants import H100_FLOPS_FP8_TENSOR, H100_MEM_BW, TFLOPs, TB, second
 
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-P_PEAK_TFLOPS = 1979.0
-BW_TBS = 3.350
+P_PEAK_TFLOPS = H100_FLOPS_FP8_TENSOR.m_as(TFLOPs/second)
+BW_TBS = H100_MEM_BW.m_as(TB/second)
 RIDGE_POINT = P_PEAK_TFLOPS / BW_TBS
 
 workloads = {
@@ -1517,25 +1540,27 @@ class BandwidthHierarchyScenario:
 # │ Show: nvlink_to_ib_ratio ≈ 18x — inline in notebook result.
 # │ How: Ratio = BW_fast / BW_slow.
 # │
-# │ Imports: mlsysim.book (check)
+# │ Imports: mlsysim.core.constants (H100_MEM_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW,
+# │          GB, second), mlsysim.fmt (check)
 # │ Exports: bs_hbm_bw_str, bs_nvlink_bw_str, bs_ib_bw_str, bs_gap_hbm_nv_str, bs_gap_nv_ib_str
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import H100_MEM_BW, NVLINK_H100_BW, INFINIBAND_NDR_BW, GB, second
 from mlsysim.fmt import check
 
 class BandwidthStaircase:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    hbm_bw_gbs = 3350 # H100 HBM3
-    nvlink_bw_gbs = 900 # H100 NVLink
-    ib_bw_gbs = 50 # 400G NDR InfiniBand
+    hbm_bw_gbs = H100_MEM_BW.m_as(GB/second)           # H100 HBM3
+    nvlink_bw_gbs = NVLINK_H100_BW.m_as(GB/second)      # H100 NVLink
+    ib_bw_gbs = (INFINIBAND_NDR_BW / 8).m_as(GB/second) # 400G NDR InfiniBand
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gap_hbm_nv = hbm_bw_gbs / nvlink_bw_gbs
     gap_nv_ib = nvlink_bw_gbs / ib_bw_gbs
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(gap_nv_ib == 18.0, f"Gap {gap_nv_ib} unexpected")
     # ┌── 4. OUTPUT ────────────────────────────────────────
-    bs_hbm_bw_str = f"{hbm_bw_gbs:,}"
-    bs_nvlink_bw_str = f"{nvlink_bw_gbs}"
-    bs_ib_bw_str = f"{ib_bw_gbs}"
+    bs_hbm_bw_str = f"{hbm_bw_gbs:,.0f}"
+    bs_nvlink_bw_str = f"{nvlink_bw_gbs:.0f}"
+    bs_ib_bw_str = f"{ib_bw_gbs:.0f}"
     bs_gap_hbm_nv_str = f"{gap_hbm_nv:.1f}"
     bs_gap_nv_ib_str = f"{gap_nv_ib:.0f}"
 

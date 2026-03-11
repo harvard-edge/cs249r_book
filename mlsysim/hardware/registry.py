@@ -2,14 +2,15 @@ from .types import HardwareNode, ComputeCore, MemoryHierarchy, StorageHierarchy,
 from ..core.registry import Registry
 from ..core.constants import (
     ureg, USD,
-    V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, V100_FLOPS_FP32,
-    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP, A100_FLOPS_FP32, A100_FLOPS_TF32, A100_FLOPS_INT8,
-    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8,
-    B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4,
-    MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP,
-    TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY,
-    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8,
-    WSE3_FLOPS_FP16, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP, WSE3_CORES,
+    V100_MEM_BW, V100_FLOPS_FP16_TENSOR, V100_MEM_CAPACITY, V100_TDP, V100_FLOPS_FP32, V100_UNIT_COST,
+    A100_MEM_BW, A100_FLOPS_FP16_TENSOR, A100_MEM_CAPACITY, A100_TDP, A100_FLOPS_FP32, A100_FLOPS_TF32, A100_FLOPS_INT8, A100_UNIT_COST,
+    H100_MEM_BW, H100_FLOPS_FP16_TENSOR, H100_MEM_CAPACITY, H100_TDP, H100_FLOPS_TF32, H100_FLOPS_FP8_TENSOR, H100_FLOPS_INT8, H100_UNIT_COST,
+    H200_MEM_BW, H200_MEM_CAPACITY, H200_TDP, H200_UNIT_COST,
+    B200_MEM_BW, B200_FLOPS_FP16_TENSOR, B200_MEM_CAPACITY, B200_TDP, B200_FLOPS_FP8_TENSOR, B200_FLOPS_INT4, B200_UNIT_COST,
+    MI300X_MEM_BW, MI300X_FLOPS_FP16_TENSOR, MI300X_MEM_CAPACITY, MI300X_TDP, MI300X_UNIT_COST,
+    TPUV5P_MEM_BW, TPUV5P_FLOPS_BF16, TPUV5P_MEM_CAPACITY, TPUV5P_TDP,
+    T4_MEM_BW, T4_FLOPS_FP16_TENSOR, T4_TDP, T4_FLOPS_INT8, T4_UNIT_COST,
+    WSE3_FLOPS_FP16, WSE3_MEM_CAPACITY, WSE3_MEM_BW, WSE3_TDP, WSE3_CORES, CEREBRAS_CS3_UNIT_COST,
     PCIE_GEN3_BW, PCIE_GEN4_BW, PCIE_GEN5_BW, NVME_SEQUENTIAL_BW
 )
 
@@ -22,7 +23,7 @@ class CloudHardware(Registry):
         memory=MemoryHierarchy(capacity=V100_MEM_CAPACITY, bandwidth=V100_MEM_BW),
         interconnect=IOInterconnect(name="PCIe Gen3 x16", bandwidth=PCIE_GEN3_BW),
         tdp=V100_TDP,
-        unit_cost=10000 * USD,
+        unit_cost=V100_UNIT_COST,
         dispatch_tax=0.02 * ureg.ms
     )
 
@@ -33,7 +34,7 @@ class CloudHardware(Registry):
         memory=MemoryHierarchy(capacity=A100_MEM_CAPACITY, bandwidth=A100_MEM_BW),
         interconnect=IOInterconnect(name="PCIe Gen4 x16", bandwidth=PCIE_GEN4_BW),
         tdp=A100_TDP,
-        unit_cost=15000 * USD,
+        unit_cost=A100_UNIT_COST,
         dispatch_tax=0.015 * ureg.ms,
         metadata={"source_url": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "last_verified": "2025-03-06"}
     )
@@ -46,23 +47,22 @@ class CloudHardware(Registry):
         storage=StorageHierarchy(capacity=2 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
         tdp=H100_TDP,
-        unit_cost=30000 * USD,
+        unit_cost=H100_UNIT_COST,
         dispatch_tax=0.01 * ureg.ms,
         metadata={"source_url": "https://resources.nvidia.com/en-us-tensor-core/nvidia-h100-tensor-core-gpu-datasheet", "last_verified": "2025-03-06"}
     )
-    
+
     H200 = HardwareNode(
         name="NVIDIA H200",
         release_year=2023,
         compute=ComputeCore(peak_flops=H100_FLOPS_FP16_TENSOR),
-        memory=MemoryHierarchy(capacity=141 * ureg.GB, bandwidth=4.8 * ureg.TB/ureg.s),
+        memory=MemoryHierarchy(capacity=H200_MEM_CAPACITY, bandwidth=H200_MEM_BW),
         storage=StorageHierarchy(capacity=4 * ureg.TB, bandwidth=NVME_SEQUENTIAL_BW),
         interconnect=IOInterconnect(name="PCIe Gen5 x16", bandwidth=PCIE_GEN5_BW),
-        tdp=H100_TDP,
-        unit_cost=35000 * USD,
+        tdp=H200_TDP,
+        unit_cost=H200_UNIT_COST,
         dispatch_tax=0.01 * ureg.ms
     )
-
 
     B200 = HardwareNode(
         name="NVIDIA B200",
@@ -70,7 +70,7 @@ class CloudHardware(Registry):
         compute=ComputeCore(peak_flops=B200_FLOPS_FP16_TENSOR, precision_flops={"fp8": B200_FLOPS_FP8_TENSOR, "int4": B200_FLOPS_INT4}),
         memory=MemoryHierarchy(capacity=B200_MEM_CAPACITY, bandwidth=B200_MEM_BW),
         tdp=B200_TDP,
-        unit_cost=40000 * USD,
+        unit_cost=B200_UNIT_COST,
         dispatch_tax=0.008 * ureg.ms
     )
 
@@ -80,16 +80,16 @@ class CloudHardware(Registry):
         compute=ComputeCore(peak_flops=MI300X_FLOPS_FP16_TENSOR),
         memory=MemoryHierarchy(capacity=MI300X_MEM_CAPACITY, bandwidth=MI300X_MEM_BW),
         tdp=MI300X_TDP,
-        unit_cost=15000 * USD,
+        unit_cost=MI300X_UNIT_COST,
         dispatch_tax=0.012 * ureg.ms
     )
-    
+
     TPUv5p = HardwareNode(
         name="Google TPU v5p",
         release_year=2023,
         compute=ComputeCore(peak_flops=TPUV5P_FLOPS_BF16),
         memory=MemoryHierarchy(capacity=TPUV5P_MEM_CAPACITY, bandwidth=TPUV5P_MEM_BW),
-        tdp=300 * ureg.W,
+        tdp=TPUV5P_TDP,
         dispatch_tax=0.04 * ureg.ms
     )
 
@@ -99,7 +99,7 @@ class CloudHardware(Registry):
         compute=ComputeCore(peak_flops=T4_FLOPS_FP16_TENSOR, precision_flops={"int8": T4_FLOPS_INT8}),
         memory=MemoryHierarchy(capacity=16 * ureg.GiB, bandwidth=T4_MEM_BW),
         tdp=T4_TDP,
-        unit_cost=2500 * USD,
+        unit_cost=T4_UNIT_COST,
         dispatch_tax=0.03 * ureg.ms
     )
 
@@ -113,7 +113,7 @@ class CloudHardware(Registry):
         # Injection bandwidth from MemoryX (approx 1.2 TB/s per WSE)
         interconnect=IOInterconnect(name="SwarmX / MemoryX", bandwidth=1.2 * ureg.TB / ureg.second),
         tdp=WSE3_TDP,
-        unit_cost=2000000 * USD,  # Approx. estimation for a CS-3 system
+        unit_cost=CEREBRAS_CS3_UNIT_COST,
         dispatch_tax=0.001 * ureg.ms,
         metadata={"source_url": "https://www.cerebras.net/product-system/"}
     )
@@ -124,7 +124,7 @@ class WorkstationHardware(Registry):
         name="NVIDIA DGX Spark (GB10)",
         release_year=2024,
         compute=ComputeCore(
-            peak_flops=250 * ureg.TFLOPs/ureg.s, 
+            peak_flops=250 * ureg.TFLOPs/ureg.s,
             precision_flops={"fp8": 500 * ureg.TFLOPs/ureg.s, "fp4": 1000 * ureg.TFLOPs/ureg.s}
         ),
         memory=MemoryHierarchy(capacity=128 * ureg.GB, bandwidth=500 * ureg.GB/ureg.s),
@@ -152,7 +152,7 @@ class MobileHardware(Registry):
         battery_capacity=15 * ureg.Wh,
         dispatch_tax=1.0 * ureg.ms
     )
-    
+
     Pixel8 = HardwareNode(
         name="Google Pixel 8 (Tensor G3)",
         release_year=2023,
@@ -181,7 +181,7 @@ class EdgeHardware(Registry):
         tdp=25 * ureg.W,
         dispatch_tax=0.2 * ureg.ms
     )
-    
+
     Coral = HardwareNode(
         name="Google Coral Edge TPU",
         release_year=2019,
@@ -190,7 +190,7 @@ class EdgeHardware(Registry):
         tdp=2 * ureg.W,
         dispatch_tax=1.0 * ureg.ms
     )
-    
+
     NUC_Movidius = HardwareNode(
         name="Intel NUC + Movidius",
         release_year=2020,
@@ -199,7 +199,7 @@ class EdgeHardware(Registry):
         tdp=15 * ureg.W,
         dispatch_tax=2.0 * ureg.ms
     )
-    
+
     GenericServer = HardwareNode(
         name="Edge Server",
         release_year=2024,
@@ -220,7 +220,7 @@ class TinyHardware(Registry):
         dispatch_tax=5.0 * ureg.ms
     )
     ESP32 = ESP32_S3 # Alias for backward compatibility
-    
+
     HimaxWE1 = HardwareNode(
         name="Himax WE-I Plus",
         release_year=2020,
@@ -236,7 +236,7 @@ class Hardware(Registry):
     Mobile = MobileHardware
     Edge = EdgeHardware
     Tiny = TinyHardware
-    
+
     # Common Aliases (Vetted only)
     V100 = CloudHardware.V100
     A100 = CloudHardware.A100
@@ -247,10 +247,10 @@ class Hardware(Registry):
     TPUv5p = CloudHardware.TPUv5p
     T4 = CloudHardware.T4
     CerebrasCS3 = CloudHardware.Cerebras_CS3
-    
+
     DGXSpark = WorkstationHardware.DGX_Spark
     MacBook = WorkstationHardware.MacBookM3Max
-    
+
     iPhone = MobileHardware.iPhone15Pro
     Snapdragon = MobileHardware.Snapdragon8Gen3
     Jetson = EdgeHardware.JetsonOrinNX

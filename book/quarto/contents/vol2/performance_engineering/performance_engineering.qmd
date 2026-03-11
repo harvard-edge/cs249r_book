@@ -1353,11 +1353,13 @@ The potential benefit of communication-computation overlap depends on the relati
 # │ How: AllReduce time = 2 * gradient_bytes / nvlink_bw; backward time =
 # │       backward_flops / (h100_tflops * MFU); overlap removes min(back, AR).
 # │
-# │ Imports: (none — uses inline constants), mlsysim.book (check)
+# │ Imports: mlsysim.core.constants (NVLINK_H100_BW, H100_FLOPS_FP16_TENSOR,
+# │          GB, second, flop), mlsysim.fmt (check)
 # │ Exports: gradient_gb_str, allreduce_ms_str, backward_ms_str, forward_ms_str,
 # │          step_no_overlap_ms_str, step_overlap_ms_str, overlap_speedup_str,
 # │          overlap_status
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.constants import NVLINK_H100_BW, H100_FLOPS_FP16_TENSOR, byte, GB, second, flop
 
 # ┌── LEGO ───────────────────────────────────────────────
 class OverlapCalc:
@@ -1367,7 +1369,7 @@ class OverlapCalc:
     model_params = 7e9           # 7B parameter model
     bytes_per_param_fp16 = 2     # FP16 gradients
     num_gpus = 8
-    nvlink_bw = 900e9            # H100 NVLink: 900 GB/s bidirectional
+    nvlink_bw = NVLINK_H100_BW.m_as(byte / second)  # H100 NVLink: 900 GB/s bidirectional
     ring_allreduce_factor = 2    # Ring AllReduce: 2*(N-1)/N ≈ 2 for large N
 
     # Backward pass compute: ~2 * forward FLOPs (gradient computation)
@@ -1376,7 +1378,7 @@ class OverlapCalc:
     tokens_per_gpu = 2048        # seq_len * micro_batch
     forward_flops = 2 * model_params * tokens_per_gpu
     backward_flops = 2 * forward_flops  # backward is ~2x forward
-    h100_fp16_tflops = 989e12    # Tensor core TFLOPS
+    h100_fp16_tflops = H100_FLOPS_FP16_TENSOR.m_as(flop / second)  # Tensor core TFLOPS
     mfu = 0.40                   # Realistic MFU
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -1751,18 +1753,18 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 # │ Show: How the "Scaling Tax" reduces MFU from a 65% local peak to 48% fleet avg.
 # │ How: MFU = (6 * P * D) / (N * R_peak * Time).
 # │
-# │ Imports: mlsysim.core.constants (BILLION, TRILLION, H100_FLOPS_FP16_TENSOR)
+# │ Imports: mlsysim.core.constants (BILLION, TRILLION, H100_FLOPS_FP16_TENSOR, LLAMA2_70B_PARAMS)
 # │ Exports: fleet_params_b_str, fleet_nodes_str, fleet_t_step_ms_str,
 # │          fleet_local_mfu_str, fleet_global_mfu_str, fleet_scaling_tax_str
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.constants import BILLION, TRILLION, H100_FLOPS_FP16_TENSOR, second, TFLOPs
+from mlsysim.core.constants import BILLION, TRILLION, H100_FLOPS_FP16_TENSOR, LLAMA2_70B_PARAMS, second, TFLOPs, param
 from mlsysim.fmt import fmt, check
 
 class FleetEfficiencyCalc:
     """Calculates Fleet MFU and identifies the Scaling Tax."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    p_params = 70 * BILLION
+    p_params = LLAMA2_70B_PARAMS.m_as(param)
     n_gpus = 128
     r_peak_per_gpu = H100_FLOPS_FP16_TENSOR.m_as(TFLOPs / second) * TRILLION
     tokens_per_step = 2048 * 32 # seq_len * global_batch

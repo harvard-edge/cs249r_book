@@ -36,6 +36,12 @@ H100_MEM_BW = 3.35 * TB / second          # HBM3
 H100_MEM_CAPACITY = 80 * GiB
 H100_TDP = 700 * watt                     # SXM variant
 
+# NVIDIA H200 (Hopper, 2023) — Source: NVIDIA H200 Data Sheet
+# H200 shares the Hopper compute die with H100, only memory differs
+H200_MEM_BW = 4.8 * TB / second             # HBM3e
+H200_MEM_CAPACITY = 141 * GB
+H200_TDP = 700 * watt                       # Same as H100 SXM
+
 # NVIDIA B100/B200 (Blackwell, 2024) — Source: NVIDIA Blackwell Architecture
 B200_FLOPS_FP16_TENSOR = 2250 * TFLOPs / second  # Dense. Sparse is 4500.
 B200_FLOPS_FP16_SPARSE = 4500 * TFLOPs / second
@@ -241,9 +247,13 @@ VIDEO_FPS_STANDARD = Q_(30, 'Hz')
 GPT2_PARAMS = 1.5e9 * param
 GPT2_LAYERS = 48
 GPT2_HIDDEN_DIM = 1600
+GPT2_HEADS = 25
 
 # GPT-3 (175B)
 GPT3_PARAMS = 175e9 * param
+GPT3_LAYERS = 96
+GPT3_HIDDEN_DIM = 12288
+GPT3_HEADS = 96
 GPT3_TRAINING_OPS = 3.14e23 * flop
 GPT3_TRAINING_TOKENS = 300e9 * count
 GPT3_TRAINING_DAYS_REF = 25 * day # Days on 1024 A100s
@@ -251,20 +261,74 @@ GPT3_TRAINING_ENERGY_MWH = 1287 # MWh, estimated per Patterson et al. (2021)
 
 # GPT-4 (Reference) - Note: Unofficial public estimates
 GPT4_EST_PARAMS = 1.76e12 * param
+GPT4_LAYERS = 120
+GPT4_HIDDEN_DIM = 16384
+GPT4_HEADS = 128
 GPT4_TRAINING_GPU_DAYS = 2.5e6 # A100 days
+
+# Llama-2 (70B) — Source: Touvron et al. (2023)
+LLAMA2_70B_PARAMS = 70e9 * param
+LLAMA2_70B_LAYERS = 80
+LLAMA2_70B_HIDDEN_DIM = 8192
+LLAMA2_70B_HEADS = 64
 
 # Llama 3.1
 LLAMA3_8B_PARAMS = 8.03e9 * param
+LLAMA3_8B_LAYERS = 32
+LLAMA3_8B_HIDDEN_DIM = 4096
+LLAMA3_8B_HEADS = 32
+LLAMA3_8B_KV_HEADS = 8
 LLAMA3_70B_PARAMS = 70.6e9 * param
+LLAMA3_70B_LAYERS = 80
+LLAMA3_70B_HIDDEN_DIM = 8192
+LLAMA3_70B_HEADS = 64
+LLAMA3_70B_KV_HEADS = 8
 LLAMA3_405B_PARAMS = 405e9 * param
 
-# BERT-Base
+# BERT-Base — Source: Devlin et al. (2018)
 BERT_BASE_PARAMS = 110e6 * param
+BERT_BASE_LAYERS = 12
+BERT_BASE_HIDDEN_DIM = 768
+BERT_BASE_HEADS = 12
 BERT_BASE_FLOPs = 22e9 * flop              # Per inference (seq_len=512)
+
+# BERT-Large — Source: Devlin et al. (2018)
 BERT_LARGE_PARAMS = 340e6 * param
+BERT_LARGE_LAYERS = 24
+BERT_LARGE_HIDDEN_DIM = 1024
+BERT_LARGE_HEADS = 16
+BERT_LARGE_FLOPs = 72e9 * flop             # Per inference (seq_len=512)
 
 # AlexNet (Reference)
 ALEXNET_PARAMS = 60e6 * param
+ALEXNET_FLOPs = 1.5e9 * flop               # Estimated per inference
+
+# YOLOv8-nano — Source: Ultralytics (2023)
+YOLOV8_NANO_PARAMS = 3.2e6 * param
+YOLOV8_NANO_FLOPs = 8.7e9 * flop  # 640x640
+YOLOV8_NANO_LAYERS = 225
+
+# WakeVision (Doorbell) — Source: Banbury et al. (2021)
+WAKEVISION_PARAMS = 0.25e6 * param
+WAKEVISION_FLOPs = 25e6 * flop
+
+# Mamba-130M — Source: Gu & Dao (2023)
+MAMBA_130M_PARAMS = 130e6 * param
+MAMBA_130M_LAYERS = 24
+MAMBA_130M_HIDDEN_DIM = 768
+MAMBA_130M_STATE_SIZE = 16
+
+# Mamba-2.8B — Source: Gu & Dao (2023)
+MAMBA_2_8B_PARAMS = 2.8e9 * param
+MAMBA_2_8B_LAYERS = 64
+MAMBA_2_8B_HIDDEN_DIM = 2560
+MAMBA_2_8B_STATE_SIZE = 16
+
+# Stable Diffusion v1.5 — Source: Rombach et al. (2022)
+STABLE_DIFFUSION_V1_5_PARAMS = 860e6 * param
+STABLE_DIFFUSION_V1_5_RESOLUTION = 512
+STABLE_DIFFUSION_V1_5_STEPS = 50
+STABLE_DIFFUSION_V1_5_FLOPs_PER_STEP = 20e9 * flop
 
 # Reference model/dataset dimensions
 TRANSFORMER_HIDDEN_DIM_EXAMPLE = 768
@@ -332,8 +396,18 @@ DLRM_EMBEDDING_ENTRIES = 25e9  # 25 Billion entries (dimensionless count)
 DLRM_EMBEDDING_DIM = 128
 DLRM_MODEL_SIZE_FP32 = 100 * GB  # Approximate total model size
 
-# YOLOv8-nano
-YOLOV8_NANO_FLOPs = 8.7e9 * flop  # 640x640
+# --- Hardware Unit Costs (Approximate, 2024 baseline) ---
+V100_UNIT_COST = 10000 * USD
+A100_UNIT_COST = 15000 * USD
+H100_UNIT_COST = 30000 * USD
+H200_UNIT_COST = 35000 * USD
+B200_UNIT_COST = 40000 * USD
+MI300X_UNIT_COST = 15000 * USD
+T4_UNIT_COST = 2500 * USD
+CEREBRAS_CS3_UNIT_COST = 2000000 * USD      # Approx. system cost
+
+# --- Hardware TDP (where not already defined above) ---
+TPUV5P_TDP = 300 * watt
 
 # --- Storage (I/O Bandwidth) ---
 NVME_SEQUENTIAL_BW = 7.0 * GB / second    # NVMe SSD sequential read (Gen 4)
