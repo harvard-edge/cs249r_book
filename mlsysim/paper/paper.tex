@@ -28,11 +28,22 @@
 \usepackage{cleveref}
 \usepackage{tikz}
 \usetikzlibrary{shapes,arrows,positioning,shadows,calc,backgrounds,decorations.pathreplacing}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 \usepackage{subcaption}
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{fancyhdr}
 \usepackage{xspace}
+
+% Allow more floats per page and prevent deferral to end
+\renewcommand{\topfraction}{0.9}
+\renewcommand{\bottomfraction}{0.9}
+\renewcommand{\textfraction}{0.1}
+\renewcommand{\floatpagefraction}{0.7}
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{4}
+\setcounter{totalnumber}{8}
 
 % Branding: styled product name (display) vs. plain text (code)
 \newcommand{\mlsysim}{\mbox{\textsc{MLSys\,\textperiodcentered\,im}}\xspace}
@@ -108,16 +119,16 @@
 \maketitle
 
 \begin{abstract}
-As machine learning models transition from laboratory curiosities to critical infrastructure, the systems required to sustain them have reached a point of extreme bimodal complexity. Developers must reason about constraints spanning from sub-milliwatt microcontrollers to multi-gigawatt datacenter fleets. Existing evaluation methodologies are polarized between hardware-dependent empirical profiling and cycle-accurate simulation, leaving a void for rapid, full-stack architectural reasoning. We present \MLSYSIM{} (\textbf{M}achine \textbf{L}earning \textbf{Sys}tems \textbf{I}nfrastructure \textbf{M}odeling), a first-principles analytical modeling framework that formalizes the ``physics of systems'' into a dimensionally-strict Python engine. \mlsysim introduces a 5-layer \emph{Progressive Lowering} abstraction that decouples computational demand from silicon supply and environmental context. By strictly enforcing unit-level integrity at runtime, \mlsysim eliminates the silent conversion errors that plague ad-hoc systems modeling. We codify a complete taxonomy of 22 ``Systems Walls'' (including compute, memory, serving, batching, streaming, tail latency, ingestion, transformation, locality, reasoning, checkpointing, and safety) organized into six domains and resolved by a composable suite of 21 solvers. Our evaluation demonstrates that \mlsysim enables sub-second design-space exploration, identifying binding constraints and synthesizing ideal hardware specifications across the entire ML systems lifecycle.
+As machine learning models transition from laboratory curiosities to critical infrastructure, the systems required to sustain them have reached a point of extreme bimodal complexity. Developers must reason about constraints spanning from sub-milliwatt microcontrollers to multi-gigawatt datacenter fleets. Existing evaluation methodologies are polarized between hardware-dependent empirical profiling and cycle-accurate simulation, leaving a void for rapid, full-stack architectural reasoning. We present \MLSYSIM{} (\textbf{M}achine \textbf{L}earning \textbf{Sys}tems \textbf{I}nfrastructure \textbf{M}odeling), a first-principles analytical modeling framework that formalizes the ``physics of systems'' into a dimensionally-strict Python engine. \mlsysim introduces a 5-layer \emph{Progressive Lowering} abstraction that decouples computational demand from silicon supply and environmental context. Strict enforcement of unit-level integrity at runtime eliminates the silent conversion errors that plague ad-hoc systems modeling. We codify a complete taxonomy of 22 ``Systems Walls'' (including compute, memory, serving, batching, streaming, tail latency, ingestion, transformation, locality, reasoning, checkpointing, and safety) organized into six domains and resolved by a composable suite of 21 solvers. Our evaluation demonstrates that \mlsysim enables sub-second design-space exploration, identifying binding constraints and synthesizing ideal hardware specifications across the entire ML systems lifecycle.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
-\begin{figure*}[t]
+\begin{figure*}[!tbp]
 \centering
-\includegraphics[width=\textwidth]{figures/mlsysim-overview.pdf}
-\caption{\textbf{\mlsysim Framework Overview.} (a)~Demand--supply separation decouples workload specifications from hardware capabilities and environmental context. (b)~22 Systems Walls organized into six domains, each grounded in a published equation. (c)~Stateless solver composition chains 21 solvers to identify binding constraints through a three-level evaluation. (d)~Example outputs for LLaMA-3 70B on 1024$\times$ H100, produced in $<$0.3\,s on a laptop.}
+\includegraphics[width=0.85\textwidth]{figures/mlsysim-overview.pdf}
+\caption{\textbf{\mlsysim Framework Overview.} (a)~Demand--supply separation decouples workload specifications from hardware capabilities and environmental context. (b)~All 22 Systems Walls organized into six domains (Node, Data, Algorithm, Fleet, Ops, Analysis), each grounded in a published equation. (c)~Stateless solver composition chains 21 solvers to identify binding constraints through a three-level evaluation. (d)~Example outputs for LLaMA-3 70B on 1024$\times$ H100, produced in $<$0.3\,s on a laptop.}
 \label{fig:overview}
 \end{figure*}
 
@@ -125,22 +136,22 @@ In ``The Bitter Lesson,'' Rich Sutton observes that general methods leveraging m
 
 Consider a concrete example. A team deploying LLaMA-3 70B for interactive serving must answer: \emph{How many H100 GPUs are needed to meet a 50\,ms time-to-first-token SLA at 95th-percentile latency?} The answer depends on at least seven interacting constraints: the model's 70 billion parameters require $\sim$140\,GB in FP16, exceeding a single GPU's 80\,GB HBM capacity (Wall~2: Memory). Tensor-parallel sharding across two GPUs introduces NVLink synchronization overhead (Wall~14: Communication). Continuous batching with PagedAttention determines KV-cache memory utilization (Wall~5: Batching). The decode phase is memory-bandwidth-bound at 3.35\,TB/s per device (Wall~4: Serving). Tail latency under load follows Erlang-C queueing dynamics (Wall~7: Tail Latency). And the fleet's total cost of ownership and carbon footprint (\$4.2M and 128\,tCO\textsubscript{2} over three years) constrain what is economically and environmentally viable (Walls~17--18). No existing tool reasons about all seven constraints simultaneously in the time it takes to re-run a notebook cell.
 
-\paragraph{The accessibility gap.}
+\textbf{The accessibility gap.}
 Yet the hardware required to develop intuition for these systems is prohibitively scarce. A student cannot requisition a 100,000-GPU cluster to explore how fat-tree versus torus topologies affect AllReduce latency, or how doubling HBM bandwidth shifts the binding constraint from memory to network. This creates a profound \emph{accessibility gap} in ML systems education: the very infrastructure students must learn to reason about is the infrastructure they cannot access. This gap has pedagogical consequences beyond mere inconvenience. Students who learn ML systems only through high-level APIs develop brittle mental models that collapse at production scale, where silent failures in memory management, synchronization overhead, and thermal throttling determine whether a training run succeeds or wastes millions of dollars in compute~\citep{patterson2022carbon}. The same gap afflicts researchers performing design-space exploration and engineers sizing production deployments: both need rapid, full-stack reasoning that today requires either back-of-the-envelope calculations (error-prone, incomplete) or dedicated hardware (expensive, slow).
 
-\paragraph{The fidelity--speed--scope void.}
+\textbf{The fidelity--speed--scope void.}
 The community has attempted to bridge this gap through modeling, but existing tools are constrained along three axes (fidelity, speed, and scope), and no tool occupies the region where all three are adequate (\Cref{tab:comparison}). Empirical profilers such as MLPerf~\citep{mlperf2020} provide ground-truth measurements but require physical silicon, restricting their use to organizations that already possess the hardware in question. Cycle-accurate simulators like ASTRA-sim~2.0~\citep{won2023astrasim2} and Timeloop/Accelergy~\citep{parashar2019timeloop,wu2019accelergy} model microarchitectural behavior with high fidelity but require hours to simulate configurations that a systems architect needs to evaluate in seconds. Analytical tools like Calculon~\citep{calculon2023} achieve speed comparable to \mlsysim but focus narrowly on LLM training performance, ignoring data pipelines, reliability, sustainability, economics, and inference serving. Vidur~\citep{agrawal2024vidur} models LLM inference with high accuracy but does not extend to training, fleet economics, or sustainability. None of these tools enforce dimensional correctness, leaving practitioners vulnerable to the silent unit-conversion errors that plague ad-hoc systems modeling: confusing gigabytes with gigabits, neglecting the refractive index of fiber in latency calculations, or mixing per-device and per-node bandwidth figures.
 
-\paragraph{The MIPS analogy.}
+\textbf{The MIPS analogy.}
 We argue that what ML systems education and rapid design-space exploration need is the equivalent of what MIPS and SPIM provided for computer architecture~\citep{hennessy2019architecture}. Patterson and Hennessy did not give students cycle-accurate x86 simulators; they gave them a \emph{taxonomically complete} instruction set that exposed every architectural concept (pipelining, hazards, caches, virtual memory) through a model simple enough to reason about yet faithful enough to develop correct mental models. \mlsysim occupies the same niche for ML systems. It sacrifices microarchitectural detail to achieve sub-second execution, enabling students and practitioners to sweep thousands of hardware--model--topology combinations in the time a cycle-accurate simulator requires for one. What it preserves is \emph{completeness}: every fundamental bottleneck to scaling a machine learning system, from single-accelerator compute ceilings to fleet-scale carbon emissions, has a mathematical resolver within the framework.
 
-\paragraph{\mlsysim.}
+\textbf{\mlsysim.}
 We present \MLSYSIM{} (Machine Learning Systems Infrastructure Modeling), an open-source, pure-Python analytical modeling framework that formalizes the back-of-the-envelope calculations of ML systems engineering into a dimensionally strict, composable engine. \Cref{fig:overview} illustrates the framework's architecture. \mlsysim separates computational \emph{demand} (the workload) from silicon \emph{supply} (the hardware) and environmental \emph{context} (infrastructure and topology), then passes this configuration through a composable suite of 21 solvers that resolve 22 physical and logical constraints, the ``Systems Walls,'' organized into six domains spanning single-node resources to fleet-scale operations. The framework requires no GPU, runs on any laptop, and produces full-stack analysis in under 0.3 seconds, making it suitable for interactive classroom use, homework assignments, and rapid design-space exploration. Designed as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025}, \mlsysim enables structured systems analysis: users configure workloads, select hardware from a vetted registry, specify infrastructure context, and observe how constraints propagate to reveal binding bottlenecks, sensitivity gradients, and synthesized hardware requirements.
 
 This paper makes the following contributions:
 
 \begin{enumerate}[leftmargin=*,itemsep=3pt,label=\textbf{C\arabic*.}]
-    \item \textbf{A Taxonomy of 22 Systems Walls} organized into six domains (Node, Data, Algorithm, Fleet, Operations, Analysis), each wall grounded in a published equation and resolved by a dedicated solver. The taxonomy provides a complete, structured vocabulary for reasoning about the constraints that bound ML system performance (\Cref{sec:taxonomy}).
+    \item \textbf{A Taxonomy of 22 Systems Walls} organized into six domains (Node, Data, Algorithm, Fleet, Ops, Analysis), each wall grounded in a published equation and resolved by a dedicated solver. The taxonomy provides a complete, structured vocabulary for reasoning about the constraints that bound ML system performance (\Cref{sec:taxonomy}).
 
     \item \textbf{Demand--Supply Separation with Dimensional Strictness.} A 5-layer progressive lowering abstraction formally decouples computational demand from silicon supply and environmental context. Every physical quantity carries SI units at runtime via the \texttt{pint} library, transforming dimensional analysis from a manual discipline into a machine-checked invariant (\Cref{sec:philosophy,sec:architecture}).
 
@@ -156,7 +167,7 @@ The remainder of this paper is organized as follows. \Cref{sec:related} surveys 
 
 Tools for modeling and evaluating ML systems span a wide spectrum of fidelity, scope, and intended audience. We organize prior work into four categories and position \mlsysim relative to each. \Cref{tab:comparison} provides a quantitative summary.
 
-\subsection{Cycle-Accurate and Trace-Driven Simulators}
+\subsection{Cycle-Level Simulators}
 
 Cycle-accurate simulators provide the highest fidelity by modeling hardware behavior at the microarchitectural level. gem5~\citep{binkert2011gem5} is the canonical general-purpose architecture simulator, capable of modeling CPUs and GPUs down to individual pipeline stages. While invaluable for processor design, gem5 lacks ML-specific abstractions (it has no notion of a transformer layer, a training step, or a parallelism strategy), and simulating even a single forward pass of a modern model can require hours of wall-clock time.
 
@@ -190,35 +201,35 @@ A parallel line of work targets sustainability specifically. LLMCarbon~\citep{fa
 
 \begin{table*}[t]
 \centering
-\caption{\textbf{Comparison of ML systems modeling tools.} Scope indicates the range of system aspects modeled. Speed reflects wall-clock time for a single evaluation. Walls indicates the number of the 22 systems walls (\Cref{tab:walls}) each tool addresses. Units indicates runtime dimensional enforcement. Open indicates public source availability. Labs indicates structured, autogradable educational exercises.}
+\caption{\textbf{Comparison of ML systems modeling tools.} Scope indicates the range of system aspects modeled. Speed reflects wall-clock time for a single evaluation. Walls indicates the number of the 22 systems walls (\Cref{tab:walls}) each tool addresses. Phase indicates whether training, inference, or both are modeled. Dist.\ indicates support for multi-node distributed analysis.}
 \label{tab:comparison}
 \small
-\begin{tabularx}{\textwidth}{@{}l l X c c c c c@{}}
+\begin{tabularx}{\textwidth}{@{}l l X c c c c@{}}
 \toprule
-\textbf{Tool} & \textbf{Approach} & \textbf{Scope} & \textbf{Speed} & \textbf{Walls} & \textbf{Units} & \textbf{Open} & \textbf{Labs} \\
+\textbf{Tool} & \textbf{Approach} & \textbf{Scope} & \textbf{Speed} & \textbf{Walls} & \textbf{Phase} & \textbf{Dist.} \\
 \midrule
-\multicolumn{8}{@{}l}{\textit{Cycle-accurate \& trace-driven}} \\
-gem5 & Cycle-accurate & CPU/GPU microarchitecture & Hours & 1--2 & \emptymark & \fullmark & \emptymark \\
-ASTRA-sim 2.0 & Cycle-accurate & Network collectives, topology & Hours & 1--2 & \emptymark & \fullmark & \emptymark \\
-SimAI & Trace-driven & Full-stack distributed training & Minutes & 2--3 & \emptymark & \fullmark & \emptymark \\
+\multicolumn{7}{@{}l}{\textit{Cycle-level}} \\
+gem5 & Cycle-accurate & CPU/GPU microarchitecture & Hours & 1--2 & Both & \emptymark \\
+ASTRA-sim 2.0 & Cycle-accurate & Network collectives, topology & Hours & 1--2 & Train & \fullmark \\
+SimAI & Trace-driven & Full-stack distributed training & Minutes & 2--3 & Train & \fullmark \\
 \midrule
-\multicolumn{8}{@{}l}{\textit{Accelerator design}} \\
-Timeloop + Accelergy & Analytical & Accelerator dataflow \& energy & Minutes & 1--2 & \emptymark & \fullmark & \emptymark \\
-LLMCompass & Analytical & LLM inference HW design space & Minutes & 2--3 & \emptymark & \fullmark & \emptymark \\
+\multicolumn{7}{@{}l}{\textit{Accelerator design}} \\
+Timeloop + Accelergy & Analytical & Accelerator dataflow \& energy & Minutes & 1--2 & Infer & \emptymark \\
+LLMCompass & Analytical & LLM inference HW design space & Minutes & 2--3 & Infer & \emptymark \\
 \midrule
-\multicolumn{8}{@{}l}{\textit{Analytical \& co-design}} \\
-Paleo & Analytical & DNN training compute \& comm. & Seconds & 2 & \emptymark & \fullmark & \emptymark \\
-Calculon & Analytical & LLM training performance & Seconds & 2--3 & \emptymark & \fullmark & \emptymark \\
-Vidur & Empirical & LLM inference scheduling & Seconds & 3--4 & \emptymark & \fullmark & \emptymark \\
-GenZ & Analytical & LLM inference platform design & Seconds & 2--3 & \emptymark & \fullmark & \emptymark \\
-LLM-Viewer & Analytical & LLM inference memory/latency & Seconds & 1--2 & \emptymark & \fullmark & \emptymark \\
+\multicolumn{7}{@{}l}{\textit{Analytical \& co-design}} \\
+Paleo & Analytical & DNN training compute \& comm. & Seconds & 2 & Train & \fullmark \\
+Calculon & Analytical & LLM training performance & Seconds & 2--3 & Train & \fullmark \\
+Vidur & Empirical & LLM inference scheduling & Seconds & 3--4 & Infer & \emptymark \\
+GenZ & Analytical & LLM inference platform design & Seconds & 2--3 & Infer & \emptymark \\
+LLM-Viewer & Analytical & LLM inference memory/latency & Seconds & 1--2 & Infer & \emptymark \\
 \midrule
-\multicolumn{8}{@{}l}{\textit{Sustainability}} \\
-LLMCarbon & Analytical & LLM carbon footprint (op.\ + embodied) & Seconds & 1 & \emptymark & \fullmark & \emptymark \\
-CodeCarbon & Empirical & Runtime energy \& carbon tracking & Seconds & 1 & \emptymark & \fullmark & \emptymark \\
+\multicolumn{7}{@{}l}{\textit{Sustainability}} \\
+LLMCarbon & Analytical & LLM carbon footprint (op.\ + embodied) & Seconds & 1 & Both & \emptymark \\
+CodeCarbon & Empirical & Runtime energy \& carbon tracking & Seconds & 1 & Both & \emptymark \\
 \midrule
-\MLSYSIM & \textbf{Analytical} & \textbf{Full-stack: compute, memory, network, data,} & \textbf{Sub-sec.} & \textbf{22} & \fullmark & \fullmark & \fullmark \\
- & & \textbf{scaling, reliability, econ., sustainability, safety} & & & & & \\
+\MLSYSIM & \textbf{Analytical} & \textbf{Full-stack: compute, memory, network, data,} & \textbf{Sub-sec.} & \textbf{22} & \textbf{Both} & \fullmark \\
+ & & \textbf{scaling, reliability, econ., sustainability, safety} & & & & \\
 \bottomrule
 \end{tabularx}
 \end{table*}
@@ -253,62 +264,154 @@ This design eliminates the single most common class of bugs in back-of-the-envel
 \subsection{Taxonomic Completeness}
 \label{sec:taxonomic}
 
-We define a modeling framework as ``complete'' only when every fundamental bottleneck to scaling has a mathematical resolver. \mlsysim codifies 22 such bottlenecks, which we call \emph{Systems Walls}, organized into six domains: Node (single-accelerator resources), Data (movement and pipelines), Algorithm (scaling and compression), Fleet (multi-node coordination), Operations (economics, sustainability, and safety), and Analysis (cross-cutting diagnostics). Each wall maps to a dedicated solver with a formal equation grounded in the systems literature. \Cref{sec:taxonomy} presents the full taxonomy with formal definitions, and \Cref{sec:solver-formalism} describes how solvers compose.
+We define a modeling framework as ``complete'' only when every fundamental bottleneck to scaling has a mathematical resolver. \mlsysim codifies 22 such bottlenecks, which we call \emph{Systems Walls}, organized into six domains: Node (single-accelerator resources), Data (movement and pipelines), Algorithm (scaling and compression), Fleet (multi-node coordination), Ops (economics, sustainability, and safety), and Analysis (cross-cutting diagnostics). Each wall maps to a dedicated solver with a formal equation grounded in the systems literature. \Cref{sec:taxonomy} presents the full taxonomy with formal definitions, and \Cref{sec:solver-formalism} describes how solvers compose.
 
 \subsection{Demand--Supply Separation}
 \label{sec:demand-supply}
 
 \mlsysim enforces a strict separation between \emph{what} a model computes and \emph{where} it runs. A \texttt{TransformerWorkload} describes computational demand (parameters, layers, FLOPs, arithmetic intensity) without reference to any specific accelerator. A \texttt{HardwareNode} describes physical supply (peak throughput, memory bandwidth, TDP) without reference to any specific model. This decoupling, inspired by the compiler IR philosophy of progressive lowering~\citep{hennessy2019architecture}, enables hardware--software co-design: the same GPT-3 workload can be evaluated against an H100, a TPU~v5p, or a hypothetical future accelerator in a single parametric sweep, with all dimensional conversions handled automatically.
 
+% ============================================================
+\section{Architecture}
+\label{sec:architecture}
 
+\mlsysim implements the design principles of \Cref{sec:philosophy} through a five-layer \emph{Progressive Lowering} stack (\Cref{fig:stack}). Each layer adds physical context to an analysis without coupling to layers above or below.
 
-\section{The Taxonomy of ML Systems Walls}
+\begin{figure}[!htbp]
+\centering
+\begin{tikzpicture}[
+    node distance=0.8cm,
+    layer/.style={rectangle, draw=black!80, fill=blue!10, text width=6.5cm, align=center, minimum height=0.6cm, rounded corners=2pt, font=\scriptsize\sffamily},
+    connector/.style={thick, ->, >=stealth, gray!80}
+]
+    \node (A) [layer] {\textbf{Layer A: Workloads (Demand)} \\ \textit{Transformer, CNN, MoE: FLOPs, Params, Intensity}};
+    \node (B) [layer, below=of A] {\textbf{Layer B: Hardware (Supply)} \\ \textit{Accelerator: Peak TFLOPs, HBM BW, IO BW, TDP}};
+    \node (C) [layer, below=of B] {\textbf{Layer C: Infrastructure (Context)} \\ \textit{Datacenter: Carbon Intensity, PUE, WUE, Grid}};
+    \node (D) [layer, below=of C] {\textbf{Layer D: Systems (Topology)} \\ \textit{Fleet: Node Count, Fabric (Tree/Torus), Oversubscription}};
+    \node (E) [layer, below=of D, fill=orange!10] {\textbf{Layer E: Solvers (Analysis)} \\ \textit{21 Solvers: Physics-grounded Analytical Bounds}};
+    \node (F) [layer, below=of E, fill=green!10] {\textbf{Results: System Scorecard} \\ \textit{Feasibility, Performance, TCO, Carbon, Safety}};
+
+    \draw [connector] (A) -- (B);
+    \draw [connector] (B) -- (C);
+    \draw [connector] (C) -- (D);
+    \draw [connector] (D) -- (E);
+    \draw [connector] (E) -- (F);
+\end{tikzpicture}
+\caption{\textbf{The \mlsysim 5-Layer Stack.} Computational demand (Layer~A) is progressively lowered through hardware supply, environmental context, and network topology before solvers produce a system scorecard.}
+\label{fig:stack}
+\end{figure}
+
+\subsection{The Progressive Lowering Stack}
+\label{sec:stack}
+
+\textbf{Layer A: Workloads (Demand).} A workload is a hardware-agnostic description of computational demand. \mlsysim provides five concrete workload types (\Cref{tab:workloads}), each exposing a \texttt{lower()} method that produces a \texttt{ComputationGraph}: an intermediate representation containing total operations, weight bytes, and arithmetic intensity in \texttt{flop/byte}. This IR is the contract between demand and supply: it captures \emph{what} must be computed without prescribing \emph{how}.
+
+\begin{table}[!htbp]
+\centering
+\caption{\textbf{Supported Workload Types.} Each workload lowers to a \texttt{ComputationGraph} with total FLOPs, weight bytes, and arithmetic intensity.}
+\label{tab:workloads}
+\small
+\begin{tabularx}{\columnwidth}{@{}l X l@{}}
+\toprule
+\textbf{Workload} & \textbf{Key Parameters} & \textbf{Scaling} \\
+\midrule
+Transformer     & $P$, $L$, $H$, $D$, seq.\ length & $2P$ FLOPs/token \\
+CNN             & $P$, inference FLOPs             & Fixed per image \\
+Sparse (MoE)    & Total vs.\ active $P$, experts   & Active $P$ for FLOPs \\
+SSM (Mamba)     & $P$, state dim, $D$              & $O(1)$ state cache \\
+Diffusion       & $P$, denoising steps $T$         & $T \times$ FLOPs/step \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\textbf{Layer B: Hardware (Supply).} A \texttt{HardwareNode} composes four subsystems: \texttt{ComputeCore} (peak FLOP/s with a precision-keyed dictionary for FP16, TF32, FP8, INT8), \texttt{MemoryHierarchy} (capacity and bandwidth), optional \texttt{StorageHierarchy}, and optional \texttt{IOInterconnect}. Each node also carries TDP, unit cost, and a kernel dispatch tax. The \texttt{ridge\_point()} method computes the Roofline inflection $R = F_{\text{peak}} / BW_{\text{mem}}$ in \texttt{flop/byte}~\citep{williams2009roofline}, enabling immediate classification of any lowered workload as compute-bound or memory-bound.
+
+\textbf{Layer C: Infrastructure (Context).} \texttt{GridProfile} objects encode regional environmental parameters: carbon intensity (gCO$_2$/kWh), Power Usage Effectiveness (PUE), and Water Usage Effectiveness (WUE). A \texttt{Datacenter} composes a grid profile with rack-level power density constraints. This layer converts raw energy consumption into carbon footprint and water usage, following the methodology of \citet{patterson2022carbon}.
+
+\textbf{Layer D: Systems (Topology).} A \texttt{Fleet} composes \texttt{Node}s (accelerator type, count per node, intra-node bandwidth) with a \texttt{NetworkFabric} (topology, inter-node bandwidth, latency, oversubscription ratio). This layer enables distributed analysis: the \texttt{DistributedSolver} decomposes workloads using 4D parallelism (DP $\times$ TP $\times$ PP $\times$ EP) and calculates hierarchical AllReduce costs, pipeline bubble fractions, and scaling efficiency.
+
+\textbf{Layer E: Solvers (Analysis).} Twenty-one stateless solvers consume demand and supply to produce dimensioned performance metrics. The solver formalism (stateless composition, chaining semantics, and three-level evaluation) is detailed in \Cref{sec:solver-formalism}.
+
+Reproducible analysis requires reproducible inputs. \mlsysim organizes vetted specifications into four curated registries collectively called the \emph{MLSys Zoo}: the \textbf{Silicon Zoo} (hardware accelerators), the \textbf{Model Zoo} (workload architectures), the \textbf{Fleet Zoo} (cluster topologies), and the \textbf{Infrastructure Zoo} (regional grid profiles). Each entry is a fully typed object whose constants are sourced from datasheets with provenance metadata including source URLs and verification dates. For example, \texttt{Hardware.Cloud.H100} returns a \texttt{HardwareNode} with all physical quantities dimensioned via \texttt{pint}. The Silicon Zoo spans six orders of magnitude from sub-milliwatt microcontrollers (\texttt{Hardware.Tiny.ESP32\_S3}, 512\,KiB SRAM) to wafer-scale engines (\texttt{Hardware.Cloud.CerebrasCS3}, 44\,GiB on-wafer SRAM, 125\,PFLOP/s). The \texttt{list(sort\_by=)} class method enables programmatic comparison, and users extend any zoo by instantiating new typed objects (\Cref{lst:hwnode}), ensuring custom entries participate in the same dimensionally strict pipeline as vetted ones.
+
+\subsection{The Type System}
+\label{sec:types}
+
+\mlsysim's type system is built on Pydantic \texttt{BaseModel} classes with \texttt{pint} \texttt{Quantity} fields, providing both schema validation and dimensional enforcement at construction time. The composition hierarchy is deliberately shallow: \texttt{HardwareNode} aggregates \texttt{ComputeCore} and \texttt{MemoryHierarchy} as direct fields, not through deep inheritance. This design makes the relationship between a hardware specification and its physical quantities immediately legible:
+
+\begin{lstlisting}[caption={Composing a custom hardware node with dimensional types.},label={lst:hwnode}]
+from mlsysim.hardware.types import *
+from mlsysim.core.constants import Q_
+node = HardwareNode(
+    name="Custom Accelerator",
+    release_year=2025,
+    compute=ComputeCore(
+        peak_flops=Q_("500 TFLOPs/s"),
+        precision_flops={"fp8": Q_("1000 TFLOPs/s")}),
+    memory=MemoryHierarchy(
+        capacity=Q_("96 GiB"),
+        bandwidth=Q_("4 TB/s")),
+    tdp=Q_("500 W"))
+print(node.ridge_point())  # -> 125 flop/byte
+\end{lstlisting}
+
+The \texttt{ComputationGraph} IR bridges the demand--supply gap. When a solver calls \texttt{workload.lower()}, the workload computes its total operations, weight bytes, and arithmetic intensity, all in dimensioned quantities. For Mixture-of-Experts models, \texttt{SparseTransformerWorkload.lower()} uses \emph{active} parameters for FLOPs but \emph{total} parameters for memory footprint, correctly modeling the fundamental decoupling between compute cost and capacity requirements in sparse architectures~\citep{shazeer2017outrageously}.
+
+The complete evaluation produces a \texttt{SystemEvaluation} scorecard, a single object containing every metric from every solver, cross-referenced by wall number. Students can inspect any individual wall or view the aggregate to understand how constraints interact across the full stack.
+
+\subsection{Extensibility}
+\label{sec:extensibility}
+
+The layered architecture is designed for extension at every level. New workload types (e.g., a \texttt{RetrievalAugmentedWorkload} for RAG pipelines) require only implementing the \texttt{lower()} method to produce a \texttt{ComputationGraph}; all existing solvers then apply without modification. New hardware entries are added to the Silicon Zoo as declarative \texttt{HardwareNode} specifications (\Cref{lst:hwnode}), with no solver changes needed. New solvers can be introduced for emerging constraints (e.g., a \texttt{PrivacySolver} for federated learning communication overhead) by implementing the solver interface: accept typed inputs, return dimensioned outputs. The type system enforces correctness at every boundary, so extensions compose safely with existing components. This design ensures that \mlsysim can track the rapidly evolving ML systems landscape without requiring architectural changes to the core framework.
+
+% ============================================================
+\section{Taxonomy of ML Systems Walls}
 \label{sec:taxonomy}
 
-The ML systems literature is rich with specialized models for specific bottlenecks---from the original Roofline model~\citep{williams2009roofline} and Chinchilla scaling laws~\citep{hoffmann2022chinchilla} to PagedAttention batching limits~\citep{kwon2023efficient} and datacenter sustainability accounting~\citep{patterson2022carbon}. However, these constraints are typically studied in isolation. We synthesize this disjointed literature into a unified taxonomy of 22 distinct ``Walls.'' A wall represents a physical or logical constraint that bounds system performance. By codifying these previously disparate equations into a single, composable framework, each wall is resolved by a dedicated solver that accepts typed inputs and produces dimensionally correct bounds. This holistic integration of theoretical and empirical constraints into a unified executable engine has not been done before. \Cref{tab:walls} provides a complete summary; the subsections that follow formalize each domain.
+The ML systems literature is rich with specialized models for specific bottlenecks, from the original Roofline model~\citep{williams2009roofline} and Chinchilla scaling laws~\citep{hoffmann2022chinchilla} to PagedAttention batching limits~\citep{kwon2023efficient} and datacenter sustainability accounting~\citep{patterson2022carbon}. However, these constraints are typically studied in isolation. We synthesize this disjointed literature into a unified taxonomy of 22 distinct ``Walls.'' A wall represents a physical or logical constraint that bounds system performance. Codifying these previously disparate equations into a single, composable framework, each wall is resolved by a dedicated solver that accepts typed inputs and produces dimensionally correct bounds. This holistic integration of theoretical and empirical constraints into a unified executable engine has not been done before. \Cref{tab:walls} provides a complete summary; the subsections that follow formalize each domain.
 
 \begin{table*}[t]
 \centering
 \caption{\textbf{The 22 ML Systems Walls.} Each wall represents a physical or logical constraint resolved by a dedicated solver. Walls 1--2 (Compute and Memory) share the \texttt{SingleNodeSolver}, yielding 21 distinct solvers across 22 walls. Domains progress from local node resources through data movement and algorithmic scaling to fleet coordination, operations, and cross-cutting analysis.}
 \label{tab:walls}
 \small
-\begin{tabularx}{\textwidth}{@{}r l l X l@{}}
+\begin{tabularx}{\textwidth}{@{}r l l l X l@{}}
 \toprule
-\textbf{\#} & \textbf{Wall} & \textbf{What's Bounded} & \textbf{Core Equation} & \textbf{Key Ref.} \\
+\textbf{\#} & \textbf{Wall} & \textbf{Solver} & \textbf{Bounded} & \textbf{Core Equation} & \textbf{Ref.} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Node (Single-Accelerator Resources)}} \\
-1  & Compute       & Peak FLOP/s ceiling    & $T = \text{OPs} / (\text{Peak} \times \eta)$ & \citealt{williams2009roofline} \\
-2  & Memory        & HBM BW + capacity      & $T = |W| / BW_{\text{HBM}}$ & \citealt{williams2009roofline} \\
-3  & Software      & Achieved MFU           & $\eta = f(\text{kernel, fusion, occupancy})$ & \citealt{chowdhery2022palm} \\
-4  & Serving       & Prefill vs.\ decode    & Two-phase roofline & \citealt{pope2023llm} \\
-5  & Batching      & KV-cache fragmentation & $\text{KV} = 2LHD \lceil S/p \rceil pBb$ & \citealt{kwon2023efficient} \\
-6  & Streaming     & Injection BW           & $T = \max(T_{\text{inject}}, T_{\text{compute}})$ & \citealt{lie2023cerebras} \\
-7  & Tail Latency  & P99 queueing delay     & Erlang-C M/M/$c$ & \citealt{dean2013tail} \\
+\multicolumn{6}{@{}l}{\textit{Node (Single-Accelerator Resources)}} \\
+1  & Compute       & SingleNode      & Peak FLOP/s       & $T = \text{OPs} / (\text{Peak} \times \eta)$ & \citealt{williams2009roofline} \\
+2  & Memory        & SingleNode      & HBM BW + cap.     & $T = |W| / BW_{\text{HBM}}$ & \citealt{williams2009roofline} \\
+3  & Software      & Efficiency      & Achieved MFU      & $\eta = \text{FLOPS}_{\text{ach}} / \text{Peak}$ & \citealt{chowdhery2022palm} \\
+4  & Serving       & Serving         & Prefill vs.\ dec. & $T_{\text{pf}} = 2PS/F\eta;\; T_{\text{dec}} = |W|/BW$ & \citealt{pope2023llm} \\
+5  & Batching      & Cont.\ Batch    & KV-cache frag.    & $\text{KV} = 2LHD \lceil S/p \rceil pBb$ & \citealt{kwon2023efficient} \\
+6  & Streaming     & WeightStream    & Injection BW      & $T = \max(T_{\text{inj}}, T_{\text{comp}})$ & \citealt{lie2023cerebras} \\
+7  & Tail Latency  & TailLatency     & P99 queueing      & Erlang-C M/M/$c$ & \citealt{dean2013tail} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Data (Movement \& Pipelines)}} \\
-8  & Ingestion     & Storage I/O throughput  & $\rho = BW_{\text{demand}} / BW_{\text{supply}}$ & \citealt{mohan2022analyzing} \\
-9  & Transformation & CPU preprocessing     & $T = B \cdot S / C_{\text{tput}}$ & \citealt{murray2021tf} \\
-10 & Locality      & Network bisection BW   & $BW_{\text{eff}} = BW_{\text{link}} \cdot \beta / \text{osub}$ & \citealt{leiserson1985fat} \\
+\multicolumn{6}{@{}l}{\textit{Data (Movement \& Pipelines)}} \\
+8  & Ingestion     & Data            & Storage I/O       & $\rho = BW_{\text{demand}} / BW_{\text{supply}}$ & \citealt{mohan2022analyzing} \\
+9  & Transform.    & Transform.      & CPU preproc.      & $T = B \cdot S / C_{\text{tput}}$ & \citealt{murray2021tf} \\
+10 & Locality      & Topology        & Bisection BW      & $BW_{\text{eff}} = BW_{\text{link}} \cdot \beta / \text{osub}$ & \citealt{leiserson1985fat} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Algorithm (Scaling \& Compression)}} \\
-11 & Complexity    & Scaling law bounds     & $C = 6PD;\; P^{*} = \sqrt{C/120}$ & \citealt{hoffmann2022chinchilla} \\
-12 & Reasoning     & Inference-time compute & $T = K \times T_{\text{step}}$ & \citealt{brown2024inference} \\
-13 & Fidelity      & Accuracy--efficiency   & $r = 32/b;\; r = 1/(1{-}s)$ & \citealt{han2015deep} \\
+\multicolumn{6}{@{}l}{\textit{Algorithm (Scaling \& Compression)}} \\
+11 & Complexity    & Scaling         & Scaling laws      & $C = 6PD;\; P^{*} = \sqrt{C/120}$ & \citealt{hoffmann2022chinchilla} \\
+12 & Reasoning     & Inf.\ Scaling   & Inf.-time comp.   & $T = K \times T_{\text{step}}$ & \citealt{brown2024inference} \\
+13 & Fidelity      & Compression     & Acc.--efficiency  & $r = 32/b;\; r = 1/(1{-}s)$ & \citealt{han2015deep} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Fleet (Multi-Node Coordination)}} \\
-14 & Communication & AllReduce overhead     & $T = 2\tfrac{N{-}1}{N}\tfrac{M}{B_{\text{link}}} + 2(N{-}1)\alpha$ & \citealt{shoeybi2019megatron} \\
-15 & Fragility     & Cluster MTBF           & $\text{MTBF}_{\text{cl}} = \text{MTBF}_{\text{node}}/N$ & \citealt{daly2006higher} \\
-16 & Multi-tenant  & Queue wait time        & $T_{\text{wait}} = \rho / [2\mu(1{-}\rho)]$ & \citealt{little1961proof} \\
+\multicolumn{6}{@{}l}{\textit{Fleet (Multi-Node Coordination)}} \\
+14 & Communic.     & Distributed     & AllReduce         & $T = 2\tfrac{N{-}1}{N}\tfrac{M}{B_{\text{link}}} + 2(N{-}1)\alpha$ & \citealt{shoeybi2019megatron} \\
+15 & Fragility     & Reliability     & Cluster MTBF      & $\text{MTBF}_{\text{cl}} = \text{MTBF}_{\text{node}}/N$ & \citealt{daly2006higher} \\
+16 & Multi-tenant  & Orchestration   & Queue wait        & $T_{\text{wait}} = \rho / [2\mu(1{-}\rho)]$ & \citealt{little1961proof} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Operations (Economics, Sustainability \& Safety)}} \\
-17 & Capital       & Total cost of ownership & $\text{TCO} = \text{CapEx} + \text{OpEx}$ & \citealt{barroso2018datacenter} \\
-18 & Sustainability & Carbon + water        & $\text{CO}_2 = E \times \text{PUE} \times \text{CI}$ & \citealt{patterson2022carbon} \\
-19 & Checkpoint    & I/O burst MFU penalty  & $\text{penalty} = T_{\text{write}} / T_{\text{interval}}$ & \citealt{eisenman2022checknrun} \\
-20 & Safety        & DP-SGD overhead        & $\sigma \propto 1/\epsilon$ & \citealt{abadi2016deep} \\
+\multicolumn{6}{@{}l}{\textit{Ops (Economics, Sustainability \& Safety)}} \\
+17 & Capital       & Economics       & TCO               & $\text{TCO} = \text{CapEx} + \text{OpEx}$ & \citealt{barroso2018datacenter} \\
+18 & Sustain.      & Sustainability  & Carbon + water    & $\text{CO}_2 = E \times \text{PUE} \times \text{CI}$ & \citealt{patterson2022carbon} \\
+19 & Checkpoint    & Checkpoint      & I/O burst penalty & $\text{penalty} = T_{\text{write}} / T_{\text{interval}}$ & \citealt{eisenman2022checknrun} \\
+20 & Safety        & Resp.\ Eng.     & DP-SGD overhead   & $\sigma \propto 1/\epsilon$ & \citealt{abadi2016deep} \\
 \midrule
-\multicolumn{5}{@{}l}{\textit{Analysis (Cross-Cutting Diagnostics)}} \\
-21 & Sensitivity   & Binding constraint     & $\partial T / \partial x_i$ & \citealt{williams2009roofline} \\
-22 & Synthesis     & Inverse spec derivation & $BW_{\text{req}} = |W| / T_{\text{target}}$ & \citealt{kwon2023efficient} \\
+\multicolumn{6}{@{}l}{\textit{Analysis (Cross-Cutting Diagnostics)}} \\
+21 & Sensitivity   & Sensitivity     & Binding constr.   & $\partial T / \partial x_i$ & \citealt{williams2009roofline} \\
+22 & Synthesis     & Synthesis       & Inverse spec      & $BW_{\text{req}} = |W| / T_{\text{target}}$ & \citealt{kwon2023efficient} \\
 \bottomrule
 \end{tabularx}
 \end{table*}
@@ -323,9 +426,9 @@ The Node walls define what a single accelerator can achieve in isolation. They a
 \label{eq:tcompute}
 T_{\text{compute}} = \frac{\text{OPs}}{\text{Peak}_{\text{FLOPS}} \times \eta}
 \end{equation}
-where $\eta \in (0,1]$ is the hardware utilization efficiency and OPs is the total operation count. Throughout this paper, $\eta$ denotes the ratio of sustained to peak throughput; the related metric \emph{Model FLOPS Utilization} (MFU) measures only model-useful FLOPs and excludes overhead such as activation recomputation. For first-order analysis, we treat $\eta \approx \text{MFU}$; the distinction matters only when recomputation or non-model compute is significant. When this wall binds, the only remedy is faster silicon or fewer operations.
+where $\eta \in (0,1]$ is the hardware utilization efficiency and OPs is the total operation count. Throughout this paper, $\eta$ denotes the ratio of sustained to peak throughput; the related metric \emph{Model FLOPS Utilization} (MFU) measures only model-useful FLOPs and excludes overhead such as activation recomputation. For first-order analysis, we treat $\eta \approx \text{MFU}$; the distinction matters only when recomputation or non-model compute is significant. When this wall binds, the only remedy is faster silicon or fewer operations. \textbf{Assumptions:} Peak FLOPS is a hard ceiling; $\eta$ is workload-dependent and must be specified or estimated from benchmark data.
 
-\textbf{Wall~2: The Memory Wall.} High-bandwidth memory (HBM) imposes two ceilings: capacity (the model must fit) and bandwidth (weights must stream to compute units fast enough). An H100 reads HBM at 3.35\,TB/s, yet its 990\,TFLOP/s demand data at a rate that exceeds this bandwidth for any workload below ${\sim}295$\,flop/byte---making most LLM inference memory-bound, not compute-bound. During training, techniques like \textbf{Low-Rank Adaptation (LoRA)} and \textbf{Activation Recomputation} fundamentally alter the capacity constraint by trading compute or parameter trainability for drastically reduced memory footprints. The same \texttt{SingleNodeSolver} computes~\citep{williams2009roofline}:
+\textbf{Wall~2: The Memory Wall.} High-bandwidth memory (HBM) imposes two ceilings: capacity (the model must fit) and bandwidth (weights must stream to compute units fast enough). An H100 reads HBM at 3.35\,TB/s, yet its 990\,TFLOP/s demand data at a rate that exceeds this bandwidth for any workload below ${\sim}295$\,flop/byte, making most LLM inference memory-bound, not compute-bound. During training, techniques like \textbf{Low-Rank Adaptation (LoRA)} and \textbf{Activation Recomputation} fundamentally alter the capacity constraint by trading compute or parameter trainability for drastically reduced memory footprints. The same \texttt{SingleNodeSolver} computes~\citep{williams2009roofline}:
 \begin{equation}
 \label{eq:tmemory}
 T_{\text{memory}} = \frac{|W|}{BW_{\text{HBM}}}
@@ -340,32 +443,43 @@ The crossover between compute-bound and memory-bound regimes occurs at the \emph
 \label{eq:ridge}
 I^{*} = \frac{\text{Peak}_{\text{FLOPS}}}{BW_{\text{HBM}}} \quad \text{(flop/byte)}
 \end{equation}
-Workloads with arithmetic intensity $I < I^{*}$ are memory-bound; those with $I > I^{*}$ are compute-bound.
+Workloads with arithmetic intensity $I < I^{*}$ are memory-bound; those with $I > I^{*}$ are compute-bound. \textbf{Assumptions:} Peak FLOPS and HBM bandwidth are hard ceilings; MFU accounts for software inefficiency via $\eta$.
 
-\textbf{Wall~3: The Software Wall.} The gap between peak and achieved FLOP/s is typically larger than the gap between hardware generations. Most na\"ive implementations achieve only 30\% of peak throughput---the remaining 70\% is lost to redundant memory traffic, low warp occupancy, and unfused operations. The \texttt{EfficiencySolver} models this as a multiplicative efficiency factor $\eta$ that modulates the Roofline ceiling~\citep{chowdhery2022palm}. FlashAttention~\citep{dao2022flashattention}, for example, achieves a $2.5\times$ speedup over standard attention by fusing memory-bound operations into a single kernel pass, effectively raising $\eta$ from ${\sim}0.3$ to ${\sim}0.75$ for attention layers. When this wall binds, better kernels---not bigger chips---are the remedy.
+\textbf{Wall~3: The Software Wall.} The gap between peak and achieved FLOP/s is typically larger than the gap between hardware generations. Most na\"ive implementations achieve only 30\% of peak throughput; the remaining 70\% is lost to redundant memory traffic, low warp occupancy, and unfused operations. The \texttt{EfficiencySolver} models this as a multiplicative efficiency factor~\citep{chowdhery2022palm}:
+\begin{equation}
+\label{eq:efficiency}
+\eta = \frac{\text{FLOPS}_{\text{achieved}}}{\text{Peak}_{\text{FLOPS}}}
+\end{equation}
+where $\eta \in (0,1]$ modulates the Roofline ceiling, reducing the effective peak from $\text{Peak}_{\text{FLOPS}}$ to $\eta \times \text{Peak}_{\text{FLOPS}}$. FlashAttention~\citep{dao2022flashattention}, for example, achieves a $2.5\times$ speedup over standard attention by fusing memory-bound operations into a single kernel pass, effectively raising $\eta$ from ${\sim}0.3$ to ${\sim}0.75$ for attention layers. When this wall binds, better kernels, not bigger chips, are the remedy.
 
-\textbf{Wall~4: The Serving Wall.} Autoregressive LLM inference exhibits two distinct phases with fundamentally different Roofline characteristics~\citep{pope2023llm}: the same GPU is compute-bound during prefill and memory-bound during decode. The \emph{prefill} phase processes all input tokens in parallel and is compute-bound; the \emph{decode} phase generates one token at a time and is memory-bandwidth-bound. The \texttt{ServingSolver} models this two-phase behavior, incorporating modern paradigms like \textbf{Speculative Decoding} (which alters decode logic via probability-weighted verification using a smaller draft model) and \textbf{Disaggregated Serving} (which separates prefill and decode phases onto different hardware, introducing KV-cache network transfer times). This duality explains why batching strategies that improve prefill throughput may have no effect on decode latency---the two phases are bound by different resources.
+\textbf{Wall~4: The Serving Wall.} Autoregressive LLM inference exhibits two distinct phases with fundamentally different Roofline characteristics~\citep{pope2023llm}. The \texttt{ServingSolver} decomposes end-to-end inference latency as:
+\begin{align}
+\label{eq:serving}
+T_{\text{prefill}} &= \frac{2P \cdot S_{\text{in}}}{\text{Peak}_{\text{FLOPS}} \times \eta} \quad \text{(compute-bound)} \\
+T_{\text{decode}} &= \frac{|W|}{BW_{\text{HBM}}} \quad \text{(memory-bound)}
+\end{align}
+where $S_{\text{in}}$ is the input sequence length and $P$ is the parameter count. The prefill phase processes all input tokens in parallel and is compute-bound; the decode phase generates one token at a time and is memory-bandwidth-bound. The solver incorporates modern paradigms including \textbf{Speculative Decoding} (which alters decode logic via probability-weighted verification using a smaller draft model) and \textbf{Disaggregated Serving} (which separates prefill and decode phases onto different hardware, introducing KV-cache network transfer times). This duality explains why batching strategies that improve prefill throughput may have no effect on decode latency, because the two phases are bound by different resources.
 
 \textbf{Wall~5: The Batching Wall.} Static batching wastes memory through external fragmentation: each request reserves a contiguous KV-cache block sized for maximum sequence length, even if most requests finish early. The \texttt{ContinuousBatchingSolver} models iteration-level scheduling with non-contiguous allocation via PagedAttention~\citep{kwon2023efficient}:
 \begin{equation}
 \label{eq:pagedkv}
 \text{KV}_{\text{paged}} = 2 \times L \times H \times D \times \lceil S / p \rceil \times p \times B \times b
 \end{equation}
-where $L$ is layers, $H$ is KV heads, $D$ is head dimension, $S$ is sequence length, $p$ is page size in tokens, $B$ is batch size, and $b$ is bytes per element. Internal fragmentation is bounded by the last page, eliminating the 40--50\% external fragmentation of contiguous allocation.
+where $L$ is layers, $H$ is KV heads, $D$ is head dimension, $S$ is sequence length, $p$ is page size in tokens, $B$ is batch size, and $b$ is bytes per element. Internal fragmentation is bounded by the last page, eliminating the 40--50\% external fragmentation of contiguous allocation. \textbf{Assumptions:} Decode is memory-bandwidth-bound for batch $\geq 1$; static batching baseline assumes 50\% fragmentation waste.
 
 \textbf{Wall~6: The Streaming Wall.} Wafer-scale architectures~\citep{lie2023cerebras} (e.g., Cerebras CS-3) invert the conventional memory hierarchy: activations reside on-wafer in SRAM while model weights stream from external MemoryX nodes, shifting the bottleneck from HBM bandwidth to injection interconnect bandwidth. The \texttt{WeightStreamingSolver} models this as:
 \begin{equation}
 \label{eq:weightstream}
 T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2|W_{\ell}| \times B}{\text{Peak} \times \eta}\right)
 \end{equation}
-The two terms inside the $\max$ represent the injection time (weight delivery) and the compute time (matrix arithmetic) for one layer. When $B$ is small, weight injection dominates and the compute engine sits idle; when $B$ is large, compute dominates and the injection link sits idle. Setting the two terms equal yields the optimal batch size $B^{*} = (BW_{\text{inject}} \times \text{Peak} \times \eta) / (2|W_{\ell}|)$, the unique operating point where injection and compute perfectly overlap, maximizing utilization of both resources.
+The two terms inside the $\max$ represent the injection time (weight delivery) and the compute time (matrix arithmetic) for one layer. When $B$ is small, weight injection dominates and the compute engine sits idle; when $B$ is large, compute dominates and the injection link sits idle. Setting the two terms equal yields the optimal batch size $B^{*} = (BW_{\text{inject}} \times \text{Peak} \times \eta) / (2|W_{\ell}|)$, the unique operating point where injection and compute perfectly overlap, maximizing utilization of both resources. \textbf{Assumptions:} Layer weights dominate the injection payload; 10\% overhead is reserved for working memory; perfect within-layer pipelining is assumed.
 
 \textbf{Wall~7: The Tail Latency Wall.} At scale, P99 latency governs user experience, not the median. A single slow replica in a fan-out of 100 services dominates end-to-end response time. The \texttt{TailLatencySolver} models inference replicas as an M/M/$c$ queue using the Erlang-C formula~\citep{dean2013tail}:
 \begin{equation}
 \label{eq:erlangc}
 \mathbb{P}[\text{wait}] = \frac{(c\rho)^c / c! \cdot (1-\rho)^{-1}}{\sum_{k=0}^{c-1}(c\rho)^k/k! + (c\rho)^c/c! \cdot (1-\rho)^{-1}}
 \end{equation}
-where $c$ is the number of replicas, $\rho = \lambda / (c\mu)$ is per-server utilization, and $\lambda$, $\mu$ are arrival and service rates. P99 latency grows non-linearly as $\rho \to 1$, making the distinction between 80\% and 95\% utilization the difference between stable and catastrophic tail behavior.
+where $c$ is the number of replicas, $\rho = \lambda / (c\mu)$ is per-server utilization, and $\lambda$, $\mu$ are arrival and service rates. P99 latency grows non-linearly as $\rho \to 1$, making the distinction between 80\% and 95\% utilization the difference between stable and catastrophic tail behavior. \textbf{Assumption:} The M/M/$c$ model is intentionally optimistic; real traffic is bursty and service times are heavy-tailed, so M/M/$c$ provides a lower bound on tail latency. If the system is unstable under M/M/$c$, it will certainly be unstable under real traffic.
 
 \subsection{Data (Movement \& Pipelines)}
 \label{sec:walls-data}
@@ -377,21 +491,21 @@ The Data walls govern how data moves \emph{to} the accelerator. A node that is l
 \label{eq:ingestion}
 \rho_{\text{data}} = \frac{BW_{\text{demand}}}{BW_{\text{supply}}}
 \end{equation}
-When $\rho_{\text{data}} > 1$, the accelerator stalls waiting for data. $BW_{\text{demand}}$ is the product of batch size, sample size, and step rate; $BW_{\text{supply}}$ is the effective throughput of the storage subsystem after accounting for read amplification and caching.
+When $\rho_{\text{data}} > 1$, the accelerator stalls waiting for data. $BW_{\text{demand}}$ is the product of batch size, sample size, and step rate; $BW_{\text{supply}}$ is the effective throughput of the storage subsystem after accounting for read amplification and caching. \textbf{Assumption:} Storage bandwidth is the bottleneck, not network I/O (single-node training).
 
 \textbf{Wall~9: The Transformation Wall.} JPEG decoding, tokenization, and augmentation execute on CPU cores, not on the accelerator. When the CPU preprocessing pipeline cannot keep pace, the accelerator stalls even if storage bandwidth is abundant. The \texttt{TransformationSolver} quantifies this bottleneck~\citep{murray2021tf}:
 \begin{equation}
 \label{eq:transform}
 T_{\text{transform}} = \frac{B \times S_{\text{sample}}}{C_{\text{throughput}}}
 \end{equation}
-where $B$ is the batch size, $S_{\text{sample}}$ is the per-sample processing cost, and $C_{\text{throughput}}$ is the aggregate CPU preprocessing throughput.
+where $B$ is the batch size, $S_{\text{sample}}$ is the per-sample processing cost, and $C_{\text{throughput}}$ is the aggregate CPU preprocessing throughput. \textbf{Assumption:} Preprocessing is CPU-bound and scales linearly with worker count up to core saturation.
 
 \textbf{Wall~10: The Locality Wall.} Network topology determines the effective bandwidth available between any two nodes in the cluster. The \texttt{TopologySolver} models this through the \emph{bisection bandwidth fraction} $\beta$~\citep{leiserson1985fat}, which varies by topology: Fat-Tree provides full bisection ($\beta = 1.0$), Dragonfly achieves $\beta \approx 0.85$, and 3D~Torus yields $\beta \approx 0.67$. The effective inter-node bandwidth is:
 \begin{equation}
 \label{eq:locality}
 BW_{\text{eff}} = \frac{BW_{\text{link}} \times \beta}{\text{oversubscription}}
 \end{equation}
-This wall becomes binding when collective communication patterns demand bandwidth that the topology cannot supply at scale.
+This wall becomes binding when collective communication patterns demand bandwidth that the topology cannot supply at scale. \textbf{Assumption:} $\beta$ values are topology-specific constants; real networks may exhibit dynamic congestion not captured by this static model.
 
 \subsection{Algorithm (Scaling \& Compression)}
 \label{sec:walls-algorithm}
@@ -405,14 +519,14 @@ C &= 6PD \quad \text{(total training FLOPs)} \\
 D^{*} &\approx 20P \quad \text{(compute-optimal tokens)} \\
 P^{*} &= \sqrt{\frac{C}{120}} \quad \text{(optimal model size for budget } C\text{)}
 \end{align}
-These relations allow students to reason backward from a compute budget to the largest model that can be trained optimally, or forward from a model size to the minimum viable training cluster.
+These relations allow students to reason backward from a compute budget to the largest model that can be trained optimally, or forward from a model size to the minimum viable training cluster. \textbf{Assumption:} Scaling law coefficients are fitted to published training runs; extrapolation beyond the fitted range is flagged.
 
 \textbf{Wall~12: The Reasoning Wall.} Inference-time compute scaling introduces a cost that grows linearly with the number of reasoning steps $K$. The \texttt{InferenceScalingSolver} models this as~\citep{brown2024inference}:
 \begin{equation}
 \label{eq:reasoning}
 T_{\text{reason}} = K \times T_{\text{step}}(P, S_{\text{context}})
 \end{equation}
-where $T_{\text{step}}$ is the per-step latency, itself a function of model size $P$ and context length $S_{\text{context}}$. Chain-of-thought and tree-search strategies can increase $K$ by $10$--$100\times$ relative to single-pass inference~\citep{brown2024inference}, fundamentally altering serving cost economics.
+where $T_{\text{step}}$ is the per-step latency, itself a function of model size $P$ and context length $S_{\text{context}}$. Chain-of-thought and tree-search strategies can increase $K$ by $10$--$100\times$ relative to single-pass inference~\citep{brown2024inference}, fundamentally altering serving cost economics. \textbf{Assumption:} Each reasoning step is an independent decode sequence; KV-cache is not shared across steps.
 
 \textbf{Wall~13: The Fidelity Wall.} Compression trades model fidelity for efficiency: quantization reduces precision while pruning removes weights entirely. The accuracy--efficiency frontier is task- and architecture-dependent. The \texttt{CompressionSolver} quantifies the two primary mechanisms~\citep{han2015deep,gholami2021survey}:
 \begin{align}
@@ -420,7 +534,7 @@ where $T_{\text{step}}$ is the per-step latency, itself a function of model size
 r_{\text{quant}} &= \frac{32}{b} \quad \text{(quantization ratio at } b \text{ bits)} \\
 r_{\text{prune}} &= \frac{1}{1 - s} \quad \text{(pruning ratio at sparsity } s\text{)}
 \end{align}
-The accuracy impact $\Delta_{\text{acc}}$ is modeled as a configurable function rather than a hardcoded constant, since the fidelity--compression frontier varies by architecture and task.
+The accuracy impact $\Delta_{\text{acc}}$ is modeled as a configurable function rather than a hardcoded constant, since the fidelity--compression frontier varies by architecture and task. \textbf{Assumptions:} Accuracy degradation follows empirical curves from~\citet{gholami2021survey}; pruning speedup assumes structured sparsity with hardware support.
 
 \subsection{Fleet (Multi-Node Coordination)}
 \label{sec:walls-fleet}
@@ -458,26 +572,26 @@ The Young-Daly formula~\citep{young1974first,daly2006higher} gives the optimal c
 \label{eq:youngdaly}
 \tau_{\text{opt}} = \sqrt{2 \delta \cdot \text{MTBF}_{\text{cluster}}}
 \end{equation}
-where $\delta$ is the time to write one checkpoint. The \texttt{ReliabilitySolver} uses these relations to estimate the fraction of compute lost to checkpointing and recovery.
+where $\delta$ is the time to write one checkpoint. The \texttt{ReliabilitySolver} uses these relations to estimate the fraction of compute lost to checkpointing and recovery. \textbf{Assumption:} Failures are independent and exponentially distributed (memoryless).
 
 \textbf{Wall~16: The Multi-tenant Wall.} Shared clusters introduce queueing delays that grow hyperbolically as utilization approaches 1.0. The \texttt{OrchestrationSolver} models job wait times using an M/D/1 queue~\citep{little1961proof}:
 \begin{equation}
 \label{eq:queue}
 T_{\text{wait}} = \frac{\rho}{2\mu(1 - \rho)}
 \end{equation}
-where $\rho = \lambda / \mu$ is the cluster utilization, $\lambda$ is the job arrival rate, and $\mu$ is the service rate. As $\rho \to 1$, wait times diverge hyperbolically, a non-linear relationship that makes the distinction between 80\% and 95\% utilization qualitatively significant.
+where $\rho = \lambda / \mu$ is the cluster utilization, $\lambda$ is the job arrival rate, and $\mu$ is the service rate. As $\rho \to 1$, wait times diverge hyperbolically, a non-linear relationship that makes the distinction between 80\% and 95\% utilization qualitatively significant. \textbf{Assumption:} Job durations are approximately deterministic, which is reasonable for large training runs with predictable step times.
 
-\subsection{Operations (Economics, Sustainability \& Safety)}
+\subsection{Ops (Economics, Sustainability \& Safety)}
 \label{sec:walls-operations}
 
-The Operations walls capture constraints that are not about \emph{how fast} a system runs but \emph{whether it should run at all}: economic viability, environmental impact, checkpoint overhead, and responsible deployment.
+The Ops walls capture constraints that are not about \emph{how fast} a system runs but \emph{whether it should run at all}: economic viability, environmental impact, checkpoint overhead, and responsible deployment.
 
 \textbf{Wall~17: The Capital Wall.} Performance analysis is incomplete without economic constraints. The \texttt{EconomicsSolver} computes total cost of ownership~\citep{barroso2018datacenter}:
 \begin{equation}
 \label{eq:tco}
 \text{TCO} = \text{CapEx} + \text{OpEx}_{\text{energy}} + \text{OpEx}_{\text{maint}}
 \end{equation}
-where $\text{OpEx}_{\text{energy}} = E_{\text{total}} \times P_{\text{kWh}}$ converts total energy consumption to dollar cost at the regional electricity price.
+where $\text{OpEx}_{\text{energy}} = E_{\text{total}} \times P_{\text{kWh}}$ converts total energy consumption to dollar cost at the regional electricity price. \textbf{Assumption:} Linear amortization over a 3--5 year hardware lifetime.
 
 \textbf{Wall~18: The Sustainability Wall.} The same training run emits up to 30$\times$ more CO$_2$ depending on regional grid carbon intensity. The \texttt{SustainabilitySolver} converts energy into environmental impact~\citep{patterson2022carbon}:
 \begin{align}
@@ -486,7 +600,7 @@ E_{\text{total}} &= E_{\text{IT}} \times \text{PUE} \\
 \text{CO}_2 &= E_{\text{total}} \times \text{CI}_{\text{region}} \quad \text{(gCO}_2\text{/kWh)} \\
 \text{H}_2\text{O} &= E_{\text{total}} \times \text{WUE} \quad \text{(L/kWh)}
 \end{align}
-where PUE is the power usage effectiveness of the datacenter, $\text{CI}_{\text{region}}$ is the carbon intensity of the local grid, and WUE is the water usage effectiveness.
+where PUE is the power usage effectiveness of the datacenter, $\text{CI}_{\text{region}}$ is the carbon intensity of the local grid, and WUE is the water usage effectiveness. \textbf{Assumption:} Grid carbon intensity is a static regional constant; temporal variation (e.g., renewable intermittency) is not modeled. Energy-proportional power follows~\citet{barroso2007case}: idle power is 30\% of TDP, with the remaining 70\% scaling linearly with MFU.
 
 \textbf{Wall~19: The Checkpoint Wall.} Long-running training jobs must periodically save model state (weights and optimizer states) to persistent storage, incurring an I/O penalty that directly reduces effective MFU. The \texttt{CheckpointSolver} models the I/O burst penalty~\citep{eisenman2022checknrun}:
 \begin{equation}
@@ -500,7 +614,7 @@ where $\beta_{\text{opt}}$ is the optimizer state multiplier (16$\times$ for Ada
 \label{eq:dpsgd}
 \sigma \propto \frac{1}{\epsilon}
 \end{equation}
-The per-step clipping and noise addition incur a training slowdown of approximately $2$--$10\times$. Fairness constraints require sufficient representation of minority subgroups, demanding additional data proportional to $O(1/p_{\min})$ where $p_{\min}$ is the smallest subgroup prevalence.
+The per-step clipping and noise addition incur a training slowdown of approximately $2$--$10\times$. Fairness constraints require sufficient representation of minority subgroups, demanding additional data proportional to $O(1/p_{\min})$ where $p_{\min}$ is the smallest subgroup prevalence. \textbf{Assumption:} Privacy budget $\varepsilon$ is a hard constraint; the solver reports the compute multiplier, not the privacy guarantee itself.
 
 \subsection{Analysis (Cross-Cutting Diagnostics)}
 \label{sec:walls-analysis}
@@ -512,7 +626,7 @@ Two solvers operate \emph{across} the taxonomy rather than within a single domai
 \label{eq:sensitivity}
 \frac{\partial T}{\partial BW_{\text{mem}}}, \quad \frac{\partial T}{\partial \text{Peak}_{\text{FLOPS}}}, \quad \frac{\partial T}{\partial BW_{\text{net}}}, \quad \ldots
 \end{equation}
-The parameter with the largest sensitivity is the binding constraint, that is, the single upgrade that would yield the greatest performance improvement. This transforms ``where should I invest?'' from intuition into calculation.
+The parameter with the largest sensitivity is the binding constraint, that is, the single upgrade that would yield the greatest performance improvement. This transforms ``where should I invest?'' from intuition into calculation. \textbf{Assumption:} Finite-difference approximation with 1\% perturbation; second-order effects are ignored. The binding constraint is identified as the parameter with the largest normalized gradient $|\partial T / \partial x_i| \cdot (x_i / T)$.
 
 \textbf{Wall~22: The Synthesis Wall.} The \texttt{SynthesisSolver} addresses the inverse problem: given a service-level objective (e.g., 50\,ms inter-token latency), it derives the minimum hardware specifications required to satisfy it~\citep{kwon2023efficient}:
 \begin{align}
@@ -520,77 +634,7 @@ The parameter with the largest sensitivity is the binding constraint, that is, t
 BW_{\text{required}} &= \frac{|W|}{T_{\text{target}}} \\
 \text{FLOPS}_{\text{required}} &= \frac{\text{OPs}}{T_{\text{target}} \times \eta}
 \end{align}
-This enables hardware-software co-design: engineers specify an SLA and the solver derives the minimum hardware that satisfies it.
-
-% ============================================================
-\section{Architecture}
-\label{sec:architecture}
-
-\mlsysim implements the design principles of \Cref{sec:philosophy} through a five-layer \emph{Progressive Lowering} stack (\Cref{fig:stack}). Each layer adds physical context to an analysis without coupling to layers above or below.
-
-\begin{figure}[t]
-\centering
-\begin{tikzpicture}[
-    node distance=0.8cm,
-    layer/.style={rectangle, draw=black!80, fill=blue!10, text width=6.5cm, align=center, minimum height=0.6cm, rounded corners=2pt, font=\scriptsize\sffamily},
-    connector/.style={thick, ->, >=stealth, gray!80}
-]
-    \node (A) [layer] {\textbf{Layer A: Workloads (Demand)} \\ \textit{Transformer, CNN, MoE --- FLOPs, Params, Intensity}};
-    \node (B) [layer, below=of A] {\textbf{Layer B: Hardware (Supply)} \\ \textit{Accelerator --- Peak TFLOPs, HBM BW, IO BW, TDP}};
-    \node (C) [layer, below=of B] {\textbf{Layer C: Infrastructure (Context)} \\ \textit{Datacenter --- Carbon Intensity, PUE, WUE, Grid}};
-    \node (D) [layer, below=of C] {\textbf{Layer D: Systems (Topology)} \\ \textit{Fleet --- Node Count, Fabric (Tree/Torus), Oversubscription}};
-    \node (E) [layer, below=of D, fill=orange!10] {\textbf{Layer E: Solvers (Analysis)} \\ \textit{21 Solvers --- Physics-grounded Analytical Bounds}};
-    \node (F) [layer, below=of E, fill=green!10] {\textbf{Results: System Scorecard} \\ \textit{Feasibility, Performance, TCO, Carbon, Safety}};
-
-    \draw [connector] (A) -- (E);
-    \draw [connector] (B) -- (D);
-    \draw [connector] (C) -- (D);
-    \draw [connector] (D) -- (E);
-    \draw [connector] (E) -- (F);
-\end{tikzpicture}
-\caption{\textbf{The \mlsysim 5-Layer Stack.} Computational demand (Layer~A) is progressively lowered through hardware supply, environmental context, and network topology before solvers produce a system scorecard.}
-\label{fig:stack}
-\end{figure}
-
-\subsection{The Progressive Lowering Stack}
-\label{sec:stack}
-
-\textbf{Layer A: Workloads (Demand).} A workload is a hardware-agnostic description of computational demand. \mlsysim provides five concrete types: \texttt{TransformerWorkload} (parameters, layers, hidden dimension, head count), \texttt{CNNWorkload} (parameters, inference FLOPs), \texttt{SparseTransformerWorkload} for Mixture-of-Experts models (total vs.\ active parameters), \texttt{SSMWorkload} for state-space models such as Mamba (O(1) state cache independent of sequence length), and \texttt{DiffusionWorkload} for generative image models (FLOPs scale with denoising steps). Every workload exposes a \texttt{lower()} method that produces a \texttt{ComputationGraph}, an intermediate representation containing total operations, weight bytes, and arithmetic intensity in \texttt{flop/byte}. This IR is the contract between demand and supply: it captures \emph{what} must be computed without prescribing \emph{how}.
-
-\textbf{Layer B: Hardware (Supply).} A \texttt{HardwareNode} composes four subsystems: \texttt{ComputeCore} (peak FLOP/s with a precision-keyed dictionary for FP16, TF32, FP8, INT8), \texttt{MemoryHierarchy} (capacity and bandwidth), optional \texttt{StorageHierarchy}, and optional \texttt{IOInterconnect}. Each node also carries TDP, unit cost, and a kernel dispatch tax. The \texttt{ridge\_point()} method computes the Roofline inflection $R = F_{\text{peak}} / BW_{\text{mem}}$ in \texttt{flop/byte}~\citep{williams2009roofline}, enabling immediate classification of any lowered workload as compute-bound or memory-bound.
-
-\textbf{Layer C: Infrastructure (Context).} \texttt{GridProfile} objects encode regional environmental parameters: carbon intensity (gCO$_2$/kWh), Power Usage Effectiveness (PUE), and Water Usage Effectiveness (WUE). A \texttt{Datacenter} composes a grid profile with rack-level power density constraints. This layer converts raw energy consumption into carbon footprint and water usage, following the methodology of \citet{patterson2022carbon}.
-
-\textbf{Layer D: Systems (Topology).} A \texttt{Fleet} composes \texttt{Node}s (accelerator type, count per node, intra-node bandwidth) with a \texttt{NetworkFabric} (topology, inter-node bandwidth, latency, oversubscription ratio). This layer enables distributed analysis: the \texttt{DistributedSolver} decomposes workloads using 4D parallelism (DP $\times$ TP $\times$ PP $\times$ EP) and calculates hierarchical AllReduce costs, pipeline bubble fractions, and scaling efficiency.
-
-\textbf{Layer E: Solvers (Analysis).} Twenty-one stateless solvers consume demand and supply to produce dimensioned performance metrics. The solver formalism (stateless composition, chaining semantics, and three-level evaluation) is detailed in \Cref{sec:solver-formalism}.
-
-Reproducible analysis requires reproducible inputs. \mlsysim organizes vetted specifications into four curated registries collectively called the \emph{MLSys Zoo}: the \textbf{Silicon Zoo} (hardware accelerators), the \textbf{Model Zoo} (workload architectures), the \textbf{Fleet Zoo} (cluster topologies), and the \textbf{Infrastructure Zoo} (regional grid profiles). Each entry is a fully typed object whose constants are sourced from datasheets with provenance metadata including source URLs and verification dates. For example, \texttt{Hardware.Cloud.H100} returns a \texttt{HardwareNode} with all physical quantities dimensioned via \texttt{pint}. The Silicon Zoo spans six orders of magnitude from sub-milliwatt microcontrollers (\texttt{Hardware.Tiny.ESP32\_S3}, 512\,KiB SRAM) to wafer-scale engines (\texttt{Hardware.Cloud.CerebrasCS3}, 44\,GiB on-wafer SRAM, 125\,PFLOP/s). The \texttt{list(sort\_by=)} class method enables programmatic comparison, and users extend any zoo by instantiating new typed objects (\Cref{lst:hwnode}), ensuring custom entries participate in the same dimensionally strict pipeline as vetted ones.
-
-\subsection{The Type System}
-\label{sec:types}
-
-\mlsysim's type system is built on Pydantic \texttt{BaseModel} classes with \texttt{pint} \texttt{Quantity} fields, providing both schema validation and dimensional enforcement at construction time. The composition hierarchy is deliberately shallow: \texttt{HardwareNode} aggregates \texttt{ComputeCore} and \texttt{MemoryHierarchy} as direct fields, not through deep inheritance. This design makes the relationship between a hardware specification and its physical quantities immediately legible:
-
-\begin{lstlisting}[caption={Composing a custom hardware node with dimensional types.},label={lst:hwnode}]
-from mlsysim.hardware.types import *
-from mlsysim.core.constants import Q_
-node = HardwareNode(
-    name="Custom Accelerator",
-    release_year=2025,
-    compute=ComputeCore(
-        peak_flops=Q_("500 TFLOPs/s"),
-        precision_flops={"fp8": Q_("1000 TFLOPs/s")}),
-    memory=MemoryHierarchy(
-        capacity=Q_("96 GiB"),
-        bandwidth=Q_("4 TB/s")),
-    tdp=Q_("500 W"))
-print(node.ridge_point())  # -> 125 flop/byte
-\end{lstlisting}
-
-The \texttt{ComputationGraph} IR bridges the demand--supply gap. When a solver calls \texttt{workload.lower()}, the workload computes its total operations, weight bytes, and arithmetic intensity, all in dimensioned quantities. For Mixture-of-Experts models, \texttt{SparseTransformerWorkload.lower()} uses \emph{active} parameters for FLOPs but \emph{total} parameters for memory footprint, correctly modeling the fundamental decoupling between compute cost and capacity requirements in sparse architectures~\citep{shazeer2017outrageously}.
-
-The complete evaluation produces a \texttt{SystemEvaluation} scorecard, a single object containing every metric from every solver, cross-referenced by wall number. Students can inspect any individual wall or view the aggregate to understand how constraints interact across the full stack.
+This enables hardware-software co-design: engineers specify an SLA and the solver derives the minimum hardware that satisfies it. \textbf{Assumption:} Hardware parameters are independently adjustable; co-design coupling between FLOPS and bandwidth is not modeled.
 
 \section{Solver Formalism}
 \label{sec:solver-formalism}
@@ -653,6 +697,13 @@ print(f"Total Job Cost: ${tco['tco_usd']:,.2f}")
 
 Each link in the chain preserves dimensional correctness: units propagate through the computation, and any mismatch raises an immediate error rather than producing a silently wrong result.
 
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\columnwidth]{images/pdf/solver-chaining.pdf}
+\caption{\textbf{Solver Composition: Demand--Supply Separation.} Three input layers (Workload, Hardware, Infrastructure) feed a pipeline of four solvers. Each solver is a pure function: typed inputs in, dimensionally correct outputs out. The \texttt{SystemEvaluation} scorecard aggregates results across feasibility, performance, latency, economics, and sustainability.}
+\label{fig:solver-chaining}
+\end{figure}
+
 \subsection{The SystemEvaluation Scorecard}
 \label{sec:solvers-scorecard}
 
@@ -664,7 +715,7 @@ Each link in the chain preserves dimensional correctness: units propagate throug
 
 \textbf{Level~3: Macro.} What does it cost, and what does it emit? TCO (\Cref{eq:tco}), carbon (\Cref{eq:sustainability}), and responsibility overhead (\Cref{eq:dpsgd}) are computed from the performance results.
 
-The three levels are evaluated in order; a feasibility failure at Level~1 short-circuits the evaluation and reports the binding constraint. This ordering reflects the dependency structure: communication optimization is irrelevant if the model exceeds available memory. The complete implementation details, key assumptions, and operational notes for all 21 solvers are documented in \Cref{sec:appendix-solvers}.
+The three levels are evaluated in order; a feasibility failure at Level~1 short-circuits the evaluation and reports the binding constraint. This ordering reflects the dependency structure: communication optimization is irrelevant if the model exceeds available memory. The complete implementation details and key assumptions for each solver are documented alongside their respective walls in \Cref{sec:taxonomy}.
 
 \section{Validation}
 \label{sec:validation}
@@ -675,17 +726,24 @@ An analytical framework earns trust through transparent confrontation with empir
 
 We anchor \mlsysim predictions against two widely-reported benchmarks spanning training and inference workloads.
 
-\paragraph{MLPerf ResNet-50 on A100.}
+\textbf{MLPerf ResNet-50 on A100.}
 For ResNet-50 training on a single NVIDIA A100 at batch size 2048, \mlsysim predicts a throughput of approximately 37{,}000 samples/s using the \texttt{SingleNodeSolver} with hardware utilization $\eta = 0.49$. The MLPerf Training v4.0 NVIDIA closed-division submission reports 38{,}200 samples/s for this configuration~\citep{mlperf2020}, yielding a prediction error of 3.1\%. This validates the Roofline-based throughput model~\citep{williams2009roofline} at the core of \mlsysim's single-node solver.
 
-\paragraph{vLLM Llama-2-70B on H100.}
+\textbf{vLLM Llama-2-70B on H100.}
 For autoregressive decoding of Llama-2-70B on a single H100 (FP16, batch size 1), \mlsysim predicts an inter-token latency (ITL) of approximately 42\,ms. The calculation is transparent: 140\,GB of model weights divided by 3.35\,TB/s HBM bandwidth yields 41.8\,ms per token~\citep{nvidia2023h100}. Published vLLM benchmarks for this configuration report ITL values in the 40--50\,ms range~\citep{kwon2023efficient}. The error is again below 5\%, confirming that decode-phase LLM inference is memory-bandwidth-bound and well-approximated by the bandwidth--capacity ratio.
 
 These two anchors, one compute-bound (ResNet-50 training) and one memory-bound (LLM decoding), validate \mlsysim across both regimes of the Roofline model. Every hardware entry in the Silicon Zoo includes \texttt{metadata.source\_url} and \texttt{metadata.last\_verified} fields, ensuring traceability to the vendor datasheets from which constants are sourced.
 
 \subsection{Design-Space Exploration Speed}
 
-\mlsysim's analytical engine sweeps over 1,000 hardware--model--precision configurations in under one second on a standard laptop. By contrast, ASTRA-sim~2.0 requires hours to simulate a single distributed training configuration at cycle-level fidelity~\citep{won2023astrasim2}. This three-order-of-magnitude speedup is the design objective. Sub-second execution enables interactive parametric sweeps---e.g., varying HBM bandwidth, substituting fat-tree for torus topology, or relocating the datacenter from Iowa to Singapore---that would be impractical with cycle-accurate simulation.
+\mlsysim's analytical engine sweeps over 1,000 hardware--model--precision configurations in under one second on a standard laptop. In contrast, ASTRA-sim~2.0 requires hours to simulate a single distributed training configuration at cycle-level fidelity~\citep{won2023astrasim2}. This three-order-of-magnitude speedup is the design objective. Sub-second execution enables interactive parametric sweeps (e.g., varying HBM bandwidth, substituting fat-tree for torus topology, or relocating the datacenter from Iowa to Singapore) that would be impractical with cycle-accurate simulation. \Cref{fig:heatmap} illustrates one such sweep: a 42-point grid of model size versus HBM bandwidth, where each cell represents a single solver invocation and the entire map executes in under 50\,ms.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\columnwidth]{images/pdf/design-space-heatmap.pdf}
+\caption{\textbf{Design-Space Exploration: Bottleneck Regime Map.} Each cell shows the binding constraint (memory or compute) for a given model size and HBM bandwidth combination under FP16 training at batch size 256. Larger models with lower bandwidth are memory-bound; smaller models with higher bandwidth are compute-bound. The diagonal regime boundary shifts as hardware generations increase bandwidth (A100 $\to$ H100 $\to$ B200). The entire 42-point grid executes in $<$50\,ms.}
+\label{fig:heatmap}
+\end{figure}
 
 \subsection{Accuracy Scope and Limitations}
 
@@ -704,7 +762,9 @@ Beyond numerical accuracy, \mlsysim enforces a structural form of validation thr
 
 \subsection{Student Use Cases}
 
-The following use cases illustrate how \mlsysim exposes the quantitative structure of systems that high-level APIs abstract away.
+Students interact with \mlsysim primarily through single-solver queries and short solver chains. The design space is broad: a student might profile the memory footprint of a new architecture, sweep batch sizes to find the Roofline crossover, compare parallelism strategies for a fixed GPU budget, estimate the carbon cost of a training run, or stress-test an SLA under traffic spikes. Each query requires specifying a model, a hardware target, and a solver, and the type system then ensures dimensional consistency throughout.
+
+We present two examples chosen to illustrate complementary aspects of the framework. The first (S1) demonstrates \emph{vertical} solver composition, chaining inference and economics solvers to connect a modeling decision (chain-of-thought reasoning) to its infrastructure cost. The second (S2) demonstrates \emph{horizontal} solver composition, combining data-pipeline and compute solvers to diagnose a bottleneck that shifts between walls as batch size changes.
 
 \subsubsection{S1: How Much Does Chain-of-Thought Reasoning Cost?}
 A student investigates the inference economics of chain-of-thought (CoT) prompting. Using a GPT-4-scale Transformer (1.8T parameters) on an H100, they configure the \texttt{InferenceScalingSolver} with $K{=}8$ reasoning steps. Each step generates $\sim$128 tokens at the memory-bound decode rate, so the total reasoning time is $T_{\text{reason}} = \text{TTFT} + K \cdot 128 \cdot \text{ITL}$. The solver reports that $K{=}8$ CoT multiplies per-query latency by $7.6{\times}$ relative to a single-step answer. Feeding this into the \texttt{EconomicsSolver}, the student finds that at 100~QPS the annualized serving cost rises from \$1.2M to \$9.1M. This result quantifies CoT as a direct multiplier on infrastructure cost, not merely on latency.
@@ -721,7 +781,7 @@ An instructor demonstrates the Roofline model by sweeping batch size from 1 to 2
 
 \begin{center}
 \small
-\begin{tabular}{rllr}
+\begin{tabularx}{\columnwidth}{@{}rXlr@{}}
 \toprule
 Batch & Bottleneck & AI (FLOP/B) & MFU \\
 \midrule
@@ -731,27 +791,27 @@ Batch & Bottleneck & AI (FLOP/B) & MFU \\
 128 & Compute  & 137   & 0.61 \\
 256 & Compute  & 274   & 0.63 \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
-The crossover from memory-bound to compute-bound occurs near batch 64, where the arithmetic intensity $\text{AI} = 2B \cdot P / |W|$ crosses the hardware ridge point ($F_{\text{peak}} / \text{BW}_{\text{HBM}} \approx 62$ FLOP/byte for H100). The Roofline transition is observable directly from the numerical output. The entire sweep executes in $<$50\,ms, enabling real-time interaction during lecture.
+The crossover from memory-bound to compute-bound occurs near batch 64, where the arithmetic intensity $\text{AI} = 2B \cdot P / |W|$ crosses the hardware ridge point ($F_{\text{peak}} / \text{BW}_{\text{HBM}} \approx 62$ FLOP/byte for H100). \Cref{fig:roofline} visualizes this transition on the Roofline diagram. The entire sweep executes in $<$50\,ms, enabling real-time interaction during lecture.
+
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\columnwidth]{images/pdf/roofline-crossover.pdf}
+\caption{\textbf{Roofline Crossover: Batch Size Sweep on H100.} Increasing batch size moves the operating point rightward along the Roofline, transitioning from memory-bound (red) to compute-bound (blue) near $B{\approx}64$. The ridge point at 62~FLOP/byte marks the crossover where HBM bandwidth and peak compute ceilings intersect.}
+\label{fig:roofline}
+\end{figure}
 
 \subsubsection{I2: Sustainability What-If, Iowa vs.\ Qu\'ebec}
-An instructor poses a policy question: \emph{does geography matter for carbon footprint?} Using the \texttt{DistributedSolver}, they configure a 256-GPU cluster training a 70B model for 30 days. The \texttt{SustainabilitySolver} then computes emissions under two grid profiles:
+An instructor poses a policy question: \emph{does geography matter for carbon footprint?} Using the \texttt{DistributedSolver}, they configure a 256-GPU cluster training a 70B model for 30 days. The \texttt{SustainabilitySolver} then computes emissions under two grid profiles: Iowa (680~gCO$_2$/kWh) and Qu\'ebec (17~gCO$_2$/kWh). The configuration is identical in hardware, model, and MFU, yet carbon footprint differs by $40{\times}$ (412 vs.\ 10.3 tonnes CO$_2$; 231 vs.\ 5.8\,kL water), demonstrating that grid carbon intensity is a first-order systems design variable (Wall~18). \Cref{fig:carbon} visualizes this contrast.
 
-\begin{center}
-\small
-\begin{tabular}{lrrr}
-\toprule
-Region & CI (g/kWh) & CO$_2$ (tonnes) & Water (kL) \\
-\midrule
-Iowa (MidAmerican) & 680 & 412 & 231 \\
-Qu\'ebec (Hydro-Q.) & 17 & 10.3 & 5.8 \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-The configuration is identical in hardware, model, and MFU, yet carbon footprint differs by $40{\times}$, demonstrating that grid carbon intensity is a first-order systems design variable (Wall~18).
+\begin{figure}[!htbp]
+\centering
+\includegraphics[width=\columnwidth]{images/pdf/carbon-comparison.pdf}
+\caption{\textbf{Geography as a Systems Variable: Iowa vs.\ Qu\'ebec.} An identical 256-GPU cluster training a 70B model for 30 days produces $40{\times}$ more CO$_2$ in Iowa (coal/gas grid, 680~gCO$_2$/kWh) than in Qu\'ebec (95\% hydroelectric, 17~gCO$_2$/kWh). Water usage follows the same ratio. Hardware, model, parallelism strategy, and MFU are identical; only the regional carbon intensity differs.}
+\label{fig:carbon}
+\end{figure}
 
 \subsection{Researcher Use Cases}
 
@@ -818,101 +878,20 @@ We identify six directions for extending \mlsysim.
 
 \subsection{The Pedagogical Argument}
 
-Even when \mlsysim's predictions deviate by 20\% from measured values, the pedagogical value lies in the reasoning process rather than the numerical output. A student who sweeps 1{,}000 configurations and identifies memory bandwidth as the binding constraint for LLM inference has acquired a transferable analytical skill: determining which resource limits performance. The framework trains students to formulate the correct quantitative questions---arithmetic intensity, ridge point location, communication-to-computation ratio---and these questions generalize to production systems even as specific hardware parameters change across generations.
+Even when \mlsysim's predictions deviate by 20\% from measured values, the pedagogical value lies in the reasoning process rather than the numerical output. A student who sweeps 1{,}000 configurations and identifies memory bandwidth as the binding constraint for LLM inference has acquired a transferable analytical skill: determining which resource limits performance. The framework trains students to formulate the correct quantitative questions (arithmetic intensity, ridge point location, communication-to-computation ratio) and these questions generalize to production systems even as specific hardware parameters change across generations.
 
-This design follows the precedent established by Patterson and Hennessy's MIPS/SPIM simulator~\citep{patterson2014organization}, which prioritized architectural reasoning over cycle-accurate fidelity. \mlsysim similarly prioritizes systems-level reasoning---identifying binding constraints, quantifying trade-offs, and understanding how hardware parameters interact---over microarchitectural precision.
+This design follows the precedent established by Patterson and Hennessy's MIPS/SPIM simulator~\citep{patterson2014organization}, which prioritized architectural reasoning over cycle-accurate fidelity. \mlsysim similarly prioritizes systems-level reasoning: identifying binding constraints, quantifying trade-offs, and understanding how hardware parameters interact, rather than microarchitectural precision.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-Machine learning has become infrastructure, yet the tools for reasoning about that infrastructure remain either too slow for interactive exploration or too narrow for full-stack analysis. \mlsysim addresses this gap with a first-principles analytical framework that formalizes the physics of ML systems into a dimensionally strict, composable engine. Its 5-layer progressive lowering architecture cleanly separates computational demand from silicon supply, while 21 solvers codify every fundamental bottleneck, from Roofline compute bounds and inference serving to tail latency, checkpointing, and carbon accounting, into a unified analytical suite.
+Machine learning has become infrastructure, yet the tools for reasoning about that infrastructure remain either too slow for interactive exploration or too narrow for full-stack analysis. \mlsysim addresses this gap with a first-principles analytical framework that formalizes the physics of ML systems into a dimensionally strict, composable engine. Its 5-layer progressive lowering architecture cleanly separates computational demand from silicon supply, while 21 solvers spanning 22 systems walls codify every fundamental bottleneck, from Roofline compute bounds and inference serving to tail latency, checkpointing, and carbon accounting, into a unified analytical suite.
 
-The central design principle is that a first-order analytical model with sub-second execution enables a class of interactive reasoning that cycle-accurate simulation cannot support. By evaluating complete system configurations in under one second, \mlsysim makes full-stack ML systems analysis feasible on commodity hardware without access to production clusters. Because all solvers are deterministic and purely analytical, labs built on \mlsysim are fully autogradable and produce identical results across platforms, ensuring that students at resource-constrained institutions engage with the same exercises as those at well-funded research universities.
+The central design principle is that a first-order analytical model with sub-second execution enables a class of interactive reasoning that cycle-accurate simulation cannot support. Evaluating complete system configurations in under one second, \mlsysim makes full-stack ML systems analysis feasible on commodity hardware without access to production clusters. Because all solvers are deterministic and purely analytical, labs built on \mlsysim are fully autogradable and produce identical results across platforms, ensuring that students at resource-constrained institutions engage with the same exercises as those at well-funded research universities.
 
 \mlsysim is part of a broader curriculum vision. Together with TinyTorch, which teaches how ML frameworks work internally through progressive implementation, \mlsysim teaches how to reason about ML systems at scale through analytical modeling. The two tools provide complementary coverage: TinyTorch addresses the framework internals from the bottom up (tensors, autograd, optimizers), while \mlsysim addresses systems-level analysis from the top down (scaling laws, binding constraints, fleet economics). Both are available as part of the open-source \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025} at \url{https://mlsysbook.ai}.
 
 As ML systems grow in scale and complexity (trillion-parameter models, million-device fleets, multi-modal pipelines), the need for rapid analytical reasoning tools will increase correspondingly. \mlsysim provides a foundation for that reasoning: not a replacement for empirical measurement, but a complement that narrows the design space before committing hardware resources to validation.
-
-\appendix
-\section{Solver Implementation Details}
-\label{sec:appendix-solvers}
-
-This appendix provides implementation details and key assumptions for all 21 solvers, organized by domain.
-
-\subsection{Node Domain (Walls 1--7)}
-
-\paragraph{SingleNodeSolver (Walls 1--2: Compute \& Memory).}
-Implements standard Roofline analysis~\citep{williams2009roofline}. Computes arithmetic intensity $I = \text{FLOPs} / \text{bytes}$ and compares against the ridge point $I^{*} = F_{\text{peak}} / BW_{\text{HBM}}$. Returns the bottleneck label (compute-bound or memory-bound), realized throughput, and Model FLOPS Utilization (MFU). \textbf{Assumptions:} (1) Peak FLOPS and HBM bandwidth are hard ceilings. (2) MFU accounts for software inefficiency via a configurable $\eta$ parameter.
-
-\paragraph{EfficiencySolver (Wall 3: Software).}
-Models the gap between peak and achieved FLOPS as a multiplicative efficiency factor $\eta$. Accounts for kernel fusion (e.g., FlashAttention raising $\eta$ from ${\sim}0.3$ to ${\sim}0.75$), occupancy losses, and memory access patterns. \textbf{Assumption:} $\eta$ is workload-dependent and must be specified or estimated from benchmark data.
-
-\paragraph{ServingSolver (Wall 4: Serving).}
-Decomposes autoregressive inference into prefill (compute-bound, parallel token processing) and decode (memory-bound, sequential token generation) phases. Computes TTFT and ITL separately, enabling analysis of why batching strategies that improve prefill throughput may not affect decode latency. The solver models advanced architectures like \textbf{Speculative Decoding} by evaluating the probabilistic acceptance rate of $K$ draft tokens verified in parallel by a target model. It also models \textbf{Disaggregated Serving} by allowing split hardware definitions for prefill and decode phases, routing the intermediate KV-cache payload across a specified network fabric to compute exact transmission overheads.
-
-\paragraph{ContinuousBatchingSolver (Wall 5: Batching).}
-Models PagedAttention~\citep{kwon2023efficient}, which treats KV-cache memory like virtual memory pages in non-contiguous physical blocks. \textbf{Assumptions:} (1) Internal fragmentation bounded by one page per sequence. (2) Decode is memory-bandwidth-bound for batch $\geq$ 1. (3) Static batching baseline assumes 50\% fragmentation waste.
-
-\paragraph{WeightStreamingSolver (Wall 6: Streaming).}
-Models wafer-scale architectures where activations reside on-wafer in SRAM while weights stream from external nodes. \textbf{Key tension:} The optimal batch size ($B^{*} \approx 52{,}000$ for Llama-70B) far exceeds SRAM capacity, motivating external memory expansion. The solver flags infeasible configurations where KV-cache exceeds SRAM\@. \textbf{Assumptions:} (1) Layer weights dominate injection payload. (2) 10\% overhead for working memory. (3) Perfect within-layer pipelining.
-
-\paragraph{TailLatencySolver (Wall 7: Tail Latency).}
-Uses the M/M/$c$ queueing model with Erlang-C formula to approximate inference server farms. \textbf{Why M/M/c?} Real traffic is bursty and service times are heavy-tailed, so the model is intentionally \emph{optimistic}: it provides a lower bound on tail latency. If the system is unstable under M/M/$c$, it will certainly be unstable under real traffic. SLO violation risk follows~\citet{dean2013tail}.
-
-\subsection{Data Domain (Walls 8--10)}
-
-\paragraph{DataSolver (Wall 8: Ingestion).}
-Computes the demand--supply bandwidth ratio $\rho_{\text{data}}$. Demand is the product of batch size, sample size, and step rate; supply is effective storage throughput after read amplification and caching. When $\rho > 1$, the accelerator stalls. \textbf{Assumption:} Storage bandwidth is the bottleneck, not network I/O (single-node training).
-
-\paragraph{TransformationSolver (Wall 9: Transformation).}
-Models CPU-side preprocessing throughput: JPEG decoding, tokenization, and augmentation. Computes per-worker throughput and aggregates across the configured number of CPU workers. \textbf{Assumption:} Preprocessing is CPU-bound and scales linearly with worker count up to core saturation.
-
-\paragraph{TopologySolver (Wall 10: Locality).}
-Models effective inter-node bandwidth as a function of topology via the bisection bandwidth fraction $\beta$: Fat-Tree ($\beta = 1.0$), Dragonfly ($\beta \approx 0.85$), 3D~Torus ($\beta \approx 0.67$). Accounts for oversubscription ratios at each network tier. \textbf{Assumption:} $\beta$ values are topology-specific constants; real networks may exhibit dynamic congestion.
-
-\subsection{Algorithm Domain (Walls 11--13)}
-
-\paragraph{ScalingSolver (Wall 11: Complexity).}
-Implements Chinchilla scaling laws~\citep{hoffmann2022chinchilla}: given a compute budget $C$, computes the optimal model size $P^{*}$ and dataset size $D^{*}$ that minimize loss. Also supports Kaplan-era scaling for comparison. \textbf{Assumption:} Scaling law coefficients are fitted to published training runs; extrapolation beyond the fitted range is flagged.
-
-\paragraph{InferenceScalingSolver (Wall 12: Reasoning).}
-Models inference-time compute scaling (chain-of-thought, beam search) where cost grows with reasoning steps $K$. Total latency is $T = \text{TTFT} + K \cdot S_{\text{step}} \cdot \text{ITL}$, where $S_{\text{step}}$ is tokens per reasoning step. \textbf{Assumption:} Each reasoning step is an independent decode sequence; KV-cache is not shared across steps.
-
-\paragraph{CompressionSolver (Wall 13: Fidelity).}
-Quantifies the speedup-accuracy trade-off for quantization (INT4/INT8) and pruning. Models memory reduction from reduced precision and compute speedup from lower-precision arithmetic. \textbf{Assumptions:} (1) Accuracy degradation follows empirical curves from~\citet{gholami2021survey}. (2) Pruning speedup assumes structured sparsity with hardware support.
-
-\subsection{Fleet Domain (Walls 14--16)}
-
-\paragraph{DistributedSolver (Wall 14: Communication).}
-Models 4D parallelism (DP $\times$ TP $\times$ PP $\times$ EP) with Ring AllReduce for data parallelism, point-to-point for pipeline parallelism, and all-to-all for expert parallelism. Computes pipeline bubble fraction as $(P_{\text{stages}} - 1) / (P_{\text{stages}} + M - 1)$ where $M$ is microbatch count. The solver accurately captures state-of-the-art memory and communication optimizations: \textbf{ZeRO/FSDP} sharding alters the DP communication volume and memory footprints, \textbf{LoRA} reduces gradient/optimizer memory proportionally to the trainable fraction $2rD \cdot n_{\text{adapted}} / P$ (parameterized by rank $r$), and \textbf{Activation Recomputation} trades $+33\%$ training FLOPs for reduced activation memory. \textbf{Assumptions:} (1) DP communication overlaps backward-pass computation with configurable efficiency $\eta_{\text{overlap}}$ (default 0.85), yielding exposed cost $(1 - \eta_{\text{overlap}}) \cdot T_{\text{comm}}$. (2) A congestion factor $\gamma \geq 1.0$ multiplicatively scales communication time to account for shared-fabric contention. (3) Pipeline operations incur hard bubble constraints.
-
-\paragraph{ReliabilitySolver (Wall 15: Fragility).}
-Uses the Young-Daly formula to compute optimal checkpoint interval: $\tau^{*} = \sqrt{2 \delta \cdot \text{MTBF}}$, where $\delta$ is checkpoint duration and MTBF is mean time between failures. Computes the fraction of compute lost to checkpointing and recovery as a function of cluster scale. \textbf{Assumption:} Failures are independent and exponentially distributed (memoryless).
-
-\paragraph{OrchestrationSolver (Wall 16: Multi-tenant).}
-Models shared-cluster queueing delays using an M/D/1 queue. Computes expected wait time as a function of cluster utilization $\rho$ and job arrival rate. \textbf{Assumption:} Job durations are approximately deterministic (reasonable for large training runs with predictable step times).
-
-\subsection{Operations Domain (Walls 17--20)}
-
-\paragraph{EconomicsSolver (Wall 17: Capital).}
-Computes total cost of ownership: $\text{TCO} = \text{CapEx} + \text{OpEx}_{\text{energy}} \times T_{\text{amort}} + \text{OpEx}_{\text{staff}}$. CapEx includes accelerator, networking, and facility costs. Energy cost is derived from power draw, PUE, and regional electricity rates. \textbf{Assumption:} Linear amortization over 3--5 year hardware lifetime.
-
-\paragraph{SustainabilitySolver (Wall 18: Sustainability).}
-Converts energy consumption into carbon emissions and water usage using regional grid carbon intensity (g\,CO$_2$/kWh) and cooling water efficiency (L/kWh). Models energy-proportional power: idle power is 30\% of TDP, with the remaining 70\% scaling linearly with MFU~\citep{barroso2007case}. \textbf{Assumption:} Grid carbon intensity is a static regional constant; temporal variation (e.g., renewable intermittency) is not modeled.
-
-\paragraph{CheckpointSolver (Wall 19: Checkpoint).}
-Complements the \texttt{ReliabilitySolver}: where reliability determines \emph{how often} to checkpoint, this solver determines \emph{how much it costs}. For Adam, each parameter requires 16 bytes of state (FP32 master weight + moments + FP16 copies), so a 70B model requires ${\sim}1.12$\,TB per checkpoint. Computes I/O burst duration as checkpoint size divided by storage write bandwidth.
-
-\paragraph{ResponsibleEngineeringSolver (Wall 20: Safety).}
-Models the computational overhead of differential privacy via DP-SGD~\citep{abadi2016deep}: per-sample gradient clipping and noise addition scale training cost by a factor proportional to batch size. Also quantifies fairness audit overhead for multi-group evaluation. \textbf{Assumption:} Privacy budget $\varepsilon$ is a hard constraint; the solver reports the compute multiplier, not the privacy guarantee itself.
-
-\subsection{Analysis Domain (Walls 21--22)}
-
-\paragraph{SensitivitySolver (Wall 21: Sensitivity).}
-Computes numerical partial derivatives of end-to-end latency with respect to each hardware parameter (FLOPS, HBM bandwidth, network bandwidth, memory capacity). Identifies the binding constraint as the parameter with the largest normalized gradient $|\partial T / \partial x_i| \cdot (x_i / T)$. \textbf{Assumption:} Finite-difference approximation with 1\% perturbation; second-order effects are ignored.
-
-\paragraph{SynthesisSolver (Wall 22: Synthesis).}
-Performs the \emph{inverse} problem: given a service-level agreement (e.g., 50\,ms ITL), derives the minimum hardware specifications required. Iteratively tightens each hardware parameter until the SLA is met, then reports the binding specification. \textbf{Assumption:} Hardware parameters are independently adjustable (no co-design coupling between FLOPS and bandwidth).
 
 \bibliography{references}
 
