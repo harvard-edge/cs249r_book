@@ -1,0 +1,301 @@
+---
+title: "Sensitivity Analysis: Where to Invest"
+subtitle: "Compute partial derivatives to find the one upgrade that matters most."
+---
+::: {.callout-note}
+## Prerequisites
+Complete the [Hello World](hello_world.qmd) and [LLM Serving](llm_serving.qmd) tutorials before this one. You should understand the roofline model, memory-bound vs. compute-bound regimes, and LLM inference phases (TTFT and ITL).
+:::
+
+When your team has budget for one hardware upgrade, how do you decide: more FLOP/s or more
+memory bandwidth? Intuition fails here --- the answer depends on which resource is the
+**binding constraint** for your specific workload. This tutorial teaches you to compute
+that answer analytically.
+
+By the end of this tutorial you will understand:
+
+- How **sensitivity analysis** reveals the binding constraint for any model-hardware pair
+- Why a 10% bandwidth increase can yield 15x more improvement than a 10% FLOP/s increase
+- How to use **inverse Roofline synthesis** to derive minimum hardware specs from an SLA
+- How binding constraints **shift across hardware generations**
+
+::: {.callout-tip}
+## What is a binding constraint?
+
+In optimization, the **binding constraint** is the inequality that holds with equality at the
+optimal point --- it is the resource that actually limits your performance. If you are
+memory-bound, bandwidth is the binding constraint: relaxing it (more GB/s) directly
+improves latency, while adding more FLOP/s does nothing. Sensitivity analysis quantifies
+exactly how much each parameter matters.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+# Build-system path setup — hidden from students
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim_mod = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim_mod
+spec.loader.exec_module(mlsysim_mod)
+import mlsysim
+```
+
+After `pip install mlsysim`, the import is simple:
+
+```python
+import mlsysim
+from mlsysim import SensitivitySolver, SynthesisSolver
+from mlsysim.core.constants import Q_
+```
+
+---
+
+## 2. Configure the Workload
+
+We will analyze **Llama-3.1-70B** inference on an **NVIDIA A100** --- a common deployment
+scenario where hardware procurement decisions have real budget implications.
+
+```{python}
+from mlsysim import SensitivitySolver, SynthesisSolver
+from mlsysim.core.constants import Q_
+
+model = mlsysim.Models.Language.Llama3_70B
+hardware = mlsysim.Hardware.Cloud.A100
+
+print(f"Model:      {model.name}")
+print(f"Parameters: {model.parameters.to('Gparam'):.1f}")
+print(f"")
+print(f"Hardware:   {hardware.name}")
+print(f"Compute:    {hardware.compute.peak_flops.to('TFLOPs/s'):.0f} (fp16)")
+print(f"Memory BW:  {hardware.memory.bandwidth.to('TB/s'):.1f}")
+print(f"Memory:     {hardware.memory.capacity.to('GB'):.0f}")
+```
+
+---
+
+## 3. Compute Sensitivities
+
+The `SensitivitySolver` perturbs each hardware parameter by a fixed percentage (default 10%)
+and measures how much inference latency changes. The result is a set of **numerical partial
+derivatives**: $\frac{\Delta T / T}{\Delta x / x}$ for each parameter $x$.
+
+```{python}
+solver = SensitivitySolver()
+res = solver.solve(
+    model=model,
+    hardware=hardware,
+    precision="fp16"
+)
+
+print(f"Baseline latency: {res.baseline_latency.to('ms'):~.2f}")
+print(f"Perturbation:     {res.perturbation_pct}%")
+print(f"")
+print(f"── Sensitivities ────────────────────────")
+for param, sensitivity in res.sensitivities.items():
+    print(f"  {param:20s}  {sensitivity:+.4f}")
+print(f"")
+print(f"Binding constraint: {res.binding_constraint}")
+```
+
+::: {.callout-note}
+## Reading the sensitivities
+
+Each sensitivity value tells you: "If I increase this parameter by 10%, latency changes by
+this fraction." A sensitivity of **-0.09** on `memory_bandwidth` means a 10% bandwidth
+increase yields roughly a 9% latency decrease. A sensitivity near **0.00** on `peak_flops`
+means more compute does almost nothing.
+
+The parameter with the largest absolute sensitivity is the **binding constraint** --- it is
+the hardware knob most worth turning. For memory-bound LLM inference, this is almost always
+bandwidth.
+:::
+
+---
+
+## 4. Quantify the Asymmetry
+
+Let us make the asymmetry concrete. How much improvement does each dollar of upgrade buy?
+
+```{python}
+sens_bw = abs(res.sensitivities.get("memory_bandwidth", 0))
+sens_flops = abs(res.sensitivities.get("peak_flops", 0))
+
+if sens_flops > 0:
+    ratio = sens_bw / sens_flops
+    print(f"Bandwidth sensitivity:  {sens_bw:.4f}")
+    print(f"FLOPS sensitivity:      {sens_flops:.4f}")
+    print(f"Ratio:                  {ratio:.1f}x")
+    print(f"")
+    print(f"A dollar spent on bandwidth improvement is ~{ratio:.0f}x more impactful")
+    print(f"than the same dollar spent on more FLOP/s.")
+else:
+    print(f"Bandwidth sensitivity:  {sens_bw:.4f}")
+    print(f"FLOPS sensitivity:      {sens_flops:.4f}")
+    print(f"FLOPS has zero sensitivity — the workload is purely memory-bound.")
+```
+
+::: {.callout-warning}
+## This is not universal
+
+The binding constraint depends on the **specific model-hardware pair**. A small CNN at
+large batch size may be compute-bound, making FLOP/s the binding constraint. Always
+run the analysis for your actual workload.
+:::
+
+---
+
+## 5. Inverse Solve: From SLA to Hardware Specs
+
+The `SynthesisSolver` inverts the roofline model. Instead of "given hardware, what is
+the latency?", it asks: **"given a latency SLA, what hardware do I need?"**
+
+Suppose your deployment requires an inter-token latency (ITL) of 50 ms or less:
+
+```{python}
+synth = SynthesisSolver()
+specs = synth.solve(
+    model=model,
+    target_latency=Q_("50 ms"),
+    precision="fp16"
+)
+
+print(f"── Required Hardware Specs ──────────────")
+print(f"Minimum memory BW:    {specs.required_bw.to('TB/s'):~.2f}")
+print(f"Minimum compute:      {specs.required_flops.to('TFLOPs/s'):~.1f}")
+print(f"Minimum memory:       {specs.required_memory.to('GB'):~.1f}")
+print(f"Compute/BW ratio:     {specs.compute_memory_ratio:~.1f}")
+```
+
+---
+
+## 6. Match Against the Silicon Zoo
+
+Which hardware in the MLSys Zoo meets the synthesized requirements?
+
+```{python}
+print(f"Required BW >= {specs.required_bw.to('TB/s'):~.2f}")
+print(f"Required memory >= {specs.required_memory.to('GB'):~.1f}")
+print(f"")
+print(f"{'Hardware':>25s}  {'BW (TB/s)':>10}  {'Mem (GB)':>10}  {'Meets Spec':>10}")
+print("-" * 62)
+
+candidates = [
+    ("A100 (80GB)", mlsysim.Hardware.Cloud.A100),
+    ("H100 SXM5",  mlsysim.Hardware.Cloud.H100),
+    ("H200",       mlsysim.Hardware.Cloud.H200),
+    ("MI300X",     mlsysim.Hardware.Cloud.MI300X),
+]
+
+for name, hw in candidates:
+    bw_ok = hw.memory.bandwidth >= specs.required_bw
+    mem_ok = hw.memory.capacity >= specs.required_memory
+    meets = bw_ok and mem_ok
+    print(
+        f"{name:>25s}  "
+        f"{hw.memory.bandwidth.to('TB/s'):>10.2f~}  "
+        f"{hw.memory.capacity.to('GB'):>10.0f~}  "
+        f"{'YES' if meets else 'no':>10}"
+    )
+```
+
+---
+
+## 7. Generational Shift: Does the Binding Constraint Change?
+
+The most important insight from sensitivity analysis is that **hardware upgrades can shift
+the binding constraint**. Let us repeat the analysis on the H100 and compare:
+
+```{python}
+h100 = mlsysim.Hardware.Cloud.H100
+
+res_a100 = solver.solve(model=model, hardware=hardware, precision="fp16")
+res_h100 = solver.solve(model=model, hardware=h100, precision="fp16")
+
+print(f"{'Parameter':>20s}  {'A100':>10}  {'H100':>10}")
+print("-" * 44)
+for param in res_a100.sensitivities:
+    val_a100 = res_a100.sensitivities[param]
+    val_h100 = res_h100.sensitivities[param]
+    print(f"{param:>20s}  {val_a100:>+10.4f}  {val_h100:>+10.4f}")
+
+print(f"")
+print(f"A100 binding: {res_a100.binding_constraint}")
+print(f"H100 binding: {res_h100.binding_constraint}")
+print(f"")
+print(f"A100 baseline latency: {res_a100.baseline_latency.to('ms'):~.2f}")
+print(f"H100 baseline latency: {res_h100.baseline_latency.to('ms'):~.2f}")
+```
+
+::: {.callout-tip}
+## Interpreting the generational comparison
+
+If both GPUs show `memory_bandwidth` as the binding constraint, it means the H100's
+additional FLOP/s (compared to A100) went largely unused for this workload. The H100's
+real advantage for LLM inference comes from its higher HBM3 bandwidth (3.35 TB/s vs.
+2.0 TB/s), not its higher TFLOP/s.
+
+If the binding constraint **shifts** from bandwidth to compute, it means the newer
+hardware has enough bandwidth that compute becomes the new bottleneck --- a qualitative
+regime change that changes your optimization strategy entirely.
+:::
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Precision as a knob.**
+Before running: predict whether switching from `fp16` to `int8` will change the binding
+constraint for Llama-70B on the A100. (Hint: quantization halves the bytes loaded per
+decode step. Does it also halve the FLOPs?) Run the sensitivity analysis at both precisions
+and compare. Write a one-sentence procurement recommendation based on your findings.
+
+**Exercise 2: Tighter SLA.**
+Use `SynthesisSolver` with a target latency of `Q_("10 ms")` instead of 50 ms. What
+bandwidth does this require? Does any hardware in the Silicon Zoo meet this spec? What
+does this tell you about the feasibility of sub-10ms ITL for 70B-parameter models on
+current hardware?
+
+**Exercise 3: Model size crossover.**
+Run the sensitivity analysis on three models of increasing size: `mlsysim.Models.Llama3_8B`,
+`mlsysim.Models.Llama3_70B`, and `mlsysim.Models.GPT3` (175B). At what model size does the
+binding constraint shift, if at all? Plot the bandwidth sensitivity vs. model parameter count.
+What trend do you observe?
+:::
+
+---
+
+## What You Learned
+
+- **Sensitivity analysis** computes numerical partial derivatives of latency w.r.t. each
+  hardware parameter, revealing which upgrade matters most
+- **Binding constraint** identification prevents wasted procurement budget on the wrong
+  hardware dimension
+- **Inverse Roofline synthesis** translates SLA requirements into minimum hardware specs,
+  enabling data-driven shortlisting
+- **Generational comparison** shows that hardware upgrades can shift the binding constraint,
+  changing the optimal investment strategy entirely
+
+---
+
+## Next Steps
+
+- **[GPU vs. Cerebras](architecture_comparison.qmd)**: See how a fundamentally different
+  architecture (wafer-scale weight streaming) changes which wall binds
+- **[Distributed Training](distributed.qmd)**: Scale to hundreds of GPUs and understand
+  communication overhead
+- **[Math Foundations](../math.qmd)**: The exact equations behind sensitivity and synthesis
+- **[Silicon Zoo](../zoo/hardware.qmd)**: Browse all vetted hardware specs

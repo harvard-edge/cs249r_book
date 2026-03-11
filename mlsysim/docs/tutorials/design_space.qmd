@@ -1,0 +1,322 @@
+---
+title: "Design Space Explorer: Bottleneck Regime Map"
+subtitle: "Sweep model size × HBM bandwidth and watch the binding constraint shift."
+---
+::: {.callout-note}
+## Prerequisites
+Complete the [Getting Started](../getting-started.qmd) guide before this tutorial. It introduces the `Engine.solve` API and the MLSys Zoo.
+:::
+
+Every ML workload lands in one of two regimes: **memory-bound** or **compute-bound**. Which
+regime you land in depends on _both_ the model and the hardware. In this tutorial, you will
+sweep a grid of model sizes and HBM bandwidths to build a **bottleneck regime map** — a
+design-space heatmap that shows exactly where the boundary falls.
+
+By the end, you will understand:
+
+- How model size and memory bandwidth interact to determine the bottleneck regime
+- Why hardware generations (A100 → H100 → B200) shift the regime boundary
+- How to run parametric sweeps that execute in under 50 ms
+
+::: {.callout-tip}
+## Why does this matter?
+
+If you are memory-bound, buying a faster GPU (more TFLOP/s) will not help — you need more
+bandwidth. If you are compute-bound, adding bandwidth is wasted money. Knowing _which_ regime
+you are in is the first step toward efficient hardware selection.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+# Build-system path setup — hidden from students
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim
+spec.loader.exec_module(mlsysim)
+Engine = mlsysim.Engine
+```
+
+After `pip install mlsysim`, the import is simple:
+
+```python
+import mlsysim
+from mlsysim import Engine
+```
+
+---
+
+## 2. Define the Sweep Grid
+
+We will sweep **model sizes** from 1B to 540B parameters and **HBM bandwidths** from 1.0 to
+3.5 TB/s. For each combination, we run `Engine.solve` with FP16 training at batch size 256
+and record whether the workload is memory-bound or compute-bound.
+
+```{python}
+from mlsysim import TransformerWorkload, Hardware, ureg
+from copy import deepcopy
+
+# Model sizes to sweep (parameters)
+model_sizes = [1e9, 7e9, 13e9, 30e9, 70e9, 175e9, 540e9]
+model_labels = ["1B", "7B", "13B", "30B", "70B", "175B", "540B"]
+
+# HBM bandwidths to sweep (TB/s)
+bandwidths = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
+
+# Create a workload for each model size
+def make_model(params):
+    """Create a Transformer workload with the given parameter count."""
+    return TransformerWorkload(
+        name=f"Transformer-{params/1e9:.0f}B",
+        architecture="Transformer",
+        parameters=params * ureg.param,
+        layers=32,
+        hidden_dim=4096,
+        heads=32,
+        inference_flops=2 * params * ureg.flop
+    )
+
+print(f"Grid: {len(model_sizes)} model sizes × {len(bandwidths)} bandwidths")
+print(f"Total configurations: {len(model_sizes) * len(bandwidths)}")
+```
+
+---
+
+## 3. Run the Sweep
+
+For each cell in the grid, we create a hardware node with the target bandwidth, solve the
+training profile, and record the bottleneck. The entire sweep completes in milliseconds
+because every calculation is analytical — no simulation required.
+
+```{python}
+from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
+
+# Use the A100 as a template (312 TFLOP/s FP16)
+template_hw = Hardware.Cloud.A100
+
+# Build the regime map
+regime_map = []
+for params, label in zip(model_sizes, model_labels):
+    row = []
+    model = make_model(params)
+    for bw in bandwidths:
+        # Create hardware with the target bandwidth but same compute
+        hw = HardwareNode(
+            name=f"Custom ({bw} TB/s)",
+            release_year=2024,
+            compute=deepcopy(template_hw.compute),
+            memory=MemoryHierarchy(
+                capacity=template_hw.memory.capacity,
+                bandwidth=bw * ureg.TB / ureg.s
+            ),
+            tdp=template_hw.tdp,
+            dispatch_tax=template_hw.dispatch_tax,
+        )
+        profile = Engine.solve(
+            model=model,
+            hardware=hw,
+            batch_size=256,
+            precision="fp16",
+            is_training=True
+        )
+        row.append(profile.bottleneck)
+    regime_map.append(row)
+
+print("Sweep complete!")
+```
+
+---
+
+## 4. Display the Regime Map
+
+Now we print the heatmap. Each cell shows **MEM** (memory-bound) or **COMP** (compute-bound).
+The boundary between regimes is the design-space equivalent of the roofline ridge point.
+
+```{python}
+# Print the text heatmap
+header = f"{'Model':>8}  " + "  ".join(f"{bw:.1f}" for bw in bandwidths)
+print(header)
+print("-" * len(header))
+
+for label, row in zip(model_labels, regime_map):
+    cells = []
+    for regime in row:
+        if "Memory" in regime:
+            cells.append(" MEM")
+        else:
+            cells.append("COMP")
+    print(f"{label:>8}  " + "  ".join(f"{c:>4}" for c in cells))
+
+print()
+print("Rows = model size (parameters)")
+print("Cols = HBM bandwidth (TB/s)")
+```
+
+::: {.callout-note}
+## Reading the Map
+
+The pattern is clear: **larger models with lower bandwidth are memory-bound** (MEM), while
+**smaller models with higher bandwidth are compute-bound** (COMP). The diagonal boundary
+between regimes is the ridge line — the model size at which memory and compute are equally
+saturated for a given bandwidth.
+:::
+
+---
+
+## 5. Locate Real Hardware on the Map
+
+Where do actual GPUs fall? The A100 has 2.0 TB/s, the H100 has 3.35 TB/s, and the B200 has
+8.0 TB/s. Each hardware generation pushes the boundary, making larger models compute-bound
+where they were previously memory-bound.
+
+```{python}
+# Real hardware bandwidth landmarks
+landmarks = {
+    "A100": 2.0,    # TB/s HBM2e
+    "H100": 3.35,   # TB/s HBM3
+    "B200": 8.0,    # TB/s HBM3e
+}
+
+# Check each landmark against the model sizes
+print(f"{'GPU':>6}  {'BW (TB/s)':>10}  ", end="")
+print("  ".join(f"{l:>5}" for l in model_labels))
+print("-" * 72)
+
+for gpu_name, bw in landmarks.items():
+    cells = []
+    for params in model_sizes:
+        model = make_model(params)
+        hw = HardwareNode(
+            name=gpu_name,
+            release_year=2024,
+            compute=deepcopy(template_hw.compute),
+            memory=MemoryHierarchy(
+                capacity=template_hw.memory.capacity,
+                bandwidth=bw * ureg.TB / ureg.s
+            ),
+            tdp=template_hw.tdp,
+            dispatch_tax=template_hw.dispatch_tax,
+        )
+        p = Engine.solve(
+            model=model, hardware=hw,
+            batch_size=256, precision="fp16", is_training=True
+        )
+        cells.append(" MEM" if "Memory" in p.bottleneck else "COMP")
+    print(f"{gpu_name:>6}  {bw:>10.2f}  " + "  ".join(f"{c:>5}" for c in cells))
+```
+
+::: {.callout-tip}
+## Hardware Generations Shift the Boundary
+
+Notice how the B200's 8.0 TB/s bandwidth pushes the compute-bound regime to cover
+significantly larger models. This is the hardware industry's answer to the memory wall:
+each generation increases bandwidth faster than compute, gradually shrinking the
+memory-bound region.
+:::
+
+---
+
+## 6. Quantify the Crossover
+
+Let us find, for each model size, the exact bandwidth at which the regime switches:
+
+```{python}
+print(f"{'Model':>8}  {'Crossover BW':>14}  {'A100 Regime':>12}  {'H100 Regime':>12}")
+print("-" * 52)
+
+for params, label in zip(model_sizes, model_labels):
+    model = make_model(params)
+    # Binary search for crossover bandwidth
+    lo, hi = 0.1, 20.0
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        hw = HardwareNode(
+            name="sweep",
+            release_year=2024,
+            compute=deepcopy(template_hw.compute),
+            memory=MemoryHierarchy(
+                capacity=1000 * ureg.GB,
+                bandwidth=mid * ureg.TB / ureg.s
+            ),
+            tdp=template_hw.tdp,
+            dispatch_tax=template_hw.dispatch_tax,
+        )
+        p = Engine.solve(model=model, hardware=hw, batch_size=256,
+                         precision="fp16", is_training=True)
+        if "Memory" in p.bottleneck:
+            lo = mid
+        else:
+            hi = mid
+
+    crossover = (lo + hi) / 2
+
+    # Check A100 and H100 regimes
+    for gpu_bw, gpu_name in [(2.0, "A100"), (3.35, "H100")]:
+        hw = HardwareNode(
+            name=gpu_name,
+            release_year=2024,
+            compute=deepcopy(template_hw.compute),
+            memory=MemoryHierarchy(
+                capacity=1000 * ureg.GB,
+                bandwidth=gpu_bw * ureg.TB / ureg.s
+            ),
+            tdp=template_hw.tdp,
+            dispatch_tax=template_hw.dispatch_tax,
+        )
+    # For display, just show the crossover
+    a100_regime = "MEM" if crossover > 2.0 else "COMP"
+    h100_regime = "MEM" if crossover > 3.35 else "COMP"
+
+    print(f"{label:>8}  {crossover:>11.2f} TB/s  {a100_regime:>12}  {h100_regime:>12}")
+```
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+Before running any code, predict: at batch size 256, will a 7B model be memory-bound or
+compute-bound on an H100 (3.35 TB/s, 989 TFLOP/s)? Write your prediction, then verify by
+adding the H100's actual compute to the sweep. Were you right?
+
+**Exercise 2: Precision effect.**
+Change the sweep from `precision="fp16"` to `precision="int8"`. How does this shift the
+regime boundary? Predict first: does INT8 make more models memory-bound or compute-bound?
+(Hint: INT8 doubles compute throughput but halves bytes per parameter.)
+
+**Exercise 3: Batch size sensitivity.**
+Re-run the full sweep with `batch_size=1` instead of 256. How does the regime map change?
+Why does small-batch inference push more workloads into the memory-bound regime?
+:::
+
+---
+
+## What You Learned
+
+- **Regime maps** visualize the boundary between memory-bound and compute-bound across a design space
+- **Model size × bandwidth** determines which regime you land in — neither alone is sufficient
+- **Hardware generations** shift the boundary by increasing bandwidth faster than compute
+- **Parametric sweeps** with analytical solvers execute in milliseconds, enabling rapid design-space exploration
+
+---
+
+## Next Steps
+
+- **[Hello World](hello_world.qmd)** — If you skipped it, go back and learn the roofline fundamentals
+- **[Data Pipeline Bottlenecks](data_pipeline.qmd)** — Discover why the GPU is not always the bottleneck
+- **[LLM Serving Lab](llm_serving.qmd)** — Model the two phases of LLM inference
+- **[Math Foundations](../math.qmd)** — The equations behind the roofline model and regime classification
