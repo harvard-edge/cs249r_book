@@ -168,7 +168,7 @@ Then write one sentence:
 
 ---
 
-## 6. Two-Track Variant (Deployment Context Comparison)
+## 6. Deployment Context Definitions
 
 Rather than 4 narrative personas, this lab offers **2 deployment contexts** as a comparison toggle (not a persistent identity):
 
@@ -201,7 +201,7 @@ The `activation_choice` and `max_trainable_width_laptop_gpu` values feed forward
 
 ---
 
-## 8. Connection to Chapter Content (Traceability)
+## 8. Traceability Table
 
 | Lab Element | Chapter Section | Chapter Claim Being Tested |
 |---|---|---|
