@@ -313,6 +313,7 @@ All contributions go to [Open Collective](https://opencollective.com/mlsysbook),
 | [📖 **Full Textbook**](https://mlsysbook.ai/book/) | Complete interactive online textbook (both volumes) |
 | [📘 **Volume I**](https://mlsysbook.ai/vol1/) | Build, Optimize, Deploy |
 | [📙 **Volume II**](https://mlsysbook.ai/vol2/) | Scale, Distribute, Govern *(Summer 2026)* |
+| [🧮 **MLSys·im**](https://mlsysbook.ai/mlsysim/) | First-principles analytical simulator |
 | [🔥 **TinyTorch**](https://mlsysbook.ai/tinytorch/) | Build ML frameworks from scratch |
 | [🔧 **Hardware Kits**](https://mlsysbook.ai/kits/) | Deploy to Arduino, Raspberry Pi, edge devices |
 | [🌐 **Ecosystem**](https://mlsysbook.org) | Resources, workshops, and community |
