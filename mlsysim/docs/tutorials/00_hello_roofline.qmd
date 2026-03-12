@@ -1,0 +1,266 @@
+---
+title: "Hello, Roofline"
+subtitle: "Five lines of code to predict whether your model is memory-bound or compute-bound."
+description: "Learn to use MLSys·im's analytical roofline model to predict ML model performance on any hardware. The foundation for all ML systems reasoning."
+categories: ["start", "beginner"]
+---
+
+## The Question
+
+You have a model and a GPU. Before you write any code, train anything, or rent any
+cloud instance — **can you predict which hardware resource will be the bottleneck?**
+
+This tutorial teaches the single most important skill in ML systems: using the
+**roofline model** to answer that question in under a second.
+
+::: {.callout-note}
+## Prerequisites
+None. This is the starting point for all MLSys·im tutorials.
+:::
+
+::: {.callout-tip}
+## Key Terms for These Tutorials
+
+If you are new to ML, here are the essential terms used throughout this tutorial series:
+
+| Term | Meaning |
+|:-----|:--------|
+| **Model** | A mathematical function with learned **parameters** (weights) that maps inputs to outputs — e.g., an image to a label |
+| **Parameters** | The numbers a model learns during training. A "25M parameter" model stores 25 million numbers |
+| **Inference** | Running a trained model on new input to get a prediction (as opposed to *training*, which learns the parameters) |
+| **CNN** | Convolutional Neural Network — a model architecture for images (e.g., ResNet-50) |
+| **LLM** | Large Language Model — a model that generates text one **token** (roughly one word) at a time (e.g., GPT-4, Llama-3) |
+| **FP16** | 16-bit floating point ("half precision") — uses 2 bytes per parameter. ML often uses reduced precision for speed |
+| **FLOP/s** | Floating-point operations per second — a measure of compute speed. **TFLOP/s** = trillion FLOP/s |
+| **HBM** | High Bandwidth Memory — the fast DRAM attached to a GPU (e.g., HBM2e on A100, HBM3 on H100) |
+| **Batch size** | How many inputs are processed together in one pass. Larger batches amortize the cost of loading weights |
+
+See the [Glossary](../glossary.qmd) for a complete list of terms.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Identify** the performance bottleneck (memory-bound vs. compute-bound) for any model-hardware pair
+- **Predict** how batch size shifts the operating point along the roofline
+- **Interpret** the ridge point as the boundary between two performance regimes
+- **Use** `Engine.solve` as the foundational API for all MLSys·im analyses
+:::
+
+::: {.callout-tip}
+## Background: The Roofline Model
+
+The roofline model (Williams, Waterman, and Patterson, 2009) is the foundational
+analytical tool for predicting hardware bottlenecks. Every accelerator has two speed limits:
+
+1. **Compute ceiling** — how fast it can do arithmetic (measured in FLOP/s)
+2. **Memory bandwidth ceiling** — how fast it can load data from memory (measured in bytes/s)
+
+The roofline model reduces to four lines of algebra:
+
+$$T_{\text{compute}} = \frac{\text{FLOPs}}{\text{Peak FLOP/s}}
+\qquad
+T_{\text{memory}} = \frac{\text{Bytes}}{\text{Peak BW}}$$
+
+$$T = \max(T_{\text{compute}},\; T_{\text{memory}})$$
+
+$$\text{Ridge point} = \frac{\text{Peak FLOP/s}}{\text{Peak BW}} \quad [\text{FLOP/byte}]$$
+
+Your model's **arithmetic intensity** (FLOPs ÷ Bytes) determines which ceiling you hit. If it is below the ridge point, you are **memory-bound** (starved for data). Above it, you are **compute-bound** (saturating the arithmetic units). This single classification drives every optimization decision downstream.
+
+**Important caveat:** The roofline is an *upper bound*. Real performance is always below it due to scheduling overhead, memory access patterns, and imperfect utilization. Achieving 40–60% of the roofline ceiling is considered good in practice. The model's value is not in predicting exact latency — it is in identifying the **binding constraint** (which resource limits you).
+:::
+
+::: {.callout-note}
+## Conventions Used in These Tutorials
+
+- **FLOP counting:** We count one multiply-accumulate (MAC) as **1 FLOP**, consistent with the MLSys Zoo constants. Industry and vendor datasheets typically count 1 MAC = 2 FLOPs. This factor of 2 shifts the ridge point: the A100's ridge is ~156 FLOP/byte in our convention but ~312 in the 2-FLOP convention. Always check which convention a paper uses before comparing numbers.
+- **Peak specs:** We use vendor-published peak Tensor Core throughput and peak HBM bandwidth. Real sustained performance is typically 70–90% of these peaks.
+- **Units:** `Q_` creates physical quantities with units (e.g., `Q_("2 TB/s")`). The `~` in format strings like `:~.2f` shows abbreviated unit names.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+# Build-system path setup — hidden from readers
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim
+spec.loader.exec_module(mlsysim)
+Engine = mlsysim.Engine
+```
+
+After `pip install mlsysim`, the import is two lines:
+
+```python
+import mlsysim
+from mlsysim import Engine
+```
+
+---
+
+## 2. Pick a Model and a GPU
+
+Pull vetted specifications from the **MLSys Zoo** — no need to search datasheets.
+
+```{python}
+# ResNet-50: 25M parameters, ~4.1 GFLOP per inference (counting multiply-accumulate as 1 FLOP)
+model = mlsysim.Models.ResNet50
+
+# NVIDIA A100: 312 TFLOP/s (FP16), 2.0 TB/s HBM2e, 80 GB
+hardware = mlsysim.Hardware.Cloud.A100
+
+print(f"Model:      {model.name} ({model.architecture})")
+print(f"Parameters: {model.parameters}")
+print(f"FLOPs/inf:  {model.inference_flops}")
+print()
+print(f"Hardware:   {hardware.name}")
+print(f"Peak FP16:  {hardware.compute.peak_flops.to('TFLOPs/s'):.0f}")
+print(f"HBM BW:     {hardware.memory.bandwidth.to('TB/s'):.1f}")
+```
+
+---
+
+## 3. Solve: One Line, One Answer
+
+The `Engine.solve` method applies the roofline model — it calculates which of the two
+speed limits you hit first, and returns latency, throughput, and the bottleneck classification.
+
+```{python}
+# One line: model + hardware + config → performance prediction
+profile = Engine.solve(
+    model=model,
+    hardware=hardware,
+    batch_size=1,          # Single image inference
+    precision="fp16"       # Half-precision (16-bit floating point)
+)
+
+print(f"Bottleneck:  {profile.bottleneck}")
+print(f"Latency:     {profile.latency.to('ms'):~.3f}")
+print(f"Throughput:  {profile.throughput:.0f} images/sec")
+```
+
+At batch size 1, ResNet-50 performs ~4.1 GFLOP but must load ~50 MB of weights (25M params × 2 bytes). That gives an arithmetic intensity of ~82 FLOP/byte — close to the A100's ridge point of ~156 FLOP/byte. At this operating point, the two ceilings are nearly balanced, and the bottleneck label depends on exact assumptions. The important takeaway: **most of the A100's 312 TFLOP/s is idle** — you need larger batches to exploit it.
+
+**Sanity check:** We can verify this with the equation from the Background. Note: we use our 1-FLOP-per-MAC convention here, so the A100's peak is 156 TFLOP/s (the vendor-reported 312 TFLOP/s uses the 2-FLOP convention):
+
+- $T_{\text{memory}} = 50\;\text{MB} \div 2.0\;\text{TB/s} = 0.025\;\text{ms}$
+- $T_{\text{compute}} = 4.1\;\text{GFLOP} \div 156\;\text{TFLOP/s} = 0.026\;\text{ms}$
+- $T = \max(0.025, 0.026) = 0.026\;\text{ms}$ → the two ceilings are nearly equal ✓
+
+ResNet-50 at batch 1 sits right at the ridge point. When $T_{\text{compute}} \approx T_{\text{memory}}$, the regime label is ambiguous — and that is the point: the ridge is a *boundary*, not a wall. Small differences in convention or measurement can flip the label. `Engine.solve` handles the convention internally, so its reported latency may differ slightly from this back-of-envelope estimate. The skill that matters is computing the ratio and knowing *where you stand*.
+
+**Computing arithmetic intensity from first principles:** This is the skill that lets you
+reason about *any* model, not just ones in the Zoo. The formula is FLOPs ÷ Bytes. Compare two very different workloads:
+
+- **ResNet-50 (batch 1):** 4.1 GFLOP ÷ 50 MB = **82 FLOP/byte** → near the A100 ridge (156) — balanced
+- **LLM decode (batch 1):** Each token does ~2 FLOP per parameter but loads 2 bytes per parameter = **1 FLOP/byte** → deeply memory-bound (you will explore this in [Tutorial 2](02_two_phases.qmd))
+
+When you encounter an unfamiliar model, compute this ratio first. It tells you the regime
+before you touch any code.
+
+---
+
+## 4. Sweep Batch Size: Watch the Regime Shift
+
+Now let's increase the batch size and see when the bottleneck changes. More images per
+batch means more computation per weight load — which increases arithmetic intensity.
+
+```{python}
+print(f"{'Batch':>6}  {'Bottleneck':<16}  {'Throughput':>12}  {'Latency':>10}")
+print("-" * 52)
+
+for batch in [1, 4, 16, 32, 64, 128, 256]:
+    p = Engine.solve(
+        model=model,
+        hardware=hardware,
+        batch_size=batch,
+        precision="fp16"
+    )
+    print(
+        f"{batch:>6}  {p.bottleneck:<16}  "
+        f"{p.throughput:>10.0f}/s  "
+        f"{p.latency.to('ms').magnitude:>8.2f} ms"
+    )
+```
+
+::: {.callout-important}
+## Key Insight
+
+**The roofline model lets you predict performance without running a single experiment.**
+The answer is determined by two ratios: your workload's arithmetic intensity and the
+hardware's ridge point. Batch size is the primary knob that moves you along the roofline —
+at small batches you are memory-bound, at large batches compute-bound. The ridge point is
+the most efficient operating point. Every optimization decision starts with knowing which
+side of the ridge you are on.
+:::
+
+::: {.callout-warning}
+## Pitfall: Assuming Peak FLOP/s Determines Inference Speed
+
+A common mistake is selecting hardware based on peak FLOP/s alone. At batch size 1,
+ResNet-50 is memory-bound — the 312 TFLOP/s compute ceiling is irrelevant. A GPU with
+half the FLOP/s but the same bandwidth would deliver *identical* inference latency. Always
+check the regime before comparing specs.
+:::
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+Before running any code: will ResNet-50 at `batch_size=64` be memory-bound or compute-bound
+on the A100? *Write your answer as one of: "memory-bound" or "compute-bound", plus one
+sentence of reasoning.* Then verify with `Engine.solve(...)`.
+Were you right? What would you need to know to predict correctly?
+
+**Exercise 2: Change the hardware.**
+Run the same batch size sweep on the H100 (`mlsysim.Hardware.Cloud.H100`). The H100 has
+3.2× more FLOP/s than the A100 but only 1.7× more bandwidth. How does the ridge point
+shift? At what batch size does the crossover happen on the H100 vs. the A100?
+
+**Exercise 3: Change the model.**
+Replace ResNet-50 with Llama-3 8B (`mlsysim.Models.Llama3_8B`). At batch size 1, is it
+memory-bound or compute-bound? Does the answer surprise you? Why do large language models
+behave differently from CNNs at the same batch size?
+
+**Self-check:** If a model's arithmetic intensity is 50 FLOP/byte and the hardware's ridge
+point is 156 FLOP/byte, is the model memory-bound or compute-bound?
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **The roofline model** predicts performance by comparing arithmetic intensity to the hardware's ridge point
+- **Memory-bound** means the GPU is waiting for data; **compute-bound** means it is saturating arithmetic units
+- **Batch size** is the primary knob for shifting between regimes — larger batches increase arithmetic intensity
+- **The ridge point** ($\text{Peak FLOP/s} \div \text{Peak BW}$) is the crossover — the most efficient operating point
+- **`Engine.solve`** is the foundational API: model + hardware + config → bottleneck, latency, throughput
+:::
+
+---
+
+## Next Steps
+
+- **[The Memory Wall](01_memory_wall.qmd)** — Discover why upgrading from A100 to H100 doesn't give the speedup you expect
+- **[Two Phases, One Request](02_two_phases.qmd)** — Learn why LLM serving has two different bottlenecks in the same request
+- **[Silicon Zoo](../zoo/hardware.qmd)** — Browse all vetted hardware specifications
+- **[Math Foundations](../math.qmd)** — The complete equations behind the roofline model

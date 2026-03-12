@@ -1,0 +1,293 @@
+---
+title: "Starving the GPU"
+subtitle: "Your GPU can process 5,300 images per second. Your CPU decodes 850."
+description: "Discover that the data pipeline — not the GPU — is often the binding constraint in training. Use DataModel and TransformationModel to find the crossover where CPU preprocessing stalls the accelerator."
+categories: ["data", "intermediate"]
+---
+
+## The Question
+
+You launch ResNet-50 training on an A100 and watch `nvidia-smi`. GPU utilization reads 40%.
+You expected 95%. The model is compute-bound. The hardware is top-tier. **Why is your GPU
+sitting idle 60% of the time?**
+
+The answer is almost never the model or the GPU. It is the invisible pipeline upstream:
+JPEG decoding, random cropping, color jitter, and normalization — all running on the CPU.
+When the CPU cannot prepare batches fast enough, the GPU starves.
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd) and
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd). You should understand memory-bound
+vs. compute-bound regimes and how `Engine.solve` reports bottlenecks.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Measure** the GPU's step time in isolation using `SingleNodeModel`
+- **Calculate** the data pipeline's throughput using `DataModel` and `TransformationModel`
+- **Identify** the batch size crossover where the CPU becomes the binding constraint
+- **Predict** how many CPU workers are needed to eliminate the data bottleneck
+:::
+
+::: {.callout-tip}
+## Background: The Three Stages of a Training Step
+
+Every training step has three sequential stages. The slowest one determines your actual
+throughput — not the GPU alone:
+
+1. **Storage I/O** (Wall 8) — Read raw data from disk into CPU memory
+2. **CPU Preprocessing** (Wall 9) — Decode, resize, augment, normalize
+3. **Accelerator Compute** (Wall 1) — Forward pass, backward pass, weight update
+
+The GPU cannot start until stages 1 and 2 finish. If either is slower than the GPU, the
+accelerator utilization drops below 100%. This is the data pipeline bottleneck.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim
+spec.loader.exec_module(mlsysim)
+Engine = mlsysim.Engine
+```
+
+```python
+import mlsysim
+from mlsysim import SingleNodeModel, DataModel, TransformationModel
+```
+
+---
+
+## 2. GPU Compute Time: The Ceiling You Think You Have
+
+We switch from LLM serving (Tutorials 2–3) to **CNN training** because the data pipeline
+bottleneck is most visible here. LLM training on tokenized text has a tiny data footprint
+(~8 MB/s as we will see in [Tutorial 11](11_full_stack_audit.qmd)). Image training with
+JPEG decoding, resizing, and augmentation can demand 10–100× more CPU work per sample —
+this is where the GPU actually starves.
+
+First, establish how fast the A100 processes a ResNet-50 training step in isolation — no
+data loading, no preprocessing, just pure compute:
+
+```{python}
+from mlsysim import SingleNodeModel
+from mlsysim.core.constants import Q_
+
+model = mlsysim.Models.ResNet50
+hardware = mlsysim.Hardware.Cloud.A100
+solver = SingleNodeModel()
+
+# Baseline: ResNet-50 on A100, batch 256, FP16
+profile = solver.solve(model=model, hardware=hardware, batch_size=256, precision="fp16")
+
+print(f"Model:          {model.name}")
+print(f"Hardware:       {hardware.name}")
+print(f"Batch size:     256")
+print(f"Step latency:   {profile.latency.to('ms'):~.2f}")
+print(f"Throughput:     {profile.throughput:.0f} img/s")
+print(f"Bottleneck:     {profile.bottleneck}")
+```
+
+The GPU can process this batch in tens of milliseconds. That is the ceiling. Now let's
+check whether the data pipeline can keep up.
+
+---
+
+## 3. Storage I/O Check: Can the Disk Deliver?
+
+ImageNet images average ~500 KB each (JPEG compressed). At batch 256, the GPU demands a
+burst of data every step. Can the storage subsystem supply it?
+
+```{python}
+from mlsysim import DataModel
+
+sample_size = Q_("500 KB")  # Average ImageNet JPEG
+batch_size = 256
+
+# Data demand = batch_size x sample_size / step_time
+step_time_s = profile.latency.to("s").magnitude
+data_per_step = (batch_size * sample_size.to("GB")).magnitude
+demand_rate = Q_(data_per_step / step_time_s, "GB/s")
+
+data_solver = DataModel()
+data_result = data_solver.solve(workload_data_rate=demand_rate, hardware=hardware)
+
+print(f"Data demand:    {demand_rate:.3f}")
+print(f"Storage supply: {data_result.supply_bw:.2f}")
+print(f"Utilization:    {data_result.utilization:.1%}")
+print(f"Is stalled:     {data_result.is_stalled}")
+```
+
+Storage I/O is fine — modern NVMe SSDs can deliver multi-GB/s easily. The bottleneck is
+not reading the bytes. It is *transforming* them.
+
+---
+
+## 4. The Reveal: CPU Preprocessing Is the Wall
+
+Even with fast storage, the CPU must decode JPEGs, apply random crops, color jitter, and
+normalization. A typical CPU worker processes ImageNet images at ~250 MB/s. With 8 workers,
+total CPU throughput is ~2 GB/s:
+
+```{python}
+from mlsysim import TransformationModel
+
+transform_solver = TransformationModel()
+cpu_throughput = Q_("2 GB/s")  # 8 workers x 250 MB/s each
+
+t = transform_solver.solve(
+    batch_size=256,
+    sample_size_bytes=sample_size,
+    cpu_throughput=cpu_throughput,
+    accelerator_step_time=profile.latency
+)
+
+print(f"CPU transform time:     {t.transform_time:~.2f}")
+print(f"GPU step time:          {t.accelerator_step_time:~.2f}")
+print(f"CPU is bottleneck:      {t.is_bottleneck}")
+print(f"GPU utilization:        {t.accelerator_utilization:.1%}")
+print(f"Slowdown factor:        {t.slowdown_factor:.2f}x")
+```
+
+::: {.callout-important}
+## Key Insight
+
+**The binding constraint is not silicon — it is JPEG decoding on the CPU.** The data
+pipeline (Wall 9: Transformation) becomes the bottleneck before the GPU (Wall 1: Compute).
+Your GPU can process 5,300+ images per second, but your 8 CPU workers can only prepare
+~850. The GPU sits idle waiting for data. This is why production training pipelines use
+GPU-accelerated preprocessing (NVIDIA DALI), pre-decoded datasets, or aggressive
+prefetching.
+:::
+
+---
+
+## 5. Batch Size Sweep: Finding the Crossover
+
+Let's sweep batch sizes to find exactly where the CPU becomes the binding constraint. At
+small batches, the GPU is slower and data arrives in time. At large batches, the GPU
+becomes more efficient but the CPU falls behind:
+
+```{python}
+print(f"{'Batch':>6}  {'GPU Step':>10}  {'CPU Xform':>10}  {'Binding':>14}  {'GPU Util':>9}")
+print("-" * 58)
+
+for bs in [32, 64, 128, 256, 512, 1024]:
+    p = solver.solve(model=model, hardware=hardware, batch_size=bs, precision="fp16")
+
+    t = transform_solver.solve(
+        batch_size=bs,
+        sample_size_bytes=sample_size,
+        cpu_throughput=cpu_throughput,
+        accelerator_step_time=p.latency
+    )
+
+    binding = "Transformation" if t.is_bottleneck else p.bottleneck
+    print(
+        f"{bs:>6}  "
+        f"{p.latency.to('ms').magnitude:>8.2f}ms  "
+        f"{t.transform_time.to('ms').magnitude:>8.2f}ms  "
+        f"{binding:>14}  "
+        f"{t.accelerator_utilization:>8.1%}"
+    )
+```
+
+Watch the crossover: at small batch sizes the GPU is the bottleneck (100% utilization).
+As batch size grows, CPU preprocessing time grows linearly while GPU step time grows
+sub-linearly. Eventually Wall 9 becomes the binding constraint and GPU utilization drops.
+
+---
+
+## 6. The Fix: Adding CPU Workers
+
+The simplest fix for a CPU bottleneck is more workers. Let's compare 8 vs. 16 vs. 32:
+
+```{python}
+print(f"{'Workers':>8}  {'Throughput':>12}  {'GPU Util @ bs=512':>18}")
+print("-" * 44)
+
+for n_workers in [8, 16, 32]:
+    cpu_tp = Q_(f"{n_workers * 250} MB/s")
+
+    p = solver.solve(model=model, hardware=hardware, batch_size=512, precision="fp16")
+
+    t = transform_solver.solve(
+        batch_size=512,
+        sample_size_bytes=sample_size,
+        cpu_throughput=cpu_tp,
+        accelerator_step_time=p.latency
+    )
+
+    print(
+        f"{n_workers:>8}  "
+        f"{cpu_tp.to('GB/s'):>12.1f~}  "
+        f"{t.accelerator_utilization:>17.1%}"
+    )
+```
+
+Doubling workers doubles throughput — but you eventually hit either storage I/O limits
+(Wall 8) or PCIe bandwidth. The takeaway: always check *all three stages* of the pipeline.
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+At batch size 64 with 8 CPU workers (2 GB/s total), will ResNet-50 training on the A100
+be GPU-bound or CPU-bound? Write your prediction, then run the code. What determines the
+answer? (Hint: compare `transform_time` vs. `accelerator_step_time`.)
+
+**Exercise 2: Medical imaging — larger samples.**
+Medical imaging uses images 10x larger than ImageNet (~5 MB per sample). Change
+`sample_size` to `Q_("5 MB")` and re-run the batch size sweep. At what batch size does
+the CPU stall the GPU now? How many workers would you need to keep up at batch 256?
+
+**Exercise 3: GPU-accelerated preprocessing.**
+If you use NVIDIA DALI to move preprocessing to the GPU, the CPU bottleneck effectively
+disappears. Model this by setting `cpu_throughput = Q_("50 GB/s")`. Run the sweep again.
+Does the bottleneck shift back to compute? What is the new GPU utilization at batch 512?
+
+**Self-check:** If the GPU step takes 20 ms and CPU preprocessing takes 35 ms, what is the
+accelerator utilization? (Answer: 20/35 = 57%.)
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **Data pipelines have three stages**: storage I/O, CPU preprocessing, and GPU compute — the slowest determines throughput
+- **CPU preprocessing (Wall 9)** is the most common bottleneck: JPEG decode, augmentation, and normalization are all CPU-bound
+- **Batch size shifts the binding constraint**: small batches are GPU-bound; large batches often become CPU-bound
+- **Adding CPU workers** helps linearly but has diminishing returns when storage I/O becomes the limit
+- **Always check all three stages** before concluding that the GPU is the bottleneck
+:::
+
+---
+
+## Next Steps
+
+- **[Quantization: Not a Free Lunch](05_quantization.qmd)** — When reducing precision helps (and when it doesn't)
+- **[KV-Cache: The Hidden Tax](03_kv_cache.qmd)** — Another hidden memory consumer: the KV-cache in LLM serving
+- **[Where to Invest](09_sensitivity.qmd)** — Use sensitivity analysis to decide whether more CPU workers or a faster GPU is the better investment
+- **[Silicon Zoo](../zoo/hardware.qmd)** — Compare storage and interconnect specs across GPU platforms

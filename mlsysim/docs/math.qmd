@@ -2,7 +2,7 @@
 title: "Mathematical Foundations"
 subtitle: "The First-Principles Equations Behind Every MLSys·im Solver"
 ---
-MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below, each grounded in a published systems paper. Before diving into code, read this page to understand *what* the 21 solvers resolving the [22 Systems Walls](architecture.qmd#the-22-systems-walls) are computing and *why*.
+MLSys·im avoids "black box" heuristics. Every output traces back to one of the equations below, each grounded in a published systems paper. Before diving into code, read this page to understand *what* the 22 resolvers (20 models and 2 solvers) resolving the [22 Systems Walls](architecture.qmd#the-22-systems-walls) are computing and *why*.
 
 ::: {.callout-tip}
 ## Reading these equations
@@ -10,11 +10,60 @@ Each solver in MLSys·im implements one or more of the models below.
 Click any solver name to go directly to its API documentation.
 :::
 
+## Notation Reference
+
+All quantities carry SI units at runtime via `pint`. The table below defines every symbol used in the equations that follow.
+
+| Symbol | Unit | Description |
+|--------|------|-------------|
+| **Model & Workload** | | |
+| $P$ | params | Model parameter count |
+| $P_{\ell}$ | params | Per-layer parameter count |
+| $\|W\|$ | bytes | Total bytes read per step (weights + KV cache) |
+| $\|W_{\ell}\|$ | bytes | Per-layer weight size ($P_{\ell} \times b_{\text{prec}}$) |
+| $b_{\text{prec}}$ | bytes/param | Numerical precision (e.g., 2 for FP16) |
+| $L$ | — | Number of layers |
+| $H$ | — | Number of attention heads (or KV heads) |
+| $D$ | — | Head dimension |
+| $S$ | tokens | Sequence length |
+| $B$ | samples | Batch size |
+| $K$ | — | Number of reasoning steps |
+| $C$ | FLOPs | Total training compute ($6PD$) |
+| $I$ | FLOP/byte | Arithmetic intensity |
+| **Hardware & Infrastructure** | | |
+| $\text{Peak}_{\text{FLOPS}}$ | FLOP/s | Peak accelerator throughput |
+| $BW_{\text{HBM}}$ | bytes/s | HBM bandwidth |
+| $BW_{\text{inject}}$ | bytes/s | Weight injection bandwidth (wafer-scale) |
+| $BW_{\text{link}}$ | bytes/s | Per-link network bandwidth |
+| $N$ | — | Number of nodes in fleet |
+| $G$ | — | GPUs per node |
+| $\alpha$ | seconds | Per-hop network latency |
+| **Efficiency & Utilization** | | |
+| $\eta$ | — | Hardware utilization ($\approx$ MFU) |
+| $\eta_{\text{overlap}}$ | — | Compute–communication overlap efficiency |
+| $\rho$ | — | Utilization ratio (queueing or data) |
+| $\beta$ | — | Bisection bandwidth fraction |
+| $\beta_{\text{opt}}$ | — | Optimizer state multiplier (total ckpt bytes / weight bytes) |
+| **Parallelism** | | |
+| TP, PP, DP, EP | — | Tensor, pipeline, data, expert parallelism |
+| $V$ | — | Virtual pipeline stages |
+| $M_{\text{micro}}$ | — | Number of microbatches |
+| **Sustainability** | | |
+| PUE | — | Power Usage Effectiveness |
+| CI | gCO₂/kWh | Regional carbon intensity |
+| WUE | L/kWh | Water Usage Effectiveness |
+| **Key Derived Quantities** | | |
+| $I^{*}$ | FLOP/byte | Ridge point ($\text{Peak}/BW_{\text{HBM}}$) |
+| $B^{*}$ | samples | Optimal batch size (streaming wall) |
+| $P^{*}$ | params | Compute-optimal model size |
+| $D^{*}$ | tokens | Compute-optimal dataset size |
+| $\tau_{\text{opt}}$ | seconds | Optimal checkpoint interval |
+
 ---
 
 ## 1. The Iron Law of ML Systems (Single Node)
 
-*Implemented in [`mlsysim.core.solver.SingleNodeSolver`](api/core.solver.SingleNodeSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.SingleNodeModel`](api/core.solver.SingleNodeModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **💡 Intuition: The Roofline Bottleneck**
@@ -42,7 +91,7 @@ If $I > I^*$, you are compute-bound. If $I < I^*$, you are memory-bound.
 
 ## 2. Distributed Training (3D Parallelism)
 
-*Implemented in [`mlsysim.core.solver.DistributedSolver`](api/core.solver.DistributedSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.DistributedModel`](api/core.solver.DistributedModel.qmd).*
 
 **Why an analytical model?** Real distributed training involves complex interactions between
 computation, communication, and scheduling. Empirical profiling requires access to expensive
@@ -141,7 +190,7 @@ $$
 
 ## 3. LLM Serving Lifecycle
 
-*Implemented in [`mlsysim.core.solver.ServingSolver`](api/core.solver.ServingSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.ServingModel`](api/core.solver.ServingModel.qmd).*
 
 LLM autoregressive inference has two physically distinct phases. Understanding which phase
 dominates is critical for capacity planning.
@@ -247,7 +296,7 @@ With a good draft model ($\alpha \approx 0.8$, $K = 4$), speculative decoding ca
 
 ## 4. The Data Wall
 
-*Implemented in [`mlsysim.core.solver.DataSolver`](api/core.solver.DataSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.DataModel`](api/core.solver.DataModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **💡 Intuition: Data Ingestion Bottlenecks**
@@ -274,7 +323,7 @@ If $\text{Utilization} > 1.0$, the compute units will stall waiting for data, re
 
 ## 5. Scaling Physics (Chinchilla Laws)
 
-*Implemented in [`mlsysim.core.solver.ScalingSolver`](api/core.solver.ScalingSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.ScalingModel`](api/core.solver.ScalingModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **💡 Intuition: Compute-Optimal Training**
@@ -305,7 +354,7 @@ $$
 
 ## 6. Cluster Orchestration (Little's Law)
 
-*Implemented in [`mlsysim.core.solver.OrchestrationSolver`](api/core.solver.OrchestrationSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.OrchestrationModel`](api/core.solver.OrchestrationModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **💡 Intuition: The Wait Wall**
@@ -332,13 +381,13 @@ As $\rho \to 1.0$, $T_{\text{wait}} \to \infty$. This illustrates why maintainin
 
 ## 7. Model Compression (The Compression Tax)
 
-*Implemented in [`mlsysim.core.solver.CompressionSolver`](api/core.solver.CompressionSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.CompressionModel`](api/core.solver.CompressionModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **💡 Intuition: Accuracy vs. Efficiency**
 Compressing a model via quantization or pruning reduces its memory footprint and increases inference speed, but often at the cost of task accuracy. This "Compression Tax" must be evaluated to ensure the model remains functional for its intended use.
 
-**📚 Source:** @han2015deep
+**📚 Source:** @han2016deep
 :::
 
 The **Compression Ratio** ($R$) is the ratio of the original model size to the compressed size:
@@ -347,11 +396,13 @@ $$
 R = \frac{\text{Size}_{\text{original}}}{\text{Size}_{\text{compressed}}}
 $$
 
-For **Quantization**, $R$ is determined by the bit-width ($b$):
+For **Quantization**, $R$ is determined by the baseline and target bit-widths:
 
 $$
-R_{\text{quant}} = \frac{32}{b}
+R_{\text{quant}} = \frac{b_{\text{base}}}{b_{\text{target}}}
 $$
+
+where $b_{\text{base}}$ is typically 16 (FP16/BF16), not 32. For example, FP16→INT4 gives $R = 16/4 = 4\times$.
 
 For **Pruning**, $R$ is determined by the sparsity ratio ($s$):
 
@@ -365,7 +416,7 @@ The estimated accuracy impact ($\Delta A$) is non-linear and typically follows e
 
 ## 8. Datacenter Sustainability
 
-*Implemented in [`mlsysim.core.solver.SustainabilitySolver`](api/core.solver.SustainabilitySolver.qmd).*
+*Implemented in [`mlsysim.core.solver.SustainabilityModel`](api/core.solver.SustainabilityModel.qmd).*
 
 ### 8.1 Total Energy
 
@@ -390,7 +441,7 @@ sourced from IEA regional grid data. This value varies from ~20 g/kWh (Quebec hy
 
 ## 9. Total Cost of Ownership (TCO)
 
-*Implemented in [`mlsysim.core.solver.EconomicsSolver`](api/core.solver.EconomicsSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.EconomicsModel`](api/core.solver.EconomicsModel.qmd).*
 
 $$
 \text{TCO} = \text{CapEx}_{\text{amortized}} + \text{OpEx}_{\text{power}} + \text{OpEx}_{\text{networking}} + \text{OpEx}_{\text{labor}}
@@ -405,7 +456,7 @@ Where:
 
 ## 10. Cluster Reliability (The Young-Daly Model)
 
-*Implemented in [`mlsysim.core.solver.ReliabilitySolver`](api/core.solver.ReliabilitySolver.qmd).*
+*Implemented in [`mlsysim.core.solver.ReliabilityModel`](api/core.solver.ReliabilityModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **💡 Intuition: The Cost of Checkpointing**
@@ -426,7 +477,7 @@ For a cluster, the collective $M$ drops linearly with the number of components. 
 
 ## 11. Tail Latency (Erlang-C Queueing)
 
-*Implemented in [`mlsysim.core.solver.TailLatencySolver`](api/core.solver.TailLatencySolver.qmd).*
+*Implemented in [`mlsysim.core.solver.TailLatencyModel`](api/core.solver.TailLatencyModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **Intuition: Why P99 Matters More Than Median**
@@ -441,13 +492,13 @@ $$
 \mathbb{P}[\text{wait}] = \frac{(c\rho)^c / c! \cdot (1-\rho)^{-1}}{\sum_{k=0}^{c-1}(c\rho)^k/k! + (c\rho)^c/c! \cdot (1-\rho)^{-1}}
 $$
 
-P99 latency grows non-linearly as $\rho \to 1$. The TailLatencySolver computes P50 and P99 wait times and SLO violation probability as a function of arrival rate, service latency, and replica count.
+P99 latency grows non-linearly as $\rho \to 1$. The TailLatencyModel computes P50 and P99 wait times and SLO violation probability as a function of arrival rate, service latency, and replica count.
 
 ---
 
 ## 12. Weight Streaming (Wafer-Scale Inference)
 
-*Implemented in [`mlsysim.core.solver.WeightStreamingSolver`](api/core.solver.WeightStreamingSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.WeightStreamingModel`](api/core.solver.WeightStreamingModel.qmd).*
 
 ::: {.callout-note appearance="simple" icon=false}
 **Intuition: Inverting the Memory Wall**
@@ -457,20 +508,24 @@ Wafer-scale architectures (e.g., Cerebras CS-3) invert the GPU memory wall: acti
 Per-layer execution time is:
 
 $$
-T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2|W_{\ell}| \times B}{\text{Peak} \times \eta}\right)
+T_{\text{layer}} = \max\!\left(\frac{|W_{\ell}|}{BW_{\text{inject}}},\; \frac{2P_{\ell} \times B}{\text{Peak} \times \eta}\right)
 $$
+
+where $|W_{\ell}|$ is the layer weight size in bytes, $P_{\ell} = |W_{\ell}| / b_{\text{prec}}$ is the parameter count, and the factor of 2 accounts for the multiply-accumulate FLOPs per parameter.
 
 The optimal batch size where injection and compute perfectly overlap:
 
 $$
-B^{*} = \frac{BW_{\text{inject}} \times \text{Peak} \times \eta}{2|W_{\ell}|}
+B^{*} = \frac{b_{\text{prec}} \times \text{Peak} \times \eta}{2 \times BW_{\text{inject}}}
 $$
+
+Note that $B^*$ depends only on numerical precision, peak compute, and injection bandwidth — it is independent of layer size.
 
 ---
 
 ## 13. Responsible Engineering (DP-SGD Overhead)
 
-*Implemented in [`mlsysim.core.solver.ResponsibleEngineeringSolver`](api/core.solver.ResponsibleEngineeringSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.ResponsibleEngineeringModel`](api/core.solver.ResponsibleEngineeringModel.qmd).*
 
 Privacy and fairness guarantees impose measurable computational overhead. Differential privacy via DP-SGD requires per-sample gradient clipping and calibrated noise addition:
 
@@ -512,7 +567,7 @@ This enables hardware–software co-design: rather than asking "how fast is my s
 
 ## 16. Software Efficiency (Wall 3: MFU Decomposition)
 
-*Implemented in [`mlsysim.core.solver.EfficiencySolver`](api/core.solver.EfficiencySolver.qmd).*
+*Implemented in [`mlsysim.core.solver.EfficiencyModel`](api/core.solver.EfficiencyModel.qmd).*
 
 The gap between peak and achieved FLOP/s is captured by the utilization parameter $\eta$:
 
@@ -532,7 +587,7 @@ where occupancy captures warp-level parallelism, fusion captures kernel launch e
 
 ## 17. Continuous Batching (Wall 5: PagedAttention)
 
-*Implemented in [`mlsysim.core.solver.ContinuousBatchingSolver`](api/core.solver.ContinuousBatchingSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.ContinuousBatchingModel`](api/core.solver.ContinuousBatchingModel.qmd).*
 
 Static batching wastes memory by pre-allocating contiguous KV-cache for the maximum sequence length. PagedAttention allocates KV-cache in fixed-size pages:
 
@@ -552,15 +607,15 @@ where $|W|$ is the model weight footprint. Continuous batching dynamically inser
 
 ## 18. Data Transformation (Wall 9: CPU Preprocessing)
 
-*Implemented in [`mlsysim.core.solver.TransformationSolver`](api/core.solver.TransformationSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.TransformationModel`](api/core.solver.TransformationModel.qmd).*
 
 CPU preprocessing (decode, resize, tokenize, augment) must keep pace with GPU consumption:
 
 $$
-T_{\text{transform}} = \frac{B \times S}{C_{\text{throughput}} \times W}
+T_{\text{transform}} = \frac{B}{R_{\text{cpu}}}
 $$
 
-where $B$ is the batch size, $S$ is the per-sample processing cost (e.g., JPEG decode + resize), $C_{\text{throughput}}$ is the single-core throughput, and $W$ is the number of CPU workers. The pipeline is stalled when:
+where $B$ is the batch size (in samples) and $R_{\text{cpu}} = N_{\text{workers}} \times r_{\text{worker}}$ is the aggregate CPU preprocessing rate (in samples/s), with $r_{\text{worker}}$ being the per-worker throughput after all transformations (decode, augment, normalize). The pipeline is stalled when:
 
 $$
 T_{\text{transform}} > T_{\text{compute}}
@@ -572,7 +627,7 @@ Common mitigations: increase $W$ (more workers), cache preprocessed data, or use
 
 ## 19. Network Topology (Wall 10: Bisection Bandwidth)
 
-*Implemented in [`mlsysim.core.solver.TopologySolver`](api/core.solver.TopologySolver.qmd).*
+*Implemented in [`mlsysim.core.solver.TopologyModel`](api/core.solver.TopologyModel.qmd).*
 
 The effective bandwidth available for collective communication depends on the network topology and its oversubscription ratio:
 
@@ -592,7 +647,7 @@ Fat-tree topologies (Leiserson, 1985) provide full bisection bandwidth ($r=1$), 
 
 ## 20. Inference-Time Scaling (Wall 12: Reasoning Compute)
 
-*Implemented in [`mlsysim.core.solver.InferenceScalingSolver`](api/core.solver.InferenceScalingSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.InferenceScalingModel`](api/core.solver.InferenceScalingModel.qmd).*
 
 Chain-of-thought, tree search, and other inference-time scaling strategies multiply the compute cost by the number of reasoning steps $K$:
 
@@ -612,7 +667,7 @@ The key insight from Snell et al. (2024) is that inference-time compute can subs
 
 ## 21. Checkpoint I/O (Wall 19: MFU Penalty)
 
-*Implemented in [`mlsysim.core.solver.CheckpointSolver`](api/core.solver.CheckpointSolver.qmd).*
+*Implemented in [`mlsysim.core.solver.CheckpointModel`](api/core.solver.CheckpointModel.qmd).*
 
 Periodic checkpointing imposes an I/O burst that pauses training:
 
@@ -620,13 +675,20 @@ $$
 \text{MFU\_penalty} = \frac{T_{\text{write}}}{T_{\text{interval}}}
 $$
 
-where $T_{\text{write}}$ is the time to write one checkpoint (model weights + optimizer state) and $T_{\text{interval}}$ is the checkpoint interval. For Adam optimizer with fp16 weights:
+where $T_{\text{write}} = |W| \times \beta_{\text{opt}} / BW_{\text{storage}}$ is the time to write one checkpoint and $T_{\text{interval}}$ is the checkpoint interval. For mixed-precision Adam with FP16 weights, the checkpoint includes:
+
+- FP16 model weights: 2 bytes/param
+- FP32 master weights: 4 bytes/param
+- FP32 momentum: 4 bytes/param
+- FP32 variance: 4 bytes/param
+
+Gradients are ephemeral and **not** checkpointed. This totals 14 bytes per parameter, giving $\beta_{\text{opt}} \approx 7$ (ratio of 14 checkpoint bytes to 2 weight bytes):
 
 $$
-\text{Checkpoint\_Size} = |W| \times (1 + 2 + 2) = 5|W|
+\text{Checkpoint\_Size} = P \times 14 \text{ bytes/param}
 $$
 
-The factor of 5 accounts for fp16 weights (1×), fp32 master weights (2×), and fp32 momentum + variance (2×). The optimal checkpoint interval from the Young-Daly formula (Section 10) balances checkpoint overhead against expected rework from failures.
+For a 70B model, the checkpoint is $70\text{B} \times 14 \approx 0.98$ TB. The optimal checkpoint interval from the Young-Daly formula (Section 10) balances checkpoint overhead against expected rework from failures.
 
 ---
 

@@ -1,0 +1,332 @@
+---
+title: "The $9M Question"
+subtitle: "K=8 reasoning steps multiply your serving bill by 7.6x — a simple algorithm choice becomes a capital decision."
+description: "Use InferenceScalingModel and EconomicsModel to quantify how chain-of-thought reasoning multiplies infrastructure cost from $1.2M to $9.1M annually."
+categories: ["ops", "intermediate"]
+---
+
+## The Question
+
+Your team wants to add chain-of-thought (CoT) reasoning to the production serving
+pipeline. The accuracy improvement is clear: K=8 reasoning steps measurably improve
+answer quality on hard queries. But what does K=8 *cost*? Not in tokens — in dollars,
+GPUs, and annual infrastructure budget. Is this an algorithm decision or a capital
+expenditure decision?
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 2: Two Phases, One Request](02_two_phases.qmd) and
+[Tutorial 3: The KV Cache Wall](03_kv_cache.qmd). You should understand TTFT, ITL, and the
+two-phase serving model.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Calculate** per-query latency and energy cost across reasoning depths K=1 to K=16
+- **Compose** `InferenceScalingModel` with `EconomicsModel` for annualized fleet cost
+- **Quantify** the cost multiplier of K=8 reasoning at 100 QPS fleet scale
+- **Evaluate** a routing strategy that sends easy queries to a cheap model and hard queries to an expensive reasoning model
+:::
+
+::: {.callout-tip}
+## Background: Inference-Time Compute Scaling
+
+Standard LLM inference generates one answer directly: prefill the prompt (TTFT), then
+decode tokens one at a time (ITL). Chain-of-thought reasoning changes this: the model
+generates K intermediate "thinking" steps, each producing dozens of tokens, before
+the final answer. The cost model becomes:
+
+$$T_{\text{reason}} = \text{TTFT} + K \times T_{\text{step}}$$
+
+where $T_{\text{step}} = \text{tokens\_per\_step} \times \text{ITL}$. Each step is
+memory-bound (decoding), so the cost scales linearly with K but at the *decode* rate —
+the expensive, memory-bandwidth-limited phase. A seemingly algorithmic choice (add more
+reasoning) translates directly into GPU-hours and dollars.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim
+spec.loader.exec_module(mlsysim)
+Engine = mlsysim.Engine
+```
+
+```python
+import mlsysim
+from mlsysim import Engine
+```
+
+---
+
+## 2. Baseline Serving: Single-Query Cost
+
+First, establish the baseline: a GPT-4 scale model served on an H100, no reasoning.
+This gives us the per-query TTFT and ITL that everything else builds on.
+
+```{python}
+from mlsysim import Models, Hardware, ServingModel
+
+model = Models.GPT4
+hardware = Hardware.Cloud.H100
+
+serving = ServingModel()
+baseline = serving.solve(
+    model=model, hardware=hardware,
+    seq_len=2048, batch_size=1, precision="fp16"
+)
+
+print(f"Model:          {model.name} ({model.parameters.to('Gcount'):.0f} params)")
+print(f"Hardware:       {hardware.name}")
+print(f"TTFT:           {baseline.ttft.to('ms'):~.1f}")
+print(f"ITL:            {baseline.itl.to('ms'):~.3f}")
+print(f"Memory Used:    {baseline.memory_utilization:.0%}")
+print(f"Feasible:       {baseline.feasible}")
+```
+
+The ITL — the per-token decode latency — is the critical number. Every reasoning
+step generates dozens of tokens at this rate. That is where the cost accumulates.
+
+---
+
+## 3. CoT Sweep: K=1 to K=16
+
+Now sweep reasoning depth using the `InferenceScalingModel`. Each step generates
+tokens of intermediate reasoning. Watch how the cost multiplier grows.
+
+```{python}
+from mlsysim import InferenceScalingModel
+
+cot_solver = InferenceScalingModel()
+K_values = [1, 4, 8, 16]
+
+print(f"{'K':>3}  {'Total Time':>12}  {'Tokens':>8}  {'Energy (J)':>11}  {'Multiplier':>11}")
+print("-" * 52)
+
+baseline_time = None
+results = {}
+
+for K in K_values:
+    result = cot_solver.solve(
+        model=model, hardware=hardware,
+        reasoning_steps=K, context_length=2048, precision="fp16"
+    )
+    total_ms = result.total_reasoning_time.to("ms").magnitude
+    energy_j = result.energy_per_query.to("J").magnitude
+
+    if baseline_time is None:
+        baseline_time = total_ms
+
+    multiplier = total_ms / baseline_time
+    results[K] = result
+
+    print(
+        f"{K:>3}  "
+        f"{total_ms:>10.1f}ms  "
+        f"{result.tokens_generated:>8}  "
+        f"{energy_j:>9.1f} J  "
+        f"{multiplier:>9.1f}x"
+    )
+```
+
+K=8 does not cost exactly 8x the baseline. The actual multiplier reflects the
+structure of the cost: one TTFT (fixed) plus K decode phases (scaling). Since
+TTFT is a small fraction of total time for high K, the multiplier approaches K
+as K grows.
+
+---
+
+## 4. The $9M Question: Annualized Fleet Cost
+
+Per-query cost is interesting. Fleet-level cost is what matters. Let's compute
+the annual infrastructure cost of serving 100 queries per second at K=1 vs. K=8.
+
+```{python}
+from mlsysim import EconomicsModel
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
+from mlsysim.core.constants import Q_
+
+econ = EconomicsModel()
+target_qps = 100
+
+print(f"{'K':>3}  {'Query (ms)':>11}  {'QPS/GPU':>8}  {'GPUs':>6}  {'Annual TCO ($)':>16}")
+print("-" * 52)
+
+fleet_results = {}
+fleet_objects = {}
+for K in K_values:
+    r = results[K]
+    qt_s = r.total_reasoning_time.to("s").magnitude
+
+    # Each GPU serves one query at a time (batch_size=1)
+    qps_per_gpu = 1.0 / qt_s if qt_s > 0 else 0
+    gpus_needed = int(target_qps / qps_per_gpu) + 1
+
+    # Build fleet: 8 GPUs per node
+    fleet = Fleet(
+        name=f"K={K} Serving",
+        node=Node(
+            name="H100 Node",
+            accelerator=hardware,
+            accelerators_per_node=8,
+            intra_node_bw=Q_("900 GB/s"),
+        ),
+        count=max((gpus_needed + 7) // 8, 1),
+        fabric=NetworkFabric(
+            name="IB NDR",
+            bandwidth=Q_("400 Gbps").to("GB/s"),
+        )
+    )
+
+    tco = econ.solve(fleet=fleet, duration_days=365)
+    fleet_results[K] = tco
+    fleet_objects[K] = fleet
+
+    print(
+        f"{K:>3}  "
+        f"{qt_s * 1000:>9.1f}ms  "
+        f"{qps_per_gpu:>8.2f}  "
+        f"{fleet.total_accelerators:>6}  "
+        f"${tco.tco_usd:>14,.0f}"
+    )
+```
+
+The jump from K=1 to K=8 is not just a latency increase — it propagates through
+the entire infrastructure stack: more GPUs, more power, more cooling, more
+network fabric, more capital expenditure.
+
+::: {.callout-important}
+## Key Insight
+
+**A seemingly algorithmic decision — "add more reasoning steps" — is actually
+an infrastructure spending decision.** K=8 chain-of-thought reasoning multiplies
+per-query latency by approximately 7-8x, which means you need 7-8x more GPUs to
+maintain the same QPS. Annual TCO scales proportionally. The decision to add CoT
+reasoning is not a model architecture choice — it is a capital expenditure decision
+that belongs in the CFO's budget, not just the ML engineer's notebook.
+:::
+
+---
+
+## 5. The Routing Argument
+
+The $9M annual TCO reframes the conversation from model architecture to capital planning.
+But it also raises an obvious question: must every query pay the full reasoning cost?
+
+In production, the answer is no — and the optimization is **routing**. Smart routing
+sends easy queries to a fast, cheap model and only routes hard queries to the expensive
+reasoning pipeline. Let's model a 70/30 split.
+
+```{python}
+# Scenario: 70% of queries go to Llama-3 70B (no reasoning, K=1)
+# 30% go to GPT-4 with K=8 reasoning
+model_cheap = Models.Llama3_70B
+
+# Cheap path: Llama-3 70B, K=1
+r_cheap = cot_solver.solve(
+    model=model_cheap, hardware=hardware,
+    reasoning_steps=1, context_length=2048, precision="fp16"
+)
+
+# Expensive path: GPT-4, K=8 (already computed)
+r_expensive = results[8]
+
+# Weighted average query time
+qt_cheap = r_cheap.total_reasoning_time.to("s").magnitude
+qt_expensive = r_expensive.total_reasoning_time.to("s").magnitude
+qt_blended = 0.70 * qt_cheap + 0.30 * qt_expensive
+
+# Compare: all queries to GPT-4 K=8 vs. routed
+qps_blended = 1.0 / qt_blended if qt_blended > 0 else 0
+gpus_blended = int(target_qps / qps_blended) + 1
+
+fleet_routed = Fleet(
+    name="Routed Serving",
+    node=Node(name="H100", accelerator=hardware,
+              accelerators_per_node=8, intra_node_bw=Q_("900 GB/s")),
+    count=max((gpus_blended + 7) // 8, 1),
+    fabric=NetworkFabric(name="IB", bandwidth=Q_("400 Gbps").to("GB/s")),
+)
+
+tco_routed = econ.solve(fleet=fleet_routed, duration_days=365)
+tco_all_k8 = fleet_results[8]
+
+savings = tco_all_k8.tco_usd - tco_routed.tco_usd
+pct_savings = savings / tco_all_k8.tco_usd * 100 if tco_all_k8.tco_usd > 0 else 0
+
+print(f"{'Strategy':<25} {'GPUs':>6}  {'Annual TCO ($)':>16}")
+print("-" * 52)
+print(f"{'All queries -> GPT-4 K=8':<25} {fleet_objects[8].total_accelerators:>6}  ${tco_all_k8.tco_usd:>14,.0f}")
+print(f"{'70/30 routed':<25} {fleet_routed.total_accelerators:>6}  ${tco_routed.tco_usd:>14,.0f}")
+print(f"{'Savings':<25} {'':>6}  ${savings:>14,.0f} ({pct_savings:.0f}%)")
+```
+
+Routing reduces the fleet but does not eliminate the infrastructure commitment. The 30%
+of queries that still need full reasoning require dedicated GPU capacity, and the routing
+classifier itself introduces latency and complexity. The $9M is the ceiling; routing
+contains it but does not make the capital planning question go away.
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+If K=8 costs approximately 7.6x the baseline, predict: does K=16 cost exactly 16x?
+More? Less? Write your reasoning (consider the fixed TTFT cost), then check the
+actual numbers from the sweep table. Explain the gap.
+
+**Exercise 2: Replace H100 with B200.**
+Use `Hardware.Cloud.B200` (roughly 2x the memory bandwidth of H100) and re-run the
+K=8 analysis. Predict first: will the *absolute* cost multiplier (K=8 vs. K=1) be the
+same, larger, or smaller on the B200? Will the *fleet size* for 100 QPS change? Run
+the numbers and explain.
+
+**Exercise 3: At what K does 70B + reasoning exceed GPT-4 + no reasoning?**
+Use `Models.Llama3_70B` with increasing K values and `Models.GPT4` with K=1. Find
+the K value at which the 70B model's per-query latency exceeds GPT-4's K=1 latency.
+What does this tell you about the trade-off between model size and reasoning depth?
+
+**Self-check:** If ITL is 5ms and each reasoning step generates 50 tokens, what is
+the total decode time for K=8? (Answer: 8 x 50 x 5ms = 2000ms = 2 seconds of pure
+decode time, plus TTFT.)
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **K reasoning steps multiply per-query latency** by approximately K (slightly less due to fixed TTFT)
+- **The cost multiplier propagates through the stack**: more latency means more GPUs, more power, more cost
+- **Annual TCO scales linearly with fleet size**: K=8 reasoning can turn a $1M serving bill into $9M
+- **Routing is the production answer**: send easy queries to cheap models, hard queries to expensive reasoning
+- **Algorithm choices are infrastructure decisions**: adding CoT reasoning belongs in the budget planning process
+:::
+
+---
+
+## Next Steps
+
+- **[Geography is a Systems Variable](07_geography.qmd)** -- See how location changes the carbon cost of your serving fleet
+- **[Scaling to 1000 GPUs](06_scaling_1000_gpus.qmd)** -- Discover reliability costs when training the models that do the reasoning
+- **[Quantization: Not a Free Lunch](05_quantization.qmd)** -- Learn when reducing precision helps with serving costs
+- **[Sensitivity Analysis](09_sensitivity.qmd)** -- Sweep parameters to find which lever matters most for your deployment

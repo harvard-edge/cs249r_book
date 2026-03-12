@@ -1,0 +1,355 @@
+---
+title: "Scaling to 1000 GPUs"
+subtitle: "At 1024 GPUs, communication overhead is the cost everyone talks about. But is it the dominant one?"
+description: "Sweep from 8 to 1024 GPUs and discover which overhead actually dominates at scale. The answer is not what most engineers expect."
+categories: ["fleet", "advanced"]
+---
+
+## The Question
+
+You have a 70B-parameter model and a budget for 1024 H100 GPUs. Communication overhead
+(AllReduce, pipeline bubbles) will eat some of your scaling efficiency — everyone knows that.
+But is communication really the dominant cost at scale? Or is something else quietly stealing
+more of your training time?
+
+::: {.callout-note}
+## Prerequisites
+Complete [Tutorial 0: Hello, Roofline](00_hello_roofline.qmd) and
+[Tutorial 1: The Memory Wall](01_memory_wall.qmd). You should understand
+memory-bound vs. compute-bound regimes and the roofline model.
+:::
+
+::: {.callout-note}
+## What You Will Learn
+
+- **Calculate** scaling efficiency across GPU counts from 8 to 1024
+- **Predict** cluster Mean Time Between Failures (MTBF) using the reliability model
+- **Compare** communication overhead vs. checkpoint overhead over a 30-day training run
+- **Explain** why reliability — not communication — is the dominant cost at scale
+:::
+
+::: {.callout-tip}
+## Background: Cluster Reliability and the Young-Daly Formula
+
+At scale, hardware failures are not rare events — they are routine. If a single GPU has a
+Mean Time To Failure (MTTF) of 50,000 hours, a cluster of N GPUs has a collective MTBF of
+approximately MTTF / N. At 512 GPUs, that is ~97 hours. At 1024 GPUs, it drops further.
+
+To survive failures, training jobs checkpoint periodically: save the full model state
+(weights + optimizer) to storage. The **Young-Daly formula** gives the optimal checkpoint
+interval that minimizes total wasted time:
+
+$$T_{\text{opt}} = \sqrt{2 \cdot \delta \cdot M}$$
+
+where $\delta$ is the time to write one checkpoint and $M$ is the cluster MTBF.
+This assumes failures arrive as a Poisson process (exponentially distributed inter-arrival
+times) and that on failure, work since the last checkpoint is lost — on average, half
+the checkpoint interval. The cost of checkpointing is not just the write time — it is
+also this rollback time.
+:::
+
+---
+
+## 1. Setup
+
+```{python}
+#| echo: false
+#| output: false
+import sys, os, importlib.util
+current_dir = os.getcwd()
+root_path = os.path.abspath(os.path.join(current_dir, "../../../"))
+if not os.path.exists(os.path.join(root_path, "mlsysim")):
+    root_path = os.path.abspath("../../")
+package_path = os.path.join(root_path, "mlsysim")
+init_file = os.path.join(package_path, "__init__.py")
+spec = importlib.util.spec_from_file_location("mlsysim", init_file)
+mlsysim = importlib.util.module_from_spec(spec)
+sys.modules["mlsysim"] = mlsysim
+spec.loader.exec_module(mlsysim)
+Engine = mlsysim.Engine
+```
+
+```python
+import mlsysim
+from mlsysim import Engine
+```
+
+---
+
+## 2. Single-Node Baseline
+
+Let's start with the simplest case: 8 GPUs in a single DGX node. No network
+fabric, no cross-node communication. This is our ceiling for scaling efficiency.
+
+```{python}
+from mlsysim import DistributedModel, Models, Systems
+from mlsysim.systems.types import Fleet, Node, NetworkFabric
+from mlsysim.core.constants import Q_
+
+model = Models.Llama3_70B
+solver = DistributedModel()
+
+# Single DGX H100 node: 8 GPUs, NVLink interconnect
+single_node = Fleet(
+    name="Single Node",
+    node=Systems.Nodes.DGX_H100,
+    count=1,
+    fabric=Systems.Fabrics.InfiniBand_NDR
+)
+
+baseline = solver.solve(
+    model=model, fleet=single_node,
+    batch_size=64, precision="fp16", tp_size=8, pp_size=1
+)
+
+print(f"GPUs:                {single_node.total_accelerators}")
+print(f"Compute latency:     {baseline.node_profile.latency.to('ms'):~.1f}")
+print(f"Communication:       {baseline.communication_latency.to('ms'):~.2f}")
+print(f"Scaling efficiency:  {baseline.scaling_efficiency:.1%}")
+```
+
+With 8 GPUs on a single node, NVLink provides enough bandwidth that communication
+overhead is small. This is our baseline — near-perfect scaling.
+
+Note: This tutorial uses the three dimensions of **3D parallelism**:
+
+- **TP (Tensor Parallelism)** = 8: splits each layer's weight matrices across 8 GPUs within a node, communicating via NVLink
+- **PP (Pipeline Parallelism)** = 1: no pipeline stages (the model is not split across sequential stages), so no pipeline bubbles
+- **DP (Data Parallelism)** = N/8: each node processes different data batches, synchronizing gradients via AllReduce over InfiniBand NDR (400 Gbps)
+
+Setting PP=1 isolates the communication vs. reliability comparison cleanly. Real production
+systems often use PP > 1 for models too large to fit on one node with TP alone, but this
+introduces pipeline bubble overhead (idle time proportional to 1/PP stages).
+
+---
+
+## 3. Scale Sweep: 8 to 1024 GPUs
+
+Now let's sweep across cluster sizes. At each scale, we measure communication
+overhead (AllReduce + pipeline bubbles) as a fraction of total step time.
+
+```{python}
+gpu_counts = [8, 32, 64, 128, 256, 512, 1024]
+
+print(f"{'GPUs':>6}  {'Nodes':>6}  {'Comm (ms)':>10}  {'Bubble (ms)':>12}  {'Efficiency':>11}")
+print("-" * 55)
+
+results = {}
+for n_gpus in gpu_counts:
+    n_nodes = n_gpus // 8
+    fleet = Fleet(
+        name=f"{n_gpus}-GPU Cluster",
+        node=Systems.Nodes.DGX_H100,
+        count=n_nodes,
+        fabric=Systems.Fabrics.InfiniBand_NDR
+    )
+    # Use TP=8 within node, DP across nodes
+    r = solver.solve(
+        model=model, fleet=fleet,
+        batch_size=max(64, n_gpus),
+        precision="fp16", tp_size=8, pp_size=1
+    )
+    results[n_gpus] = r
+    print(
+        f"{n_gpus:>6}  {n_nodes:>6}  "
+        f"{r.communication_latency.to('ms').magnitude:>10.1f}  "
+        f"{r.pipeline_bubble_latency.to('ms').magnitude:>12.1f}  "
+        f"{r.scaling_efficiency:>11.1%}"
+    )
+```
+
+Communication overhead grows with GPU count, but scaling efficiency degrades
+gradually. This is **Amdahl's Law** in action: if the serial fraction (communication)
+is $f$, the maximum speedup at $N$ GPUs is $1 / (f + (1-f)/N)$. At 1024 GPUs, even a
+5% serial fraction caps ideal speedup at ~20×, not 1024×. But if communication were the
+whole story, large-scale training would be predictable and manageable.
+
+If communication were the only overhead, we could predict scaling efficiency from
+network bandwidth alone and call it a day. The numbers above look manageable — even at
+1024 GPUs, communication takes a modest fraction of each step.
+
+But this analysis assumed something we have not examined: that the cluster stays up for
+the entire training run. Communication is not the whole story.
+
+---
+
+## 4. The Reliability Reveal
+
+Let's now ask a different question: how often does a 512-GPU or 1024-GPU cluster
+experience a hardware failure? The `ReliabilityModel` models cluster-level MTBF.
+
+```{python}
+from mlsysim import ReliabilityModel
+
+rel_solver = ReliabilityModel()
+
+print(f"{'GPUs':>6}  {'Nodes':>6}  {'Cluster MTBF':>14}  {'Failures/30d':>14}  {'Optimal Ckpt':>13}")
+print("-" * 60)
+
+rel_results = {}
+for n_gpus in gpu_counts:
+    n_nodes = n_gpus // 8
+    fleet = Fleet(
+        name=f"{n_gpus}-GPU",
+        node=Systems.Nodes.DGX_H100,
+        count=n_nodes,
+        fabric=Systems.Fabrics.InfiniBand_NDR
+    )
+    # 30-day training run, 60-second checkpoint write time
+    r = rel_solver.solve(fleet=fleet, job_duration_hours=30*24, checkpoint_time_s=60.0)
+    rel_results[n_gpus] = r
+    mtbf_h = r.fleet_mtbf.to("hour").magnitude
+    print(
+        f"{n_gpus:>6}  {n_nodes:>6}  "
+        f"{mtbf_h:>12.1f} h  "
+        f"{r.expected_failures:>14.1f}  "
+        f"{r.optimal_checkpoint_interval.to('hour').magnitude:>11.1f} h"
+    )
+```
+
+At 512+ GPUs, something fails roughly every day. The optimal checkpoint interval
+drops to about 1-2 hours. Every checkpoint pauses training, and every failure
+rolls back to the last checkpoint, discarding all work in between.
+
+---
+
+## 5. The Hidden Cost: Communication vs. Checkpoints
+
+Now the key comparison. Over a 30-day training run, how much total time is lost
+to communication overhead vs. checkpoint overhead?
+
+```{python}
+from mlsysim import CheckpointModel
+
+ckpt_solver = CheckpointModel()
+job_hours = 30 * 24  # 30 days
+
+print(f"{'GPUs':>6}  {'Comm Loss (h)':>14}  {'Ckpt Loss (h)':>14}  {'Ckpt/Comm':>10}")
+print("-" * 50)
+
+for n_gpus in [64, 256, 512, 1024]:
+    dist_r = results[n_gpus]
+    rel_r = rel_results[n_gpus]
+
+    # Communication overhead per step as fraction of step time
+    comm_fraction = 1.0 - dist_r.scaling_efficiency
+    comm_loss_hours = comm_fraction * job_hours
+
+    # Checkpoint overhead: write time per checkpoint + rollback from failures
+    ckpt_r = ckpt_solver.solve(
+        model=model, hardware=Systems.Nodes.DGX_H100.accelerator,
+        optimizer="adam", checkpoint_interval_hours=rel_r.optimal_checkpoint_interval.to("hour").magnitude
+    )
+    ckpt_write_s = ckpt_r.write_time_seconds.to("second").magnitude
+    ckpt_interval_h = rel_r.optimal_checkpoint_interval.to("hour").magnitude
+
+    # Number of checkpoints in 30 days
+    n_checkpoints = job_hours / ckpt_interval_h if ckpt_interval_h > 0 else 0
+    total_ckpt_write_h = n_checkpoints * ckpt_write_s / 3600
+
+    # Rollback cost: each failure loses ~half the checkpoint interval on average
+    avg_rollback_h = ckpt_interval_h / 2
+    total_rollback_h = rel_r.expected_failures * avg_rollback_h
+
+    total_ckpt_loss_h = total_ckpt_write_h + total_rollback_h
+    ratio = total_ckpt_loss_h / comm_loss_hours if comm_loss_hours > 0 else 0
+
+    print(
+        f"{n_gpus:>6}  "
+        f"{comm_loss_hours:>14.1f}  "
+        f"{total_ckpt_loss_h:>14.1f}  "
+        f"{ratio:>10.1f}x"
+    )
+```
+
+::: {.callout-important}
+## Key Insight
+
+**At scale, reliability overhead dominates communication overhead.** At 512+ GPUs,
+the cluster MTBF drops low enough that frequent checkpointing and failure rollbacks
+consume far more training time than AllReduce communication. A seemingly well-tuned
+distributed training job can lose 10-30% of its wall-clock time to checkpoint I/O
+and wasted work from rollbacks — costs that are invisible if you only measure
+communication efficiency. The first question at scale is not "how fast is my
+network?" but "how often does something break?"
+:::
+
+---
+
+## 6. The Checkpoint Size Problem
+
+The reason checkpoint overhead is so painful is that modern models produce enormous
+checkpoint files. Let's quantify the checkpoint size for Llama-3 70B with the Adam
+optimizer:
+
+```{python}
+ckpt_result = ckpt_solver.solve(
+    model=model,
+    hardware=Systems.Nodes.DGX_H100.accelerator,
+    optimizer="adam",
+    checkpoint_interval_hours=1.0
+)
+
+print(f"Model:              {model.name}")
+print(f"Checkpoint size:    {ckpt_result.checkpoint_size.to('GB'):~.1f}")
+print(f"Write time:         {ckpt_result.write_time_seconds.to('second'):~.1f}")
+print(f"MFU penalty (1h):   {ckpt_result.mfu_penalty_pct:.2%}")
+print(f"Storage bottleneck: {ckpt_result.storage_bottleneck}")
+```
+
+A single checkpoint for a 70B model with Adam optimizer states is hundreds of
+gigabytes. At hourly intervals, the I/O burden is substantial. At the optimal
+Young-Daly interval for large clusters, the burden becomes a dominant factor.
+
+---
+
+## Your Turn
+
+::: {.callout-caution}
+## Exercises
+
+**Exercise 1: Predict before you compute.**
+At 2048 GPUs (256 DGX nodes), predict the cluster MTBF. Write your estimate, then
+build the fleet and run `ReliabilityModel`. How many failures do you expect in a
+30-day run? Were you close?
+
+**Exercise 2: What checkpoint interval minimizes total overhead?**
+For a 512-GPU cluster, sweep checkpoint intervals from 0.5 hours to 8 hours. For
+each interval, calculate: (a) total checkpoint write time over 30 days, and (b)
+total rollback time (expected failures x half the interval). Plot or print the
+total overhead. Does the minimum match the Young-Daly optimal interval?
+
+**Exercise 3: What if GPU reliability doubles?**
+Imagine next-generation GPUs with MTTF of 100,000 hours instead of 50,000 hours.
+Build a custom Node with `nics_per_node=8, psus_per_node=2` and re-run the
+reliability analysis for 1024 GPUs. How does the MTBF change? At what GPU count
+does the "doubled reliability" cluster match the original cluster's MTBF at 512
+GPUs?
+
+**Self-check:** If single-GPU MTTF is 50,000 hours and a node has 8 GPUs, 8 NICs,
+and 2 PSUs, what is the approximate node MTTF? (Hint: MTTF_node = 1 / sum(1/MTTF_i)
+for each component.)
+:::
+
+---
+
+## Key Takeaways
+
+::: {.callout-tip}
+## Summary
+
+- **Communication overhead grows gradually** with GPU count but remains manageable with good fabric
+- **Cluster MTBF drops inversely** with component count: 1024 GPUs means failures every ~20-50 hours
+- **Checkpoint overhead dominates** at scale: write time + rollback time exceeds communication loss
+- **The Young-Daly formula** gives the optimal checkpoint interval, balancing write cost against rollback risk
+- **Reliability is a first-order systems variable**: no amount of network tuning compensates for a cluster that breaks every day
+:::
+
+---
+
+## Next Steps
+
+- **[Geography is a Systems Variable](07_geography.qmd)** -- Discover that location changes carbon footprint by 40x
+- **[The $9M Question](08_nine_million_dollar.qmd)** -- Quantify the infrastructure cost of chain-of-thought reasoning
+- **[Sensitivity Analysis](09_sensitivity.qmd)** -- Use sensitivity sweeps to find which parameter matters most
+- **[Full Stack Audit](11_full_stack_audit.qmd)** -- Combine all solvers into a complete system analysis
