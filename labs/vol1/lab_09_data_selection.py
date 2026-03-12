@@ -31,6 +31,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
 def _():
@@ -51,7 +55,7 @@ def _():
     # ── Hardware constants (source: NVIDIA spec sheets; Jetson Orin NX datasheet) ──
     H100_RAM_GB      = 80      # H100 SXM5 HBM3e memory capacity, GB
     H100_BW_GBS      = 3350    # H100 SXM5 HBM3e memory bandwidth, GB/s
-    H100_TFLOPS_FP16 = 1979    # H100 peak FP16 tensor core TFLOPS
+    H100_TFLOPS_FP16 = 989     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_TDP_W       = 700     # H100 TDP, Watts
 
     ORIN_RAM_GB      = 16      # Jetson Orin NX unified memory, GB
@@ -134,7 +138,76 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Predict the curriculum learning speedup over random ordering</strong> — determine whether a 2&ndash;3&times; convergence speedup is plausible and identify which ordering strategy (easy-first, hard-first, random) is fastest.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Compare annotation strategies on the Pareto frontier</strong> — identify why active learning's uncertainty sampling achieves ~1.85&times; label efficiency over random annotation at the same budget.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the budget threshold below which model quality is infeasible</strong> — find the annotation spending level where validation accuracy falls below the minimum viable threshold for each deployment context.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Curriculum learning and convergence speed from @sec-data-selection-curriculum-learning &middot;
+                    Pareto efficiency definition from @sec-data-selection-pareto-tradeoffs
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If you can only spend $10,000 annotating training data, does randomly
+                labeling examples cost more or less than selecting the most informative ones
+                first &mdash; and is there a budget level below which no annotation strategy
+                can produce a viable model?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 3: READING ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -151,7 +224,7 @@ def _(mo):
     return
 
 
-# ── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -174,17 +247,56 @@ def _(mo):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I — THE SELECTION COST BLINDSPOT
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 4: ACT I SCENARIO ────────────────────────────────────────────────────
+# ── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Selection Cost Blindspot"
+    _act_duration = "12 min"
+    _act_why = (
+        "You expect that reordering training examples is a minor implementation detail. "
+        "The instruments will show that presenting examples in curriculum order (easy to hard) "
+        "achieves 2\u20133\u00d7 convergence speedup over random ordering "
+        "\u2014 without changing the data, the model, or the hardware."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["BlueLine"]
     mo.vstack([
-        mo.md("---"),
-        mo.md("## Act I — The Selection Cost Blindspot"),
         mo.Html(f"""
         <div style="border-left: 4px solid {_color}; background: #eff6ff;
                     border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
@@ -623,17 +735,56 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II — THE PARETO CURVE (FIRST INTRODUCTION)
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 13: ACT II SCENARIO ──────────────────────────────────────────────────
+# ── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The Pareto Curve"
+    _act_duration = "25 min"
+    _act_why = (
+        "Act I showed that ordering data delivers a free speedup. Now discover that "
+        "selecting which data to annotate is a Pareto optimization problem: active learning "
+        "achieves ~1.85\u00d7 label efficiency over random annotation at the same budget "
+        "\u2014 but there is a budget threshold below which no strategy produces a viable model."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration} &middot; First introduction: Pareto Frontier</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["GreenLine"]
     mo.vstack([
-        mo.md("---"),
-        mo.md("## Act II — The Pareto Curve"),
         mo.callout(mo.md(
             "**New instrument introduced in this lab:** The Pareto Curve maps model quality "
             "against selection cost. The Pareto frontier is the set of strategies where "
@@ -1171,7 +1322,101 @@ def _(mo):
     return
 
 
-# ── CELL 24: DESIGN LEDGER SAVE + HUD FOOTER ─────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Curriculum learning delivers 2&ndash;3&times; convergence speedup with zero data change.</strong>
+                    Presenting easy examples before hard ones produces stable gradient updates
+                    at every training phase. The speedup is not from fewer examples &mdash; the
+                    full dataset is used &mdash; but from the order that maximizes the gradient
+                    signal quality at each stage.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Active learning achieves ~1.85&times; label efficiency over random annotation.</strong>
+                    Uncertainty sampling selects the examples the model is least confident about,
+                    concentrating annotation budget on the highest-information regions of the
+                    decision boundary. At the same $50K budget, this produces a substantially
+                    better model than exhaustive random labeling.
+                </div>
+                <div>
+                    <strong>3. Below the minimum viable budget, no annotation strategy produces a deployable model.</strong>
+                    The Pareto frontier has a floor: at insufficient annotation budgets, even
+                    the most efficient strategy cannot reach the accuracy threshold needed for
+                    production deployment. Budget is a hard constraint, not a soft optimization.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 10: The Compression Frontier</strong> &mdash; This lab optimized
+                    the training data. Lab 10 optimizes the model itself: quantization,
+                    pruning, and the Pareto frontier between model size and accuracy that
+                    determines whether your trained model fits on the deployment target.
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-data-selection-curriculum-learning and
+                    @sec-data-selection-pareto-tradeoffs for the full derivations.<br/>
+                    <strong>Build:</strong> TinyTorch Module 09 &mdash; implement a difficulty
+                    scorer and curriculum data sampler from scratch.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. The scaling law L proportional to D^(-0.095) means doubling dataset size improves loss by approximately what factor — and why does this explain why a 10% coreset can match 100% dataset accuracy within 2%?
+
+    2. A 10,000 H100 cluster can process 10T tokens in 3 months but only 5T quality tokens exist. At what ICR 'knee' (dataset fraction) does additional data yield near-zero learning per FLOP — and what is the correct strategy when you hit the Data Wall?
+
+    3. A training run costs $100M. Data selection reduces the dataset by 50% while maintaining accuracy. What is the compute savings — and why does this demonstrate that data selection is the highest-leverage optimization in the D-A-M stack, not model architecture or hardware?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ── CELL 21: DESIGN LEDGER SAVE + HUD FOOTER ─────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,

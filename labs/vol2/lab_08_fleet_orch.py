@@ -34,7 +34,7 @@ app = marimo.App(width="full")
 #
 # Hardware Constants:
 #   H100_BW_GBS         = 3350   H100 SXM5 HBM3e, NVIDIA spec
-#   H100_TFLOPS_FP16    = 1979   H100 SXM5 FP16 Tensor Core, NVIDIA spec
+#   H100_TFLOPS_FP16    = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 #   H100_RAM_GB         = 80     H100 SXM5 HBM3e capacity, NVIDIA spec
 #   CLUSTER_SIZE_GPUS   = 1024   reference cluster for examples
 #   SLURM_SCHED_LAT_MS  = 100    Slurm scheduling decision latency, Slurm docs
@@ -67,7 +67,7 @@ def _():
     # H100 SXM5 HBM3e bandwidth — NVIDIA datasheet, fleet_orchestration.qmd
     H100_BW_GBS         = 3350   # GB/s HBM3e memory bandwidth
     # H100 FP16 Tensor Core peak — NVIDIA H100 spec sheet
-    H100_TFLOPS_FP16    = 1979   # TFLOPS FP16 (with sparsity: 3958, dense: 1979)
+    H100_TFLOPS_FP16    = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     # H100 HBM3e capacity — NVIDIA H100 SXM5 datasheet
     H100_RAM_GB         = 80     # GB HBM3e
     # Reference cluster scale — fleet_orchestration.qmd FleetSetup.cluster_size
@@ -204,7 +204,80 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the variance multiplier in the Pollaczek-Khinchine formula</strong> &mdash; at 80% utilization, ML workloads (C<sub>s</sub> = 3) produce 20x mean-job-duration wait, not the 4x expected for uniform jobs.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Identify the optimal utilization range (60&ndash;70%) for ML clusters</strong> and calculate the annual cost of running at 90%: 45x queue multiplier &asymp; 180-hour waits for 4-hour average jobs.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Compare FIFO, Priority, and Backfill scheduling</strong> on the joint objective of effective utilization &gt; 60% and P50 queue wait &lt; 2 hours simultaneously.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Little&rsquo;s Law (L = &lambda;W) from @sec-fleet-orchestration-introduction &middot;
+                    Checkpoint overhead and MTBF scaling from Lab 07 (@sec-fault-tolerance-reliability)
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Your cluster runs at 95% utilization and users wait 4 hours for
+                1-hour jobs &mdash; adding GPUs barely helps. Is this a capacity
+                problem, or is high utilization itself the cause of the catastrophic
+                queue wait?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -220,7 +293,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ───────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ───────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -241,27 +314,42 @@ def _(mo):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I: THE UTILIZATION TRAP
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I -- CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _c = COLORS["BlueLine"]
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Utilization Trap"
+    _act_duration = "12-15 min"
+    _act_why      = ("You expect that 95% utilization means the cluster is nearly always computing. "
+                     "The data will show that at 95% utilization, M/M/1 queuing theory predicts "
+                     "mean wait = 20x mean job duration &mdash; a 1-hour job waits 20 hours, "
+                     "not because of bugs but because of mathematics.")
+
     mo.Html(f"""
-    <div style="margin: 28px 0 8px 0;">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
-            <div style="background: {_c}; color: white; border-radius: 50%;
-                         width: 28px; height: 28px; display: flex; align-items: center;
-                         justify-content: center; font-size: 0.85rem; font-weight: 800;
-                         flex-shrink: 0;">I</div>
-            <div style="font-size: 0.7rem; font-weight: 700; color: #94a3b8;
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I &middot; Calibration &middot; 12&ndash;15 min
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <h2 style="margin: 0; font-size: 1.75rem; font-weight: 800; color: #0f172a;
-                   letter-spacing: -0.01em;">The Utilization Trap</h2>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
     </div>
     """)
     return
@@ -739,27 +827,44 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II: SCHEDULING POLICY DESIGN
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II -- DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _c = COLORS["OrangeLine"]
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Scheduling Policy Design"
+    _act_duration = "20-25 min"
+    _act_why      = ("Act I showed that high utilization is the root cause of long waits. "
+                     "Now discover that no single scheduling policy can simultaneously "
+                     "satisfy all objectives: FIFO blocks interactive jobs, priority queues "
+                     "starve training runs, and only backfill &mdash; filling temporal gaps "
+                     "between reservations &mdash; achieves both low interactive wait and "
+                     "high effective utilization.")
+
     mo.Html(f"""
-    <div style="margin: 36px 0 8px 0;">
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
-            <div style="background: {_c}; color: white; border-radius: 50%;
-                         width: 28px; height: 28px; display: flex; align-items: center;
-                         justify-content: center; font-size: 0.85rem; font-weight: 800;
-                         flex-shrink: 0;">II</div>
-            <div style="font-size: 0.7rem; font-weight: 700; color: #94a3b8;
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II &middot; Design Challenge &middot; 20&ndash;25 min
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <h2 style="margin: 0; font-size: 1.75rem; font-weight: 800; color: #0f172a;
-                   letter-spacing: -0.01em;">Scheduling Policy Design</h2>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
     </div>
     """)
     return
@@ -1498,6 +1603,114 @@ def _(mo):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The utilization trap is mathematical, not operational.</strong>
+                    At 95% cluster utilization, M/M/1 queuing theory predicts mean wait
+                    = 20x mean job duration. This is not a scheduler bug &mdash; it is
+                    physics. Adding GPUs reduces wait only if it substantially lowers
+                    utilization below the 80&ndash;85% knee of the curve.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. ML workload variance (C<sub>s</sub> = 3) inflates wait by 5x versus uniform jobs.</strong>
+                    The Pollaczek-Khinchine (1 + C<sub>s</sub><sup>2</sup>)/2 term amplifies the
+                    base M/M/1 wait from 4x to 20x at 80% utilization. Running an ML cluster
+                    at 80% produces the same queue conditions as a uniform-job cluster at 95%.
+                    The safe operating point for ML clusters is 60&ndash;70%.
+                </div>
+                <div>
+                    <strong>3. Backfill decouples interactive wait from training job duration.</strong>
+                    Simple priority gives short jobs queue position but still forces them to wait
+                    for running jobs to finish. Backfill fills the temporal gaps between large
+                    reservations with short jobs &mdash; achieving both higher cluster utilization
+                    and lower interactive wait simultaneously.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 09: Performance Engineering</strong> &mdash; This lab quantified
+                    scheduling waste. The next lab asks: once a job is running, what fraction of
+                    its GPU-hours are actually doing useful computation? The roofline model and
+                    Model FLOP Utilization (MFU) expose how memory bandwidth, not compute,
+                    limits real training throughput.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-fleet-orchestration-scheduling-algorithms for
+                    the full derivation of the Pollaczek-Khinchine formula and backfill
+                    scheduling correctness guarantees.<br/>
+                    <strong>Build:</strong> TinyTorch Module 18 &mdash; implement a priority
+                    queue scheduler with backfill that passes the interactive-SLA test suite.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. At 80% utilization, M/M/1 queuing predicts mean wait of 4x mean job duration for uniform jobs. Why does ML workload variance (Cs = 3) inflate this to 20x via the Pollaczek-Khinchine formula, and what safe utilization range does this imply?
+2. An operator pushes cluster utilization to 95% to maximize GPU-hours billed. For a cluster where average jobs take 4 hours, what is the expected queue wait time, and why does this make the cluster effectively unusable for interactive jobs?
+3. How does backfill scheduling fill temporal gaps between large reservations with short jobs, and why does this achieve both higher cluster utilization and lower interactive wait simultaneously?
+
+**You're ready to move on if you can:**
+- Calculate expected queue wait using the Pollaczek-Khinchine formula for ML workloads with high variance
+- Explain why the utilization-latency tradeoff is a mathematical property, not a software limitation
+- Describe how backfill scheduling decouples interactive job latency from training job duration
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1585,32 +1798,6 @@ def _(
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# KEY TAKEAWAYS
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Key Takeaways
-
-    1. **The utilization trap is mathematical, not operational.** At 95% cluster
-       utilization, M/M/1 queuing theory predicts mean wait = 20× mean job duration.
-       This is not a scheduler bug — it is physics. Adding GPUs reduces wait only
-       if it substantially lowers utilization below the 80–85% knee of the curve.
-       Operators who target 95% utilization to maximize hardware ROI are trading
-       user experience for efficiency in a nonlinear, punishing way.
-
-    2. **Backfill scheduling decouples interactive wait from training job duration.**
-       Simple priority gives short jobs queue position but forces them to wait for
-       running jobs to finish. Backfill gives them *immediate* access to the temporal
-       gaps between large job reservations — idle GPU-hours that would otherwise go
-       wasted. The result is both higher cluster utilization and lower interactive
-       wait, simultaneously. This is why Slurm's backfill plugin is the default
-       recommendation for mixed ML workloads.
-    """)
-    return
 
 
 if __name__ == "__main__":

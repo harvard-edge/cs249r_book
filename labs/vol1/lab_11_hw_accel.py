@@ -13,14 +13,14 @@ app = marimo.App(width="full")
 #   The ridge point = peak_flops / peak_bandwidth separates the two regimes.
 #   MFU (Model FLOP Utilization) = achieved_FLOPS / peak_FLOPS.
 #
-# Contexts: Cloud H100 (80 GB HBM3e, 3350 GB/s, 1979 TFLOPS FP16) vs
+# Contexts: Cloud H100 (80 GB HBM3e, 3350 GB/s, 989 TFLOPS FP16) vs
 #           Edge  Jetson Orin NX (16 GB, 102 GB/s, ~12 TFLOPS FP16)
 #
 # New Instrument: Interactive Roofline Model (first introduction in curriculum)
 #
 # Act I  — The Memory Wall (12-15 min)
-#   Scenario: GPU Kernel Engineer — GEMM achieves 15.7% MFU on H100. Why?
-#   Prediction: Why is MFU only 15.7%? (memory-bound, below ridge point)
+#   Scenario: GPU Kernel Engineer — GEMM achieves 31.5% MFU on H100. Why?
+#   Prediction: Why is MFU only 31.5%? (memory-bound, below ridge point)
 #   Instrument: Interactive Roofline — adjust M×N×K, precision, device
 #   Reflection: Most effective MFU improvement when memory-bound?
 #   Correct: Increase tile dimensions to raise arithmetic intensity
@@ -35,15 +35,19 @@ app = marimo.App(width="full")
 #
 # Key constants (all from NVIDIA spec sheets and hw_acceleration.qmd):
 #   H100_BW_GBS      = 3350   # H100 SXM5 HBM3e bandwidth, NVIDIA spec
-#   H100_TFLOPS_FP16 = 1979   # H100 FP16 tensor core TFLOPS, NVIDIA spec
+#   H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 #   H100_RAM_GB      = 80     # H100 HBM3e capacity, NVIDIA spec
-#   H100_RIDGE_PT    = 591    # FLOP/byte = 1979e12 / 3350e9, derived
+#   H100_RIDGE_PT    = 295    # FLOP/byte = 989e12 / 3350e9, derived
 #   ORIN_BW_GBS      = 102    # Jetson Orin NX 16GB, NVIDIA spec
 #   ORIN_TFLOPS_FP16 = 12     # Jetson Orin NX FP16 TFLOPS, estimated from GPU die
 #   ORIN_RAM_GB      = 16     # Jetson Orin NX RAM, NVIDIA spec
 #   ORIN_RIDGE_PT    = 10     # conservative FLOP/byte estimate per chapter text
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructors) ──────────
 @app.cell
@@ -67,12 +71,12 @@ def _():
 
     # Cloud: NVIDIA H100 SXM5 (NVIDIA spec sheet, 2023)
     H100_BW_GBS      = 3350   # GB/s HBM3e memory bandwidth
-    H100_TFLOPS_FP16 = 1979   # TFLOPS FP16 tensor core peak
+    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_TFLOPS_FP32 = 67     # TFLOPS FP32 (non-tensor)
-    H100_TFLOPS_INT8 = 3958   # TFLOPS INT8 tensor core peak (2x FP16)
+    H100_TFLOPS_INT8 = 3958   # TFLOPS INT8 tensor core peak (2x FP8)
     H100_RAM_GB      = 80     # GB HBM3e total capacity
     H100_TDP_W       = 700    # Watts TDP
-    H100_RIDGE_PT    = 591    # FLOP/byte = 1979e12 / 3350e9 (derived)
+    H100_RIDGE_PT    = 295    # FLOP/byte = 989e12 / 3350e9 (derived)
 
     # Edge: NVIDIA Jetson Orin NX 16GB (NVIDIA Jetson product brief 2023)
     ORIN_BW_GBS      = 102    # GB/s LPDDR5 memory bandwidth
@@ -80,9 +84,9 @@ def _():
     ORIN_TFLOPS_INT8 = 100    # TOPS INT8 (advertised on product page)
     ORIN_RAM_GB      = 16     # GB LPDDR5
     ORIN_TDP_W       = 25     # Watts maximum TDP
-    ORIN_RIDGE_PT    = 10     # FLOP/byte conservative (chapter text value)
-    # Note: exact ORIN FP16 ridge = 12e12/102e9 = 118; chapter uses ~10 as
-    # a conservative figure accounting for sustained vs peak bandwidth
+    ORIN_RIDGE_PT    = 80     # FLOP/byte sustained estimate (12 TFLOPS / 102 GB/s = 118 peak;
+    # ~80 assumes ~70% bandwidth utilization under realistic sustained workloads,
+    # consistent with LPDDR5 efficiency measurements in embedded inference contexts)
 
     # Bytes per element by precision
     BYTES_FP32  = 4     # bytes per FP32 element
@@ -126,8 +130,8 @@ def _(mo, LAB_CSS):
             </h1>
             <p style="margin: 0 0 20px 0; font-size: 1.05rem; color: #94a3b8;
                       max-width: 680px; line-height: 1.65;">
-                A kernel that achieves 312 TFLOPS on a 1979 TFLOPS accelerator
-                is running at 15.7% efficiency. Is the algorithm broken?
+                A kernel that achieves 312 TFLOPS on a 989 TFLOPS accelerator
+                is running at 31.5% efficiency. Is the algorithm broken?
                 No — the roof is somewhere else. This lab forces you to find it.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap;">
@@ -163,7 +167,76 @@ def _(mo, LAB_CSS):
     return
 
 
-# ─── RECOMMENDED READING ─────────────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Diagnose whether a GEMM kernel is memory-bound or compute-bound</strong> — compute its arithmetic intensity and compare it to the hardware ridge point (295 FLOP/byte for H100 FP16) to determine which ceiling limits performance.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify the H100 compute utilization of a transformer attention layer at 2.7%</strong> — explain why a kernel achieving 26.8 TFLOPS out of 989 TFLOPS peak is correctly behaving, not broken, and identify the correct optimization strategy.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Predict the minimum batch size that moves a memory-bound workload to compute-bound</strong> — determine at what point increasing batch size raises arithmetic intensity above the ridge point, and discover how this creates an OOM trade-off.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Roofline model equation from @sec-hardware-acceleration-roofline-model-42ff &middot;
+                    Arithmetic intensity definition from @sec-hardware-acceleration-roofline-model-42ff &middot;
+                    MFU (Model FLOPS Utilization) concept from @sec-model-training-iron-law-training-performance-a53f
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "A transformer attention layer achieves only 2.7% of the H100's peak compute
+                and three weeks of arithmetic optimization have not moved it &mdash; what is
+                the actual bottleneck, and would doubling the accelerator's TFLOPS help at all?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: READING ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -180,15 +253,15 @@ def _(mo):
     return
 
 
-# ─── CONTEXT TOGGLE ──────────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
         options={
-            "Cloud (H100 SXM5, 80 GB HBM3e, 1979 TFLOPS FP16)": "cloud",
+            "Cloud (H100 SXM5, 80 GB HBM (High Bandwidth Memory), 989 TFLOPS FP16)": "cloud",
             "Edge (Jetson Orin NX, 16 GB LPDDR5, ~12 TFLOPS FP16)": "edge",
         },
-        value="Cloud (H100 SXM5, 80 GB HBM3e, 1979 TFLOPS FP16)",
+        value="Cloud (H100 SXM5, 80 GB HBM (High Bandwidth Memory), 989 TFLOPS FP16)",
         label="Deployment context:",
         inline=True,
     )
@@ -197,7 +270,7 @@ def _(mo):
         mo.md("## Select Your Deployment Context"),
         mo.md(
             "The ridge point separating memory-bound from compute-bound is a hardware "
-            "constant. On an H100 it is 591 FLOP/byte; on a Jetson Orin NX it is roughly "
+            "constant. On an H100 it is 295 FLOP/byte; on a Jetson Orin NX it is roughly "
             "10 FLOP/byte. Select your context — the entire roofline changes with it."
         ),
         context_toggle,
@@ -205,10 +278,55 @@ def _(mo):
     return (context_toggle,)
 
 
-# =============================================================================
-# ACT I — THE MEMORY WALL
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, context_toggle, COLORS):
+    _ctx   = context_toggle.value
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Memory Wall"
+    _act_duration = "12 min"
+    _ridge_str = "295 FLOP/byte" if _ctx == "cloud" else "~10 FLOP/byte"
+    _device_name = "H100 SXM5" if _ctx == "cloud" else "Jetson Orin NX"
+    _act_why = (
+        f"You expect that a kernel achieving only 31.5% MFU has a bug or a suboptimal algorithm. "
+        f"The Roofline will show that the kernel is behaving correctly: its arithmetic intensity "
+        f"is below the ridge point ({_ridge_str}), so memory bandwidth \u2014 not arithmetic "
+        f"throughput \u2014 is the binding constraint. No amount of compute tuning can help."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration} &middot; {_device_name}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ─── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, context_toggle, COLORS):
     _ctx   = context_toggle.value
@@ -216,23 +334,22 @@ def _(mo, context_toggle, COLORS):
     _bg    = "#EBF4FA"        if _ctx == "cloud" else COLORS["RedLL"]
 
     _device_name  = "H100 SXM5"        if _ctx == "cloud" else "Jetson Orin NX"
-    _peak_tflops  = "1979 TFLOPS FP16" if _ctx == "cloud" else "~12 TFLOPS FP16"
+    _peak_tflops  = "989 TFLOPS FP16"  if _ctx == "cloud" else "~12 TFLOPS FP16"
     _peak_bw      = "3350 GB/s"        if _ctx == "cloud" else "102 GB/s"
-    _ridge_str    = "591 FLOP/byte"    if _ctx == "cloud" else "~10 FLOP/byte"
+    _ridge_str    = "295 FLOP/byte"    if _ctx == "cloud" else "~10 FLOP/byte"
 
     mo.vstack([
-        mo.md("---"),
         mo.Html(f"""
         <div style="border-left:4px solid {_color}; background:{_bg};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:{_color};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message · GPU Kernel Engineer
+                Incoming Message &middot; GPU Kernel Engineer
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
                 "Our matrix multiply kernel achieves 312 TFLOPS on the {_device_name}.
-                Peak is {_peak_tflops}. MFU is about 15.7%.
-                We have spent three weeks tuning the arithmetic — register tiling,
+                Peak is {_peak_tflops}. MFU is about 31.5%.
+                We have spent three weeks tuning the arithmetic &mdash; register tiling,
                 loop unrolling, mixed precision. The math has not moved one TFLOP.
                 Our manager is asking why we keep hitting the same wall.
                 What ceiling are we running into?"
@@ -240,8 +357,6 @@ def _(mo, context_toggle, COLORS):
         </div>
         """),
         mo.md(f"""
-        ## Act I — The Memory Wall
-
         The engineer has been optimizing the wrong bottleneck for three weeks.
         The {_device_name} has a peak compute of {_peak_tflops} but a memory
         bandwidth of {_peak_bw}. The **ridge point** is the arithmetic intensity
@@ -560,7 +675,7 @@ def _(mo, act1_pred, _ai_gemm, _ridge_pt, _is_mem_bound, _regime_label):
     _feedback = {
         "A": (
             "**Not quite.** There is no bug. A square GEMM with N=512 has an arithmetic "
-            "intensity of only ~170 FLOP/byte — far below the H100 ridge point of 591 FLOP/byte. "
+            "intensity of only ~170 FLOP/byte — far below the H100 ridge point of 295 FLOP/byte. "
             "Matrix multiply *can* be compute-bound, but only for large enough matrices. "
             "The ratio of FLOPs to bytes grows linearly with N."
         ),
@@ -572,7 +687,7 @@ def _(mo, act1_pred, _ai_gemm, _ridge_pt, _is_mem_bound, _regime_label):
         ),
         "C": (
             "**Correct.** With N=512, arithmetic intensity is ~170 FLOP/byte — well below "
-            "the H100 ridge point of 591 FLOP/byte. The kernel is memory-bandwidth-bound. "
+            "the H100 ridge point of 295 FLOP/byte. The kernel is memory-bandwidth-bound. "
             "Optimizing FP arithmetic does nothing when the bottleneck is data movement. "
             "The kernel spends most cycles waiting for data, not computing."
         ),
@@ -681,7 +796,7 @@ attainable_perf(I) = min(peak_flops, BW x I)
 ridge_point = peak_flops / BW    [FLOP / byte]
 ```
 
-- H100 SXM5:     ridge = 1979e12 / 3350e9 = 591 FLOP/byte
+- H100 SXM5:     ridge = 989e12 / 3350e9 = 295 FLOP/byte
 - Jetson Orin NX: ridge ~10 FLOP/byte (conservative, per chapter text)
 
 **GEMM arithmetic intensity** for square M=N=K at B bytes/element:
@@ -698,8 +813,8 @@ At FP16 (B=2): I_gemm = N / 3.  So I grows *linearly with N*.
 |-------|-----------|--------------------|
 | 128   |  43       | Memory-Bound       |
 | 512   | 170       | Memory-Bound       |
-| 1024  | 341       | Memory-Bound       |
-| 1773  | 591       | AT ridge point     |
+| 885   | 295       | AT ridge point     |
+| 1024  | 341       | Compute-Bound      |
 | 4096  | 1365      | Compute-Bound      |
 | 8192  | 2730      | Compute-Bound      |
 
@@ -716,10 +831,55 @@ A memory-bound kernel always has MFU < (BW x I) / peak_flops.
     return
 
 
-# =============================================================================
-# ACT II — THE DESIGN CHALLENGE
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, context_toggle, COLORS):
+    _ctx    = context_toggle.value
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The Design Challenge"
+    _act_duration = "25 min"
+    _device = "H100" if _ctx == "cloud" else "Jetson Orin NX"
+    _ridge2 = "295 FLOP/byte" if _ctx == "cloud" else "~10 FLOP/byte"
+    _act_why = (
+        f"Act I showed that a single GEMM kernel has a fixed ridge point ({_ridge2}). "
+        f"Now discover that an LLM inference stack mixes kernels across the full arithmetic "
+        f"intensity spectrum \u2014 and that elementwise ops (layer norm, softmax, ReLU) at "
+        f"~0.8 FLOP/byte are always memory-bound on any accelerator built this decade."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration} &middot; {_device}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ─── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, context_toggle, COLORS):
     _ctx    = context_toggle.value
@@ -727,16 +887,15 @@ def _(mo, context_toggle, COLORS):
     _bg     = "#EBF4FA"        if _ctx == "cloud" else COLORS["RedLL"]
     _device = "H100"           if _ctx == "cloud" else "Jetson Orin NX"
     _ram    = "80 GB"          if _ctx == "cloud" else "16 GB"
-    _ridge2 = "591 FLOP/byte"  if _ctx == "cloud" else "~10 FLOP/byte"
+    _ridge2 = "295 FLOP/byte"  if _ctx == "cloud" else "~10 FLOP/byte"
 
     mo.vstack([
-        mo.md("---"),
         mo.Html(f"""
         <div style="border-left:4px solid {_color}; background:{_bg};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
             <div style="font-size:0.72rem; font-weight:700; color:{_color};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message · ML Infrastructure Lead
+                Incoming Message &middot; ML Infrastructure Lead
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
                 "We are designing an LLM inference service on the {_device}
@@ -750,8 +909,6 @@ def _(mo, context_toggle, COLORS):
         </div>
         """),
         mo.md(f"""
-        ## Act II — The Design Challenge
-
         An LLM inference stack mixes kernels with wildly different arithmetic intensities.
         Large GEMM operations can become compute-bound at large batch sizes.
         Elementwise operations — layer norm, softmax — have arithmetic intensities
@@ -1300,10 +1457,119 @@ Kernel fusion buys performance only if the design fits in RAM first.
     return
 
 
-# =============================================================================
-# DESIGN LEDGER SAVE + HUD
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="background:{COLORS['Surface2']}; border-radius:12px;
+                padding:28px 32px; margin:24px 0; border:1px solid {COLORS['Border']};">
+        <h2 style="margin:0 0 20px; font-size:1.1rem; font-weight:700;
+                   color:{COLORS['Text']};">Key Takeaways</h2>
+
+        <div style="display:flex; flex-direction:column; gap:14px; margin-bottom:24px;">
+
+            <div style="background:#fff; border-radius:8px; padding:16px 20px;
+                        border-left:4px solid {COLORS['BlueLine']};
+                        border:1px solid {COLORS['Border']}; border-left-width:4px;">
+                <div style="font-weight:700; color:{COLORS['Text']}; margin-bottom:4px;">
+                    1. Diagnose the regime before optimising the kernel.
+                </div>
+                <div style="color:{COLORS['TextSec']}; font-size:0.9rem; line-height:1.5;">
+                    A transformer attention layer at ~8 FLOP/byte sits far below the
+                    H100 ridge point of 295 FLOP/byte, achieving only 2.7% of peak
+                    compute. Adding faster arithmetic changes nothing — the fix is
+                    always to increase data reuse (more FLOPs per loaded byte), not
+                    to add more compute units.
+                </div>
+            </div>
+
+            <div style="background:#fff; border-radius:8px; padding:16px 20px;
+                        border-left:4px solid {COLORS['GreenLine']};
+                        border:1px solid {COLORS['Border']}; border-left-width:4px;">
+                <div style="font-weight:700; color:{COLORS['Text']}; margin-bottom:4px;">
+                    2. Elementwise ops are always memory-bound — fuse them.
+                </div>
+                <div style="color:{COLORS['TextSec']}; font-size:0.9rem; line-height:1.5;">
+                    Layer norm, softmax, ReLU, and every single-pass elementwise
+                    operation has an arithmetic intensity below 1 FLOP/byte — well
+                    below the ridge point on any silicon built this decade. The only
+                    lever is kernel fusion: eliminate the redundant HBM round-trips
+                    between consecutive ops. This is why FlashAttention and fused
+                    layer norm exist. The specific accelerator will change. This
+                    principle will not.
+                </div>
+            </div>
+
+            <div style="background:#fff; border-radius:8px; padding:16px 20px;
+                        border-left:4px solid {COLORS['OrangeLine']};
+                        border:1px solid {COLORS['Border']}; border-left-width:4px;">
+                <div style="font-weight:700; color:{COLORS['Text']}; margin-bottom:4px;">
+                    3. GEMM crosses into compute-bound territory only at large batch sizes.
+                </div>
+                <div style="color:{COLORS['TextSec']}; font-size:0.9rem; line-height:1.5;">
+                    As matrix dimensions grow, arithmetic intensity rises proportionally
+                    to the tile edge length. At small batch sizes (batch=1 inference),
+                    even GEMM is memory-bound. At large batch sizes (training),
+                    GEMM becomes compute-bound and MFU can approach 50–60% on H100.
+                    Batch size is a first-order knob for utilization.
+                </div>
+            </div>
+
+        </div>
+
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+
+            <div style="flex:1; min-width:220px; background:#fff; border-radius:8px;
+                        padding:16px 20px; border:1px solid {COLORS['Border']};">
+                <div style="font-weight:700; color:{COLORS['Text']}; margin-bottom:8px;
+                            font-size:0.9rem;">What's Next</div>
+                <div style="color:{COLORS['TextSec']}; font-size:0.85rem; line-height:1.5;">
+                    <strong>Lab 12 — Serving Systems</strong> applies the Roofline
+                    lens to inference serving: how does batch size interact with
+                    latency SLAs and throughput targets in a production deployment?
+                </div>
+            </div>
+
+            <div style="flex:1; min-width:220px; background:#fff; border-radius:8px;
+                        padding:16px 20px; border:1px solid {COLORS['Border']};">
+                <div style="font-weight:700; color:{COLORS['Text']}; margin-bottom:8px;
+                            font-size:0.9rem;">Textbook &amp; TinyTorch</div>
+                <div style="color:{COLORS['TextSec']}; font-size:0.85rem; line-height:1.5;">
+                    Textbook: <code>@sec-hw-acceleration</code> — Roofline model,
+                    arithmetic intensity, MFU, and kernel fusion.<br><br>
+                    TinyTorch: <code>tinytorch/src/11_hw_accel/</code> — implement
+                    a tiled GEMM kernel and measure achieved vs theoretical bandwidth.
+                </div>
+            </div>
+
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 20B: SYNTHESIS SELF-ASSESSMENT ──────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo):
+    mo.accordion({
+        "Self-Assessment: Can you answer these?": mo.md("""
+    1. GPT-2 at batch=1 is 80% parallelizable. Using Amdahl's Law, what is the maximum system speedup achievable regardless of how fast the GPU is — and what serial overhead accounts for the remaining 20%?
+
+    2. On the Roofline plot, the H100's ridge point is approximately 295 FLOP/byte. A workload with arithmetic intensity of 5 FLOP/byte sits where relative to the ridge — and does optimizing FLOPS or bandwidth improve its performance?
+
+    3. ResNet-50 achieves ~20x system speedup on H100 while GPT-2 achieves ~5x on the same chip. Both use identical hardware. Explain the two separate reasons (parallelizable fraction and arithmetic intensity regime) that produce this 4x gap in system speedup.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+    })
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1405,40 +1671,7 @@ def _(
             </div>
         </div>
         """),
-    ])
-    return
 
-
-# ─── KEY TAKEAWAYS ────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.md("## Key Takeaways"),
-        mo.callout(
-            mo.md("""
-**1. The roofline is a constraint, not a goal.**
-Every kernel lives in one of two regimes. If arithmetic intensity is below
-the ridge point, you are memory-bound and no amount of arithmetic optimization
-will move throughput. Identify your ridge point first; then measure your AI.
-The fix for a memory-bound kernel is always to increase data reuse — more
-FLOPs per loaded byte — not to add more compute units.
-            """),
-            kind="info",
-        ),
-        mo.callout(
-            mo.md("""
-**2. Elementwise ops are always memory-bound — fuse them.**
-Layer norm, softmax, ReLU, and all single-pass elementwise operations
-have arithmetic intensities below 1 FLOP/byte. They will never exceed the
-ridge point on any silicon built in this decade. The only way to improve
-their performance is kernel fusion: eliminate the redundant HBM round-trips
-between consecutive ops. This is why FlashAttention, fused layer norm,
-and operator fusion graphs exist. The specific accelerator will change
-in five years. This principle will not.
-            """),
-            kind="info",
-        ),
     ])
     return
 

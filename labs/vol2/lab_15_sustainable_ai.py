@@ -33,6 +33,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
 def _():
@@ -53,7 +57,7 @@ def _():
     # ── Hardware constants ───────────────────────────────────────────────────
     H100_TDP_W        = 700     # H100 SXM5 TDP — NVIDIA H100 SXM5 spec sheet
     H100_IDLE_W       = 180     # H100 idle power — NVIDIA H100 power whitepaper
-    H100_TFLOPS_FP16  = 1979    # H100 FP16 Tensor Core TFLOPS — NVIDIA spec
+    H100_TFLOPS_FP16  = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 
     # ── Carbon intensity constants ───────────────────────────────────────────
     # Source: US EPA eGRID 2022, @tbl-carbon-intensity in @sec-sustainable-ai
@@ -126,7 +130,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING (hide_code=True) ─────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Predict the net carbon change</strong> when compute efficiency improves 2&times; but deployment scale grows 3&times; &mdash; and verify that the Jevons rebound makes total carbon increase, not decrease.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify the carbon footprint</strong> using C&thinsp;=&thinsp;E&thinsp;&times;&thinsp;I&thinsp;&times;&thinsp;PUE and identify the 40&times; difference between a coal-grid region (820&thinsp;g CO&#8322;/kWh) and a renewable region (40&thinsp;g CO&#8322;/kWh).</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a carbon-aware scheduling policy</strong> that achieves &ge;40% carbon reduction for a 1,000-node H100 cluster without triggering SLA violations from over-shifting flexible jobs.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Carbon footprint formula C = E &times; I from @sec-sustainable-ai-carbon-footprint-analysis-ccc5 &middot;
+                    Jevons Paradox definition from @sec-sustainable-ai-multilayer-mitigation-strategy-framework-80f2
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If you make your ML training hardware 2&times; more energy-efficient, why does your organization&rsquo;s total carbon footprint increase by 40% &mdash; and what is the only intervention that actually guarantees a net reduction?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING (hide_code=True) ─────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -203,23 +273,42 @@ def _(mo, context_toggle, COLORS, COAL_CI_G_KWH, RENEW_CI_G_KWH):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE EFFICIENCY TRAP
-# Stakeholder: Head of Sustainability | Prediction: why did carbon go UP?
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["RedLine"]
+    _act_title    = "The Efficiency Trap"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You expect that a 2&times; more efficient GPU means roughly half the carbon. "
+                     "The data will show that when a cheaper operation triggers proportionally "
+                     "more demand, total emissions rise &mdash; sometimes dramatically. "
+                     "This is Jevons Paradox, and it invalidates the intuition that "
+                     "per-unit efficiency is the same as total-system sustainability.")
     mo.vstack([
         mo.md("---"),
-        mo.Html("""
-        <div style="background: #fef2f2; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #CB202D;
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I &middot; The Efficiency Trap &middot; 12&ndash;15 min
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
             </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                More efficient hardware, higher total emissions. How?
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
@@ -712,23 +801,42 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: CARBON-AWARE SCHEDULING
-# Stakeholder: ML Platform Lead | Prediction: can time-shifting hit 40% target?
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["GreenLine"]
+    _act_title    = "Carbon-Aware Scheduling"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = ("Act I proved that efficiency without a carbon cap makes emissions worse. "
+                      "Now design the scheduling policy that actually works: "
+                      "shift flexible jobs from coal-heavy grid hours to low-carbon windows. "
+                      "The constraint is a 40% reduction target with no SLA violations &mdash; "
+                      "which means you cannot shift more flexible work than the low-carbon window can absorb.")
     mo.vstack([
         mo.md("---"),
-        mo.Html("""
-        <div style="background: #f0fdf4; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #008F45;
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II &middot; Carbon-Aware Scheduling &middot; 20&ndash;25 min
+        mo.Html(f"""
+        <div style="margin: 40px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
             </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                Design the scheduling policy: 40% carbon reduction, no SLA breach.
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
@@ -1328,7 +1436,108 @@ def _(mo):
     return
 
 
-# ─── LEDGER SAVE + HUD FOOTER (hide_code=True) ───────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 20: SYNTHESIS ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Jevons Paradox governs total carbon, not per-unit efficiency.</strong>
+                    A 2&times; efficiency gain with 3&times; deployment scale multiplies to 1.5&times; total energy.
+                    The formula C&thinsp;=&thinsp;E&thinsp;&times;&thinsp;I confirms it: total carbon increases
+                    when demand elasticity exceeds the efficiency gain. Enforced carbon budget caps are
+                    the only intervention that guarantees net reduction.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Grid carbon intensity spans two orders of magnitude.</strong>
+                    Coal-heavy grids emit 820&thinsp;g CO&#8322;/kWh; Quebec hydro emits 40&thinsp;g CO&#8322;/kWh &mdash;
+                    a 20&times; difference. A single site-selection decision achieves more carbon reduction
+                    than any algorithmic optimization (pruning, quantization, distillation combined yield
+                    at most ~160&times; compound savings).
+                </div>
+                <div>
+                    <strong>3. Carbon-aware scheduling is a finite lever bounded by low-carbon window capacity.</strong>
+                    Shifting 30% of flexible jobs to renewable night-grid hours can hit 40%+ reduction;
+                    shifting more than the window absorbs triggers SLA violations.
+                    The binding constraint is always the low-carbon capacity, not the willingness to shift.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What&#x2019;s Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 16: The Fairness Impossibility</strong> &mdash; This lab showed that
+                    sustainability constraints require explicit governance (carbon caps). The next lab
+                    asks: is there an equivalent impossibility in fairness &mdash; a theorem proving
+                    that no algorithm can satisfy all fairness criteria simultaneously?
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-sustainable-ai-geographic-temporal-optimization-492c
+                    for carbon-aware scheduling implementation and the temporal shifting formula.<br/>
+                    <strong>Build:</strong> The CarbonAwareScheduler LEGO cell in the chapter
+                    demonstrates the 50&ndash;80% reduction achievable via temporal job placement.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. The formula C = E x I means total carbon = energy consumed x grid carbon intensity. A 10,000 MWh training run in Quebec (20 g CO2/kWh) versus Poland (800 g CO2/kWh) produces what ratio in CO2 emissions, and why does this single site-selection decision outweigh most algorithmic optimizations?
+2. A 2x efficiency gain combined with 3x deployment scale produces 1.5x total energy consumption. Why does the Jevons Paradox mean that algorithmic efficiency improvements alone cannot guarantee absolute carbon reduction?
+3. Carbon-aware scheduling can shift 30% of flexible jobs to renewable night-grid hours for a 40%+ reduction. What is the binding constraint on this lever, and why does shifting more jobs than the low-carbon window can absorb trigger SLA violations?
+
+**You're ready to move on if you can:**
+- Calculate total carbon emissions using C = E x I for different grid locations and PUE values
+- Explain why Jevons Paradox makes hard carbon caps the only intervention that guarantees net reduction
+- Determine the maximum fraction of workload that can be time-shifted without violating latency SLAs
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER SAVE + HUD FOOTER ───────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, ledger, COLORS,
       context_toggle, efficiency_gain, deployment_scale,
@@ -1423,32 +1632,6 @@ def _(mo, ledger, COLORS,
         </span>
     </div>
     """)
-    return
-
-
-# ─── KEY TAKEAWAYS (hide_code=True) ───────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.md("""
-        ## Key Takeaways
-
-        1. **Jevons Paradox governs total carbon, not efficiency gains alone.**
-           Making each unit of compute cheaper or more efficient increases demand,
-           and total carbon `C = E × I` grows when demand outpaces efficiency.
-           The H100 scenario: 2× efficiency gain × 3× deployment scale = 1.5× total
-           energy. The only mechanism that reduces absolute carbon is an enforced
-           carbon budget cap, not per-unit efficiency targets.
-
-        2. **Carbon-aware scheduling is a finite lever bounded by night-time capacity.**
-           Shifting flexible jobs from coal-heavy day grid (820 gCO₂/kWh) to renewable
-           night grid (40 gCO₂/kWh) can achieve 40%+ carbon reduction for a 30% flexible
-           workload — but only while the night window has capacity. When flexible fraction
-           exceeds `time_shift_hours / 24`, SLA violations begin. The binding constraint
-           is always the low-carbon capacity window, not the willingness to shift.
-        """),
-    ])
     return
 
 

@@ -39,6 +39,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
 def _():
@@ -63,7 +67,7 @@ def _():
     # Apple A17 Pro spec, model_serving.qmd hardware baselines.
 
     H100_BW_GBS      = 3350   # H100 SXM5 HBM3e bandwidth — NVIDIA official spec
-    H100_TFLOPS_FP16 = 1979   # H100 FP16 tensor core TFLOPS — NVIDIA official spec
+    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB      = 80     # H100 HBM3e capacity — NVIDIA official spec
     H100_TDP_W       = 700    # H100 SXM5 TDP — NVIDIA official spec
 
@@ -155,10 +159,74 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RECOMMENDED READING
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
 
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Predict P99 latency from utilization using the M/M/1 formula, and explain why P99 at 80% utilization is 4.6&times; the mean service time.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose why a 10&times; traffic spike causes system collapse rather than 10&times; latency degradation, using Little&apos;s Law to quantify the queue explosion.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a replica provisioning plan that meets a P99 SLO (Service Level Objective) before a traffic event, given arrival rate, service time, and headroom requirements.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Little&apos;s Law (L = &lambda;W) from @sec-littles-law &middot;
+                    P99 percentile semantics from @sec-serving-slos &middot;
+                    M/M/1 queue model from @sec-tail-latency
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Your average latency is 45 ms, your SLO is 100 ms P99, and your dashboard shows green &mdash; so why are users complaining, and when a 10&times; traffic spike arrives, why won&apos;t the system slow down 10&times; instead of collapsing entirely?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -192,11 +260,48 @@ def _(mo):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I — THE QUEUE BLINDSPOT
-# Scenario: monitoring dashboard says green. Users are complaining.
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Queue Blindspot"
+    _act_duration = "12\u201315 min"
+    _act_why = (
+        "You assume average latency predicts user experience. The M/M/1 model will show "
+        "that P99 at 80% utilization is already 4.6\u00d7 the mean \u2014 placing the tail "
+        "well above any reasonable SLO even when the dashboard looks perfectly healthy."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS, context_toggle):
     _ctx    = context_toggle.value
@@ -792,11 +897,49 @@ def _(mo, act1_pred):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II — THE P99 LATENCY HISTOGRAM (FIRST INTRODUCTION)
-# Scenario: 10x launch-day traffic spike. Do we need more replicas?
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The P99 Latency Histogram"
+    _act_duration = "20\u201325 min"
+    _act_why = (
+        "Act I showed that average latency hides P99 explosion. Now provision for a "
+        "10\u00d7 launch-day traffic spike: you cannot add capacity reactively once the "
+        "queue floods \u2014 auto-scaling takes 30\u2013120 seconds, and the collapse "
+        "happens in milliseconds."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS, context_toggle):
     _ctx    = context_toggle.value
@@ -1578,66 +1721,108 @@ def _(
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# KEY TAKEAWAYS
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-        mo.md("## Key Takeaways"),
-        mo.callout(mo.md("""
-        **1. Average latency is a lie.** Never define an SLO on average latency.
-        At 80% utilization, M/M/1 gives P99 = 4.6\u00d7 average — placing the tail
-        well above any reasonable SLO even when the average looks healthy.
-        The correct metric is a tail percentile. Monitor what users experience,
-        not what the infrastructure produces on average.
-        """), kind="info"),
-        mo.callout(mo.md("""
-        **2. Little's Law is a capacity planning tool.** `L = \u03bbW` gives three levers:
-        reduce arrival rate (\u03bb), reduce service time (quantization, faster model),
-        or add replicas to reduce queue depth. Before any traffic event, compute
-        the required capacity: `\u03bc > \u03bb + 4.605 / SLO_ms` (in req/ms units).
-        Provision proactively. Reactive auto-scaling has 30–120 s lag — the queue
-        floods before new replicas are ready. The constraint determines the lever.
-        """), kind="info"),
-    ])
-    return
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# CONNECTIONS
-# ─────────────────────────────────────────────────────────────────────────────
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.md("""
-        ## Connections
-
-        **Textbook:** This lab explores the queuing theory foundations in @sec-model-serving
-        and the tail latency analysis in @sec-tail-latency. The continuous batching
-        reflection connects to @sec-continuous-batching. Little's Law is derived
-        formally in @sec-littles-law.
-
-        **TinyTorch:** In Module 13, you implement a request scheduler with configurable
-        batching strategy. See `tinytorch/src/13_serving/`. The module includes a
-        discrete-event simulator for validating your scheduler's P99 behavior under
-        load, allowing you to verify the M/M/1 predictions from this lab empirically.
-
-        **Next Lab:** Lab 14 (ML Operations) builds on this by exploring how monitoring
-        systems detect the drift that changes the arrival rate distribution, converting
-        a healthy serving system into a P99 violator over time without any code changes.
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Average latency is a lie.</strong>
+                    At 80% utilization, M/M/1 gives P99 = 4.6&times; average.
+                    A system with 45 ms average latency already delivers P99 &asymp; 207 ms &mdash;
+                    above a 200 ms SLO &mdash; even when every dashboard metric shows green.
+                    Never define an SLO on average latency.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Little&apos;s Law is a capacity planning tool, not a post-mortem formula.</strong>
+                    L = &lambda;W gives the required capacity before any traffic event:
+                    &mu; &gt; &lambda; + 4.605 / SLO_ms. Reactive auto-scaling has 30&ndash;120 s lag;
+                    the queue floods in milliseconds. Provision proactively or accept collapse.
+                </div>
+                <div>
+                    <strong>3. Replica count, not model speed, is the primary lever for P99 SLA at 10&times; traffic.</strong>
+                    At 10&times; spike (10,000 req/s on 1,000 req/s capacity), even infinite compute
+                    speed cannot fix the queue explosion &mdash; you need &ge; 10 replicas provisioned
+                    before the spike, not during it. Each H100 replica costs ~$3/hour; provisioning
+                    10&times; capacity pre-spike costs ~$30/hour of standby capacity to avoid minutes of SLO collapse.
+                </div>
+            </div>
+        </div>
         """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 14: The Silent Degradation Problem.</strong> This lab showed
+                    how to serve a model within P99 SLO bounds. Lab 14 asks: what happens
+                    after deployment when the model&apos;s input distribution drifts &mdash;
+                    degrading accuracy week by week while every serving metric, including
+                    the P99 you just tuned, stays perfectly green?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-model-serving for the full serving inversion
+                    derivation and @sec-littles-law for the formal M/M/1 queue model.<br/>
+                    <strong>Build:</strong> TinyTorch Module 13 &mdash; implement a request
+                    scheduler with configurable batching and a discrete-event simulator to
+                    verify M/M/1 P99 predictions empirically.
+                    See <code>tinytorch/src/13_serving/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. At 85% server utilization with a 10 ms service time, the M/M/1 model predicts mean latency of ~66.7 ms and P99 of approximately how many milliseconds — and why does the relationship between utilization and P99 become nonlinear past 70%?
+
+    2. The batching paradox: increasing batch size improves throughput but degrades individual request latency. At what batch size and utilization level did your Act II deployment find the 'sweet spot' that met both the QPS target and the P99 latency budget?
+
+    3. Training wants utilization near 100% to maximize throughput. Serving wants utilization near 40-60% to absorb traffic spikes. Explain quantitatively why a 10x traffic spike causes system collapse at 90% baseline utilization but is absorbed at 50% baseline utilization.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
     ])
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DESIGN LEDGER HUD FOOTER
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CELL 21: DESIGN LEDGER HUD FOOTER ───────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo, ledger, COLORS):

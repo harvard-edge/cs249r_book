@@ -50,6 +50,10 @@ def _():
     return COLORS, LAB_CSS, DesignLedger, apply_plotly_theme, go, ledger, math, mo, np
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, LAB_CSS, mo):
@@ -101,7 +105,76 @@ def _(COLORS, LAB_CSS, mo):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the hardware gap</strong> between cloud and TinyML deployment targets — measuring the 10&sup6; compute, 67,000&times; bandwidth, and 160,000&times; memory ratios that prevent a universal software stack.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict which Iron Law term dominates</strong> ResNet-50 inference at batch=1 on the H100, using T&nbsp;=&nbsp;D/BW&nbsp;+&nbsp;O/R&nbsp;+&nbsp;L to decompose the 100&nbsp;MB data-movement vs. 4&nbsp;GFLOPs compute trade-off.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the binding constraint</strong> that makes ResNet-50 infeasible on a Cortex-M7, distinguishing between memory-capacity failure (OOM) and compute-speed limitation.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    D&middot;A&middot;M Taxonomy from @sec-introduction-scaling-regimes &middot;
+                    Deployment spectrum (Cloud/Edge/Mobile/TinyML) from @sec-introduction-deployment-spectrum-a38c &middot;
+                    Iron Law equation T&nbsp;=&nbsp;D/BW&nbsp;+&nbsp;O/R&nbsp;+&nbsp;L from @sec-introduction-iron-law-ml-systems-c32a
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If the H100 is one million times faster than a microcontroller, why can't you
+                simply shrink a cloud model to make it run anywhere &mdash; and which physical
+                term of the Iron Law tells you why the cloud itself is already slower than you think?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -115,7 +188,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE + LEDGER LOAD ──────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE + LEDGER LOAD ──────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
     _prior_ctx = "cloud"  # default — overridden by ledger if available
@@ -138,17 +211,43 @@ def _(COLORS, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — THE SCALE BLINDSPOT
+# ZONE B: ACT I — CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ─── ACT I: SECTION HEADER ─────────────────────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act I — The Scale Blindspot
-    *Calibration · 12-15 minutes*
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Scale Blindspot"
+    _act_duration = "12–15 min"
+    _act_why      = (
+        "Most engineers estimate the cloud-to-microcontroller compute gap at 100&times; or "
+        "10,000&times; — a manageable engineering difference. "
+        "The data will show a 1,000,000&times; gap: not an optimization problem, "
+        "but an architectural boundary that forces separate software stacks."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -591,17 +690,45 @@ def _(act1_reflect, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — THE IRON LAW PREVIEW
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ─── ACT II: SECTION HEADER ────────────────────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act II — The Iron Law Preview
-    *Design Challenge · 20-25 minutes*
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Iron Law Preview"
+    _act_duration = "20–25 min"
+    _act_why      = (
+        "Act I established the 10&sup6;&times; compute gap between H100 and Cortex-M7. "
+        "Act II asks: given ResNet-50 (4 GFLOPs, 100 MB) on each target, "
+        "which Iron Law term &mdash; memory movement (D/BW), arithmetic (O/R), "
+        "or overhead (L) &mdash; actually dominates at batch=1? "
+        "On H100 the answer is counterintuitive. On Cortex-M7 there is a harder constraint: "
+        "the model simply does not fit in 512 KB of SRAM."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -1048,79 +1175,102 @@ def _(MCU_SRAM_MB, RESNET50_DATA_MB, act2_reflect, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CONNECTIONS TO ECOSYSTEM
+# ZONE D: CLOSING
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
+# ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Connections
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The 10&sup6; compute gap is an architectural boundary, not an optimization problem.</strong>
+                    The H100 delivers 989 TFLOPs; the Cortex-M7 delivers 0.001 TFLOPs &mdash; a 989,000&times; gap.
+                    No compiler flag bridges this. The gap forces separate model architectures,
+                    separate compilation targets, and separate runtime stacks across the four deployment paradigms.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. At batch=1, cloud accelerators are memory-bound &mdash; not compute-bound.</strong>
+                    The H100 finishes 4 GFLOPs of ResNet-50 arithmetic in ~4 nanoseconds, but moving
+                    100 MB through HBM3 takes ~30 microseconds. The Memory Wall persists even on the
+                    fastest hardware when batch size is 1; batching amortizes data movement across requests.
+                </div>
+                <div>
+                    <strong>3. Memory capacity, not compute speed, is the binding constraint for TinyML feasibility.</strong>
+                    ResNet-50 requires 100 MB of RAM. The Cortex-M7 has 512 KB &mdash; a 200&times; deficit.
+                    The model cannot be loaded at all. Compute speed is irrelevant until memory fits.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 02: The Iron Law.</strong> This lab revealed that the H100 is
+                    memory-bound at batch=1. Lab 02 asks: by exactly how much does a $2M hardware
+                    upgrade improve latency for a memory-bound workload &mdash; and when does
+                    a physical law make cloud inference categorically impossible?
+                </div>
+            </div>
+
+            <!-- Textbook & TinyTorch -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-introduction for the D&middot;A&middot;M Taxonomy,
+                    Hardware Twins, and the Degradation Equation.<br/>
+                    <strong>Build:</strong> TinyTorch Module 01 &mdash; implement a minimal forward-pass
+                    engine and observe the Iron Law&apos;s three terms in profiling output.
+                    See <code>tinytorch/src/01_foundations/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. The H100 has ~2,000,000x more compute than the Cortex-M7. Why does this gap force separate model architectures and runtime stacks rather than a single universal stack?
+
+    2. At batch=1, which term of the Iron Law (T = D/BW + O/R + L) dominates for ResNet-50 on the H100 — and what does that tell you about which hardware resource to upgrade?
+
+    3. Silent degradation: a recommendation system shows 100% uptime and <50 ms P99 latency for 6 months while its accuracy falls below an acceptable floor. What monitoring gap allows this, and what threshold parameter from Act II would have caught it earlier?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
     """)
+        }),
+    ])
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Textbook** — This lab explores the core quantitative claims of @sec-introduction:
-
-    - **D·A·M Taxonomy** (@sec-introduction-scaling-regimes): Data, Algorithm, Machine as interdependent axes.
-      Optimizing one shifts bottlenecks; it does not eliminate them.
-    - **Iron Law** (@sec-introduction-iron-law-ml-systems-c32a): `T = D/BW + O/R + L`.
-      The dominant term determines the optimization target.
-    - **Deployment Spectrum** (@sec-introduction-deployment-spectrum-a38c): Four paradigms
-      (Cloud, Edge, Mobile, TinyML) each governed by distinct physical constraints.
-
-    **Next Lab** — Lab 02 (The Memory Wall) applies the Iron Law across the full deployment spectrum
-    with the Latency Waterfall instrument, introduced for the first time in that lab.
-
-    **TinyTorch** — In Module 01, you will implement a minimal forward-pass engine and
-    observe the Iron Law's three terms directly in profiling output.
-    See `tinytorch/src/01_foundations/`.
-    """), kind="info")
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# KEY TAKEAWAYS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Key Takeaways
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **1. The 10⁶ compute gap is an architectural boundary, not an optimization problem.**
-    The H100 delivers 989 TFLOPs; the Cortex-M7 delivers 0.001 TFLOPs — a 989,000× gap.
-    No compiler flag bridges this. The gap forces separate model architectures,
-    separate compilation targets, and separate runtime stacks. This is the physical
-    justification for the four-paradigm deployment spectrum in @sec-ml-systems.
-
-    **2. At batch=1, cloud accelerators are memory-bound — not compute-bound.**
-    The H100 finishes 4 GFLOPs of ResNet-50 arithmetic in ~4 nanoseconds, but moving
-    100 MB through HBM3 takes ~30 microseconds. The Memory Wall persists even on the
-    fastest hardware when batch size is 1. This is why production serving systems use
-    continuous batching: to make the compute term non-negligible and amortize data movement
-    across multiple requests.
-    """), kind="success")
-    return
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# DESIGN LEDGER SAVE + HUD
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
+# ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     COLORS,

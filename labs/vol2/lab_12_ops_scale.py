@@ -54,7 +54,7 @@ def _():
 
     # ── Hardware and operational constants ─────────────────────────────────────
     H100_BW_GBS         = 3350   # GB/s HBM3e — NVIDIA H100 SXM5 spec
-    H100_TFLOPS_FP16    = 1979   # TFLOPS tensor core FP16 — NVIDIA spec
+    H100_TFLOPS_FP16    = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     K8S_SCALE_LAG_SEC   = 30     # Kubernetes HPA typical response time — k8s docs
     K8S_POD_START_SEC   = 5      # Pod startup time (warm image) — k8s production benchmark
     CIRCUIT_BREAKER_MS  = 100    # Circuit breaker response time — typical SRE practice
@@ -67,6 +67,8 @@ def _():
         K8S_SCALE_LAG_SEC, K8S_POD_START_SEC, CIRCUIT_BREAKER_MS,
     )
 
+
+# ═══ ZONE A: OPENING ═══════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER (hide_code=True) ──────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -88,7 +90,7 @@ def _(mo, LAB_CSS, COLORS):
             </h1>
             <p style="margin: 0 0 22px 0; font-size: 1.05rem; color: #94a3b8;
                       max-width: 660px; line-height: 1.65;">
-                Every per-service SLO is green. The end-to-end SLO is red. How?
+                Every per-service SLO (Service Level Objective) is green. The end-to-end SLO is red. How?
                 Tail latency compounds probabilistically across service chains — and
                 when overload hits, queued requests amplify into cascading failures
                 that bring down entire platforms in under 30 seconds.
@@ -111,7 +113,7 @@ def _(mo, LAB_CSS, COLORS):
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">Context A: Kubernetes (HPA 30s lag)</span>
+                <span class="badge badge-info">Context A: Kubernetes (HPA (Horizontal Pod Autoscaler) 30s lag)</span>
                 <span class="badge badge-info">Context B: Bare Metal (manual scale)</span>
                 <span class="badge badge-warn">Invariant: P(e2e violation) &gt; per-service rate</span>
                 <span class="badge badge-fail">Invariant: Queued load amplifies cascades</span>
@@ -122,7 +124,76 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING (hide_code=True) ─────────────────────────────
+# ─── CELL 2: BRIEFING (hide_code=True) ────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify why P(e2e violation) exceeds the per-service violation rate</strong> using the composition formula P = 1 &minus; &prod;(1 &minus; P<sub>i</sub>) and explain why equal budget allocation fails.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose how a 30&ndash;60 s Kubernetes HPA response lag allows retry storms to saturate queues</strong> before auto-scaling can respond, triggering full cascade failure.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a circuit breaker and bulkhead configuration</strong> that contains a 150% overload event within one service and prevents propagation to the remaining N&minus;1 services.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    SLO composition probability from @sec-ops-scale &middot;
+                    Circuit breaker state machine from @sec-ops-scale &middot;
+                    N-models operational complexity from @sec-ml-operations-scale-singlemodel-platform-operations-db8e
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Every per-service dashboard is green and every individual SLO is met &mdash;
+                so why is the end-to-end SLO red, and why does a single slow service bring
+                down the entire platform within 30 seconds?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING (hide_code=True) ─────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -141,7 +212,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE (hide_code=True) ──────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE (hide_code=True) ──────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -188,29 +259,40 @@ def _(mo, context_toggle, COLORS, K8S_SCALE_LAG_SEC, K8S_POD_START_SEC):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE SLO COMPOSITION MISTAKE
-# Stakeholder: SRE Lead | Prediction: why e2e SLO is violated
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══ ZONE B: ACT I — CALIBRATION ═══════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 28px 0 8px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: #94a3b8; margin-bottom: 6px;
-                    display: flex; align-items: center; gap: 8px;">
-            <span style="background: #006395; color: white; border-radius: 50%;
-                         width: 22px; height: 22px; display: inline-flex; align-items: center;
-                         justify-content: center; font-size: 0.72rem; font-weight: 800;">I</span>
-            Act I — Calibration · 12–15 min
-            <span style="flex: 1; height: 1px; background: #e2e8f0;"></span>
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The SLO Composition Mistake"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "You assume that meeting every per-service SLO guarantees the end-to-end SLO. "
+        "The composition formula P(e2e violation) = 1 &minus; &prod;(1 &minus; P<sub>i</sub>) "
+        "shows this is wrong &mdash; 5 services each at 1% violation rate produce a 4.9% "
+        "end-to-end violation rate, and equal time allocation is mathematically incoherent."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2;">
-            The SLO Composition Mistake
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.95rem; color: #475569; margin-top: 4px;">
-            Meeting all per-service SLOs is necessary but not sufficient for end-to-end SLO compliance.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -631,30 +713,41 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: CASCADING FAILURE PREVENTION
-# Stakeholder: Platform Reliability Lead | Prediction: cascade prevention
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══ ZONE C: ACT II — DESIGN CHALLENGE ═════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 36px 0 8px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: #94a3b8; margin-bottom: 6px;
-                    display: flex; align-items: center; gap: 8px;">
-            <span style="background: #CB202D; color: white; border-radius: 50%;
-                         width: 22px; height: 22px; display: inline-flex; align-items: center;
-                         justify-content: center; font-size: 0.72rem; font-weight: 800;">II</span>
-            Act II — Design Challenge · 20–25 min
-            <span style="flex: 1; height: 1px; background: #e2e8f0;"></span>
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["RedLine"]
+    _act_title    = "Cascading Failure Prevention"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I showed that tail latency compounds probabilistically. "
+        "Now discover why the cure is worse than the disease when you rely on queuing: "
+        "a slow service fills queues, timeouts trigger retries, retries triple the load, "
+        "and Kubernetes HPA takes 30 s to respond &mdash; 300&times; slower than a circuit breaker "
+        "that sheds load in 100 ms."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.5rem; font-weight: 800; color: #0f172a; line-height: 1.2;">
-            Cascading Failure Prevention
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.95rem; color: #475569; margin-top: 4px;">
-            A slow service fills queues. Full queues cause timeouts. Timeouts trigger retries.
-            Retries amplify load. Amplified load kills databases. The entire system goes dark.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -1204,7 +1297,109 @@ def _(mo, K8S_SCALE_LAG_SEC, K8S_POD_START_SEC, CIRCUIT_BREAKER_MS):
     return
 
 
-# ─── LEDGER SAVE + HUD (hide_code=True) ───────────────────────────────────────
+# ═══ ZONE D: CLOSING ════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS (hide_code=True) ──────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. SLO composition compounds your error budget.</strong>
+                    Five independent services each at 1% violation rate produce a 4.9% end-to-end
+                    violation rate. Equal time allocation (100 ms each for a 500 ms SLO) is
+                    mathematically incoherent &mdash; the correct allocation requires solving
+                    P<sub>i</sub> = 1 &minus; (1 &minus; p<sub>e2e</sub>)<sup>1/N</sup>.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Kubernetes HPA is 300&times; too slow to stop a cascade.</strong>
+                    HPA polls metrics every 15 s and pod startup adds 5 s, totalling ~30 s of
+                    response lag. A circuit breaker detects overload and sheds load in 100 ms.
+                    By the time HPA fires, a retry storm has already tripled the downstream load.
+                </div>
+                <div>
+                    <strong>3. Load shedding beats queuing for cascade prevention.</strong>
+                    Queuing a slow service amplifies load through timeouts and retries. A circuit
+                    breaker that sheds excess load (above &rho; = 1.0) and bulkheads that isolate
+                    services contain a 150% overload event to a single service, preventing the
+                    6-hour total outage that queuing alone produces.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 13: Security &amp; Privacy at Scale</strong> &mdash;
+                    This lab showed that staged rollout canaries rely on regression detection signals.
+                    The next lab asks: what happens when differential privacy noise is added to model
+                    updates &mdash; does the noise mask the regression signal your canary depends on?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-ops-scale for the full SLO composition derivation,
+                    circuit breaker state machine, and N-models complexity curves.<br/>
+                    <strong>Read:</strong> @sec-ml-operations-scale-singlemodel-platform-operations-db8e
+                    for the platform ROI formula and break-even analysis at 20 models.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. Five independent services each at 1% violation rate produce a 4.9% end-to-end violation rate. Why is equal time allocation (100 ms each for a 500 ms SLO) mathematically incoherent, and what formula gives the correct per-service budget?
+2. Kubernetes HPA takes ~30 seconds to respond to overload, while a circuit breaker sheds load in 100 ms. Why is HPA 300x too slow to prevent a cascade, and what has already happened to downstream load by the time HPA fires?
+3. A 150% overload event hits one service. With queuing alone, retry storms triple downstream load causing a 6-hour total outage. How do circuit breakers and bulkheads contain the damage to a single service?
+
+**You're ready to move on if you can:**
+- Calculate end-to-end SLO violation probability from per-service violation rates using composition formulas
+- Explain why load shedding beats queuing for cascade prevention in multi-service ML pipelines
+- Describe the circuit breaker state machine and when it transitions between closed, open, and half-open states
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER SAVE + HUD (hide_code=True) ───────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,

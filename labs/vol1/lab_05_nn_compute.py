@@ -69,7 +69,7 @@ def _():
 
     # Cloud context: H100 SXM5
     H100_RAM_GB      = 80       # GB HBM3e
-    H100_L2_CACHE_MB = 40       # MB L2
+    H100_L2_CACHE_MB = 50       # MB L2 (H100 SXM5 spec)
     H100_L1_CACHE_KB = 6 * 1024 # KB per SM × 108 SMs (shared L1 budget approx)
     # For per-layer L1 we use a practical per-SM allocation
     H100_L1_PER_SM_KB = 256     # KB per SM L1/shared mem
@@ -145,10 +145,80 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CELL 2: RECOMMENDED READING
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the transistor cost ratio</strong> between ReLU (~50 transistors) and Sigmoid (~2,500 transistors) and verify the 50&times; silicon penalty using the Activation Comparator instrument.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict which memory hierarchy tier</strong> a given layer&rsquo;s activations will land in for a specified batch size, channel count, and spatial dimension, given L1/L2/HBM (High Bandwidth Memory)/DRAM capacity boundaries.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the batch size threshold</strong> where activation memory exceeds the mobile L2 cache (512 KB) and triggers the 10&times; latency penalty of HBM access for a 3&times;3 convolutional layer.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Activation function definitions from @sec-neural-computation-artificial-neuron-computing-primitive-45b4 &middot;
+                    Memory hierarchy tiers from @sec-neural-computation-transistor-tax
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                &ldquo;ReLU and Sigmoid produce similar accuracy on the same network &mdash;
+                so why does the choice of activation function determine whether your model
+                fits in cache or spills to memory 100&times; slower, and whether gradient
+                signals survive 20 layers of backpropagation?&rdquo;
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: READING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -163,7 +233,7 @@ def _(mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CELL 3: CONTEXT TOGGLE
+# ─── CELL 4: CONTEXT_TOGGLE ──────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
@@ -179,7 +249,7 @@ def _(mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CELL 4: CONTEXT SPECS DISPLAY
+# ─── CELL 4b: CONTEXT SPECS DISPLAY ─────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
@@ -232,36 +302,57 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE ACTIVATION COST BLINDSPOT
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I -- CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _color = COLORS["Mobile"]
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Activation Cost Blindspot"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You expect activation functions to be &ldquo;free&rdquo; &mdash; just a "
+                     "nonlinearity tacked onto a matrix multiply. The Transistor Tax shows "
+                     "that Sigmoid costs 50&times; more silicon than ReLU. For a mobile AR "
+                     "model running 4 sigmoid layers at 12 FPS, swapping to ReLU is not an "
+                     "accuracy trade-off; it is an architectural decision with a measurable "
+                     "thermal and throughput consequence.")
+
     mo.vstack([
         mo.md("---"),
         mo.Html(f"""
-        <div style="background: linear-gradient(90deg, #0f172a, #1e293b);
-                    padding: 10px 20px; border-radius: 8px; margin: 8px 0;">
-            <span style="font-size:0.72rem; font-weight:700; color:#6366f1;
-                         text-transform:uppercase; letter-spacing:0.15em;">
-                Act I · Calibration · 12–15 min
-            </span>
-            <span style="font-size:1.2rem; font-weight:800; color:#f8fafc; margin-left:16px;">
-                The Activation Cost Blindspot
-            </span>
+        <div style="margin: 8px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
         </div>
         """),
         mo.Html(f"""
-        <div style="border-left:4px solid {_color}; background:#fff7ed;
+        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeLL']};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{_color};
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
                         text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message · Mobile AR Team Lead
+                Incoming Message &middot; Mobile AR Team Lead
             </div>
             <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                "Our mobile AR model runs at 12 FPS — half our 24 FPS target. The team
+                "Our mobile AR model runs at 12 FPS &mdash; half our 24 FPS target. The team
                 wants to add a larger backbone. Before you approve that, look at what
                 activations are already costing us. We have four layers that could each
                 use different activation functions. Right now they all use Sigmoid."
@@ -720,25 +811,47 @@ def _(mo, act1_reflection):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II — THE MEMORY HIERARCHY
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II -- DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _color = COLORS["BlueLine"]
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Memory Hierarchy"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = ("Act I quantified the silicon cost of activation functions. "
+                     "Now discover that where activations live in memory is a second, "
+                     "independent 10&times; multiplier per tier boundary. You expect a "
+                     "3&times;3 convolution&rsquo;s activations to fit in mobile L2 cache. "
+                     "The Memory Ledger will show that at batch=1, the 224&times;224 input "
+                     "layer alone generates ~50 MB &mdash; 100&times; larger than mobile L2 &mdash; "
+                     "and every access hits HBM at 10&times; the L1 cost.")
+
     mo.vstack([
         mo.md("---"),
         mo.Html(f"""
-        <div style="background: linear-gradient(90deg, #0f172a, #1e293b);
-                    padding: 10px 20px; border-radius: 8px; margin: 8px 0;">
-            <span style="font-size:0.72rem; font-weight:700; color:#6366f1;
-                         text-transform:uppercase; letter-spacing:0.15em;">
-                Act II · Design Challenge · 20–25 min
-            </span>
-            <span style="font-size:1.2rem; font-weight:800; color:#f8fafc; margin-left:16px;">
-                The Memory Hierarchy
-            </span>
+        <div style="margin: 8px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
         </div>
         """),
         mo.md("""
@@ -1324,10 +1437,109 @@ def _(mo, act2_reflection):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# LEDGER SAVE + HUD FOOTER
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS, ACTIVATION_TAX_RATIO):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The Transistor Tax is real and large.</strong>
+                    ReLU costs ~50 transistors; Sigmoid costs ~2,500 &mdash;
+                    a <strong>{int(ACTIVATION_TAX_RATIO)}&times; silicon penalty</strong> per activation unit
+                    (@sec-neural-computation-transistor-tax). On mobile hardware with a fixed power
+                    and area budget, this translates directly to FPS targets missed and battery drain.
+                    Activation function choice is not a mathematical preference; it is a hardware constraint.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Where data lives matters as much as what you compute with it.</strong>
+                    The memory hierarchy imposes a 10&times; latency penalty per tier boundary.
+                    A single convolution layer at 224&times;224 with 256 channels generates ~51 MB of
+                    activations &mdash; 100&times; what mobile L2 cache can hold. Every memory access
+                    for that layer hits HBM at 10&times; the L1 cost.
+                </div>
+                <div>
+                    <strong>3. Batch size is the lever that determines memory tier placement.</strong>
+                    At batch=1, small layers may fit in L2. At batch=32, the same layer spills to HBM.
+                    The OOM boundary is predictable from first principles: total activation memory
+                    = &Sigma;<sub>l</sub> batch &times; width<sub>l</sub>&sup2; &times; channels<sub>l</sub> &times; bytes/element.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 06: The Quadratic Wall</strong> &mdash; this lab showed that
+                    activation memory is a linear cost in layer count and batch size. Lab 06
+                    asks: what happens when the memory cost is O(N&sup2;)? Transformer
+                    self-attention materializes an N&times;N similarity matrix &mdash; and doubling
+                    the sequence length quadruples the memory requirement.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-neural-computation-transistor-tax (Transistor Tax),
+                    @sec-neural-computation-computational-implementation-details-1ecc (training memory),
+                    footnote fn-memory-wall-nn (L1 vs DRAM latency gap).<br/>
+                    <strong>Build:</strong> TinyTorch Module 05 &mdash; implement forward passes for
+                    each activation function by hand and measure their computational cost directly.
+                    See <code>tinytorch/src/05_activations/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. Sigmoid costs approximately 50x more transistors than ReLU and causes gradient magnitudes to collapse to ~0.25^L after L layers. At what depth does the gradient fall below the 'learning becomes impossible' threshold of 10^-6?
+
+    2. Training the MNIST network (784->128->64->10) requires approximately how many times more memory than inference at batch=32 — and which of the four memory components (weights, gradients, optimizer state, activations) grows with batch size?
+
+    3. A team switches from ReLU to Sigmoid to improve convergence on a 12-layer network. Predict what happens to (a) gradient magnitude after 12 layers, (b) training memory requirements, and (c) inference power per evaluation — and explain which failure is silent versus visible.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1422,39 +1634,7 @@ def _(
         for k, v in _hud_items
     )
 
-    mo.vstack([
-        mo.md("---"),
-        mo.md("## Key Takeaways"),
-        mo.callout(mo.md(f"""
-        **1. The Transistor Tax is real and large.** ReLU costs ~50 transistors.
-        Sigmoid costs ~2,500 — a **{int(ACTIVATION_TAX_RATIO)}× silicon penalty** per activation
-        unit (@sec-neural-computation-transistor-tax). On mobile hardware with a fixed power
-        and area budget, this translates directly to FPS targets missed and battery drain.
-        Activation function choice is not a mathematical preference; it is a hardware constraint.
-
-        **2. Where data lives matters as much as what you compute with it.** The memory
-        hierarchy imposes a 10× latency penalty per tier boundary. A single convolution
-        layer at 224×224 with 256 channels generates ~51 MB of activations — 100× what
-        mobile L2 cache can hold. Every memory access for that layer hits HBM at 10×
-        the L1 cost. This is the Memory Wall (@sec-neural-computation-computational-infrastructure-requirements-b5b0),
-        and batch size is the lever that determines which tier activations land in.
-        """), kind="info"),
-        mo.md("### Connections"),
-        mo.callout(mo.md("""
-        **Textbook:** @sec-neural-computation-transistor-tax (Transistor Tax),
-        @sec-neural-computation-computational-implementation-details-1ecc (training memory),
-        footnote fn-memory-wall-nn (L1 vs DRAM latency gap).
-
-        **Next lab:** Lab 06 explores transformer attention scaling — O(n²) compute
-        and how depth vs width trade-offs interact with the memory hierarchy
-        you just profiled.
-
-        **TinyTorch:** In Module 05, you will implement forward passes for each
-        activation function by hand and measure their computational cost directly.
-        See `tinytorch/src/05_activations/`.
-        """), kind="info"),
-        mo.Html(f'<div class="lab-hud">{_hud_html}</div>'),
-    ])
+    mo.Html(f'<div class="lab-hud">{_hud_html}</div>')
     return
 
 

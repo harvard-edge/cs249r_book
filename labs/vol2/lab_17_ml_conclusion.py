@@ -53,7 +53,7 @@ def _():
 
     # ── Cloud fleet hardware constants ────────────────────────────────────────
     H100_BW_GBS       = 3350    # GB/s HBM3e; NVIDIA H100 SXM5 spec
-    H100_TFLOPS_FP16  = 1979    # TFLOPS FP16 tensor-core; NVIDIA spec
+    H100_TFLOPS_FP16  = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80      # GB HBM3e; NVIDIA spec
     H100_TDP_W        = 700     # Watts TDP; NVIDIA spec
 
@@ -96,6 +96,10 @@ def _():
         UPTIME_TARGET, BUDGET_GPUS,
     )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER (hide_code=True) ──────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -178,7 +182,67 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ──────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']}; background: #ffffff;
+                border-radius: 0 10px 10px 0; padding: 20px 26px; margin: 12px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 14px;">
+            Lab Briefing &nbsp;&middot;&nbsp; Capstone &nbsp;&middot;&nbsp; 35–40 minutes
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+            <div>
+                <div style="font-size: 0.75rem; font-weight: 700; color: {COLORS['TextSec']};
+                            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">
+                    Learning Objectives
+                </div>
+                <ol style="margin: 0; padding-left: 18px; color: {COLORS['Text']};
+                           font-size: 0.88rem; line-height: 1.75;">
+                    <li>Identify which constraint domain appeared most frequently in your
+                        Design Ledger and explain why scale shifts the binding constraint
+                        from compute to communication</li>
+                    <li>Predict the orchestration multiplier required to achieve 100&times;
+                        system efficiency given hardware&nbsp;=&nbsp;4&times; and
+                        algorithm&nbsp;=&nbsp;2.5&times;</li>
+                    <li>Design a fleet configuration satisfying all six simultaneous
+                        constraints for 1,000 hospitals under HIPAA, carbon cap,
+                        adversarial robustness, and 99.9% uptime requirements</li>
+                </ol>
+            </div>
+            <div>
+                <div style="font-size: 0.75rem; font-weight: 700; color: {COLORS['TextSec']};
+                            text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px;">
+                    Prerequisites
+                </div>
+                <div style="color: {COLORS['TextSec']}; font-size: 0.85rem; line-height: 1.7;">
+                    All Vol&nbsp;1 + Vol&nbsp;2 chapters. Key laws in scope:
+                    Amdahl, Young-Daly, Chouldechova impossibility, DP &epsilon;-&delta;,
+                    Jevons Paradox, Ring AllReduce bandwidth, Little&rsquo;s Law.
+                </div>
+                <div style="margin-top: 14px; padding: 10px 14px;
+                            background: {COLORS['Surface2']}; border-radius: 6px;
+                            border: 1px solid {COLORS['Border']};">
+                    <div style="font-size: 0.75rem; font-weight: 700; color: {COLORS['BlueLine']};
+                                margin-bottom: 4px;">Core Question</div>
+                    <div style="font-size: 0.84rem; color: {COLORS['Text']}; line-height: 1.6;
+                                font-style: italic;">
+                        After optimizing memory, compute, networking, privacy, sustainability,
+                        and fairness in isolation across 16 chapters, which constraint proves
+                        hardest to satisfy simultaneously — and what does achieving all six
+                        at once require that no individual optimization prepared you for?
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -197,17 +261,39 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — DESIGN LEDGER ARCHAEOLOGY
+# ZONE B: ACT I — CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 # ─── ACT I: SECTION HEADER ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act I — Design Ledger Archaeology
-    *Calibration · 12-15 minutes*
+def _(mo, COLORS):
+    _act_color = COLORS["Cloud"]
+    _act_why = (
+        "At 1,000 GPUs, a 10% drop in network bandwidth costs more throughput than a "
+        "10% drop in FLOPS — the bottleneck is not where you think it is."
+    )
+    mo.Html(f"""
+    <div style="border-top: 2px solid {_act_color}; margin: 28px 0 20px 0; padding-top: 18px;">
+        <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+            <div style="width: 38px; height: 38px; border-radius: 50%;
+                        background: {_act_color}; color: #fff;
+                        display: flex; align-items: center; justify-content: center;
+                        font-size: 1.1rem; font-weight: 800; flex-shrink: 0;">I</div>
+            <div>
+                <div style="font-size: 1.15rem; font-weight: 800; color: {COLORS['Text']};">
+                    Act I &mdash; Design Ledger Archaeology
+                </div>
+                <div style="font-size: 0.78rem; color: {COLORS['TextMuted']}; margin-top: 2px;">
+                    Calibration &middot; 12&ndash;15 minutes
+                </div>
+            </div>
+        </div>
+        <div style="font-size: 0.87rem; color: {COLORS['TextSec']}; line-height: 1.65;
+                    padding-left: 52px; font-style: italic;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -617,7 +703,7 @@ def _(
         "A": (
             "**Memory bandwidth** is among the most persistent constraints in single-node "
             "and inference workloads. The H100's arithmetic intensity ridge point "
-            "(1,979 TFLOPS / 3,350 GB/s = ~591 FLOP/byte) means that most token-generation "
+            "(989 TFLOPS / 3,350 GB/s = ~295 FLOP/byte) means that most token-generation "
             "workloads are bandwidth-bound at batch=1. You were correct that memory "
             "dominates in many labs — but the ledger reveals it does not dominate "
             "*all* labs. At fleet scale, network fabric and checkpoint overhead become "
@@ -787,17 +873,40 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — THE FINAL ARCHITECTURE CHALLENGE
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 # ─── ACT II: SECTION HEADER ───────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act II — The Final Architecture Challenge
-    *Design Challenge · 20-25 minutes*
+def _(mo, COLORS):
+    _act_color = COLORS["OrangeLine"]
+    _act_why = (
+        "Hardware gives 4x. Algorithms give 2.5x. Together that is only 10x of the "
+        "100x target — the remaining 10x must come from orchestration, which no single "
+        "chapter prepared you to deliver alone."
+    )
+    mo.Html(f"""
+    <div style="border-top: 2px solid {_act_color}; margin: 28px 0 20px 0; padding-top: 18px;">
+        <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 10px;">
+            <div style="width: 38px; height: 38px; border-radius: 50%;
+                        background: {_act_color}; color: #fff;
+                        display: flex; align-items: center; justify-content: center;
+                        font-size: 1.1rem; font-weight: 800; flex-shrink: 0;">II</div>
+            <div>
+                <div style="font-size: 1.15rem; font-weight: 800; color: {COLORS['Text']};">
+                    Act II &mdash; The Final Architecture Challenge
+                </div>
+                <div style="font-size: 0.78rem; color: {COLORS['TextMuted']}; margin-top: 2px;">
+                    Design Challenge &middot; 20&ndash;25 minutes
+                </div>
+            </div>
+        </div>
+        <div style="font-size: 0.87rem; color: {COLORS['TextSec']}; line-height: 1.65;
+                    padding-left: 52px; font-style: italic;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -1672,6 +1781,131 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border-radius: 10px;
+                    padding: 22px 26px; margin-bottom: 16px;
+                    border: 1px solid {COLORS['Border']};">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 14px;">
+                Key Takeaways
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <div style="width: 22px; height: 22px; border-radius: 50%;
+                                background: {COLORS['BlueLine']}; color: #fff;
+                                font-size: 0.7rem; font-weight: 800;
+                                display: flex; align-items: center; justify-content: center;
+                                flex-shrink: 0; margin-top: 2px;">1</div>
+                    <div style="font-size: 0.88rem; color: {COLORS['Text']}; line-height: 1.65;">
+                        <strong>Communication, not compute, dominates at scale.</strong>
+                        At 1,000 GPUs, a 10% bandwidth degradation reduces cluster throughput
+                        more than a 10% FLOPS reduction, because Ring AllReduce makes
+                        synchronization the binding constraint. The bottleneck moves
+                        as a function of fleet size — this is what Principle 6 means.
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <div style="width: 22px; height: 22px; border-radius: 50%;
+                                background: {COLORS['OrangeLine']}; color: #fff;
+                                font-size: 0.7rem; font-weight: 800;
+                                display: flex; align-items: center; justify-content: center;
+                                flex-shrink: 0; margin-top: 2px;">2</div>
+                    <div style="font-size: 0.88rem; color: {COLORS['Text']}; line-height: 1.65;">
+                        <strong>100x = 4x &times; 2.5x &times; 10x — and the 10x must come from orchestration.</strong>
+                        Hardware and algorithms together contribute only 10x of the 100x
+                        efficiency target. The next decade of ML systems engineering is
+                        about compound AI: reasoning chains, tool use, and dynamic retrieval
+                        that extract more capability from the same FLOPS.
+                    </div>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: flex-start;">
+                    <div style="width: 22px; height: 22px; border-radius: 50%;
+                                background: {COLORS['GreenLine']}; color: #fff;
+                                font-size: 0.7rem; font-weight: 800;
+                                display: flex; align-items: center; justify-content: center;
+                                flex-shrink: 0; margin-top: 2px;">3</div>
+                    <div style="font-size: 0.88rem; color: {COLORS['Text']}; line-height: 1.65;">
+                        <strong>Constraints are coupled, not independent.</strong>
+                        Every constraint you tightened in isolation (privacy &epsilon;,
+                        carbon cap, adversarial robustness, fairness criterion) becomes
+                        harder to satisfy when all six must hold simultaneously.
+                        The skilled ML architect does not ask how to avoid the physics —
+                        they ask which constraint to prioritize when they cannot all be
+                        satisfied at once.
+                    </div>
+                </div>
+            </div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Production deployment.</strong> The curriculum ends here, but the
+                    constraints do not. Every real system you build will navigate the same
+                    six dimensions &mdash; memory, compute, networking, privacy, sustainability,
+                    fairness &mdash; with a budget that forces explicit trade-offs.
+                    The physics never lie; your job is to find the binding constraint first.
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; Reference
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-conclusion-six-principles-distributed-ml-systems-746a
+                    &mdash; Six principles and the communication-dominance invariant.<br/>
+                    <strong>@sec-conclusion-path-forward-caa2</strong> &mdash; The 100x
+                    decomposition and the Compound Capability Law.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. At 1,000 GPUs, a 10% bandwidth improvement yields more throughput gain than a 10% FLOPS improvement because Ring AllReduce makes synchronization the binding constraint. At what fleet size does the bottleneck shift, and what principle (Principle 6) explains why the bottleneck moves as a function of scale?
+2. The 100x efficiency target decomposes as Hardware (4x) x Algorithm (2.5x) x Orchestration (10x). Hardware and algorithm gains face diminishing returns. Why must the 10x orchestration factor come from compound AI (reasoning chains, tool use, dynamic retrieval) rather than more hardware?
+3. All six constraint families (memory, compute, networking, privacy, sustainability, fairness) interact as a coupled system. Tightening privacy epsilon makes sustainability harder (more compute for DP noise); tightening fairness makes accuracy harder. Describe one concrete tradeoff you explored across the labs and how a production system would resolve it.
+
+**You're ready to move on if you can:**
+- Identify the binding constraint at a given fleet scale and explain why it shifts as scale changes
+- Decompose a system-level efficiency target into hardware, algorithm, and orchestration contributions
+- Navigate tradeoffs between competing constraints when all six must be satisfied simultaneously
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER SAVE + HUD ───────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1843,26 +2077,6 @@ def _(mo):
     throughput, latency, cost, and safety requirements simultaneously?"
 
     That is the question this curriculum trained you to ask.
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ## Key Takeaways
-
-    1. **Constraints are not obstacles; they are the specification.**
-       Every architectural choice in ML systems is ultimately a choice about
-       which constraint to prioritize when they cannot all be satisfied simultaneously.
-       The invariants give you the exact tradeoff surface. Read them.
-
-    2. **The bottleneck moves with scale — that is the curriculum.**
-       Memory dominates single-node inference. Communication dominates multi-node
-       training. Privacy and fairness constraints activate at any scale but are
-       invisible until you look across populations. The researcher who built the
-       fastest training systems internalized which invariant binds when, and why.
-       That intuition is now yours to develop.
     """)
     return
 

@@ -41,6 +41,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
+
 # ── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
 def _():
@@ -62,7 +66,7 @@ def _():
 
     # Cloud: NVIDIA H100 SXM5
     H100_BW_GBS      = 3350   # GB/s — H100 SXM5 HBM3e, NVIDIA spec
-    H100_TFLOPS_FP16 = 1979   # TFLOPS FP16 (tensor core), NVIDIA spec
+    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB      = 80     # GB HBM3e on-chip, NVIDIA spec
     H100_TDP_W       = 700    # Watts TDP, NVIDIA spec
     H100_COST_HR     = 3.0    # $/hr cloud on-demand, ~2026 market estimate
@@ -187,7 +191,74 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Diagnose your weakest invariant across Labs 01&ndash;15 by reading your Design Ledger prediction accuracy data, not by guessing.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Design a full-stack multi-tier deployment that satisfies simultaneous SLAs on P99 latency, cost-per-request, fairness gap, and drift resilience.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify which of the seven Volume I invariants is the binding constraint for your chosen configuration, and predict how relaxing it by 2&times; changes the system.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    All prior labs (01&ndash;15) assumed complete &middot;
+                    Seven Volume I invariants from @sec-conclusion-synthesis &middot;
+                    Design philosophy from @sec-conclusion-design-philosophy
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Every sub-team hit its target &mdash; Amdahl ceiling reduced, P99 within SLO, drift detected, fairness audited &mdash; so why did the integrated system lose 4 percentage points of accuracy within weeks, and which of the seven invariants should have predicted this?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -204,11 +275,49 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I — DESIGN LEDGER ARCHAEOLOGY
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 3: ACT I INTRO ───────────────────────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "Design Ledger Archaeology"
+    _act_duration = "12\u201315 min"
+    _act_why = (
+        "You believe you know your weakest invariant from memory. Your Design Ledger knows it "
+        "from data. The prediction gap \u2014 between what you think you got wrong and what the "
+        "ledger shows you got wrong \u2014 is itself a systems insight: mental models degrade, "
+        "measurement does not."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 6: ACT1_STAKEHOLDER ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["BlueLine"]
@@ -695,10 +804,49 @@ def _(mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ACT II — FULL-STACK DESIGN CHALLENGE
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 10: ACT II INTRO ─────────────────────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "Full-Stack Design Challenge"
+    _act_duration = "20\u201325 min"
+    _act_why = (
+        "Act I revealed your weakest invariant. Now all seven activate simultaneously: "
+        "the system you configure must satisfy P99, cost, memory, fairness, and drift "
+        "constraints at once \u2014 and optimizing any one will shift cost to another, "
+        "because complexity in an ML system cannot be destroyed, only moved."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 13: ACT II INTRO ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, COLORS,
@@ -1621,44 +1769,111 @@ Each fix is directly traceable to one of the 7 invariants. There is no free lunc
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# KEY TAKEAWAYS
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 24: KEY TAKEAWAYS ────────────────────────────────────────────────────
+# ─── CELL 20: SYNTHESIS (CAPSTONE) ────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-        mo.md("## Key Takeaways"),
-        mo.callout(mo.md("""
-**1. The tier boundary is not a software choice — it is a physics constraint.**
 
-You cannot deploy the same model across all four tiers by adjusting a hyperparameter.
-The 256 KB SRAM ceiling on a Cortex-M7 is immovable. The 5-watt thermal budget on a
-smartphone is immovable. Each tier boundary is set by thermodynamics, memory physics,
-and signal latency — not by framework version or quantization scheme. The architect's
-first job is to understand which constraints are negotiable and which are walls.
-        """), kind="info"),
-        mo.callout(mo.md("""
-**2. All 7 invariants are active simultaneously in production.**
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Volume I Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Tier boundaries are physics constraints, not software choices.</strong>
+                    The 256 KB SRAM ceiling on a Cortex-M7 is immovable. The 5-watt thermal budget
+                    on a smartphone is immovable. Each tier boundary is set by thermodynamics, memory
+                    physics, and signal latency &mdash; not by framework version or quantization
+                    scheme. The architect&apos;s first job is to understand which constraints are
+                    negotiable and which are walls.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. All 7 invariants are active simultaneously in production.</strong>
+                    The Iron Law governs cloud P99. Amdahl caps GPU scaling. The Memory Wall
+                    determines tier assignment. Little&apos;s Law predicts P99 explosion at
+                    utilization. The degradation equation sets retraining cadence. Chouldechova
+                    bounds the fairness-accuracy tradeoff. Every slider you move shifts multiple
+                    constraints at once; no single optimization is ever free.
+                </div>
+                <div>
+                    <strong>3. Complexity cannot be destroyed &mdash; only moved.</strong>
+                    Every sub-team hitting its individual target is a necessary but insufficient
+                    condition for system success. The integrated system failed because INT8
+                    quantization shifted complexity from the model to the monitoring and skew
+                    pipeline &mdash; a pipeline no sub-team owned. Systems thinking is the
+                    invariant that governs all other invariants.
+                </div>
+            </div>
+        </div>
+        """),
 
-The Iron Law governs your cloud P99. Amdahl caps your GPU scaling. The Memory Wall
-determines which tiers can host which models. Little's Law predicts your P99 explosion
-at high utilization. The degradation equation sets your retraining cadence. Chouldechova
-bounds your fairness-accuracy tradeoff. In a real deployment, you cannot optimize one
-invariant in isolation — every slider you move shifts multiple constraints at once.
-The skill this volume teaches is not memorizing formulas; it is reasoning about
-simultaneous constraint interactions at system scale.
-        """), kind="info"),
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next &mdash; Volume II
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    Volume I covered single-machine ML systems (1&ndash;8 GPUs). Volume II asks:
+                    what happens when the same constraints &mdash; the Iron Law, Amdahl, Little&apos;s
+                    Law, drift &mdash; operate across hundreds of machines, connected by a network
+                    fabric that becomes the new memory bandwidth bottleneck? The binding constraint
+                    you found in this capstone will appear again &mdash; at rack scale.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-conclusion-synthesis for the full seven-invariant
+                    framework and @sec-conclusion-design-philosophy for the systems-first
+                    perspective that unifies all Volume I chapters.<br/>
+                    <strong>Build:</strong> TinyTorch Module 16 &mdash; the capstone integration,
+                    combining profiling, serving, drift detection, and fairness auditing into a
+                    single end-to-end pipeline. See <code>tinytorch/src/16_capstone/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. Llama-2-70B (FP16) on H100 has T_mem approximately 42 ms and T_comp approximately 0.14 ms for a single token of autoregressive decoding. What is the memory-to-compute ratio — and why does optimizing CUDA kernel utilization from 70% to 95% yield less than 1% end-to-end speedup?
+
+    2. The Conservation of Complexity states that complexity cannot be destroyed, only moved between Data, Algorithm, and Machine. In the Act II MobileNetV2 deployment, switching from FP16 to INT8 reduces memory complexity but increases which other complexity dimension — and what is the Iron Law invariant that formalizes this interaction?
+
+    3. A team where every sub-team hit its own metric (efficient architecture, 4x compression, P99 < 50 ms) still shipped a system that lost 4 accuracy points within weeks. Identify the specific cross-invariant interaction that caused the silent failure — and explain why monitoring infrastructure metrics (uptime, latency, error rate) could not have detected it.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
     ])
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LEDGER SAVE + HUD
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── CELL 25: LEDGER SAVE + HUD ────────────────────────────────────────────────
+# ─── CELL 21: LEDGER SAVE + HUD ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,

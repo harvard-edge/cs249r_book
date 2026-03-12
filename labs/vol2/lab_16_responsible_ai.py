@@ -80,6 +80,10 @@ def _():
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 1: HEADER (hide_code=True) ─────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, LAB_CSS, COLORS):
@@ -135,7 +139,74 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING (hide_code=True) ────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Identify which fairness criterion is violated</strong> when demographic parity is satisfied but false positive rates remain unequal &mdash; and prove this follows from the Chouldechova impossibility theorem when base rates differ.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify the fairness tax</strong>: measure the exact accuracy drop when enforcing demographic parity vs. equalized odds in a content moderation classifier with heterogeneous base rates across 180 countries.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a multi-jurisdiction fairness compliance strategy</strong> that satisfies EU calibration requirements and US equalized-odds standards simultaneously without exceeding 1M daily false positives.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Fairness definitions (demographic parity, equalized odds, calibration)
+                    from @sec-responsible-ai-fairness-machine-learning-2ba4 &middot;
+                    Chouldechova impossibility theorem from @sec-responsible-ai-demographic-parity-f126
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If you can set any classification threshold and choose any fairness criterion, why is it mathematically impossible to simultaneously satisfy demographic parity, equalized odds, and calibration &mdash; and what does choosing between them actually mean at 1 billion users?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING (hide_code=True) ────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -203,24 +274,42 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE FAIRNESS INCOMPATIBILITY
-# Stakeholder: Trust & Safety Lead | 1B user content moderation
-# Prediction: what happens to FPR under demographic parity?
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["Cloud"]
+    _act_title    = "The Fairness Incompatibility"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You believe there exists a threshold that makes the model fair on all dimensions simultaneously. "
+                     "The instruments will show that at every threshold position, "
+                     "at least one fairness metric is substantially violated when group base rates differ &mdash; "
+                     "not because the model is poorly trained, but because the Chouldechova-Kleinberg theorem "
+                     "proves these criteria are logically incompatible.")
     mo.vstack([
         mo.md("---"),
-        mo.Html("""
-        <div style="background: #f0f4ff; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #6366f1;
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I · The Fairness Incompatibility · 12–15 min
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
             </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                You achieved demographic parity. Why are false positive rates still unequal?
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
@@ -859,11 +948,9 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: RESPONSIBLE DEPLOYMENT AT SCALE
-# Stakeholder: Chief AI Ethics Officer | Global platform, 180 countries
-# Prediction: best compliance strategy across jurisdictions
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
 def _(mo, act1_reflect):
@@ -878,17 +965,39 @@ def _(mo, act1_reflect):
 
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
+    _act2_num      = "II"
+    _act2_color    = COLORS["GreenLine"]
+    _act2_title    = "Responsible Deployment at Scale"
+    _act2_duration = "20&ndash;25 min"
+    _act2_why      = ("Act I proved that fairness criteria are mathematically incompatible. "
+                      "Now face the fleet-scale consequence: 1 billion users across 180 countries "
+                      "means the fairness criterion you choose in one jurisdiction violates a "
+                      "different jurisdiction&#x2019;s regulatory standard. "
+                      "You must make an explicit policy decision &mdash; and every decision "
+                      "produces a specific false-positive rate that scales from \u201cnegligible\u201d "
+                      "to millions of affected users per day.")
     mo.vstack([
         mo.md("---"),
-        mo.Html("""
-        <div style="background: #f0fdf4; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #008F45;
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II · Responsible Deployment at Scale · 20–25 min
+        mo.Html(f"""
+        <div style="margin: 40px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act2_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act2_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act2_num} &middot; {_act2_duration}</div>
             </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                1 billion users. 180 countries. Design a compliant deployment strategy.
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act2_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act2_why}
             </div>
         </div>
         """),
@@ -1542,7 +1651,110 @@ def _(mo):
     return
 
 
-# ─── LEDGER SAVE + HUD ────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 20: SYNTHESIS ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Demographic parity and equalized odds are logically incompatible when base rates differ.</strong>
+                    The Chouldechova-Kleinberg impossibility theorem (2016&ndash;2017) is a mathematical proof,
+                    not an empirical observation. When P(Y=1|S=a) &ne; P(Y=1|S=b), no algorithm, threshold,
+                    or training procedure can simultaneously satisfy all three criteria. The engineer
+                    must choose which constraint to satisfy and accept violations of the others.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. The fairness tax scales with base-rate divergence, not with model quality.</strong>
+                    A 4% accuracy drop to enforce demographic parity grows larger as the base-rate gap widens.
+                    In heterogeneous multi-region deployments (e.g., 70% vs. 25% base rates),
+                    the tax can exceed 10 percentage points &mdash; not because the model is worse,
+                    but because the constraint is more demanding.
+                </div>
+                <div>
+                    <strong>3. At 1 billion users, fairness criterion choice is a policy decision with measurable societal consequences.</strong>
+                    A 0.1% false positive rate that seems negligible becomes 1 million incorrectly flagged
+                    users per day. Fleet-scale deployment transforms fairness from an abstract metric
+                    into a concrete harm rate that must be budgeted like a latency SLA.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What&#x2019;s Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 17: The Constraints Never Lie</strong> &mdash; This lab quantified
+                    the fairness impossibility as a constraint on responsible deployment. The
+                    capstone now asks: when all six constraint families (memory, compute, networking,
+                    privacy, sustainability, fairness) must be satisfied simultaneously for a
+                    1,000-hospital medical fleet, which ones are truly incompatible?
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-responsible-ai-fairness-machine-learning-2ba4 for
+                    the full Chouldechova proof and the FairnessTaxAnalysis worked example
+                    showing the exact 85% &rarr; 81% accuracy cost.<br/>
+                    <strong>Build:</strong> The FairnessConstraintSweep LEGO cell demonstrates
+                    the three-criteria incompatibility with a threshold sweep visualization.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. The Chouldechova-Kleinberg theorem proves that Demographic Parity, Equalized Odds, and Calibration cannot all hold when base rates differ. This is a mathematical proof, not an empirical observation. What must the engineer choose, and what must they accept as a consequence?
+2. A 4% accuracy drop to enforce demographic parity grows larger as the base-rate gap widens. With Group A at 70% and Group B at 25% base rate, why can the fairness tax exceed 10 percentage points, and why is this independent of model quality?
+3. At 1 billion users, a 0.1% false positive rate becomes 1 million incorrectly flagged users per day. Why does fleet-scale deployment transform fairness from an abstract metric into a concrete harm rate that must be budgeted like a latency SLA?
+
+**You're ready to move on if you can:**
+- Explain why the fairness impossibility theorem forces an explicit policy choice, not a technical optimization
+- Calculate the accuracy cost (fairness tax) of enforcing a specific fairness criterion given base-rate divergence
+- Translate per-user false positive rates into absolute daily harm counts at fleet scale
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER SAVE + HUD ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,

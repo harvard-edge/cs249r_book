@@ -37,6 +37,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
 def _():
@@ -57,7 +61,7 @@ def _():
 
     # ── Hardware constants (LABS_SPEC.md / NVIDIA and Apple specs) ────────────
     H100_BW_GBS       = 3350   # GB/s — H100 SXM5 HBM3e bandwidth
-    H100_TFLOPS_FP16  = 1979   # TFLOPS FP16 tensor core peak
+    H100_TFLOPS_FP16  = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_TFLOPS_INT8  = 3958   # TOPS INT8 tensor core (2× FP16)
     H100_RAM_GB       = 80     # GB HBM3e capacity
     H100_TDP_W        = 700    # Watts TDP
@@ -166,7 +170,76 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Predict the accuracy drop from INT8 quantization</strong> — determine whether reducing a 7B LLM from FP16 to INT8 costs 10%, 5%, or under 1% accuracy, and identify where the "quantization cliff" appears.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose why 50% unstructured pruning yields ~0% speedup on GPU</strong> — trace why irregular zero patterns in dense matrix multiplications are not exploited by standard hardware kernels.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a compression configuration that satisfies simultaneous memory and latency constraints</strong> — find the quantization + structured pruning combination that fits a 7B model in 8 GB while meeting a 50 ms per-token latency budget.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Uniform quantization formula from @sec-optimizations-quantization &middot;
+                    Pareto frontier concept introduced in Lab 09 &middot;
+                    Structured vs unstructured sparsity from @sec-optimizations-pruning
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "INT8 quantization halves the bits per weight &mdash; so why does it cost
+                under 1% accuracy, while removing half the weights through pruning can
+                sometimes provide zero speedup on the same hardware?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 3: READING ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -180,7 +253,7 @@ def _(mo):
     return
 
 
-# ── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -212,7 +285,7 @@ def _(mo, context_toggle, COLORS):
             ("Device",              "NVIDIA H100 SXM5"),
             ("HBM Capacity",        "80 GB"),
             ("Memory Bandwidth",    "3,350 GB/s"),
-            ("FP16 Peak",           "1,979 TFLOPS"),
+            ("FP16 Peak",           "989 TFLOPS"),
             ("INT8 Peak",           "3,958 TOPS (2x FP16)"),
             ("Power Budget",        "700 W TDP"),
             ("INT8 native support", "Yes — Tensor Cores"),
@@ -255,28 +328,56 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE QUANTIZATION SURPRISE
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 5: ACT I SCENARIO ────────────────────────────────────────────────────
+# ── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Quantization Surprise"
+    _act_duration = "12 min"
+    _act_why = (
+        "You expect that halving the bits per weight halves the model\u2019s representational "
+        "capacity, costing proportional accuracy. The accuracy-vs-bitwidth curve will show "
+        "a flat \u201cFree Lunch Zone\u201d from FP32 through INT8, then a sudden cliff "
+        "at 3\u20134 bits \u2014 not a gradual decline."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["Mobile"]
     mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="background: linear-gradient(90deg, #0f172a, #1e293b);
-                    padding: 10px 20px; border-radius: 8px; margin: 8px 0;">
-            <span style="font-size:0.72rem; font-weight:700; color:#6366f1;
-                         text-transform:uppercase; letter-spacing:0.15em;">
-                Act I &middot; Calibration &middot; 12&ndash;15 min
-            </span>
-            <span style="font-size:1.2rem; font-weight:800; color:#f8fafc; margin-left:16px;">
-                The Quantization Surprise
-            </span>
-        </div>
-        """),
         mo.Html(f"""
         <div style="border-left:4px solid {_color}; background:#fff7ed;
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
@@ -895,28 +996,56 @@ def _(mo, act1_reflection):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II — THE COMPRESSION TRADE-OFF FRONTIER
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 15: ACT II SCENARIO ──────────────────────────────────────────────────
+# ── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The Compression Trade-off Frontier"
+    _act_duration = "25 min"
+    _act_why = (
+        "Act I revealed the Free Lunch Zone. Now discover the multi-dimensional design space: "
+        "quantization provides linear speedup on bandwidth-bound inference, while 50% "
+        "unstructured pruning provides exactly zero speedup on standard GPU kernels "
+        "\u2014 and you must navigate both to deploy a 7B model across three memory tiers."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration} &middot; First introduction: Compression Trade-off Frontier</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ── CELL 15: ACT2_STAKEHOLDER ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["Cloud"]
     mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="background: linear-gradient(90deg, #0f172a, #1e293b);
-                    padding: 10px 20px; border-radius: 8px; margin: 8px 0;">
-            <span style="font-size:0.72rem; font-weight:700; color:{_color};
-                         text-transform:uppercase; letter-spacing:0.15em;">
-                Act II &middot; Design Challenge &middot; 20&ndash;25 min
-            </span>
-            <span style="font-size:1.2rem; font-weight:800; color:#f8fafc; margin-left:16px;">
-                The Compression Trade-off Frontier
-            </span>
-        </div>
-        """),
         mo.Html(f"""
         <div style="border-left:4px solid {_color}; background:#f0f4ff;
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
@@ -1507,11 +1636,106 @@ def _(mo, act2_reflection):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. INT8 quantization is a free lunch: under 1% accuracy loss for 4&times; memory reduction.</strong>
+                    Neural networks are overparameterized in numerical precision. INT8's 256 levels
+                    are sufficient to represent the weight distribution of a trained model. The
+                    "cliff" at 3&ndash;4 bits is sudden, not gradual &mdash; accuracy collapses
+                    when discrete levels become insufficient to distinguish critical weight values.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Unstructured pruning at 50% provides ~0% speedup on standard GPUs.</strong>
+                    Dense GEMM kernels iterate over every element including zeros. The sparsity
+                    is invisible to the hardware. Only structured sparsity (e.g., NVIDIA 2:4)
+                    provides real speedup because the hardware can skip known-zero elements
+                    in a regular pattern.
+                </div>
+                <div>
+                    <strong>3. Deploying a 7B model to 8 GB memory requires INT4 + structured pruning.</strong>
+                    FP16 (14 GB) does not fit. INT8 (7 GB) fits but latency at 50 GB/s mobile
+                    bandwidth is ~140 ms &mdash; over budget. INT4 + structured 2:4 pruning
+                    reaches ~1.75 GB and ~35 ms per token, satisfying both constraints.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 11: The Roofline</strong> &mdash; This lab found the optimal
+                    compression configuration. Lab 11 asks: where does your compressed model
+                    sit on the Roofline? INT4 quantization changes both the memory footprint
+                    and the arithmetic intensity, shifting the workload's position relative to
+                    the ridge point.
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-optimizations-quantization and
+                    @sec-optimizations-pruning for the full quantization and sparsity mechanics.<br/>
+                    <strong>Build:</strong> TinyTorch Module 10 &mdash; implement post-training
+                    quantization and measure the accuracy-vs-bitwidth curve yourself.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. Quantizing a 7B LLM from FP16 to INT8 causes less than 1% accuracy loss while providing 4x memory reduction. At what bit-width does the quantization cliff appear — and why is the drop sudden rather than gradual?
+
+    2. Unstructured pruning at 50% sparsity provides 0% speedup on standard GPUs. What property of modern GPU hardware (Tensor Cores, SIMD) causes this — and what type of pruning does achieve a speedup?
+
+    3. You must deploy a 7B model to an iPhone 15 Pro with a 50 ms latency budget. The model weights are 14 GB in FP16. Explain why INT4 quantization (4x bandwidth improvement) is required, and whether unstructured pruning at 70% sparsity would help or not.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# LEDGER SAVE + HUD FOOTER
+# ZONE D: LEDGER_HUD
 # ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 25: LEDGER SAVE + HUD ────────────────────────────────────────────────
+# ── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,

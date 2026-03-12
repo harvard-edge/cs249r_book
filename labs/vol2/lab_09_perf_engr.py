@@ -30,7 +30,7 @@ app = marimo.App(width="full")
 #
 # Key hardware constants (NVIDIA specs):
 #   H100_BW_GBS         = 3350  # H100 SXM5 HBM3e bandwidth, NVIDIA spec
-#   H100_TFLOPS_FP16    = 1979  # H100 SXM5 FP16 tensor core TFLOPS, NVIDIA spec
+#   H100_TFLOPS_FP16    = 989   # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 #   H100_RAM_GB         = 80    # H100 HBM3e capacity, NVIDIA spec
 #   NVLINK4_BW_GBS      = 900   # NVLink 4.0 bidirectional bandwidth, NVIDIA spec
 #   IB_HDR200_BW_GBS    = 400   # InfiniBand HDR200 unidirectional, Mellanox spec
@@ -61,7 +61,7 @@ def _():
 
     # ── Hardware constants (all values sourced from NVIDIA datasheets) ─────────
     H100_BW_GBS      = 3350   # GB/s  — H100 SXM5 HBM3e, NVIDIA spec
-    H100_TFLOPS_FP16 = 1979   # TFLOPS — H100 SXM5 FP16 tensor core, NVIDIA spec
+    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB      = 80     # GB    — H100 HBM3e capacity, NVIDIA spec
     NVLINK4_BW_GBS   = 900    # GB/s  — NVLink 4.0 bidirectional, NVIDIA spec
     IB_HDR200_BW_GBS = 400    # GB/s  — InfiniBand HDR200 unidirectional, Mellanox spec
@@ -142,7 +142,79 @@ def _(COLORS, LAB_CSS, mo):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Predict the end-to-end speedup from Amdahl's Law</strong> given a component's time fraction and speedup factor &mdash; a 3x attention-kernel improvement on a 12% bottleneck yields only 8% end-to-end gain.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose the dominant bottleneck in a 512-GPU training profile</strong> (AllReduce, pipeline bubble, or data loading) and calculate which fix delivers the highest ROI for a fixed engineering budget.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify why optimizing the non-binding constraint yields zero speedup</strong> using the Iron Law: Time = max(Compute/FLOPS, Memory/BW) + Overhead.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Iron Law of ML Performance from @sec-performance-engineering-efficiency-frontier &middot;
+                    Roofline Model and Arithmetic Intensity from @sec-performance-engineering-roofline
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Your team spent 3 weeks building a 3x faster attention kernel and got
+                only 8% end-to-end speedup &mdash; why? And which component of your
+                512-GPU training profile actually controls the cluster's efficiency?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -164,7 +236,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -189,28 +261,52 @@ def _(mo):
     return (context_toggle,)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE PROFILING REVELATION
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I -- CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 4: ACT I HEADER ──────────────────────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(COLORS, mo):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Profiling Revelation"
+    _act_duration = "12-15 min"
+    _act_why      = ("You expect that a 3x faster attention kernel will produce approximately "
+                     "3x end-to-end training speedup. Amdahl's Law will reveal that attention "
+                     "accounts for only 12% of total training time &mdash; making the maximum "
+                     "possible speedup 1.14x regardless of how fast the kernel runs.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 6: ACT1_STAKEHOLDER ───────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
     _c = COLORS["BlueLine"]
     mo.vstack([
-        mo.Html(f"""
-        <div style="margin: 28px 0 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 6px;">
-                Act I · 12–15 minutes
-            </div>
-            <h2 style="font-size: 1.7rem; font-weight: 900; color: #0f172a;
-                       margin: 0 0 6px 0; letter-spacing: -0.015em;">
-                The Profiling Revelation
-            </h2>
-            <div style="width: 56px; height: 4px; background: {_c}; border-radius: 2px;"></div>
-        </div>
-        """),
         mo.Html(f"""
         <div style="border-left:4px solid {_c}; background:{COLORS['BlueL']};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
@@ -737,28 +833,52 @@ def _(act1_reflection, mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: DISTRIBUTED PERFORMANCE ANALYSIS
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II -- DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 12: ACT II HEADER ────────────────────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(COLORS, mo):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Distributed Performance Analysis"
+    _act_duration = "20-25 min"
+    _act_why      = ("Act I showed that optimizing the wrong bottleneck wastes engineering weeks. "
+                     "Now apply the same logic at 512-GPU scale: a real training profile shows "
+                     "compute = 45%, AllReduce = 30%, pipeline bubble = 15%, data loading = 10%. "
+                     "One quarter's engineering budget. Amdahl determines the only correct choice.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 13: ACT2_STAKEHOLDER ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
     _c = COLORS["OrangeLine"]
     mo.vstack([
-        mo.Html(f"""
-        <div style="margin: 40px 0 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 6px;">
-                Act II · 20–25 minutes
-            </div>
-            <h2 style="font-size: 1.7rem; font-weight: 900; color: #0f172a;
-                       margin: 0 0 6px 0; letter-spacing: -0.015em;">
-                Distributed Performance Analysis
-            </h2>
-            <div style="width: 56px; height: 4px; background: {_c}; border-radius: 2px;"></div>
-        </div>
-        """),
         mo.Html(f"""
         <div style="border-left:4px solid {_c}; background:{COLORS['OrangeL']};
                     border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
@@ -778,8 +898,8 @@ def _(COLORS, mo):
         """),
         mo.md("""
         **Model Flop Utilization (MFU)** measures the fraction of peak hardware FLOPS
-        actually used for productive computation. At 35% MFU on H100s (1979 TFLOPS FP16),
-        the cluster delivers 35% × 1979 = 693 effective TFLOPS per GPU, leaving 65%
+        actually used for productive computation. At 35% MFU on H100s (989 TFLOPS FP16),
+        the cluster delivers 35% × 989 = 346 effective TFLOPS per GPU, leaving 65%
         of purchased capability idle.
 
         The four candidate bottlenecks have different Amdahl impacts *and* different
@@ -1265,7 +1385,7 @@ def _(mo):
 
         ```
         MFU = (Achieved FLOPS) / (Peak FLOPS × num_GPUs)
-             = (tokens/sec × FLOPs/token) / (1979 TFLOPS × 512)
+             = (tokens/sec × FLOPs/token) / (989 TFLOPS × 512)
         ```
 
         **Optimization ROI model:**
@@ -1378,7 +1498,120 @@ def _(act2_reflection, mo):
     return
 
 
-# ─── CELL 20: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Profile first, always.</strong>
+                    Amdahl's Law is exact: a component at f = 12% of total time with a
+                    k = 3x speedup yields at most +13.6% end-to-end improvement.
+                    The three weeks spent on the attention kernel would have delivered
+                    3.3x more impact applied to AllReduce &mdash; a fact the profiler
+                    reveals in the first hour. You cannot optimize what you cannot measure.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. In distributed training, the serial residual is distributed coordination.</strong>
+                    At 512-GPU scale, the non-parallelizable fraction includes AllReduce
+                    barriers (30%), pipeline bubble idle time (15%), and data loading
+                    stalls (10%). Pipeline bubble reduction via micro-batch tuning
+                    (m: 4 &rarr; 8) is a configuration change costing zero hardware
+                    and zero library changes &mdash; typically the highest-ROI first fix.
+                    A +2.8 MFU point gain on a 512-GPU H100 cluster at $3/GPU-hour
+                    saves ~$47,000 per week of training time recovered.
+                </div>
+                <div>
+                    <strong>3. Optimizing the non-binding constraint yields zero speedup.</strong>
+                    The Iron Law (Time = max(Compute/FLOPS, Memory/BW) + Overhead) is not
+                    a guideline &mdash; it is exact. A 95%-efficient compute kernel on a
+                    memory-bound workload produces 0% end-to-end improvement because compute
+                    is not in the max() term.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 10: Distributed Inference</strong> &mdash; Training
+                    performance is dominated by AllReduce and pipeline bubbles. The
+                    next lab asks: when the same model moves from training to serving,
+                    what shifts? KV-cache memory pressure and queuing dynamics replace
+                    gradient synchronization as the binding constraint.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-performance-engineering-efficiency-frontier
+                    for the full Iron Law derivation and @sec-performance-engineering-roofline
+                    for the Roofline Model and arithmetic intensity analysis.<br/>
+                    <strong>Build:</strong> TinyTorch Module 19 &mdash; implement a
+                    profile-guided optimizer that identifies the Amdahl bottleneck
+                    from a simulated trace and recommends the highest-ROI fix.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. A component at f = 12% of total time receives a k = 3x speedup. Using Amdahl's Law, what is the maximum end-to-end improvement? Why would the same engineering effort applied to a component at f = 40% deliver far more impact?
+2. At 512-GPU scale, the serial residual includes AllReduce barriers (30%), pipeline bubble idle time (15%), and data loading stalls (10%). Which of these is a configuration change costing zero hardware, and why is it typically the highest-ROI first fix?
+3. The Iron Law states Time = max(Compute/FLOPS, Memory/BW) + Overhead. If a workload is memory-bound, why does a 2x improvement to the compute kernel yield exactly 0% end-to-end speedup?
+
+**You're ready to move on if you can:**
+- Use Amdahl's Law to prioritize optimization targets by their maximum possible end-to-end impact
+- Identify whether a workload is compute-bound or memory-bound using the roofline model and arithmetic intensity
+- Explain why profiling must come before optimization and why the binding constraint determines the only productive optimization target
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ────────────────────────────────────────────────────────
+# ─── CELL 21: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     COLORS, _budget_exceeded, _mfu_improvement, _mfu_new,
@@ -1446,60 +1679,6 @@ def _(
     return
 
 
-# ─── CELL 21: KEY TAKEAWAYS ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("## Key Takeaways"),
-        mo.callout(mo.md("""
-        **1. Profile first, always.** Amdahl's Law is exact: optimizing a component
-        that represents f = 12% of total time with a k = 3× speedup yields a maximum
-        of +13.6% end-to-end improvement, regardless of kernel quality. The three weeks
-        spent on the attention kernel would have delivered 3.3× more impact applied to
-        AllReduce — a fact the profiler reveals in the first hour. *You cannot optimize
-        what you cannot measure.*
-        """), kind="info"),
-        mo.callout(mo.md("""
-        **2. In distributed training, the serial residual is distributed coordination.**
-        Single-machine Amdahl treats serial code as the bottleneck. At 512-GPU scale,
-        the "serial" fraction includes AllReduce synchronization barriers (30%), pipeline
-        bubble idle time (15%), and data loading stalls (10%) — none of which are in
-        the model code. Pipeline bubble reduction via micro-batch tuning is often the
-        highest-ROI first fix: it is a configuration change (`m: 4 → 8`) with zero
-        hardware cost, zero library changes, and immediate impact. Profile. Then fix
-        the bottleneck the profiler found, not the bottleneck you find interesting.
-        """), kind="info"),
-    ])
-    return
-
-
-# ─── CELL 22: CONNECTIONS ─────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ## Connections
-
-    **Textbook:** This lab explores @sec-performance-engineering, specifically
-    @sec-performance-engineering-efficiency-frontier (Iron Law of ML Performance),
-    @sec-performance-engineering-roofline (Roofline Model and arithmetic intensity),
-    and the profile-diagnose-fix-reprofile methodology.
-
-    The distributed Amdahl analysis connects to @sec-distributed-training-systems
-    (3D parallelism and pipeline bubble costs) and @sec-collective-communication
-    (AllReduce bandwidth and ring topology constraints).
-
-    **Next Lab:** Lab 10 (Distributed Inference) builds on this performance engineering
-    foundation by examining how KV-cache memory pressure and continuous batching
-    reshape the optimization landscape from training to serving.
-
-    **Hardware constants used in this lab:**
-    All numbers derive from NVIDIA H100 SXM5 specifications (H100_TFLOPS_FP16 = 1979,
-    H100_BW_GBS = 3350, H100_RAM_GB = 80), InfiniBand HDR200 specs
-    (IB_HDR200_BW_GBS = 400), and NVLink 4.0 specs (NVLINK4_BW_GBS = 900).
-    Pipeline bubble percentages and engineering cost estimates are derived from
-    empirical characterization of 512-GPU H100 LLM training runs.
-    """)
-    return
 
 
 if __name__ == "__main__":

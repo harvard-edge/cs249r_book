@@ -31,7 +31,7 @@ app = marimo.App(width="full")
 #   Tree:  Per-node volume = 2(1-1/N) × M — same asymptotic, different bottleneck
 #
 # Hardware Constants (all commented with source):
-#   H100_TFLOPS_FP16  = 1979        # H100 SXM5, NVIDIA spec
+#   H100_TFLOPS_FP16  = 989         # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 #   H100_RAM_GB       = 80          # H100 HBM3e, NVIDIA spec
 #   IB_HDR200_BW_GBS  = 400         # InfiniBand NDR, NVIDIA spec (Gbps, ÷8 → GB/s)
 #   IB_LATENCY_US     = 1.5         # InfiniBand one-way latency, @sec-collective-communication
@@ -63,6 +63,10 @@ def _():
     ledger = DesignLedger()
     return COLORS, LAB_CSS, DesignLedger, apply_plotly_theme, go, ledger, math, mo, np
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -115,7 +119,73 @@ def _(COLORS, LAB_CSS, mo):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the bandwidth vs. latency dominance: calculate why Ring AllReduce for a 70B model (280 GB FP32 gradients) on 64 GPUs over InfiniBand NDR takes ~11,200 ms, with the bandwidth term (11,200 ms) exceeding the latency term (0.4 ms) by a factor of 30,000&times;.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Identify the alpha-beta crossover point: predict the maximum message size (~150 KB at 1,024 GPUs) where Tree AllReduce is faster than Ring AllReduce, given &alpha; = 3 &mu;s and &beta; = 50 GB/s.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a hierarchical AllReduce strategy: configure Ring inter-node and Tree intra-node to achieve total AllReduce time under 6,000 ms for a 70B model on 512 GPUs across 64 nodes.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Ring AllReduce bandwidth formula 2(N-1)/N &times; M/&beta; from @sec-collective-communication &middot;
+                    Alpha-beta latency model and crossover point n* = &alpha;&beta; from @sec-network-fabrics-performance-model
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Ring AllReduce is bandwidth-optimal and Tree AllReduce is latency-optimal &mdash; so which one should you use for a 70B-parameter model, and is there any message size where Tree actually wins?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -170,8 +240,46 @@ def _(COLORS, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — THE RING EFFICIENCY REVELATION
+# ZONE B: ACT I — CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
+@app.cell(hide_code=True)
+def _(COLORS, mo):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Ring Efficiency Revelation"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "You expect InfiniBand latency (microseconds) to dominate AllReduce time. The "
+        "instruments will show that for a 70B model (280 GB FP32 gradients), the bandwidth "
+        "term (11,200 ms) exceeds the latency term (0.4 ms) by 30,000&times; &mdash; at LLM "
+        "scale, AllReduce is entirely a bandwidth problem, and latency optimization is irrelevant."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
 
 # ─── ACT I: STAKEHOLDER MESSAGE ────────────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -687,8 +795,47 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — ALGORITHM SELECTION UNDER CONSTRAINTS
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
+@app.cell(hide_code=True)
+def _(COLORS, mo):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Algorithm Selection Under Constraints"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I showed that Ring AllReduce is bandwidth-optimal for large messages. Now discover "
+        "when that advantage reverses: Ring&apos;s latency term 2(N-1)&alpha; scales linearly "
+        "with N, while Tree&apos;s scales as 2&thinsp;log&thinsp;N. At 1,024 GPUs and messages "
+        "below ~150 KB, Tree becomes definitively faster &mdash; and the crossover point is the "
+        "engineering boundary between two fundamentally different optimization strategies."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
 
 # ─── ACT II: STAKEHOLDER MESSAGE ───────────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -697,17 +844,6 @@ def _(COLORS, mo):
     _bg    = COLORS["OrangeLL"]
 
     mo.vstack([
-        mo.Html(f"""
-        <div style="margin: 32px 0 8px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 4px;">
-                Act II · Design Challenge · 20-25 min
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};">
-                Algorithm Selection Under Constraints
-            </div>
-        </div>
-        """),
         mo.Html(f"""
         <div style="border-left: 4px solid {_color}; background: {_bg};
                     border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 4px 0 12px 0;">
@@ -856,10 +992,10 @@ def _(COLORS, apply_plotly_theme, bw_radio, go, gpu_count_slider, math, mo, msg_
     # ── Hardware constants ──────────────────────────────────────────────────────
     # IB_LATENCY_US     = 1.5  # InfiniBand one-way latency, μs
     #                          # Source: @sec-collective-communication, @tbl-interconnect-parameters
-    # H100_TFLOPS_FP16  = 1979 # H100 SXM5 FP16 Tensor Core TFLOPS, NVIDIA spec
+    # H100_TFLOPS_FP16  = 989  # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     # COMPUTE_STEP_REF  = estimated compute time per training step
     _IB_LATENCY_US    = 1.5
-    _H100_TFLOPS_FP16 = 1979   # TFLOPS, NVIDIA H100 SXM5 spec
+    _H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     _H100_RAM_GB      = 80     # GB HBM3e, NVIDIA spec
 
     # ── Simulation inputs ───────────────────────────────────────────────────────
@@ -1248,6 +1384,121 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(COLORS, mo):
+    mo.Html(f"""
+    <div style="margin: 40px 0 32px 0; font-family: system-ui, sans-serif;">
+
+      <!-- Takeaways card -->
+      <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                  border-radius: 12px; padding: 28px 32px; margin-bottom: 24px;">
+        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+                    text-transform: uppercase; color: {COLORS['TextMuted']};
+                    margin-bottom: 16px;">Key Takeaways</div>
+
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+
+          <div style="display: flex; gap: 14px; align-items: flex-start;">
+            <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
+                        width: 26px; height: 26px; display: flex; align-items: center;
+                        justify-content: center; font-size: 0.75rem; font-weight: 700;
+                        flex-shrink: 0; margin-top: 1px;">1</div>
+            <div>
+              <div style="font-weight: 700; color: {COLORS['Text']}; font-size: 0.95rem;
+                          margin-bottom: 3px;">Bandwidth dominates at production scale.</div>
+              <div style="color: {COLORS['TextSec']}; font-size: 0.88rem; line-height: 1.5;">
+                For a 70B-parameter model gradient sync across 64 GPUs, the bandwidth term
+                (11,200 ms) exceeds the latency term (0.4 ms) by 30,000x. Optimizing for
+                latency alone is irrelevant — you must hit the bandwidth ceiling.
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 14px; align-items: flex-start;">
+            <div style="background: {COLORS['GreenLine']}; color: white; border-radius: 50%;
+                        width: 26px; height: 26px; display: flex; align-items: center;
+                        justify-content: center; font-size: 0.75rem; font-weight: 700;
+                        flex-shrink: 0; margin-top: 1px;">2</div>
+            <div>
+              <div style="font-weight: 700; color: {COLORS['Text']}; font-size: 0.95rem;
+                          margin-bottom: 3px;">Algorithm crossover is a quantitative threshold, not a heuristic.</div>
+              <div style="color: {COLORS['TextSec']}; font-size: 0.88rem; line-height: 1.5;">
+                The Ring/Tree crossover occurs at n* = α·β ≈ 150 KB at 1,024 GPUs.
+                Below this threshold, Ring sends 2(N−1) messages and its latency term
+                dominates; Tree sends only 2 log₂N messages. No single algorithm is
+                universally optimal — cluster size and message size jointly determine the winner.
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 14px; align-items: flex-start;">
+            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
+                        width: 26px; height: 26px; display: flex; align-items: center;
+                        justify-content: center; font-size: 0.75rem; font-weight: 700;
+                        flex-shrink: 0; margin-top: 1px;">3</div>
+            <div>
+              <div style="font-weight: 700; color: {COLORS['Text']}; font-size: 0.95rem;
+                          margin-bottom: 3px;">Hierarchical topology and compression multiply each other.</div>
+              <div style="color: {COLORS['TextSec']}; font-size: 0.88rem; line-height: 1.5;">
+                Hierarchical Ring (NVLink intra-node + InfiniBand inter-node) achieves
+                ~5,800 ms for a 280 GB payload — a 2x improvement over flat Ring.
+                Adding BF16 compression halves that again to ~2,900 ms. Topology-aware
+                algorithms and gradient compression are complementary, not competing, strategies.
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Connection cards -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+        <div style="background: white; border: 1px solid {COLORS['Border']};
+                    border-top: 3px solid {COLORS['BlueLine']}; border-radius: 8px;
+                    padding: 20px 24px;">
+          <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+                      text-transform: uppercase; color: {COLORS['TextMuted']};
+                      margin-bottom: 10px;">What's Next</div>
+          <div style="font-weight: 700; color: {COLORS['Text']}; font-size: 0.9rem;
+                      margin-bottom: 6px;">Lab V2-07: Fault Tolerance</div>
+          <div style="color: {COLORS['TextSec']}; font-size: 0.85rem; line-height: 1.5;">
+            AllReduce algorithm choice directly determines checkpoint coordination strategy.
+            Ring AllReduce requires all N ranks to complete before any rank can proceed —
+            one slow node stalls the entire collective. Lab 07 explores how checkpointing
+            frequency and recovery strategy interact with collective communication overhead.
+          </div>
+        </div>
+
+        <div style="background: white; border: 1px solid {COLORS['Border']};
+                    border-top: 3px solid {COLORS['GreenLine']}; border-radius: 8px;
+                    padding: 20px 24px;">
+          <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em;
+                      text-transform: uppercase; color: {COLORS['TextMuted']};
+                      margin-bottom: 10px;">Textbook &amp; TinyTorch</div>
+          <div style="font-weight: 700; color: {COLORS['Text']}; font-size: 0.9rem;
+                      margin-bottom: 6px;">@sec-collective-communication</div>
+          <div style="color: {COLORS['TextSec']}; font-size: 0.85rem; line-height: 1.5;">
+            The α-β model, Ring AllReduce derivation, and algorithm selection criteria
+            are formalized in <em>@sec-collective-communication</em>. In TinyTorch,
+            the collective module at <code>tinytorch/src/collective/</code> implements
+            Ring AllReduce from scratch — you'll see exactly how chunk scheduling maps
+            to the bandwidth and latency terms you explored here.
+          </div>
+        </div>
+
+      </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1366,6 +1617,21 @@ def _(
 
         Next: **Lab 07** — The Young-Daly optimal checkpoint interval and fault tolerance at scale.
         """), kind="success"),
+
+        mo.accordion({
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. For a 70B-parameter model (280 GB gradients) across 64 GPUs on InfiniBand NDR (50 GB/s), the bandwidth term exceeds the latency term by 30,000x. Why does this ratio mean that optimizing startup latency is irrelevant at production scale?
+2. The Ring/Tree AllReduce crossover occurs at approximately 150 KB at 1,024 GPUs. What determines this crossover point, and why does no single algorithm win for all message sizes and cluster sizes?
+3. Hierarchical Ring (NVLink intra-node + InfiniBand inter-node) achieves a 2x improvement over flat Ring, and adding BF16 compression doubles that again. Why are topology-aware algorithms and gradient compression complementary rather than competing strategies?
+
+**You're ready to move on if you can:**
+- Calculate Ring AllReduce time using the alpha-beta model for a given gradient size and cluster configuration
+- Determine the Ring/Tree crossover point for a specific cluster size and hardware
+- Explain when communication overhead exceeds 50% of step time and what interventions are available
+""")
+        }),
     ])
     return
 

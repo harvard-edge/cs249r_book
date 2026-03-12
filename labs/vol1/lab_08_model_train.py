@@ -30,6 +30,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ── CELL 0: SETUP ────────────────────────────────────────────────────────────
 @app.cell
 def _():
@@ -132,7 +136,76 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ── CELL 2: RECOMMENDED READING ──────────────────────────────────────────────
+# ── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the 16&times; training memory multiplier</strong> — compute why a 7B FP32 Adam run requires 112 GB (weights + gradients + Adam m_t + v_t), not 28 GB, before a single activation is stored.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose why mixed precision reduces memory by ~1.5&times;, not 2&times;</strong> — trace the FP32 master copy that persists even when activations are in FP16.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Predict the throughput cost of gradient accumulation</strong> — determine whether accumulating 32 micro-batches produces the same throughput as a native batch-32 run and identify the +33% compute overhead of gradient checkpointing.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Training memory components (weights, gradients, optimizer state) from
+                    @sec-model-training-training-systems-fundamentals-05d2 &middot;
+                    Iron Law of Training Performance from @sec-model-training-iron-law-training-performance-a53f
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "An H100 has 80 GB of memory and a 7B model weighs 28 GB in FP32 &mdash;
+                so why does training that model immediately OOM, and can gradient accumulation
+                solve it without sacrificing throughput?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 3: READING ───────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -147,7 +220,7 @@ def _(mo):
     return
 
 
-# ── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -167,17 +240,56 @@ def _(mo):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I — THE MEMORY BUDGET SHOCK
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 4: ACT I SCENARIO ───────────────────────────────────────────────────
+# ── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Memory Budget Shock"
+    _act_duration = "12 min"
+    _act_why = (
+        "You know the H100 has 80 GB and a 7B model weighs 28 GB in FP32 \u2014 "
+        "so the job should fit. The instruments will show that training memory "
+        "is not the model size: it is weights + gradients + Adam state, which "
+        "multiplies the requirement by 4\u00d7 before a single batch is loaded."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["RedLine"]
     mo.vstack([
-        mo.md("---"),
-        mo.md("## Act I — The Memory Budget Shock"),
         mo.Html(f"""
         <div style="border-left: 4px solid {_color}; background: #fef2f2;
                     border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
@@ -187,7 +299,7 @@ def _(mo, COLORS):
             </div>
             <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
                 "Our new 7B model training job OOM'd on the H100 after 2 steps. I set
-                precision to fp32 and used Adam — that should be fine, right? H100 has
+                precision to fp32 and used Adam &mdash; that should be fine, right? H100 has
                 80 GB and the model is only 7 billion parameters."
             </div>
         </div>
@@ -674,17 +786,56 @@ At 7B parameters: $12 \times 7 \times 10^9 = 84 \text{ GB}$ — still exceeds H1
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II — GRADIENT ACCUMULATION VS BATCH SIZE
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 13: ACT II INTRO ────────────────────────────────────────────────────
+# ── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "Gradient Accumulation vs Batch Size"
+    _act_duration = "25 min"
+    _act_why = (
+        "Act I established that the static memory floor is fixed at 112 GB before activations. "
+        "Now discover the one technique that lets you achieve effective batch-256 training "
+        "on a device that can only fit batch-8 \u2014 and measure exactly what that "
+        "flexibility costs in throughput."
+    )
+    mo.vstack([
+        mo.md("---"),
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
+            </div>
+        </div>
+        """),
+    ])
+    return
+
+
+# ── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["OrangeLine"]
     mo.vstack([
-        mo.md("---"),
-        mo.md("## Act II — Gradient Accumulation vs Batch Size"),
         mo.Html(f"""
         <div style="border-left: 4px solid {_color}; background: #fff7ed;
                     border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
@@ -860,11 +1011,13 @@ def _(
 
     # ── Throughput model ──────────────────────────────────────────────────────
     # Source: training.qmd §Iron Law of Training Performance
-    #   Gradient accumulation overhead: each accumulation step adds a small
-    #   gradient summation cost (~2–5% extra compute per step).
-    #   Source: plan traceability — "Slightly slower due to optimizer overhead"
-    _accum_overhead_per_step = 0.03  # 3% overhead per accumulation step
-    _total_overhead          = 1.0 + _accum_overhead_per_step * _accum
+    #   Gradient accumulation overhead: the extra cost is a fixed per-optimizer-step
+    #   overhead (~3-5%) from gradient summation bookkeeping, NOT proportional to K.
+    #   Each micro-batch forward-backward is the same compute as the native case;
+    #   the only extras are K-1 gradient += ops (cheap) and optimizer step overhead.
+    #   Source: training.qmd §Iron Law of Training Performance
+    _accum_overhead_fixed = 0.04  # ~4% fixed overhead per optimizer step
+    _total_overhead       = 1.0 + _accum_overhead_fixed
 
     # Throughput: samples per second (normalized to native batch = 1.0)
     # Native large batch baseline: 1 optimizer step per _effective_batch samples
@@ -993,7 +1146,7 @@ Activation memory     = {_micro} × {_seq_len} × {_hidden_dim} × {_n_layers if
 {_ckpt_note}
 Static memory floor   = {_static_gb:.1f} GB  (weights + grads + Adam)
 Total required        = {_total_gb:.1f} GB
-Accumulation overhead = {(_total_overhead - 1) * 100:.0f}%  ({_accum} steps × 3% per step)
+Accumulation overhead = {(_total_overhead - 1) * 100:.0f}%  (fixed bookkeeping cost per optimizer step)
 Relative throughput   = 1 / ({_total_overhead:.2f} overhead × {_ckpt_compute_overhead:.2f} ckpt) = {_effective_throughput:.3f}×
 ```
 """
@@ -1056,21 +1209,17 @@ def _(mo, act2_prediction):
             f"**Correct.** You predicted: {_predicted_label}. "
             f"Gradient accumulation runs the same total compute as a native batch — "
             f"every sample sees a forward and backward pass exactly once. "
-            f"The cost difference comes only from the gradient summation bookkeeping "
-            f"at each accumulation step: roughly 2–5% overhead per step. "
-            f"With 32 steps this is 32 × 3% ≈ 96% overhead on the accumulation logic, "
-            f"but that logic is tiny compared to the forward-backward pass itself, "
-            f"making the total throughput hit roughly 3–8% below native batch."
+            f"The only extra cost is a fixed per-optimizer-step overhead (~4%) from "
+            f"gradient summation bookkeeping. This overhead does not scale with K: "
+            f"accumulating 4 or 32 micro-batches costs roughly the same ~4% penalty."
         ), kind="success")
     elif act2_prediction.value == "same":
         mo.callout(mo.md(
             f"**Close, but not quite.** You predicted: {_predicted_label}. "
-            f"Gradient accumulation is nearly equivalent, but each micro-batch step "
-            f"incurs a small gradient summation and bookkeeping overhead. "
-            f"Over 32 accumulation steps this accumulates to a real (small) throughput "
-            f"penalty — typically 3–8% total. The chapter maps accumulation to "
-            f"the Utilization ($\\eta$) term of the Iron Law: it keeps the GPU busy "
-            f"but adds minor overhead per step."
+            f"Gradient accumulation is nearly equivalent, but each optimizer step "
+            f"incurs a small fixed overhead (~4%) from gradient summation bookkeeping. "
+            f"The chapter maps accumulation to the Utilization ($\\eta$) term of the "
+            f"Iron Law: it keeps the GPU busy but adds a minor fixed cost per step."
         ), kind="warn")
     elif act2_prediction.value == "32x_slower":
         mo.callout(mo.md(
@@ -1198,64 +1347,100 @@ For GPT-2's 48 layers: $\sqrt{48} \approx 7$ — store 7 checkpoints instead of 
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONNECTIONS + TAKEAWAYS
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 22: CONNECTIONS ──────────────────────────────────────────────────────
+# ── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-        mo.md("## Connections"),
-        mo.callout(mo.md("""
-        **Textbook:** This lab explores the memory accounting framework from
-        @sec-model-training-training-systems-fundamentals-05d2 and the Iron Law of
-        Training Performance from @sec-model-training-iron-law-training-performance-a53f.
-        The gradient accumulation throughput model traces to the Iron Law's utilization
-        term ($\\eta$): accumulation keeps the GPU busy but adds minor overhead per step.
 
-        **TinyTorch:** In Module 08, you implement the optimizer state allocation and
-        backward-pass gradient accumulation loop from scratch. When you see the Adam
-        state tensors initialized at `model.parameters() × 2` you will recognize the
-        memory cost computed in this lab.
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Training a 7B FP32 Adam model requires 112 GB &mdash; 4&times; the inference size.</strong>
+                    Weights (28 GB) + gradients (28 GB) + Adam m_t (28 GB) + Adam v_t (28 GB)
+                    = 112 GB before a single activation is stored. An H100 OOM is not a
+                    configuration mistake; it is a predictable consequence of the formula.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Mixed precision reduces static memory by ~1.5&times;, not 2&times;.</strong>
+                    Switching weights and gradients to BF16 halves those buffers, but Adam
+                    moments remain in FP32. Total goes from 16 bytes/param to ~12 bytes/param
+                    &mdash; a real saving, but not the 2&times; improvement that "half precision"
+                    implies.
+                </div>
+                <div>
+                    <strong>3. Gradient accumulation costs ~4% throughput regardless of accumulation depth.</strong>
+                    Accumulating K micro-batches produces the same gradient as a native batch
+                    at ~4% overhead per optimizer step. The overhead is fixed (gradient summation
+                    bookkeeping), not proportional to K &mdash; doubling K does not double the cost.
+                </div>
+            </div>
+        </div>
+        """),
 
-        **Next Lab:** Lab 09 (Data Selection) examines how the *content* of the training
-        data — not just the volume — affects how many optimizer steps are needed to
-        converge, which multiplies the total training cost explored here.
-        """), kind="info"),
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 09: The Data Selection Tradeoff</strong> &mdash; This lab
+                    computed the memory cost per optimizer step. Lab 09 asks how the content
+                    of the training data &mdash; not just its volume &mdash; affects how many
+                    steps are needed to converge, multiplying the total cost you measured here.
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-model-training-training-systems-fundamentals-05d2
+                    for the full memory accounting framework.<br/>
+                    <strong>Build:</strong> TinyTorch Module 08 &mdash; implement Adam optimizer
+                    state allocation and gradient accumulation from scratch.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. Training GPT-2 XL (1.5B parameters) in FP32 with Adam requires how many GB of static memory (weights + gradients + optimizer state) before a single activation is stored — and what is the Adam-to-SGD memory ratio?
+
+    2. A baseline GPT-2 training run achieves only 45% MFU with 40% of iteration time consumed by data loading. After applying mixed precision, gradient checkpointing, and prefetching, what is the target MFU from Act II — and which bottleneck did each optimization address?
+
+    3. Mixed precision reduces training memory by ~1.5x rather than 2x. Why does the FP32 master copy prevent the naive 2x calculation — and would switching from Adam to SGD save more memory than switching from FP32 to FP16 mixed precision for a 1.5B parameter model?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
     ])
     return
 
 
-# ── CELL 23: KEY TAKEAWAYS ────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("## Key Takeaways"),
-        mo.callout(mo.md("""
-        **1. The 16× training multiplier.** A 7B model in FP32 with Adam requires
-        16 bytes per parameter — not 4. Weights (4B) + gradients (4B) + Adam m_t (4B)
-        + Adam v_t (4B) = 16 bytes × 7B params = 112 GB. OOM is not a surprise;
-        it is a predictable consequence of this arithmetic. The H100's 80 GB is not
-        a ceiling you hit by accident — you can calculate exactly when you will hit it
-        before submitting the job.
-        """), kind="warn"),
-        mo.callout(mo.md("""
-        **2. Gradient accumulation buys memory, not speed.** Accumulation gives you an
-        effective large batch at the cost of micro-batch-sized activation memory.
-        Throughput stays within 5–10% of native large-batch training. The technique
-        belongs in the Iron Law's $\\eta$ column: it eliminates the activation OOM that
-        would otherwise kill utilization entirely, at a small overhead cost per step.
-        Gradient checkpointing adds another degree of freedom: trade +33% compute for
-        $\\sqrt{L}$ activation memory — the right choice when activation memory is the
-        binding constraint.
-        """), kind="info"),
-    ])
-    return
-
-
-# ── CELL 24: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
+# ── CELL 21: DESIGN LEDGER SAVE + HUD ────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,

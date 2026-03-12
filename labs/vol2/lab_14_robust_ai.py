@@ -55,7 +55,7 @@ def _():
 
     # ── Hardware constants (from NVIDIA H100 SXM5 spec and Vol2 robust_ai.qmd) ─
     H100_BW_GBS       = 3350    # GB/s HBM3e — NVIDIA H100 SXM5 spec
-    H100_TFLOPS_FP16  = 1979    # TFLOPS tensor core FP16 — NVIDIA spec
+    H100_TFLOPS_FP16  = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80      # GB HBM3e — NVIDIA spec
 
     # ── Adversarial training compute constants ────────────────────────────────
@@ -87,6 +87,10 @@ def _():
         SECURITY_ADV_THRESHOLD, PRODUCT_CLEAN_THRESHOLD,
     )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER (hide_code=True) ─────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -142,7 +146,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING (hide_code=True) ────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the robustness tax</strong>: measure the exact clean-accuracy cost (26 percentage points) of PGD-7 adversarial training at &epsilon;=8/255 and predict whether FGSM or PGD achieves a lower adversarial accuracy floor.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose why 3.4% adversarial accuracy is worse than random</strong> for a 10-class classifier &mdash; and identify which geometric property of high-dimensional spaces makes imperceptible perturbations catastrophic.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a defense configuration</strong> that simultaneously satisfies adversarial accuracy &ge;50% (PGD) and clean accuracy &ge;90%, given the &epsilon;-accuracy tradeoff physics of adversarial training.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Adversarial attack mechanics (&epsilon;-ball, FGSM, PGD) from @sec-robust-ai &middot;
+                    Loss landscape intuition from @sec-training-optimization
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Adversarial training is the standard defense against &epsilon;-ball attacks &mdash; so why does hardening a model with PGD-7 at &epsilon;=8/255 cost 26 percentage points of clean accuracy, and is there any defense configuration that satisfies both the security and clinical requirements simultaneously?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING (hide_code=True) ────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -207,23 +277,43 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: ADVERSARIAL FRAGILITY REVELATION
-# Stakeholder: ML Security Lead | Prediction: what does 3.4% adversarial mean?
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["RedLine"]
+    _act_title    = "Adversarial Fragility Revelation"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You expect that a model with 97.3% clean accuracy is robust &mdash; after all, "
+                     "it classifies correctly almost all the time. "
+                     "A single FGSM perturbation of &epsilon;=8/255 will show it drops to 3.4%, "
+                     "which is worse than random chance for a 10-class problem. "
+                     "The question is not whether the model fails; it is why the failure is "
+                     "so catastrophic when the perturbation is invisible to human eyes.")
     mo.vstack([
         mo.md("---"),
-        mo.Html("""
-        <div style="background: #fef2f2; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #CB202D;
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I · Adversarial Fragility Revelation · 12–15 min
+        mo.Html(f"""
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
             </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                What does 3.4% adversarial accuracy actually mean?
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
@@ -794,23 +884,44 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: ROBUSTNESS-ACCURACY TRADEOFF
-# Stakeholder: CISO | Prediction: is the joint constraint satisfiable?
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
+    _act2_num      = "II"
+    _act2_color    = COLORS["BlueLine"]
+    _act2_title    = "Robustness-Accuracy Tradeoff"
+    _act2_duration = "20&ndash;25 min"
+    _act2_why      = ("Act I confirmed that an undefended model collapses under perturbation. "
+                      "Now discover why the cure is almost as painful as the disease: "
+                      "adversarial training forces decision boundaries wider to resist attacks, "
+                      "which inevitably misclassifies clean examples that were near tight margins. "
+                      "Your task is to find whether the security constraint (&ge;50% adversarial) "
+                      "and clinical constraint (&ge;90% clean) can be satisfied simultaneously &mdash; "
+                      "or whether they are fundamentally incompatible.")
     mo.vstack([
         mo.md("---"),
-        mo.Html("""
-        <div style="background: #EBF4FA; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #006395;
-                        text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II · Robustness-Accuracy Tradeoff · 20–25 min
+        mo.Html(f"""
+        <div style="margin: 40px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act2_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act2_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act2_num} &middot; {_act2_duration}</div>
             </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                Can you satisfy both the security requirement and the product requirement?
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act2_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act2_why}
             </div>
         </div>
         """),
@@ -1461,7 +1572,109 @@ def _(mo):
     return
 
 
-# ─── LEDGER SAVE + HUD FOOTER ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 20: SYNTHESIS ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Adversarial examples are not noise &mdash; they are maximally effective signals.</strong>
+                    At 3.4% adversarial accuracy (worse than random for 10 classes), FGSM and PGD
+                    accumulate perturbations constructively across 150,000+ dimensions by aligning
+                    each pixel with the gradient of the loss. High dimensionality amplifies
+                    imperceptible perturbations into definitive misclassifications.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. The robustness-accuracy tradeoff is geometric, not configurable away.</strong>
+                    PGD-7 adversarial training at &epsilon;=8/255 drops ResNet-50 clean accuracy from
+                    76% to ~50% (a 26 percentage point loss) and costs 8&times; training compute.
+                    The boundary must be wider to resist attacks &mdash; and wider boundaries misclassify
+                    clean inputs that were near those tight margins.
+                </div>
+                <div>
+                    <strong>3. The joint security + clinical constraint is satisfiable but narrow.</strong>
+                    The feasible region where adversarial accuracy &ge;50% AND clean accuracy &ge;90%
+                    is a small slice of the training configuration space. It requires careful
+                    calibration of training &epsilon;, PGD steps, and adversarial loss weight &mdash;
+                    no single &ldquo;safe default&rdquo; exists.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What&#x2019;s Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 15: The Jevons Reckoning</strong> &mdash; This lab quantified the
+                    compute overhead of adversarial training (8&times;). The next lab asks: when you
+                    make training 2&times; more efficient across a fleet, does total carbon consumption
+                    fall &mdash; or does Jevons Paradox cause it to rise?
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-robust-ai (adversarial training section) for the
+                    Madry et al. minimax formulation and PGD convergence proof.<br/>
+                    <strong>Build:</strong> The RobustnessTaxAnalysis LEGO cell demonstrates the
+                    exact 76% &rarr; 50% clean accuracy drop with explicit training simulation.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. FGSM and PGD achieve 3.4% adversarial accuracy (worse than random for 10 classes) by aligning each pixel perturbation with the loss gradient across 150,000+ dimensions. Why are adversarial examples maximally effective signals rather than random noise?
+2. PGD-7 adversarial training costs 8x compute per epoch and drops clean accuracy from 76% to ~50%. Why is this robustness-accuracy tradeoff geometric (wider decision boundaries misclassify clean inputs) rather than a tuning problem that better algorithms can eliminate?
+3. The feasible region where adversarial accuracy >= 50% AND clean accuracy >= 90% is narrow and requires careful calibration of training epsilon, PGD steps, and adversarial loss weight. Why does no single safe default exist for this joint constraint?
+
+**You're ready to move on if you can:**
+- Explain why high dimensionality amplifies imperceptible perturbations into definitive misclassifications
+- Calculate the compute cost multiplier of adversarial training for a given PGD step count
+- Identify the feasibility region in the robustness-accuracy tradeoff space for a specific deployment constraint
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER SAVE + HUD FOOTER ───────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1598,35 +1811,6 @@ def _(
         </div>
     </div>
     """)
-    return
-
-
-# ─── KEY TAKEAWAYS ───────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.md("""
-        ## Key Takeaways
-
-        1. **Adversarial examples are not noise — they are maximally effective signals.**
-           A 10-class classifier at 3.4% adversarial accuracy is performing *worse* than
-           random (10%). FGSM and PGD are not random perturbations; they align each pixel's
-           perturbation with the gradient of the loss, accumulating constructively across
-           150,000+ dimensions to consistently steer predictions to specific wrong classes.
-           In high-dimensional spaces, imperceptible L∞ perturbations can dominate the
-           model's decision.
-
-        2. **The robustness-accuracy tradeoff is geometric, not configurable away.**
-           Adversarial training forces decision boundaries to maintain an ε-margin around
-           every training point. Wider boundaries in adversarial directions mean reduced
-           precision on clean examples — some clean inputs near tight boundaries are now
-           inside the margin. Achieving ε=8/255 adversarial accuracy above 50% reliably
-           costs 5–9 percentage points of clean accuracy. This is a fundamental constraint
-           that data augmentation, regularization, and architecture choices cannot bypass.
-           Certified methods (randomized smoothing) cost even more.
-        """),
-    ])
     return
 
 

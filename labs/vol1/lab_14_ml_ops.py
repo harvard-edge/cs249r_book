@@ -36,6 +36,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
 def _():
@@ -69,7 +73,7 @@ def _():
 
     # ── Cloud H100 retraining cost constants ──────────────────────────────────
     H100_BW_GBS       = 3350   # H100 SXM5 HBM3e bandwidth, NVIDIA spec
-    H100_TFLOPS_FP16  = 1979   # H100 peak FP16 Tensor Core TFLOPS, NVIDIA spec
+    H100_TFLOPS_FP16  = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80     # H100 HBM3e capacity, NVIDIA spec
     H100_TDP_W        = 700    # H100 SXM5 TDP, NVIDIA spec
     H100_COST_PER_HR  = 2.0    # H100 SXM5 on-demand USD/hr (standard cloud pricing)
@@ -162,7 +166,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Identify the week when PSI crossed the 0.2 drift threshold for a fraud detection model, and explain why every infrastructure metric remained green throughout.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify the optimal retraining interval T* for two deployment contexts (Cloud at $1K/run vs. Edge at $5K/run) using the staleness cost formula.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Compare fixed-interval vs. threshold-triggered retraining strategies and determine when automation breaks even against manual retraining at 4 hours/week.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    PSI formula and 0.1/0.2 thresholds from @sec-ml-operations-quantifying-drift-physics-psi-8c11 &middot;
+                    Operational mismatch concept from @sec-ml-operations-mlops-3ea3
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Your fraud model dropped from 94% to 87% accuracy while every infrastructure metric stayed green &mdash; so how do you measure a failure that infrastructure monitoring cannot see, and how often should you retrain to prevent it without wasting compute?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -178,7 +248,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ──────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -196,9 +266,48 @@ def _(mo):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE SILENT DRIFT — CALIBRATION
+# ZONE B: ACT I — CALIBRATION
 # ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Silent Drift"
+    _act_duration = "12\u201315 min"
+    _act_why = (
+        "You assume a green infrastructure dashboard means a healthy model. The fraud detection "
+        "scenario will show that a 7-percentage-point accuracy drop produces zero infrastructure "
+        "alerts \u2014 because infrastructure monitoring answers \u201cIs the server running?\u201d "
+        "not \u201cIs the model still correct?\u201d"
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["BlueLine"]
@@ -792,9 +901,48 @@ def _(mo, act1_reflect):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ACT II: OPTIMAL RETRAINING CADENCE — DESIGN CHALLENGE
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "Optimal Retraining Cadence"
+    _act_duration = "20\u201325 min"
+    _act_why = (
+        "Act I showed that drift is invisible to infrastructure monitoring. Now quantify "
+        "how often to retrain: \u201cretrain more often\u201d is wrong \u2014 the optimal "
+        "interval T* depends on the square root of retraining cost, meaning a 4\u00d7 more "
+        "expensive retraining run only doubles the interval, not quadruples it."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["OrangeLine"]
@@ -1475,77 +1623,107 @@ def _(mo, act2_reflect):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CONNECTIONS
+# ZONE D: CLOSING
 # ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-        mo.md("""
-        ## Connections
 
-        **Textbook** &mdash; This lab explores the core concepts of @sec-ml-operations:
-
-        - **@sec-ml-operations-mlops-3ea3** &mdash; The Operational Mismatch: why
-          infrastructure metrics cannot detect model accuracy degradation
-        - **@sec-ml-operations-quantifying-drift-physics-psi-8c11** &mdash; The PSI
-          formula (@eq-psi), the 0.1 / 0.2 threshold table
-          (@tbl-feature-distribution-thresholds), and the connection to KL divergence
-        - **@sec-ml-operations-cost-aware-automation** &mdash; The staleness cost model
-          (@eq-staleness-cost), the optimal retraining interval T* (@eq-optimal-retrain),
-          and the sensitivity table (@tbl-retraining-sensitivity)
-
-        **Lab Sequence** &mdash; Lab 13 (Model Serving) showed how to serve a model at
-        low latency and stay within P99 SLO bounds. This lab shows what happens *after*
-        deployment: the model's *input distribution* drifts away from training, silently
-        degrading accuracy while the serving infrastructure remains healthy. The P99
-        latency instruments from Lab 13 measure serving health; PSI measures model health.
-        Both are required for production reliability.
-
-        **The Synthesis** &mdash; Lab 16 (Conclusion) will audit your full design across
-        all 15 chapters. Your PSI threshold choice, detection week, and T* interval from
-        this lab feed into the cross-lab Design Ledger review against the Five MLOps
-        Principles: Reproducibility, Separation of Concerns, Consistency, Observable
-        Degradation, and Cost-Aware Automation (@sec-ml-operations-summary-ac43).
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Infrastructure health and model health are independent signals.</strong>
+                    A fraud model that dropped 7 percentage points in accuracy maintained 100% uptime,
+                    zero error rate, and normal latency for 6 months. PSI crossed the 0.2 critical
+                    threshold by week 8 &mdash; four months before the accuracy drop was noticed.
+                    Infrastructure monitoring cannot detect this class of failure.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Retraining cadence is a quantitative economic optimization, not a heuristic.</strong>
+                    T* = sqrt(2 &times; C_retrain / C_drift) scales with the square root of cost.
+                    A 4&times; more expensive retraining run doubles T*, not quadruples it &mdash;
+                    explaining why Cloud (T* &asymp; 7&ndash;14 days) and Edge (T* &asymp; 60&ndash;90 days)
+                    environments require dramatically different cadences even at identical accuracy targets.
+                </div>
+                <div>
+                    <strong>3. Automation breaks even in 20 weeks.</strong>
+                    An automated pipeline costs 80 engineering hours once. Manual retraining costs
+                    4 hours/week. After 20 weeks, the manual team spends 100% of capacity on maintenance;
+                    the automated team spends 0%. Threshold-triggered retraining (PSI &gt; 0.1)
+                    further reduces unnecessary compute versus fixed-interval schedules.
+                </div>
+            </div>
+        </div>
         """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 15: Responsible Engineering.</strong> This lab showed that drift
+                    degrades accuracy. Lab 15 asks: when accuracy degrades, does it degrade
+                    equally across all demographic groups &mdash; and how do you measure and
+                    constrain the disparity before it causes regulatory or reputational harm?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-ml-operations-quantifying-drift-physics-psi-8c11
+                    for the PSI derivation and @sec-ml-operations-cost-aware-automation for the
+                    full staleness cost model and T* formula.<br/>
+                    <strong>Build:</strong> TinyTorch Module 14 &mdash; implement a PSI drift
+                    detector and a threshold-triggered retraining scheduler.
+                    See <code>tinytorch/src/14_mlops/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. A model deployed with 94% accuracy sees Jensen-Shannon divergence increase to 0.3 over 26 weeks (lambda=0.10). Using the Degradation Equation, what is the model's accuracy at week 26 — and which infrastructure metric (uptime, P99 latency, error rate) would have flagged this?
+
+    2. The retraining economics formula says: retrain if delta_Accuracy x Value_per_point > Training_Cost + Deployment_Risk. For the Act II simulator, what drift rate (lambda) and domain type produced the fastest-degrading model — and what was the retraining frequency required to keep accuracy above 80%?
+
+    3. MLOps automation costs 80 hours to build but saves 4 hours/week of manual monitoring. At what week does automation break even — and why does a recommendation system (lambda approx 0.15) require daily retraining while an embedded medical device (lambda approx 0.03) can retrain quarterly?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
     ])
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# KEY TAKEAWAYS
-# ═════════════════════════════════════════════════════════════════════════════
-
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.md("""
-        ## Key Takeaways
-
-        1. **Infrastructure health and model health are independent signals.**
-           A model can have 100% uptime, zero errors, and normal latency while its
-           accuracy has decayed by 7 percentage points. Uptime monitoring answers
-           "Is the server running?" PSI monitoring answers "Is the model still correct?"
-           Both are necessary. Neither substitutes for the other. The fraud model stayed
-           green on every infrastructure dashboard for 6 months while silently failing.
-
-        2. **Retraining cadence is a quantitative economic optimization, not a heuristic.**
-           T* = sqrt(2 &times; C_retrain / C_drift) shows that the optimal interval scales
-           with the *square root* of retraining cost. A 4&times; more expensive retraining
-           run doubles T*, not quadruples it. Cloud and Edge environments with identical
-           accuracy requirements can have T* values that differ 3&times;–10&times; purely
-           because of deployment cost asymmetry. The physics of your deployment context
-           determines your retraining economics &mdash; not intuition.
-        """),
-    ])
-    return
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# LEDGER SAVE + HUD
-# ═════════════════════════════════════════════════════════════════════════════
+# ─── CELL 21: LEDGER SAVE + HUD ───────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(

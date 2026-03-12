@@ -34,6 +34,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 0: SETUP (hide_code=False — leave visible) ─────────────────────────
 @app.cell
 def _():
@@ -176,7 +180,75 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ──────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify GPU utilization loss from the dispatch tax</strong> — compute the exact fraction of wall-clock time a GPU performs arithmetic when 1,000 small kernels each carry a 10 &mu;s launch overhead.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict which workloads benefit most from kernel fusion</strong> — identify why KWS (1,000 small kernels) gains &gt;30% from compilation while GPT-2 (20 large kernels) gains near zero.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Calculate the compilation break-even threshold</strong> — derive the minimum inference volume at which a 30-second torch.compile cost is recovered for a given throughput gain.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Kernel launch overhead concept from @sec-ml-frameworks &middot;
+                    Memory bandwidth vs. compute TFLOPS from @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If a model launches 1,000 kernels per forward pass and each kernel computes
+                for only 5 &mu;s, why does buying a faster GPU make the utilization problem
+                worse &mdash; and when does compiling the model actually help?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: READING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -189,7 +261,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     context_toggle = mo.ui.radio(
@@ -226,49 +298,73 @@ def _(mo, COLORS):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT 1: THE DISPATCH TAX AUDIT
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS, context_toggle):
     _ctx = context_toggle.value
     _dispatch_us = 10 if _ctx == "cloud" else 50
     _ctx_label = "Cloud (A100)" if _ctx == "cloud" else "Edge (Jetson Orin NX)"
-    _ctx_color = COLORS["Cloud"] if _ctx == "cloud" else COLORS["Edge"]
-
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Dispatch Tax Audit"
+    _act_duration = "12 min"
+    _act_why = (
+        f"You expect that a model with fewer, larger operations is harder to optimize. "
+        f"The instruments will show the opposite: it is the model with 1,000 tiny kernels "
+        f"that is broken, because the fixed {_dispatch_us}\u00a0\u03bcs launch cost per kernel "
+        f"dwarfs the 5\u00a0\u03bcs of actual computation \u2014 and a faster GPU makes it worse."
+    )
     mo.vstack([
         mo.md("---"),
         mo.Html(f"""
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-            <div style="background: {_ctx_color}; color: white; font-size: 0.72rem;
-                        font-weight: 800; padding: 4px 12px; border-radius: 20px;
-                        letter-spacing: 0.12em; text-transform: uppercase;">
-                Act 1 · 12 min
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration} &middot; {_ctx_label}</div>
             </div>
-            <div style="font-size: 0.8rem; font-weight: 600; color: #64748b;">
-                Context: {_ctx_label} · {_dispatch_us} μs dispatch tax per kernel
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
             </div>
-        </div>
-        """),
-        mo.md("## The Dispatch Tax Audit"),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: {COLORS['BlueL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message · ML Infra Lead
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Our Keyword Spotting model's transformer inference is 3× slower than the
-                paper reports. Same hardware, same model. The profiler shows 1,000 kernel
-                launches per forward pass. Each kernel averages 5 μs of GPU compute. What
-                fraction of wall time is the GPU actually doing math?"
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
     ])
+    return
+
+
+# ─── CELL 6: ACT1_STAKEHOLDER ─────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: {COLORS['BlueL']};
+                border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
+        <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
+                    text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
+            Incoming Message &middot; ML Infra Lead
+        </div>
+        <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
+            "Our Keyword Spotting model's transformer inference is 3&times; slower than the
+            paper reports. Same hardware, same model. The profiler shows 1,000 kernel
+            launches per forward pass. Each kernel averages 5 &mu;s of GPU compute. What
+            fraction of wall time is the GPU actually doing math?"
+        </div>
+    </div>
+    """)
     return
 
 
@@ -606,33 +702,58 @@ def _(mo):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ACT 2: THE COMPILATION BREAK-EVEN
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS, context_toggle):
     _ctx = context_toggle.value
     _ctx_label = "Cloud (A100)" if _ctx == "cloud" else "Edge (Jetson Orin NX)"
-    _ctx_color = COLORS["Cloud"] if _ctx == "cloud" else COLORS["Edge"]
     _volume_default = "10M requests/day" if _ctx == "cloud" else "100 requests/hour"
-
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The Compilation Break-Even"
+    _act_duration = "22 min"
+    _act_why = (
+        f"Act I showed that compilation raises KWS utilization from 33% to 67%. "
+        f"Now discover when \u201ccompile once, run fast forever\u201d is actually net-positive: "
+        f"a 30-second compile time on ResNet-50 requires ~134,000 inferences to break even, "
+        f"and on a {_volume_default} deployment, that crossover tells you whether to compile at all."
+    )
     mo.vstack([
         mo.md("---"),
         mo.Html(f"""
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
-            <div style="background: {_ctx_color}; color: white; font-size: 0.72rem;
-                        font-weight: 800; padding: 4px 12px; border-radius: 20px;
-                        letter-spacing: 0.12em; text-transform: uppercase;">
-                Act 2 · 22 min
+        <div style="margin: 32px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration} &middot; {_ctx_label}</div>
             </div>
-            <div style="font-size: 0.8rem; font-weight: 600; color: #64748b;">
-                Context: {_ctx_label} · Default volume: {_volume_default}
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
-        mo.md("## The Compilation Break-Even"),
-        mo.callout(mo.md("""**Design Challenge:** You have a production serving system. You must decide: run eagerly (flexible, no compile cost) or compile (latency to compile, permanent throughput gain). The break-even analysis determines whether compilation is net-positive for your deployment. A wrong decision costs either throughput or deployment time."""), kind="info"),
     ])
+    return
+
+
+# ─── CELL 13: ACT2_STAKEHOLDER ────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo):
+    mo.callout(mo.md("""**Design Challenge:** You have a production serving system. You must decide: run eagerly (flexible, no compile cost) or compile (latency to compile, permanent throughput gain). The break-even analysis determines whether compilation is net-positive for your deployment. A wrong decision costs either throughput or deployment time."""), kind="info")
     return
 
 
@@ -1242,10 +1363,100 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DESIGN LEDGER SAVE + HUD FOOTER
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The dispatch tax determines GPU utilization, not model size.</strong>
+                    A KWS model with 1,000 kernels at 5 &mu;s compute + 10 &mu;s dispatch achieves
+                    only 33% utilization. A GPT-2 layer with 20 large kernels already achieves ~90%.
+                    Faster hardware amplifies this gap rather than closing it.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Kernel fusion is the fix for dispatch-bound workloads.</strong>
+                    Fusing LayerNorm + Dropout + ReLU into one kernel reduces HBM traffic 3&times;
+                    and achieves ~5&times; wall-clock speedup. For GPT-2-sized ops the gain is
+                    near zero &mdash; compilation only helps when fragmentation was the problem.
+                </div>
+                <div>
+                    <strong>3. Compilation has a break-even threshold of ~134,000 inferences.</strong>
+                    A 30-second torch.compile on ResNet-50 costs 0.224 ms per image in saved
+                    time. That gap accumulates slowly: you need high inference volume before the
+                    fixed compile cost is recovered. On edge deployments with episodic traffic,
+                    eager mode may win overall.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 08: The Training Memory Budget</strong> &mdash; This lab measured
+                    the dispatch overhead inside one forward pass. Lab 08 zooms out to the full
+                    training loop and asks: where does the other 55% of wall time go when MFU is
+                    only 45%?
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-ml-frameworks for kernel fusion mechanics and
+                    the compilation continuum.<br/>
+                    <strong>Build:</strong> TinyTorch Module 07 &mdash; implement a fused
+                    forward-pass executor and observe the dispatch count reduction firsthand.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. A KWS model with 1,000 kernels at 5 us compute each and 10 us launch overhead per kernel achieves what GPU utilization percentage — and what is the only way to increase it without changing the hardware?
+
+    2. A LayerNorm + Dropout + ReLU sequence fused into one kernel reduces HBM traffic by approximately 3x and achieves ~5x wall-clock speedup. Why does eliminating intermediate read/write round-trips account for most of this gain?
+
+    3. Compilation takes 30 seconds and provides a 35% throughput improvement. Below what number of inference iterations does the compilation overhead make it net-negative — and for what class of model (many small kernels vs. few large ones) is compilation most valuable?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo,

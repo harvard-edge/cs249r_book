@@ -109,7 +109,79 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the Feeding Tax</strong> for a standard cloud disk feeding an A100 GPU, verifying that GPU utilization falls below 5% (idle &gt;95% of the time) when storage bandwidth is 250 MB/s versus the required 5.8 GB/s.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose the data gravity crossover</strong> for a 50 TB dataset: calculate transfer time and egress cost over a 100 Gbps link and determine whether moving data or moving compute is cheaper.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a tiered storage pipeline</strong> that achieves &lt;10% Feeding Tax while staying under $500/month storage cost, using NVMe hot tier, S3 warm tier, and parallel dataloader workers.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Energy-Movement Invariant from @sec-data-engineering-physics-data-cdcb &middot;
+                    Feeding Tax formula from @sec-data-engineering-feeding-problem
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                &ldquo;Your GPU is idle 77% of the time and your team wants to buy more hardware &mdash;
+                but is the bottleneck actually compute, and when does the physical weight of your
+                50 TB dataset make it cheaper to move the GPU cluster than to move the data?&rdquo;
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: READING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -125,7 +197,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ──────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT_TOGGLE ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -170,26 +242,42 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE PIPELINE BOTTLENECK
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I -- CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _c = COLORS["BlueLine"]
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Pipeline Bottleneck"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You expect that a GPU running at 23% utilization just needs more hardware. "
+                     "The Feeding Tax calculation will show that storage bandwidth, not compute "
+                     "shortage, is the binding constraint &mdash; and that a standard cloud disk "
+                     "at 250 MB/s leaves the GPU idle over 95% of the time. Buying more GPUs "
+                     "would make the idleness 95% of twice as much hardware.")
+
     mo.Html(f"""
-    <div style="margin: 32px 0 8px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: {_c}; margin-bottom: 6px;">
-            Act I · 12–15 minutes
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; line-height: 1.2;">
-            The Pipeline Bottleneck
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.95rem; color: #475569; margin-top: 6px; max-width: 680px;">
-            A team of ML engineers is training a computer vision model. Their GPU utilization
-            has been sitting at 23% for three days. Before you touch a single slider,
-            you need to commit to a diagnosis.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -663,26 +751,43 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: THE DATA GRAVITY CALCULATION
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II -- DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _c = COLORS["Cloud"]
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Data Gravity Calculation"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = ("Act I showed the I/O bottleneck inside one datacenter. Now discover "
+                     "a constraint that storage tier upgrades cannot fix: the physics of moving "
+                     "data between datacenters. You expect that 50 TB over a 100 Gbps link "
+                     "is fast and cheap. The calculation will show it takes 23 hours and costs "
+                     "$90,000+ in egress fees &mdash; making compute co-location the only "
+                     "viable strategy at petabyte scale.")
+
     mo.Html(f"""
-    <div style="margin: 40px 0 8px 0; border-top: 2px solid #e2e8f0; padding-top: 32px;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: {_c}; margin-bottom: 6px;">
-            Act II · 20–25 minutes
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; line-height: 1.2;">
-            The Data Gravity Calculation
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.95rem; color: #475569; margin-top: 6px; max-width: 700px;">
-            You have fixed the training pipeline. Now a new problem: the team's 50 TB
-            training dataset lives in AWS us-east-1. The GPUs they need are available
-            in us-west-2. Should they move the data, or move the compute?
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -1210,7 +1315,107 @@ def _(mo):
     return
 
 
-# ─── DESIGN LEDGER SAVE + HUD ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The Feeding Tax exceeds 95% on a standard cloud disk.</strong>
+                    At 250 MB/s storage vs. 5.8 GB/s required, the GPU is idle 95.7% of each
+                    training step. Upgrading to NVMe (5 GB/s) with 8 dataloader workers reduces
+                    idle time to ~15% &mdash; a 5.6&times; throughput improvement that costs
+                    less than a single GPU upgrade.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Data has physical mass at petabyte scale.</strong>
+                    Moving 1 PB over a 100 Gbps link takes 23 hours and costs $90,000+ in
+                    egress fees. The rule of thumb: when T<sub>transfer</sub> &gt; T<sub>training</sub>,
+                    move the compute to the data, not the other way around.
+                </div>
+                <div>
+                    <strong>3. Tiered storage resolves the cost&ndash;performance tension.</strong>
+                    Keeping 1 TB of hot epoch data on NVMe (~$140/month) while warming the
+                    remainder on S3 ($23/TB/month) achieves &lt;10% Feeding Tax at under
+                    $500/month &mdash; the pipeline economics that NVMe-only cannot afford
+                    at petabyte scale.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 05: The Activation Tax</strong> &mdash; this lab established
+                    that data movement dominates compute cost at the pipeline level. Lab 05
+                    asks the same question inside the model: how does the choice of activation
+                    function determine whether your layer&rsquo;s outputs land in L1 cache
+                    or spill to memory 100&times; slower?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-data-engineering-data-gravity-adcb for the
+                    full DataGravity derivation and the lakehouse architectural response.<br/>
+                    <strong>Build:</strong> TinyTorch Module 04 &mdash; the data pipeline
+                    profiler where Feeding Tax is measured directly from I/O throughput.
+                    See <code>tinytorch/src/04_data/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. A standard cloud disk (250 MB/s) feeding an A100 that demands ~5,800 MB/s results in what GPU utilization percentage — and what is this phenomenon called?
+
+    2. You are deciding whether to move 1 PB of training data to a remote GPU cluster (23 hours, $90,000+ egress) or to move compute to the data. Which principle from Act II justifies moving compute to the data, and under what bandwidth conditions does the decision reverse?
+
+    3. Upgrading storage from a standard cloud disk to NVMe with 8 dataloader workers can improve GPU utilization from ~4% to ~85%. Why does adding more GPU compute without this storage fix yield near-zero throughput improvement?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, ledger, context_toggle, act1_prediction, act1_reflection,
       act2_prediction, act2_reflection, _gpu_util, _transfer_exceeds_training,

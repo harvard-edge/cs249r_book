@@ -62,6 +62,10 @@ def _():
     return mo, ledger, COLORS, LAB_CSS, apply_plotly_theme, go, np, math
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, LAB_CSS, COLORS):
@@ -110,7 +114,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Identify the pipeline bottleneck: predict whether doubling local NVMe capacity improves GPU utilization when the S3 network link (1.25 GB/s) is the slowest stage, and explain why throughput equals the minimum across all pipeline stages.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify the storage-compute chasm: measure why a single H100 at 3.35 TB/s HBM bandwidth creates a 479&times; gap against a single NVMe drive at 7 GB/s, and what pipeline depth is required to bridge it.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a checkpoint strategy: find the minimum write bandwidth (35 GB/s) and checkpoint interval that keeps GPU utilization above 90% without checkpoint writes overflowing into the next interval.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Storage hierarchy tiers and the 479&times; HBM-to-NVMe gap from @sec-data-storage-fuel-line &middot;
+                    Sequential vs. random I/O access patterns for ML workloads from @sec-data-storage-workload-inversion
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If your Lustre cluster provides 672 GB/s of aggregate storage bandwidth and your H100s can consume data at 3.35 TB/s from HBM &mdash; why are GPUs sitting at 12% utilization, and why would buying more NVMe drives do nothing to fix it?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -175,26 +245,43 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE I/O BOTTLENECK
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _c = COLORS["BlueLine"]
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The I/O Bottleneck"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "Your training platform has 128 H100 GPUs and a 24-node Lustre cluster providing "
+        "672 GB/s of aggregate storage bandwidth, yet GPUs are at 12% utilization. "
+        "You expect that adding more NVMe drives will fix this &mdash; the pipeline "
+        "waterfall will show that the S3 network link (1.25 GB/s) is the bottleneck, "
+        "and doubling NVMe capacity provides exactly 0% improvement."
+    )
     mo.Html(f"""
-    <div style="margin: 32px 0 8px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: {_c}; margin-bottom: 6px;">
-            Act I · 12–15 minutes
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; line-height: 1.2;">
-            The I/O Bottleneck
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.95rem; color: #475569; margin-top: 6px; max-width: 700px;">
-            Your training platform has 128 H100 GPUs and a 24-node Lustre cluster providing
-            672 GB/s of aggregate storage bandwidth. GPU utilization is at 12%.
-            Before touching the simulator, commit to a diagnosis.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -813,26 +900,42 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: DISTRIBUTED STORAGE ARCHITECTURE
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _c = COLORS["Cloud"]
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Distributed Storage Architecture"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I showed that the S3 network link is the pipeline bottleneck &mdash; not NVMe. "
+        "Now design storage for a 4,096-GPU cluster where bandwidth math looks sufficient, "
+        "but checkpoint writes (1,050 GB every 30 minutes) compete with training reads for "
+        "the same NVMe drives, creating write storms that stall the entire pipeline."
+    )
     mo.Html(f"""
-    <div style="margin: 40px 0 8px 0; border-top: 2px solid #e2e8f0; padding-top: 32px;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: {_c}; margin-bottom: 6px;">
-            Act II · 20–25 minutes
+    <div style="margin: 40px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.6rem; font-weight: 800; color: #0f172a; line-height: 1.2;">
-            Distributed Storage Architecture
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.95rem; color: #475569; margin-top: 6px; max-width: 700px;">
-            You have fixed the training pipeline. Now a harder problem: design the storage
-            architecture for a 4,096-GPU cluster. The bandwidth math looks fine. But at this
-            scale, a different bottleneck emerges — one that hardware purchases cannot solve.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -1458,6 +1561,113 @@ def _(mo):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Pipeline throughput equals the throughput of the slowest stage.</strong>
+                    Doubling NVMe capacity provides exactly 0% improvement when the S3 network link
+                    (1.25 GB/s) is the bottleneck. The NVMe tier is a latency-hiding buffer, not a
+                    speed solution &mdash; its value only materializes when the pipeline can fill it
+                    faster than GPUs drain it.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. The 479&times; storage-compute gap cannot be closed by single-tier hardware.</strong>
+                    H100 HBM delivers 3.35 TB/s; a single NVMe drive delivers 7 GB/s. GPU throughput
+                    has grown 236&times; since 2016 while NVMe throughput grew only 4&times;. A tiered
+                    pipeline (Object Store &rarr; NVMe &rarr; HBM) with prefetching is the only
+                    architectural response to this widening gap.
+                </div>
+                <div>
+                    <strong>3. Checkpoint writes require 35 GB/s sustained bandwidth and compete directly with training reads.</strong>
+                    A 175B model checkpoint is ~1,050 GB (Adam optimizer state). Writing it within 30 seconds
+                    requires 35 GB/s &mdash; 5 dedicated NVMe drives &mdash; leaving only 14 GB/s for
+                    training data. Checkpoint interval of 15&ndash;30 minutes with 50% NVMe write allocation
+                    keeps GPU utilization above 90% during write windows.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab V2-05: The Parallelism Paradox</strong> &mdash; This lab showed that
+                    the storage pipeline bottleneck starves GPUs regardless of compute power. The next
+                    lab asks: when GPUs are fully fed, why does adding more of them in data-parallel
+                    training eventually decrease training efficiency due to communication overhead?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-data-storage-fuel-line for the 479&times; gap derivation
+                    and checkpoint sizing math, and @sec-data-storage-workload-inversion for sequential
+                    vs. random I/O patterns.<br/>
+                    <strong>Build:</strong> TinyTorch data loader module &mdash; implement prefetch
+                    pipelines with configurable queue depth in <code>tinytorch/src/data/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. A cluster has 4 NVMe SSDs (28 GB/s aggregate) but streams data from S3 over a 10 Gbps link (1.25 GB/s). Why does doubling NVMe capacity provide exactly 0% improvement, and what determines the actual pipeline throughput?
+2. Writing a 175B model checkpoint (~1,050 GB) within 30 seconds requires 35 GB/s sustained bandwidth. How many NVMe drives does this consume, and what happens to training data read throughput during a checkpoint write window?
+3. The storage-compute gap has widened from ~100x to 479x between 2016 and 2024. Why can no single-tier storage solution close this gap, and what makes tiered prefetching (Object Store to NVMe to HBM) the only viable architectural response?
+
+**You're ready to move on if you can:**
+- Identify the bottleneck stage in a multi-tier storage pipeline and explain why upgrading non-bottleneck tiers yields zero improvement
+- Calculate checkpoint write bandwidth requirements and their impact on training data read throughput
+- Explain why the storage-compute gap widens with each GPU generation and what architectural pattern addresses it
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 # ─── DESIGN LEDGER SAVE + HUD ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(

@@ -104,6 +104,10 @@ def _():
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 1: HEADER ───────────────────────────────────────────────────────────
 
 
@@ -163,7 +167,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ──────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Identify the alpha-beta crossover: predict whether upgrading InfiniBand from 200 Gbps to 400 Gbps improves transfer time for a 4 KB control message, and calculate where the crossover from latency-dominated to bandwidth-dominated regime occurs (~75 KB).</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Quantify the oversubscription tax: measure how a 4:1 oversubscribed spine reduces bisection bandwidth from 25.6 TB/s to 6.4 TB/s, making every global AllReduce 4&times; slower.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a fabric topology: determine the maximum oversubscription ratio that keeps AllReduce below 30% of step time for a 70B model on a 1,024-GPU cluster.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Alpha-beta latency model T(n) = &alpha; + n/&beta; from @sec-network-fabrics-performance-model &middot;
+                    Bisection bandwidth definition and fat-tree construction from @sec-network-fabrics-fat-tree
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If you upgrade your InfiniBand links from 200 Gbps to 400 Gbps, which workloads actually benefit &mdash; and why does oversubscribing the spine tier make even your 400 Gbps investment worthless for large-model AllReduce?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
 
 
 @app.cell(hide_code=True)
@@ -201,35 +271,46 @@ def _(mo):
     return (context_toggle,)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE BISECTION BANDWIDTH BLINDSPOT
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.Html("""<div style="margin: 24px 0 8px 0;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="background:#006395; color:white; border-radius:50%;
-                             width:28px; height:28px; display:inline-flex; align-items:center;
-                             justify-content:center; font-size:0.85rem; font-weight:800;
-                             flex-shrink:0;">I</div>
-                <div style="flex:1; height:2px; background:#e2e8f0;"></div>
-                <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                            text-transform:uppercase; letter-spacing:0.12em;">
-                    Act I · 12–15 min
-                </div>
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Bisection Bandwidth Blindspot"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "You expect a bandwidth upgrade from 200 Gbps to 400 Gbps to halve transfer times. "
+        "The alpha-beta model will show that for a 4 KB pipeline coordination message, the "
+        "improvement is only 5% &mdash; startup latency dominates below the 75 KB crossover, "
+        "and upgrading bandwidth in the latency-dominated regime wastes engineering budget."
+    )
+    mo.Html(f"""
+    <div style="margin: 24px 0 12px 0;">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <div style="background:{_act_color}; color:white; border-radius:50%;
+                         width:32px; height:32px; display:inline-flex; align-items:center;
+                         justify-content:center; font-size:0.9rem; font-weight:800;
+                         flex-shrink:0;">{_act_num}</div>
+            <div style="flex:1; height:2px; background:{COLORS['Border']};"></div>
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.12em;">
+                Act {_act_num} &middot; {_act_duration}
             </div>
-            <div style="font-size:1.6rem; font-weight:800; color:#0f172a;
-                        margin-top:8px; line-height:1.2;">
-                The Bisection Bandwidth Blindspot
-            </div>
-            <div style="color:#475569; font-size:0.95rem; margin-top:4px;">
-                Why is AllReduce running at 40% of expected throughput on our new cluster?
-            </div>
-        </div>"""),
-    ])
+        </div>
+        <div style="font-size:1.5rem; font-weight:800; color:{COLORS['Text']};
+                    margin-top:8px; line-height:1.2;">
+            {_act_title}
+        </div>
+        <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
+                    line-height:1.55; max-width:700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -757,38 +838,49 @@ def _(mo, act1_prediction, act1_reflection):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II — THE 1024-GPU FABRIC DESIGN
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, act1_prediction, act1_reflection):
+def _(mo, act1_prediction, act1_reflection, COLORS):
     mo.stop(act1_prediction.value is None)
     mo.stop(act1_reflection.value is None)
-
-    mo.vstack([
-        mo.Html("""<div style="margin: 24px 0 8px 0;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="background:#CB202D; color:white; border-radius:50%;
-                             width:28px; height:28px; display:inline-flex; align-items:center;
-                             justify-content:center; font-size:0.85rem; font-weight:800;
-                             flex-shrink:0;">II</div>
-                <div style="flex:1; height:2px; background:#e2e8f0;"></div>
-                <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                            text-transform:uppercase; letter-spacing:0.12em;">
-                    Act II · 20–25 min
-                </div>
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The 1024-GPU Fabric Design"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I showed that bandwidth upgrades are irrelevant below the 75 KB crossover. "
+        "Now apply the other side: at 1,024 GPU scale, AllReduce messages are hundreds of GB &mdash; "
+        "firmly bandwidth-dominated. Here, oversubscribing the spine by 4:1 reduces bisection "
+        "bandwidth by 4&times;, turning the network into the dominant bottleneck regardless "
+        "of per-link speed."
+    )
+    mo.Html(f"""
+    <div style="margin: 24px 0 12px 0;">
+        <div style="display:flex; align-items:center; gap:12px;">
+            <div style="background:{_act_color}; color:white; border-radius:50%;
+                         width:32px; height:32px; display:inline-flex; align-items:center;
+                         justify-content:center; font-size:0.9rem; font-weight:800;
+                         flex-shrink:0;">{_act_num}</div>
+            <div style="flex:1; height:2px; background:{COLORS['Border']};"></div>
+            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
+                        text-transform:uppercase; letter-spacing:0.12em;">
+                Act {_act_num} &middot; {_act_duration}
             </div>
-            <div style="font-size:1.6rem; font-weight:800; color:#0f172a;
-                        margin-top:8px; line-height:1.2;">
-                The 1024-GPU Fabric Design
-            </div>
-            <div style="color:#475569; font-size:0.95rem; margin-top:4px;">
-                $50M hardware budget. Three fabric options. One dominant AllReduce workload.
-            </div>
-        </div>"""),
-    ])
+        </div>
+        <div style="font-size:1.5rem; font-weight:800; color:{COLORS['Text']};
+                    margin-top:8px; line-height:1.2;">
+            {_act_title}
+        </div>
+        <div style="color:{COLORS['TextSec']}; font-size:0.92rem; margin-top:6px;
+                    line-height:1.55; max-width:700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -1480,6 +1572,113 @@ def _(mo, act1_prediction, act1_reflection, act2_prediction, act2_reflection):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The alpha-beta crossover at ~75 KB determines which optimization lever matters.</strong>
+                    Below 75 KB, doubling bandwidth from 200 Gbps to 400 Gbps improves transfer time by
+                    only 5% &mdash; startup latency (&alpha; = 1.5 &mu;s) dominates. Above 75 KB,
+                    bandwidth upgrades scale linearly. Applying the wrong optimization to the wrong
+                    regime wastes engineering budget entirely.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Oversubscription reduces bisection bandwidth proportionally.</strong>
+                    A 4:1 oversubscribed spine cuts bisection bandwidth from 25.6 TB/s to 6.4 TB/s,
+                    making every global AllReduce 4&times; slower. At 70B-model scale, this pushes
+                    AllReduce above 50% of step time, turning the network into the dominant training
+                    bottleneck regardless of per-link speed.
+                </div>
+                <div>
+                    <strong>3. Maximum 2:1 oversubscription keeps AllReduce below 30% of step time for 70B models.</strong>
+                    At 2:1, bisection bandwidth is 12.8 TB/s and AllReduce consumes approximately 10%
+                    of step time &mdash; an acceptable trade-off that cuts switch costs by 50% while
+                    preserving training efficiency.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab V2-04: The Data Gravity Trap</strong> &mdash; This lab showed that
+                    the network determines AllReduce throughput. The next lab asks: what happens
+                    when the storage pipeline cannot feed GPUs fast enough, and checkpoint writes
+                    compete with training data reads for the same NVMe bandwidth?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-network-fabrics-performance-model for the full
+                    alpha-beta derivation and @sec-network-fabrics-fat-tree for bisection bandwidth
+                    formulas.<br/>
+                    <strong>Build:</strong> TinyTorch collective communication module &mdash; implement
+                    Ring AllReduce with configurable bandwidth and latency parameters in
+                    <code>tinytorch/src/collective/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. The alpha-beta model predicts T = alpha + n/beta. Below ~75 KB, doubling bandwidth from 200 Gbps to 400 Gbps improves transfer time by only ~5%. Why does startup latency dominate for small messages, and at what message size does bandwidth become the binding constraint?
+2. A 4:1 oversubscribed spine cuts bisection bandwidth from 25.6 TB/s to 6.4 TB/s. For a 70B-model gradient AllReduce, what maximum oversubscription ratio keeps communication below 30% of step time?
+3. Both Pipeline Parallelism (~200 MB activations) and Data Parallelism (~700 GB gradients) operate above the 75 KB crossover. Why do they require different optimization strategies despite both being bandwidth-dominated?
+
+**You're ready to move on if you can:**
+- Use the alpha-beta model to determine whether a given message size is latency-dominated or bandwidth-dominated
+- Calculate the bisection bandwidth impact of spine oversubscription on AllReduce performance
+- Recommend a maximum oversubscription ratio for a given model size and training SLA
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 # ─── LEDGER SAVE + HUD ────────────────────────────────────────────────────────
 
 

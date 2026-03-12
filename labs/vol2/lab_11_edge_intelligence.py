@@ -62,9 +62,9 @@ def _():
     H100_RAM_GB       = 80      # GB HBM3e — NVIDIA spec
     H100_TDP_W        = 700     # Watts TDP — NVIDIA spec
 
-    MOBILE_BW_GBS     = 68      # GB/s mobile NPU memory bandwidth — Apple A17 class
+    MOBILE_BW_GBS     = 68      # GB/s mobile LPDDR5 memory bandwidth — mid-range smartphone (representative; A17 Pro peaks ~102 GB/s)
     MOBILE_RAM_GB     = 8       # GB typical smartphone RAM
-    MOBILE_NPU_TOPS   = 35      # TOPS INT8 — Apple A16 Neural Engine class
+    MOBILE_NPU_TOPS   = 35      # TOPS INT8 — Apple A17 Pro Neural Engine class
 
     LTE_UL_MBPS       = 50      # LTE uplink bandwidth per device (Mbps) — avg real-world
     WIFI_UL_MBPS      = 100     # WiFi uplink bandwidth per device (Mbps) — 802.11ac typical
@@ -131,7 +131,80 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING (hide_code=True) ────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING (hide_code=True) ──────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the communication overhead of federated learning</strong> versus centralized training for a given model size, client count, and compression ratio.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict the accuracy-privacy trade-off</strong> as differential privacy noise (&epsilon;) decreases: at &epsilon; = 1.0, accuracy drops approximately 8&ndash;15% versus &epsilon; = 10, and the gap grows as model size increases.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the federation paradox</strong>: non-IID data distributions require significantly more communication rounds than IID baselines (empirically 10&ndash;30&times; more, depending on data heterogeneity), making privacy-preserving federated learning dramatically costlier than it appears.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Federated Learning Algorithms (FedAvg, convergence) from @sec-edge-intelligence-federated-learning-6e7e &middot;
+                    Differential Privacy fundamentals from @sec-edge-intelligence-federated-privacy-a1ed
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Federated learning keeps user data on-device for privacy, but shipping
+                gradients to a central server may cost more bandwidth than shipping the
+                data itself &mdash; and adding differential privacy noise degrades accuracy.
+                When is the privacy guarantee worth the cost?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING (hide_code=True) ────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -145,7 +218,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE (hide_code=True) ─────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE (hide_code=True) ─────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -217,28 +290,41 @@ def _(mo, context_toggle, COLORS):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — THE COMMUNICATION COST REVELATION
+# ZONE B: ACT I -- CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ───────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 28px 0 8px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: #94a3b8; margin-bottom: 4px;
-                    display: flex; align-items: center; gap: 8px;">
-            <span style="background: #006395; color: white; border-radius: 50%;
-                         width: 20px; height: 20px; display: inline-flex;
-                         align-items: center; justify-content: center;
-                         font-size: 0.72rem; font-weight: 800; flex-shrink: 0;">I</span>
-            Act I · 12–15 min
-            <span style="flex: 1; height: 1px; background: #e2e8f0;"></span>
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Communication Cost Revelation"
+    _act_duration = "12-15 min"
+    _act_why      = ("You expect federated learning to be more efficient than centralized "
+                     "training because data stays on device. The numbers will show that "
+                     "shipping gradients for a 1B-parameter model across 1M devices per round "
+                     "costs 2,000 TB upload-only per round &mdash; 20,000x the centralized data "
+                     "transfer baseline; adding the matching model download doubles that to 4 PB per round.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.55rem; font-weight: 800; color: #0f172a;">
-            The Communication Cost Revelation
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.92rem; color: #475569; margin-top: 4px;">
-            Federated learning keeps data local. But model gradients are not free.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -645,29 +731,41 @@ This is the federation paradox: the privacy-preserving approach uses *more* band
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — THE PRIVACY-UTILITY TRADEOFF
+# ZONE C: ACT II -- DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ──────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 36px 0 8px 0;">
-        <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
-                    text-transform: uppercase; color: #94a3b8; margin-bottom: 4px;
-                    display: flex; align-items: center; gap: 8px;">
-            <span style="background: #CC5500; color: white; border-radius: 50%;
-                         width: 20px; height: 20px; display: inline-flex;
-                         align-items: center; justify-content: center;
-                         font-size: 0.72rem; font-weight: 800; flex-shrink: 0;">II</span>
-            Act II · 20–25 min
-            <span style="flex: 1; height: 1px; background: #e2e8f0;"></span>
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Privacy-Utility Tradeoff"
+    _act_duration = "20-25 min"
+    _act_why      = ("Act I showed that federated gradient communication costs far exceed "
+                     "the data transfer baseline. Now discover that adding differential privacy "
+                     "(the only formal guarantee) imposes a concrete accuracy tax: &epsilon; = 1 "
+                     "can cost 8&ndash;15% accuracy. Find the &epsilon; that keeps accuracy within "
+                     "5% of centralized while satisfying formal privacy requirements.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size: 1.55rem; font-weight: 800; color: #0f172a;">
-            The Privacy-Utility Tradeoff
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        <div style="font-size: 0.92rem; color: #475569; margin-top: 4px;">
-            Differential privacy provides formal guarantees — but at an accuracy cost.
-            Design the system that survives both constraints.
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -1191,6 +1289,116 @@ track cumulative budget and stop training before budget exhaustion.
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS (hide_code=True) ────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Federated gradient communication can cost more than centralized data transfer.</strong>
+                    Shipping gradients for a 1B-parameter model (2 GB) from 1% of 100M devices
+                    (1M devices) per round = 2,000 TB upload-only per round (4,000 TB bidirectional).
+                    The centralized baseline for 100M users typing ~100 bytes/keystroke is ~100 GB/day.
+                    Without aggressive compression (&gt;99%), federated learning is not bandwidth-efficient.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Differential privacy is the only formal guarantee &mdash; and it costs accuracy.</strong>
+                    Federated learning alone (no DP) is vulnerable to model inversion attacks.
+                    Adding DP at &epsilon; = 1 provides a formal bound but costs 8&ndash;15%
+                    accuracy. The &epsilon; = 5&ndash;10 regime often preserves accuracy within
+                    5% of centralized while providing meaningful (if not maximal) protection.
+                </div>
+                <div>
+                    <strong>3. The federation paradox: privacy forces a significantly costlier training path.</strong>
+                    Under non-IID data distributions (real devices have non-IID data by definition),
+                    convergence requires 10&ndash;30&times; more communication rounds than IID centralized
+                    training (Li et al., 2020; exact factor depends on data heterogeneity).
+                    Federated learning is not an efficiency technology &mdash; it is a privacy
+                    technology that accepts efficiency costs as the price of formal guarantees.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 12: ML Operations at Scale</strong> &mdash; This lab showed
+                    that deploying a privacy-preserving model update involves careful accuracy
+                    monitoring. The next lab asks: when you have 100 models in production,
+                    how do you detect silent regressions? A 0.5% CTR drop at 5,000 QPS costs
+                    $1,080,000 per day if undetected for 24 hours.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-edge-intelligence-federated-privacy-a1ed for
+                    the full differential privacy derivation and the Advanced Composition
+                    Theorem for tracking cumulative privacy budget across rounds.<br/>
+                    <strong>Build:</strong> TinyTorch Module 21 &mdash; implement FedAvg with
+                    differential privacy noise injection and measure convergence under varying
+                    &epsilon; and non-IID data distributions.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. Shipping gradients for a 1B-parameter model from 1% of 100M devices produces 2,000 TB upload per round versus ~100 GB/day for centralized data. What compression ratio (>99%) is needed to make federated learning bandwidth-efficient, and why is this the binding constraint?
+2. Differential privacy at epsilon=1 collapses membership inference accuracy to 50-55% (random guessing) but costs 8-15% model accuracy. Why is increasing dataset size, not weakening epsilon, the correct engineering response?
+3. Non-IID device data requires 10-30x more communication rounds than IID centralized training. Why does this mean federated learning is a privacy technology that accepts efficiency costs, not an efficiency technology?
+
+**You're ready to move on if you can:**
+- Calculate federated communication cost versus centralized data transfer for a given model and device population
+- Explain the privacy-utility tradeoff quantitatively using the epsilon parameter
+- Identify why on-device adaptation requires LoRA or similar parameter-efficient methods given mobile memory constraints
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ────────────────────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════════════════════
 # LEDGER SAVE + HUD FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════

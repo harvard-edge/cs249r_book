@@ -28,6 +28,11 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
 def _():
     import marimo as mo
@@ -45,10 +50,7 @@ def _():
     return mo, ledger, COLORS, LAB_CSS
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HEADER
-# ─────────────────────────────────────────────────────────────────────────────
-
+# ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell
 def _(mo, LAB_CSS):
     mo.vstack([
@@ -93,10 +95,81 @@ def _(mo, LAB_CSS):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONCEPT 1: THE 95% PROBLEM
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
 
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Identify why infrastructure accounts for 95% of a production ML system</strong> and why the remaining 5% (the model) cannot be the primary engineering concern.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict which deployment paradigm satisfies a given set of physical constraints</strong> (latency floor, power budget, memory capacity) from the four-regime framework.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Recognize each recurring UI component</strong> of the lab interface &mdash; prediction lock, Latency Waterfall, MathPeek accordion, and HUD footer &mdash; before encountering them in live labs.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    No prior reading required &mdash; this lab introduces the curriculum
+                    from first principles. Concepts here will be reinforced in
+                    @sec-introduction and @sec-ml-systems.
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>20&ndash;25 min</strong><br/>
+                    3 Concept Checks &middot; Interface Tour
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If a model reaches 99% accuracy in a Jupyter notebook, what are the 95% of
+                engineering problems that still stand between that model and a deployed product
+                &mdash; and which physical law determines which problems you cannot solve with software?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: CONCEPT CHECKS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CONCEPT 1: THE 95% PROBLEM ────────────────────────────────────────────────
+# _act_why: "You believe ML engineering is about models. The data shows 95% is infrastructure."
 @app.cell
 def _(mo):
     mo.vstack([
@@ -150,9 +223,7 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CHECK 1
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CHECK 1 ───────────────────────────────────────────────────────────────────
 
 @app.cell
 def _(mo):
@@ -223,9 +294,7 @@ def _(mo, check1):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONCEPT 2: PHYSICAL CONSTRAINTS PARTITION DEPLOYMENT
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CONCEPT 2: PHYSICAL CONSTRAINTS PARTITION DEPLOYMENT ─────────────────────
 
 @app.cell
 def _(mo, check1):
@@ -300,9 +369,7 @@ def _(mo, check1):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CHECK 2  (multi-select — more than one correct answer)
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CHECK 2 (multi-select) ────────────────────────────────────────────────────
 
 @app.cell
 def _(mo, check1):
@@ -402,9 +469,7 @@ def _(mo, check1, check2):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONCEPT 3: THE DEPLOYMENT REGIMES
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CONCEPT 3: THE DEPLOYMENT REGIMES ────────────────────────────────────────
 
 @app.cell
 def _(mo, check1, check2):
@@ -526,9 +591,7 @@ def _(mo, check1, check2):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CHECK 3  (ranking via radio — forces active reasoning about trade-offs)
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CHECK 3 (constraint reasoning) ───────────────────────────────────────────
 
 @app.cell
 def _(mo, check1, check2):
@@ -595,11 +658,13 @@ def _(mo, check1, check2, check3):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# SECTION 4: LAB INTERFACE ORIENTATION
-# Shows students the exact UI components they will encounter from Lab 01 onward.
-# Zero new physics content — pure scaffolding of look-and-feel.
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: INTERFACE ORIENTATION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# _act_why: "Before Lab 01, students must recognize every recurring UI component — prediction locks, instruments, MathPeek — so cognitive load goes to content, not navigation."
+
+# ─── INTERFACE ORIENTATION INTRO ───────────────────────────────────────────────
 
 @app.cell
 def _(mo, check1, check2, check3):
@@ -847,9 +912,11 @@ def _(mo, check1, check2, check3, COLORS):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DEPLOYMENT CONTEXT SELECTION
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── DEPLOYMENT CONTEXT SELECTION ─────────────────────────────────────────────
 
 @app.cell
 def _(mo, check1, check2, check3):
@@ -892,9 +959,7 @@ def _(mo, check1, check2, check3):
     return (context_selector,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CONTEXT REVEAL + STAKEHOLDER MESSAGE + LEDGER INIT ───────────────────────
 
 @app.cell
 def _(mo, check1, check2, check3, context_selector, ledger, COLORS):
@@ -1092,10 +1157,98 @@ def _(mo, check1, check2, check3, context_selector, ledger, COLORS):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DESIGN LEDGER HUD (always visible)
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CELL 20: SYNTHESIS ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
 
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The model is the 5% &mdash; the infrastructure is the 95%.</strong>
+                    A model that reaches 99% accuracy in a notebook is not a product until it runs
+                    reliably, monitors its own degradation, and serves requests within physical
+                    constraints. ML Systems Engineering optimizes the 95% that makes deployment possible.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Physical constraints partition deployment into four incommensurable regimes.</strong>
+                    The speed of light, thermodynamics, and memory physics create four distinct operating
+                    envelopes &mdash; Cloud, Edge, Mobile, TinyML &mdash; that no software engineering
+                    can bridge. Choosing the wrong regime makes the system impossible, not just slow.
+                </div>
+                <div>
+                    <strong>3. The prediction lock, Latency Waterfall, and MathPeek accordion appear in every lab.</strong>
+                    These are not UX choices &mdash; the prediction lock enforces scientific method,
+                    the Waterfall shows Iron Law terms in real time, and the MathPeek surfaces the
+                    governing equation behind every number. Recognize them before Lab 01.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 01: The Magnitude Awakening.</strong> This lab established
+                    that four deployment regimes exist and that constraints are incommensurable.
+                    Lab 01 asks: by exactly how many orders of magnitude do they differ &mdash;
+                    and does that gap force separate software stacks or merely require tuning?
+                </div>
+            </div>
+
+            <!-- Textbook & TinyTorch -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-introduction for the 95% Problem, the D&middot;A&middot;M
+                    Taxonomy, and the four deployment paradigms with their physical constraints.<br/>
+                    <strong>Build:</strong> TinyTorch starts in Module 01 &mdash; the foundations
+                    module that builds the forward-pass engine you will profile throughout the curriculum.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. Which deployment context (cloud, mobile, edge, or TinyML) did you choose, and what was the binding constraint that defined your track — compute, memory, power, or latency?
+
+    2. The D·A·M Triad claims that Data, Algorithm, and Machine are inseparable. After selecting your track, which axis most constrained what model architectures were feasible?
+
+    3. If a friend claims 'the same trained model can run on any device — you just need to make it smaller,' what specific numbers from Act I would you cite to explain why a 2,000,000x compute gap and a 160,000x memory gap make this impossible in practice?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ───────────────────────────────────────────────────────
 @app.cell
 def _(mo, ledger, COLORS):
     _track   = ledger.get_track() or "NONE"

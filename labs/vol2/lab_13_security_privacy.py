@@ -58,7 +58,7 @@ def _():
     # the chapter's defense-selection framework table.
 
     H100_BW_GBS         = 3350   # H100 SXM5 HBM3e bandwidth, NVIDIA spec
-    H100_TFLOPS_FP16    = 1979   # H100 SXM5 FP16 tensor core TFLOPS, NVIDIA spec
+    H100_TFLOPS_FP16    = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB         = 80     # H100 SXM5 HBM3e capacity, NVIDIA spec
 
     HIPAA_MAX_EPSILON   = 1.0    # HIPAA-interpretable DP requirement (@tbl-defense-selection-framework)
@@ -97,6 +97,10 @@ def _():
         CLOUD_ISOLATION_OVERHEAD,
     )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -154,7 +158,72 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the membership inference risk</strong> introduced by generalization gap — and measure exactly how DP training collapses 94% MI accuracy to near-random (&le;55%).</div>
+                <div style="margin-bottom: 3px;">2. <strong>Calculate the noise scale</strong> &sigma; &ge; C&radic;(2&thinsp;ln(1.25/&delta;))/&epsilon; and predict the accuracy penalty for a given &epsilon;-&delta; budget in a HIPAA-constrained clinical setting.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Diagnose why on-premises isolation costs 0% throughput overhead while cloud MIG partitioning costs 15%</strong> — and identify which threat vector drives that structural difference.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Differential privacy &epsilon;-&delta; definition from @sec-security-privacy-differential-privacy-8c2b &middot; Generalization gap concept from @sec-training-generalization
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If your model never exposes raw training data, why can an attacker determine with 94% accuracy whether a specific person&#x2019;s record was in your training set &mdash; and what does it actually cost in model utility to stop them?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -201,27 +270,39 @@ def _(mo, COLORS):
     return (context_toggle,)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE PRIVACY MEASUREMENT GAP
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 32px 0 8px 0;">
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Privacy Measurement Gap"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You believe a model that never shares raw training data is privacy-preserving. "
+                     "A membership inference attack achieving 94% accuracy will show that "
+                     "memorization of individual records &mdash; not raw data exposure &mdash; "
+                     "is the real threat, and that the only remedy is calibrated noise injected during training.")
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: #006395; color: white; border-radius: 6px;
-                        padding: 3px 10px; font-size: 0.72rem; font-weight: 800;
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I
-            </div>
-            <div style="font-size: 1.6rem; font-weight: 900; color: #0f172a;">
-                The Privacy Measurement Gap
-            </div>
-            <div style="flex: 1; height: 1px; background: #e2e8f0;"></div>
-            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">
-                12–15 min
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -700,27 +781,41 @@ def _(mo, act1_reflection):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II — DP PARAMETER SELECTION
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 40px 0 8px 0;">
+def _(mo, COLORS):
+    _act2_num      = "II"
+    _act2_color    = COLORS["OrangeLine"]
+    _act2_title    = "DP Parameter Selection"
+    _act2_duration = "20&ndash;25 min"
+    _act2_why      = ("Act I proved that the privacy gap is real and measurable. "
+                      "Now discover the engineering cost: every &epsilon; you choose "
+                      "carries a noise scale &sigma; that erodes model accuracy, and "
+                      "every multi-tenant deployment in the cloud adds a 15% throughput "
+                      "tax that compounds with that noise. "
+                      "Your constraint is HIPAA &epsilon;&thinsp;&le;&thinsp;1 and a 90% accuracy floor &mdash; both simultaneously.")
+    mo.Html(f"""
+    <div style="margin: 40px 0 12px 0;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: #CB202D; color: white; border-radius: 6px;
-                        padding: 3px 10px; font-size: 0.72rem; font-weight: 800;
+            <div style="background: {_act2_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act2_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II
-            </div>
-            <div style="font-size: 1.6rem; font-weight: 900; color: #0f172a;">
-                DP Parameter Selection
-            </div>
-            <div style="flex: 1; height: 1px; background: #e2e8f0;"></div>
-            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">
-                20–25 min
-            </div>
+                Act {_act2_num} &middot; {_act2_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act2_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act2_why}
         </div>
     </div>
     """)
@@ -1348,7 +1443,108 @@ def _(mo, act2_reflection):
     return
 
 
-# ─── LEDGER SAVE + HUD ───────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+# ─── CELL 20: SYNTHESIS ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The privacy gap is measurable, not assumed.</strong>
+                    Standard training without DP allows membership inference accuracy bounded by the
+                    generalization gap (Yeom bound: Advantage &le; A_train &minus; A_test).
+                    A 94% MI accuracy signals deep memorization; DP training at &epsilon;&thinsp;&le;&thinsp;1
+                    collapses that to 50&ndash;55% &mdash; statistically indistinguishable from random guessing.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. DP noise scales as &sigma; = C&radic;(2&thinsp;ln(1.25/&delta;))/&epsilon;.</strong>
+                    The accuracy cost at fixed &epsilon; is proportional to &sigma;/&radic;N.
+                    Increasing dataset size 10&times; recovers &radic;10 &asymp; 3.16&times; noise tolerance &mdash;
+                    scale is the correct engineering response to the privacy-utility tradeoff,
+                    not weakening &epsilon;.
+                </div>
+                <div>
+                    <strong>3. Infrastructure isolation is a throughput tax, not a free feature.</strong>
+                    Cloud MIG partitioning costs exactly 15% throughput (1,000 &rarr; 850 tokens/sec)
+                    to prevent cross-tenant side-channel attacks; on-premises hardware isolation costs 0%.
+                    The deployment context choice has a direct, quantifiable engineering consequence.
+                </div>
+            </div>
+        </div>
+        """),
+
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What&#x2019;s Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 14: The Adversarial Wall</strong> &mdash; This lab quantified passive
+                    inference attacks on a trained model. The next lab asks: what happens when the
+                    attacker actively perturbs inputs to fool the model at inference time, and what
+                    is the training cost of defending against them?
+                </div>
+            </div>
+
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-security-privacy-differential-privacy-8c2b for the
+                    full Gaussian mechanism derivation and DP-SGD algorithm.<br/>
+                    <strong>Build:</strong> The MultiTenantIsolation LEGO cell in the chapter
+                    demonstrates the 15% MIG throughput tax via explicit timing benchmarks.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. DP noise scales as sigma = C * sqrt(2 ln(1.25/delta)) / epsilon. At epsilon=1 with N=1,000 people, per-person error is $200. For N=100, the error rises to $2,000. What does this 1/sqrt(N) scaling imply about the minimum dataset size for DP to be practical?
+2. MIG partitioning costs exactly 15% throughput (1,000 to 850 tokens/sec) to prevent cross-tenant side-channel attacks. On-premises hardware isolation costs 0%. What does this quantifiable difference reveal about how deployment context choices have direct engineering consequences?
+3. Standard training allows membership inference accuracy bounded by the generalization gap (Yeom bound). DP training at epsilon <= 1 collapses MI accuracy to 50-55%. Why is increasing dataset size 10x (recovering sqrt(10) noise tolerance) the correct response rather than weakening epsilon?
+
+**You're ready to move on if you can:**
+- Calculate the per-record accuracy cost of differential privacy for a given epsilon, sensitivity, and dataset size
+- Explain why infrastructure isolation is a throughput tax with quantifiable cost, not a free feature
+- Determine when DP is feasible based on dataset size and the required accuracy tolerance
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER SAVE + HUD ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1442,41 +1638,6 @@ def _(
             {_badge_ctx}
         </div>
         """),
-        mo.md("""
-        ## Key Takeaways
-
-        1. **The privacy gap is measurable, not assumed.** Standard training without DP
-           allows membership inference accuracy bounded by the generalization gap
-           (Yeom et al. 2018: Advantage ≤ A_train − A_test). A 94% MI accuracy means
-           the model memorized enough training-specific patterns to make individual
-           membership nearly deterministic. DP training — by injecting calibrated
-           Gaussian noise into every gradient step — collapses this gap to near-random
-           (50–55% MI accuracy at ε ≤ 1). Privacy is not a policy choice; it is a
-           parameter with a mathematically defined noise requirement.
-
-        2. **DP noise scales inversely with dataset size.** The accuracy cost of DP
-           at fixed ε is proportional to σ / √N. Increasing the training dataset
-           by 10× reduces the effective noise impact by √10 ≈ 3.16×, enabling recovery
-           to clinically viable accuracy while maintaining the regulatory ε ≤ 1 bound.
-           This is the correct engineering response to the privacy-utility tradeoff —
-           not weakening ε, which provides only the illusion of compliance while
-           dramatically weakening the privacy guarantee (e^2 ≈ 7.4 vs e^1 ≈ 2.7).
-        """),
-        mo.callout(mo.md("""
-        **Connection to Textbook and TinyTorch:**
-
-        This lab explores the core tradeoff from @sec-security-privacy-differential-privacy-8c2b.
-        The Gaussian mechanism noise formula σ ≥ C√(2 ln(1.25/δ))/ε governs every slider
-        in Act II. The Yeom bound (Advantage ≤ generalization gap) governs Act I.
-
-        The deployment context (on-prem vs cloud) demonstrates the multi-tenant isolation
-        overhead quantified in the chapter's MultiTenantIsolation LEGO cell: 15% throughput
-        loss from MIG partitioning is the engineering cost of preventing cross-tenant
-        side-channel attacks in shared infrastructure.
-
-        The Lab 14 (Robust AI) extends this framework to adversarial examples — where the
-        threat model shifts from passive inference to active manipulation of model outputs.
-        """), kind="info"),
     ])
     return
 

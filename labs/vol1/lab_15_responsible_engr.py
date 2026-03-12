@@ -38,6 +38,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
+
 # ── CELL 0: SETUP (hide_code=False — leave visible) ───────────────────────────
 @app.cell
 def _():
@@ -57,7 +61,7 @@ def _():
 
     # ── Hardware constants — plain floats, sources annotated ──────────────────
     H100_BW_GBS      = 3350   # GB/s — H100 SXM5 HBM3e, NVIDIA spec
-    H100_TFLOPS_FP16 = 1979   # TFLOPS FP16 — NVIDIA H100 datasheet
+    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB      = 80     # GB HBM — NVIDIA H100 SXM5
     MOBILE_BW_GBS    = 68     # GB/s — Apple A17-class smartphone NPU
     MOBILE_TOPS_INT8 = 35     # TOPS INT8 — Apple A17-class NPU
@@ -148,7 +152,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Identify why equal accuracy across demographic groups does not imply equal false positive or false negative rates, using the Chouldechova impossibility theorem.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Compare three fairness criteria (accuracy-only, demographic parity, equalized odds) and predict the accuracy cost of each relative to an unconstrained baseline.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a fairness audit strategy within a $50K annual budget that satisfies equalized odds constraints while maintaining recall above 80%.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Fairness criteria definitions from @sec-responsible-engineering-fairness-metrics &middot;
+                    Chouldechova impossibility theorem from @sec-responsible-engineering-impossibility
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Your loan model has 85% accuracy on both demographic groups, which your legal team calls compliant &mdash; so why do advocacy groups have a valid mathematical argument that the model is biased, and can you make it fairer without destroying its accuracy?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -167,7 +237,7 @@ def _(mo):
     return
 
 
-# ── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -191,11 +261,50 @@ def _(mo):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I — THE FAIRNESS ILLUSION
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 4: ACT I SCENARIO ────────────────────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The Fairness Illusion"
+    _act_duration = "12\u201315 min"
+    _act_why = (
+        "You assume equal accuracy across demographic groups means equal treatment. "
+        "The Chouldechova impossibility theorem proves this cannot be true when base rates "
+        "differ between groups \u2014 a calibrated model with equal accuracy structurally "
+        "produces unequal false positive and false negative rates. This is mathematics, "
+        "not a training failure."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 6: ACT1_STAKEHOLDER ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["OrangeLine"]
@@ -791,11 +900,49 @@ def _(mo, act1_reflection):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II — THE AUDIT-ACCURACY TRADEOFF
-# ─────────────────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═════════════════════════════════════════════════════════════════════════════
 
-# ── CELL 13: ACT II SCENARIO ──────────────────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The Audit-Accuracy Tradeoff"
+    _act_duration = "20\u201325 min"
+    _act_why = (
+        "Act I proved that fairness criteria are mutually incompatible when base rates differ. "
+        "Now choose: accuracy-only, demographic parity, or equalized odds \u2014 and discover "
+        "that the right criterion is a legal and ethical policy decision, not an engineering one, "
+        "while the accuracy cost of the most defensible criterion is lower than you expect."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ── CELL 13: ACT2_STAKEHOLDER ─────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
     _color = COLORS["BlueLine"]
@@ -1430,38 +1577,109 @@ def _(mo, act2_reflection):
     return
 
 
-# ── CELL 22: KEY TAKEAWAYS ────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-        mo.md("## Key Takeaways"),
-        mo.callout(
-            mo.md("""
-            **1. Equal accuracy is not equal treatment (Chouldechova 2017).**
-            When base rates differ between groups, a calibrated model with a shared threshold
-            *structurally* produces unequal false positive and false negative rates. This is
-            not a training failure — it is a mathematical consequence of the base rate gap.
-            Auditing accuracy by group is a necessary but insufficient compliance check.
-            """),
-            kind="info",
-        ),
-        mo.callout(
-            mo.md("""
-            **2. Choosing a fairness criterion is a policy decision, not an engineering one.**
-            Demographic parity, equalized odds, and individual fairness are incompatible
-            when base rates differ. Each encodes a different moral theory of equal treatment.
-            Equalized odds is most defensible in hiring and lending under US law because it
-            conditions on actual qualification. The engineering job is to implement the chosen
-            criterion at minimum accuracy cost — not to choose it.
-            """),
-            kind="info",
-        ),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Equal accuracy is not equal treatment (Chouldechova 2017).</strong>
+                    When base rates differ between groups, a calibrated model with equal accuracy
+                    structurally produces unequal FPR and FNR. With a 30% vs. 50% base rate gap,
+                    a model at 85% accuracy on both groups can still have false positive rates
+                    that differ by more than 10 percentage points. This is mathematics, not bias.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Choosing a fairness criterion is a policy decision, not an engineering one.</strong>
+                    Demographic parity, equalized odds, and calibration are mutually incompatible
+                    when base rates differ. Equalized odds is most defensible in hiring and lending
+                    under US law because it conditions on actual qualification. The engineering job
+                    is to implement the chosen criterion &mdash; not to choose it.
+                </div>
+                <div>
+                    <strong>3. The equalized odds accuracy cost is lower than expected.</strong>
+                    In the resume screening scenario, enforcing equalized odds (equal FPR and FNR)
+                    costs approximately 3&ndash;5 percentage points of accuracy relative to the
+                    unconstrained baseline, while reducing the false positive rate disparity from
+                    &gt;10 pp to &lt;1 pp. The fairness gain is asymmetric to the accuracy cost.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 16: Synthesizing ML Systems.</strong> This lab showed that
+                    fairness has a measurable accuracy cost. Lab 16 asks: when you combine
+                    all constraints from Chapters 12&ndash;15 simultaneously &mdash; Amdahl&apos;s
+                    ceiling, P99 SLOs, drift rate, and fairness thresholds &mdash; can a single
+                    system satisfy all of them, and how do you diagnose which constraint is binding?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-responsible-engineering-impossibility for the
+                    Chouldechova proof and @sec-responsible-engineering-audit-pipelines for
+                    the audit cost model at deployment scale.<br/>
+                    <strong>Build:</strong> TinyTorch Module 15 &mdash; implement a fairness
+                    auditor that computes FPR/FNR parity and flags disparate impact violations.
+                    See <code>tinytorch/src/15_responsible/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. A facial recognition system reports 96% aggregate accuracy. The Gender Shades study shows the worst-performing subgroup can reach 34.7% error rate. What is the maximum disparity ratio — and why does aggregate accuracy fail to bound subgroup performance?
+
+    2. The Fairness-Accuracy Pareto Frontier shows a 'sweet spot' at Point B where fairness disparity drops from 18% to 5% at a cost of only ~3 percentage points of accuracy (from 94.7% to 91.3%). What does this reveal about the assumption that fairness and accuracy are strictly opposed?
+
+    3. The Fairness Impossibility Theorem (Chouldechova-Kleinberg) proves that Calibration, Equal FPR, and Equal FNR cannot all be simultaneously satisfied when base rates differ between groups. Given this, what is the correct engineering response when a product manager asks for a 'fair' model — and what role does a policy decision play?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
     ])
     return
 
 
-# ── CELL 23: LEDGER SAVE + HUD ────────────────────────────────────────────────
+# ─── CELL 21: LEDGER SAVE + HUD ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo,

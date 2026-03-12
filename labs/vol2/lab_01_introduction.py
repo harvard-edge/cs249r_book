@@ -53,7 +53,7 @@ def _():
 
     # ── Hardware constants (all from NVIDIA H100 SXM5 spec and Vol2 intro) ──
     H100_BW_GBS       = 3350    # GB/s HBM3e — NVIDIA H100 SXM5 spec
-    H100_TFLOPS_FP16  = 1979    # TFLOPS tensor core FP16 — NVIDIA spec
+    H100_TFLOPS_FP16  = 989     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80      # GB HBM3e — NVIDIA spec
     H100_TDP_W        = 700     # Watts TDP — NVIDIA spec
     H100_NVLINK_BW    = 900     # GB/s bidirectional NVLink4 — NVIDIA spec
@@ -75,6 +75,10 @@ def _():
         GPT4_TRAINING_FLOPS, H100_MFU_DEFAULT,
     )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER (hide_code=True) ─────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -130,7 +134,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING (hide_code=True) ────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify fleet availability collapse: predict why a 1,000-GPU cluster at 99.9% per-GPU reliability has only a 37% chance of being fully healthy at any moment.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose the communication wall: identify at what GPU count and interconnect type Ethernet scaling efficiency drops below 30% for a 175B-parameter model.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Compare infrastructure TCO paths: determine the utilization breakeven point where on-premises hardware becomes cheaper than reserved cloud over a 3-year horizon.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Fleet reliability and the exponential collapse formula from @sec-vol2-introduction-scale-moment &middot;
+                    Iron Law of Scale and AllReduce volume from @sec-vol2-introduction-fleet-law
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If each GPU in your fleet has 99.9% uptime and each GPU delivers 989 TFLOPS, why does a 1,000-GPU cluster fail multiple times per day and deliver far less than 1,000&times; the throughput of a single machine?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING (hide_code=True) ────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -177,7 +247,7 @@ def _(mo, context_toggle, COLORS):
     _specs = (
         "1,024 H100 SXM5 GPUs · InfiniBand 400 GB/s fabric · H100 NVLink4 within nodes"
         if _is_fleet else
-        "1 H100 SXM5 · 80 GB HBM3e · 3,350 GB/s memory bandwidth · 1,979 TFLOPS FP16"
+        "1 H100 SXM5 · 80 GB HBM3e · 3,350 GB/s memory bandwidth · 989 TFLOPS FP16"
     )
     mo.Html(f"""
     <div style="border-left: 4px solid {_color}; background: {'#f0f4ff' if _is_fleet else '#ecfdf5'};
@@ -193,27 +263,45 @@ def _(mo, context_toggle, COLORS):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I: THE SCALE ILLUSION
-# Stakeholder: VP Engineering | Prediction: speedup with 1000 GPUs
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.Html("""
-        <div style="background: #f0f4ff; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #6366f1;
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Scale Illusion"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "You expect that 1,000&times; hardware delivers 1,000&times; speedup. "
+        "Amdahl&rsquo;s Law and communication overhead will show that a 1,024-GPU cluster "
+        "at realistic parallel efficiency delivers a fraction of the theoretical maximum &mdash; "
+        "and the gap widens as you add more nodes."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I · The Scale Illusion · 12–15 min
-            </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                Does 1,000× hardware deliver 1,000× speedup?
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        """),
-    ])
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -245,14 +333,14 @@ def _(mo):
 
     Before exploring the cluster, establish the physics on one H100.
 
-    An H100 SXM5 delivers **1,979 TFLOPS** peak FP16 throughput. Real training
+    An H100 SXM5 delivers **989 TFLOPS** peak FP16 dense throughput. Real training
     workloads achieve roughly **50% Model FLOP Utilization (MFU)** — the rest is
     memory access latency, kernel launch overhead, and data loading. At 50% MFU:
 
     ```
-    Effective throughput = 1,979 TFLOPS × 0.50 = 989.5 TFLOPS
+    Effective throughput = 989 TFLOPS × 0.50 = 494.5 TFLOPS
     GPT-4 training compute ≈ 2.2 × 10²⁴ FLOPs
-    Single-GPU time = 2.2×10²⁴ / (989.5×10¹²) / (86,400 × 365) ≈ 71 years
+    Single-GPU time = 2.2×10²⁴ / (494.5×10¹²) / (86,400 × 365) ≈ 141 years
     ```
 
     The VP's $10M budget buys 1,000 H100s. Perfect linear scaling would give
@@ -724,27 +812,45 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II: THE FLEET COST MODEL
-# Stakeholder: CFO | Prediction: cheapest 3-year TCO path
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.Html("""
-        <div style="background: #fff7ed; border-radius: 12px; padding: 14px 20px; margin-bottom: 6px;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: #cc5500;
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Fleet Cost Model"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I showed that scale efficiency is far below the theoretical maximum. "
+        "Now discover a deeper trap: the infrastructure path that looks cheapest per GPU-hour "
+        "becomes the most expensive once utilization drops below the breakeven threshold &mdash; "
+        "a number your CFO has never calculated."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II · The Fleet Cost Model · 20–25 min
-            </div>
-            <div style="font-size: 1.3rem; font-weight: 800; color: #1e293b; margin-top: 4px;">
-                Three infrastructure paths. One 3-year budget. Which wins?
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        """),
-    ])
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -1280,7 +1386,11 @@ def _(mo):
     return
 
 
-# ─── LEDGER SAVE + HUD FOOTER ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS, context_toggle,
@@ -1368,46 +1478,99 @@ def _(
     return
 
 
-# ─── KEY TAKEAWAYS ────────────────────────────────────────────────────────────
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
+def _(mo, COLORS):
     mo.vstack([
         mo.md("---"),
-        mo.md("""
-        ## Key Takeaways
 
-        1. **Scale does not deliver linear speedup.** The gap between ideal and actual
-           speedup is the **Bisection Bandwidth Wall** made visible: AllReduce gradient
-           synchronization grows with cluster size, and realistic parallel efficiency
-           caps actual scaling at 20–40% for large clusters. Expect 200–400× speedup
-           from 1,000 GPUs, not 1,000×.
-
-        2. **Infrastructure TCO is not hourly rate times hours.** On-premises costs
-           include CAPEX, power, cooling, and staff — fixed costs that accrue whether
-           GPUs are active or idle. The breakeven utilization (typically 60–75%) determines
-           which infrastructure path wins. Below breakeven, reserved cloud dominates;
-           above it, on-prem amortizes its fixed costs over enough productive GPU-hours
-           to compete. Utilization is the variable your CFO actually needs to forecast.
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Fleet reliability collapses exponentially.</strong>
+                    At 1,000 GPUs and 99.9% per-GPU uptime, fleet availability is (0.999)^1000 &asymp; 37% &mdash;
+                    more likely broken than healthy. At GPT-4 scale (25,000 GPUs), a hardware failure
+                    occurs every 4.4 hours. Engineering for failure is not optional; it is the primary design constraint.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Communication, not compute, sets the scaling ceiling.</strong>
+                    For a 175B-parameter model on Ethernet (12.5 GB/s), Ring AllReduce takes 56 seconds
+                    against 1.2 seconds of compute &mdash; communication consumes 97% of step time and
+                    Amdahl&apos;s Law caps maximum speedup at 5&times; regardless of GPU count.
+                </div>
+                <div>
+                    <strong>3. Infrastructure TCO is governed by utilization, not hourly rate.</strong>
+                    On-premises beats reserved cloud only above the breakeven utilization threshold
+                    (typically 60&ndash;75%). Below breakeven, fixed CAPEX, power, and cooling costs
+                    accumulate regardless of whether GPUs are computing &mdash; a trap invisible
+                    in per-hour pricing comparisons.
+                </div>
+            </div>
+        </div>
         """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab V2-02: The Interconnect Wall</strong> &mdash; This lab showed that
+                    Ethernet collapses scaling efficiency to &lt;30%. The next lab asks: why does
+                    NVLink at 900 GB/s create a hard boundary between intra-node and inter-node
+                    parallelism strategies?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-vol2-introduction-scale-moment for the Fleet Law derivation
+                    and @sec-vol2-introduction-fleet-law for the Iron Law of Scale.<br/>
+                    <strong>Build:</strong> TinyTorch distributed module &mdash; implement a ring-AllReduce
+                    in <code>tinytorch/src/distributed/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. A 1,000-GPU cluster with 99.9% per-GPU uptime has what fleet availability? Why does the Fleet Law (MTBF_cluster = MTBF_gpu / N) mean that engineering for failure is the primary design constraint at scale?
+2. For a 175B-parameter model on Ethernet, Ring AllReduce takes 56 seconds against 1.2 seconds of compute. Why does Amdahl's Law cap maximum speedup at roughly 5x regardless of how many GPUs you add?
+3. On-premises infrastructure accumulates fixed costs whether GPUs are computing or idle. At what utilization range does on-prem break even against reserved cloud, and why is this threshold invisible in per-hour pricing comparisons?
+
+**You're ready to move on if you can:**
+- Calculate fleet availability from per-GPU uptime using (reliability)^N
+- Explain why communication overhead, not compute, sets the scaling ceiling for large models
+- Identify the utilization breakeven point that determines the TCO winner between on-prem and cloud
+""")
+        }),
     ])
-    return
-
-
-# ─── CONNECTIONS ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Textbook:** This lab explores the **Scale Moment** and **Law of Distributed Efficiency**
-    from @sec-vol2-introduction-scale-moment, and the **Engineering Crux** hierarchy from
-    @sec-vol2-introduction-engineering-crux. The AllReduce communication model will be
-    formalized in @sec-vol2-collective-communication.
-
-    **Next Lab:** Lab V2-02 explores NVLink vs. PCIe bandwidth and the interconnect wall —
-    the hardware-level constraint that sets the ceiling on parallel efficiency.
-
-    **TinyTorch:** The distributed training parallelism concepts in this lab connect to
-    `tinytorch/src/distributed/` — you will implement a ring-AllReduce there.
-    """), kind="info")
     return
 
 

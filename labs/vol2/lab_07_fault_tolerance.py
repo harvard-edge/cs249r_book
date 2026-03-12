@@ -123,7 +123,79 @@ def _(COLORS, LAB_CSS, mo):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify how the 1/N scaling law collapses cluster MTBF</strong> — a 10,000-GPU cluster with 50,000-hour per-GPU MTBF fails every 5 hours, not once a decade.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Derive the Young-Daly optimal checkpoint interval</strong> T* = sqrt(2C/&lambda;) and predict whether a 16,384-GPU cluster should checkpoint every 5 minutes, every 30 minutes, or every 2 hours.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the storage throughput required</strong> to keep checkpoint overhead below 10% for a 2.1 TB model checkpoint at the optimal interval.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Component MTBF and reliability math from @sec-fault-tolerance-reliability &middot;
+                    Checkpoint cost model (synchronous vs. asynchronous) from @sec-fault-tolerance-checkpointing
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If each GPU in your 16,384-GPU cluster is rated for 200,000 hours MTBF,
+                why does your cluster fail every 44 minutes &mdash; and how often should
+                you checkpoint to avoid throwing away most of your training budget?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -141,7 +213,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ─────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, mo):
     context_toggle = mo.ui.radio(
@@ -167,17 +239,42 @@ def _(COLORS, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — THE CHECKPOINT COST BLINDSPOT
+# ZONE B: ACT I -- CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ─── ACT I: SECTION HEADER ─────────────────────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act I — The Checkpoint Cost Blindspot
-    *Calibration · 12-15 minutes*
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Checkpoint Cost Blindspot"
+    _act_duration = "12-15 min"
+    _act_why      = ("You expect checkpointing every 30 minutes to be conservative. "
+                     "The Young-Daly formula will show that at the 1,024-GPU scale, "
+                     "you are checkpointing 2x too often — burning I/O bandwidth "
+                     "without buying safety.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -197,7 +294,7 @@ def _(COLORS, mo):
         <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
             "We're training a 70B parameter model on our 1,024-GPU cluster. We checkpoint
             every 1,000 steps — roughly every 30 minutes. Each checkpoint takes 4 minutes
-            to write to NFS. The cluster fails on average once every 8 hours. Our cluster
+            to write to NFS (Network File System). The cluster fails on average once every 8 hours. Our cluster
             utilization has dropped lately. An engineer suggested we're checkpointing too
             often, but I don't want to lose hours of work if we fail. Are we at the right
             frequency?"
@@ -696,17 +793,42 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — FLEET-SCALE CHECKPOINTING
+# ZONE C: ACT II -- DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
-
-# ─── ACT II: SECTION HEADER ────────────────────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act II — Fleet-Scale Checkpointing
-    *Design Challenge · 20-25 minutes*
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Fleet-Scale Checkpointing"
+    _act_duration = "20-25 min"
+    _act_why      = ("Act I proved the optimal interval shrinks as MTBF shrinks. "
+                     "Now apply Young-Daly from first principles to a 16,384-GPU cluster "
+                     "and determine whether the optimal interval is closer to 5 minutes, "
+                     "30 minutes, or 2 hours — and what storage throughput that demands.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -1315,7 +1437,7 @@ def _(mo):
 
         **Multi-level checkpointing strategy:**
         - Level 0: In-memory (host RAM) every N steps — near-zero cost, volatile
-        - Level 1: NVMe/local SSD every K·N steps — fast, survives GPU failure
+        - Level 1: NVMe (Non-Volatile Memory Express)/local SSD every K·N steps — fast, survives GPU failure
         - Level 2: Distributed storage (Lustre/GCS) every M·K·N steps — durable
 
         Each level uses Young-Daly independently with its own C and λ. The expected
@@ -1326,6 +1448,112 @@ def _(mo):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Fleet MTBF collapses as 1/N.</strong>
+                    A 10,000-GPU cluster with 50,000-hour per-GPU MTBF fails every 5 hours.
+                    At 16,384 H100 GPUs (empirically validated by Meta Llama 3: 419 failures
+                    in 54 days), the cluster MTBF is approximately 3 hours &mdash; failure
+                    is the normal operating condition, not an exception.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Young-Daly is a physics law, not a guideline.</strong>
+                    T* = sqrt(2C/&lambda;) minimizes provably expected wasted time.
+                    For the 16K-GPU cluster (MTBF = 3 hrs, C = 2 min), T* &asymp; 27 min.
+                    Doubling cluster size increases optimal checkpoint frequency by only
+                    sqrt(2) &asymp; 1.4x &mdash; the square root dampens the scaling.
+                </div>
+                <div>
+                    <strong>3. Storage throughput, not compute, limits large-scale checkpointing.</strong>
+                    A 2.1 TB GPT-3 checkpoint at 27-minute intervals requires &ge;40 GB/s
+                    of sustained write throughput. This forces tiered storage staging
+                    (HBM (High Bandwidth Memory) &rarr; NVMe &rarr; PFS (Parallel File System)) and sharded checkpointing at 2.1 GB/worker.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 08: Fleet Orchestration</strong> &mdash; This lab showed that
+                    checkpoints happen every 27 minutes and failures arrive every 3 hours.
+                    The next lab asks: how does the scheduler reclaim GPU-hours between
+                    checkpoint windows, and what happens to queue latency when you push
+                    cluster utilization past 80%?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-fault-tolerance-young-daly for the full
+                    derivation of the optimal checkpoint interval and its assumptions.<br/>
+                    <strong>Build:</strong> TinyTorch Module 17 &mdash; implement asynchronous
+                    checkpoint writing with overlap scheduling to decouple C_stall from C_write.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. The Young-Daly formula gives T* = sqrt(2C/lambda). For a 16K-GPU cluster with MTBF ~3 hours and checkpoint cost of 2 minutes, what is the optimal interval? Why does doubling cluster size only increase checkpoint frequency by sqrt(2) rather than 2x?
+2. A 2.1 TB GPT-3 checkpoint written every 27 minutes requires at least 40 GB/s sustained write throughput. What storage architecture (tiered HBM to NVMe to PFS) makes this feasible, and why does sharded checkpointing at 2.1 GB/worker matter?
+3. Meta's Llama 3 training experienced 419 interruptions in 54 days on 16,384 H100s. Why does setting checkpoint intervals by intuition systematically waste compute, and what does the Young-Daly formula reveal that intuition misses?
+
+**You're ready to move on if you can:**
+- Apply the Young-Daly formula to calculate optimal checkpoint intervals for a given cluster size and failure rate
+- Explain why fleet MTBF collapses as 1/N and what this means for large-scale training reliability
+- Calculate the storage throughput required for a given checkpoint size and interval
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ────────────────────────────────────────────────────────
 # ═══════════════════════════════════════════════════════════════════════════════
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1419,27 +1647,6 @@ def _(
     return
 
 
-# ─── KEY TAKEAWAYS ─────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Key Takeaways
-
-    1. **Young-Daly is a physics law, not a guideline:** The optimal checkpoint interval
-       T\\* = sqrt(2C/λ) minimizes the provably expected total wasted time. Deviating from
-       T\\* in either direction increases costs — more frequent checkpoints burn I/O bandwidth,
-       less frequent checkpoints increase expected rework. The formula makes the right
-       answer exact, not approximate.
-
-    2. **Cluster failure rate scales linearly with GPU count:**
-       λ_cluster = N × λ_per_gpu. At 16,384 GPUs with per-GPU MTBF of 200 hours,
-       the cluster fails every 44 minutes. Async checkpointing — where the training
-       stall C_stall is decoupled from the write time C_write — is not an optimization
-       at this scale; it is a prerequisite. Without it, checkpoint overhead alone
-       consumes 30-40% of GPU-hours.
-    """)
-    return
 
 
 if __name__ == "__main__":

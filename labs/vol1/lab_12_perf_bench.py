@@ -41,6 +41,10 @@ app = marimo.App(width="full")
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 @app.cell
 def _():
@@ -60,7 +64,7 @@ def _():
 
     # ── Hardware constants (plain floats — no pint, sourced from @sec-benchmarking) ─
     H100_BW_GBS       = 3350.0   # GB/s  — H100 SXM5 HBM3e, NVIDIA spec
-    H100_TFLOPS_FP16  = 1979.0   # TFLOPS — H100 peak FP16, NVIDIA spec
+    H100_TFLOPS_FP16  = 989.0    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80.0     # GB    — H100 HBM capacity
     H100_TDP_W        = 700.0    # Watts — H100 TDP
 
@@ -162,7 +166,73 @@ def _(mo, LAB_CSS, COLORS, CLOUD_AMDAHL_64, GPU_PURCHASE, CTO_EXPECTED_SPEEDUP):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ──────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the Amdahl ceiling for a 64-GPU training cluster given a measured serial fraction, and predict end-to-end speedup before adding hardware.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose why a benchmark score of 85 (Vendor A) correctly predicted the winner on synthetic workloads but the wrong winner in production.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the batch-size divergence threshold above which a benchmark loses validity, and compute the resulting production throughput gap.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Amdahl&apos;s Law formula from @sec-benchmarking-endtoend-benchmarks-51bb &middot;
+                    Benchmark validity concepts from @sec-benchmarking-machine-learning-benchmarking-framework-70b8
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "Your CTO approved 64 GPUs expecting 64x speedup, and the vendor benchmark confirmed the hardware purchase — so why will your training job only run 6x faster, and why did you buy the slower vendor?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -176,7 +246,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ───────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ───────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -256,26 +326,43 @@ def _(mo, context_toggle, COLORS,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE AMDAHL CEILING
+# ZONE B: ACT I — CALIBRATION
 # ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _color = COLORS["BlueLine"]
-    mo.vstack([
-        mo.Html(f"""
-        <div style="margin: 28px 0 8px 0;">
-            <div style="font-size:0.72rem; font-weight:700; letter-spacing:0.18em;
-                        text-transform:uppercase; color:{_color}; margin-bottom:6px;">
-                Act I &middot; Calibration &middot; 12&ndash;15 min
-            </div>
-            <div style="font-size:1.7rem; font-weight:900; color:#0f172a;
-                        letter-spacing:-0.01em;">
-                The 64&times; Speedup That Cannot Exist
-            </div>
+    _act_num = "I"
+    _act_color = COLORS["BlueLine"]
+    _act_title = "The 64\u00d7 Speedup That Cannot Exist"
+    _act_duration = "12\u201315 min"
+    _act_why = (
+        "You expect 64 GPUs to deliver 64\u00d7 speedup. They will not. A 15% serial fraction "
+        "in your data-loading pipeline caps the ceiling at 6.1\u00d7 by mathematical law \u2014 "
+        "and the CTO\u2019s $2M hardware purchase cannot change that number."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        """),
-    ])
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -833,21 +920,42 @@ def _(mo, act1_reflect, CLOUD_SERIAL_FRAC, GPU_PURCHASE):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ACT II — BENCHMARK VALIDITY
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _color = COLORS["OrangeLine"]
+    _act_num = "II"
+    _act_color = COLORS["OrangeLine"]
+    _act_title = "The Benchmark That Ranked the Wrong Vendor First"
+    _act_duration = "20\u201325 min"
+    _act_why = (
+        "Act I showed that the serial fraction caps parallel scaling. Now discover a second "
+        "failure mode: the benchmark that measured the right thing on the wrong workload "
+        "\u2014 ranking Vendor A first on synthetic tests while Vendor B is 20% faster "
+        "in the production traffic that actually matters."
+    )
     mo.Html(f"""
-    <div style="margin: 36px 0 8px 0;">
-        <div style="font-size:0.72rem; font-weight:700; letter-spacing:0.18em;
-                    text-transform:uppercase; color:{_color}; margin-bottom:6px;">
-            Act II &middot; Design Challenge &middot; 20&ndash;25 min
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        <div style="font-size:1.7rem; font-weight:900; color:#0f172a;
-                    letter-spacing:-0.01em;">
-            The Benchmark That Ranked the Wrong Vendor First
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -1391,72 +1499,104 @@ def _(mo, act2_pred):
 
 
 # ─── CONNECTIONS ──────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Connections
+def _(mo, COLORS, CLOUD_SERIAL_FRAC, GPU_PURCHASE, CLOUD_AMDAHL_64, CTO_EXPECTED_SPEEDUP):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The serial fraction, not the number of processors, sets the speedup ceiling.</strong>
+                    With S={CLOUD_SERIAL_FRAC*100:.0f}%, 64 GPUs deliver {CLOUD_AMDAHL_64:.1f}&times; &mdash;
+                    not {CTO_EXPECTED_SPEEDUP:.0f}&times;. The Amdahl ceiling of 1/S = {1/CLOUD_SERIAL_FRAC:.1f}&times;
+                    is invariant regardless of how many processors you add.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. A benchmark is valid only if it exercises the production bottleneck.</strong>
+                    Vendor A scored 85 on the synthetic workload but lost in production because
+                    synthetic and production use different memory access patterns. The benchmark
+                    was reproducible and fair; it was not valid.
+                </div>
+                <div>
+                    <strong>3. The batch-size divergence threshold quantifies benchmark invalidity.</strong>
+                    When benchmark batch size diverges more than 10&times; from production,
+                    the validity score drops below 0.5 and the ranking reversal becomes predictable
+                    from first principles, not hindsight.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 13: The Tail Latency Trap.</strong> This lab showed that the serial
+                    fraction caps parallel scaling. Lab 13 asks: once your system is serving
+                    requests, why does the average latency look healthy while users are complaining
+                    &mdash; and how does Little&apos;s Law predict the P99 explosion before it happens?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-benchmarking-endtoend-benchmarks-51bb for the
+                    full Amdahl derivation and @sec-benchmarking-fallacies-pitfalls-9781 for the
+                    benchmark trap as a named anti-pattern.<br/>
+                    <strong>Build:</strong> TinyTorch Module 12 &mdash; instrument a real inference
+                    pipeline, measure component fractions, and verify Amdahl&apos;s Law on hardware.
+                    See <code>tinytorch/src/12_benchmarking/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. A vision pipeline has 8 ms preprocessing and 10 ms inference. After achieving a 5x inference speedup, the end-to-end speedup is only 1.8x. What is the Amdahl ceiling (maximum possible speedup with infinitely fast inference) — and what fraction of the pipeline causes it?
+
+    2. Peak TFLOPS predict sustained performance poorly: an A100 achieving 90% utilization on ResNet-50 may achieve only 40% on a recommendation system. From Act II, what configuration (batch size, context) allowed the Jetson Orin NX to meet the latency SLA more efficiently than the H100?
+
+    3. A vendor reports 10x faster inference on their new accelerator. Based on the chapter's data that model inference is only 10-20% of total production latency (the rest is preprocessing, queuing, postprocessing), what end-to-end speedup should you actually expect — and what should you benchmark to verify?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
     """)
+        }),
+    ])
     return
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Textbook**
-
-    This lab is grounded in @sec-benchmarking, specifically:
-
-    - @sec-benchmarking-machine-learning-benchmarking-framework-70b8 — three principles:
-      benchmarks as proxies, Goodhart's Law, end-to-end beats component metrics
-    - @sec-benchmarking-benchmarking-granularity-3855 — why a 3&times; inference speedup
-      can yield only 1.3&times; end-to-end improvement (Act I, Amdahl composition)
-    - @sec-benchmarking-endtoend-benchmarks-51bb — the benchmark-production gap;
-      production traffic as the gold standard for validity
-    - @sec-benchmarking-fallacies-pitfalls-9781 — the benchmark trap as a named anti-pattern
-
-    **TinyTorch**
-
-    In TinyTorch Module 12 (Profiling and Benchmarking), you will instrument an actual
-    inference pipeline to measure real component fractions, then verify Amdahl's Law
-    numerically on hardware. The lab predicts; TinyTorch confirms.
-    See `tinytorch/src/12_benchmarking/`.
-
-    **Next Lab**
-
-    Lab 13 (Model Serving) applies this thinking to a different axis: Little's Law
-    quantifies how request concurrency, arrival rate, and latency interact. The same
-    principle — measure the system, not the component — governs SLO design and the
-    distinction between P50 and P99 latency.
-    """), kind="info")
-    return
-
-
-# ─── KEY TAKEAWAYS ────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, CLOUD_SERIAL_FRAC, GPU_PURCHASE, CLOUD_AMDAHL_64, CTO_EXPECTED_SPEEDUP):
-    mo.callout(mo.md(
-        f"## Key Takeaways\n\n"
-        f"1. **The serial fraction, not the number of processors, sets the speedup ceiling.** "
-        f"Amdahl's Law: Speedup = 1/(S + P/N). "
-        f"With S={CLOUD_SERIAL_FRAC*100:.0f}%, adding {GPU_PURCHASE} GPUs delivers "
-        f"**{CLOUD_AMDAHL_64:.1f}&times;** — not {CTO_EXPECTED_SPEEDUP:.0f}&times;. "
-        f"The ceiling is 1/S = {1/CLOUD_SERIAL_FRAC:.1f}&times; regardless of N. "
-        f"To approach linear scaling, reduce S through async data loading and async I/O — "
-        f"not by buying more processors.\n\n"
-        f"2. **A benchmark is valid only if it exercises the production bottleneck.** "
-        f"Vendor A won the synthetic benchmark because the synthetic workload uses "
-        f"the uniform-batch, cache-friendly patterns Vendor A is optimized for. "
-        f"Vendor B won in production because production uses the variable-length, "
-        f"random-access patterns Vendor B is optimized for. "
-        f"The benchmark was reproducible and fair. It was not valid. "
-        f"The gold standard is production traffic with P99 latency — the only measurement "
-        f"that guarantees the production bottleneck is exercised."
-    ), kind="success")
-    return
-
-
-# ─── DESIGN LEDGER SAVE + HUD FOOTER ─────────────────────────────────────────
+# ─── CELL 21: DESIGN LEDGER SAVE + HUD FOOTER ────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, ledger, COLORS,
       act1_pred, act1_reflect, act2_pred, act2_reflect,

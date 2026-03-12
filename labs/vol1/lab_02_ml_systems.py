@@ -23,7 +23,7 @@ app = marimo.App(width="full")
 #
 # Hardware constants (all from @sec-ml-systems-deployment-spectrum-71be and NVIDIA specs):
 #   H100_BW_GBS      = 3350    # H100 SXM5 HBM3e, NVIDIA spec
-#   H100_TFLOPS_FP16 = 1979    # TFLOPS FP16 Tensor Core, NVIDIA spec
+#   H100_TFLOPS_FP16 = 989     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 #   A100_BW_GBS      = 2000    # A100 SXM4 HBM2e, NVIDIA spec (approx 1935, rounded)
 #   ORIN_BW_GBS      = 102     # Jetson Orin NX, NVIDIA spec
 #   ORIN_TOPS        = 100     # INT8 TOPS, Jetson Orin NX
@@ -31,6 +31,10 @@ app = marimo.App(width="full")
 #                              # from @eq-latency-physics in ml_systems.qmd
 # ─────────────────────────────────────────────────────────────────────────────
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 0: SETUP (hide_code=False — leave visible for instructor inspection) ─
 
@@ -54,7 +58,7 @@ def _():
     # ── Hardware constants (NVIDIA published specs + chapter equations) ──
     # H100 SXM5: https://www.nvidia.com/en-us/data-center/h100/
     H100_BW_GBS = 3350       # GB/s  HBM3e memory bandwidth
-    H100_TFLOPS_FP16 = 1979  # TFLOPS  FP16 Tensor Core peak
+    H100_TFLOPS_FP16 = 989   # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB = 80         # GB  HBM capacity
 
     # A100 SXM4: prior-generation reference for CTO upgrade scenario
@@ -144,7 +148,79 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ──────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ──────────────────────────────────────────────────────────
+
+
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Diagnose why a 6&times; compute upgrade yields only ~8% latency improvement</strong> for a memory-bound workload, using the Bottleneck Principle to quantify that the Memory term (D/BW) accounts for &gt;99% of inference latency at AI&nbsp;=&nbsp;5&nbsp;FLOPs/Byte.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Identify the Ridge Point</strong> &mdash; the Arithmetic Intensity threshold (AI&nbsp;=&nbsp;R/BW&nbsp;&asymp;&nbsp;590 FLOPs/Byte on H100) where a workload transitions from memory-bound to compute-bound, and predict which batch sizes cross it.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Calculate the propagation delay floor</strong> for a 3,000 km datacenter and determine at what distance the speed of light makes a 10 ms AV safety SLA physically impossible to satisfy from the cloud.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Iron Law equation T&nbsp;=&nbsp;D/BW&nbsp;+&nbsp;O/R&nbsp;+&nbsp;L
+                    from @sec-introduction-iron-law-ml-systems-c32a &middot;
+                    Arithmetic Intensity definition from @sec-ml-systems-deployment-spectrum-71be &middot;
+                    Deployment spectrum constraints from @sec-ml-systems-architectural-anchor
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "If you double the compute power of your inference server, why doesn&apos;t
+                latency halve &mdash; and when does the speed of light make cloud inference
+                physically impossible?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ──────────────────────────────────────────────
 
 
 @app.cell(hide_code=True)
@@ -162,17 +238,17 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ────────────────────────────────────────────────────
 
 
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
         options={
-            "☁️  Cloud (H100 · 3,350 GB/s · 1,979 TFLOPS FP16)": "cloud",
+            "☁️  Cloud (H100 · 3,350 GB/s · 989 TFLOPS FP16)": "cloud",
             "🤖  Edge  (Jetson Orin NX · 102 GB/s · 100 TOPS)":   "edge",
         },
-        value="☁️  Cloud (H100 · 3,350 GB/s · 1,979 TFLOPS FP16)",
+        value="☁️  Cloud (H100 · 3,350 GB/s · 989 TFLOPS FP16)",
         label="Deployment context (sets hardware for all computations):",
         inline=True,
     )
@@ -181,34 +257,44 @@ def _(mo):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE MEMORY WALL REVELATION
+# ZONE B: ACT I — CALIBRATION
 # ═════════════════════════════════════════════════════════════════════════════
 
-
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.Html("""<div style="margin: 24px 0 8px 0;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="background:#006395; color:white; border-radius:50%;
-                             width:28px; height:28px; display:inline-flex; align-items:center;
-                             justify-content:center; font-size:0.85rem; font-weight:800;
-                             flex-shrink:0;">I</div>
-                <div style="flex:1; height:2px; background:#e2e8f0;"></div>
-                <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                            text-transform:uppercase; letter-spacing:0.12em;">
-                    Act I · 12–15 min
-                </div>
-            </div>
-            <div style="font-size:1.6rem; font-weight:800; color:#0f172a;
-                        margin-top:8px; line-height:1.2;">
-                The Memory Wall Revelation
-            </div>
-            <div style="color:#475569; font-size:0.95rem; margin-top:4px;">
-                Why did a $2M hardware upgrade produce only 8% latency improvement?
-            </div>
-        </div>"""),
-    ])
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Memory Wall Revelation"
+    _act_duration = "12–15 min"
+    _act_why      = (
+        "You expect a faster GPU to reduce latency proportionally to its TFLOPS gain. "
+        "The data will show that when Arithmetic Intensity sits far below the Ridge Point "
+        "(AI = 5 vs. ridge &asymp; 590 FLOPs/Byte on H100), the Memory term D/BW accounts for "
+        "&gt;99% of total latency &mdash; and the $2M compute upgrade attacked the wrong term."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -297,7 +383,7 @@ def _(mo):
         },
         label="""**Prediction Lock — Act I.**
 A transformer inference workload has Arithmetic Intensity = 5 FLOPs/Byte.
-The H100 ridge point is R/BW = 1,979 TFLOPS / 3,350 GB/s ≈ 590 FLOPs/Byte.
+The H100 ridge point is R/BW = 989 TFLOPS / 3,350 GB/s ≈ 295 FLOPs/Byte.
 The A100 ridge point is 312 TFLOPS / 2,000 GB/s ≈ 156 FLOPs/Byte.
 
 Upgrading from A100 to H100 multiplies peak compute (R) by 6×, but only increases
@@ -661,7 +747,7 @@ def _(mo, act1_prediction):
             "D) Balanced — both Memory and Compute terms are equal":     "balanced",
         },
         label="""**Reflection.** A transformer encoder running on H100 has Arithmetic Intensity = 5 FLOPs/Byte.
-The H100 ridge point is approximately 590 FLOPs/Byte (R/BW = 1,979 TFLOPS / 3,350 GB/s).
+The H100 ridge point is approximately 295 FLOPs/Byte (R/BW = 989 TFLOPS / 3,350 GB/s).
 This workload is:""",
     )
     act1_reflection
@@ -750,12 +836,12 @@ def _(mo, act1_prediction):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# ACT II — THE LIGHT BARRIER
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═════════════════════════════════════════════════════════════════════════════
 
-
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, act1_prediction, act1_reflection):
+def _(mo, act1_prediction, act1_reflection, COLORS):
     mo.stop(
         act1_prediction.value is None or act1_reflection.value is None,
         mo.callout(
@@ -764,28 +850,40 @@ def _(mo, act1_prediction, act1_reflection):
         )
     )
 
-    mo.vstack([
-        mo.Html("""<div style="margin: 32px 0 8px 0;">
-            <div style="display:flex; align-items:center; gap:12px;">
-                <div style="background:#CB202D; color:white; border-radius:50%;
-                             width:28px; height:28px; display:inline-flex; align-items:center;
-                             justify-content:center; font-size:0.85rem; font-weight:800;
-                             flex-shrink:0;">II</div>
-                <div style="flex:1; height:2px; background:#e2e8f0;"></div>
-                <div style="font-size:0.72rem; font-weight:700; color:#94a3b8;
-                            text-transform:uppercase; letter-spacing:0.12em;">
-                    Act II · 20–25 min
-                </div>
-            </div>
-            <div style="font-size:1.6rem; font-weight:800; color:#0f172a;
-                        margin-top:8px; line-height:1.2;">
-                The Light Barrier
-            </div>
-            <div style="color:#475569; font-size:0.95rem; margin-top:4px;">
-                An autonomous vehicle needs a 10 ms decision loop. The nearest datacenter is 3,000 km away.
-            </div>
-        </div>"""),
-    ])
+    _act_num      = "II"
+    _act_color    = COLORS["RedLine"]
+    _act_title    = "The Light Barrier"
+    _act_duration = "20–25 min"
+    _act_why      = (
+        "Act I showed that memory bandwidth, not compute, is the binding constraint for "
+        "transformer inference at low Arithmetic Intensity. "
+        "Now discover a constraint that even memory bandwidth cannot fix: "
+        "the speed of light in fiber sets a hard latency floor that no GPU upgrade "
+        "can remove &mdash; and a 3,000 km datacenter already exceeds a 10 ms AV safety SLA "
+        "before a single FLOP is computed."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -1351,9 +1449,109 @@ def _(mo, act1_prediction, act1_reflection, act2_prediction):
     return
 
 
-# ─── LEDGER SAVE + HUD FOOTER ─────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The Memory Wall dominates transformer inference at low Arithmetic Intensity.</strong>
+                    At AI&nbsp;=&nbsp;5 FLOPs/Byte (far below the H100 ridge point of &asymp;590 FLOPs/Byte),
+                    the Memory term D/BW accounts for &gt;99% of inference latency. A 6&times; compute
+                    upgrade produces only &asymp;8% latency improvement &mdash; because it attacked the wrong term.
+                    The correct lever is memory bandwidth (BW), not compute throughput (R).
+                    At ~$3/GPU-hour, the $2M H100 upgrade attacks &lt;1% of latency.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. The Ridge Point determines which hardware upgrade is worth buying.</strong>
+                    The H100 Ridge Point is R/BW&nbsp;&asymp;&nbsp;590 FLOPs/Byte.
+                    Only workloads with AI above this threshold benefit from more TFLOPS.
+                    Below it, the Memory Wall is the binding constraint regardless of how many TFLOPS
+                    the accelerator advertises.
+                </div>
+                <div>
+                    <strong>3. The speed of light cannot be optimized.</strong>
+                    Propagation delay at 3,000 km is 30 ms &mdash; 3&times; the 10 ms AV safety SLA,
+                    before any computation. This physical floor is the quantitative reason Edge ML
+                    exists as a deployment paradigm. When L_propagation &gt; SLA budget,
+                    the deployment architecture must change; no GPU upgrade can fix it.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 03: The ML Workflow.</strong> The Iron Law governs performance
+                    at a point in time. Lab 03 asks what happens as time passes and the world
+                    drifts away from training data &mdash; introducing silent degradation,
+                    the MLOps feedback loop, and the Degradation Equation.
+                </div>
+            </div>
+
+            <!-- Textbook & TinyTorch -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-ml-systems-analyzing-workloads-cbb8 for the full
+                    Iron Law derivation and @sec-ml-systems-bottleneck-principle-3514 for the
+                    Bottleneck Principle and Ridge Point.<br/>
+                    <strong>Build:</strong> TinyTorch Module 02 &mdash; implement the Iron Law
+                    profiler and observe the three terms in a real forward pass.
+                    See <code>tinytorch/src/02_systems/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
 
 
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. When a workload is memory-bound at batch=1, upgrading from A100 to H100 yields ~1.6x speedup instead of ~3.2x. Why does only the bandwidth ratio matter, not the FLOPS ratio?
+
+    2. What specific batch size and precision combination moved your ResNet-50 deployment across the ridge point from memory-bound to compute-bound on the H100?
+
+    3. The Bottleneck Principle states that optimizing the non-dominant term yields exactly 0% speedup. If your deployment is memory-bound, name two optimization actions that target the correct term and two that waste effort entirely.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1398,72 +1596,49 @@ def _(
     _ctx_color   = COLORS["Cloud"] if _ctx == "cloud" else COLORS["Edge"]
     _ctx_label   = "Cloud (H100)" if _ctx == "cloud" else "Edge (Orin NX)"
 
-    mo.vstack([
-        mo.md("---"),
-        mo.Html(f"""
-        <div style="display:flex; gap:28px; align-items:center; padding:14px 24px;
-                    background:#0f172a; border-radius:12px; margin-top:24px;
-                    font-family:'SF Mono','Fira Code',monospace; font-size:0.8rem;
-                    border:1px solid #1e293b; flex-wrap:wrap;">
-            <div>
-                <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
-                    LAB
-                </span>
-                <span style="color:#e2e8f0; margin-left:8px;">02 · The Iron Law</span>
-            </div>
-            <div>
-                <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
-                    CONTEXT
-                </span>
-                <span style="color:{_ctx_color}; margin-left:8px; font-weight:700;">
-                    {_ctx_label}
-                </span>
-            </div>
-            <div>
-                <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
-                    ACT I
-                </span>
-                <span style="color:{'#4ade80' if _act1_correct else '#f87171'}; margin-left:8px;">
-                    {_act1_label} · bottleneck = {_bottleneck_new}
-                </span>
-            </div>
-            <div>
-                <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
-                    ACT II
-                </span>
-                <span style="color:{'#4ade80' if _act2_correct else '#f87171'}; margin-left:8px;">
-                    {_act2_label} · SLA {_sla_label}
-                </span>
-            </div>
-            <div>
-                <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
-                    LEDGER
-                </span>
-                <span style="color:#4ade80; margin-left:8px;">ch02 saved</span>
-            </div>
+    mo.Html(f"""
+    <div style="display:flex; gap:28px; align-items:center; padding:14px 24px;
+                background:#0f172a; border-radius:12px; margin-top:24px;
+                font-family:'SF Mono','Fira Code',monospace; font-size:0.8rem;
+                border:1px solid #1e293b; flex-wrap:wrap;">
+        <div>
+            <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
+                LAB
+            </span>
+            <span style="color:#e2e8f0; margin-left:8px;">02 · The Iron Law</span>
         </div>
-        """),
-        mo.callout(mo.md("""
-        **Lab 02 Key Takeaways:**
-
-        1. **The Memory Wall dominates transformer inference.** At AI = 5 FLOPs/Byte
-           (far below the H100 ridge point of ~590 FLOPs/Byte), the Memory term D/BW
-           accounts for >99% of inference latency. A 6× compute upgrade produces ~8%
-           latency improvement — exactly what the CTO observed. The fix is increasing
-           memory bandwidth (BW), not compute throughput (R).
-
-        2. **The speed of light cannot be optimized.** Propagation delay at 3,000 km
-           is 30 ms — 3× the 10 ms AV safety SLA, before any computation. This physical
-           floor is the quantitative reason Edge ML exists as a deployment paradigm.
-           When L_propagation > SLA budget, the deployment architecture must change.
-        """), kind="info"),
-        mo.callout(mo.md("""
-        **Next:** Lab 03 (ml_workflow.qmd) introduces the MLOps feedback loop and
-        silent degradation — what happens when the model is deployed and the world changes.
-        The Iron Law governs performance at a point in time; Lab 03 examines how
-        performance evolves over time as data distribution drifts.
-        """), kind="info"),
-    ])
+        <div>
+            <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
+                CONTEXT
+            </span>
+            <span style="color:{_ctx_color}; margin-left:8px; font-weight:700;">
+                {_ctx_label}
+            </span>
+        </div>
+        <div>
+            <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
+                ACT I
+            </span>
+            <span style="color:{'#4ade80' if _act1_correct else '#f87171'}; margin-left:8px;">
+                {_act1_label} · bottleneck = {_bottleneck_new}
+            </span>
+        </div>
+        <div>
+            <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
+                ACT II
+            </span>
+            <span style="color:{'#4ade80' if _act2_correct else '#f87171'}; margin-left:8px;">
+                {_act2_label} · SLA {_sla_label}
+            </span>
+        </div>
+        <div>
+            <span style="color:#94a3b8; font-weight:600; letter-spacing:0.06em;">
+                LEDGER
+            </span>
+            <span style="color:#4ade80; margin-left:8px;">ch02 saved</span>
+        </div>
+    </div>
+    """)
     return
 
 

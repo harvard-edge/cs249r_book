@@ -50,7 +50,7 @@ def _():
 
     # ── Hardware constants (H100 SXM5, NVIDIA spec) ───────────────────────────
     H100_BW_GBS       = 3350   # GB/s — HBM3e memory bandwidth (NVIDIA H100 spec)
-    H100_TFLOPS_FP16  = 1979   # TFLOPS — peak FP16 tensor core throughput (NVIDIA)
+    H100_TFLOPS_FP16  = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80     # GB — HBM3e capacity per H100 (NVIDIA H100 spec)
     NVLINK4_BW_GBS    = 900    # GB/s — NVLink 4.0 bisection bandwidth per GPU pair
 
@@ -151,10 +151,80 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# RECOMMENDED READING
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Calculate the KV-cache memory footprint</strong> for Llama-70B (2.6 MB/token) at varying context lengths and determine the maximum concurrent users on a 4x H100 NVLink replica (160 GB available after weights).</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict which batch size minimizes total response time</strong> at 100 QPS &mdash; discovering that batch=32 (91.5 ms total) beats batch=8 (123.2 ms) despite 22% longer per-batch service time, because queuing delay drops from 42.3 ms to 8.9 ms.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a fleet configuration</strong> for 1,000 QPS of Llama-70B with P99 &lt; 200 ms, quantifying that Power-of-Two-Choices load balancing reduces P99 by 47% versus random assignment.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    KV-cache memory formula from @sec-inference-scale-kv-cache-wall &middot;
+                    Queuing hockey-stick behavior from @sec-fleet-orchestration-introduction
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "You have 640 GB across eight H100s. After weights consume 140 GB, the
+                remaining memory must hold KV-cache for every concurrent user &mdash;
+                and the faster you serve each request, the worse your total system latency
+                becomes. Why does minimizing service time maximize total response time?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -168,9 +238,7 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONTEXT TOGGLE
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT TOGGLE ──────────────────────────────────────────────────
 
 @app.cell(hide_code=True)
 def _(mo):
@@ -194,10 +262,48 @@ def _(mo):
     return (context_toggle,)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I — SCENARIO + STAKEHOLDER MESSAGE
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I -- CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The KV-Cache Memory Wall"
+    _act_duration = "12-15 min"
+    _act_why      = ("You expect 500 GB of free memory to support hundreds of concurrent users. "
+                     "The KV-cache formula (2.6 MB/token/user) will show that at 4096-token "
+                     "context, each user consumes 10.65 GB &mdash; limiting a 4x H100 replica "
+                     "to approximately 15 concurrent users, not hundreds.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 6: ACT1_STAKEHOLDER ───────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS, context_toggle):
     _ctx   = context_toggle.value
@@ -222,7 +328,6 @@ def _(mo, COLORS, context_toggle):
 
     mo.vstack([
         mo.md("---"),
-        mo.md("## Act I — The KV-Cache Memory Wall"),
         mo.md(f"""
         Every token a user has generated — and every token in their prompt — requires
         storing a **key vector** and a **value vector** for each attention layer.
@@ -758,10 +863,49 @@ def _(mo, act1_pred):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II — SCENARIO + STAKEHOLDER MESSAGE
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II -- DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Latency vs Throughput: Two Serving Configurations"
+    _act_duration = "20-25 min"
+    _act_why      = ("Act I showed that KV-cache limits concurrent users to ~15 per replica. "
+                     "Now discover that the queuing hockey stick makes batch=8 slower than "
+                     "batch=32 at 100 QPS &mdash; and that switching from random to "
+                     "Power-of-Two-Choices load balancing saves as much P99 latency as "
+                     "adding entire GPU nodes.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 13: ACT2_STAKEHOLDER ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS, context_toggle):
     _ctx   = context_toggle.value
@@ -786,7 +930,6 @@ def _(mo, COLORS, context_toggle):
 
     mo.vstack([
         mo.md("---"),
-        mo.md("## Act II — Latency vs Throughput: Two Serving Configurations"),
         mo.md("""
         LLM inference is not a single workload. A real-time assistant and a batch pipeline
         have fundamentally different objectives. The same hardware configured two different
@@ -1489,6 +1632,113 @@ def _(mo, act2_pred, act1_pred, H100_BW_GBS, LLAMA70B_PARAMS_B, BYTES_FP16):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. KV-cache grows linearly with context length and limits concurrency severely.</strong>
+                    At 2.6 MB/token for Llama-70B (FP16), a 4096-token request requires 10.65 GB
+                    of cache. A 4x H100 NVLink replica with 160 GB available after weights can
+                    serve at most 15 concurrent requests &mdash; not hundreds.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Minimizing per-request service time can maximize total latency.</strong>
+                    At 100 QPS, batch=8 (S=54 ms, rho=67.5%) has 42.3 ms queuing delay for
+                    123.2 ms total. Batch=32 (S=66 ms, rho=20.6%) has 8.9 ms queuing delay
+                    for 91.5 ms total &mdash; 26% lower despite 22% longer service time.
+                    The hockey stick is not intuitive until you see the numbers.
+                </div>
+                <div>
+                    <strong>3. Load balancing algorithm choice has quantitative P99 impact.</strong>
+                    Power-of-Two-Choices reduces P99 from 45 ms to 24 ms (47% improvement)
+                    versus random assignment on the same fleet. This is free &mdash; a configuration
+                    change worth as much as adding entire GPU nodes to the fleet.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 11: Edge Intelligence</strong> &mdash; This lab showed that
+                    inference at cloud scale is memory-constrained. The next lab asks: what
+                    happens when you move that same model to a device with 8 GB total RAM
+                    and 300 MB available for ML? The memory amplification factor (3&ndash;12x
+                    for training) makes on-device adaptation an engineering crisis.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-inference-scale-kv-cache-wall for the full
+                    KV-cache derivation and PagedAttention motivation. See the Serving Cost
+                    Dominance Law callout for the 9x serving/training cost inversion.<br/>
+                    <strong>Build:</strong> TinyTorch Module 20 &mdash; implement a KV-cache
+                    allocator with paged memory management and measure its impact on concurrent
+                    request throughput.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. Llama-70B in FP16 requires 2.6 MB/token of KV cache. At 4096-token context, each request needs 10.65 GB. On a 4x H100 NVLink replica with 160 GB available after weights, what is the maximum concurrent request count, and why is this far fewer than most engineers expect?
+2. At 100 QPS, batch=8 has lower service time (54 ms) but higher total latency (123 ms) than batch=32 (66 ms service, 91.5 ms total). What queuing dynamics explain this counterintuitive result, and where does the hockey-stick curve inflect?
+3. Power-of-Two-Choices load balancing reduces P99 from 45 ms to 24 ms versus random assignment with zero hardware cost. Why does sampling just two candidates and picking the less-loaded one achieve such a large improvement?
+
+**You're ready to move on if you can:**
+- Calculate KV-cache memory requirements and maximum concurrency for a given model and GPU configuration
+- Explain why minimizing per-request service time can maximize total latency due to queuing effects
+- Compare load balancing algorithms by their quantitative P99 impact on inference serving
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ────────────────────────────────────────────────────────
 # ─────────────────────────────────────────────────────────────────────────────
 # DESIGN LEDGER SAVE + HUD FOOTER
 # ─────────────────────────────────────────────────────────────────────────────

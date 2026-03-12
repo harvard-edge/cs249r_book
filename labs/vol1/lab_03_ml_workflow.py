@@ -135,7 +135,77 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the cost multiplier of late constraint discovery</strong> using the 2<sup>N-1</sup> Constraint Propagation Principle and verify that a deployment-stage discovery (Stage 5) costs 16&times; more than a requirements-stage discovery.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Identify the dominant time category in ML projects</strong> by comparing your intuitive estimate against the chapter&rsquo;s data showing 60&ndash;80% of effort goes to data activities, not modeling.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Predict the crossover week</strong> at which a small model (90% start, 1-hour cycle) overtakes a large model (95% start, 1-week cycle) in a 26-week project window, and explain why iteration velocity dominates starting accuracy.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Six-stage ML lifecycle from @sec-ml-workflow-understanding-ml-lifecycle-ca87 &middot;
+                    Time allocation data from @sec-ml-workflow-quantifying-ml-lifecycle-bd69
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                &ldquo;A team achieves 96% accuracy after 120 days &mdash; then discovers the deployment target has 512 MB of RAM and the model needs 4 GB. How do you quantify how much those 120 days were worth, and what single decision on Day 1 would have made them count?&rdquo;
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: READING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -151,45 +221,45 @@ def _(mo):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT I: THE CONSTRAINT TAX
-# Pedagogical Goal: Students overestimate the cost of modeling and underestimate
-# the cost of late constraint discovery. The 2^(N-1) formula is the surprise.
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I -- CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    mo.vstack([
-        mo.Html(f"""
-        <div style="display: flex; align-items: center; gap: 12px; margin: 28px 0 8px 0;">
-            <div style="background: {COLORS['BlueLine']}; color: white; border-radius: 50%;
-                        width: 28px; height: 28px; display: flex; align-items: center;
-                        justify-content: center; font-weight: 800; font-size: 0.9rem;
-                        flex-shrink: 0;">I</div>
-            <div style="font-size: 1.45rem; font-weight: 800; color: #0f172a;
-                        letter-spacing: -0.01em;">Act I — The Constraint Tax</div>
-            <div style="flex: 1; height: 1px; background: #e2e8f0;"></div>
-            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;
-                        white-space: nowrap;">12–15 min</div>
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Constraint Tax"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You expect the cost of fixing a late-stage problem to scale linearly "
+                     "with project progress &mdash; perhaps 5&times; more expensive at deployment "
+                     "than at requirements. The Rural Clinic data will show that the 2<sup>N&minus;1</sup> "
+                     "law makes it 16&times; more expensive, not 5&times;, and that the majority of "
+                     "project time was never spent on the model at all.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        """),
-        mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']};
-                    background: {COLORS['BlueLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 4px 0 16px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message · ML Project Lead, Rural Health Initiative
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Day 90: we hit 95% accuracy. Day 120: 96% — better than any published
-                benchmark on this dataset. Day 151: we handed the model to deployment.
-                Day 152: they checked the tablets in the field clinics. 512 MB of RAM.
-                Our model needs 4 GB. We have to start over. Five months. Gone."
-            </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
         </div>
-        """),
-    ])
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -620,41 +690,48 @@ def _(mo, act1_reflection):
     return
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ACT II: THE ITERATION VELOCITY RACE
-# Pedagogical Goal: Students believe starting with the highest-accuracy model
-# is the right strategy. The chapter's calculation shows that a model starting
-# 5 percentage points behind but cycling 168× faster overtakes the leader
-# within the 26-week project window.
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II -- DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, act1_reflection, COLORS):
     mo.stop(act1_reflection.value is None)
 
-    mo.vstack([
-        mo.Html(f"""
-        <div style="display: flex; align-items: center; gap: 12px; margin: 28px 0 8px 0;">
-            <div style="background: {COLORS['OrangeLine']}; color: white; border-radius: 50%;
-                        width: 28px; height: 28px; display: flex; align-items: center;
-                        justify-content: center; font-weight: 800; font-size: 0.9rem;
-                        flex-shrink: 0;">II</div>
-            <div style="font-size: 1.45rem; font-weight: 800; color: #0f172a;
-                        letter-spacing: -0.01em;">Act II — The Iteration Velocity Race</div>
-            <div style="flex: 1; height: 1px; background: #e2e8f0;"></div>
-            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;
-                        white-space: nowrap;">20–25 min</div>
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Iteration Velocity Race"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = ("Act I showed that the Rural Clinic failure was a constraint propagation "
+                     "problem. Now discover the second failure: the team chose the wrong model "
+                     "strategy. You expect that starting with higher accuracy (95% vs 90%) "
+                     "always wins. The data shows a 1-hour cycle accumulates 4,368 iterations "
+                     "while a 1-week cycle completes 26 &mdash; and that velocity, not "
+                     "starting accuracy, determines who wins the 26-week race.")
+
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
         </div>
-        """),
-        mo.md(
-            "The Rural Clinic project failed not just because of a missing constraint — "
-            "it also suffered from a strategic mistake: the team chose the largest, "
-            "highest-accuracy model and iterated slowly. "
-            "The chapter introduces the **Iteration Tax**: a fast, smaller model can "
-            "accumulate thousands of learning cycles in the time a large model completes "
-            "a handful. The question is when — and whether — the fast model catches up."
-        ),
-    ])
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
+    """)
     return
 
 
@@ -1306,7 +1383,104 @@ def _(mo, act2_reflection):
     return
 
 
-# ─── DESIGN LEDGER SAVE + HUD ─────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The Constraint Propagation Principle is geometric, not linear.</strong>
+                    A deployment constraint discovered at Stage 5 costs 2<sup>4</sup> = 16&times; more
+                    to fix than one caught at Stage 1. The Rural Clinic team spent 150 days on work
+                    that a 1-day requirements checklist would have prevented.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Modeling is not the bottleneck.</strong>
+                    The chapter&rsquo;s data shows 60&ndash;80% of ML project time is spent on data
+                    activities. Students who guess 40&ndash;60% on modeling are off by 3&ndash;8&times;.
+                    The dominant cost center is invisible until measured.
+                </div>
+                <div>
+                    <strong>3. Iteration velocity dominates starting accuracy.</strong>
+                    A small model (90% start, 1-hour cycle) accumulates 4,368 iterations in 26 weeks
+                    versus 26 for the large model. The crossover typically occurs around Week 8&ndash;12.
+                    Cycle time, not model quality, is the binding constraint on final performance.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 04: The Data Gravity Trap</strong> &mdash; this lab showed that
+                    data activities dominate project time. Lab 04 asks: what happens when the data
+                    itself becomes immovable? At petabyte scale, the physics of data transfer
+                    determines whether you co-locate compute with data or pay $90,000 to move it.
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-ml-workflow-integrating-systems-thinking-principles-24c0
+                    for the full Constraint Propagation derivation and Iteration Tax formula.<br/>
+                    <strong>Build:</strong> TinyTorch Module 03 &mdash; the training loop scaffold
+                    where iteration cycle time is measured directly.
+                    See <code>tinytorch/src/03_workflow/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. Using the 2^(N-1) Constraint Propagation law, how much more expensive is it to fix a memory constraint discovered at Stage 5 (Deployment) versus Stage 1 (Requirements) in a 6-stage pipeline?
+
+    2. In the iteration velocity race, a large model improves +0.15% accuracy per week-long cycle while a small model improves +0.10% per hour-long cycle. At what approximate week does the small model overtake the large one?
+
+    3. The Rural Clinic team achieved 96% accuracy but the project failed. What single Stage 1 action (cost: ~1 day) would have prevented 150 days of wasted work — and what does this reveal about where leverage lives in the ML pipeline?
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger, COLORS,
@@ -1369,19 +1543,7 @@ def _(
     _gate_count  = sum(_gates)
     _gates_color = COLORS["GreenLine"] if _gate_count >= 4 else COLORS["OrangeLine"] if _gate_count >= 2 else COLORS["RedLine"]
 
-    mo.vstack([
-        mo.md("---"),
-        mo.callout(
-            mo.md(
-                "**Lab 03 complete.** Your choices have been recorded in the Design Ledger. "
-                "The `iteration_cycle_hours` and `model_size_chosen` values carry forward to "
-                "**Lab 05 (Neural Computation)** and **Lab 08 (Training)**, where the "
-                "memory footprint of your chosen model size becomes the baseline for "
-                "the memory wall and training memory analysis."
-            ),
-            kind="success",
-        ),
-        mo.Html(f"""
+    mo.Html(f"""
         <div style="display: flex; gap: 20px; align-items: center; padding: 14px 22px;
                     background: {COLORS['Surface0']}; border-radius: 12px; margin-top: 8px;
                     font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8rem;
@@ -1417,8 +1579,7 @@ def _(
                 </span>
             </div>
         </div>
-        """),
-    ])
+        """)
     return
 
 

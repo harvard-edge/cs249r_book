@@ -60,7 +60,7 @@ def _():
                                  # Source: @sec-compute-infrastructure bandwidth hierarchy table
 
     # H100 compute specs
-    H100_TFLOPS_FP16   = 1979   # H100 SXM5 FP16 tensor core TFLOPS, NVIDIA spec
+    H100_TFLOPS_FP16   = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB        = 80     # H100 SXM5 HBM3e capacity, NVIDIA spec
 
     # FP16 bytes per parameter
@@ -68,7 +68,7 @@ def _():
 
     # Calibrated compute constant: K_COMP × params_b × batch = compute_time_s
     # Calibrated so that 70B params × batch 32 = 2.1 s (spec reference point)
-    # Derivation: 2.1 = (6 × 70e9 × seq_139 × 32) / (1979e12 × 0.45), seq_139 ≈ 139 tokens
+    # Derivation: 2.1 = (6 × 70e9 × seq_90 × 32) / (989e12 × 0.45), seq_90 ≈ 90 tokens
     # Equivalent to: K_COMP = 2.1 / (70 × 32) = 9.375e-4
     K_COMP = 2.1 / (70.0 * 32.0)   # s / (B_params × batch)
 
@@ -82,6 +82,10 @@ def _():
         K_COMP,
     )
 
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
 
 # ─── CELL 1: HEADER ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
@@ -133,7 +137,73 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the bandwidth staircase: measure why a 10 GB tensor transfer takes 11 ms on NVLink but 200 ms over InfiniBand, an 18&times; gap that determines all parallelism placement decisions.</strong></div>
+                <div style="margin-bottom: 3px;">2. <strong>Diagnose interconnect violations: identify the communication fraction when Tensor Parallelism is placed across the InfiniBand boundary, and predict why it collapses GPU utilization to near zero.</strong></div>
+                <div style="margin-bottom: 3px;">3. <strong>Design a hierarchical parallelism mapping: configure TP intra-node and DP inter-node to achieve &gt;80% efficiency for a 70B model on 16 GPUs across 2 DGX nodes.</strong></div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Transfer time formula T = Data / Bandwidth from @sec-compute-infrastructure &middot;
+                    Tensor vs. Data Parallelism definitions from @sec-distributed-training-systems
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "NVLink and InfiniBand are both &lsquo;fast&rsquo; interconnects &mdash; so why does placing Tensor Parallelism across the node boundary turn a 15% communication overhead into an 85% overhead that renders your GPU investment worthless?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ─────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -174,27 +244,42 @@ def _(mo, COLORS):
     return (context_toggle,)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT I — THE INTERCONNECT CLIFF
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE B: ACT I — CALIBRATION
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.Html("""
-    <div style="margin: 32px 0 8px 0;">
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Interconnect Cliff"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "You expect all GPU connections to be fast &mdash; after all, both NVLink and InfiniBand are "
+        "high-speed fabrics. The bandwidth staircase will show an 18&times; gap between them: "
+        "transferring 10 GB takes 11 ms intra-node but 200 ms inter-node, and this physical cliff "
+        "is the reason Tensor Parallelism cannot cross the node boundary."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: #006395; color: white; border-radius: 6px;
-                        padding: 3px 10px; font-size: 0.72rem; font-weight: 800;
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act I
-            </div>
-            <div style="font-size: 1.6rem; font-weight: 900; color: #0f172a;">
-                The Interconnect Cliff
-            </div>
-            <div style="flex: 1; height: 1px; background: #e2e8f0;"></div>
-            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">
-                12–15 min
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -730,28 +815,43 @@ def _(mo):
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ACT II — THE MULTI-NODE SCALING WALL
-# ═════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE C: ACT II — DESIGN CHALLENGE
+# ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo, act1_reflect):
+def _(mo, act1_reflect, COLORS):
     mo.stop(act1_reflect.value is None)
-    mo.Html("""
-    <div style="margin: 40px 0 8px 0;">
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "The Multi-Node Scaling Wall"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I revealed the 18&times; gap between NVLink and InfiniBand. Now apply it: "
+        "place Tensor Parallelism across the InfiniBand boundary and discover that "
+        "communication consumes 85% of step time &mdash; the bandwidth hierarchy is not "
+        "a recommendation, it is a hard physical constraint on parallelism placement."
+    )
+    mo.Html(f"""
+    <div style="margin: 40px 0 12px 0;">
         <div style="display: flex; align-items: center; gap: 12px;">
-            <div style="background: #CB202D; color: white; border-radius: 6px;
-                        padding: 3px 10px; font-size: 0.72rem; font-weight: 800;
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em;">
-                Act II
-            </div>
-            <div style="font-size: 1.6rem; font-weight: 900; color: #0f172a;">
-                The Multi-Node Scaling Wall
-            </div>
-            <div style="flex: 1; height: 1px; background: #e2e8f0;"></div>
-            <div style="font-size: 0.78rem; color: #94a3b8; font-weight: 600;">
-                20–25 min
-            </div>
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
         </div>
     </div>
     """)
@@ -1333,6 +1433,110 @@ def _(mo, act1_reflect):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. The bandwidth staircase is an 18&times; cliff at the node boundary.</strong>
+                    NVLink delivers 900 GB/s and InfiniBand delivers 50 GB/s: a 10 GB tensor takes 11 ms
+                    within a node but 200 ms between nodes. This cliff is not a configuration choice &mdash;
+                    it is a consequence of signal propagation physics at centimeter vs. meter distances.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Tensor Parallelism placed across the InfiniBand boundary collapses to ~15% efficiency.</strong>
+                    Each transformer layer requires 192 AllReduce operations. At 50 GB/s, that totals 518 ms
+                    of communication vs. 29 ms on NVLink. GPUs are idle 94% of the time waiting for gradients
+                    that the interconnect cannot deliver fast enough.
+                </div>
+                <div>
+                    <strong>3. The hierarchical TP-intra/DP-inter mapping is universal, not conventional.</strong>
+                    Meta, Google, and OpenAI all use the same assignment because the 18&times; bandwidth gap
+                    physically forces TP to the fastest tier. Hierarchical placement achieves ~85% efficiency;
+                    violating it collapses efficiency to ~15%.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab V2-03: The Bisection Bandwidth Wall</strong> &mdash; This lab showed
+                    that the node boundary creates an 18&times; bandwidth cliff. The next lab asks:
+                    within the inter-node fabric itself, how does network topology (fat-tree vs.
+                    oversubscribed spine) determine the effective AllReduce bandwidth at cluster scale?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-compute-infrastructure for the full bandwidth hierarchy
+                    derivation and the 18&times; gap calculation.<br/>
+                    <strong>Build:</strong> TinyTorch distributed module &mdash; implement hierarchical
+                    AllReduce with NVLink intra-node and InfiniBand inter-node in
+                    <code>tinytorch/src/distributed/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. NVLink delivers 900 GB/s while InfiniBand delivers 50 GB/s. What is the bandwidth ratio, and why does this 18x cliff at the node boundary force Tensor Parallelism to stay within a single node?
+2. An engineer proposes extending Tensor Parallelism across 2 nodes (16 GPUs). Each transformer layer requires 192 AllReduce operations. Why does this collapse GPU utilization to ~15%, and what parallelism strategy should be used across the InfiniBand boundary instead?
+3. Meta, Google, and OpenAI all use the same TP-intra/DP-inter mapping. Is this a convention or a physical constraint? What happens to efficiency if you violate the hierarchical placement?
+
+**You're ready to move on if you can:**
+- Quantify the bandwidth cliff at each level of the interconnect hierarchy (die, package, node, rack)
+- Explain why the TP-intra/DP-inter mapping is universal across all large-scale training systems
+- Calculate the communication overhead of placing tensor parallelism across an InfiniBand boundary
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 # ═════════════════════════════════════════════════════════════════════════════
 # LEDGER SAVE + HUD FOOTER
 # ═════════════════════════════════════════════════════════════════════════════

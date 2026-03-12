@@ -58,7 +58,7 @@ def _():
     # Source: NVIDIA H100 SXM5 HBM3e spec
     H100_RAM_GB      = 80     # GB HBM3e
     H100_BW_GBS      = 3350   # GB/s
-    H100_TFLOPS_FP16 = 1979   # TFLOPS dense FP16
+    H100_TFLOPS_FP16 = 989    # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 
     # Source: NVIDIA Jetson Orin NX 16GB spec
     ORIN_RAM_GB  = 16     # GB unified memory
@@ -144,7 +144,80 @@ def _(mo, LAB_CSS, COLORS):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ─────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the arithmetic intensity gap</strong> between ResNet-50 (I &asymp; 40.2 FLOPs/byte) and GPT-2 (I &asymp; 0.50 FLOPs/byte) on the same H100 GPU, and explain why the 80&times; difference determines which hardware resource is the binding constraint.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Predict the maximum sequence length</strong> for a 32-layer, 12-head Transformer within 80 GB of attention memory (FP16), discovering the hard quadratic ceiling before interacting with the scaling instrument.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Identify the OOM boundary</strong> where N&sup2; &times; H &times; bytes &times; L exceeds GPU memory, and compare how the same boundary appears at 80 GB (H100) versus 16 GB (Jetson Orin NX).</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Arithmetic intensity definition from @sec-network-architectures-understanding-arithmetic-intensity-ade5 &middot;
+                    O(N&sup2;) attention memory from @sec-network-architectures-transformers-attentiononly-architecture-1b56
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35&ndash;40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                &ldquo;ResNet-50 and GPT-2 perform similar GFLOPs per inference on the same H100 &mdash;
+                so why does GPT-2 waste &gt;98% of the GPU&rsquo;s peak compute, and what happens
+                to attention memory when you try to support the 100K-token context window
+                marketing promised?&rdquo;
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: READING ──────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -159,7 +232,7 @@ def _(mo):
     return
 
 
-# ─── CELL 3: CONTEXT TOGGLE ──────────────────────────────────────────────────
+# ─── CELL 4: CONTEXT_TOGGLE ──────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     context_toggle = mo.ui.radio(
@@ -173,28 +246,44 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — THE ATTENTION EXPLOSION
+# ZONE B: ACT I -- CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 5: ACT1_BANNER ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _color = COLORS["Cloud"]
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Attention Explosion"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = ("You expect that two &ldquo;deep learning&rdquo; workloads performing "
+                     "similar GFLOPs on the same GPU will have similar performance. "
+                     "The arithmetic intensity comparator will show an 80&times; gap: "
+                     "ResNet-50 reuses weights across spatial dimensions and saturates GPU compute, "
+                     "while GPT-2 at batch=1 loads 6 GB of weights for just 3 GFLOPs per token "
+                     "and wastes &gt;98% of peak FLOPS.")
+
     mo.vstack([
         mo.md("---"),
         mo.Html(f"""
-        <div style="margin: 8px 0 4px 0;">
-            <div class="concept-header">
-                <span style="background:{_color}; color:white; border-radius:50%;
-                             width:22px; height:22px; display:inline-flex; align-items:center;
-                             justify-content:center; font-size:0.78rem; font-weight:800;
-                             flex-shrink:0;">I</span>
-                <span>Act I of II</span>
-                <span class="concept-header-line"></span>
+        <div style="margin: 8px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
             </div>
-            <div style="font-size:1.5rem; font-weight:800; color:#0f172a; line-height:1.2;
-                        margin-top: 4px;">The Attention Explosion</div>
-            <div style="color:#94a3b8; font-size:0.88rem; margin-top:3px;">
-                The O(N²) memory wall that limits every large language model
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
@@ -675,28 +764,45 @@ def _(mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — DEPTH VS WIDTH TRADEOFF
+# ZONE C: ACT II -- DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# ─── CELL 12: ACT2_BANNER ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo, COLORS):
-    _color = COLORS["Edge"]
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "Depth vs Width Tradeoff"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = ("Act I showed that architecture determines which hardware resource bottlenecks. "
+                     "Now discover a constraint that applies even when memory is abundant: "
+                     "sequential depth creates a latency floor that no GPU can parallelize away. "
+                     "You expect that equal FLOPS means equal latency. The instruments will show "
+                     "that a 64-layer model&rsquo;s O(L) sequential dependency makes it slower "
+                     "on a Jetson Orin NX than a 4-layer model with the same parameter count "
+                     "and identical total operations.")
+
     mo.vstack([
         mo.md("---"),
         mo.Html(f"""
-        <div style="margin: 8px 0 4px 0;">
-            <div class="concept-header">
-                <span style="background:{_color}; color:white; border-radius:50%;
-                             width:22px; height:22px; display:inline-flex; align-items:center;
-                             justify-content:center; font-size:0.78rem; font-weight:800;
-                             flex-shrink:0;">II</span>
-                <span>Act II of II</span>
-                <span class="concept-header-line"></span>
+        <div style="margin: 8px 0 12px 0;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="background: {_act_color}; color: white; border-radius: 50%;
+                            width: 32px; height: 32px; display: inline-flex; align-items: center;
+                            justify-content: center; font-size: 0.9rem; font-weight: 800;
+                            flex-shrink: 0;">{_act_num}</div>
+                <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+                <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em;">
+                    Act {_act_num} &middot; {_act_duration}</div>
             </div>
-            <div style="font-size:1.5rem; font-weight:800; color:#0f172a; line-height:1.2;
-                        margin-top: 4px;">Depth vs Width Tradeoff</div>
-            <div style="color:#94a3b8; font-size:0.88rem; margin-top:3px;">
-                For a fixed parameter budget, does a deeper or wider network run faster on edge hardware?
+            <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                        margin-top: 8px; line-height: 1.2;">
+                {_act_title}
+            </div>
+            <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                        line-height: 1.55; max-width: 700px;">
+                {_act_why}
             </div>
         </div>
         """),
@@ -1199,7 +1305,108 @@ def _(mo):
     return
 
 
-# ─── LEDGER SAVE + HUD ───────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Architecture determines bottleneck regime, not hardware.</strong>
+                    ResNet-50 (I &asymp; 40.2 FLOPs/byte) and GPT-2 (I &asymp; 0.50 FLOPs/byte)
+                    on the same H100 occupy opposite ends of the arithmetic intensity spectrum.
+                    GPT-2 at batch=1 wastes &gt;98% of peak FLOPS because it is memory-bandwidth-bound,
+                    not because the GPU is too slow.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Attention memory is O(N&sup2;) &mdash; not a linear cost, a quadratic wall.</strong>
+                    Doubling context from 4K to 8K tokens quadruples attention memory.
+                    At 100K tokens vs 4K, the factor is 625&times;. For 32 layers and 12 heads at FP16,
+                    the total reaches ~7,680 GB &mdash; nearly 100&times; an H100&rsquo;s capacity.
+                    FlashAttention avoids materializing the full N&times;N matrix; the compute is unchanged.
+                </div>
+                <div>
+                    <strong>3. For edge inference, depth is the enemy of latency.</strong>
+                    Sequential layer dependencies cannot be parallelized away on hardware with limited
+                    compute units. At a fixed parameter budget, a shallower wider network runs faster
+                    on a Jetson Orin NX &mdash; it exposes more parallel work per layer. Architecture
+                    selection is a systems contract, not a modeling preference.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab 07: The Training Throughput Race</strong> &mdash; this lab showed
+                    that architecture determines whether a workload is compute-bound or memory-bound.
+                    Lab 07 asks: given your chosen architecture and hardware context, how do you
+                    maximize Model FLOPS Utilization (MFU) &mdash; the fraction of theoretical peak
+                    FLOPS you actually achieve during training?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-network-architectures-understanding-arithmetic-intensity-ade5
+                    for the full Roofline Model and Workload Signatures derivation.<br/>
+                    <strong>Build:</strong> TinyTorch Module 06 &mdash; implement the self-attention
+                    mechanism from scratch and measure its N&sup2; memory footprint directly.
+                    See <code>tinytorch/src/06_attention/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+
+        mo.accordion({
+            "Self-Assessment: Can you answer these?": mo.md("""
+    1. ResNet-50 has arithmetic intensity ~40 FLOPs/byte while GPT-2 at batch=1 has ~0.5 FLOPs/byte. On the same H100, which is compute-bound and which is memory-bandwidth-bound — and what does that mean for the GPU utilization of each?
+
+    2. A 100K-token Transformer context window requires ~240 GB of attention memory per layer (O(N^2) scaling). For a 32-layer model, how many total GB of attention memory are needed — and why does this exceed any single GPU regardless of FLOPS?
+
+    3. MobileNet has 14x fewer FLOPs than ResNet-50 but can run slower on datacenter GPUs. Explain why in terms of arithmetic intensity, and describe what deployment context MobileNet is actually optimized for.
+
+    *If you cannot answer all three from memory, revisit Act I and Act II.*
+    """)
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
     mo, ledger,
@@ -1262,31 +1469,6 @@ def _(
         </span>
     </div>
     """)
-    return
-
-
-# ─── KEY TAKEAWAYS ────────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.vstack([
-        mo.md("---"),
-        mo.callout(mo.md("""
-        **Key Takeaways**
-
-        1. **Attention memory is O(N²) — not a linear cost, a quadratic wall.**
-           Doubling context from 4K to 8K tokens quadruples attention memory.
-           At 100K tokens vs 4K, it is 625× larger. FlashAttention breaks this wall by
-           computing attention in tiles without materializing the full N×N matrix in HBM —
-           the math is identical; only HBM data movement changes.
-
-        2. **For edge inference, depth is the enemy of latency.**
-           Sequential layer dependencies cannot be parallelized away on hardware with limited
-           compute units. At a fixed parameter budget, a shallower wider network runs faster
-           on a Jetson Orin NX than a deeper narrower one — because it exposes more parallel
-           work per layer. The architecture selection decision (depth vs width) is a
-           systems contract, not a modeling preference.
-        """), kind="info"),
-    ])
     return
 
 

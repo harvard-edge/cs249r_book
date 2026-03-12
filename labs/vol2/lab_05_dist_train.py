@@ -30,7 +30,7 @@ app = marimo.App(width="full")
 #   3D Parallel: TP×PP×DP — within-node TP (NVLink), cross-node PP (IB), DP
 #
 # Hardware Constants:
-#   H100_TFLOPS_FP16  = 1979    # TFLOPS, H100 SXM5 with sparsity; source: NVIDIA spec
+#   H100_TFLOPS_FP16  = 989     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
 #   H100_BW_GBS       = 3350    # GB/s HBM3e; source: NVIDIA H100 spec sheet
 #   H100_RAM_GB       = 80      # GB HBM3e; source: NVIDIA H100 spec sheet
 #   NVLINK4_BW_GBS    = 900     # GB/s NVLink 4; source: NVIDIA DGX H100 spec
@@ -64,6 +64,10 @@ def _():
     return COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np, make_subplots
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE A: OPENING
+# ═══════════════════════════════════════════════════════════════════════════════
+
 # ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(COLORS, LAB_CSS, mo):
@@ -86,7 +90,7 @@ def _(COLORS, LAB_CSS, mo):
                     The Parallelism Paradox
                 </div>
                 <div style="font-size: 0.95rem; color: #94a3b8; max-width: 600px; line-height: 1.6;">
-                    Adding GPUs to a data-parallel job can reduce Model FLOPs Utilization
+                    Adding GPUs to a data-parallel job can reduce MFU (Model FLOPS Utilization)
                     below single-GPU levels. This lab forces you to confront the
                     communication-computation ratio and design the 3D parallelism
                     configuration that keeps 1024 H100s productive.
@@ -117,7 +121,73 @@ def _(COLORS, LAB_CSS, mo):
     return
 
 
-# ─── CELL 2: RECOMMENDED READING ───────────────────────────────────────────────
+# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.Html(f"""
+    <div style="border-left: 4px solid {COLORS['BlueLine']};
+                background: white; border-radius: 0 12px 12px 0;
+                padding: 20px 28px; margin: 8px 0 16px 0;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
+
+        <!-- LEARNING OBJECTIVES -->
+        <div style="margin-bottom: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Learning Objectives
+            </div>
+            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+                <div style="margin-bottom: 3px;">1. <strong>Quantify the communication wall:</strong> derive the AllReduce transfer time as a function of model size, GPU count, and interconnect bandwidth, and explain why DP (Data Parallelism) parallel efficiency collapses when crossing the intra-node to inter-node boundary.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Identify the budget-optimal configuration:</strong> use the scaling efficiency formula to determine whether gradient accumulation on fewer GPUs can match the effective batch size of a larger cluster at lower cost, and explain when TP (Tensor Parallelism) within-node and PP (Pipeline Parallelism) across-node are required.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Diagnose pipeline bubble waste:</strong> apply the bubble fraction formula B = (PP &minus; 1) / (PP &times; m) to evaluate when pipeline overhead renders a configuration infeasible.</div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- PREREQUISITES + DURATION (side by side) -->
+        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 220px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Prerequisites
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    Scaling efficiency formula and data parallelism from @sec-distributed-training-systems &middot;
+                    AllReduce communication volume (2&times; gradient size) from @sec-collective-communication
+                </div>
+            </div>
+            <div style="flex: 0 0 180px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                    Duration
+                </div>
+                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
+                    <strong>35-40 min</strong><br/>
+                    Act I: ~12 min &middot; Act II: ~25 min
+                </div>
+            </div>
+        </div>
+
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
+
+        <!-- CORE QUESTION -->
+        <div style="margin-top: 16px;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+                Core Question
+            </div>
+            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                        line-height: 1.5; font-style: italic;">
+                "You have a fixed training budget and need to complete GPT-2 training as fast as possible &mdash; does adding more GPUs always help, and at what point does the communication overhead of a larger cluster outweigh the compute benefit?"
+            </div>
+        </div>
+    </div>
+    """)
+    return
+
+
+# ─── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
@@ -158,17 +228,44 @@ def _(COLORS, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT I — THE DATA PARALLEL WALL
+# ZONE B: ACT I — CALIBRATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─── ACT I: SECTION HEADER ─────────────────────────────────────────────────────
+# ─── CELL 5: ACT1_BANNER (hide_code=True) ─────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act I — The Data Parallel Wall
-    *Calibration &middot; 12&ndash;15 minutes*
+def _(mo, COLORS):
+    _act_num      = "I"
+    _act_color    = COLORS["BlueLine"]
+    _act_title    = "The Data Parallel Wall"
+    _act_duration = "12&ndash;15 min"
+    _act_why      = (
+        "You expect that moving from 8 intra-node GPUs to 32 inter-node GPUs roughly quadruples "
+        "training throughput. Quantify how parallel efficiency changes when data parallelism crosses "
+        "the intra-node NVLink boundary to inter-node Ethernet, and identify the dominant term "
+        "in the AllReduce cost that causes the efficiency cliff."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -302,7 +399,7 @@ def _(mo):
 def _(COLORS, apply_plotly_theme, dp_batch_per_gpu, dp_gpus, dp_interconnect, dp_model_b, go, math, mo, np):
     # ── Hardware constants ───────────────────────────────────────────────────────
     # Source: NVIDIA H100 SXM5 spec sheet, Mellanox InfiniBand HDR200 spec
-    H100_TFLOPS_FP16  = 1979.0    # TFLOPS H100 SXM5 with sparsity; NVIDIA spec
+    H100_TFLOPS_FP16  = 989.0     # TFLOPS FP16 dense tensor core — NVIDIA H100 SXM5 spec
     H100_RAM_GB       = 80.0      # GB HBM3e; NVIDIA H100 spec sheet
     NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (per-direction); NVIDIA DGX H100 spec
     IB_HDR200_BW_GBS  = 400.0     # GB/s InfiniBand HDR200 (per-direction); Mellanox spec
@@ -656,17 +753,45 @@ def _(act1_reflect, mo):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# ACT II — 3D PARALLELISM DESIGN CHALLENGE
+# ZONE C: ACT II — DESIGN CHALLENGE
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-# ─── ACT II: SECTION HEADER ────────────────────────────────────────────────────
+# ─── CELL 12: ACT2_BANNER (hide_code=True) ────────────────────────────────────
 @app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    ---
-    ## Act II — 3D Parallelism Design Challenge
-    *Design Challenge &middot; 20&ndash;25 minutes*
+def _(mo, COLORS):
+    _act_num      = "II"
+    _act_color    = COLORS["OrangeLine"]
+    _act_title    = "3D Parallelism Design Challenge"
+    _act_duration = "20&ndash;25 min"
+    _act_why      = (
+        "Act I showed that data parallelism collapses at inter-node scale. Now tackle a "
+        "model that does not fit on a single GPU: GPT-3 (175B parameters) on 1,024 H100s. "
+        "3D parallelism (TP&times;PP&times;DP) is the only option &mdash; but each "
+        "dimension adds its own overhead, and violating the bandwidth hierarchy triggers "
+        "OOM failures that no amount of clever scheduling can fix."
+    )
+    mo.Html(f"""
+    <div style="margin: 32px 0 12px 0; border-top: 2px solid {COLORS['Border']}; padding-top: 32px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="background: {_act_color}; color: white; border-radius: 50%;
+                        width: 32px; height: 32px; display: inline-flex; align-items: center;
+                        justify-content: center; font-size: 0.9rem; font-weight: 800;
+                        flex-shrink: 0;">{_act_num}</div>
+            <div style="flex: 1; height: 2px; background: {COLORS['Border']};"></div>
+            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em;">
+                Act {_act_num} &middot; {_act_duration}</div>
+        </div>
+        <div style="font-size: 1.5rem; font-weight: 800; color: {COLORS['Text']};
+                    margin-top: 8px; line-height: 1.2;">
+            {_act_title}
+        </div>
+        <div style="color: {COLORS['TextSec']}; font-size: 0.92rem; margin-top: 6px;
+                    line-height: 1.55; max-width: 700px;">
+            {_act_why}
+        </div>
+    </div>
     """)
     return
 
@@ -842,7 +967,7 @@ def _(
     _params_per_gpu    = _params_per_gpu_b * 1e9
     _model_mem_gb      = _params_per_gpu * BYTES_PER_PARAM_FP16 / 1e9
     _optim_mem_gb      = _params_per_gpu * OPTIMIZER_OVERHEAD / 1e9
-    _activ_mem_gb      = ACTIVATION_BYTES_GB * (_tp if _tp > 1 else 1)  # activation replication
+    _activ_mem_gb      = ACTIVATION_BYTES_GB / (_tp if _tp > 1 else 1)  # TP partitions activations
     _total_mem_gb      = _model_mem_gb + _optim_mem_gb + _activ_mem_gb
 
     # ── Failure state: OOM ───────────────────────────────────────────────────────
@@ -1215,6 +1340,109 @@ def _(act2_reflect, mo):
     return
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# ZONE D: CLOSING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ─── CELL 20: SYNTHESIS ───────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(mo, COLORS):
+    mo.vstack([
+        mo.md("---"),
+
+        # ── KEY TAKEAWAYS ──
+        mo.Html(f"""
+        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
+                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
+            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
+                Key Takeaways
+            </div>
+            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
+                <div style="margin-bottom: 10px;">
+                    <strong>1. Scaling from 8 to 32 GPUs on 10GbE collapses parallel efficiency from 97% to 13%.</strong>
+                    The 5.6 GB gradient sync at 1.25 GB/s takes 4,805 ms per step against 1,800 ms of compute.
+                    GPUs spend 73% of each step waiting for gradients. The 720&times; bandwidth gap between NVLink
+                    (900 GB/s) and 10GbE (1.25 GB/s) is the root cause &mdash; not the GPU count.
+                </div>
+                <div style="margin-bottom: 10px;">
+                    <strong>2. Eight GPUs with gradient accumulation beats 32 GPUs at 87% lower cost.</strong>
+                    8 GPUs with 4-step accumulation achieves the same effective batch size of 512 as 32 GPUs,
+                    costs $422 vs. $3,021, and keeps all communication on NVLink (overhead &lt;0.1%).
+                    The cheapest configuration often uses the fewest GPUs connected by the fastest network.
+                </div>
+                <div>
+                    <strong>3. Pipeline bubble waste scales as (PP &minus; 1) / (PP &times; m) and exceeds 40% when PP &gg; m.</strong>
+                    At 8 pipeline stages and 32 microbatches, bubble fraction is (8&minus;1)/(8&times;32) = 2.7% &mdash; acceptable.
+                    At 16 stages and 8 microbatches, it rises to (16&minus;1)/(16&times;8) = 11.7% &mdash; over the 10% ceiling.
+                    Keeping m &gg; PP is the constraint that determines pipeline parallelism feasibility.
+                </div>
+            </div>
+        </div>
+        """),
+
+        # ── CONNECTIONS ──
+        mo.Html(f"""
+        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
+
+            <!-- What's Next -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    What's Next
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Lab V2-06: The Bandwidth Invariant</strong> &mdash; This lab showed that
+                    AllReduce communication dominates training cost at scale. The next lab asks: which
+                    AllReduce algorithm (Ring vs. Tree) wins for large gradient payloads, and where
+                    exactly is the crossover where Tree outperforms Ring?
+                </div>
+            </div>
+
+            <!-- Textbook Connection -->
+            <div style="flex: 1; min-width: 280px; background: white;
+                        border: 1px solid {COLORS['Border']}; border-radius: 12px;
+                        padding: 20px 24px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
+                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
+                    Textbook &amp; TinyTorch
+                </div>
+                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
+                    <strong>Read:</strong> @sec-distributed-training-systems for the full scaling
+                    efficiency derivation, gradient accumulation analysis, and pipeline bubble formula.<br/>
+                    <strong>Build:</strong> TinyTorch distributed training module &mdash; implement
+                    data parallelism with gradient accumulation in <code>tinytorch/src/distributed/</code>.
+                </div>
+            </div>
+
+        </div>
+        """),
+
+        mo.accordion({
+
+
+            "Self-Assessment": mo.md("""
+**Check your understanding:**
+
+1. Scaling from 8 intra-node GPUs (NVLink) to 32 cross-node GPUs (10GbE) collapses parallel efficiency from 97% to 13%. What is the gradient sync time on 10GbE versus compute time, and at what GPU count does adding more hardware yield negative returns?
+2. Pipeline bubble waste follows the formula (PP - 1) / (PP x m). At 8 pipeline stages, what microbatch count keeps bubble fraction below 10%? Why does this formula, not software tuning, determine pipeline parallelism feasibility?
+3. Eight GPUs with gradient accumulation achieve the same effective batch size as 32 GPUs at 87% lower cost. What makes this possible, and why is the cheapest configuration often the one using the fewest GPUs on the fastest interconnect?
+
+**You're ready to move on if you can:**
+- Calculate parallel efficiency given compute time and gradient synchronization time for a specific interconnect
+- Use the pipeline bubble formula to determine feasible PP-stage and microbatch configurations
+- Compare cost-effectiveness of gradient accumulation versus scaling out across a slow network
+""")
+
+
+        }),
+    ])
+    return
+
+
+# ─── CELL 21: LEDGER_HUD ─────────────────────────────────────────────────────
 # ─── LEDGER SAVE + HUD ─────────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
